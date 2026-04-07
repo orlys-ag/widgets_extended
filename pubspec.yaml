@@ -1,5 +1,6 @@
 name: widgets_extended
 description: "Collection of rich utility widgets for common Flutter operations."
+repository: https://github.com/orlys-ag/widgets_extended
 version: 0.0.1
 
 environment:
