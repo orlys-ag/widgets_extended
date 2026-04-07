@@ -473,7 +473,7 @@ class _DynamicHeightHarness extends StatelessWidget {
 /// Thin harness around TreeMapView for retained-entry tests.
 class _TreeMapViewHarness extends StatelessWidget {
   const _TreeMapViewHarness({required this.data});
-  final SplayTreeMap<String, String> data;
+  final Map<String, String> data;
 
   @override
   Widget build(BuildContext context) {
