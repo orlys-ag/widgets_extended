@@ -77,11 +77,11 @@ class TreeSyncController<TKey, TData> {
   /// Roots in [desired] but not in the tree are inserted at the correct index.
   /// The order of [desired] is respected.
   ///
-  /// If [childrenOf] is provided, children are set for every root that is
-  /// newly added, and existing roots have their direct children re-synced to
-  /// match the desired state. If a re-added root was previously expanded
-  /// (and [preserveExpansion] is true), it is automatically expanded after
-  /// its children are set.
+  /// If [childrenOf] is provided, it is called recursively for every node
+  /// in the desired tree — roots and their descendants — to sync children
+  /// at all depths. Return an empty list for leaf nodes. If a re-added node
+  /// was previously expanded (and [preserveExpansion] is true), it is
+  /// automatically expanded after its children are set.
   ///
   /// Set [animate] to false to suppress animations (useful for initial setup).
   void syncRoots(
@@ -163,23 +163,13 @@ class TreeSyncController<TKey, TData> {
       _controller.reorderRoots(desiredKeys);
     }
 
-    // 6. Re-sync direct children for all desired roots.
-    //    Pre-compute all desired child keys so syncChildren can defer
+    // 6. Re-sync children recursively for all desired nodes.
+    //    Pre-compute all desired descendant keys so syncChildren can defer
     //    removal of nodes that are desired under a different parent.
     if (childrenOf != null) {
       _globallyDesiredChildren = <TKey>{};
-      for (final node in desired) {
-        for (final child in childrenOf(node.key)) {
-          _globallyDesiredChildren!.add(child.key);
-        }
-      }
-      for (final node in desired) {
-        syncChildren(
-          node.key,
-          childrenOf(node.key),
-          animate: toAdd.contains(node.key) ? false : animate,
-        );
-      }
+      _collectDesiredDescendants(desired, childrenOf);
+      _syncChildrenRecursive(desired, childrenOf, toAdd, animate);
       _globallyDesiredChildren = null;
     }
 
@@ -343,6 +333,40 @@ class TreeSyncController<TKey, TData> {
       for (final childKey in children) {
         _clearChildrenTracking(childKey);
       }
+    }
+  }
+
+  /// Recursively collects all desired descendant keys into
+  /// [_globallyDesiredChildren].
+  void _collectDesiredDescendants(
+    List<TreeNode<TKey, TData>> nodes,
+    List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
+  ) {
+    for (final node in nodes) {
+      final children = childrenOf(node.key);
+      for (final child in children) {
+        _globallyDesiredChildren!.add(child.key);
+      }
+      _collectDesiredDescendants(children, childrenOf);
+    }
+  }
+
+  /// Recursively syncs children for each node, then recurses into
+  /// their children.
+  void _syncChildrenRecursive(
+    List<TreeNode<TKey, TData>> nodes,
+    List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
+    Set<TKey> newlyAdded,
+    bool animate,
+  ) {
+    for (final node in nodes) {
+      final children = childrenOf(node.key);
+      syncChildren(
+        node.key,
+        children,
+        animate: newlyAdded.contains(node.key) ? false : animate,
+      );
+      _syncChildrenRecursive(children, childrenOf, newlyAdded, animate);
     }
   }
 

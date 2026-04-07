@@ -26,11 +26,17 @@ import 'types.dart';
 ///
 /// Example:
 /// ```dart
+/// // childrenOf is called recursively at all depths.
+/// // Return an empty list for leaf nodes.
+/// final childrenByParent = <String, List<TreeNode<String, String>>>{
+///   "folders":   [TreeNode(key: "docs", data: "Documents")],
+///   "docs":      [TreeNode(key: "readme", data: "README.md")],
+///   // "readme" has no entry → childrenOf returns []
+/// };
+///
 /// SyncedSliverTree<String, String>(
-///   roots: categories.map((c) => TreeNode(key: c.id, data: c.label)).toList(),
-///   childrenOf: (key) => items[key]!
-///       .map((item) => TreeNode(key: item.id, data: item.label))
-///       .toList(),
+///   roots: [TreeNode(key: "folders", data: "Folders")],
+///   childrenOf: (key) => childrenByParent[key] ?? [],
 ///   nodeBuilder: (context, key, depth, controller) {
 ///     final label = controller.getNodeData(key)?.data ?? key;
 ///     return ListTile(title: Text(label));
@@ -58,10 +64,11 @@ class SyncedSliverTree<TKey, TData> extends StatefulWidget {
   /// animates the transitions.
   final List<TreeNode<TKey, TData>> roots;
 
-  /// Optional callback that provides children for a given root key.
+  /// Optional callback that provides children for a given node key.
   ///
-  /// Called for every newly added root to populate its children. If null,
-  /// roots are added as leaf nodes.
+  /// Called recursively for every node in the tree — roots and their
+  /// descendants — to populate and sync children at all depths. Return an
+  /// empty list for leaf nodes. If null, roots are added as leaf nodes.
   final List<TreeNode<TKey, TData>> Function(TKey key)? childrenOf;
 
   /// Builds the widget for each visible node.
