@@ -330,4 +330,98 @@ void main() {
       controller.dispose();
     });
   });
+
+  group("sync controller recreation preserves state", () {
+    testWidgets(
+      "re-syncing after controller recreation does not corrupt tree",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(
+          treeController: controller,
+          preserveExpansion: true,
+        );
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        final roots = [
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ];
+        List<TreeNode<String, String>> childrenOf(String key) {
+          if (key == "a") {
+            return [TreeNode(key: "a1", data: "A1")];
+          }
+          return [];
+        }
+
+        sync.syncRoots(roots, childrenOf: childrenOf, animate: false);
+        controller.expand(key: "a");
+        expect(controller.visibleNodes, ["a", "a1", "b"]);
+        expect(controller.isExpanded("a"), true);
+
+        // Simulate what SyncedSliverTree does on preserveExpansion change:
+        // dispose old sync controller, create new one, re-sync.
+        sync.dispose();
+        sync = TreeSyncController(
+          treeController: controller,
+          preserveExpansion: false,
+        );
+        sync.initializeTracking();
+
+        sync.syncRoots(roots, childrenOf: childrenOf, animate: false);
+
+        // State must be fully preserved — same visible order, same expansion.
+        expect(controller.visibleNodes, ["a", "a1", "b"]);
+        expect(controller.isExpanded("a"), true);
+        expect(controller.getParent("a1"), "a");
+        expect(controller.rootCount, 2);
+      },
+    );
+
+    testWidgets(
+      "re-syncing with changed data after recreation applies diff correctly",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(
+          treeController: controller,
+          preserveExpansion: true,
+        );
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        sync.syncRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ], animate: false);
+
+        // Recreate sync controller and initialize tracking from existing tree.
+        sync.dispose();
+        sync = TreeSyncController(
+          treeController: controller,
+          preserveExpansion: false,
+        );
+        sync.initializeTracking();
+
+        // Sync with different data — 'b' removed, 'c' added.
+        sync.syncRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "c", data: "C"),
+        ], animate: false);
+
+        expect(controller.visibleNodes, ["a", "c"]);
+        expect(controller.getNodeData("b"), isNull);
+        expect(controller.getNodeData("c"), isNotNull);
+      },
+    );
+  });
 }

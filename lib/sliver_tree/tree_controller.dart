@@ -147,6 +147,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Synthetic entering state returned by [getAnimationState] for operation
   /// group members that are expanding. The render object only reads [.type].
+  ///
+  /// WARNING: This is a static mutable singleton shared across all
+  /// [TreeController] instances. Internal code only reads [.type], which is
+  /// safe. However, external callers of [getAnimationState] receive this
+  /// same object — mutating any field (e.g. [progress], [currentExtent])
+  /// would corrupt the shared instance. If external mutation becomes a
+  /// concern, return a fresh [AnimationState] or an immutable view instead.
   static final AnimationState _syntheticEnteringState = AnimationState(
     type: AnimationType.entering,
     startExtent: 0,
@@ -169,6 +176,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   int get visibleNodeCount => _visibleOrder.length;
 
   int get rootCount => _roots.length;
+
+  /// Root node IDs in order.
+  ///
+  /// Returns an unmodifiable view of the internal list.
+  /// The wrapper reflects mutations to [_roots] automatically.
+  late final List<TKey> rootKeys = UnmodifiableListView<TKey>(_roots);
+
+  /// Gets the ordered list of child keys for the given node.
+  ///
+  /// Returns an empty list if the node has no children or doesn't exist.
+  List<TKey> getChildren(TKey key) {
+    final c = _children[key];
+    if (c == null || c.isEmpty) return const [];
+    return UnmodifiableListView<TKey>(c);
+  }
 
   /// Gets the node data for the given key, or null if not found.
   TreeNode<TKey, TData>? getNodeData(TKey key) {
@@ -496,6 +518,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _nodeData[node.key] = node;
       // Reset expansion state so a subsequent expand() works cleanly.
       _expanded[node.key] = false;
+      // Descendants had their exit animations reversed by _cancelDeletion,
+      // but the parent is now collapsed so they should not be visible.
+      // Remove their animations and rebuild the visible order.
+      final descendants = _getDescendants(node.key);
+      for (final desc in descendants) {
+        _removeAnimation(desc);
+      }
+      _rebuildVisibleOrder();
+      _structureGeneration++;
       notifyListeners();
       return;
     }
@@ -615,6 +646,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     _children[parentKey] = childIds;
+
+    // If parent is expanded and visible, insert new children into the
+    // visible order so they render immediately.
+    if (_expanded[parentKey] == true && childIds.isNotEmpty) {
+      final parentIdx = _visibleIndex[parentKey];
+      if (parentIdx != null) {
+        final insertIdx = parentIdx + 1;
+        _visibleOrder.insertAll(insertIdx, childIds);
+        _updateIndicesFrom(insertIdx);
+        _structureGeneration++;
+      }
+    }
+
     notifyListeners();
   }
 
@@ -638,6 +682,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _nodeData[node.key] = node;
       // Reset expansion state so a subsequent expand() works cleanly.
       _expanded[node.key] = false;
+      // Descendants had their exit animations reversed by _cancelDeletion,
+      // but the parent is now collapsed so they should not be visible.
+      // Remove their animations and rebuild the visible order.
+      final descendants = _getDescendants(node.key);
+      for (final desc in descendants) {
+        _removeAnimation(desc);
+      }
+      _rebuildVisibleOrder();
+      _structureGeneration++;
       notifyListeners();
       return;
     }
@@ -885,12 +938,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (children == null || children.isEmpty) {
       return;
     }
-    // Don't expand if any ancestor is collapsed (node is not truly visible)
-    if (!_areAncestorsExpanded(key)) {
-      return;
-    }
     // Don't expand if this node is currently exiting
     if (isExiting(key)) {
+      return;
+    }
+    // If ancestors are collapsed, just record the expansion state.
+    // The node is not visible, so there is nothing to animate or
+    // insert into the visible order. When ancestors are later expanded,
+    // this node's children will appear immediately.
+    if (!_areAncestorsExpanded(key)) {
+      _expanded[key] = true;
+      notifyListeners();
       return;
     }
     _expanded[key] = true;
@@ -1478,6 +1536,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         if (children != null) {
           for (final childId in children) {
             addSubtree(childId);
+          }
+        }
+      } else {
+        // Parent is collapsed, but children that are still in an active
+        // animation (e.g. collapsing via an OperationGroup) must remain
+        // in the visible order so their exit animation completes smoothly
+        // instead of snapping away.
+        final children = _children[key];
+        if (children != null) {
+          for (final childId in children) {
+            if (_nodeToOperationGroup.containsKey(childId) ||
+                _bulkAnimationGroup?.members.contains(childId) == true ||
+                _standaloneAnimations.containsKey(childId)) {
+              addSubtree(childId);
+            }
           }
         }
       }

@@ -42,6 +42,7 @@ class TreeSyncController<TKey, TData> {
   TreeSyncController({
     required TreeController<TKey, TData> treeController,
     this.preserveExpansion = true,
+    this.maxExpansionMemorySize = 1024,
   }) : _controller = treeController;
 
   final TreeController<TKey, TData> _controller;
@@ -49,6 +50,11 @@ class TreeSyncController<TKey, TData> {
   /// Whether to remember and restore expansion state across remove/re-add
   /// cycles.
   final bool preserveExpansion;
+
+  /// Maximum number of entries in [_expansionMemory]. When exceeded, the
+  /// oldest entries are evicted (FIFO via [LinkedHashMap] insertion order).
+  /// Set to 0 to disable expansion memory entirely.
+  final int maxExpansionMemorySize;
 
   /// Remembered expansion states for removed nodes.
   final Map<TKey, bool> _expansionMemory = {};
@@ -183,6 +189,11 @@ class TreeSyncController<TKey, TData> {
     _currentRoots
       ..clear()
       ..addAll(desiredKeys);
+
+    // 9. Prune expansion memory of keys that are now live in the controller.
+    if (preserveExpansion) {
+      _pruneExpansionMemory();
+    }
   }
 
   /// Syncs the children of [parentKey] to match [desired].
@@ -308,6 +319,33 @@ class TreeSyncController<TKey, TData> {
     _globallyDesiredChildren = null;
   }
 
+  /// Initializes tracking state from the current tree controller.
+  ///
+  /// Call after construction when the tree controller already has nodes
+  /// (e.g., when recreating the sync controller mid-lifetime). Without
+  /// this, the first [syncRoots] call treats all existing nodes as new
+  /// and cannot remove nodes that are no longer desired.
+  void initializeTracking() {
+    _currentRoots
+      ..clear()
+      ..addAll(_controller.rootKeys);
+    _currentChildren.clear();
+
+    void trackChildren(TKey key) {
+      final children = _controller.getChildren(key);
+      if (children.isNotEmpty) {
+        _currentChildren[key] = List<TKey>.of(children);
+        for (final childKey in children) {
+          trackChildren(childKey);
+        }
+      }
+    }
+
+    for (final rootKey in _currentRoots) {
+      trackChildren(rootKey);
+    }
+  }
+
   /// Clears all remembered expansion state.
   void clearExpansionMemory() {
     _expansionMemory.clear();
@@ -375,13 +413,22 @@ class TreeSyncController<TKey, TData> {
     if (!preserveExpansion) {
       return;
     }
-    if (_controller.isExpanded(key)) {
-      _expansionMemory[key] = true;
-    } else {
-      // Explicitly store false so a previously-expanded node that was later
-      // collapsed doesn't get re-expanded on re-add.
-      _expansionMemory[key] = false;
+    _expansionMemory[key] = _controller.isExpanded(key);
+    // Evict oldest entries if over capacity.
+    while (_expansionMemory.length > maxExpansionMemorySize &&
+        maxExpansionMemorySize > 0) {
+      _expansionMemory.remove(_expansionMemory.keys.first);
     }
+  }
+
+  /// Removes [_expansionMemory] entries for keys that are currently present
+  /// in the tree controller. Their expansion state is already live in the
+  /// controller, so remembering it is redundant.
+  void _pruneExpansionMemory() {
+    if (_expansionMemory.isEmpty) return;
+    _expansionMemory.removeWhere((key, _) {
+      return _controller.getNodeData(key) != null;
+    });
   }
 
   /// Restores expansion state for [key] after insertion.

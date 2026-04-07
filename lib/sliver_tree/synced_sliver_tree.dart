@@ -151,6 +151,7 @@ class _SyncedSliverTreeState<TKey, TData>
         treeController: _treeController,
         preserveExpansion: widget.preserveExpansion,
       );
+      _syncController.initializeTracking();
     }
 
     _sync(animate: true);

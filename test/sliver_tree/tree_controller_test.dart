@@ -607,4 +607,464 @@ void main() {
       expect(unsorted.visibleNodes, ['c', 'a', 'b']);
     });
   });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BUG REGRESSION: setChildren on an already-expanded parent
+  // ════════════════════════════════════════════════════════════════════════════
+
+  group("setChildren on expanded parent", () {
+    testWidgets("new children are visible after replacing on expanded parent", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "c1", data: "C1")]);
+      controller.expand(key: "a");
+      expect(controller.visibleNodes, ["a", "c1"]);
+
+      // Replace children while parent is expanded.
+      controller.setChildren("a", [
+        TreeNode(key: "c2", data: "C2"),
+        TreeNode(key: "c3", data: "C3"),
+      ]);
+
+      // New children must appear in the visible order.
+      expect(controller.visibleNodes, ["a", "c2", "c3"]);
+      expect(controller.isExpanded("a"), true);
+      expect(controller.hasChildren("a"), true);
+    });
+
+    testWidgets("replacing with empty list on expanded parent hides children", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "c1", data: "C1")]);
+      controller.expand(key: "a");
+      expect(controller.visibleNodes, ["a", "c1"]);
+
+      // Replace with empty list — old children removed, no new children.
+      controller.setChildren("a", []);
+
+      expect(controller.visibleNodes, ["a"]);
+      expect(controller.hasChildren("a"), false);
+    });
+
+    testWidgets("replacing children preserves parent expansion state", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "c1", data: "C1")]);
+      controller.expand(key: "a");
+
+      controller.setChildren("a", [TreeNode(key: "c2", data: "C2")]);
+
+      // Parent should still be expanded and collapsible.
+      expect(controller.isExpanded("a"), true);
+      controller.collapse(key: "a");
+      expect(controller.visibleNodes, ["a"]);
+      controller.expand(key: "a");
+      expect(controller.visibleNodes, ["a", "c2"]);
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BUG REGRESSION: _rebuildVisibleOrder during collapse animation
+  //
+  // _rebuildVisibleOrder drops OperationGroup pendingRemoval nodes because
+  // _expanded[key] is already false, so it doesn't recurse into the
+  // collapsed parent's children. The collapsing nodes snap away instead of
+  // completing their animation. These tests check INTERMEDIATE state (right
+  // after the reorder) to catch the visual snap.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  group("reorder during collapse animation", () {
+    testWidgets("collapsing children survive reorderRoots (not snapped away)", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 300),
+      );
+
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
+      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+      controller.expand(key: "a", animate: false);
+      expect(controller.visibleNodes, ["a", "a1", "b"]);
+
+      // Start a collapse animation on "a".
+      controller.collapse(key: "a");
+      expect(controller.hasActiveAnimations, true);
+      // "a1" should still be in visibleNodes (animating out).
+      expect(controller.visibleNodes, contains("a1"));
+
+      // Reorder roots while collapse is in flight.
+      controller.reorderRoots(["b", "a"]);
+
+      // KEY CHECK: "a1" must still be present (still animating), not
+      // snapped away by _rebuildVisibleOrder.
+      expect(
+        controller.visibleNodes,
+        contains("a1"),
+        reason: "collapsing child should survive reorderRoots",
+      );
+
+      // After settling, "a1" should be gone.
+      await tester.pumpAndSettle();
+      expect(controller.visibleNodes, ["b", "a"]);
+      controller.dispose();
+    });
+
+    testWidgets("collapsing descendants survive reorderRoots with deep tree", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 300),
+      );
+
+      controller.setRoots([
+        TreeNode(key: "root", data: "Root"),
+        TreeNode(key: "other", data: "Other"),
+      ]);
+      controller.setChildren("root", [
+        TreeNode(key: "c1", data: "C1"),
+        TreeNode(key: "c2", data: "C2"),
+      ]);
+      controller.setChildren("c1", [TreeNode(key: "c1a", data: "C1A")]);
+      controller.expand(key: "root", animate: false);
+      controller.expand(key: "c1", animate: false);
+      expect(controller.visibleNodes, ["root", "c1", "c1a", "c2", "other"]);
+
+      // Start collapsing "root" (c1, c1a, c2 enter exit animation).
+      controller.collapse(key: "root");
+      expect(controller.hasActiveAnimations, true);
+
+      // Reorder roots while collapse is in flight.
+      controller.reorderRoots(["other", "root"]);
+
+      // KEY CHECK: collapsing descendants must still be animating.
+      expect(
+        controller.visibleNodes,
+        contains("c1"),
+        reason: "collapsing child should survive reorderRoots",
+      );
+
+      await tester.pumpAndSettle();
+      expect(controller.visibleNodes, ["other", "root"]);
+      expect(controller.getNodeData("c1"), isNotNull);
+      controller.dispose();
+    });
+
+    testWidgets("moveNode during collapse animation preserves subtree", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 300),
+      );
+
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
+      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+      controller.expand(key: "a", animate: false);
+      expect(controller.visibleNodes, ["a", "a1", "b"]);
+
+      // Start a collapse animation on "a".
+      controller.collapse(key: "a");
+      expect(controller.hasActiveAnimations, true);
+
+      // Move "a1" to "b" while collapse is in flight.
+      controller.moveNode("a1", "b");
+
+      await tester.pumpAndSettle();
+
+      // "a1" should be preserved under "b", not lost.
+      expect(controller.getParent("a1"), "b");
+      expect(controller.getNodeData("a1"), isNotNull);
+      controller.dispose();
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SAFETY: nested concurrent collapse
+  //
+  // When collapsing a parent while a child is already mid-collapse,
+  // _getVisibleDescendants does not recurse into the collapsed child.
+  // The grandchildren are handled by the child's own OperationGroup.
+  // These tests verify the final state is always consistent.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  group("nested concurrent collapse", () {
+    testWidgets("collapsing parent while child is mid-collapse cleans up all", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 300),
+      );
+
+      // Build a 3-level tree: A → B → C
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+      controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+      controller.expandAll(animate: false);
+      expect(controller.visibleNodes, ["a", "b", "c"]);
+
+      // Collapse B — C starts exiting animation.
+      controller.collapse(key: "b");
+      expect(controller.hasActiveAnimations, true);
+      expect(controller.visibleNodes, contains("c")); // still animating out
+
+      // Immediately collapse A — B (and ideally C) should be captured.
+      controller.collapse(key: "a");
+
+      // Let all animations settle.
+      await tester.pumpAndSettle();
+
+      // Only "a" should remain visible. B and C must be gone.
+      expect(controller.visibleNodes, ["a"]);
+      expect(controller.isExpanded("a"), false);
+      expect(controller.isExpanded("b"), false);
+      controller.dispose();
+    });
+
+    testWidgets(
+      "nested collapse followed by expand-all restores correct state",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+
+        // A → B → C, all expanded.
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+        controller.expandAll(animate: false);
+        expect(controller.visibleNodes, ["a", "b", "c"]);
+
+        // Collapse B, then collapse A while B is still collapsing.
+        controller.collapse(key: "b");
+        controller.collapse(key: "a");
+
+        // Let it all settle.
+        await tester.pumpAndSettle();
+        expect(controller.visibleNodes, ["a"]);
+
+        // Now expand all — B and C should reappear cleanly.
+        controller.expandAll(animate: false);
+        expect(controller.visibleNodes, ["a", "b", "c"]);
+        controller.dispose();
+      },
+    );
+
+    testWidgets(
+      "collapsing grandparent during child collapse with multiple children",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+
+        // A → B → [C, D], all expanded.
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.setChildren("b", [
+          TreeNode(key: "c", data: "C"),
+          TreeNode(key: "d", data: "D"),
+        ]);
+        controller.expandAll(animate: false);
+        expect(controller.visibleNodes, ["a", "b", "c", "d"]);
+
+        // Collapse B — C and D start exiting.
+        controller.collapse(key: "b");
+
+        // Advance partway through the animation.
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(controller.hasActiveAnimations, true);
+
+        // Collapse A while B's children are still animating.
+        controller.collapse(key: "a");
+
+        await tester.pumpAndSettle();
+
+        // Only "a" should remain. No orphaned C or D.
+        expect(controller.visibleNodes, ["a"]);
+        controller.dispose();
+      },
+    );
+
+    testWidgets(
+      "4-level tree: collapse at level 2 then level 1 cleans up all",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+
+        // A → B → C → D
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+        controller.setChildren("c", [TreeNode(key: "d", data: "D")]);
+        controller.expandAll(animate: false);
+        expect(controller.visibleNodes, ["a", "b", "c", "d"]);
+
+        // Collapse C — D starts exiting.
+        controller.collapse(key: "c");
+        // Collapse B — C (and ideally D) should be captured.
+        controller.collapse(key: "b");
+        // Collapse A — B should be captured.
+        controller.collapse(key: "a");
+
+        await tester.pumpAndSettle();
+
+        expect(controller.visibleNodes, ["a"]);
+
+        // Re-expand all to verify internal state is clean.
+        controller.expandAll(animate: false);
+        expect(controller.visibleNodes, ["a", "b", "c", "d"]);
+        controller.dispose();
+      },
+    );
+  });
+
+  group("expand with collapsed ancestors", () {
+    testWidgets("sets expansion state even when ancestors are collapsed", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+      controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+
+      // a is collapsed, b is collapsed.
+      expect(controller.isExpanded("a"), false);
+      expect(controller.isExpanded("b"), false);
+
+      // Expand b while a is collapsed — should set state, not animate.
+      controller.expand(key: "b");
+      expect(controller.isExpanded("b"), true);
+      // b's children are not visible (a is still collapsed).
+      expect(controller.visibleNodes, ["a"]);
+
+      // Now expand a — b should already be expanded, so c is visible.
+      controller.expand(key: "a");
+      expect(controller.visibleNodes, ["a", "b", "c"]);
+    });
+
+    testWidgets("notifies listeners when expanding under collapsed ancestor", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+      controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+
+      int notifyCount = 0;
+      controller.addListener(() => notifyCount++);
+
+      controller.expand(key: "b");
+      expect(notifyCount, 1);
+    });
+
+    testWidgets(
+      "does not expand an exiting node regardless of ancestor state",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+        controller.expand(key: "a", animate: false);
+
+        // Start removing b (puts it in exit animation).
+        controller.remove(key: "b", animate: true);
+        expect(controller.isExiting("b"), true);
+
+        // Trying to expand an exiting node should be a no-op.
+        controller.expand(key: "b");
+        expect(controller.isExpanded("b"), false);
+
+        await tester.pumpAndSettle();
+        controller.dispose();
+      },
+    );
+  });
+
+  group("cancel-deletion zombie nodes", () {
+    testWidgets(
+      "re-inserting a removed node does not leave zombie children visible",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+
+        // Build tree: root 'a' with child 'a1', expanded.
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+        controller.expand(key: "a", animate: false);
+        expect(controller.visibleNodes, ["a", "a1"]);
+
+        // Remove with animation (puts both in pendingDeletion).
+        controller.remove(key: "a", animate: true);
+        expect(controller.visibleNodes, contains("a"));
+        expect(controller.visibleNodes, contains("a1"));
+
+        // Re-insert before animation completes (triggers cancel-deletion).
+        controller.insertRoot(TreeNode(key: "a", data: "A"));
+        expect(controller.isExpanded("a"), false);
+
+        // Let all animations settle.
+        await tester.pumpAndSettle();
+
+        // Child should NOT be visible since parent is collapsed.
+        expect(
+          controller.visibleNodes,
+          ["a"],
+          reason:
+              "Children of a collapsed parent must not remain in visibleNodes "
+              "after cancel-deletion animations complete.",
+        );
+
+        controller.dispose();
+      },
+    );
+  });
 }
