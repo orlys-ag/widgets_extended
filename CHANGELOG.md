@@ -1,3 +1,7 @@
+## 0.0.4
+
+- Fix expansion state for multi-sync
+
 ## 0.0.3
 
 - Fix expansion state history

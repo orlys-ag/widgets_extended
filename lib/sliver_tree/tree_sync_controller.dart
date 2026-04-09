@@ -70,6 +70,11 @@ class TreeSyncController<TKey, TData> {
   /// defer removal of nodes that are desired under a different parent.
   Set<TKey>? _globallyDesiredChildren;
 
+  /// True while [_syncChildrenRecursive] is running. Tells [syncChildren]
+  /// to skip immediate expansion restoration — the recursive method handles
+  /// it after each node's full subtree is in place.
+  bool _deferExpansionRestore = false;
+
   /// The underlying [TreeController] being driven.
   TreeController<TKey, TData> get treeController => _controller;
 
@@ -175,7 +180,9 @@ class TreeSyncController<TKey, TData> {
     if (childrenOf != null) {
       _globallyDesiredChildren = <TKey>{};
       _collectDesiredDescendants(desired, childrenOf);
+      _deferExpansionRestore = true;
       _syncChildrenRecursive(desired, childrenOf, toAdd, animate);
+      _deferExpansionRestore = false;
       _globallyDesiredChildren = null;
     }
 
@@ -269,11 +276,11 @@ class TreeSyncController<TKey, TData> {
           animate: animate,
         );
         // Restore expansion state only for truly new nodes.
-        // When inside a recursive sync (_globallyDesiredChildren is set),
-        // defer restoration — the node's own children haven't been synced
-        // yet, so expand() would be a no-op. _syncChildrenRecursive
-        // handles restoration after the full subtree is in place.
-        if (_globallyDesiredChildren == null) {
+        // When inside a recursive sync (_deferExpansionRestore is true),
+        // skip — the node's own children haven't been synced yet, so
+        // expand() would be a no-op. _syncChildrenRecursive handles
+        // restoration after each node's full subtree is in place.
+        if (!_deferExpansionRestore) {
           _restoreExpansion(node.key, animate: animate);
         }
       }

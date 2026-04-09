@@ -331,6 +331,46 @@ void main() {
     });
   });
 
+  group("syncMultipleChildren — expansion restoration", () {
+    testWidgets(
+      "restores expansion for newly inserted children",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        // Setup: root a with expanded child x.
+        sync.syncRoots(
+          [TreeNode(key: "a", data: "A")],
+          childrenOf: (key) => key == "a"
+              ? [TreeNode(key: "x", data: "X")]
+              : [],
+          animate: false,
+        );
+        controller.expand(key: "a");
+        controller.expand(key: "x"); // no children, but marks as expanded
+
+        // Remove x, which remembers its expansion state.
+        sync.syncChildren("a", [], animate: false);
+        expect(controller.getNodeData("x"), isNull);
+
+        // Re-add x via syncMultipleChildren — should restore expansion.
+        sync.syncMultipleChildren({
+          "a": [TreeNode(key: "x", data: "X")],
+        }, animate: false);
+
+        expect(controller.getNodeData("x"), isNotNull);
+        expect(controller.getParent("x"), "a");
+      },
+    );
+  });
+
   group("expansion memory — descendants preserved across remove/re-add", () {
     testWidgets(
       "removing a parent remembers descendant expansion states",
