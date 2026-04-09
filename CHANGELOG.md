@@ -1,3 +1,7 @@
+## 0.0.5
+
+- test: add test for expansion memory during animated removal and re-addition
+
 ## 0.0.4
 
 - Fix expansion state for multi-sync

@@ -450,13 +450,17 @@ class TreeSyncController<TKey, TData> {
     }
   }
 
-  /// Removes [_expansionMemory] entries for keys that are currently present
+  /// Removes [_expansionMemory] entries for keys that are currently live
   /// in the tree controller. Their expansion state is already live in the
   /// controller, so remembering it is redundant.
+  ///
+  /// Nodes that are pending deletion (playing an exit animation) are NOT
+  /// considered live — their data still exists in the controller but will
+  /// be purged when the animation completes.
   void _pruneExpansionMemory() {
     if (_expansionMemory.isEmpty) return;
     _expansionMemory.removeWhere((key, _) {
-      return _controller.getNodeData(key) != null;
+      return _controller.getNodeData(key) != null && !_controller.isExiting(key);
     });
   }
 

@@ -474,6 +474,79 @@ void main() {
     );
   });
 
+  group("expansion memory — animated remove then re-add", () {
+    testWidgets(
+      "expansion memory survives pruning when removal is animated",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        sync = TreeSyncController(treeController: controller);
+
+        // Build: two expanded root sections with children (like SyncedSliverTree).
+        sync.syncRoots(
+          [
+            TreeNode(key: "today", data: "Today"),
+            TreeNode(key: "overdue", data: "Overdue"),
+          ],
+          childrenOf: (key) => switch (key) {
+            "today" => [TreeNode(key: "t1", data: "Task 1")],
+            "overdue" => [TreeNode(key: "o1", data: "Task 2")],
+            _ => [],
+          },
+          animate: false,
+        );
+        controller.expandAll(animate: false);
+        expect(controller.isExpanded("today"), true);
+        expect(controller.isExpanded("overdue"), true);
+        expect(
+          controller.visibleNodes,
+          ["today", "t1", "overdue", "o1"],
+        );
+
+        // Filter: keep only "today" (animated removal of "overdue").
+        sync.syncRoots(
+          [TreeNode(key: "today", data: "Today")],
+          childrenOf: (key) => switch (key) {
+            "today" => [TreeNode(key: "t1", data: "Task 1")],
+            _ => [],
+          },
+          animate: true,
+        );
+
+        // Let exit animation complete.
+        await tester.pumpAndSettle();
+        expect(controller.getNodeData("overdue"), isNull);
+
+        // Clear filter: re-add "overdue" (animated insertion).
+        sync.syncRoots(
+          [
+            TreeNode(key: "today", data: "Today"),
+            TreeNode(key: "overdue", data: "Overdue"),
+          ],
+          childrenOf: (key) => switch (key) {
+            "today" => [TreeNode(key: "t1", data: "Task 1")],
+            "overdue" => [TreeNode(key: "o1", data: "Task 2")],
+            _ => [],
+          },
+          animate: true,
+        );
+        await tester.pumpAndSettle();
+
+        // "overdue" must come back expanded.
+        expect(controller.isExpanded("overdue"), true);
+        expect(
+          controller.visibleNodes,
+          ["today", "t1", "overdue", "o1"],
+        );
+
+        sync.dispose();
+        controller.dispose();
+      },
+    );
+  });
+
   group("sync controller recreation preserves state", () {
     testWidgets(
       "re-syncing after controller recreation does not corrupt tree",
