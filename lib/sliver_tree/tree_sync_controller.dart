@@ -269,7 +269,13 @@ class TreeSyncController<TKey, TData> {
           animate: animate,
         );
         // Restore expansion state only for truly new nodes.
-        _restoreExpansion(node.key, animate: animate);
+        // When inside a recursive sync (_globallyDesiredChildren is set),
+        // defer restoration — the node's own children haven't been synced
+        // yet, so expand() would be a no-op. _syncChildrenRecursive
+        // handles restoration after the full subtree is in place.
+        if (_globallyDesiredChildren == null) {
+          _restoreExpansion(node.key, animate: animate);
+        }
       }
       remaining.insert(targetIndex, node.key);
     }
@@ -405,19 +411,35 @@ class TreeSyncController<TKey, TData> {
         animate: newlyAdded.contains(node.key) ? false : animate,
       );
       _syncChildrenRecursive(children, childrenOf, newlyAdded, animate);
+      // Restore expansion for children after their full subtrees are synced.
+      // This is deferred from syncChildren because expand() requires the
+      // node to already have children registered in the controller.
+      for (final child in children) {
+        _restoreExpansion(child.key, animate: animate);
+      }
     }
   }
 
-  /// Remembers the expansion state of [key] before removal.
+  /// Remembers the expansion state of [key] and all its descendants before
+  /// removal. This is necessary because [TreeController.remove] purges the
+  /// entire subtree, so descendant expansion states would be lost.
   void _rememberExpansion(TKey key) {
     if (!preserveExpansion) {
       return;
     }
-    _expansionMemory[key] = _controller.isExpanded(key);
+    _rememberExpansionRecursive(key);
     // Evict oldest entries if over capacity.
     while (_expansionMemory.length > maxExpansionMemorySize &&
         maxExpansionMemorySize > 0) {
       _expansionMemory.remove(_expansionMemory.keys.first);
+    }
+  }
+
+  /// Recursively stores the expansion state for [key] and its descendants.
+  void _rememberExpansionRecursive(TKey key) {
+    _expansionMemory[key] = _controller.isExpanded(key);
+    for (final childKey in _controller.getChildren(key)) {
+      _rememberExpansionRecursive(childKey);
     }
   }
 

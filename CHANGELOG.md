@@ -1,3 +1,7 @@
+## 0.0.3
+
+- Fix expansion state history
+
 ## 0.0.2
 
 - Fix expanding a child node that has a collapsed parent (previously ignored expansion).

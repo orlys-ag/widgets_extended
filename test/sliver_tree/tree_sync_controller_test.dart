@@ -331,6 +331,109 @@ void main() {
     });
   });
 
+  group("expansion memory — descendants preserved across remove/re-add", () {
+    testWidgets(
+      "removing a parent remembers descendant expansion states",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        // Build: root -> child -> grandchild
+        sync.syncRoots(
+          [TreeNode(key: "root", data: "Root")],
+          childrenOf: (key) => switch (key) {
+            "root" => [TreeNode(key: "child", data: "Child")],
+            "child" => [TreeNode(key: "grand", data: "Grand")],
+            _ => [],
+          },
+          animate: false,
+        );
+        controller.expand(key: "root");
+        controller.expand(key: "child");
+        expect(controller.visibleNodes, ["root", "child", "grand"]);
+
+        // Filter removes root (and its entire subtree).
+        sync.syncRoots([], animate: false);
+        expect(controller.visibleNodes, isEmpty);
+
+        // Filter is cleared — root and subtree come back.
+        sync.syncRoots(
+          [TreeNode(key: "root", data: "Root")],
+          childrenOf: (key) => switch (key) {
+            "root" => [TreeNode(key: "child", data: "Child")],
+            "child" => [TreeNode(key: "grand", data: "Grand")],
+            _ => [],
+          },
+          animate: false,
+        );
+
+        // Expansion state of root AND child should be restored.
+        expect(controller.isExpanded("root"), true);
+        expect(controller.isExpanded("child"), true);
+        expect(controller.visibleNodes, ["root", "child", "grand"]);
+      },
+    );
+
+    testWidgets(
+      "removing a child remembers its descendant expansion states",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        // Build: root -> mid -> leaf
+        sync.syncRoots(
+          [TreeNode(key: "root", data: "Root")],
+          childrenOf: (key) => switch (key) {
+            "root" => [TreeNode(key: "mid", data: "Mid")],
+            "mid" => [TreeNode(key: "leaf", data: "Leaf")],
+            _ => [],
+          },
+          animate: false,
+        );
+        controller.expand(key: "root");
+        controller.expand(key: "mid");
+        expect(controller.visibleNodes, ["root", "mid", "leaf"]);
+
+        // Remove only the mid child (root stays).
+        sync.syncRoots(
+          [TreeNode(key: "root", data: "Root")],
+          childrenOf: (key) => [],
+          animate: false,
+        );
+        expect(controller.visibleNodes, ["root"]);
+
+        // Re-add mid with its subtree.
+        sync.syncRoots(
+          [TreeNode(key: "root", data: "Root")],
+          childrenOf: (key) => switch (key) {
+            "root" => [TreeNode(key: "mid", data: "Mid")],
+            "mid" => [TreeNode(key: "leaf", data: "Leaf")],
+            _ => [],
+          },
+          animate: false,
+        );
+
+        expect(controller.isExpanded("root"), true);
+        expect(controller.isExpanded("mid"), true);
+        expect(controller.visibleNodes, ["root", "mid", "leaf"]);
+      },
+    );
+  });
+
   group("sync controller recreation preserves state", () {
     testWidgets(
       "re-syncing after controller recreation does not corrupt tree",
