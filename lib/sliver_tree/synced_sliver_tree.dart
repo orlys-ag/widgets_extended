@@ -20,8 +20,7 @@ import 'tree_sync_controller.dart';
 import 'types.dart';
 
 /// Builds a widget for a visible synced tree node.
-typedef TreeItemBuilder<TKey, TItem> =
-    Widget Function(BuildContext context, TreeItemView<TKey, TItem> node);
+typedef TreeItemBuilder<TKey, TItem> = Widget Function(BuildContext context, TreeItemView<TKey, TItem> node);
 
 enum _SyncedSliverTreeMode { hierarchy, flat, snapshot }
 
@@ -104,12 +103,9 @@ class TreeSnapshot<TKey, TItem> {
     required Map<TKey, TItem> dataByKey,
     Map<TKey, Iterable<TKey>>? childrenByParent,
   }) : roots = List<TKey>.unmodifiable(List<TKey>.of(roots)),
-       dataByKey = Map<TKey, TItem>.unmodifiable(
-         Map<TKey, TItem>.of(dataByKey),
-       ),
+       dataByKey = Map<TKey, TItem>.unmodifiable(Map<TKey, TItem>.of(dataByKey)),
        childrenByParent = Map<TKey, List<TKey>>.unmodifiable(<TKey, List<TKey>>{
-         for (final entry
-             in (childrenByParent ?? <TKey, Iterable<TKey>>{}).entries)
+         for (final entry in (childrenByParent ?? <TKey, Iterable<TKey>>{}).entries)
            entry.key: List<TKey>.unmodifiable(List<TKey>.of(entry.value)),
        }) {
     _validate();
@@ -129,14 +125,10 @@ class TreeSnapshot<TKey, TItem> {
     void visit(TItem item, {required bool isRoot}) {
       final key = keyOf(item);
       if (!visiting.add(key)) {
-        throw ArgumentError(
-          "TreeSnapshot.fromHierarchy detected a cycle involving key \"$key\".",
-        );
+        throw ArgumentError("TreeSnapshot.fromHierarchy detected a cycle involving key \"$key\".");
       }
       if (dataByKey.containsKey(key)) {
-        throw ArgumentError(
-          "TreeSnapshot.fromHierarchy encountered duplicate key \"$key\".",
-        );
+        throw ArgumentError("TreeSnapshot.fromHierarchy encountered duplicate key \"$key\".");
       }
 
       dataByKey[key] = item;
@@ -167,11 +159,7 @@ class TreeSnapshot<TKey, TItem> {
       visit(root, isRoot: true);
     }
 
-    return TreeSnapshot<TKey, TItem>(
-      roots: rootKeys,
-      dataByKey: dataByKey,
-      childrenByParent: childrenByParent,
-    );
+    return TreeSnapshot<TKey, TItem>(roots: rootKeys, dataByKey: dataByKey, childrenByParent: childrenByParent);
   }
 
   /// Builds a validated snapshot from flat items with optional parent keys.
@@ -190,9 +178,7 @@ class TreeSnapshot<TKey, TItem> {
     for (final item in orderedItems) {
       final key = keyOf(item);
       if (dataByKey.containsKey(key)) {
-        throw ArgumentError(
-          "TreeSnapshot.fromFlat encountered duplicate key \"$key\".",
-        );
+        throw ArgumentError("TreeSnapshot.fromFlat encountered duplicate key \"$key\".");
       }
       dataByKey[key] = item;
     }
@@ -202,27 +188,17 @@ class TreeSnapshot<TKey, TItem> {
     for (final item in orderedItems) {
       final key = keyOf(item);
       final parentKey = parentOf(item);
-      final TKey? effectiveParent =
-          parentKey != null && dataByKey.containsKey(parentKey)
-          ? parentKey
-          : null;
+      final TKey? effectiveParent = parentKey != null && dataByKey.containsKey(parentKey) ? parentKey : null;
 
       if (effectiveParent == null) {
         roots.add(key);
       } else {
-        final children = childrenByParent.putIfAbsent(
-          effectiveParent,
-          () => <TKey>[],
-        );
+        final children = childrenByParent.putIfAbsent(effectiveParent, () => <TKey>[]);
         children.add(key);
       }
     }
 
-    return TreeSnapshot<TKey, TItem>(
-      roots: roots,
-      dataByKey: dataByKey,
-      childrenByParent: childrenByParent,
-    );
+    return TreeSnapshot<TKey, TItem>(roots: roots, dataByKey: dataByKey, childrenByParent: childrenByParent);
   }
 
   /// Root node keys in render order.
@@ -242,8 +218,7 @@ class TreeSnapshot<TKey, TItem> {
   /// Converts the snapshot roots into [TreeNode] objects for syncing.
   List<TreeNode<TKey, TItem>> buildRoots() {
     return <TreeNode<TKey, TItem>>[
-      for (final key in roots)
-        TreeNode<TKey, TItem>(key: key, data: dataByKey[key] as TItem),
+      for (final key in roots) TreeNode<TKey, TItem>(key: key, data: dataByKey[key] as TItem),
     ];
   }
 
@@ -254,8 +229,7 @@ class TreeSnapshot<TKey, TItem> {
       return <TreeNode<TKey, TItem>>[];
     }
     return <TreeNode<TKey, TItem>>[
-      for (final key in childKeys)
-        TreeNode<TKey, TItem>(key: key, data: dataByKey[key] as TItem),
+      for (final key in childKeys) TreeNode<TKey, TItem>(key: key, data: dataByKey[key] as TItem),
     ];
   }
 
@@ -263,14 +237,10 @@ class TreeSnapshot<TKey, TItem> {
     final rootSet = <TKey>{};
     for (final rootKey in roots) {
       if (!dataByKey.containsKey(rootKey)) {
-        throw ArgumentError(
-          "TreeSnapshot roots contains \"$rootKey\", but dataByKey does not.",
-        );
+        throw ArgumentError("TreeSnapshot roots contains \"$rootKey\", but dataByKey does not.");
       }
       if (!rootSet.add(rootKey)) {
-        throw ArgumentError(
-          "TreeSnapshot roots contains duplicate key \"$rootKey\".",
-        );
+        throw ArgumentError("TreeSnapshot roots contains duplicate key \"$rootKey\".");
       }
     }
 
@@ -300,18 +270,14 @@ class TreeSnapshot<TKey, TItem> {
         }
         parentCount[childKey] = (parentCount[childKey] ?? 0) + 1;
         if (parentCount[childKey]! > 1) {
-          throw ArgumentError(
-            "TreeSnapshot assigns child \"$childKey\" to multiple parents.",
-          );
+          throw ArgumentError("TreeSnapshot assigns child \"$childKey\" to multiple parents.");
         }
       }
     }
 
     for (final rootKey in roots) {
       if (parentCount.containsKey(rootKey)) {
-        throw ArgumentError(
-          "TreeSnapshot root \"$rootKey\" also appears as a child.",
-        );
+        throw ArgumentError("TreeSnapshot root \"$rootKey\" also appears as a child.");
       }
     }
 
@@ -320,9 +286,7 @@ class TreeSnapshot<TKey, TItem> {
 
     void visit(TKey key) {
       if (!visiting.add(key)) {
-        throw ArgumentError(
-          "TreeSnapshot contains a cycle involving key \"$key\".",
-        );
+        throw ArgumentError("TreeSnapshot contains a cycle involving key \"$key\".");
       }
       for (final childKey in childrenByParent[key] ?? <TKey>[]) {
         if (!visited.contains(childKey)) {
@@ -471,13 +435,10 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   final int maxStickyDepth;
 
   @override
-  State<SyncedSliverTree<TKey, TItem>> createState() =>
-      _SyncedSliverTreeState<TKey, TItem>();
+  State<SyncedSliverTree<TKey, TItem>> createState() => _SyncedSliverTreeState<TKey, TItem>();
 }
 
-class _SyncedSliverTreeState<TKey, TItem>
-    extends State<SyncedSliverTree<TKey, TItem>>
-    with TickerProviderStateMixin {
+class _SyncedSliverTreeState<TKey, TItem> extends State<SyncedSliverTree<TKey, TItem>> with TickerProviderStateMixin {
   late TreeController<TKey, TItem> _treeController;
   late TreeSyncController<TKey, TItem> _syncController;
   TreeSnapshot<TKey, TItem>? _lastSnapshot;
@@ -528,37 +489,26 @@ class _SyncedSliverTreeState<TKey, TItem>
   void _sync({required bool animate}) {
     final previousSnapshot = _lastSnapshot;
     final snapshot = _buildSnapshot();
-    _syncController.syncRoots(
-      snapshot.buildRoots(),
-      childrenOf: snapshot.buildChildren,
-      animate: animate,
-    );
+    _syncController.syncRoots(snapshot.buildRoots(), childrenOf: snapshot.buildChildren, animate: animate);
     if (previousSnapshot != null) {
-      _expandParentsThatGainedChildren(
-        previousSnapshot,
-        snapshot,
-        animate: animate,
-      );
+      _expandParentsThatGainedChildren(previousSnapshot, snapshot, animate: animate);
     }
     _lastSnapshot = snapshot;
   }
 
   TreeSnapshot<TKey, TItem> _buildSnapshot() {
     return switch (widget._mode) {
-      _SyncedSliverTreeMode.hierarchy =>
-        TreeSnapshot<TKey, TItem>.fromHierarchy(
-          roots: widget._hierarchyRoots as Iterable<TItem>,
-          keyOf: widget._keyOf as TKey Function(TItem item),
-          childrenOf:
-              widget._childrenOf as Iterable<TItem> Function(TItem item),
-        ),
+      _SyncedSliverTreeMode.hierarchy => TreeSnapshot<TKey, TItem>.fromHierarchy(
+        roots: widget._hierarchyRoots as Iterable<TItem>,
+        keyOf: widget._keyOf as TKey Function(TItem item),
+        childrenOf: widget._childrenOf as Iterable<TItem> Function(TItem item),
+      ),
       _SyncedSliverTreeMode.flat => TreeSnapshot<TKey, TItem>.fromFlat(
         items: widget._flatItems as Iterable<TItem>,
         keyOf: widget._keyOf as TKey Function(TItem item),
         parentOf: widget._parentOf as TKey? Function(TItem item),
       ),
-      _SyncedSliverTreeMode.snapshot =>
-        widget._snapshot as TreeSnapshot<TKey, TItem>,
+      _SyncedSliverTreeMode.snapshot => widget._snapshot as TreeSnapshot<TKey, TItem>,
     };
   }
 
@@ -579,9 +529,7 @@ class _SyncedSliverTreeState<TKey, TItem>
         return !oldChildSet.contains(childKey);
       });
 
-      if (gainedNewChild &&
-          _treeController.getNodeData(parentKey) != null &&
-          !_treeController.isExpanded(parentKey)) {
+      if (gainedNewChild && _treeController.getNodeData(parentKey) != null && !_treeController.isExpanded(parentKey)) {
         _treeController.expand(key: parentKey, animate: animate);
       }
     }
