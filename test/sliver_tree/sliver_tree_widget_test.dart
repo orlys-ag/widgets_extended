@@ -122,11 +122,11 @@ void main() {
   });
 
   // ══════════════════════════════════════════════════════════════════════════
-  // PHASE 0: TreeMapView insertion order
+  // PHASE 0: SyncedSliverTree.flat insertion order
   // ══════════════════════════════════════════════════════════════════════════
 
-  group('TreeMapView insertion order', () {
-    testWidgets('independent roots preserve source-map order', (tester) async {
+  group("SyncedSliverTree.flat insertion order", () {
+    testWidgets("independent roots preserve source-map order", (tester) async {
       // SplayTreeMap keys are ordered by natural comparison (alphabetic).
       final data = SplayTreeMap<String, String>.from({
         'alpha': 'A',
@@ -139,11 +139,11 @@ void main() {
           home: Scaffold(
             body: CustomScrollView(
               slivers: [
-                TreeMapView<String, String>(
+                buildFlatSyncedTree(
                   data: data,
                   parentOf: (key, value) => null,
-                  nodeBuilder: (context, key, value, depth, controller) {
-                    return SizedBox(height: 48, child: Text(key));
+                  itemBuilder: (context, node) {
+                    return SizedBox(height: 48, child: Text(node.key));
                   },
                 ),
               ],
@@ -162,7 +162,7 @@ void main() {
       expect(betaY, lessThan(gammaY));
     });
 
-    testWidgets('retained entries with value changes update rendered content', (
+    testWidgets("retained entries with value changes update rendered content", (
       tester,
     ) async {
       final data1 = SplayTreeMap<String, String>.from({'a': 'Original'});
@@ -170,7 +170,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: CustomScrollView(slivers: [_TreeMapViewHarness(data: data1)]),
+            body: CustomScrollView(slivers: [buildFlatSyncedTree(data: data1)]),
           ),
         ),
       );
@@ -182,7 +182,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: CustomScrollView(slivers: [_TreeMapViewHarness(data: data2)]),
+            body: CustomScrollView(slivers: [buildFlatSyncedTree(data: data2)]),
           ),
         ),
       );
@@ -192,7 +192,7 @@ void main() {
       expect(find.text('Original'), findsNothing);
     });
 
-    testWidgets('retained child survives when old parent is removed', (
+    testWidgets("retained child survives when old parent is removed", (
       tester,
     ) async {
       // Parent 'p' has child 'c', both visible (initiallyExpanded).
@@ -206,11 +206,11 @@ void main() {
           home: Scaffold(
             body: CustomScrollView(
               slivers: [
-                TreeMapView<String, String>(
+                buildFlatSyncedTree(
                   data: data1,
                   parentOf: (key, value) => key == 'c' ? 'p' : null,
-                  nodeBuilder: (context, key, value, depth, controller) {
-                    return SizedBox(height: 48, child: Text(value));
+                  itemBuilder: (context, node) {
+                    return SizedBox(height: 48, child: Text(node.item.value));
                   },
                   initiallyExpanded: true,
                 ),
@@ -231,11 +231,11 @@ void main() {
           home: Scaffold(
             body: CustomScrollView(
               slivers: [
-                TreeMapView<String, String>(
+                buildFlatSyncedTree(
                   data: data2,
                   parentOf: (key, value) => null,
-                  nodeBuilder: (context, key, value, depth, controller) {
-                    return SizedBox(height: 48, child: Text(value));
+                  itemBuilder: (context, node) {
+                    return SizedBox(height: 48, child: Text(node.item.value));
                   },
                   initiallyExpanded: true,
                 ),
@@ -252,7 +252,7 @@ void main() {
       expect(find.text('Parent'), findsNothing);
     });
 
-    testWidgets('retained child moved to different parent appears correctly', (
+    testWidgets("retained child moved to different parent appears correctly", (
       tester,
     ) async {
       final data1 = SplayTreeMap<String, String>.from({
@@ -266,11 +266,11 @@ void main() {
           home: Scaffold(
             body: CustomScrollView(
               slivers: [
-                TreeMapView<String, String>(
+                buildFlatSyncedTree(
                   data: data1,
                   parentOf: (key, value) => key == 'c' ? 'a' : null,
-                  nodeBuilder: (context, key, value, depth, controller) {
-                    return SizedBox(height: 48, child: Text(value));
+                  itemBuilder: (context, node) {
+                    return SizedBox(height: 48, child: Text(node.item.value));
                   },
                   initiallyExpanded: true,
                 ),
@@ -294,11 +294,11 @@ void main() {
           home: Scaffold(
             body: CustomScrollView(
               slivers: [
-                TreeMapView<String, String>(
+                buildFlatSyncedTree(
                   data: data2,
                   parentOf: (key, value) => key == 'c' ? 'b' : null,
-                  nodeBuilder: (context, key, value, depth, controller) {
-                    return SizedBox(height: 48, child: Text(value));
+                  itemBuilder: (context, node) {
+                    return SizedBox(height: 48, child: Text(node.item.value));
                   },
                   initiallyExpanded: true,
                 ),
@@ -314,7 +314,7 @@ void main() {
     });
 
     testWidgets(
-      'rescued-to-root nodes are reordered to match SplayTreeMap order',
+      "rescued-to-root nodes are reordered to match SplayTreeMap order",
       (tester) async {
         // 'p' is parent of 'a' and 'b'. All expanded.
         final data1 = SplayTreeMap<String, String>.from({
@@ -328,12 +328,12 @@ void main() {
             home: Scaffold(
               body: CustomScrollView(
                 slivers: [
-                  TreeMapView<String, String>(
+                  buildFlatSyncedTree(
                     data: data1,
                     parentOf: (key, value) =>
                         key == 'a' || key == 'b' ? 'p' : null,
-                    nodeBuilder: (context, key, value, depth, controller) {
-                      return SizedBox(height: 48, child: Text(key));
+                    itemBuilder: (context, node) {
+                      return SizedBox(height: 48, child: Text(node.key));
                     },
                     initiallyExpanded: true,
                   ),
@@ -352,11 +352,11 @@ void main() {
             home: Scaffold(
               body: CustomScrollView(
                 slivers: [
-                  TreeMapView<String, String>(
+                  buildFlatSyncedTree(
                     data: data2,
                     parentOf: (key, value) => null,
-                    nodeBuilder: (context, key, value, depth, controller) {
-                      return SizedBox(height: 48, child: Text(key));
+                    itemBuilder: (context, node) {
+                      return SizedBox(height: 48, child: Text(node.key));
                     },
                     initiallyExpanded: true,
                   ),
@@ -470,19 +470,36 @@ class _DynamicHeightHarness extends StatelessWidget {
   }
 }
 
-/// Thin harness around TreeMapView for retained-entry tests.
-class _TreeMapViewHarness extends StatelessWidget {
-  const _TreeMapViewHarness({required this.data});
-  final Map<String, String> data;
+Widget buildFlatSyncedTree({
+  required Map<String, String> data,
+  String? Function(String key, String value)? parentOf,
+  Widget Function(
+    BuildContext context,
+    TreeItemView<String, MapEntry<String, String>> node,
+  )?
+  itemBuilder,
+  bool initiallyExpanded = false,
+}) {
+  final resolveParentOf =
+      parentOf ??
+      (String key, String value) {
+        return null;
+      };
 
-  @override
-  Widget build(BuildContext context) {
-    return TreeMapView<String, String>(
-      data: data,
-      parentOf: (key, value) => null,
-      nodeBuilder: (context, key, value, depth, controller) {
-        return SizedBox(height: 48, child: Text(value));
-      },
-    );
-  }
+  return SyncedSliverTree<String, MapEntry<String, String>>.flat(
+    items: data.entries,
+    keyOf: (entry) {
+      return entry.key;
+    },
+    parentOf: (entry) {
+      return resolveParentOf(entry.key, entry.value);
+    },
+    initiallyExpanded: initiallyExpanded,
+    animationDuration: Duration.zero,
+    itemBuilder:
+        itemBuilder ??
+        (context, node) {
+          return SizedBox(height: 48, child: Text(node.item.value));
+        },
+  );
 }
