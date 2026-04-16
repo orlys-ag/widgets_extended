@@ -59,6 +59,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// Frame counter for throttling sticky header recomputation during animation.
   int _stickyThrottleCounter = 0;
 
+  /// Scroll offset observed on the last frame that computed sticky headers.
+  /// Used to force a recompute when the user scrolls during an animation, so
+  /// sticky [pinnedY] values don't lag behind the actual scroll position.
+  double _lastStickyScrollOffset = double.nan;
+
   /// Reusable map for node offsets during layout.
   final Map<TKey, double> _nodeOffsets = {};
 
@@ -504,6 +509,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   @override
   void performLayout() {
     final constraints = this.constraints;
+    // This sliver's layout and paint code assume a vertical-forward axis.
+    // Child constraints, offset math, sticky pinning and hit-testing all use
+    // plain (x = indent, y = layoutOffset) coordinates with no axis mapping.
+    // Running in any other axis/growth/reverse configuration silently renders
+    // incorrectly, so fail loudly in debug builds.
+    assert(
+      constraints.axis == Axis.vertical &&
+          constraints.axisDirection == AxisDirection.down &&
+          constraints.growthDirection == GrowthDirection.forward,
+      "SliverTree currently supports only vertical, forward-growing axes "
+      "(Axis.vertical, AxisDirection.down, GrowthDirection.forward). Got "
+      "axis=${constraints.axis}, axisDirection=${constraints.axisDirection}, "
+      "growthDirection=${constraints.growthDirection}.",
+    );
     childManager?.didStartLayout();
 
     final visibleNodes = controller.visibleNodes;
@@ -663,16 +682,36 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // every 3rd frame. Both _identifyPotentialStickyNodes and
     // _computeStickyHeaders bail on animating candidates anyway, so results
     // are approximate and largely unchanged frame-to-frame.
+    //
+    // Exception: if the user scrolled since the last sticky computation, we
+    // MUST recompute. pinnedY is relative to scrollOffset, and stale values
+    // produce visible header jitter plus wrong hit-test coordinates.
+    final bool scrolledSinceLastSticky =
+        _lastStickyScrollOffset != scrollOffset;
     final bool skipStickyRecompute;
     if (controller.hasActiveAnimations && _maxStickyDepth > 0) {
       _stickyThrottleCounter++;
-      skipStickyRecompute = (_stickyThrottleCounter % 3) != 0;
+      skipStickyRecompute = !scrolledSinceLastSticky &&
+          (_stickyThrottleCounter % 3) != 0;
     } else {
       _stickyThrottleCounter = 0;
       skipStickyRecompute = false;
     }
 
-    if (!skipStickyRecompute) {
+    if (skipStickyRecompute) {
+      // Even when throttling, purge entries for nodes that just started
+      // exiting so a stale pinned row doesn't keep painting / inflate
+      // paintExtent for another 1–2 frames.
+      if (_stickyHeaders.isNotEmpty) {
+        _stickyHeaders.removeWhere((s) {
+          if (controller.isExiting(s.nodeId)) {
+            _stickyNodeIds.remove(s.nodeId);
+            return true;
+          }
+          return false;
+        });
+      }
+    } else {
       // Identify sticky candidates now that offsets and precomputed data are ready.
       final potentialStickyNodes = _identifyPotentialStickyNodes(
         scrollOffset,
@@ -712,6 +751,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       }
 
       _computeStickyHeaders(scrollOffset, constraints.overlap, visibleNodes);
+      _lastStickyScrollOffset = scrollOffset;
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -742,8 +782,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Bug 1 fix: Ensure paintExtent covers sticky headers. Sticky headers
     // paint at pinnedY (near viewport top) but content may have scrolled far
     // enough that the natural paint extent doesn't cover them, causing clipping.
+    bool stickyInflationClamped = false;
     for (final sticky in _stickyHeaders) {
       final stickyBottom = sticky.pinnedY + sticky.extent;
+      if (stickyBottom > remainingPaintExtent) {
+        // This header would extend past our paint budget and overlap the
+        // next sliver. We cannot relocate it here (pinnedY is final), but
+        // flagging visual overflow ensures the viewport clips us to
+        // paintExtent so it doesn't bleed through.
+        stickyInflationClamped = true;
+      }
       if (stickyBottom > paintExtent) paintExtent = stickyBottom;
     }
 
@@ -755,7 +803,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       paintExtent: paintExtent,
       maxPaintExtent: totalScrollExtent,
       cacheExtent: math.min(remainingCacheExtent, totalScrollExtent),
-      hasVisualOverflow: totalScrollExtent > constraints.remainingPaintExtent,
+      // Overflow means: our painted region would exceed the portion of the
+      // scroll extent visible within our own paintExtent. Comparing against
+      // remainingPaintExtent (which includes space occupied by later slivers)
+      // gave false negatives and missed clipping. Also flag when a sticky
+      // header's inflated bottom was clamped against remainingPaintExtent.
+      hasVisualOverflow: stickyInflationClamped ||
+          scrollOffset + paintExtent < totalScrollExtent,
     );
 
     _lastVisibleNodeCount = visibleNodes.length;
@@ -833,16 +887,35 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
 
     // Pass B: Paint sticky headers (deepest first so shallower paints on top).
+    final paintExtent = geometry!.paintExtent;
     for (int i = _stickyHeaders.length - 1; i >= 0; i--) {
       final sticky = _stickyHeaders[i];
       final child = _children[sticky.nodeId];
       if (child == null) continue;
+      // Skip nodes currently animating out. Sticky recompute is throttled
+      // during animations, so _stickyHeaders may still contain entries for
+      // nodes that just entered pendingRemoval — painting them would leave
+      // a ghost row until the next recompute tick.
+      if (controller.isExiting(sticky.nodeId)) continue;
+
+      // Don't paint a header that has been pushed entirely past the sliver's
+      // paint region (e.g. by a tiny remainingPaintExtent near the bottom).
+      if (sticky.pinnedY >= paintExtent) continue;
+
+      // Clip to whichever is smaller: the header's natural extent, or the
+      // remaining paint region. Without this clamp the header would spill
+      // into the next sliver when pinnedY + extent > paintExtent.
+      final clippedExtent = math.min(
+        sticky.extent,
+        paintExtent - sticky.pinnedY,
+      );
+      if (clippedExtent <= 0) continue;
 
       final paintOffset = offset + Offset(sticky.indent, sticky.pinnedY);
       context.pushClipRect(
         needsCompositing,
         paintOffset,
-        Rect.fromLTWH(0, 0, child.size.width, sticky.extent),
+        Rect.fromLTWH(0, 0, child.size.width, clippedExtent),
         (context, offset) {
           context.paintChild(child, offset);
         },

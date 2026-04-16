@@ -1288,4 +1288,316 @@ void main() {
       },
     );
   });
+
+  group("collapse with no visible descendants", () {
+    testWidgets(
+      "notifies listeners when collapsing a node whose children aren't visible",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        // Tree: g -> p -> c. Collapse g so p's children aren't visible.
+        // Then expand p — it takes the "ancestors collapsed" path which
+        // sets _expanded[p]=true without touching visible order.
+        controller.setRoots([TreeNode(key: "g", data: "G")]);
+        controller.setChildren("g", [TreeNode(key: "p", data: "P")]);
+        controller.setChildren("p", [TreeNode(key: "c", data: "C")]);
+        controller.expand(key: "p", animate: false);
+        // g is still collapsed, so p isn't in visibleOrder and neither is c.
+        expect(controller.isExpanded("p"), true);
+        expect(controller.visibleNodes, ["g"]);
+
+        int notifyCount = 0;
+        controller.addListener(() => notifyCount++);
+
+        // Pre-fix: _expanded['p'] flipped to false, but the empty-descendants
+        // early return skipped notifyListeners, leaving observers (e.g.
+        // TreeNodeBuilder watching isExpanded) stale.
+        controller.collapse(key: "p");
+
+        expect(controller.isExpanded("p"), false);
+        expect(
+          notifyCount,
+          greaterThan(0),
+          reason:
+              "collapse() must notify listeners even when there are no "
+              "visible descendants — observers watch isExpanded.",
+        );
+      },
+    );
+  });
+
+  group("getAnimationState for bulk group members", () {
+    testWidgets(
+      "returns synthetic entering state for forward bulk members",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "r", data: "R")]);
+        controller.setChildren("r", [
+          TreeNode(key: "c1", data: "C1"),
+          TreeNode(key: "c2", data: "C2"),
+        ]);
+
+        // expandAll drives a bulk animation group. Pre-fix, members in that
+        // group had no standalone AnimationState, so getAnimationState
+        // returned null — callers (sticky header anchoring) couldn't see
+        // them as entering and computed the wrong subtree bottom.
+        controller.expandAll();
+        await tester.pump(const Duration(milliseconds: 50));
+
+        final state = controller.getAnimationState("c1");
+        expect(
+          state,
+          isNotNull,
+          reason:
+              "Bulk-group members advancing forward must report a synthetic "
+              "entering state so render-layer code can detect them.",
+        );
+        expect(state!.type, AnimationType.entering);
+
+        await tester.pumpAndSettle();
+      },
+    );
+  });
+
+  group("insertRoot / insert re-insert honors index", () {
+    testWidgets(
+      "insertRoot with an existing key relocates to the requested index",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+          TreeNode(key: "c", data: "C"),
+        ]);
+        expect(controller.rootKeys, ["a", "b", "c"]);
+
+        // Pre-fix, this silently returned without honoring index=0.
+        controller.insertRoot(
+          TreeNode(key: "c", data: "C-updated"),
+          index: 0,
+        );
+
+        expect(controller.rootKeys, ["c", "a", "b"]);
+        expect(controller.getNodeData("c")!.data, "C-updated");
+        expect(controller.visibleNodes, ["c", "a", "b"]);
+      },
+    );
+
+    testWidgets(
+      "insert with an existing key reparents to the requested parent",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "p1", data: "P1"),
+          TreeNode(key: "p2", data: "P2"),
+        ]);
+        controller.setChildren("p1", [TreeNode(key: "x", data: "X")]);
+        controller.expand(key: "p1", animate: false);
+        controller.expand(key: "p2", animate: false);
+        expect(controller.getParent("x"), "p1");
+
+        // Pre-fix, this was a silent no-op because 'x' already existed.
+        controller.insert(
+          parentKey: "p2",
+          node: TreeNode(key: "x", data: "X-updated"),
+        );
+
+        expect(controller.getParent("x"), "p2");
+        expect(controller.getNodeData("x")!.data, "X-updated");
+        expect(controller.getChildren("p1"), isEmpty);
+        expect(controller.getChildren("p2"), ["x"]);
+      },
+    );
+
+    testWidgets(
+      "insertRoot with same index is a no-op relocation (no notifyListeners spam is acceptable)",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
+
+        // Same position, same parent → just a data update.
+        controller.insertRoot(TreeNode(key: "a", data: "A-updated"));
+        expect(controller.rootKeys, ["a", "b"]);
+        expect(controller.getNodeData("a")!.data, "A-updated");
+      },
+    );
+  });
+
+  group("getAnimationState returns fresh instances", () {
+    testWidgets(
+      "two synthetic entering states are not the same instance",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "r", data: "R")]);
+        controller.setChildren("r", [
+          TreeNode(key: "c1", data: "C1"),
+          TreeNode(key: "c2", data: "C2"),
+        ]);
+        controller.expandAll();
+        await tester.pump(const Duration(milliseconds: 50));
+
+        final a = controller.getAnimationState("c1");
+        final b = controller.getAnimationState("c2");
+        expect(a, isNotNull);
+        expect(b, isNotNull);
+        // Pre-fix these were the same static singleton; mutating [a] would
+        // have corrupted [b]. Post-fix each call yields a fresh instance.
+        expect(identical(a, b), isFalse,
+            reason: "Synthetic entering state must not be a shared singleton.");
+        a!.progress = 0.42;
+        expect(b!.progress, 0.0,
+            reason: "Mutating one synthetic state must not affect another.");
+
+        await tester.pumpAndSettle();
+      },
+    );
+  });
+
+  group("bulk animation group disposal", () {
+    testWidgets(
+      "bulk group is disposed after expandAll completes",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 100),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "r", data: "R")]);
+        controller.setChildren("r", [
+          TreeNode(key: "c1", data: "C1"),
+          TreeNode(key: "c2", data: "C2"),
+        ]);
+
+        expect(controller.hasActiveAnimations, isFalse);
+        controller.expandAll();
+        expect(controller.hasActiveAnimations, isTrue);
+
+        await tester.pumpAndSettle();
+        // Pre-fix, the bulk group's AnimationController stayed alive even
+        // after completion (held a ticker registration for the life of the
+        // controller). Post-fix it is disposed and hasActiveAnimations is
+        // false without any lingering non-empty group.
+        expect(controller.hasActiveAnimations, isFalse);
+      },
+    );
+  });
+
+  group("setChildren on pending-deletion parent", () {
+    testWidgets(
+      "asserts to prevent orphaned state",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 100),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.expand(key: "a", animate: false);
+
+        // Start an animated remove. 'a' is now pending deletion.
+        controller.remove(key: "a", animate: true);
+        await tester.pump(const Duration(milliseconds: 20));
+
+        // Attaching children to a pending-deletion parent would leak state
+        // once the parent's exit animation finalizes and purges only
+        // pending-deletion descendants. Assertion prevents it.
+        expect(
+          () => controller.setChildren("a", [TreeNode(key: "x", data: "X")]),
+          throwsA(isA<AssertionError>()),
+        );
+
+        await tester.pumpAndSettle();
+      },
+    );
+  });
+
+  group("orphaned operation group cleanup", () {
+    testWidgets(
+      "re-inserting and re-expanding a removed key does not reuse a stale "
+      "operation group",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 200),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "p", data: "P")]);
+        controller.setChildren("p", [
+          TreeNode(key: "c1", data: "C1"),
+          TreeNode(key: "c2", data: "C2"),
+        ]);
+
+        // Fresh animated expand creates _operationGroups["p"].
+        controller.expand(key: "p", animate: true);
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(controller.isAnimating("c1"), isTrue);
+
+        // Remove 'p' mid-animation without animating out (synchronous purge).
+        // Pre-fix: _operationGroups["p"] survived because _purgeNodeData
+        // only scrubbed membership, not the group keyed by the purged key.
+        controller.remove(key: "p", animate: false);
+        expect(controller.getNodeData("p"), isNull);
+        expect(controller.getNodeData("c1"), isNull);
+
+        // Re-insert and re-expand. If the old group were reused, the controller
+        // value may already be at 1.0 (completed), so forward() is a no-op
+        // and the child may never animate in — and later a stale status
+        // callback could mutate the new state.
+        controller.insertRoot(TreeNode(key: "p", data: "P"));
+        controller.setChildren("p", [
+          TreeNode(key: "c1", data: "C1"),
+          TreeNode(key: "c2", data: "C2"),
+        ]);
+        controller.expand(key: "p", animate: true);
+
+        // Children must actually animate in post-fix.
+        expect(
+          controller.isAnimating("c1"),
+          isTrue,
+          reason:
+              "Expanding a re-inserted parent must create a fresh operation "
+              "group with a controller starting at 0.0.",
+        );
+        await tester.pumpAndSettle();
+        expect(controller.isExpanded("p"), isTrue);
+        expect(controller.visibleNodes, contains("c1"));
+      },
+    );
+  });
 }

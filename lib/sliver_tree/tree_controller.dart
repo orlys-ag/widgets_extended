@@ -140,20 +140,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Scratch set reused to avoid per-frame allocation.
   final Set<TKey> _keysToRemoveScratch = {};
 
-  /// Synthetic entering state returned by [getAnimationState] for operation
-  /// group members that are expanding. The render object only reads [.type].
-  ///
-  /// WARNING: This is a static mutable singleton shared across all
-  /// [TreeController] instances. Internal code only reads [.type], which is
-  /// safe. However, external callers of [getAnimationState] receive this
-  /// same object — mutating any field (e.g. [progress], [currentExtent])
-  /// would corrupt the shared instance. If external mutation becomes a
-  /// concern, return a fresh [AnimationState] or an immutable view instead.
-  static final AnimationState _syntheticEnteringState = AnimationState(
-    type: AnimationType.entering,
-    startExtent: 0,
-    targetExtent: 0,
-  );
+  /// Builds a fresh synthetic entering state for [getAnimationState] to return
+  /// for operation or bulk group members that are expanding. A fresh object
+  /// per call avoids any cross-controller corruption if an external caller
+  /// mutates the returned [AnimationState].
+  static AnimationState _buildSyntheticEnteringState() {
+    return AnimationState(
+      type: AnimationType.entering,
+      startExtent: 0,
+      targetExtent: 0,
+    );
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // PUBLIC QUERIES
@@ -271,13 +268,24 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         final status = group.controller.status;
         if (status == AnimationStatus.forward ||
             status == AnimationStatus.completed) {
-          return _syntheticEnteringState;
+          return _buildSyntheticEnteringState();
         }
       }
       return null;
     }
 
-    // 3. Bulk group — no individual state
+    // 3. Bulk group — synthesize entering state for members advancing forward
+    // so consumers (e.g. sticky header anchoring) can detect entering nodes.
+    final bulk = _bulkAnimationGroup;
+    if (bulk != null &&
+        bulk.members.contains(key) &&
+        !bulk.pendingRemoval.contains(key)) {
+      final status = bulk.controller.status;
+      if (status == AnimationStatus.forward ||
+          status == AnimationStatus.completed) {
+        return _buildSyntheticEnteringState();
+      }
+    }
     return null;
   }
 
@@ -551,9 +559,34 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return;
     }
 
-    // Node was already restored by an ancestor's _cancelDeletion
+    // Node is already present (e.g. restored by an ancestor's
+    // _cancelDeletion, or a live re-insert). Update the data and — if the
+    // caller requested a different location — relocate it to honor the
+    // insertRoot(index:) contract instead of silently dropping the index.
     if (_nodeData.containsKey(node.key)) {
       _nodeData[node.key] = node;
+      final currentParent = _parents[node.key];
+      if (currentParent != null) {
+        // Different parent — delegate to moveNode.
+        moveNode(node.key, null, index: index);
+        return;
+      }
+      final currentRootIndex = _roots.indexOf(node.key);
+      final desiredIndex = index ??
+          (comparator != null ? _sortedIndex(_roots, node) : null);
+      final wantsRelocate = desiredIndex != null &&
+          desiredIndex != currentRootIndex &&
+          // Appending is a no-op if already at the end.
+          !(currentRootIndex == _roots.length - 1 &&
+              desiredIndex >= _roots.length);
+      if (wantsRelocate) {
+        _roots.removeAt(currentRootIndex);
+        final clamped = desiredIndex.clamp(0, _roots.length);
+        _roots.insert(clamped, node.key);
+        _rebuildVisibleOrder();
+        _structureGeneration++;
+      }
+      notifyListeners();
       return;
     }
 
@@ -609,6 +642,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     assert(
       _nodeData.containsKey(parentKey),
       'Parent node $parentKey not found',
+    );
+    assert(
+      !_pendingDeletion.contains(parentKey),
+      'Cannot setChildren on $parentKey while it is animating out '
+      '(pending deletion). The parent will be purged when its exit animation '
+      'completes, leaving the new children orphaned.',
     );
 
     // Purge old children and their descendants before overwriting.
@@ -747,9 +786,34 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    // Node was already restored by an ancestor's _cancelDeletion
+    // Node is already present (e.g. restored by an ancestor's
+    // _cancelDeletion, or a live re-insert). Update the data and — if the
+    // caller requested a different location — relocate it to honor the
+    // insert(parentKey:, index:) contract instead of silently dropping it.
     if (_nodeData.containsKey(node.key)) {
       _nodeData[node.key] = node;
+      final currentParent = _parents[node.key];
+      if (currentParent != parentKey) {
+        // Different parent — delegate to moveNode.
+        moveNode(node.key, parentKey, index: index);
+        return;
+      }
+      final siblings = _children[parentKey] ??= [];
+      final currentIndex = siblings.indexOf(node.key);
+      final desiredIndex = index ??
+          (comparator != null ? _sortedIndex(siblings, node) : null);
+      final wantsRelocate = desiredIndex != null &&
+          desiredIndex != currentIndex &&
+          !(currentIndex == siblings.length - 1 &&
+              desiredIndex >= siblings.length);
+      if (wantsRelocate) {
+        siblings.removeAt(currentIndex);
+        final clamped = desiredIndex.clamp(0, siblings.length);
+        siblings.insert(clamped, node.key);
+        _rebuildVisibleOrder();
+        _structureGeneration++;
+      }
+      notifyListeners();
       return;
     }
     final parentDepth = _depths[parentKey] ?? 0;
@@ -925,8 +989,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// provided, the node is inserted at that position among its new siblings;
   /// otherwise it is appended.
   ///
-  /// The node's subtree (children, expansion state, measured extents, and
-  /// active animations) is preserved.
+  /// The node's subtree (children, expansion state, and measured extents) is
+  /// preserved. Any in-flight enter/exit animations on the moved subtree are
+  /// cancelled so a mid-exit node isn't purged at its new location when the
+  /// animation finalizes — callers that need animation on the new position
+  /// should trigger it explicitly after the move.
   void moveNode(TKey key, TKey? newParentKey, {int? index}) {
     assert(_nodeData.containsKey(key), 'Node $key not found');
     assert(
@@ -1100,6 +1167,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     controller.addListener(_notifyAnimationListeners);
     controller.addStatusListener((status) {
+      // Identity guard: if the group under [key] has been replaced (e.g. after
+      // a purge + re-expand), ignore status events from the stale instance.
+      if (!identical(_operationGroups[key], group)) return;
       _onOperationGroupStatusChange(key, status);
     });
 
@@ -1199,6 +1269,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Find all visible descendants (includes nodes currently entering)
     final descendants = _getVisibleDescendants(key);
     if (descendants.isEmpty) {
+      notifyListeners();
       return;
     }
 
@@ -1255,6 +1326,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     controller.addListener(_notifyAnimationListeners);
     controller.addStatusListener((status) {
+      // Identity guard: if the group under [key] has been replaced (e.g. after
+      // a purge + re-expand), ignore status events from the stale instance.
+      if (!identical(_operationGroups[key], group)) return;
       _onOperationGroupStatusChange(key, status);
     });
 
@@ -1689,8 +1763,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// its prior animation state was computed against the old position and
   /// must not continue to drive finalize/purge after the move.
   void _cancelAnimationStateForSubtree(TKey key) {
+    // Also dispose any OperationGroup whose operationKey is inside the moved
+    // subtree. Its controller would otherwise keep running and, on dismiss,
+    // remove the (now relocated) members from _visibleOrder — destroying the
+    // moved subtree under its new parent.
+    final subtreeGroupKeys = <TKey>[];
     void visit(TKey nodeId) {
       _pendingDeletion.remove(nodeId);
+      if (_operationGroups.containsKey(nodeId)) {
+        subtreeGroupKeys.add(nodeId);
+      }
       _removeAnimation(nodeId);
       final children = _children[nodeId];
       if (children != null) {
@@ -1701,6 +1783,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     visit(key);
+
+    for (final groupKey in subtreeGroupKeys) {
+      final group = _operationGroups.remove(groupKey);
+      if (group == null) continue;
+      for (final member in group.members.keys) {
+        if (_nodeToOperationGroup[member] == groupKey) {
+          _nodeToOperationGroup.remove(member);
+        }
+      }
+      group.dispose();
+    }
+
     if (_standaloneAnimations.isEmpty) {
       _standaloneTicker?.stop();
     }
@@ -1781,9 +1875,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
-    // Clear the group
-    _bulkAnimationGroup!.members.clear();
-    _bulkAnimationGroup!.pendingRemoval.clear();
+    // Dispose the group. Leaving it live retains an idle AnimationController
+    // and its ticker registration for the life of the TreeController, which
+    // is wasteful. A subsequent expandAll/collapseAll will create a new one.
+    _disposeBulkAnimationGroup();
 
     notifyListeners();
   }
@@ -1883,18 +1978,26 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Cancels a pending deletion for a node and all its descendants.
   ///
-  /// Reverses exit animations to enter animations so the nodes animate back in.
+  /// Reverses the exit animation of [key] into an enter animation so the
+  /// re-inserted node animates back in. Descendants are cleared of pending
+  /// deletion and their animations are simply removed: the caller always
+  /// forces expansion to false on the restored node, so descendants will not
+  /// be visible. Starting an enter animation for each descendant (only to
+  /// have it torn down immediately) would also yank them out of any
+  /// unrelated [OperationGroup] they still belong to via
+  /// [_captureAndRemoveFromGroups], leaving that group short a member.
   void _cancelDeletion(TKey key, {bool animate = true}) {
     if (animationDuration == Duration.zero) animate = false;
+    _pendingDeletion.remove(key);
+    if (animate) {
+      _startStandaloneEnterAnimation(key);
+    } else {
+      _removeAnimation(key);
+    }
     final descendants = _getDescendants(key);
-    final nodes = [key, ...descendants];
-    for (final nodeId in nodes) {
+    for (final nodeId in descendants) {
       _pendingDeletion.remove(nodeId);
-      if (animate) {
-        _startStandaloneEnterAnimation(nodeId);
-      } else {
-        _removeAnimation(nodeId);
-      }
+      _removeAnimation(nodeId);
     }
   }
 
@@ -2274,6 +2377,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         group.members.remove(key);
         group.pendingRemoval.remove(key);
       }
+    }
+    // If [key] IS an operation key (the node that triggered an expand/collapse),
+    // tear down the whole group. Without this, the entry lives on in
+    // [_operationGroups] orphaned — a later insert+expand with the same key
+    // would reuse the stale group via the Path 1 branch in [expand]/[collapse].
+    final orphanGroup = _operationGroups.remove(key);
+    if (orphanGroup != null) {
+      for (final memberKey in orphanGroup.members.keys) {
+        if (_nodeToOperationGroup[memberKey] == key) {
+          _nodeToOperationGroup.remove(memberKey);
+        }
+      }
+      orphanGroup.dispose();
     }
     // Clean up bulk animation group membership
     _bulkAnimationGroup?.members.remove(key);

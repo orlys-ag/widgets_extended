@@ -1,5 +1,9 @@
 ## 0.0.7
 
+- Various fixes.
+
+## 0.0.7
+
 - Add SyncedTreeNode + new constructors
 
 ## 0.0.6

@@ -787,18 +787,23 @@ class _SyncedSliverTreeState<TKey, TItem>
   }) {
     for (final entry in newChildrenByParent.entries) {
       final parentKey = entry.key;
-      if (!oldChildrenByParent.containsKey(parentKey)) {
+
+      if (entry.value.isEmpty) {
         continue;
       }
 
-      final oldChildren = oldChildrenByParent[parentKey] ?? <TKey>[];
-      final oldChildSet = oldChildren.toSet();
-      final gainedNewChild = entry.value.any((childKey) {
-        return !oldChildSet.contains(childKey);
-      });
+      // Only auto-expand a parent that is gaining its FIRST children in this
+      // sync. If the parent already had children previously, the user may
+      // have deliberately collapsed it; silently re-expanding on a sibling
+      // addition would override that intent.
+      final oldChildren = oldChildrenByParent[parentKey];
+      final hadChildrenBefore =
+          oldChildren != null && oldChildren.isNotEmpty;
+      if (hadChildrenBefore) {
+        continue;
+      }
 
-      if (gainedNewChild &&
-          _treeController.getNodeData(parentKey) != null &&
+      if (_treeController.getNodeData(parentKey) != null &&
           !_treeController.isExpanded(parentKey)) {
         _treeController.expand(key: parentKey, animate: animate);
       }

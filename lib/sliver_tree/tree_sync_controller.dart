@@ -176,23 +176,33 @@ class TreeSyncController<TKey, TData> {
       }
     }
 
-    // 5. Reorder all live roots to match desired order if needed.
-    // After removals and insertions, `remaining` holds the current live root
-    // order. If it differs from `desiredKeys`, reorder the controller.
-    if (!_listEquals(remaining, desiredKeys)) {
-      _controller.reorderRoots(desiredKeys);
-    }
-
-    // 6. Re-sync children recursively for all desired nodes.
+    // 5. Re-sync children recursively for all desired nodes.
     //    _globallyDesiredChildren was already populated at the top of this
     //    method so the reparent detection in step 1 could see deep moves.
     //    syncChildren uses it to defer removal of nodes desired under a
     //    different parent.
+    //
+    //    This must run BEFORE reorderRoots: a former root being reparented
+    //    into another root's subtree is still a live root at this point, and
+    //    reorderRoots asserts that orderedKeys matches the current live roots
+    //    exactly. The reparenting moveNode happens inside this recursive pass.
     if (childrenOf != null) {
       _deferExpansionRestore = true;
       _syncChildrenRecursive(desired, childrenOf, toAdd, animate);
       _deferExpansionRestore = false;
       _globallyDesiredChildren = null;
+    }
+
+    // 6. Reorder all live roots to match desired order if needed.
+    //    After recursive children sync, any former roots that were reparented
+    //    into the new tree have been moved out, so the controller's live
+    //    roots should match desiredKeys (possibly in a different order).
+    final liveRoots = <TKey>[
+      for (final k in _controller.rootKeys)
+        if (!_controller.isExiting(k)) k,
+    ];
+    if (!_listEquals(liveRoots, desiredKeys)) {
+      _controller.reorderRoots(desiredKeys);
     }
 
     // 7. Restore expansion state for newly inserted roots after their
@@ -322,6 +332,16 @@ class TreeSyncController<TKey, TData> {
 
     // 6. Update tracking state.
     _currentChildren[parentKey] = desiredKeys;
+
+    // 7. If the parent itself had a pending expansion restore that was
+    // deferred because its children weren't registered yet, retry now that
+    // they are. Without this retry, a re-added parent whose children arrive
+    // in a later sync would remain silently collapsed.
+    if (preserveExpansion &&
+        !_deferExpansionRestore &&
+        _expansionMemory.containsKey(parentKey)) {
+      _restoreExpansion(parentKey, animate: animate);
+    }
   }
 
   /// Syncs children for multiple parents in a single batch.
@@ -458,13 +478,12 @@ class TreeSyncController<TKey, TData> {
   /// removal. This is necessary because [TreeController.remove] purges the
   /// entire subtree, so descendant expansion states would be lost.
   void _rememberExpansion(TKey key) {
-    if (!preserveExpansion) {
+    if (!preserveExpansion || maxExpansionMemorySize <= 0) {
       return;
     }
     _rememberExpansionRecursive(key);
     // Evict oldest entries if over capacity.
-    while (_expansionMemory.length > maxExpansionMemorySize &&
-        maxExpansionMemorySize > 0) {
+    while (_expansionMemory.length > maxExpansionMemorySize) {
       _expansionMemory.remove(_expansionMemory.keys.first);
     }
   }
@@ -486,19 +505,42 @@ class TreeSyncController<TKey, TData> {
   /// be purged when the animation completes.
   void _pruneExpansionMemory() {
     if (_expansionMemory.isEmpty) return;
-    _expansionMemory.removeWhere((key, _) {
-      return _controller.getNodeData(key) != null &&
-          !_controller.isExiting(key);
+    _expansionMemory.removeWhere((key, wasExpanded) {
+      if (_controller.getNodeData(key) == null) return false;
+      if (_controller.isExiting(key)) return false;
+      // If the remembered state says expanded but the node currently has
+      // no children in the controller, the restore couldn't complete yet
+      // (children arrive in a later sync). Keep the memory so the next
+      // sync can finish restoring instead of losing the state silently.
+      if (wasExpanded == true &&
+          !_controller.isExpanded(key) &&
+          !_controller.hasChildren(key)) {
+        return false;
+      }
+      return true;
     });
   }
 
   /// Restores expansion state for [key] after insertion.
+  ///
+  /// If [key] was remembered as expanded but its children aren't registered
+  /// with the controller yet (async-loaded subtrees, ordering of sync calls),
+  /// the memory entry is preserved so a subsequent sync that adds the
+  /// children can finish restoring. Clearing eagerly would leave the node
+  /// permanently collapsed on re-add.
   void _restoreExpansion(TKey key, {required bool animate}) {
     if (!preserveExpansion) return;
-    final wasExpanded = _expansionMemory.remove(key);
-    if (wasExpanded == true) {
-      _controller.expand(key: key, animate: animate);
+    final wasExpanded = _expansionMemory[key];
+    if (wasExpanded != true) {
+      _expansionMemory.remove(key);
+      return;
     }
+    if (!_controller.hasChildren(key)) {
+      // Keep memory for the next sync — expand() now would be a no-op.
+      return;
+    }
+    _expansionMemory.remove(key);
+    _controller.expand(key: key, animate: animate);
   }
 
   /// Shallow list equality check.

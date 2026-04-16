@@ -743,4 +743,110 @@ void main() {
       },
     );
   });
+
+  group("expansion memory — async children via direct syncChildren", () {
+    testWidgets(
+      "parent stays expanded when its children arrive in a later syncChildren",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        // Seed: parent with a child, parent expanded.
+        sync.syncRoots([TreeNode(key: "p", data: "P")], animate: false);
+        sync.syncChildren(
+          "p",
+          [TreeNode(key: "c", data: "C")],
+          animate: false,
+        );
+        controller.expand(key: "p", animate: false);
+        expect(controller.isExpanded("p"), true);
+
+        // Remove parent — expansion memory records isExpanded=true.
+        sync.syncRoots([], animate: false);
+        expect(controller.getNodeData("p"), isNull);
+
+        // Re-add parent WITHOUT syncing its children in the same call
+        // (simulates async-loaded subtrees or caller ordering). Pre-fix,
+        // _restoreExpansion ran immediately, found no children, no-op'd,
+        // and cleared the memory — so the later syncChildren could never
+        // restore expansion.
+        sync.syncRoots([TreeNode(key: "p", data: "P")], animate: false);
+
+        // Children arrive in a later direct syncChildren call.
+        sync.syncChildren(
+          "p",
+          [TreeNode(key: "c", data: "C")],
+          animate: false,
+        );
+
+        expect(
+          controller.isExpanded("p"),
+          true,
+          reason:
+              "Expansion memory must survive until the parent's children "
+              "are registered, so a deferred syncChildren can complete the "
+              "restore.",
+        );
+        expect(controller.visibleNodes, ["p", "c"]);
+      },
+    );
+  });
+
+  group("maxExpansionMemorySize == 0 disables expansion memory", () {
+    testWidgets(
+      "memory does not grow when capacity is 0",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(
+          treeController: controller,
+          maxExpansionMemorySize: 0,
+        );
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        sync.syncRoots(
+          [TreeNode(key: "p", data: "P")],
+          childrenOf: (k) =>
+              k == "p" ? [TreeNode(key: "c", data: "C")] : [],
+          animate: false,
+        );
+        controller.expand(key: "p", animate: false);
+        expect(controller.isExpanded("p"), true);
+
+        // Remove the parent. Pre-fix, _rememberExpansion still populated
+        // _expansionMemory (the eviction loop was gated by > 0, so 0 just
+        // disabled eviction — not storage). Post-fix, capacity <= 0 bails
+        // out of remembrance entirely.
+        sync.syncRoots([], animate: false);
+
+        // Re-add. With memory disabled, the re-added parent must NOT auto-
+        // expand — there's no remembered state to restore from.
+        sync.syncRoots(
+          [TreeNode(key: "p", data: "P")],
+          childrenOf: (k) =>
+              k == "p" ? [TreeNode(key: "c", data: "C")] : [],
+          animate: false,
+        );
+        expect(
+          controller.isExpanded("p"),
+          false,
+          reason:
+              "With maxExpansionMemorySize=0, expansion state must not be "
+              "remembered across remove/re-add per the documented contract.",
+        );
+      },
+    );
+  });
 }
