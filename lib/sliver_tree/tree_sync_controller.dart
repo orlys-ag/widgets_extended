@@ -104,23 +104,28 @@ class TreeSyncController<TKey, TData> {
     final desiredSet = desiredKeys.toSet();
     final currentSet = _currentRoots.toSet();
 
-    // 1. Remove roots no longer desired.
-    //    When childrenOf is provided, skip removal of roots that appear in
-    //    a desired child list — they are being reparented, not deleted.
-    final toRemove = currentSet.difference(desiredSet);
-    final movedToChild = <TKey>{};
+    // Pre-compute the full set of desired descendant keys so the reparenting
+    // check below can detect a root that is moving to any depth in the new
+    // tree (not just a direct child of another new root). This set is also
+    // reused in step 6 to defer cross-parent removals in _syncChildrenRecursive.
+    Set<TKey>? desiredDescendants;
     if (childrenOf != null) {
-      for (final key in toRemove) {
-        for (final root in desired) {
-          if (childrenOf(root.key).any((c) => c.key == key)) {
-            movedToChild.add(key);
-            break;
-          }
-        }
-      }
+      desiredDescendants = <TKey>{};
+      _globallyDesiredChildren = desiredDescendants;
+      _collectDesiredDescendants(desired, childrenOf);
     }
+
+    // 1. Remove roots no longer desired.
+    //    When childrenOf is provided, skip removal of roots that appear
+    //    anywhere in the desired tree — they are being reparented, not
+    //    deleted. If a reparented root were treated as a deletion, its
+    //    subtree would enter _pendingDeletion; a later moveNode would
+    //    succeed but _finalizeAnimation would eventually purge the subtree.
+    final toRemove = currentSet.difference(desiredSet);
     for (final key in toRemove) {
-      if (movedToChild.contains(key)) continue;
+      if (desiredDescendants != null && desiredDescendants.contains(key)) {
+        continue;
+      }
       // Skip if already removed or moved by an earlier operation.
       if (_controller.getNodeData(key) == null ||
           _controller.getParent(key) != null) {
@@ -148,8 +153,12 @@ class TreeSyncController<TKey, TData> {
       final targetIndex = _insertionIndex(desiredKeys, remaining, node.key);
 
       if (_controller.getNodeData(node.key) != null) {
+        final oldParent = _controller.getParent(node.key);
         _controller.updateNode(node);
         _controller.moveNode(node.key, null, index: targetIndex);
+        if (oldParent != null) {
+          _currentChildren[oldParent]?.remove(node.key);
+        }
       } else {
         _controller.insertRoot(node, index: targetIndex, animate: animate);
       }
@@ -175,11 +184,11 @@ class TreeSyncController<TKey, TData> {
     }
 
     // 6. Re-sync children recursively for all desired nodes.
-    //    Pre-compute all desired descendant keys so syncChildren can defer
-    //    removal of nodes that are desired under a different parent.
+    //    _globallyDesiredChildren was already populated at the top of this
+    //    method so the reparent detection in step 1 could see deep moves.
+    //    syncChildren uses it to defer removal of nodes desired under a
+    //    different parent.
     if (childrenOf != null) {
-      _globallyDesiredChildren = <TKey>{};
-      _collectDesiredDescendants(desired, childrenOf);
       _deferExpansionRestore = true;
       _syncChildrenRecursive(desired, childrenOf, toAdd, animate);
       _deferExpansionRestore = false;
@@ -266,8 +275,17 @@ class TreeSyncController<TKey, TData> {
       final targetIndex = _insertionIndex(desiredKeys, remaining, node.key);
 
       if (_controller.getNodeData(node.key) != null) {
+        // Read the old parent before the move so we can drop the now-stale
+        // tracking entry under it. Without this, a caller that later calls
+        // syncChildren(oldParent, [...node...]) would see the key as already
+        // present under oldParent, skip the moveNode, and diverge from the
+        // controller's actual state.
+        final oldParent = _controller.getParent(node.key);
         _controller.updateNode(node);
         _controller.moveNode(node.key, parentKey, index: targetIndex);
+        if (oldParent != null && oldParent != parentKey) {
+          _currentChildren[oldParent]?.remove(node.key);
+        }
       } else {
         _controller.insert(
           parentKey: parentKey,
@@ -346,17 +364,26 @@ class TreeSyncController<TKey, TData> {
 
     void trackChildren(TKey key) {
       final children = _controller.getChildren(key);
-      if (children.isNotEmpty) {
-        _currentChildren[key] = List<TKey>.of(children);
-        for (final childKey in children) {
-          trackChildren(childKey);
-        }
+      _currentChildren[key] = List<TKey>.of(children);
+      for (final childKey in children) {
+        trackChildren(childKey);
       }
     }
 
     for (final rootKey in _currentRoots) {
       trackChildren(rootKey);
     }
+  }
+
+  /// Returns a deep-copied snapshot of the current tracked child order.
+  ///
+  /// The returned map and lists are detached from the controller's internal
+  /// state, so callers can safely compare snapshots across sync operations.
+  Map<TKey, List<TKey>> snapshotCurrentChildren() {
+    return <TKey, List<TKey>>{
+      for (final entry in _currentChildren.entries)
+        entry.key: List<TKey>.of(entry.value),
+    };
   }
 
   /// Clears all remembered expansion state.
@@ -460,7 +487,8 @@ class TreeSyncController<TKey, TData> {
   void _pruneExpansionMemory() {
     if (_expansionMemory.isEmpty) return;
     _expansionMemory.removeWhere((key, _) {
-      return _controller.getNodeData(key) != null && !_controller.isExiting(key);
+      return _controller.getNodeData(key) != null &&
+          !_controller.isExiting(key);
     });
   }
 

@@ -127,11 +127,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Listeners notified on every animation tick (layout-only updates).
   final List<VoidCallback> _animationListeners = [];
 
-  /// When true, [_notifyAnimationListeners] snapshots the listener list
-  /// before iterating, preventing [ConcurrentModificationError] if a
-  /// listener adds or removes a listener during notification.
-  bool safeAnimationListenerNotification = false;
-
   /// Default extent for nodes that haven't been measured yet.
   static const double defaultExtent = 48.0;
 
@@ -370,13 +365,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
               member.targetExtent = extent;
             }
           } else if (oldExtent != extent) {
-            final status = group.controller.status;
-            if (status == AnimationStatus.forward ||
-                status == AnimationStatus.completed) {
-              member.targetExtent = extent;
-            } else {
-              member.startExtent = extent;
-            }
+            // targetExtent is the "fully expanded" reference (value=1);
+            // startExtent is always 0 (fully collapsed). Update targetExtent
+            // regardless of direction — during reverse (collapsing), setting
+            // startExtent = extent would make the lerp return `extent` at
+            // value=0 instead of 0, so the node would never collapse to zero.
+            member.targetExtent = extent;
           }
         }
       }
@@ -445,9 +439,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   void _notifyAnimationListeners() {
-    final listeners = safeAnimationListenerNotification
-        ? List<VoidCallback>.of(_animationListeners)
-        : _animationListeners;
+    // Snapshot before iteration so a listener that removes itself during
+    // the callback doesn't trigger ConcurrentModificationError.
+    final listeners = List<VoidCallback>.of(_animationListeners);
     for (final listener in listeners) {
       listener();
     }
@@ -514,6 +508,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (animationDuration == Duration.zero) animate = false;
     // If the node is pending deletion, cancel the deletion
     if (_pendingDeletion.contains(node.key)) {
+      // If the node was pending deletion under a non-null parent, detach
+      // it and re-attach as a root. Without this relocation, cancelling
+      // the deletion would resurrect it under its old parent, silently
+      // ignoring the insertRoot() contract.
+      final oldParent = _parents[node.key];
+      if (oldParent != null) {
+        _children[oldParent]?.remove(node.key);
+        _parents[node.key] = null;
+        final effectiveIndex = index ??
+            (comparator != null ? _sortedIndex(_roots, node) : null);
+        if (effectiveIndex != null && effectiveIndex < _roots.length) {
+          _roots.insert(effectiveIndex, node.key);
+        } else {
+          _roots.add(node.key);
+        }
+        _refreshSubtreeDepths(node.key, 0);
+      } else if (index != null) {
+        // Already a root — honor an explicitly requested index by
+        // relocating within _roots.
+        final current = _roots.indexOf(node.key);
+        if (current != -1) {
+          _roots.removeAt(current);
+          final clamped = index.clamp(0, _roots.length);
+          _roots.insert(clamped, node.key);
+        }
+      }
       _cancelDeletion(node.key, animate: animate);
       _nodeData[node.key] = node;
       // Reset expansion state so a subsequent expand() works cleanly.
@@ -678,6 +698,39 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     );
     // If the node is pending deletion, cancel the deletion
     if (_pendingDeletion.contains(node.key)) {
+      // If the pending-deletion node lives under a different parent (or is
+      // a root), move it to [parentKey] before cancelling the deletion.
+      // Without this relocation, cancelDeletion would resurrect the node
+      // under its old parent, silently ignoring the parentKey/index args.
+      final oldParent = _parents[node.key];
+      if (oldParent != parentKey) {
+        if (oldParent != null) {
+          _children[oldParent]?.remove(node.key);
+        } else {
+          _roots.remove(node.key);
+        }
+        _parents[node.key] = parentKey;
+        final siblings = _children[parentKey] ??= [];
+        final effectiveIndex = index ??
+            (comparator != null ? _sortedIndex(siblings, node) : null);
+        if (effectiveIndex != null && effectiveIndex < siblings.length) {
+          siblings.insert(effectiveIndex, node.key);
+        } else {
+          siblings.add(node.key);
+        }
+        final parentDepth = _depths[parentKey] ?? 0;
+        _refreshSubtreeDepths(node.key, parentDepth + 1);
+      } else if (index != null) {
+        // Same parent — honor an explicitly requested index by relocating
+        // within the sibling list.
+        final siblings = _children[parentKey] ??= [];
+        final current = siblings.indexOf(node.key);
+        if (current != -1) {
+          siblings.removeAt(current);
+          final clamped = index.clamp(0, siblings.length);
+          siblings.insert(clamped, node.key);
+        }
+      }
       _cancelDeletion(node.key, animate: animate);
       _nodeData[node.key] = node;
       // Reset expansion state so a subsequent expand() works cleanly.
@@ -843,7 +896,23 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     );
 
     _children[parentKey] = [...orderedKeys, ...pendingChildren];
-    if (_expanded[parentKey] == true && _areAncestorsExpanded(parentKey)) {
+    bool needsVisibleRebuild =
+        _expanded[parentKey] == true && _areAncestorsExpanded(parentKey);
+    if (!needsVisibleRebuild) {
+      // Even if the parent is not expanded, children may still be present
+      // in _visibleOrder because they are mid-animation (collapse in
+      // progress, pending-deletion exit). Those entries would otherwise
+      // retain the old order until the animation completes.
+      for (final child in _children[parentKey]!) {
+        if (_nodeToOperationGroup.containsKey(child) ||
+            _bulkAnimationGroup?.members.contains(child) == true ||
+            _standaloneAnimations.containsKey(child)) {
+          needsVisibleRebuild = true;
+          break;
+        }
+      }
+    }
+    if (needsVisibleRebuild) {
       _rebuildVisibleOrder();
       _structureGeneration++;
     }
@@ -873,6 +942,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final oldParent = _parents[key];
     if (oldParent == newParentKey) return; // already there
 
+    // Cancel any animation/deletion state tied to the moved subtree's old
+    // position. Without this, a node caught mid-exit-animation would still
+    // be purged by _finalizeAnimation after the move, destroying the subtree
+    // under its new parent.
+    _cancelAnimationStateForSubtree(key);
+
     // Remove from old parent's child list (or roots).
     if (oldParent != null) {
       _children[oldParent]?.remove(key);
@@ -900,25 +975,25 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
-    // Recursively refresh depths for the moved subtree.
-    void updateDepths(TKey nodeKey, int depth) {
-      _depths[nodeKey] = depth;
-      final children = _children[nodeKey];
-      if (children != null) {
-        for (final childKey in children) {
-          updateDepths(childKey, depth + 1);
-        }
-      }
-    }
-
     final newDepth = newParentKey != null
         ? (_depths[newParentKey] ?? 0) + 1
         : 0;
-    updateDepths(key, newDepth);
+    _refreshSubtreeDepths(key, newDepth);
 
     _rebuildVisibleOrder();
     _structureGeneration++;
     notifyListeners();
+  }
+
+  /// Recursively sets [_depths] for [key] and all its descendants.
+  void _refreshSubtreeDepths(TKey key, int depth) {
+    _depths[key] = depth;
+    final children = _children[key];
+    if (children != null) {
+      for (final childKey in children) {
+        _refreshSubtreeDepths(childKey, depth + 1);
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1607,6 +1682,28 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     return null;
+  }
+
+  /// Cancels pending-deletion and all animation state for [key] and all
+  /// of its descendants. Intended for use when a subtree is reparented —
+  /// its prior animation state was computed against the old position and
+  /// must not continue to drive finalize/purge after the move.
+  void _cancelAnimationStateForSubtree(TKey key) {
+    void visit(TKey nodeId) {
+      _pendingDeletion.remove(nodeId);
+      _removeAnimation(nodeId);
+      final children = _children[nodeId];
+      if (children != null) {
+        for (final child in children) {
+          visit(child);
+        }
+      }
+    }
+
+    visit(key);
+    if (_standaloneAnimations.isEmpty) {
+      _standaloneTicker?.stop();
+    }
   }
 
   /// Removes an animation from all sources and cleans up group membership.

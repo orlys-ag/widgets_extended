@@ -377,6 +377,143 @@ void main() {
       },
     );
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Hit testing during enter animation
+  // ══════════════════════════════════════════════════════════════════════════
+
+  group("hit testing on animating nodes", () {
+    testWidgets(
+      "tap in visible peek routes to the child's visible (bottom) slice",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        int topTaps = 0;
+        int bottomTaps = 0;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: CustomScrollView(
+                slivers: [
+                  SliverTree<String, String>(
+                    controller: controller,
+                    nodeBuilder: (context, key, depth) {
+                      return SizedBox(
+                        height: 100,
+                        child: Column(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => topTaps++,
+                                child: const SizedBox.expand(),
+                              ),
+                            ),
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => bottomTaps++,
+                                child: const SizedBox.expand(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Start an animated root insert — 'n' animates from visibleExtent 0
+        // to 100 over 400ms with a linear curve.
+        controller.insertRoot(TreeNode(key: "n", data: "N"));
+        // The standalone ticker's first tick only seeds _lastStandaloneTickTime
+        // and produces no progress delta. A second pump actually advances the
+        // animation: at ~20% progress the visibleExtent ≈ 20. Paint draws the
+        // child shifted up by (100 - 20) = 80 and clipped to a 20px strip at
+        // top of viewport — only the child's bottom slice (y ∈ [80, 100]) is
+        // visible, entirely inside the bottom detector's half (y ∈ [50, 100]).
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 80));
+
+        // Tap at screen y=10 (inside the ~20px visible strip).
+        await tester.tapAt(const Offset(50, 10));
+        await tester.pump();
+
+        // Pre-fix: hit test passed local y=10 to the child, routing to the
+        // top detector (y ∈ [0, 50]) — which is the clipped-away portion
+        // the user did NOT visually touch. Post-fix: y=10 + (100-20)=90
+        // routes to the bottom detector that is actually rendered at that
+        // screen position.
+        expect(bottomTaps, 1);
+        expect(topTaps, 0);
+
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      "applyPaintTransform mirrors paint's clip shift for animating nodes",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CustomScrollView(
+              slivers: [
+                SliverTree<String, String>(
+                  controller: controller,
+                  nodeBuilder: (context, key, depth) {
+                    return SizedBox(
+                      key: ValueKey("row-$key"),
+                      height: 100,
+                      child: const SizedBox.expand(),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+
+        controller.insertRoot(TreeNode(key: "n", data: "N"));
+        // Two pumps: first seeds the ticker, second actually advances by 80ms.
+        // At ~20% progress the visibleExtent ≈ 20, so paint shifts the child
+        // up by (100 - 20) = 80.
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 80));
+
+        // localToGlobal walks applyPaintTransform. The child's (0,0) should
+        // map to the screen position where paint actually draws the child's
+        // top — ~80px above the viewport top. Before the fix this returned
+        // the un-shifted paintOffset (viewport top), off by 80.
+        final topLeft = tester.getTopLeft(find.byKey(const ValueKey("row-n")));
+        expect(topLeft.dy, closeTo(-80, 2));
+
+        await tester.pumpAndSettle();
+
+        // After settle, no animation → no clip shift → localToGlobal reports
+        // the natural offset.
+        final settledTopLeft =
+            tester.getTopLeft(find.byKey(const ValueKey("row-n")));
+        expect(settledTopLeft.dy, closeTo(0, 0.5));
+      },
+    );
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════════

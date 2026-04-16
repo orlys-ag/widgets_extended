@@ -1,3 +1,11 @@
+## 0.0.7
+
+- Add SyncedTreeNode + new constructors
+
+## 0.0.6
+
+- Refactor TreeMapView into SyncedSliverTree
+
 ## 0.0.5
 
 - test: add test for expansion memory during animated removal and re-addition

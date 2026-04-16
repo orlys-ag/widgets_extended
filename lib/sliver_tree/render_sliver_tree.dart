@@ -920,10 +920,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final localMainAxisPosition =
           mainAxisPosition + scrollOffset - nodeOffset;
       if (localMainAxisPosition < 0) continue;
-      if (localMainAxisPosition >= nodeExtent) break;
+      if (localMainAxisPosition >= nodeExtent) continue;
 
       final localCrossAxisPosition = crossAxisPosition - parentData.indent;
       if (localCrossAxisPosition < 0) continue;
+
+      // Mirror paint's clip-and-translate trick. When a node is animating
+      // and its visible extent is smaller than its intrinsic box, paint
+      // draws the child shifted up by (height - extent) so the bottom slice
+      // peeks through the clipped visible strip. Hit tests must apply the
+      // same Y adjustment or taps on the visible slice would route to the
+      // clipped-away top of the child box.
+      final yAdjust =
+          (controller.isAnimating(nodeId) &&
+              nodeExtent < child.size.height)
+          ? (child.size.height - nodeExtent)
+          : 0.0;
 
       final hit = result.addWithAxisOffset(
         paintOffset: Offset(parentData.indent, nodeOffset - scrollOffset),
@@ -939,7 +951,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
             }) {
               return child.hitTest(
                 BoxHitTestResult.wrap(result),
-                position: Offset(crossAxisPosition, mainAxisPosition),
+                position: Offset(
+                  crossAxisPosition,
+                  mainAxisPosition + yAdjust,
+                ),
               );
             },
       );
@@ -968,10 +983,23 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       }
     }
 
+    // Mirror paint's clip-and-translate trick. When a node is animating and
+    // its visible extent is smaller than its intrinsic box, paint shifts the
+    // child up by (height - extent) so the bottom slice peeks through the
+    // clipped strip. The transform must include that same Y shift or callers
+    // that resolve via applyPaintTransform (localToGlobal, layer composition,
+    // showOnScreen, semantics) will be off by (height - extent) pixels.
+    final yAdjust =
+        (nodeId != null &&
+            controller.isAnimating(nodeId as TKey) &&
+            parentData.visibleExtent < child.size.height)
+        ? (child.size.height - parentData.visibleExtent)
+        : 0.0;
+
     final scrollOffset = constraints.scrollOffset;
     transform.translateByDouble(
       parentData.indent,
-      parentData.layoutOffset - scrollOffset,
+      parentData.layoutOffset - scrollOffset - yAdjust,
       0.0,
       1.0,
     );

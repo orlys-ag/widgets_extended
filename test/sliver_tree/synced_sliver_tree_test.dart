@@ -94,6 +94,236 @@ void main() {
     });
   });
 
+  group("SyncedSliverTree.tree", () {
+    testWidgets("renders a nested immutable tree", (tester) async {
+      final tree = <SyncedTreeNode<String, String>>[
+        SyncedTreeNode<String, String>(
+          key: "root",
+          data: "Root",
+          children: <SyncedTreeNode<String, String>>[
+            SyncedTreeNode<String, String>(key: "child", data: "Child"),
+          ],
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: <Widget>[
+                SyncedSliverTree<String, String>(
+                  tree: tree,
+                  initiallyExpanded: true,
+                  animationDuration: Duration.zero,
+                  itemBuilder: (context, node) {
+                    return SizedBox(
+                      height: 48,
+                      child: Text(
+                        "${node.depth}|${node.parentKey}|${node.item}",
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text("0|null|Root"), findsOneWidget);
+      expect(find.text("1|root|Child"), findsOneWidget);
+    });
+
+    testWidgets("throws on duplicate keys", (tester) async {
+      final tree = <SyncedTreeNode<String, String>>[
+        SyncedTreeNode<String, String>(
+          key: "root",
+          data: "Root",
+          children: <SyncedTreeNode<String, String>>[
+            SyncedTreeNode<String, String>(key: "dup", data: "Child A"),
+            SyncedTreeNode<String, String>(key: "dup", data: "Child B"),
+          ],
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: <Widget>[
+                SyncedSliverTree<String, String>(
+                  tree: tree,
+                  animationDuration: Duration.zero,
+                  itemBuilder: (context, node) {
+                    return const SizedBox(height: 48);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final exception = tester.takeException();
+      expect(exception, isA<ArgumentError>());
+      expect(
+        exception.toString(),
+        contains('duplicate child key "dup" under parent "root"'),
+      );
+    });
+
+    testWidgets("throws when a child key is reused under multiple parents", (
+      tester,
+    ) async {
+      final shared = SyncedTreeNode<String, String>(
+        key: "shared",
+        data: "Shared",
+      );
+      final tree = <SyncedTreeNode<String, String>>[
+        SyncedTreeNode<String, String>(
+          key: "left",
+          data: "Left",
+          children: <SyncedTreeNode<String, String>>[shared],
+        ),
+        SyncedTreeNode<String, String>(
+          key: "right",
+          data: "Right",
+          children: <SyncedTreeNode<String, String>>[shared],
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: <Widget>[
+                SyncedSliverTree<String, String>(
+                  tree: tree,
+                  animationDuration: Duration.zero,
+                  itemBuilder: (context, node) {
+                    return const SizedBox(height: 48);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final exception = tester.takeException();
+      expect(exception, isA<ArgumentError>());
+      expect(
+        exception.toString(),
+        contains('encountered duplicate key "shared"'),
+      );
+    });
+
+    testWidgets("watch rebuilds on expand and collapse", (tester) async {
+      final tree = <SyncedTreeNode<String, String>>[
+        SyncedTreeNode<String, String>(
+          key: "root",
+          data: "Root",
+          children: <SyncedTreeNode<String, String>>[
+            SyncedTreeNode<String, String>(key: "child", data: "Child"),
+          ],
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: <Widget>[
+                SyncedSliverTree<String, String>(
+                  tree: tree,
+                  initiallyExpanded: false,
+                  animationDuration: Duration.zero,
+                  itemBuilder: (context, node) {
+                    if (node.hasChildren) {
+                      return node.watch(
+                        builder: (context, currentNode) {
+                          return GestureDetector(
+                            onTap: () => currentNode.toggle(),
+                            child: SizedBox(
+                              height: 48,
+                              child: Text(
+                                "${currentNode.item}|${currentNode.isExpanded}",
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    }
+
+                    return SizedBox(height: 48, child: Text(node.item));
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text("Root|false"), findsOneWidget);
+      expect(find.text("Child"), findsNothing);
+
+      await tester.tap(find.text("Root|false"));
+      await tester.pump();
+
+      expect(find.text("Root|true"), findsOneWidget);
+      expect(find.text("Child"), findsOneWidget);
+    });
+  });
+
+  group("SyncedSliverTree.nodes", () {
+    testWidgets(
+      "renders roots and lazy children without snapshot boilerplate",
+      (tester) async {
+        final roots = <TreeNode<String, String>>[
+          const TreeNode<String, String>(key: "root", data: "Root"),
+        ];
+        final childrenByParent = <String, List<TreeNode<String, String>>>{
+          "root": <TreeNode<String, String>>[
+            const TreeNode<String, String>(key: "child", data: "Child"),
+          ],
+        };
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: CustomScrollView(
+                slivers: <Widget>[
+                  SyncedSliverTree<String, String>.nodes(
+                    roots: roots,
+                    childrenOf: (key) =>
+                        childrenByParent[key] ??
+                        const <TreeNode<String, String>>[],
+                    initiallyExpanded: true,
+                    animationDuration: Duration.zero,
+                    itemBuilder: (context, node) {
+                      return SizedBox(
+                        height: 48,
+                        child: Text(
+                          "${node.depth}|${node.parentKey}|${node.item}",
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.text("0|null|Root"), findsOneWidget);
+        expect(find.text("1|root|Child"), findsOneWidget);
+      },
+    );
+  });
+
   group("SyncedSliverTree.hierarchy", () {
     testWidgets("supports heterogeneous trees without controller lookups", (
       tester,

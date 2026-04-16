@@ -1,9 +1,10 @@
 /// A declarative sliver tree with data-first input modes.
 ///
 /// [SyncedSliverTree] owns both a [TreeController] and a [TreeSyncController]
-/// internally. Callers provide domain data through one of three normalized
-/// input shapes:
+/// internally. Callers provide domain data through one of five input shapes:
 ///
+/// - [SyncedSliverTree.new] for an immutable nested [SyncedTreeNode] tree
+/// - [SyncedSliverTree.nodes] for existing [TreeNode] roots plus [childrenOf]
 /// - [SyncedSliverTree.hierarchy] for nested objects
 /// - [SyncedSliverTree.flat] for flat items with parent keys
 /// - [SyncedSliverTree.snapshot] for precomputed tree structure
@@ -15,7 +16,9 @@ library;
 import 'package:flutter/widgets.dart';
 
 import 'sliver_tree_widget.dart';
+import 'synced_tree_node.dart';
 import 'tree_controller.dart';
+import 'tree_node_builder.dart';
 import 'tree_sync_controller.dart';
 import 'types.dart';
 
@@ -23,7 +26,7 @@ import 'types.dart';
 typedef TreeItemBuilder<TKey, TItem> =
     Widget Function(BuildContext context, TreeItemView<TKey, TItem> node);
 
-enum _SyncedSliverTreeMode { hierarchy, flat, snapshot }
+enum _SyncedSliverTreeMode { tree, nodes, hierarchy, flat, snapshot }
 
 /// Rich view of a visible synced tree node passed to [itemBuilder].
 class TreeItemView<TKey, TItem> {
@@ -91,6 +94,40 @@ class TreeItemView<TKey, TItem> {
   /// Toggles this node between expanded and collapsed.
   void toggle({bool animate = true}) {
     controller.toggle(key: key, animate: animate);
+  }
+}
+
+extension TreeItemViewWatch<TKey, TItem> on TreeItemView<TKey, TItem> {
+  /// Rebuilds [builder] when this node's expand/collapse state changes.
+  Widget watch({
+    required Widget Function(
+      BuildContext context,
+      TreeItemView<TKey, TItem> node,
+    )
+    builder,
+    Key? key,
+  }) {
+    return TreeNodeBuilder<TKey, TItem>(
+      key: key,
+      controller: controller,
+      nodeId: this.key,
+      builder: (context, hasChildren, isExpanded) {
+        final current = controller.getNodeData(this.key);
+        if (current == null) {
+          return const SizedBox.shrink();
+        }
+        return builder(
+          context,
+          TreeItemView<TKey, TItem>(
+            key: this.key,
+            item: current.data,
+            depth: controller.getDepth(this.key),
+            parentKey: controller.getParent(this.key),
+            controller: controller,
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -352,14 +389,37 @@ class TreeSnapshot<TKey, TItem> {
   }
 }
 
+class _NormalizedTreeInput<TKey, TItem> {
+  const _NormalizedTreeInput({
+    required this.roots,
+    required this.childrenByParent,
+  });
+
+  final List<TreeNode<TKey, TItem>> roots;
+  final Map<TKey, List<TreeNode<TKey, TItem>>> childrenByParent;
+
+  List<TreeNode<TKey, TItem>> childrenOf(TKey key) {
+    return childrenByParent[key] ?? <TreeNode<TKey, TItem>>[];
+  }
+}
+
 /// A sliver widget that declaratively displays a tree and animates changes.
 ///
 /// Example:
 /// ```dart
-/// SyncedSliverTree<String, Folder>.hierarchy(
-///   roots: folders,
-///   keyOf: (folder) => folder.id,
-///   childrenOf: (folder) => folder.children,
+/// SyncedSliverTree<String, Folder>(
+///   tree: <SyncedTreeNode<String, Folder>>[
+///     SyncedTreeNode<String, Folder>(
+///       key: rootFolder.id,
+///       data: rootFolder,
+///       children: <SyncedTreeNode<String, Folder>>[
+///         SyncedTreeNode<String, Folder>(
+///           key: childFolder.id,
+///           data: childFolder,
+///         ),
+///       ],
+///     ),
+///   ],
 ///   itemBuilder: (context, node) {
 ///     return ListTile(
 ///       title: Text(node.item.name),
@@ -378,6 +438,52 @@ class TreeSnapshot<TKey, TItem> {
 /// )
 /// ```
 class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
+  /// Creates a synced sliver tree from an immutable nested tree.
+  const SyncedSliverTree({
+    required Iterable<SyncedTreeNode<TKey, TItem>> tree,
+    required this.itemBuilder,
+    this.preserveExpansion = true,
+    this.initiallyExpanded = true,
+    this.animationDuration = const Duration(milliseconds: 300),
+    this.animationCurve = Curves.easeInOut,
+    this.indentWidth = 0.0,
+    this.maxStickyDepth = 0,
+    super.key,
+  }) : _mode = _SyncedSliverTreeMode.tree,
+       _tree = tree,
+       _nodeRoots = null,
+       _nodeChildrenOf = null,
+       _hierarchyRoots = null,
+       _flatItems = null,
+       _snapshot = null,
+       _keyOf = null,
+       _childrenOf = null,
+       _parentOf = null;
+
+  /// Creates a synced sliver tree from existing [TreeNode] roots plus
+  /// a [childrenOf] callback.
+  const SyncedSliverTree.nodes({
+    required Iterable<TreeNode<TKey, TItem>> roots,
+    required Iterable<TreeNode<TKey, TItem>> Function(TKey key) childrenOf,
+    required this.itemBuilder,
+    this.preserveExpansion = true,
+    this.initiallyExpanded = true,
+    this.animationDuration = const Duration(milliseconds: 300),
+    this.animationCurve = Curves.easeInOut,
+    this.indentWidth = 0.0,
+    this.maxStickyDepth = 0,
+    super.key,
+  }) : _mode = _SyncedSliverTreeMode.nodes,
+       _tree = null,
+       _nodeRoots = roots,
+       _nodeChildrenOf = childrenOf,
+       _hierarchyRoots = null,
+       _flatItems = null,
+       _snapshot = null,
+       _keyOf = null,
+       _childrenOf = null,
+       _parentOf = null;
+
   /// Creates a synced sliver tree from nested domain objects.
   const SyncedSliverTree.hierarchy({
     required Iterable<TItem> roots,
@@ -392,6 +498,9 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     this.maxStickyDepth = 0,
     super.key,
   }) : _mode = _SyncedSliverTreeMode.hierarchy,
+       _tree = null,
+       _nodeRoots = null,
+       _nodeChildrenOf = null,
        _hierarchyRoots = roots,
        _flatItems = null,
        _snapshot = null,
@@ -413,6 +522,9 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     this.maxStickyDepth = 0,
     super.key,
   }) : _mode = _SyncedSliverTreeMode.flat,
+       _tree = null,
+       _nodeRoots = null,
+       _nodeChildrenOf = null,
        _hierarchyRoots = null,
        _flatItems = items,
        _snapshot = null,
@@ -432,6 +544,9 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     this.maxStickyDepth = 0,
     super.key,
   }) : _mode = _SyncedSliverTreeMode.snapshot,
+       _tree = null,
+       _nodeRoots = null,
+       _nodeChildrenOf = null,
        _hierarchyRoots = null,
        _flatItems = null,
        _snapshot = snapshot,
@@ -440,6 +555,9 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
        _parentOf = null;
 
   final _SyncedSliverTreeMode _mode;
+  final Iterable<SyncedTreeNode<TKey, TItem>>? _tree;
+  final Iterable<TreeNode<TKey, TItem>>? _nodeRoots;
+  final Iterable<TreeNode<TKey, TItem>> Function(TKey key)? _nodeChildrenOf;
   final Iterable<TItem>? _hierarchyRoots;
   final Iterable<TItem>? _flatItems;
   final TreeSnapshot<TKey, TItem>? _snapshot;
@@ -480,7 +598,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     with TickerProviderStateMixin {
   late TreeController<TKey, TItem> _treeController;
   late TreeSyncController<TKey, TItem> _syncController;
-  TreeSnapshot<TKey, TItem>? _lastSnapshot;
+  bool _hasSyncedOnce = false;
 
   @override
   void initState() {
@@ -526,25 +644,67 @@ class _SyncedSliverTreeState<TKey, TItem>
   }
 
   void _sync({required bool animate}) {
-    final previousSnapshot = _lastSnapshot;
-    final snapshot = _buildSnapshot();
-    _syncController.syncRoots(
-      snapshot.buildRoots(),
-      childrenOf: snapshot.buildChildren,
-      animate: animate,
-    );
-    if (previousSnapshot != null) {
+    final previousChildrenByParent = _hasSyncedOnce
+        ? _syncController.snapshotCurrentChildren()
+        : null;
+
+    switch (widget._mode) {
+      case _SyncedSliverTreeMode.tree:
+        final normalized = _normalizeTree(
+          widget._tree as Iterable<SyncedTreeNode<TKey, TItem>>,
+        );
+        _syncController.syncRoots(
+          normalized.roots,
+          childrenOf: normalized.childrenOf,
+          animate: animate,
+        );
+        break;
+      case _SyncedSliverTreeMode.nodes:
+        _syncController.syncRoots(
+          List<TreeNode<TKey, TItem>>.of(
+            widget._nodeRoots as Iterable<TreeNode<TKey, TItem>>,
+          ),
+          childrenOf: (key) {
+            return List<TreeNode<TKey, TItem>>.of(
+              (widget._nodeChildrenOf
+                  as Iterable<TreeNode<TKey, TItem>> Function(TKey key))(key),
+            );
+          },
+          animate: animate,
+        );
+        break;
+      case _SyncedSliverTreeMode.hierarchy:
+      case _SyncedSliverTreeMode.flat:
+      case _SyncedSliverTreeMode.snapshot:
+        final snapshot = _buildSnapshot();
+        _syncController.syncRoots(
+          snapshot.buildRoots(),
+          childrenOf: snapshot.buildChildren,
+          animate: animate,
+        );
+        break;
+    }
+
+    if (previousChildrenByParent != null) {
       _expandParentsThatGainedChildren(
-        previousSnapshot,
-        snapshot,
+        previousChildrenByParent,
+        _syncController.snapshotCurrentChildren(),
         animate: animate,
       );
     }
-    _lastSnapshot = snapshot;
+    _hasSyncedOnce = true;
   }
 
   TreeSnapshot<TKey, TItem> _buildSnapshot() {
     return switch (widget._mode) {
+      _SyncedSliverTreeMode.tree => throw StateError(
+        "SyncedSliverTree tree and nodes modes do not build TreeSnapshot "
+        "internally.",
+      ),
+      _SyncedSliverTreeMode.nodes => throw StateError(
+        "SyncedSliverTree tree and nodes modes do not build TreeSnapshot "
+        "internally.",
+      ),
       _SyncedSliverTreeMode.hierarchy =>
         TreeSnapshot<TKey, TItem>.fromHierarchy(
           roots: widget._hierarchyRoots as Iterable<TItem>,
@@ -562,18 +722,76 @@ class _SyncedSliverTreeState<TKey, TItem>
     };
   }
 
+  _NormalizedTreeInput<TKey, TItem> _normalizeTree(
+    Iterable<SyncedTreeNode<TKey, TItem>> tree,
+  ) {
+    final roots = <TreeNode<TKey, TItem>>[];
+    final childrenByParent = <TKey, List<TreeNode<TKey, TItem>>>{};
+    final seen = <TKey>{};
+    final visiting = <TKey>{};
+
+    TreeNode<TKey, TItem> visit(
+      SyncedTreeNode<TKey, TItem> node, {
+      required bool isRoot,
+    }) {
+      final key = node.key;
+      if (!visiting.add(key)) {
+        throw ArgumentError(
+          "SyncedSliverTree.tree detected a cycle involving key \"$key\".",
+        );
+      }
+      if (!seen.add(key)) {
+        throw ArgumentError(
+          "SyncedSliverTree.tree encountered duplicate key \"$key\".",
+        );
+      }
+
+      final treeNode = TreeNode<TKey, TItem>(key: key, data: node.data);
+      if (isRoot) {
+        roots.add(treeNode);
+      }
+
+      final childNodes = <TreeNode<TKey, TItem>>[];
+      final seenChildren = <TKey>{};
+      for (final child in node.children) {
+        if (!seenChildren.add(child.key)) {
+          throw ArgumentError(
+            "SyncedSliverTree.tree encountered duplicate child key "
+            "\"${child.key}\" under parent \"$key\".",
+          );
+        }
+        childNodes.add(visit(child, isRoot: false));
+      }
+      if (childNodes.isNotEmpty) {
+        childrenByParent[key] = childNodes;
+      }
+
+      visiting.remove(key);
+      return treeNode;
+    }
+
+    for (final root in tree) {
+      visit(root, isRoot: true);
+    }
+
+    return _NormalizedTreeInput<TKey, TItem>(
+      roots: roots,
+      childrenByParent: childrenByParent,
+    );
+  }
+
   void _expandParentsThatGainedChildren(
-    TreeSnapshot<TKey, TItem> oldSnapshot,
-    TreeSnapshot<TKey, TItem> newSnapshot, {
+    Map<TKey, List<TKey>> oldChildrenByParent,
+    Map<TKey, List<TKey>> newChildrenByParent, {
     required bool animate,
   }) {
-    for (final entry in newSnapshot.childrenByParent.entries) {
+    for (final entry in newChildrenByParent.entries) {
       final parentKey = entry.key;
-      if (!oldSnapshot.dataByKey.containsKey(parentKey)) {
+      if (!oldChildrenByParent.containsKey(parentKey)) {
         continue;
       }
 
-      final oldChildren = oldSnapshot.childrenByParent[parentKey] ?? <TKey>[];
+      final oldChildren = oldChildrenByParent[parentKey] ?? <TKey>[];
       final oldChildSet = oldChildren.toSet();
       final gainedNewChild = entry.value.any((childKey) {
         return !oldChildSet.contains(childKey);

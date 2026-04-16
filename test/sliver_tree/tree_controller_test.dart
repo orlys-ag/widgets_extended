@@ -1,3 +1,4 @@
+import 'package:flutter/animation.dart' show Curves;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
@@ -1064,6 +1065,226 @@ void main() {
         );
 
         controller.dispose();
+      },
+    );
+  });
+
+  group("reorderChildren during collapse animation", () {
+    testWidgets(
+      "reorders visible order for children still animating out",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "root", data: "R")]);
+        controller.setChildren("root", [
+          TreeNode(key: "x", data: "X"),
+          TreeNode(key: "y", data: "Y"),
+        ]);
+        controller.expand(key: "root", animate: false);
+        expect(controller.visibleNodes, ["root", "x", "y"]);
+
+        // Begin an animated collapse. Children remain in visibleOrder until
+        // the collapse animation finishes.
+        controller.collapse(key: "root");
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(controller.visibleNodes, ["root", "x", "y"]);
+
+        // Reorder mid-collapse. Pre-fix this was a no-op because
+        // _expanded['root'] is already false at this point.
+        controller.reorderChildren("root", ["y", "x"]);
+        expect(controller.visibleNodes, ["root", "y", "x"]);
+
+        await tester.pumpAndSettle();
+      },
+    );
+  });
+
+  group("moveNode during exit animation", () {
+    testWidgets(
+      "reparented pending-deletion node is not purged after the animation",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
+        // Start removing 'b' (animated exit).
+        controller.remove(key: "b");
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(controller.getNodeData("b"), isNotNull);
+
+        // Reparent 'b' under 'a' mid-exit. Pre-fix, _pendingDeletion still
+        // flagged 'b' and _finalizeAnimation would purge it once the
+        // animation completed — destroying the node at its new location.
+        controller.moveNode("b", "a");
+        controller.expand(key: "a", animate: false);
+
+        await tester.pumpAndSettle();
+
+        expect(controller.getNodeData("b"), isNotNull);
+        expect(controller.getParent("b"), "a");
+      },
+    );
+  });
+
+  group("insert with pending-deletion node", () {
+    testWidgets(
+      "honors parentKey when node is pending deletion under another parent",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
+        controller.setChildren("a", [TreeNode(key: "x", data: "X-old")]);
+        controller.expand(key: "a", animate: false);
+
+        // Start removing 'x' (animated exit) — it's now pending deletion
+        // under parent 'a'.
+        controller.remove(key: "x");
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(controller.getParent("x"), "a");
+
+        // Insert 'x' under 'b'. Pre-fix, cancelDeletion resurrected 'x'
+        // under 'a' and the parentKey argument was silently ignored.
+        controller.insert(
+          parentKey: "b",
+          node: TreeNode(key: "x", data: "X-new"),
+        );
+        await tester.pumpAndSettle();
+
+        expect(controller.getParent("x"), "b");
+        expect(controller.getChildren("a"), isEmpty);
+        expect(controller.getChildren("b"), ["x"]);
+        expect(controller.getNodeData("x")!.data, "X-new");
+        expect(controller.getDepth("x"), 1);
+      },
+    );
+
+    testWidgets(
+      "depth is refreshed when reparenting subtree from pending deletion",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        // Build: root → a → x → y. Remove 'a' (animated) so 'a', 'x', 'y'
+        // are all pending deletion at depths 1, 2, 3.
+        controller.setRoots([TreeNode(key: "root", data: "R")]);
+        controller.setChildren("root", [TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "x", data: "X")]);
+        controller.setChildren("x", [TreeNode(key: "y", data: "Y")]);
+        controller.expand(key: "root", animate: false);
+        controller.expand(key: "a", animate: false);
+        controller.expand(key: "x", animate: false);
+
+        controller.remove(key: "a");
+        await tester.pump(const Duration(milliseconds: 50));
+
+        // Re-insert 'a' at root. Depth of 'a' should become 0 and the
+        // subtree depths must cascade (x=1, y=2).
+        controller.insertRoot(TreeNode(key: "a", data: "A-new"));
+        await tester.pumpAndSettle();
+
+        expect(controller.getParent("a"), isNull);
+        expect(controller.getDepth("a"), 0);
+        expect(controller.getDepth("x"), 1);
+        expect(controller.getDepth("y"), 2);
+      },
+    );
+  });
+
+  group("insertRoot with pending-deletion node", () {
+    testWidgets(
+      "promotes a pending-deletion child back to the roots list",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "p", data: "P")]);
+        controller.setChildren("p", [TreeNode(key: "c", data: "C-old")]);
+        controller.expand(key: "p", animate: false);
+
+        controller.remove(key: "c");
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(controller.getParent("c"), "p");
+
+        // Promote 'c' to a root. Pre-fix, cancelDeletion left 'c' under
+        // 'p' and 'c' never appeared in the roots list.
+        controller.insertRoot(TreeNode(key: "c", data: "C-new"));
+        await tester.pumpAndSettle();
+
+        expect(controller.getParent("c"), isNull);
+        expect(controller.getDepth("c"), 0);
+        expect(controller.getChildren("p"), isEmpty);
+        expect(controller.rootKeys, containsAll(["p", "c"]));
+        expect(controller.getNodeData("c")!.data, "C-new");
+      },
+    );
+  });
+
+  group("setFullExtent during collapse animation", () {
+    testWidgets(
+      "resize during reverse updates targetExtent so node still collapses to 0",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "r", data: "R")]);
+        controller.setChildren("r", [TreeNode(key: "a", data: "A")]);
+        controller.setFullExtent("a", 48);
+
+        controller.expand(key: "r");
+        await tester.pumpAndSettle();
+
+        // Start the collapse. Member for 'a' is {start: 0, target: 48}.
+        controller.collapse(key: "r");
+        // Halfway through (linear curve → curvedValue = 0.5).
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 200));
+
+        // Sanity: 'a' is mid-collapse — visible extent ≈ 24 (half of 48).
+        expect(controller.getCurrentExtent("a"), closeTo(24, 5));
+
+        // Simulate the render object measuring 'a' at a new, larger size
+        // mid-collapse (e.g., text reflow). Pre-fix, this set startExtent=100
+        // so the lerp ran from 100 → 48 instead of 0 → 100, leaving the node
+        // with a non-zero extent even when fully dismissed.
+        controller.setFullExtent("a", 100);
+
+        // With the fix (targetExtent = 100, startExtent = 0):
+        //   computeExtent(0.5, 100) = lerp(0, 100, 0.5) = 50
+        // With the bug (startExtent = 100, targetExtent = 48):
+        //   computeExtent(0.5, 100) = lerp(100, 48, 0.5) = 74
+        expect(controller.getCurrentExtent("a"), closeTo(50, 5));
+
+        await tester.pumpAndSettle();
+        // Node is collapsed out of the visible order. Full extent cache is
+        // the last measured value.
+        expect(controller.getEstimatedExtent("a"), 100);
       },
     );
   });
