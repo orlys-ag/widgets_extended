@@ -29,6 +29,25 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   set controller(TreeController<TKey, TData> value) {
     if (_controller == value) return;
     _controller = value;
+    // Stale per-node caches keyed by the old controller's keys would
+    // produce wrong geometry on the next layout — especially if the new
+    // controller's structureGeneration happens to match the cached value
+    // (fresh controllers start at 0). Reset everything that's keyed by
+    // node and force a structure-change pass.
+    _structureChanged = true;
+    _stickyPrecomputeDirty = true;
+    _lastStructureGeneration = -1;
+    _lastVisibleNodeCount = 0;
+    _lastTotalScrollExtent = 0.0;
+    _animationsWereActive = false;
+    _lastStickyScrollOffset = double.nan;
+    _nodeOffsets.clear();
+    _nodeExtents.clear();
+    _nodesInCacheRegion.clear();
+    _stickyHeaders.clear();
+    _stickyNodeIds.clear();
+    _stickyById.clear();
+    _lastPrecomputedCount = 0;
     markNeedsLayout();
   }
 
@@ -163,6 +182,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
   /// Inserts a child for the specified node.
   void insertChild(RenderBox child, TKey nodeId) {
+    // Defensive drop of any prior box at this slot. Normal lifecycle pairs
+    // removeRenderObjectChild before insertRenderObjectChild, but a path
+    // that skips remove (forgetChild + reparent, an exception between
+    // remove/insert) would leave the old box adopted — causing adoptChild
+    // to assert "child already has a parent" or the old box to become a
+    // zombie still walked by attach/detach.
+    final existing = _children[nodeId];
+    if (existing != null && !identical(existing, child)) {
+      dropChild(existing);
+    }
     _children[nodeId] = child;
     adoptChild(child);
     final parentData = child.parentData! as SliverTreeParentData;
@@ -199,6 +228,34 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     super.detach();
     for (final child in _children.values) {
       child.detach();
+    }
+  }
+
+  /// Filters out children whose nodes have been removed from the controller
+  /// (or are mid-exit) so screen readers don't announce/focus them while
+  /// the render boxes wait for their post-frame eviction.
+  ///
+  /// Walks in visual order (sticky headers first, then in-flow visible
+  /// nodes top-to-bottom) so screen readers announce rows in the same
+  /// order the user sees them rather than raw insertion order.
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) {
+    // Sticky headers paint on top, shallowest first (visual top).
+    for (final sticky in _stickyHeaders) {
+      final child = _children[sticky.nodeId];
+      if (child == null) continue;
+      if (controller.getNodeData(sticky.nodeId) == null) continue;
+      if (controller.isExiting(sticky.nodeId)) continue;
+      visitor(child);
+    }
+    // Then in-flow visible nodes, skipping any already emitted as sticky.
+    for (final nodeId in controller.visibleNodes) {
+      if (_stickyNodeIds.contains(nodeId)) continue;
+      final child = _children[nodeId];
+      if (child == null) continue;
+      if (controller.getNodeData(nodeId) == null) continue;
+      if (controller.isExiting(nodeId)) continue;
+      visitor(child);
     }
   }
 
@@ -1076,6 +1133,34 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       0.0,
       1.0,
     );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // CHILD POSITION QUERIES
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // Required by Scrollable.ensureVisible / showOnScreen / RenderAbstractViewport
+  // .getOffsetToReveal. The base RenderSliver implementation throws.
+
+  @override
+  double childMainAxisPosition(covariant RenderBox child) {
+    final parentData = child.parentData! as SliverTreeParentData;
+    final nodeId = parentData.nodeId;
+    if (nodeId != null) {
+      final sticky = _stickyById[nodeId];
+      if (sticky != null) return sticky.pinnedY;
+    }
+    return parentData.layoutOffset - constraints.scrollOffset;
+  }
+
+  @override
+  double childCrossAxisPosition(covariant RenderBox child) {
+    return (child.parentData! as SliverTreeParentData).indent;
+  }
+
+  @override
+  double? childScrollOffset(covariant RenderObject child) {
+    return (child.parentData! as SliverTreeParentData).layoutOffset;
   }
 
   // ══════════════════════════════════════════════════════════════════════════

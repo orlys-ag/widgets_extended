@@ -188,9 +188,12 @@ class TreeSyncController<TKey, TData> {
     //    exactly. The reparenting moveNode happens inside this recursive pass.
     if (childrenOf != null) {
       _deferExpansionRestore = true;
-      _syncChildrenRecursive(desired, childrenOf, toAdd, animate);
-      _deferExpansionRestore = false;
-      _globallyDesiredChildren = null;
+      try {
+        _syncChildrenRecursive(desired, childrenOf, toAdd, animate);
+      } finally {
+        _deferExpansionRestore = false;
+        _globallyDesiredChildren = null;
+      }
     }
 
     // 6. Reorder all live roots to match desired order if needed.
@@ -245,6 +248,13 @@ class TreeSyncController<TKey, TData> {
     List<TreeNode<TKey, TData>> desired, {
     bool animate = true,
   }) {
+    // Silently ignore unknown parents. Without this guard, a release build
+    // skips TreeController.insert's debug assert and writes _parents[child] =
+    // parentKey for a ghost parent, creating a zombie subtree unreachable
+    // from any root and never eligible for _purgeNodeData cleanup.
+    if (_controller.getNodeData(parentKey) == null) {
+      return;
+    }
     final desiredKeys = desired.map((n) => n.key).toList();
     final desiredSet = desiredKeys.toSet();
     final currentKeys = _currentChildren[parentKey] ?? const [];
@@ -359,15 +369,18 @@ class TreeSyncController<TKey, TData> {
     bool animate = true,
   }) {
     _globallyDesiredChildren = <TKey>{};
-    for (final children in desiredByParent.values) {
-      for (final c in children) {
-        _globallyDesiredChildren!.add(c.key);
+    try {
+      for (final children in desiredByParent.values) {
+        for (final c in children) {
+          _globallyDesiredChildren!.add(c.key);
+        }
       }
+      for (final entry in desiredByParent.entries) {
+        syncChildren(entry.key, entry.value, animate: animate);
+      }
+    } finally {
+      _globallyDesiredChildren = null;
     }
-    for (final entry in desiredByParent.entries) {
-      syncChildren(entry.key, entry.value, animate: animate);
-    }
-    _globallyDesiredChildren = null;
   }
 
   /// Initializes tracking state from the current tree controller.

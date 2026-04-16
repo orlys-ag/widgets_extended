@@ -685,7 +685,7 @@ class _SyncedSliverTreeState<TKey, TItem>
         break;
     }
 
-    if (previousChildrenByParent != null) {
+    if (previousChildrenByParent != null && widget.initiallyExpanded) {
       _expandParentsThatGainedChildren(
         previousChildrenByParent,
         _syncController.snapshotCurrentChildren(),

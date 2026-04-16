@@ -336,6 +336,15 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     final nodeId = child.slot as TKey?;
     if (nodeId != null) {
       _children.remove(nodeId);
+      // forgetChild bypasses removeRenderObjectChild, so if a GlobalKey
+      // inside nodeBuilder moves the element elsewhere, the RenderBox
+      // stays adopted as a zombie in renderObject._children and gets
+      // walked by attach/detach/visitChildren. Drop it here when it's
+      // still our adopted child.
+      final box = renderObject.getChildForNode(nodeId);
+      if (box != null && identical(box.parent, renderObject)) {
+        renderObject.removeChild(box, nodeId);
+      }
     }
     super.forgetChild(child);
   }

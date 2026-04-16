@@ -1600,4 +1600,227 @@ void main() {
       },
     );
   });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BUG REGRESSION: moveNode silently ignores explicit index when the node is
+  // already under the target parent.
+  //
+  // `moveNode(key, parent, index: N)` short-circuits when `oldParent == parent`
+  // and never applies the requested position. Callers expecting "move to
+  // index N within my current parent" silently get a no-op.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  group("moveNode same-parent reorder", () {
+    testWidgets("reorders within current parent when explicit index given", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "root", data: "R")]);
+      controller.setChildren("root", [
+        TreeNode(key: "c1", data: "C1"),
+        TreeNode(key: "c2", data: "C2"),
+        TreeNode(key: "c3", data: "C3"),
+      ]);
+      controller.expand(key: "root");
+      expect(controller.visibleNodes, ["root", "c1", "c2", "c3"]);
+
+      // Move c3 to index 0 within its existing parent.
+      controller.moveNode("c3", "root", index: 0);
+
+      expect(
+        controller.visibleNodes,
+        ["root", "c3", "c1", "c2"],
+        reason: "moveNode with explicit index must honor it even when the "
+            "old and new parent are the same",
+      );
+    });
+
+    testWidgets("reorders within roots when explicit index given", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+        TreeNode(key: "c", data: "C"),
+      ]);
+
+      // Move 'c' (currently a root) to root index 0.
+      controller.moveNode("c", null, index: 0);
+
+      expect(
+        controller.visibleNodes,
+        ["c", "a", "b"],
+        reason: "moveNode into roots with explicit index must reorder",
+      );
+    });
+
+    testWidgets("no-op fast path still applies when index is null", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+      final gen = controller.structureGeneration;
+
+      // No index → preserve the existing "already there" no-op semantics.
+      controller.moveNode("a1", "a");
+      expect(controller.structureGeneration, gen);
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BUG REGRESSION: reorderRoots / reorderChildren use debug-only asserts for
+  // user-API input validation. In release builds the asserts are stripped, so
+  // invalid `orderedKeys` silently corrupt internal state (missing children,
+  // duplicated entries, dropped subtrees). Validation must throw an
+  // ArgumentError in all build modes.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  group("reorder release-mode validation", () {
+    testWidgets("reorderRoots throws ArgumentError on duplicate keys", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
+
+      expect(
+        () => controller.reorderRoots(["a", "a"]),
+        throwsArgumentError,
+      );
+    });
+
+    testWidgets("reorderRoots throws ArgumentError on missing key", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
+
+      // Missing 'b'.
+      expect(() => controller.reorderRoots(["a"]), throwsArgumentError);
+    });
+
+    testWidgets("reorderRoots throws ArgumentError on unknown key", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+
+      expect(() => controller.reorderRoots(["x"]), throwsArgumentError);
+    });
+
+    testWidgets(
+      "reorderChildren throws ArgumentError on unknown parent",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "root", data: "R")]);
+
+        expect(
+          () => controller.reorderChildren("missing", const []),
+          throwsArgumentError,
+        );
+      },
+    );
+
+    testWidgets("reorderChildren throws ArgumentError on duplicate keys", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "root", data: "R")]);
+      controller.setChildren("root", [
+        TreeNode(key: "c1", data: "C1"),
+        TreeNode(key: "c2", data: "C2"),
+      ]);
+
+      expect(
+        () => controller.reorderChildren("root", ["c1", "c1"]),
+        throwsArgumentError,
+      );
+    });
+
+    testWidgets("reorderChildren throws ArgumentError on missing key", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "root", data: "R")]);
+      controller.setChildren("root", [
+        TreeNode(key: "c1", data: "C1"),
+        TreeNode(key: "c2", data: "C2"),
+      ]);
+
+      expect(
+        () => controller.reorderChildren("root", ["c1"]),
+        throwsArgumentError,
+      );
+    });
+
+    testWidgets("reorderChildren throws ArgumentError on unknown key", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "root", data: "R")]);
+      controller.setChildren("root", [TreeNode(key: "c1", data: "C1")]);
+
+      expect(
+        () => controller.reorderChildren("root", ["x"]),
+        throwsArgumentError,
+      );
+    });
+  });
 }

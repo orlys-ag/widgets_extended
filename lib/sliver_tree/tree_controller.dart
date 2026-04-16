@@ -487,6 +487,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// This clears any existing state.
   void setRoots(List<TreeNode<TKey, TData>> roots) {
+    final seen = <TKey>{};
+    for (final node in roots) {
+      if (!seen.add(node.key)) {
+        throw ArgumentError("Duplicate key ${node.key} in setRoots");
+      }
+    }
     _clear();
     final sorted = comparator != null ? (List.of(roots)..sort(comparator)) : roots;
     for (final node in sorted) {
@@ -649,6 +655,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       '(pending deletion). The parent will be purged when its exit animation '
       'completes, leaving the new children orphaned.',
     );
+    final seen = <TKey>{};
+    for (final child in children) {
+      if (!seen.add(child.key)) {
+        throw ArgumentError(
+          "Duplicate key ${child.key} in setChildren($parentKey)",
+        );
+      }
+      if (child.key == parentKey) {
+        throw ArgumentError(
+          "setChildren($parentKey): child key ${child.key} equals parentKey "
+          "(a node cannot be its own child)",
+        );
+      }
+      // Reject keys that already exist under a different parent — silently
+      // overwriting _children[child.key] = [] below would orphan the existing
+      // subtree and leave a stale reference in the old parent's child list.
+      // Accept when the key is already a child of this same parent (no-op
+      // reparent — handled by the purge-old-children step).
+      if (_nodeData.containsKey(child.key) &&
+          _parents[child.key] != parentKey) {
+        throw ArgumentError(
+          "setChildren($parentKey): key ${child.key} already exists under "
+          "parent ${_parents[child.key]}. Use moveNode() or remove() first.",
+        );
+      }
+    }
 
     // Purge old children and their descendants before overwriting.
     final oldChildren = _children[parentKey];
@@ -734,6 +766,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     assert(
       _nodeData.containsKey(parentKey),
       "Parent node $parentKey not found",
+    );
+    assert(
+      !_pendingDeletion.contains(parentKey),
+      "Cannot insert under $parentKey while it is animating out "
+      "(pending deletion). The parent will be purged when its exit animation "
+      "completes, leaving the new child orphaned.",
     );
     // If the node is pending deletion, cancel the deletion
     if (_pendingDeletion.contains(node.key)) {
@@ -918,12 +956,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         liveRootSet.add(k);
       }
     }
-    assert(
-      orderedKeys.length == liveRootSet.length &&
-          orderedKeys.toSet().length == orderedKeys.length &&
-          liveRootSet.containsAll(orderedKeys),
-      'orderedKeys must contain exactly the current live root keys',
-    );
+    // Validate in all build modes: an `assert` here would be stripped in
+    // release and silently corrupt `_roots` (duplicated entries, lost subtrees,
+    // references to unknown keys).
+    if (orderedKeys.length != liveRootSet.length ||
+        orderedKeys.toSet().length != orderedKeys.length ||
+        !liveRootSet.containsAll(orderedKeys)) {
+      throw ArgumentError.value(
+        orderedKeys,
+        "orderedKeys",
+        "must contain exactly the current live root keys with no duplicates",
+      );
+    }
 
     _roots
       ..clear()
@@ -940,7 +984,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// children of [parentKey]. Expansion state, animation state, and measured
   /// extents are preserved.
   void reorderChildren(TKey parentKey, List<TKey> orderedKeys) {
-    assert(_nodeData.containsKey(parentKey), 'Parent $parentKey not found');
+    if (!_nodeData.containsKey(parentKey)) {
+      throw ArgumentError.value(parentKey, "parentKey", "not found");
+    }
     final currentChildren = _children[parentKey] ?? <TKey>[];
 
     final pendingChildren = <TKey>[];
@@ -952,12 +998,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         liveChildSet.add(k);
       }
     }
-    assert(
-      orderedKeys.length == liveChildSet.length &&
-          orderedKeys.toSet().length == orderedKeys.length &&
-          liveChildSet.containsAll(orderedKeys),
-      'orderedKeys must contain exactly the current live children of $parentKey',
-    );
+    // Validate in all build modes — see reorderRoots for rationale.
+    if (orderedKeys.length != liveChildSet.length ||
+        orderedKeys.toSet().length != orderedKeys.length ||
+        !liveChildSet.containsAll(orderedKeys)) {
+      throw ArgumentError.value(
+        orderedKeys,
+        "orderedKeys",
+        "must contain exactly the current live children of $parentKey with "
+            "no duplicates",
+      );
+    }
 
     _children[parentKey] = [...orderedKeys, ...pendingChildren];
     bool needsVisibleRebuild =
@@ -1000,14 +1051,24 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       newParentKey == null || _nodeData.containsKey(newParentKey),
       'New parent $newParentKey not found',
     );
-    // Guard against cycles.
-    assert(
-      newParentKey == null || !_getDescendants(key).contains(newParentKey),
-      'Cannot move $key under its own descendant $newParentKey',
-    );
+    // Self-reparent would build a cycle in _children[key] and stack-overflow
+    // _refreshSubtreeDepths. Guard at runtime so release builds don't crash.
+    if (newParentKey != null && newParentKey == key) {
+      throw StateError("Cannot move $key onto itself");
+    }
+    // Reparenting under a descendant would form a cycle; check at runtime
+    // (release builds skip the assert below).
+    if (newParentKey != null && _getDescendants(key).contains(newParentKey)) {
+      throw StateError(
+        "Cannot move $key under its own descendant $newParentKey",
+      );
+    }
 
     final oldParent = _parents[key];
-    if (oldParent == newParentKey) return; // already there
+    // If already under the target parent and no explicit position was
+    // requested, nothing to do. With an explicit [index], fall through so the
+    // node is repositioned among its existing siblings.
+    if (oldParent == newParentKey && index == null) return;
 
     // Cancel any animation/deletion state tied to the moved subtree's old
     // position. Without this, a node caught mid-exit-animation would still
