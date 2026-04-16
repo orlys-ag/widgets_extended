@@ -1,6 +1,6 @@
 ## 0.0.8
 
-- Various fixes.
+- Various fixes and optimizations
 
 ## 0.0.7
 

@@ -514,6 +514,337 @@ void main() {
       },
     );
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Builder invocation: pure animation ticks must not re-run nodeBuilder for
+  // rows whose structure is unchanged. If this regresses, every animation
+  // frame rebuilds every visible widget — a severe perf regression that
+  // would also break stable-identity assumptions in closures.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  group("nodeBuilder invocation during animation", () {
+    testWidgets(
+      "rows are not rebuilt on intermediate animation ticks",
+      (tester) async {
+        // Structural notifications (expand, animation completion) rebuild
+        // every mounted row — that's by design and covered elsewhere. This
+        // test pins the middle of an animation: pure extent-interpolation
+        // ticks that only call markNeedsLayout must not trigger rebuilds.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 600),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
+        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+
+        final buildCounts = <String, int>{};
+
+        await tester.pumpWidget(
+          buildTestTree(
+            controller: controller,
+            nodeBuilder: (context, key, depth) {
+              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+              return SizedBox(height: 48, child: Text(key));
+            },
+          ),
+        );
+        await tester.pump();
+
+        // Kick off an animated expand. The expand() call itself notifies
+        // listeners, which schedules a rebuild of mounted rows and creates
+        // 'a1' on the next layout pass.
+        controller.expand(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+
+        // Capture baseline counts AFTER the expand-triggered rebuild has
+        // landed. We're now mid-animation (≈0% progress of 600ms).
+        final baselineA = buildCounts["a"] ?? 0;
+        final baselineB = buildCounts["b"] ?? 0;
+        final baselineA1 = buildCounts["a1"] ?? 0;
+
+        // Pump several pure-tick frames. Total ≈100ms — well inside the
+        // 600ms animation, so no completion notification fires.
+        for (int i = 0; i < 5; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+
+        // During those intermediate ticks no rebuilds should have happened.
+        expect(
+          buildCounts["a"],
+          baselineA,
+          reason: "row 'a' was rebuilt on animation ticks",
+        );
+        expect(
+          buildCounts["b"],
+          baselineB,
+          reason: "row 'b' was rebuilt on animation ticks",
+        );
+        expect(
+          buildCounts["a1"],
+          baselineA1,
+          reason: "row 'a1' was rebuilt on animation ticks",
+        );
+
+        await tester.pumpAndSettle();
+      },
+    );
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Pass-1 cache-hit stability: once animations settle, repeated layouts
+  // against unchanged extents must keep offsets consistent. If the fast
+  // path's `oldExtent == newExtent` equality check ever drifts (e.g. because
+  // a future refactor makes getCurrentExtent return a value lerped through
+  // a curve that rounds differently per frame), offsets could silently
+  // desync from scroll extent. This test pins the current behaviour.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  group("layout stability across idle frames", () {
+    testWidgets(
+      "row positions remain stable across many idle pumps after settle",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 200),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+          TreeNode(key: "c", data: "C"),
+        ]);
+
+        await tester.pumpWidget(
+          buildTestTree(
+            controller: controller,
+            nodeBuilder: (context, key, depth) {
+              return SizedBox(
+                key: ValueKey("row-$key"),
+                height: 48,
+                child: Text(key),
+              );
+            },
+          ),
+        );
+
+        // Trigger an animation then fully settle. This leaves Pass 1 on the
+        // mixed path (hasAnimations becomes false, _animationsWereActive may
+        // still be true on the first post-settle frame), exercising the
+        // extent-equality cache-hit branch.
+        controller.insertRoot(TreeNode(key: "d", data: "D"));
+        await tester.pumpAndSettle();
+
+        final positionsAfterSettle = <String, double>{
+          for (final key in ["a", "b", "c", "d"])
+            key: tester
+                .getTopLeft(find.byKey(ValueKey("row-$key")))
+                .dy,
+        };
+
+        // Pump a bunch of idle frames — each re-enters performLayout with
+        // identical extents. If the equality check misfires and drifts
+        // offsets, positions will move.
+        for (int i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+
+        for (final entry in positionsAfterSettle.entries) {
+          final now = tester
+              .getTopLeft(find.byKey(ValueKey("row-${entry.key}")))
+              .dy;
+          expect(
+            now,
+            entry.value,
+            reason: "row ${entry.key} drifted across idle frames",
+          );
+        }
+      },
+    );
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Targeted data-refresh: updateNode rebuilds only the affected row
+  // ══════════════════════════════════════════════════════════════════════════
+
+  group("Targeted data refresh", () {
+    testWidgets(
+      "updateNode on one node does not rebuild sibling rows",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+          TreeNode(key: "c", data: "C"),
+        ]);
+
+        final buildCounts = <String, int>{};
+        await tester.pumpWidget(
+          buildTestTree(
+            controller: controller,
+            nodeBuilder: (context, key, depth) {
+              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+              final data = controller.getNodeData(key)?.data ?? "";
+              return SizedBox(height: 48, child: Text(data));
+            },
+          ),
+        );
+
+        expect(buildCounts["a"], 1);
+        expect(buildCounts["b"], 1);
+        expect(buildCounts["c"], 1);
+
+        controller.updateNode(TreeNode(key: "b", data: "B-updated"));
+        await tester.pump();
+
+        // Visible row updated.
+        expect(find.text("B-updated"), findsOneWidget);
+        // Only b's builder ran again. a and c are untouched.
+        expect(buildCounts["b"], 2);
+        expect(buildCounts["a"], 1,
+            reason: "sibling 'a' must not rebuild on unrelated updateNode");
+        expect(buildCounts["c"], 1,
+            reason: "sibling 'c' must not rebuild on unrelated updateNode");
+      },
+    );
+
+    testWidgets(
+      "structural mutation still rebuilds every mounted row",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
+        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+
+        final buildCounts = <String, int>{};
+        await tester.pumpWidget(
+          buildTestTree(
+            controller: controller,
+            nodeBuilder: (context, key, depth) {
+              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+              return SizedBox(height: 48, child: Text(key));
+            },
+          ),
+        );
+
+        final before = Map<String, int>.from(buildCounts);
+
+        // expand() is a structural mutation — it must still refresh all
+        // mounted rows (closures may depend on expansion state, etc.).
+        controller.expand(key: "a");
+        await tester.pump();
+
+        expect(buildCounts["a"]!, greaterThan(before["a"]!));
+        expect(buildCounts["b"]!, greaterThan(before["b"]!));
+      },
+    );
+
+    testWidgets(
+      "updateNode on an off-screen node does not trigger any rebuild",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+        // 50 roots — only a handful are mounted at once given 48px rows.
+        controller.setRoots([
+          for (int i = 0; i < 50; i++)
+            TreeNode(key: "r$i", data: "R$i"),
+        ]);
+
+        final buildCounts = <String, int>{};
+        await tester.pumpWidget(
+          buildTestTree(
+            controller: controller,
+            nodeBuilder: (context, key, depth) {
+              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+              final data = controller.getNodeData(key)?.data ?? "";
+              return SizedBox(height: 48, child: Text(data));
+            },
+          ),
+        );
+
+        // Pick a key that was never mounted.
+        final String offscreenKey = "r49";
+        expect(buildCounts.containsKey(offscreenKey), isFalse,
+            reason: "sanity: last root shouldn't be mounted in initial viewport");
+
+        final snapshot = Map<String, int>.from(buildCounts);
+
+        controller.updateNode(TreeNode(key: offscreenKey, data: "updated"));
+        await tester.pump();
+
+        // Build counts of mounted rows must be unchanged.
+        for (final entry in snapshot.entries) {
+          expect(buildCounts[entry.key], entry.value,
+              reason: "mounted row '${entry.key}' must not rebuild for an "
+                  "updateNode on an off-screen key");
+        }
+      },
+    );
+
+    testWidgets(
+      "batched data + structural mutations produce one full refresh",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
+
+        final buildCounts = <String, int>{};
+        await tester.pumpWidget(
+          buildTestTree(
+            controller: controller,
+            nodeBuilder: (context, key, depth) {
+              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+              final data = controller.getNodeData(key)?.data ?? "";
+              return SizedBox(height: 48, child: Text(data));
+            },
+          ),
+        );
+        final before = Map<String, int>.from(buildCounts);
+
+        controller.runBatch(() {
+          controller.updateNode(TreeNode(key: "a", data: "A2"));
+          controller.insertRoot(TreeNode(key: "c", data: "C"));
+          controller.updateNode(TreeNode(key: "b", data: "B2"));
+        });
+        await tester.pump();
+
+        // Everyone rebuilt at most once — the structural notify subsumed
+        // the per-key data refresh for a and b.
+        expect(buildCounts["a"], before["a"]! + 1);
+        expect(buildCounts["b"], before["b"]! + 1);
+        expect(buildCounts["c"], 1);
+        expect(find.text("A2"), findsOneWidget);
+        expect(find.text("B2"), findsOneWidget);
+        expect(find.text("C"), findsOneWidget);
+      },
+    );
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════════

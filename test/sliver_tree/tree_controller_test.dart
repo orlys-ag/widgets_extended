@@ -34,20 +34,30 @@ void main() {
       expect(controller.visibleNodes, ['a', 'b']);
     });
 
-    testWidgets('notifies listeners', (tester) async {
+    testWidgets('fires node-data listener with the changed key', (tester) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationDuration: Duration.zero,
       );
       addTearDown(controller.dispose);
 
-      controller.setRoots([TreeNode(key: 'a', data: 'A')]);
+      controller.setRoots([
+        TreeNode(key: 'a', data: 'A'),
+        TreeNode(key: 'b', data: 'B'),
+      ]);
 
-      int notifyCount = 0;
-      controller.addListener(() => notifyCount++);
+      int structuralCount = 0;
+      final dataChangedKeys = <String>[];
+      controller.addListener(() => structuralCount++);
+      controller.addNodeDataListener(dataChangedKeys.add);
 
       controller.updateNode(TreeNode(key: 'a', data: 'A2'));
-      expect(notifyCount, 1);
+
+      expect(dataChangedKeys, ['a']);
+      // Data-only change must not fire the structural channel, otherwise
+      // listeners that rebuild all mounted rows (e.g. SliverTreeElement)
+      // would defeat the targeted-refresh optimization.
+      expect(structuralCount, 0);
     });
 
     testWidgets('preserves expansion state', (tester) async {
@@ -1821,6 +1831,110 @@ void main() {
         () => controller.reorderChildren("root", ["x"]),
         throwsArgumentError,
       );
+    });
+  });
+
+  group("computeFirstAnimatingVisibleIndex", () {
+    testWidgets("returns visibleNodeCount when no animations are active",
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
+
+      expect(controller.hasActiveAnimations, isFalse);
+      expect(controller.computeFirstAnimatingVisibleIndex(),
+          controller.visibleNodeCount);
+    });
+
+    testWidgets("returns smallest visible index among active operation groups",
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 300),
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+        TreeNode(key: "c", data: "C"),
+      ]);
+      controller.setChildren("b", [
+        TreeNode(key: "b1", data: "B1"),
+        TreeNode(key: "b2", data: "B2"),
+      ]);
+
+      // Expand b — triggers an operation group with b1, b2 as members.
+      // visible order mid-anim: [a, b, b1, b2, c], animating members = {b1, b2}.
+      controller.expand(key: "b");
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(controller.hasActiveAnimations, isTrue);
+
+      final idx = controller.computeFirstAnimatingVisibleIndex();
+      expect(idx, 2,
+          reason: "b1 at index 2 is the first animating visible node");
+
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        "returns visibleNodeCount when animating members are not in visible order",
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 300),
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
+      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+
+      // Expanding then immediately removing the parent leaves the group
+      // momentarily populated but the members no longer in _visibleOrder.
+      controller.expand(key: "a");
+      controller.remove(key: "a");
+      await tester.pump(const Duration(milliseconds: 10));
+
+      final idx = controller.computeFirstAnimatingVisibleIndex();
+      // Any animating member still in visible order counts; any not in
+      // visible order is ignored. The result must always be ≤ visibleNodeCount.
+      expect(idx, lessThanOrEqualTo(controller.visibleNodeCount));
+
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets("scales with smallest of multiple concurrent groups",
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 300),
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+        TreeNode(key: "c", data: "C"),
+      ]);
+      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+      controller.setChildren("c", [TreeNode(key: "c1", data: "C1")]);
+
+      controller.expand(key: "c");
+      controller.expand(key: "a");
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // After both expands, visible: [a, a1, b, c, c1]. Two groups active.
+      // Smallest animating visible index is a1 (index 1).
+      final idx = controller.computeFirstAnimatingVisibleIndex();
+      expect(idx, 1);
+
+      await tester.pumpAndSettle();
     });
   });
 }

@@ -100,6 +100,16 @@ class TreeSyncController<TKey, TData> {
     List<TreeNode<TKey, TData>> Function(TKey key)? childrenOf,
     bool animate = true,
   }) {
+    _controller.runBatch(() {
+      _syncRootsImpl(desired, childrenOf: childrenOf, animate: animate);
+    });
+  }
+
+  void _syncRootsImpl(
+    List<TreeNode<TKey, TData>> desired, {
+    List<TreeNode<TKey, TData>> Function(TKey key)? childrenOf,
+    bool animate = true,
+  }) {
     final desiredKeys = desired.map((n) => n.key).toList();
     final desiredSet = desiredKeys.toSet();
     final currentSet = _currentRoots.toSet();
@@ -255,6 +265,16 @@ class TreeSyncController<TKey, TData> {
     if (_controller.getNodeData(parentKey) == null) {
       return;
     }
+    _controller.runBatch(() {
+      _syncChildrenImpl(parentKey, desired, animate: animate);
+    });
+  }
+
+  void _syncChildrenImpl(
+    TKey parentKey,
+    List<TreeNode<TKey, TData>> desired, {
+    bool animate = true,
+  }) {
     final desiredKeys = desired.map((n) => n.key).toList();
     final desiredSet = desiredKeys.toSet();
     final currentKeys = _currentChildren[parentKey] ?? const [];
@@ -368,19 +388,21 @@ class TreeSyncController<TKey, TData> {
     Map<TKey, List<TreeNode<TKey, TData>>> desiredByParent, {
     bool animate = true,
   }) {
-    _globallyDesiredChildren = <TKey>{};
-    try {
-      for (final children in desiredByParent.values) {
-        for (final c in children) {
-          _globallyDesiredChildren!.add(c.key);
+    _controller.runBatch(() {
+      _globallyDesiredChildren = <TKey>{};
+      try {
+        for (final children in desiredByParent.values) {
+          for (final c in children) {
+            _globallyDesiredChildren!.add(c.key);
+          }
         }
+        for (final entry in desiredByParent.entries) {
+          syncChildren(entry.key, entry.value, animate: animate);
+        }
+      } finally {
+        _globallyDesiredChildren = null;
       }
-      for (final entry in desiredByParent.entries) {
-        syncChildren(entry.key, entry.value, animate: animate);
-      }
-    } finally {
-      _globallyDesiredChildren = null;
-    }
+    });
   }
 
   /// Initializes tracking state from the current tree controller.

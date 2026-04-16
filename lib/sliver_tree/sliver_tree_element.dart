@@ -59,6 +59,16 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Set by [reassemble] to signal that [update] should invalidate children.
   bool _didReassemble = false;
 
+  /// Keys whose data changed since the last build. Refreshed surgically
+  /// in [performRebuild] instead of walking every mounted child.
+  final Set<TKey> _dirtyDataNodes = {};
+
+  /// Set when the controller fired a structural notification (or any event
+  /// that may have changed expansion / visible order / depth / closures).
+  /// Forces [performRebuild] to refresh every mounted child, which
+  /// subsumes [_dirtyDataNodes].
+  bool _needsFullRefresh = false;
+
   // ══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
   // ══════════════════════════════════════════════════════════════════════════
@@ -69,12 +79,14 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     renderObject.childManager = this;
     widget.controller.addListener(_onControllerChanged);
     widget.controller.addAnimationListener(_onAnimationTick);
+    widget.controller.addNodeDataListener(_onNodeDataChanged);
   }
 
   @override
   void unmount() {
     widget.controller.removeListener(_onControllerChanged);
     widget.controller.removeAnimationListener(_onAnimationTick);
+    widget.controller.removeNodeDataListener(_onNodeDataChanged);
     _gcScheduled = false;
     super.unmount();
   }
@@ -93,8 +105,10 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     if (oldWidget.controller != newWidget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       oldWidget.controller.removeAnimationListener(_onAnimationTick);
+      oldWidget.controller.removeNodeDataListener(_onNodeDataChanged);
       newWidget.controller.addListener(_onControllerChanged);
       newWidget.controller.addAnimationListener(_onAnimationTick);
+      newWidget.controller.addNodeDataListener(_onNodeDataChanged);
       renderObject.controller = newWidget.controller;
     }
 
@@ -104,31 +118,45 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       renderObject.markStructureChanged();
     }
 
-    // Refresh mounted children with the (potentially new) nodeBuilder so
-    // that visible rows always reflect current parent state and closures.
+    // Parent rebuild: nodeBuilder closure may have captured new state,
+    // so every mounted row must be refreshed. This supersedes any
+    // targeted data-refresh already queued.
+    _needsFullRefresh = true;
+    _dirtyDataNodes.clear();
     _refreshMountedChildren();
+    _needsFullRefresh = false;
   }
 
   @override
   void performRebuild() {
     super.performRebuild();
-    // Triggered by markNeedsBuild (e.g. controller data change via updateNode).
-    // Walk mounted children and feed them fresh widgets from the current
-    // nodeBuilder so same-key data updates propagate without recreation.
-    _refreshMountedChildren();
+    // Triggered by markNeedsBuild. Two entry points:
+    //  - _onControllerChanged (structural): _needsFullRefresh is true.
+    //  - _onNodeDataChanged (per-key data): only _dirtyDataNodes is populated.
+    // Full refresh subsumes targeted refresh, so check it first.
+    if (_needsFullRefresh) {
+      _needsFullRefresh = false;
+      _dirtyDataNodes.clear();
+      _refreshMountedChildren();
+    } else if (_dirtyDataNodes.isNotEmpty) {
+      final keys = List<TKey>.of(_dirtyDataNodes);
+      _dirtyDataNodes.clear();
+      _refreshMountedChildren(only: keys);
+    }
   }
 
-  /// Refreshes all mounted children with fresh widgets from the current
+  /// Refreshes mounted children with fresh widgets from the current
   /// [SliverTree.nodeBuilder].
   ///
-  /// Called from [update] (parent rebuild) and [performRebuild] (controller
-  /// data change) so that existing visible rows always reflect the latest
-  /// widget tree and controller state.
-  void _refreshMountedChildren() {
+  /// When [only] is null, every mounted row is refreshed (used for
+  /// structural notifications and parent rebuilds). When provided, only
+  /// the listed keys are refreshed — the per-key data-change fast path.
+  void _refreshMountedChildren({Iterable<TKey>? only}) {
     if (_children.isEmpty) return;
-    for (final entry in _children.entries.toList()) {
-      final key = entry.key;
-      final oldElement = entry.value;
+    final keysToRefresh = only ?? _children.keys.toList();
+    for (final key in keysToRefresh) {
+      final oldElement = _children[key];
+      if (oldElement == null) continue;
       // Skip nodes that no longer exist — GC will clean them up.
       if (widget.controller.getNodeData(key) == null) continue;
       final depth = widget.controller.getDepth(key);
@@ -158,6 +186,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
 
   void _onControllerChanged() {
     renderObject.markNeedsLayout();
+    _needsFullRefresh = true;
     markNeedsBuild();
     _scheduleGarbageCollection();
   }
@@ -166,6 +195,17 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Only triggers relayout — no GC scheduling needed.
   void _onAnimationTick() {
     renderObject.markNeedsLayout();
+  }
+
+  /// Called when a single node's data changed (via [TreeController.updateNode])
+  /// without any structural mutation. Queues a targeted rebuild of just
+  /// that row instead of sweeping every mounted child.
+  void _onNodeDataChanged(TKey key) {
+    // Node not mounted — nothing to refresh. Don't mark dirty or schedule
+    // a build, otherwise we'd do a no-op pass for every off-screen update.
+    if (!_children.containsKey(key)) return;
+    _dirtyDataNodes.add(key);
+    markNeedsBuild();
   }
 
   /// Schedules cleanup of elements for nodes that no longer exist.

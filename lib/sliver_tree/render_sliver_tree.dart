@@ -516,6 +516,24 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     return offset;
   }
 
+  /// Incremental variant of [_recomputeOffsets] that only walks from
+  /// [fromIndex] forward. Offsets for earlier indices are assumed
+  /// already correct — extents only affect the offsets of nodes that
+  /// come AFTER them, so changes at index `k` leave indices `< k`
+  /// untouched. Returns the new total scroll extent.
+  double _recomputeOffsetsFrom(List<TKey> visibleNodes, int fromIndex) {
+    if (visibleNodes.isEmpty) return 0.0;
+    if (fromIndex <= 0) return _recomputeOffsets(visibleNodes);
+
+    double offset = _nodeOffsets[visibleNodes[fromIndex]] ?? 0.0;
+    for (int i = fromIndex; i < visibleNodes.length; i++) {
+      final nodeId = visibleNodes[i];
+      _nodeOffsets[nodeId] = offset;
+      offset += _nodeExtents[nodeId] ?? 0.0;
+    }
+    return offset;
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   // NODE LAYOUT
   // ══════════════════════════════════════════════════════════════════════════
@@ -636,7 +654,39 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // Pure scrolling: no animations active now or last frame.
       // Offsets and extents are unchanged — reuse cached total.
       totalScrollExtent = _lastTotalScrollExtent;
+    } else if (hasAnimations) {
+      // Active animation frame: only indices at or beyond the first
+      // animating node can have changed offsets/extents. Everything
+      // before them has stable cached values from the prior frame.
+      final firstAnimIdx = controller.computeFirstAnimatingVisibleIndex();
+      if (firstAnimIdx >= visibleNodes.length) {
+        // Animating nodes exist but none are in the visible order
+        // (e.g. an animation on a subtree that was moved out of view).
+        // Nothing to recompute here.
+        totalScrollExtent = _lastTotalScrollExtent;
+      } else {
+        if (firstAnimIdx == 0) {
+          totalScrollExtent = 0.0;
+        } else {
+          final prevId = visibleNodes[firstAnimIdx - 1];
+          totalScrollExtent = (_nodeOffsets[prevId] ?? 0.0)
+              + (_nodeExtents[prevId] ?? 0.0);
+        }
+        for (int i = firstAnimIdx; i < visibleNodes.length; i++) {
+          final nodeId = visibleNodes[i];
+          final newExtent = controller.getCurrentExtent(nodeId);
+          _nodeOffsets[nodeId] = totalScrollExtent;
+          _nodeExtents[nodeId] = newExtent;
+          totalScrollExtent += newExtent;
+        }
+      }
     } else {
+      // Transitional frame: no active animations this frame, but there
+      // were last frame. Some just-settled nodes may have their cached
+      // extent stuck at an intermediate interpolated value if the
+      // settling frame fired before our last layout. Walk the list with
+      // the extent-equality short-circuit so stable-prefix nodes stay
+      // cheap and only changed nodes get rewritten.
       totalScrollExtent = 0.0;
       bool foundAnimating = false;
 
@@ -663,11 +713,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final nodesInCacheRegion = _nodesInCacheRegion;
     final cacheStartIndex = _findFirstVisibleIndex(visibleNodes, cacheStart);
 
+    int cacheEndIndex = cacheStartIndex;
     for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final offset = _nodeOffsets[nodeId]!;
       if (offset >= cacheEnd) break;
       nodesInCacheRegion.add(nodeId);
+      cacheEndIndex = i + 1;
     }
 
     // Create children for nodes in cache region
@@ -681,9 +733,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Layout the children — track whether any extent changed to skip
     // the O(N) _recomputeOffsets when sizes are stable (cache hit path).
+    // Also track the smallest index whose extent changed so we can walk
+    // only from there when recomputing offsets.
     bool extentsChanged = false;
+    int firstChangedIdx = visibleNodes.length;
 
-    for (final nodeId in nodesInCacheRegion) {
+    for (int i = cacheStartIndex; i < cacheEndIndex; i++) {
+      final nodeId = visibleNodes[i];
       final actualAnimatedExtent = _layoutNodeChild(
         nodeId, crossAxisExtent,
       );
@@ -694,6 +750,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         _nodeExtents[nodeId] = actualAnimatedExtent;
         totalScrollExtent += actualAnimatedExtent - estimatedExtent;
         extentsChanged = true;
+        if (i < firstChangedIdx) firstChangedIdx = i;
       }
 
       final child = _children[nodeId]!;
@@ -703,13 +760,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Only recompute offsets if actual extents differed from estimates.
     // During steady-state animation (constraint cache hit → same sizes),
-    // this skips the full O(N) recomputation.
+    // this skips the full O(N) recomputation. When extents did change,
+    // only walk from the first changed index forward — offsets before
+    // that point are unaffected by later-index extent changes.
     if (extentsChanged) {
       _stickyPrecomputeDirty = true;
-      totalScrollExtent = _recomputeOffsets(visibleNodes);
+      totalScrollExtent = _recomputeOffsetsFrom(visibleNodes, firstChangedIdx);
 
-      // Update parent data with corrected offsets.
-      for (final nodeId in nodesInCacheRegion) {
+      // Only rewrite parentData.layoutOffset for cache-region nodes at or
+      // after firstChangedIdx. Earlier cache-region nodes already had the
+      // correct value written in the measurement loop above.
+      final updateStart = math.max(cacheStartIndex, firstChangedIdx);
+      for (int i = updateStart; i < cacheEndIndex; i++) {
+        final nodeId = visibleNodes[i];
         final child = _children[nodeId];
         if (child == null) continue;
         final parentData = child.parentData! as SliverTreeParentData;

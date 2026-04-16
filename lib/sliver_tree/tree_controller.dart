@@ -127,6 +127,23 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Listeners notified on every animation tick (layout-only updates).
   final List<VoidCallback> _animationListeners = [];
 
+  /// Listeners notified when a single node's data changes without any
+  /// structural change (e.g. [updateNode]). Receives the changed key.
+  final List<void Function(TKey)> _nodeDataListeners = [];
+
+  /// Depth of nested [runBatch] calls. Mutations inside a batch defer
+  /// their structural notification to the outermost [runBatch] exit.
+  int _batchDepth = 0;
+
+  /// Set when a mutation inside [runBatch] requested a structural
+  /// notification. Drained and fired once when [_batchDepth] returns to 0.
+  bool _batchDidRequestStructural = false;
+
+  /// Keys whose data changed inside the current [runBatch]. Drained after
+  /// the structural notification fires so that targeted row refreshes see
+  /// a coherent post-batch state.
+  Set<TKey>? _batchDirtyDataNodes;
+
   /// Default extent for nodes that haven't been measured yet.
   static const double defaultExtent = 48.0;
 
@@ -223,6 +240,40 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _standaloneAnimations.isNotEmpty ||
       _operationGroups.isNotEmpty ||
       (_bulkAnimationGroup != null && !_bulkAnimationGroup!.isEmpty);
+
+  /// Returns the smallest [_visibleOrder] index among all currently-animating
+  /// nodes, or [visibleNodeCount] when none are visible / none are animating.
+  ///
+  /// Used by the render object to skip the O(N) Pass 1 offset rescan during
+  /// animation: everything before the returned index has stable offset and
+  /// extent from the prior frame, so only indices `>= firstAnimatingIndex`
+  /// need to be recomputed.
+  ///
+  /// Complexity is O(A) in the number of animating nodes, which is normally
+  /// much smaller than the visible-order length.
+  int computeFirstAnimatingVisibleIndex() {
+    if (!hasActiveAnimations) return _visibleOrder.length;
+    int min = _visibleOrder.length;
+    void check(TKey k) {
+      final idx = _visibleIndex[k];
+      if (idx != null && idx < min) min = idx;
+    }
+    for (final group in _operationGroups.values) {
+      for (final k in group.members.keys) {
+        check(k);
+      }
+    }
+    final bulk = _bulkAnimationGroup;
+    if (bulk != null) {
+      for (final k in bulk.members) {
+        check(k);
+      }
+    }
+    for (final k in _standaloneAnimations.keys) {
+      check(k);
+    }
+    return min;
+  }
 
   /// Debug helper to print bulk animation state.
   /// Call this to verify animation is running correctly.
@@ -455,6 +506,94 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
   }
 
+  /// Registers a callback that fires when a single node's data changes
+  /// without any structural change (e.g. after [updateNode]).
+  ///
+  /// The callback receives the changed node's key. Use this to rebuild
+  /// only the affected row without scanning every mounted child.
+  void addNodeDataListener(void Function(TKey key) listener) {
+    _nodeDataListeners.add(listener);
+  }
+
+  /// Removes a previously registered node-data listener.
+  void removeNodeDataListener(void Function(TKey key) listener) {
+    _nodeDataListeners.remove(listener);
+  }
+
+  /// Fires a per-node data-changed notification, or records the intent
+  /// when inside [runBatch]. Unlike [_notifyStructural], callers pass the
+  /// affected key so listeners can do targeted work.
+  void _notifyNodeDataChanged(TKey key) {
+    if (_batchDepth > 0) {
+      (_batchDirtyDataNodes ??= <TKey>{}).add(key);
+      return;
+    }
+    _fireNodeDataListeners(key);
+  }
+
+  void _fireNodeDataListeners(TKey key) {
+    // Snapshot before iteration — listeners may remove themselves.
+    final listeners = List<void Function(TKey)>.of(_nodeDataListeners);
+    for (final listener in listeners) {
+      listener(key);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BATCHING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Runs [body] with structural notifications coalesced into a single
+  /// [notifyListeners] call fired after [body] returns.
+  ///
+  /// Any number of mutations inside [body] — [insertRoot], [insert],
+  /// [remove], [expand], [collapse], [updateNode], [moveNode], etc. — fire
+  /// at most one structural notification when the outermost [runBatch]
+  /// exits. Nested [runBatch] calls coalesce into the outermost one.
+  ///
+  /// Animation tick notifications ([addAnimationListener]) are not affected
+  /// and continue to fire in real time.
+  ///
+  /// The notification fires even if [body] throws, so listeners always see
+  /// the post-batch state. Exceptions propagate after the notification.
+  T runBatch<T>(T Function() body) {
+    _batchDepth++;
+    try {
+      return body();
+    } finally {
+      _batchDepth--;
+      if (_batchDepth == 0) {
+        final didStructural = _batchDidRequestStructural;
+        final dirtyData = _batchDirtyDataNodes;
+        _batchDidRequestStructural = false;
+        _batchDirtyDataNodes = null;
+        // Fire structural first: a structural notify causes the element to
+        // mark itself for a full refresh, which subsumes any data-only
+        // refresh for the same keys. Firing data first would queue a
+        // targeted refresh that the full refresh then redundantly repeats.
+        if (didStructural) {
+          notifyListeners();
+        }
+        if (dirtyData != null && dirtyData.isNotEmpty) {
+          for (final key in dirtyData) {
+            _fireNodeDataListeners(key);
+          }
+        }
+      }
+    }
+  }
+
+  /// Fires a structural notification, or records the intent when inside
+  /// [runBatch]. All in-controller mutation paths call this instead of
+  /// [notifyListeners] directly so batching works uniformly.
+  void _notifyStructural() {
+    if (_batchDepth > 0) {
+      _batchDidRequestStructural = true;
+      return;
+    }
+    notifyListeners();
+  }
+
   /// Binary-searches [siblings] for the sorted insertion index of [node]
   /// using [comparator]. Skips pending-deletion keys.
   int _sortedIndex(List<TKey> siblings, TreeNode<TKey, TData> node) {
@@ -506,7 +645,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     _rebuildVisibleIndex();
     _structureGeneration++;
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Adds a new root node to the tree.
@@ -561,7 +700,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       _rebuildVisibleOrder();
       _structureGeneration++;
-      notifyListeners();
+      _notifyStructural();
       return;
     }
 
@@ -592,7 +731,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _rebuildVisibleOrder();
         _structureGeneration++;
       }
-      notifyListeners();
+      _notifyStructural();
       return;
     }
 
@@ -626,7 +765,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _startStandaloneEnterAnimation(node.key);
     }
 
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Calculates the visible order index for inserting a root at the given root index.
@@ -750,7 +889,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Inserts a new node as a child of the given parent.
@@ -821,7 +960,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       _rebuildVisibleOrder();
       _structureGeneration++;
-      notifyListeners();
+      _notifyStructural();
       return;
     }
     // Node is already present (e.g. restored by an ancestor's
@@ -851,7 +990,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _rebuildVisibleOrder();
         _structureGeneration++;
       }
-      notifyListeners();
+      _notifyStructural();
       return;
     }
     final parentDepth = _depths[parentKey] ?? 0;
@@ -897,7 +1036,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
     }
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Removes a node and all its descendants from the tree.
@@ -924,7 +1063,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _removeNodesImmediate(nodesToRemove);
       _structureGeneration++;
     }
-    notifyListeners();
+    _notifyStructural();
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -938,7 +1077,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void updateNode(TreeNode<TKey, TData> node) {
     assert(_nodeData.containsKey(node.key), 'Node ${node.key} not found');
     _nodeData[node.key] = node;
-    notifyListeners();
+    // Data-only change: no structural mutation, no visible order shift,
+    // no expansion/hasChildren change. Fire the targeted data channel
+    // so the element rebuilds only this row instead of sweeping every
+    // mounted child.
+    _notifyNodeDataChanged(node.key);
   }
 
   /// Reorders the root nodes to match [orderedKeys].
@@ -975,7 +1118,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       ..addAll(pendingRoots);
     _rebuildVisibleOrder();
     _structureGeneration++;
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Reorders the children of [parentKey] to match [orderedKeys].
@@ -1031,7 +1174,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _rebuildVisibleOrder();
       _structureGeneration++;
     }
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Moves a node from its current parent to [newParentKey].
@@ -1110,7 +1253,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _rebuildVisibleOrder();
     _structureGeneration++;
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Recursively sets [_depths] for [key] and all its descendants.
@@ -1151,7 +1294,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // this node's children will appear immediately.
     if (!_areAncestorsExpanded(key)) {
       _expanded[key] = true;
-      notifyListeners();
+      _notifyStructural();
       return;
     }
     _expanded[key] = true;
@@ -1179,7 +1322,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _updateIndicesFrom(insertIndex);
       }
       _structureGeneration++;
-      notifyListeners();
+      _notifyStructural();
       return;
     }
 
@@ -1208,7 +1351,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       _structureGeneration++;
-      notifyListeners();
+      _notifyStructural();
       return;
     }
 
@@ -1313,7 +1456,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     controller.forward();
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Collapses the given node, hiding its children.
@@ -1330,7 +1473,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Find all visible descendants (includes nodes currently entering)
     final descendants = _getVisibleDescendants(key);
     if (descendants.isEmpty) {
-      notifyListeners();
+      _notifyStructural();
       return;
     }
 
@@ -1347,7 +1490,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _removeFromVisibleOrder(toRemove);
         _structureGeneration++;
       }
-      notifyListeners();
+      _notifyStructural();
       return;
     }
 
@@ -1368,7 +1511,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _startStandaloneExitAnimation(nodeId, triggeringAncestorId: key);
       }
       _structureGeneration++;
-      notifyListeners();
+      _notifyStructural();
       return;
     }
 
@@ -1407,7 +1550,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     controller.reverse();
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Toggles the expansion state of the given node.
@@ -1553,7 +1696,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _removeAnimation(key);
       }
     }
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Collapses all nodes in the tree.
@@ -1623,7 +1766,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             return (depth < maxDepth) ? false : value;
           });
         }
-        notifyListeners();
+        _notifyStructural();
       }
       return;
     }
@@ -1714,7 +1857,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _removeFromVisibleOrder(toRemove);
       }
     }
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Rebuilds the entire visible order from the tree structure.
@@ -1941,7 +2084,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // is wasteful. A subsequent expandAll/collapseAll will create a new one.
     _disposeBulkAnimationGroup();
 
-    notifyListeners();
+    _notifyStructural();
   }
 
   /// Called when an operation group's animation completes or is dismissed.
@@ -1959,7 +2102,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       _operationGroups.remove(operationKey);
       group.dispose();
-      notifyListeners();
+      _notifyStructural();
     } else if (status == AnimationStatus.dismissed) {
       // Collapse done (value = 0). Remove nodes from visible order.
       _keysToRemoveScratch.clear();
@@ -1996,7 +2139,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       _operationGroups.remove(operationKey);
       group.dispose();
-      notifyListeners();
+      _notifyStructural();
     }
   }
 
@@ -2130,7 +2273,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_keysToRemoveScratch.isNotEmpty) {
       _removeFromVisibleOrder(_keysToRemoveScratch);
       _structureGeneration++;
-      notifyListeners();
+      _notifyStructural();
     }
 
     _notifyAnimationListeners();
@@ -2504,6 +2647,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void dispose() {
     _clear();
     _animationListeners.clear();
+    _nodeDataListeners.clear();
     super.dispose();
   }
 }
