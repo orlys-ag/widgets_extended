@@ -242,8 +242,9 @@ class SliverTreeParentData extends ParentData {
 
   @override
   String toString() {
-    return "SliverTreeParentData(nodeId: $nodeId, offset: $layoutOffset, "
-        "indent: $indent, visibleExtent: $visibleExtent)";
+    return "SliverTreeParentData(nodeId: $nodeId, "
+        "offset: $layoutOffset, indent: $indent, "
+        "visibleExtent: $visibleExtent)";
   }
 }
 

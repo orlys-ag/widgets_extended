@@ -2,6 +2,7 @@
 library;
 
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/rendering.dart';
 
@@ -41,13 +42,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _lastTotalScrollExtent = 0.0;
     _animationsWereActive = false;
     _lastStickyScrollOffset = double.nan;
-    _nodeOffsets.clear();
-    _nodeExtents.clear();
-    _nodesInCacheRegion.clear();
+    // Nid-indexed arrays are sized against the old controller; reset to
+    // empty and let [_ensureLayoutCapacity] regrow against the new one.
+    _nodeOffsetsByNid = Float64List(0);
+    _nodeExtentsByNid = Float64List(0);
+    _inCacheRegionByNid = Uint8List(0);
+    _stickyByNid = <StickyHeaderInfo<TKey>?>[];
     _stickyHeaders.clear();
-    _stickyNodeIds.clear();
-    _stickyById.clear();
     _lastPrecomputedCount = 0;
+    // Drop child map bookkeeping — the actual RenderBoxes stay adopted and
+    // will be reconciled on the next layout via the child manager.
+    _children.clear();
     markNeedsLayout();
   }
 
@@ -66,8 +71,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   // CHILD STORAGE (nodeId-based)
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Children by nodeId.
-  final Map<TKey, RenderBox> _children = {};
+  /// Mounted render boxes keyed by node ID. Keyed by the stable user-level
+  /// identifier rather than the controller's internal nid, because nids are
+  /// recycled on node purge — a recycled nid would shadow the prior key's
+  /// adopted render box until the element's GC pass runs.
+  final Map<TKey, RenderBox> _children = <TKey, RenderBox>{};
 
   /// Count of visible nodes from last layout - used to detect structure changes.
   int _lastVisibleNodeCount = 0;
@@ -83,14 +91,52 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// sticky [pinnedY] values don't lag behind the actual scroll position.
   double _lastStickyScrollOffset = double.nan;
 
-  /// Reusable map for node offsets during layout.
-  final Map<TKey, double> _nodeOffsets = {};
+  /// Layout-space offsets indexed by the controller's internal nid. Slots
+  /// for nids not present in [TreeController.visibleNodes] are undefined —
+  /// the layout only reads from slots it just wrote this frame (or a
+  /// previous frame under the stable-extent fast path), never from stale
+  /// slots left by purged keys.
+  Float64List _nodeOffsetsByNid = Float64List(0);
 
-  /// Reusable map for node extents during layout.
-  final Map<TKey, double> _nodeExtents = {};
+  /// Layout-space extents indexed by the controller's internal nid.
+  /// Same slot-validity invariant as [_nodeOffsetsByNid].
+  Float64List _nodeExtentsByNid = Float64List(0);
 
-  /// Reusable set for nodes in the cache region during layout.
-  final Set<TKey> _nodesInCacheRegion = {};
+  /// Flags indexed by nid: non-zero iff the node lies in the current cache
+  /// region. Cleared via [Uint8List.fillRange] at the start of Pass 2 each
+  /// layout, then set for every cache-region member.
+  Uint8List _inCacheRegionByNid = Uint8List(0);
+
+  /// Sticky header info indexed by nid. Null when the node is not currently
+  /// a sticky header. Serves as both membership flag (non-null means sticky)
+  /// and the data payload used by paint/hit-test/transform.
+  List<StickyHeaderInfo<TKey>?> _stickyByNid = <StickyHeaderInfo<TKey>?>[];
+
+  /// Grows all nid-indexed layout arrays to match the controller's current
+  /// nid capacity. Doubles on each realloc so amortized growth is O(1)
+  /// per node insertion.
+  void _ensureLayoutCapacity() {
+    final needed = _controller.nidCapacity;
+    if (needed <= _nodeOffsetsByNid.length) return;
+    int cap = _nodeOffsetsByNid.isEmpty ? 16 : _nodeOffsetsByNid.length;
+    while (cap < needed) {
+      cap *= 2;
+    }
+    final newOffsets = Float64List(cap);
+    newOffsets.setRange(0, _nodeOffsetsByNid.length, _nodeOffsetsByNid);
+    _nodeOffsetsByNid = newOffsets;
+    final newExtents = Float64List(cap);
+    newExtents.setRange(0, _nodeExtentsByNid.length, _nodeExtentsByNid);
+    _nodeExtentsByNid = newExtents;
+    final newCacheFlags = Uint8List(cap);
+    newCacheFlags.setRange(0, _inCacheRegionByNid.length, _inCacheRegionByNid);
+    _inCacheRegionByNid = newCacheFlags;
+    final newSticky = List<StickyHeaderInfo<TKey>?>.filled(cap, null);
+    for (int i = 0; i < _stickyByNid.length; i++) {
+      newSticky[i] = _stickyByNid[i];
+    }
+    _stickyByNid = newSticky;
+  }
 
   /// Whether structure changed since last layout.
   bool _structureChanged = true;
@@ -110,12 +156,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
   /// Computed sticky headers for the current layout, ordered root→leaf.
   final List<StickyHeaderInfo<TKey>> _stickyHeaders = [];
-
-  /// Fast lookup of sticky node IDs for paint/hit-test.
-  final Set<TKey> _stickyNodeIds = {};
-
-  /// Fast lookup of sticky info by node ID for applyPaintTransform.
-  final Map<TKey, StickyHeaderInfo<TKey>> _stickyById = {};
 
   // Stable subtree precompute caches (rebuilt each layout, reused across frames).
   // Use nullable backing lists that are replaced when capacity grows, avoiding
@@ -171,11 +211,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
   }
 
-  /// The set of node IDs that should be retained (in cache region + sticky).
-  ///
-  /// Updated each layout pass. Used by the element to decide which off-screen
-  /// children can be safely evicted.
-  Set<TKey> get retainedNodeIds => {..._nodesInCacheRegion, ..._stickyNodeIds};
+  /// Whether the given node is retained by the current layout — i.e. it is
+  /// in the cache region or is a sticky header. Used by the element to
+  /// decide whether an off-screen child can be evicted. O(1), no allocation.
+  bool isNodeRetained(TKey id) {
+    final nid = _controller.nidOf(id);
+    if (nid < 0) return false;
+    if (nid < _inCacheRegionByNid.length && _inCacheRegionByNid[nid] != 0) {
+      return true;
+    }
+    if (nid < _stickyByNid.length && _stickyByNid[nid] != null) {
+      return true;
+    }
+    return false;
+  }
 
   /// Gets the child for the given node ID, or null if not present.
   RenderBox? getChildForNode(TKey id) => _children[id];
@@ -194,13 +243,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
     _children[nodeId] = child;
     adoptChild(child);
-    final parentData = child.parentData! as SliverTreeParentData;
-    parentData.nodeId = nodeId;
+    (child.parentData! as SliverTreeParentData).nodeId = nodeId;
   }
 
   /// Removes the child for the specified node.
   void removeChild(RenderBox child, TKey nodeId) {
-    _children.remove(nodeId);
+    if (identical(_children[nodeId], child)) {
+      _children.remove(nodeId);
+    }
     dropChild(child);
   }
 
@@ -242,7 +292,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   void visitChildrenForSemantics(RenderObjectVisitor visitor) {
     // Sticky headers paint on top, shallowest first (visual top).
     for (final sticky in _stickyHeaders) {
-      final child = _children[sticky.nodeId];
+      final child = getChildForNode(sticky.nodeId);
       if (child == null) continue;
       if (controller.getNodeData(sticky.nodeId) == null) continue;
       if (controller.isExiting(sticky.nodeId)) continue;
@@ -250,8 +300,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
     // Then in-flow visible nodes, skipping any already emitted as sticky.
     for (final nodeId in controller.visibleNodes) {
-      if (_stickyNodeIds.contains(nodeId)) continue;
-      final child = _children[nodeId];
+      final nid = _controller.nidOf(nodeId);
+      if (nid >= 0 &&
+          nid < _stickyByNid.length &&
+          _stickyByNid[nid] != null) {
+        continue;
+      }
+      final child = getChildForNode(nodeId);
       if (child == null) continue;
       if (controller.getNodeData(nodeId) == null) continue;
       if (controller.isExiting(nodeId)) continue;
@@ -290,8 +345,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Walk descendants, accumulating stable offsets using full extents for
     // entering nodes. This prevents push-up bounce during expand animations.
-    double stableOffset = _nodeOffsets[nodeId] ?? 0.0;
-    stableOffset += _nodeExtents[nodeId] ?? 0.0;
+    final nid = _controller.nidOf(nodeId);
+    double stableOffset = _nodeOffsetsByNid[nid];
+    stableOffset += _nodeExtentsByNid[nid];
     double bottom = stableOffset;
 
     for (int i = index + 1; i < visibleNodes.length; i++) {
@@ -304,7 +360,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // Use full (target) extent instead of animated extent to keep bottom stable.
         childExtent = controller.getEstimatedExtent(childId);
       } else {
-        childExtent = _nodeExtents[childId] ?? 0.0;
+        childExtent = _nodeExtentsByNid[_controller.nidOf(childId)];
       }
 
       final childEnd = stableOffset + childExtent;
@@ -348,7 +404,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // Use full extent so ancestor push-up doesn't bounce during expand.
         stableExtent = controller.getEstimatedExtent(nodeId);
       } else {
-        stableExtent = _nodeExtents[nodeId] ?? 0.0;
+        stableExtent = _nodeExtentsByNid[_controller.nidOf(nodeId)];
       }
 
       _stablePrefix[i + 1] = _stablePrefix[i] + stableExtent;
@@ -374,9 +430,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Pass C: subtree bottom per node.
     // For each node i: bottom = (node's actual end) + (stable sum of descendants).
     for (int i = 0; i < n; i++) {
-      final nodeId = visibleNodes[i];
-      final actualEnd =
-          (_nodeOffsets[nodeId] ?? 0.0) + (_nodeExtents[nodeId] ?? 0.0);
+      final nid = _controller.nidOf(visibleNodes[i]);
+      final actualEnd = _nodeOffsetsByNid[nid] + _nodeExtentsByNid[nid];
 
       final end = _subtreeEndIndex[i];
       final descendantStableSum = _stablePrefix[end + 1] - _stablePrefix[i + 1];
@@ -432,14 +487,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (controller.isAnimating(candidateId)) break;
       if (!controller.hasChildren(candidateId)) break;
 
-      final naturalOffset = _nodeOffsets[candidateId];
-      if (naturalOffset == null) break;
+      // Candidate must be in the current visible list — otherwise its
+      // offset slot holds stale data from a prior layout pass (or zero).
+      final candidateIndex = controller.getVisibleIndex(candidateId);
+      if (candidateIndex < 0) break;
+      final naturalOffset = _nodeOffsetsByNid[_controller.nidOf(candidateId)];
 
       final naturalY = naturalOffset - scrollOffset;
       if (naturalY > stackTop) break;
 
       final extent = controller.getEstimatedExtent(candidateId);
-      final candidateIndex = controller.getVisibleIndex(candidateId);
       final subtreeBottom =
           (candidateIndex >= 0 && candidateIndex < _lastPrecomputedCount)
               ? _subtreeBottomByIndex[candidateIndex]
@@ -475,9 +532,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// [overlap] is `constraints.overlap` — the number of pixels at the top
   /// covered by a preceding pinned sliver (e.g. PinnedHeaderSliver).
   void _computeStickyHeaders(double scrollOffset, double overlap, List<TKey> visibleNodes) {
+    // Null out prior-layout sticky entries before recomputing. The nid slots
+    // for nodes that remain sticky this frame are rewritten below; slots for
+    // nodes that no longer qualify stay null, which doubles as the
+    // "is-sticky" membership test used by paint/hit-test/semantics.
+    for (final sticky in _stickyHeaders) {
+      final nid = _controller.nidOf(sticky.nodeId);
+      if (nid >= 0 && nid < _stickyByNid.length) {
+        _stickyByNid[nid] = null;
+      }
+    }
     _stickyHeaders.clear();
-    _stickyNodeIds.clear();
-    _stickyById.clear();
 
     double? parentPinnedY;
     _forEachStickyCandidate(scrollOffset, overlap, visibleNodes,
@@ -496,22 +561,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         indent: indent,
       );
       _stickyHeaders.add(info);
-      _stickyNodeIds.add(candidateId);
-      _stickyById[candidateId] = info;
+      _stickyByNid[_controller.nidOf(candidateId)] = info;
 
       parentPinnedY = pinnedY;
       return true;
     });
   }
 
-  /// Recomputes [_nodeOffsets] from current [_nodeExtents] and returns
-  /// the new total scroll extent. Call after Pass 2 when extents have
-  /// been updated with actual measured values.
+  /// Recomputes [_nodeOffsetsByNid] from current [_nodeExtentsByNid] and
+  /// returns the new total scroll extent. Call after Pass 2 when extents
+  /// have been updated with actual measured values.
   double _recomputeOffsets(List<TKey> visibleNodes) {
     double offset = 0.0;
     for (final nodeId in visibleNodes) {
-      _nodeOffsets[nodeId] = offset;
-      offset += _nodeExtents[nodeId] ?? 0.0;
+      final nid = _controller.nidOf(nodeId);
+      _nodeOffsetsByNid[nid] = offset;
+      offset += _nodeExtentsByNid[nid];
     }
     return offset;
   }
@@ -525,11 +590,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     if (visibleNodes.isEmpty) return 0.0;
     if (fromIndex <= 0) return _recomputeOffsets(visibleNodes);
 
-    double offset = _nodeOffsets[visibleNodes[fromIndex]] ?? 0.0;
+    double offset = _nodeOffsetsByNid[_controller.nidOf(visibleNodes[fromIndex])];
     for (int i = fromIndex; i < visibleNodes.length; i++) {
-      final nodeId = visibleNodes[i];
-      _nodeOffsets[nodeId] = offset;
-      offset += _nodeExtents[nodeId] ?? 0.0;
+      final nid = _controller.nidOf(visibleNodes[i]);
+      _nodeOffsetsByNid[nid] = offset;
+      offset += _nodeExtentsByNid[nid];
     }
     return offset;
   }
@@ -548,7 +613,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     TKey nodeId,
     double crossAxisExtent,
   ) {
-    final child = _children[nodeId];
+    final child = getChildForNode(nodeId);
     if (child == null) return null;
 
     final indent = controller.getIndent(nodeId);
@@ -609,6 +674,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       return;
     }
 
+    _ensureLayoutCapacity();
+
     // Detect structure changes
     if (controller.structureGeneration != _lastStructureGeneration) {
       _structureChanged = true;
@@ -639,13 +706,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     if (_structureChanged) {
       totalScrollExtent = 0.0;
-      _nodeOffsets.clear();
-      _nodeExtents.clear();
 
       for (final nodeId in visibleNodes) {
-        _nodeOffsets[nodeId] = totalScrollExtent;
+        final nid = _controller.nidOf(nodeId);
+        _nodeOffsetsByNid[nid] = totalScrollExtent;
         final extent = controller.getCurrentExtent(nodeId);
-        _nodeExtents[nodeId] = extent;
+        _nodeExtentsByNid[nid] = extent;
         totalScrollExtent += extent;
       }
 
@@ -668,15 +734,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         if (firstAnimIdx == 0) {
           totalScrollExtent = 0.0;
         } else {
-          final prevId = visibleNodes[firstAnimIdx - 1];
-          totalScrollExtent = (_nodeOffsets[prevId] ?? 0.0)
-              + (_nodeExtents[prevId] ?? 0.0);
+          final prevNid = _controller.nidOf(visibleNodes[firstAnimIdx - 1]);
+          totalScrollExtent =
+              _nodeOffsetsByNid[prevNid] + _nodeExtentsByNid[prevNid];
         }
         for (int i = firstAnimIdx; i < visibleNodes.length; i++) {
           final nodeId = visibleNodes[i];
           final newExtent = controller.getCurrentExtent(nodeId);
-          _nodeOffsets[nodeId] = totalScrollExtent;
-          _nodeExtents[nodeId] = newExtent;
+          final nid = _controller.nidOf(nodeId);
+          _nodeOffsetsByNid[nid] = totalScrollExtent;
+          _nodeExtentsByNid[nid] = newExtent;
           totalScrollExtent += newExtent;
         }
       }
@@ -692,14 +759,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
       for (final nodeId in visibleNodes) {
         final newExtent = controller.getCurrentExtent(nodeId);
-        final oldExtent = _nodeExtents[nodeId];
+        final nid = _controller.nidOf(nodeId);
+        final oldExtent = _nodeExtentsByNid[nid];
 
-        if (!foundAnimating && oldExtent != null && oldExtent == newExtent) {
-          totalScrollExtent = _nodeOffsets[nodeId]! + newExtent;
+        if (!foundAnimating && oldExtent == newExtent) {
+          // Structure is stable in this branch, so the prior-layout slot
+          // value is valid; no null-vs-zero ambiguity to guard against.
+          totalScrollExtent = _nodeOffsetsByNid[nid] + newExtent;
         } else {
           foundAnimating = true;
-          _nodeOffsets[nodeId] = totalScrollExtent;
-          _nodeExtents[nodeId] = newExtent;
+          _nodeOffsetsByNid[nid] = totalScrollExtent;
+          _nodeExtentsByNid[nid] = newExtent;
           totalScrollExtent += newExtent;
         }
       }
@@ -709,24 +779,26 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // PASS 2: Create children for nodes in cache region
     // ────────────────────────────────────────────────────────────────────────
 
-    _nodesInCacheRegion.clear();
-    final nodesInCacheRegion = _nodesInCacheRegion;
+    // Clear prior-layout cache-region flags in one memset-style pass, then
+    // mark the slice [cacheStartIndex, cacheEndIndex) as this frame's members.
+    _inCacheRegionByNid.fillRange(0, _inCacheRegionByNid.length, 0);
     final cacheStartIndex = _findFirstVisibleIndex(visibleNodes, cacheStart);
 
     int cacheEndIndex = cacheStartIndex;
     for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
-      final offset = _nodeOffsets[nodeId]!;
+      final nid = _controller.nidOf(nodeId);
+      final offset = _nodeOffsetsByNid[nid];
       if (offset >= cacheEnd) break;
-      nodesInCacheRegion.add(nodeId);
+      _inCacheRegionByNid[nid] = 1;
       cacheEndIndex = i + 1;
     }
 
     // Create children for nodes in cache region
-    if (nodesInCacheRegion.isNotEmpty) {
+    if (cacheEndIndex > cacheStartIndex) {
       invokeLayoutCallback<SliverConstraints>((SliverConstraints constraints) {
-        for (final nodeId in nodesInCacheRegion) {
-          childManager?.createChild(nodeId);
+        for (int i = cacheStartIndex; i < cacheEndIndex; i++) {
+          childManager?.createChild(visibleNodes[i]);
         }
       });
     }
@@ -745,17 +817,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       );
       if (actualAnimatedExtent == null) continue;
 
-      final estimatedExtent = _nodeExtents[nodeId]!;
+      final nid = _controller.nidOf(nodeId);
+      final estimatedExtent = _nodeExtentsByNid[nid];
       if (actualAnimatedExtent != estimatedExtent) {
-        _nodeExtents[nodeId] = actualAnimatedExtent;
+        _nodeExtentsByNid[nid] = actualAnimatedExtent;
         totalScrollExtent += actualAnimatedExtent - estimatedExtent;
         extentsChanged = true;
         if (i < firstChangedIdx) firstChangedIdx = i;
       }
 
-      final child = _children[nodeId]!;
+      final child = getChildForNode(nodeId)!;
       final parentData = child.parentData! as SliverTreeParentData;
-      parentData.layoutOffset = _nodeOffsets[nodeId]!;
+      parentData.layoutOffset = _nodeOffsetsByNid[nid];
     }
 
     // Only recompute offsets if actual extents differed from estimates.
@@ -773,10 +846,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final updateStart = math.max(cacheStartIndex, firstChangedIdx);
       for (int i = updateStart; i < cacheEndIndex; i++) {
         final nodeId = visibleNodes[i];
-        final child = _children[nodeId];
+        final child = getChildForNode(nodeId);
         if (child == null) continue;
         final parentData = child.parentData! as SliverTreeParentData;
-        parentData.layoutOffset = _nodeOffsets[nodeId] ?? 0.0;
+        parentData.layoutOffset = _nodeOffsetsByNid[_controller.nidOf(nodeId)];
       }
     }
 
@@ -825,7 +898,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (_stickyHeaders.isNotEmpty) {
         _stickyHeaders.removeWhere((s) {
           if (controller.isExiting(s.nodeId)) {
-            _stickyNodeIds.remove(s.nodeId);
+            final nid = _controller.nidOf(s.nodeId);
+            if (nid >= 0 && nid < _stickyByNid.length) {
+              _stickyByNid[nid] = null;
+            }
             return true;
           }
           return false;
@@ -840,7 +916,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       );
 
       // Force-create and layout any sticky nodes not already in cache region.
-      final newStickyNodes = potentialStickyNodes.difference(nodesInCacheRegion);
+      // Filter by the cache-region flag rather than allocating a diff set.
+      final newStickyNodes = <TKey>{};
+      for (final id in potentialStickyNodes) {
+        final nid = _controller.nidOf(id);
+        if (nid < 0 || _inCacheRegionByNid[nid] == 0) {
+          newStickyNodes.add(id);
+        }
+      }
       if (newStickyNodes.isNotEmpty) {
         invokeLayoutCallback<SliverConstraints>((SliverConstraints constraints) {
           for (final nodeId in newStickyNodes) {
@@ -852,16 +935,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
             nodeId, crossAxisExtent,
           );
           if (extent != null) {
-            _nodeExtents[nodeId] = extent;
+            _nodeExtentsByNid[_controller.nidOf(nodeId)] = extent;
           }
         }
         // Recompute offsets again since new sticky nodes may have changed extents.
         totalScrollExtent = _recomputeOffsets(visibleNodes);
         for (final nodeId in newStickyNodes) {
-          final child = _children[nodeId];
+          final child = getChildForNode(nodeId);
           if (child == null) continue;
           final parentData = child.parentData! as SliverTreeParentData;
-          parentData.layoutOffset = _nodeOffsets[nodeId] ?? 0.0;
+          parentData.layoutOffset = _nodeOffsetsByNid[_controller.nidOf(nodeId)];
         }
         // Re-precompute subtree bottoms with updated extents.
         if (_maxStickyDepth > 0 && !hasAnimations) {
@@ -882,8 +965,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final startIndex = _findFirstVisibleIndex(visibleNodes, scrollOffset);
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
-      final offset = _nodeOffsets[nodeId]!;
-      final extent = _nodeExtents[nodeId]!;
+      final nid = _controller.nidOf(nodeId);
+      final offset = _nodeOffsetsByNid[nid];
+      final extent = _nodeExtentsByNid[nid];
       final endOfNode = offset + extent;
 
       if (offset >= scrollOffset + remainingPaintExtent) break;
@@ -950,9 +1034,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     while (low < high) {
       final mid = (low + high) ~/ 2;
-      final nodeId = nodes[mid];
-      final offset = _nodeOffsets[nodeId] ?? 0.0;
-      final extent = _nodeExtents[nodeId] ?? 0.0;
+      final nid = _controller.nidOf(nodes[mid]);
+      final offset = _nodeOffsetsByNid[nid];
+      final extent = _nodeExtentsByNid[nid];
 
       if (offset + extent <= scrollOffset) {
         low = mid + 1;
@@ -976,9 +1060,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Pass A: Paint non-sticky nodes normally.
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
-      if (_stickyNodeIds.contains(nodeId)) continue;
+      final nid = _controller.nidOf(nodeId);
+      if (nid >= 0 && nid < _stickyByNid.length && _stickyByNid[nid] != null) {
+        continue;
+      }
 
-      final child = _children[nodeId];
+      final child = getChildForNode(nodeId);
       if (child == null) continue;
 
       final parentData = child.parentData! as SliverTreeParentData;
@@ -1010,7 +1097,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final paintExtent = geometry!.paintExtent;
     for (int i = _stickyHeaders.length - 1; i >= 0; i--) {
       final sticky = _stickyHeaders[i];
-      final child = _children[sticky.nodeId];
+      final child = getChildForNode(sticky.nodeId);
       if (child == null) continue;
       // Skip nodes currently animating out. Sticky recompute is throttled
       // during animations, so _stickyHeaders may still contain entries for
@@ -1059,7 +1146,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Phase 1: Test sticky headers first (they're visually on top).
     // Iterate shallowest first (index 0) = topmost = first hit priority.
     for (final sticky in _stickyHeaders) {
-      final child = _children[sticky.nodeId];
+      final child = getChildForNode(sticky.nodeId);
       if (child == null) continue;
       if (controller.isExiting(sticky.nodeId)) continue;
 
@@ -1097,9 +1184,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
-      if (_stickyNodeIds.contains(nodeId)) continue;
+      final nid = _controller.nidOf(nodeId);
+      if (nid >= 0 && nid < _stickyByNid.length && _stickyByNid[nid] != null) {
+        continue;
+      }
 
-      final child = _children[nodeId];
+      final child = getChildForNode(nodeId);
       if (child == null) continue;
 
       // Skip exiting nodes - they should not receive interactions
@@ -1169,10 +1259,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Check if this child is a sticky header (O(1) lookup).
     if (nodeId != null) {
-      final sticky = _stickyById[nodeId];
-      if (sticky != null) {
-        transform.translateByDouble(sticky.indent, sticky.pinnedY, 0.0, 1.0);
-        return;
+      final nid = _controller.nidOf(nodeId as TKey);
+      if (nid >= 0 && nid < _stickyByNid.length) {
+        final sticky = _stickyByNid[nid];
+        if (sticky != null) {
+          transform.translateByDouble(sticky.indent, sticky.pinnedY, 0.0, 1.0);
+          return;
+        }
       }
     }
 
@@ -1210,8 +1303,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final parentData = child.parentData! as SliverTreeParentData;
     final nodeId = parentData.nodeId;
     if (nodeId != null) {
-      final sticky = _stickyById[nodeId];
-      if (sticky != null) return sticky.pinnedY;
+      final nid = _controller.nidOf(nodeId as TKey);
+      if (nid >= 0 && nid < _stickyByNid.length) {
+        final sticky = _stickyByNid[nid];
+        if (sticky != null) return sticky.pinnedY;
+      }
     }
     return parentData.layoutOffset - constraints.scrollOffset;
   }

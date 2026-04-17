@@ -2,6 +2,7 @@
 library;
 
 import 'dart:collection';
+import 'dart:typed_data';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/scheduler.dart';
@@ -62,20 +63,353 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // ECS-STYLE COMPONENT STORAGE
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Node data by key.
-  final Map<TKey, TreeNode<TKey, TData>> _nodeData = {};
+  /// Node data indexed by nid (see INTERNAL NID REGISTRY below). Entries
+  /// for freed nids are null. Look up by key via [_keyToNid].
+  final List<TreeNode<TKey, TData>?> _dataByNid =
+      <TreeNode<TKey, TData>?>[];
 
-  /// Parent key for each node. Null for root nodes.
-  final Map<TKey, TKey?> _parents = {};
+  /// Parent nid for each node, indexed by nid. [_kNoParent] for roots and
+  /// freed slots. Dense, capacity ≥ [_nidToKey].length; grown by
+  /// [_ensureDenseCapacity].
+  Int32List _parentByNid = Int32List(0);
 
-  /// Ordered list of child IDs for each node.
-  final Map<TKey, List<TKey>> _children = {};
+  /// Sentinel value in nid-indexed parent arrays meaning "no parent" (root
+  /// node) or "slot is free". Same sentinel is safe for both because a
+  /// freed nid is never queried through [_keyToNid].
+  static const int _kNoParent = -1;
 
-  /// Cached depth for each node (0 for roots).
-  final Map<TKey, int> _depths = {};
+  /// Ordered list of child keys for each node, indexed by the parent's
+  /// nid. Inner lists remain keyed by [TKey] for now — a later phase can
+  /// convert them to child-nid lists once consumers use nids directly.
+  final List<List<TKey>?> _childrenByNid = <List<TKey>?>[];
 
-  /// Expansion state for each node.
-  final Map<TKey, bool> _expanded = {};
+  /// Cached depth for each node (0 for roots), indexed by nid. Entries for
+  /// freed nids are 0. Grown by [_ensureDenseCapacity].
+  Int32List _depthByNid = Int32List(0);
+
+  /// Expansion state for each node, indexed by nid. 0 = collapsed,
+  /// 1 = expanded. Entries for freed nids are 0.
+  Uint8List _expandedByNid = Uint8List(0);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // INTERNAL NID REGISTRY
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // Every live key is assigned a stable internal integer "nid". Planned later
+  // phases replace the TKey-keyed maps above with dense arrays indexed by nid
+  // (ints hash and compare faster than arbitrary TKey, enabling Float64List /
+  // Int32List storage for hot-path state). Phase 1 only establishes the
+  // mapping — no existing map logic changes.
+
+  /// Forward lookup: user key → internal nid.
+  final Map<TKey, int> _keyToNid = {};
+
+  /// Reverse lookup: nid → user key. Entries for freed nids are null.
+  final List<TKey?> _nidToKey = <TKey?>[];
+
+  /// Pool of released nids available for reuse. Populated by [_releaseNid].
+  final List<int> _freeNids = <int>[];
+
+  /// Next fresh nid to hand out when [_freeNids] is empty.
+  int _nextNid = 0;
+
+  /// Returns the nid for [key], allocating one if the key isn't registered.
+  /// Idempotent for already-registered keys. Grows every dense per-nid
+  /// array in lockstep so callers can safely index them at the returned nid.
+  int _adoptKey(TKey key) {
+    final existing = _keyToNid[key];
+    if (existing != null) return existing;
+    final int nid;
+    if (_freeNids.isNotEmpty) {
+      nid = _freeNids.removeLast();
+      _nidToKey[nid] = key;
+      _dataByNid[nid] = null;
+      _parentByNid[nid] = _kNoParent;
+      _childrenByNid[nid] = null;
+      _depthByNid[nid] = 0;
+      _expandedByNid[nid] = 0;
+      _indexByNid[nid] = _kNotVisible;
+    } else {
+      nid = _nextNid++;
+      _nidToKey.add(key);
+      _dataByNid.add(null);
+      _childrenByNid.add(null);
+      _ensureDenseCapacity(_nidToKey.length);
+      _parentByNid[nid] = _kNoParent;
+      _depthByNid[nid] = 0;
+      _expandedByNid[nid] = 0;
+      _indexByNid[nid] = _kNotVisible;
+    }
+    _keyToNid[key] = nid;
+    return nid;
+  }
+
+  /// Grows every typed-data nid-indexed array to at least [needed] slots.
+  /// Doubles capacity on each realloc so amortized growth is O(1) per
+  /// [_adoptKey] call.
+  void _ensureDenseCapacity(int needed) {
+    if (needed <= _parentByNid.length) return;
+    int cap = _parentByNid.isEmpty ? 8 : _parentByNid.length;
+    while (cap < needed) {
+      cap *= 2;
+    }
+    final newParent = Int32List(cap);
+    newParent.setRange(0, _parentByNid.length, _parentByNid);
+    _parentByNid = newParent;
+    final newDepth = Int32List(cap);
+    newDepth.setRange(0, _depthByNid.length, _depthByNid);
+    _depthByNid = newDepth;
+    final newExpanded = Uint8List(cap);
+    newExpanded.setRange(0, _expandedByNid.length, _expandedByNid);
+    _expandedByNid = newExpanded;
+    final newIndex = Int32List(cap);
+    newIndex.fillRange(_indexByNid.length, cap, _kNotVisible);
+    newIndex.setRange(0, _indexByNid.length, _indexByNid);
+    _indexByNid = newIndex;
+  }
+
+  /// Returns the parent nid for [key], or [_kNoParent] if [key] is a root
+  /// or unregistered. Hot path — no allocation, no exception.
+  int _parentNidOfKey(TKey key) {
+    final nid = _keyToNid[key];
+    return nid == null ? _kNoParent : _parentByNid[nid];
+  }
+
+  /// Returns the parent key for [key], or null if [key] is a root or
+  /// unregistered. Equivalent to the old `_parentKeyOfKey(key)`.
+  TKey? _parentKeyOfKey(TKey key) {
+    final pNid = _parentNidOfKey(key);
+    return pNid == _kNoParent ? null : _nidToKey[pNid];
+  }
+
+  /// Sets the parent of [key] to [parent] (or null for root). [key] must
+  /// already be registered; [parent] must also be registered (unless null).
+  void _setParentKey(TKey key, TKey? parent) {
+    final nid = _keyToNid[key]!;
+    _parentByNid[nid] = parent == null ? _kNoParent : _keyToNid[parent]!;
+  }
+
+  /// Releases the nid associated with [key] back to the pool. Clears every
+  /// per-nid dense array slot so a future [_adoptKey] that recycles the nid
+  /// sees a clean state.
+  void _releaseNid(TKey key) {
+    final nid = _keyToNid.remove(key);
+    if (nid == null) return;
+    _nidToKey[nid] = null;
+    _dataByNid[nid] = null;
+    _parentByNid[nid] = _kNoParent;
+    _childrenByNid[nid] = null;
+    _depthByNid[nid] = 0;
+    _expandedByNid[nid] = 0;
+    _indexByNid[nid] = _kNotVisible;
+    _freeNids.add(nid);
+  }
+
+  /// Nullable lookup of the [TreeNode] record for [key]. Equivalent to the
+  /// old `_nodeData[key]` — returns null if [key] is not registered.
+  TreeNode<TKey, TData>? _dataOf(TKey key) {
+    final nid = _keyToNid[key];
+    return nid == null ? null : _dataByNid[nid];
+  }
+
+  /// Whether [key] currently has a node record. Equivalent to the old
+  /// `_nodeData.containsKey(key)`.
+  bool _hasKey(TKey key) => _keyToNid.containsKey(key);
+
+  /// Returns the child key list for [key], or null if unregistered or no
+  /// list has been allocated yet. Equivalent to the old `_childListOf(key)`.
+  List<TKey>? _childListOf(TKey key) {
+    final nid = _keyToNid[key];
+    return nid == null ? null : _childrenByNid[nid];
+  }
+
+  /// Returns the child key list for [key], allocating an empty list if
+  /// none exists. [key] must already be registered.
+  /// Equivalent to the old `_childListOrCreate(key)`.
+  List<TKey> _childListOrCreate(TKey key) {
+    final nid = _keyToNid[key]!;
+    return _childrenByNid[nid] ??= <TKey>[];
+  }
+
+  /// Replaces the child key list for [key]. [key] must be registered.
+  /// Equivalent to the old `_children[key] = list`.
+  void _setChildList(TKey key, List<TKey> list) {
+    _childrenByNid[_keyToNid[key]!] = list;
+  }
+
+  /// Depth for [key], or 0 if unregistered.
+  /// Equivalent to the old `_depthOfKey(key)`.
+  int _depthOfKey(TKey key) {
+    final nid = _keyToNid[key];
+    return nid == null ? 0 : _depthByNid[nid];
+  }
+
+  /// Sets the depth for [key]. [key] must be registered.
+  void _setDepthKey(TKey key, int depth) {
+    _depthByNid[_keyToNid[key]!] = depth;
+  }
+
+  /// Whether [key] is currently expanded. Returns false if unregistered.
+  /// Equivalent to the old `_isExpandedKey(key)` / `_isExpandedKey(key)`.
+  bool _isExpandedKey(TKey key) {
+    final nid = _keyToNid[key];
+    return nid != null && _expandedByNid[nid] != 0;
+  }
+
+  /// Sets the expansion flag for [key]. [key] must be registered.
+  /// Equivalent to the old `_expanded[key] = expanded`.
+  void _setExpandedKey(TKey key, bool expanded) {
+    _expandedByNid[_keyToNid[key]!] = expanded ? 1 : 0;
+  }
+
+  /// Visible-order index for [key], or [_kNotVisible] (-1) if [key] isn't
+  /// currently visible or isn't registered. Equivalent to the old
+  /// `_visibleIndex[key] ?? -1`.
+  int _visibleIndexOf(TKey key) {
+    final nid = _keyToNid[key];
+    return nid == null ? _kNotVisible : _indexByNid[nid];
+  }
+
+  /// Writes [index] into the visible-index slot for [nid]. [nid] must be live.
+  void _setVisibleIndexByNid(int nid, int index) {
+    _indexByNid[nid] = index;
+  }
+
+  /// Marks [key] as not present in [_visibleOrder]. Safe to call on an
+  /// unregistered key (no-op). Equivalent to the old
+  /// `_clearVisibleIndex(key)`.
+  void _clearVisibleIndex(TKey key) {
+    final nid = _keyToNid[key];
+    if (nid == null) return;
+    _indexByNid[nid] = _kNotVisible;
+  }
+
+  /// Whether [key] is present in [_visibleOrder]. Equivalent to the old
+  /// `_isVisible(key)`.
+  bool _isVisible(TKey key) => _visibleIndexOf(key) != _kNotVisible;
+
+  /// Resets every slot of [_indexByNid] to [_kNotVisible]. Used by
+  /// [_clear] and [_rebuildVisibleIndex].
+  void _resetVisibleIndexAll() {
+    _indexByNid.fillRange(0, _indexByNid.length, _kNotVisible);
+  }
+
+  /// Grows [_visibleOrderNids] to at least [needed] slots (doubling).
+  /// Amortized O(1) per [_visibleInsertNid]/[_visibleAddKey] call.
+  void _ensureVisibleCapacity(int needed) {
+    if (needed <= _visibleOrderNids.length) return;
+    int cap = _visibleOrderNids.isEmpty ? 16 : _visibleOrderNids.length;
+    while (cap < needed) {
+      cap *= 2;
+    }
+    final grown = Int32List(cap);
+    grown.setRange(0, _visibleLen, _visibleOrderNids);
+    _visibleOrderNids = grown;
+  }
+
+  /// Returns the key stored at visible index [i]. [i] must satisfy
+  /// `0 <= i < _visibleLen`.
+  TKey _visibleKeyAt(int i) => _nidToKey[_visibleOrderNids[i]] as TKey;
+
+  /// Inserts [key]'s nid at visible index [index]. [key] must be registered.
+  void _visibleInsertKey(int index, TKey key) {
+    _visibleInsertNid(index, _keyToNid[key]!);
+  }
+
+  /// Inserts [nid] at visible index [index]. Shifts all entries at
+  /// `[index, _visibleLen)` right by one. [nid] must be live.
+  void _visibleInsertNid(int index, int nid) {
+    _ensureVisibleCapacity(_visibleLen + 1);
+    for (int i = _visibleLen; i > index; i--) {
+      _visibleOrderNids[i] = _visibleOrderNids[i - 1];
+    }
+    _visibleOrderNids[index] = nid;
+    _visibleLen++;
+  }
+
+  /// Appends [key]'s nid to the end of the visible order. [key] must be
+  /// registered.
+  void _visibleAddKey(TKey key) {
+    _ensureVisibleCapacity(_visibleLen + 1);
+    _visibleOrderNids[_visibleLen++] = _keyToNid[key]!;
+  }
+
+  /// Inserts the nids of [keys] at visible index [index], preserving
+  /// their order.
+  void _visibleInsertAllKeys(int index, List<TKey> keys) {
+    final n = keys.length;
+    if (n == 0) return;
+    _ensureVisibleCapacity(_visibleLen + n);
+    for (int i = _visibleLen - 1; i >= index; i--) {
+      _visibleOrderNids[i + n] = _visibleOrderNids[i];
+    }
+    for (int i = 0; i < n; i++) {
+      _visibleOrderNids[index + i] = _keyToNid[keys[i]]!;
+    }
+    _visibleLen += n;
+  }
+
+  /// Removes the entry at visible index [index], shifting the suffix left.
+  void _visibleRemoveAt(int index) {
+    for (int i = index; i < _visibleLen - 1; i++) {
+      _visibleOrderNids[i] = _visibleOrderNids[i + 1];
+    }
+    _visibleLen--;
+  }
+
+  /// Removes entries in `[start, end)` (half-open) from the visible order.
+  void _visibleRemoveRange(int start, int end) {
+    final n = end - start;
+    if (n <= 0) return;
+    for (int i = start; i < _visibleLen - n; i++) {
+      _visibleOrderNids[i] = _visibleOrderNids[i + n];
+    }
+    _visibleLen -= n;
+  }
+
+  /// Compacts the visible order by dropping every entry whose key appears
+  /// in [keys]. Preserves relative order of retained entries. Also drops
+  /// entries whose nid has been released (e.g. callers that purge node data
+  /// before rewriting the visible order) — those are always stale.
+  void _visibleRemoveWhereKeyIn(Set<TKey> keys) {
+    int writeIdx = 0;
+    for (int readIdx = 0; readIdx < _visibleLen; readIdx++) {
+      final nid = _visibleOrderNids[readIdx];
+      final key = _nidToKey[nid];
+      if (key == null) continue;
+      if (keys.contains(key)) continue;
+      _visibleOrderNids[writeIdx++] = nid;
+    }
+    _visibleLen = writeIdx;
+  }
+
+  /// Resets the visible order to empty. Does not clear [_indexByNid];
+  /// callers that want a fully invisible state must also invoke
+  /// [_resetVisibleIndexAll] or zero individual slots.
+  void _visibleClear() {
+    _visibleLen = 0;
+  }
+
+  /// Clears the expanded flag for every registered node whose depth is
+  /// less than [maxDepth] (or for every node when [maxDepth] is null).
+  /// Equivalent to the old `_expanded.updateAll` calls used by
+  /// [collapseAll]. Freed nids are already 0 so skipping them is optional
+  /// — we iterate only live ones to avoid spurious work in very sparse
+  /// registries.
+  void _collapseAllInRegistry(int? maxDepth) {
+    if (maxDepth == null) {
+      _expandedByNid.fillRange(0, _expandedByNid.length, 0);
+      return;
+    }
+    final n = _nidToKey.length;
+    for (int nid = 0; nid < n; nid++) {
+      if (_nidToKey[nid] == null) continue;
+      if (_expandedByNid[nid] == 0) continue;
+      if (_depthByNid[nid] < maxDepth) {
+        _expandedByNid[nid] = 0;
+      }
+    }
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // VISIBILITY STATE
@@ -84,12 +418,26 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Root node IDs in order.
   final List<TKey> _roots = [];
 
-  /// Flattened list of visible node IDs in render order.
-  /// Includes nodes that are animating out (exiting).
-  final List<TKey> _visibleOrder = [];
+  /// Flattened visible order, stored as nids for cache-friendly iteration.
+  /// Includes nodes that are animating out (exiting). Capacity grows by
+  /// doubling; live range is `0.._visibleLen`. See [_ensureVisibleCapacity],
+  /// [_visibleInsertNid], [_visibleInsertAllKeys], [_visibleRemoveAt],
+  /// [_visibleRemoveRange], [_visibleRemoveWhereKeyIn].
+  Int32List _visibleOrderNids = Int32List(0);
 
-  /// Fast lookup: node key → index in [_visibleOrder].
-  final Map<TKey, int> _visibleIndex = {};
+  /// Number of live entries in [_visibleOrderNids]. Always
+  /// `<= _visibleOrderNids.length`. The public [visibleNodes] view and every
+  /// internal loop reads this instead of the underlying array's length.
+  int _visibleLen = 0;
+
+  /// Fast lookup: nid → index in [_visibleOrder], or [_kNotVisible] if the
+  /// node is not currently in the visible list. Dense, indexed by nid; grown
+  /// in lockstep with every other per-nid dense array by [_ensureDenseCapacity].
+  Int32List _indexByNid = Int32List(0);
+
+  /// Sentinel value in [_indexByNid] meaning "not in [_visibleOrder]". Freed
+  /// nids also carry this sentinel so a recycled nid starts invisible.
+  static const int _kNotVisible = -1;
 
   // ══════════════════════════════════════════════════════════════════════════
   // ANIMATION STATE
@@ -175,14 +523,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// The flattened list of visible node IDs in render order.
   ///
-  /// Returns an unmodifiable view of the internal list.
-  /// The wrapper reflects mutations to [_visibleOrder] automatically.
-  late final List<TKey> visibleNodes = UnmodifiableListView<TKey>(
-    _visibleOrder,
-  );
+  /// Returns a read-only live view over the internal nid-indexed buffer.
+  /// Mutations to the visible order are reflected automatically.
+  late final List<TKey> visibleNodes = _VisibleNodesView<TKey, TData>(this);
 
   /// Number of visible nodes.
-  int get visibleNodeCount => _visibleOrder.length;
+  int get visibleNodeCount => _visibleLen;
 
   int get rootCount => _roots.length;
 
@@ -196,20 +542,60 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// Returns an empty list if the node has no children or doesn't exist.
   List<TKey> getChildren(TKey key) {
-    final c = _children[key];
+    final c = _childListOf(key);
     if (c == null || c.isEmpty) return const [];
     return UnmodifiableListView<TKey>(c);
   }
 
   /// Gets the node data for the given key, or null if not found.
   TreeNode<TKey, TData>? getNodeData(TKey key) {
-    return _nodeData[key];
+    return _dataOf(key);
   }
 
   /// Gets the depth of the given node (0 for roots).
   int getDepth(TKey key) {
-    return _depths[key] ?? 0;
+    return _depthOfKey(key);
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // NID-SPACE ACCESSORS (intended for render-layer consumers)
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // These expose the internal nid registry so hot-path consumers (notably
+  // RenderSliverTree) can keep per-node state in dense typed-data arrays
+  // indexed by nid instead of hashing [TKey] on every read.
+  //
+  // Nids are stable for the lifetime of a node but may be recycled after
+  // [remove]/purge. Consumers that cache nid-indexed state must invalidate
+  // or overwrite on structural change.
+
+  /// Sentinel returned by [nidOf] when the key isn't registered. Same value
+  /// as the internal [_kNotVisible] but exposed separately since callers
+  /// should treat it as "unknown key".
+  static const int noNid = -1;
+
+  /// Returns the internal nid for [key], or [noNid] if the key isn't
+  /// currently registered. O(1).
+  int nidOf(TKey key) => _keyToNid[key] ?? noNid;
+
+  /// Returns the key associated with [nid], or null if the nid has been
+  /// released. O(1). Consumers that cache nid-indexed state can use this to
+  /// detect stale entries after node removal.
+  TKey? keyOfNid(int nid) {
+    if (nid < 0 || nid >= _nidToKey.length) return null;
+    return _nidToKey[nid];
+  }
+
+  /// The current high-water mark for allocated nids. Nid-indexed dense
+  /// arrays maintained externally should grow to at least this length.
+  int get nidCapacity => _nidToKey.length;
+
+  /// Returns the nid of the visible node at [visibleIndex]. No [TKey] hash
+  /// occurs. Panics (unchecked read) if [visibleIndex] is out of range.
+  int visibleNidAt(int visibleIndex) => _visibleOrderNids[visibleIndex];
+
+  /// Depth for [nid] (0 for roots). No [TKey] hash. [nid] must be live.
+  int depthOfNid(int nid) => _depthByNid[nid];
 
   /// Gets the horizontal indent for the given node.
   double getIndent(TKey key) {
@@ -218,18 +604,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Whether the given node is expanded.
   bool isExpanded(TKey key) {
-    return _expanded[key] ?? false;
+    return _isExpandedKey(key);
   }
 
   /// Whether the given node has children.
   bool hasChildren(TKey key) {
-    final c = _children[key];
+    final c = _childListOf(key);
     return c != null && c.isNotEmpty;
   }
 
   /// Gets the number of children for the given node.
   int getChildCount(TKey key) {
-    return _children[key]?.length ?? 0;
+    return _childListOf(key)?.length ?? 0;
   }
 
   /// Whether any nodes are currently animating.
@@ -252,11 +638,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Complexity is O(A) in the number of animating nodes, which is normally
   /// much smaller than the visible-order length.
   int computeFirstAnimatingVisibleIndex() {
-    if (!hasActiveAnimations) return _visibleOrder.length;
-    int min = _visibleOrder.length;
+    if (!hasActiveAnimations) return _visibleLen;
+    int min = _visibleLen;
     void check(TKey k) {
-      final idx = _visibleIndex[k];
-      if (idx != null && idx < min) min = idx;
+      final idx = _visibleIndexOf(k);
+      if (idx != _kNotVisible && idx < min) min = idx;
     }
     for (final group in _operationGroups.values) {
       for (final k in group.members.keys) {
@@ -473,11 +859,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Gets the index of a node in the visible order, or -1 if not visible.
   int getVisibleIndex(TKey key) {
-    return _visibleIndex[key] ?? -1;
+    return _visibleIndexOf(key);
   }
 
   /// Gets the parent key for the given node, or null if it is a root.
-  TKey? getParent(TKey key) => _parents[key];
+  TKey? getParent(TKey key) => _parentKeyOfKey(key);
 
   // ══════════════════════════════════════════════════════════════════════════
   // ANIMATION LISTENERS
@@ -606,7 +992,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     int lo = 0, hi = live.length;
     while (lo < hi) {
       final mid = (lo + hi) >> 1;
-      final midNode = _nodeData[live[mid]]!;
+      final midNode = _dataOf(live[mid])!;
       if (comparator!(midNode, node) <= 0) {
         lo = mid + 1;
       } else {
@@ -635,13 +1021,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _clear();
     final sorted = comparator != null ? (List.of(roots)..sort(comparator)) : roots;
     for (final node in sorted) {
-      _nodeData[node.key] = node;
-      _parents[node.key] = null;
-      _children[node.key] = [];
-      _depths[node.key] = 0;
-      _expanded[node.key] = false;
+      _adoptKey(node.key);
+      _dataByNid[_keyToNid[node.key]!] = node;
+      _setParentKey(node.key, null);
+      _setChildList(node.key, []);
+      _setDepthKey(node.key, 0);
+      _setExpandedKey(node.key, false);
       _roots.add(node.key);
-      _visibleOrder.add(node.key);
+      _visibleAddKey(node.key);
     }
     _rebuildVisibleIndex();
     _structureGeneration++;
@@ -665,10 +1052,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // it and re-attach as a root. Without this relocation, cancelling
       // the deletion would resurrect it under its old parent, silently
       // ignoring the insertRoot() contract.
-      final oldParent = _parents[node.key];
+      final oldParent = _parentKeyOfKey(node.key);
       if (oldParent != null) {
-        _children[oldParent]?.remove(node.key);
-        _parents[node.key] = null;
+        _childListOf(oldParent)?.remove(node.key);
+        _setParentKey(node.key, null);
         final effectiveIndex = index ??
             (comparator != null ? _sortedIndex(_roots, node) : null);
         if (effectiveIndex != null && effectiveIndex < _roots.length) {
@@ -688,9 +1075,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       _cancelDeletion(node.key, animate: animate);
-      _nodeData[node.key] = node;
+      _adoptKey(node.key);
+      _dataByNid[_keyToNid[node.key]!] = node;
       // Reset expansion state so a subsequent expand() works cleanly.
-      _expanded[node.key] = false;
+      _setExpandedKey(node.key, false);
       // Descendants had their exit animations reversed by _cancelDeletion,
       // but the parent is now collapsed so they should not be visible.
       // Remove their animations and rebuild the visible order.
@@ -708,9 +1096,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // _cancelDeletion, or a live re-insert). Update the data and — if the
     // caller requested a different location — relocate it to honor the
     // insertRoot(index:) contract instead of silently dropping the index.
-    if (_nodeData.containsKey(node.key)) {
-      _nodeData[node.key] = node;
-      final currentParent = _parents[node.key];
+    if (_hasKey(node.key)) {
+      _adoptKey(node.key);
+      _dataByNid[_keyToNid[node.key]!] = node;
+      final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != null) {
         // Different parent — delegate to moveNode.
         moveNode(node.key, null, index: index);
@@ -736,11 +1125,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     // Add to data structures
-    _nodeData[node.key] = node;
-    _parents[node.key] = null;
-    _children[node.key] = [];
-    _depths[node.key] = 0;
-    _expanded[node.key] = false;
+    _adoptKey(node.key);
+    _dataByNid[_keyToNid[node.key]!] = node;
+    _setParentKey(node.key, null);
+    _setChildList(node.key, []);
+    _setDepthKey(node.key, 0);
+    _setExpandedKey(node.key, false);
 
     // Add to roots list
     final effectiveIndex = index ?? (comparator != null ? _sortedIndex(_roots, node) : null);
@@ -748,7 +1138,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // _calculateRootInsertIndex reads _roots[effectiveIndex].
     final visibleInsertIndex = effectiveIndex != null && effectiveIndex < _roots.length
         ? _calculateRootInsertIndex(effectiveIndex)
-        : _visibleOrder.length;
+        : _visibleLen;
     if (effectiveIndex != null && effectiveIndex < _roots.length) {
       _roots.insert(effectiveIndex, node.key);
     } else {
@@ -757,7 +1147,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     // Add to visible order (root nodes are always visible)
     final insertIndex = visibleInsertIndex;
-    _visibleOrder.insert(insertIndex, node.key);
+    _visibleInsertKey(insertIndex, node.key);
     _updateIndicesFrom(insertIndex);
     _structureGeneration++;
 
@@ -771,11 +1161,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Calculates the visible order index for inserting a root at the given root index.
   int _calculateRootInsertIndex(int rootIndex) {
     if (rootIndex == 0) return 0;
-    if (rootIndex >= _roots.length) return _visibleOrder.length;
+    if (rootIndex >= _roots.length) return _visibleLen;
 
     // Find the root at the given index and return its visible index
     final rootId = _roots[rootIndex];
-    return _visibleIndex[rootId] ?? _visibleOrder.length;
+    final idx = _visibleIndexOf(rootId);
+    return idx == _kNotVisible ? _visibleLen : idx;
   }
 
   /// Adds children to a node.
@@ -785,7 +1176,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// descendants are purged from all data structures first.
   void setChildren(TKey parentKey, List<TreeNode<TKey, TData>> children) {
     assert(
-      _nodeData.containsKey(parentKey),
+      _hasKey(parentKey),
       'Parent node $parentKey not found',
     );
     assert(
@@ -808,21 +1199,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         );
       }
       // Reject keys that already exist under a different parent — silently
-      // overwriting _children[child.key] = [] below would orphan the existing
+      // overwriting _childListOf(child.key) = [] below would orphan the existing
       // subtree and leave a stale reference in the old parent's child list.
       // Accept when the key is already a child of this same parent (no-op
       // reparent — handled by the purge-old-children step).
-      if (_nodeData.containsKey(child.key) &&
-          _parents[child.key] != parentKey) {
+      if (_hasKey(child.key) &&
+          _parentKeyOfKey(child.key) != parentKey) {
         throw ArgumentError(
           "setChildren($parentKey): key ${child.key} already exists under "
-          "parent ${_parents[child.key]}. Use moveNode() or remove() first.",
+          "parent ${_parentKeyOfKey(child.key)}. Use moveNode() or remove() first.",
         );
       }
     }
 
     // Purge old children and their descendants before overwriting.
-    final oldChildren = _children[parentKey];
+    final oldChildren = _childListOf(parentKey);
     if (oldChildren != null && oldChildren.isNotEmpty) {
       final allOldKeys = <TKey>[];
       for (final oldChildKey in oldChildren) {
@@ -830,13 +1221,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _getDescendantsInto(oldChildKey, allOldKeys);
       }
 
-      // Check visibility and contiguity BEFORE purging (purge removes from _visibleIndex)
-      int minIdx = _visibleOrder.length;
+      // Check visibility and contiguity BEFORE purging (purge clears the index)
+      int minIdx = _visibleLen;
       int maxIdx = -1;
       int visibleCount = 0;
       for (final key in allOldKeys) {
-        final idx = _visibleIndex[key];
-        if (idx != null) {
+        final idx = _visibleIndexOf(key);
+        if (idx != _kNotVisible) {
           visibleCount++;
           if (idx < minIdx) minIdx = idx;
           if (idx > maxIdx) maxIdx = idx;
@@ -851,39 +1242,40 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (visibleCount > 0) {
         if (maxIdx - minIdx + 1 == visibleCount) {
           // Contiguous removal
-          _visibleOrder.removeRange(minIdx, maxIdx + 1);
+          _visibleRemoveRange(minIdx, maxIdx + 1);
           _updateIndicesAfterRemove(minIdx);
         } else {
           // Non-contiguous removal
-          _visibleOrder.removeWhere(oldKeySet.contains);
+          _visibleRemoveWhereKeyIn(oldKeySet);
           _rebuildVisibleIndex();
         }
         _structureGeneration++;
       }
     }
 
-    final parentDepth = _depths[parentKey] ?? 0;
+    final parentDepth = _depthOfKey(parentKey);
     final childIds = <TKey>[];
     final sorted = comparator != null ? (List.of(children)..sort(comparator)) : children;
 
     for (final child in sorted) {
-      _nodeData[child.key] = child;
-      _parents[child.key] = parentKey;
-      _children[child.key] = [];
-      _depths[child.key] = parentDepth + 1;
-      _expanded[child.key] = false;
+      _adoptKey(child.key);
+      _dataByNid[_keyToNid[child.key]!] = child;
+      _setParentKey(child.key, parentKey);
+      _setChildList(child.key, []);
+      _setDepthKey(child.key, parentDepth + 1);
+      _setExpandedKey(child.key, false);
       childIds.add(child.key);
     }
 
-    _children[parentKey] = childIds;
+    _setChildList(parentKey, childIds);
 
     // If parent is expanded and visible, insert new children into the
     // visible order so they render immediately.
-    if (_expanded[parentKey] == true && childIds.isNotEmpty) {
-      final parentIdx = _visibleIndex[parentKey];
-      if (parentIdx != null) {
+    if (_isExpandedKey(parentKey) && childIds.isNotEmpty) {
+      final parentIdx = _visibleIndexOf(parentKey);
+      if (parentIdx != _kNotVisible) {
         final insertIdx = parentIdx + 1;
-        _visibleOrder.insertAll(insertIdx, childIds);
+        _visibleInsertAllKeys(insertIdx, childIds);
         _updateIndicesFrom(insertIdx);
         _structureGeneration++;
       }
@@ -903,7 +1295,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }) {
     if (animationDuration == Duration.zero) animate = false;
     assert(
-      _nodeData.containsKey(parentKey),
+      _hasKey(parentKey),
       "Parent node $parentKey not found",
     );
     assert(
@@ -918,15 +1310,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // a root), move it to [parentKey] before cancelling the deletion.
       // Without this relocation, cancelDeletion would resurrect the node
       // under its old parent, silently ignoring the parentKey/index args.
-      final oldParent = _parents[node.key];
+      final oldParent = _parentKeyOfKey(node.key);
       if (oldParent != parentKey) {
         if (oldParent != null) {
-          _children[oldParent]?.remove(node.key);
+          _childListOf(oldParent)?.remove(node.key);
         } else {
           _roots.remove(node.key);
         }
-        _parents[node.key] = parentKey;
-        final siblings = _children[parentKey] ??= [];
+        _setParentKey(node.key, parentKey);
+        final siblings = _childListOrCreate(parentKey);
         final effectiveIndex = index ??
             (comparator != null ? _sortedIndex(siblings, node) : null);
         if (effectiveIndex != null && effectiveIndex < siblings.length) {
@@ -934,12 +1326,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         } else {
           siblings.add(node.key);
         }
-        final parentDepth = _depths[parentKey] ?? 0;
+        final parentDepth = _depthOfKey(parentKey);
         _refreshSubtreeDepths(node.key, parentDepth + 1);
       } else if (index != null) {
         // Same parent — honor an explicitly requested index by relocating
         // within the sibling list.
-        final siblings = _children[parentKey] ??= [];
+        final siblings = _childListOrCreate(parentKey);
         final current = siblings.indexOf(node.key);
         if (current != -1) {
           siblings.removeAt(current);
@@ -948,9 +1340,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       _cancelDeletion(node.key, animate: animate);
-      _nodeData[node.key] = node;
+      _adoptKey(node.key);
+      _dataByNid[_keyToNid[node.key]!] = node;
       // Reset expansion state so a subsequent expand() works cleanly.
-      _expanded[node.key] = false;
+      _setExpandedKey(node.key, false);
       // Descendants had their exit animations reversed by _cancelDeletion,
       // but the parent is now collapsed so they should not be visible.
       // Remove their animations and rebuild the visible order.
@@ -967,15 +1360,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // _cancelDeletion, or a live re-insert). Update the data and — if the
     // caller requested a different location — relocate it to honor the
     // insert(parentKey:, index:) contract instead of silently dropping it.
-    if (_nodeData.containsKey(node.key)) {
-      _nodeData[node.key] = node;
-      final currentParent = _parents[node.key];
+    if (_hasKey(node.key)) {
+      _adoptKey(node.key);
+      _dataByNid[_keyToNid[node.key]!] = node;
+      final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != parentKey) {
         // Different parent — delegate to moveNode.
         moveNode(node.key, parentKey, index: index);
         return;
       }
-      final siblings = _children[parentKey] ??= [];
+      final siblings = _childListOrCreate(parentKey);
       final currentIndex = siblings.indexOf(node.key);
       final desiredIndex = index ??
           (comparator != null ? _sortedIndex(siblings, node) : null);
@@ -993,15 +1387,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _notifyStructural();
       return;
     }
-    final parentDepth = _depths[parentKey] ?? 0;
+    final parentDepth = _depthOfKey(parentKey);
     // Add to data structures
-    _nodeData[node.key] = node;
-    _parents[node.key] = parentKey;
-    _children[node.key] = [];
-    _depths[node.key] = parentDepth + 1;
-    _expanded[node.key] = false;
+    _adoptKey(node.key);
+    _dataByNid[_keyToNid[node.key]!] = node;
+    _setParentKey(node.key, parentKey);
+    _setChildList(node.key, []);
+    _setDepthKey(node.key, parentDepth + 1);
+    _setExpandedKey(node.key, false);
     // Add to parent's children
-    final siblings = _children[parentKey] ??= [];
+    final siblings = _childListOrCreate(parentKey);
     final effectiveIndex = index ?? (comparator != null ? _sortedIndex(siblings, node) : null);
     if (effectiveIndex != null && effectiveIndex < siblings.length) {
       siblings.insert(effectiveIndex, node.key);
@@ -1009,26 +1404,28 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       siblings.add(node.key);
     }
     // If parent is expanded, add to visible order
-    if (_expanded[parentKey] == true) {
-      if (_visibleIndex[parentKey] case final int parentVisibleIndex) {
+    if (_isExpandedKey(parentKey)) {
+      final parentVisibleIndex = _visibleIndexOf(parentKey);
+      if (parentVisibleIndex != _kNotVisible) {
         int insertIndex = parentVisibleIndex + 1;
         // Find position among siblings
         if (effectiveIndex != null) {
           for (int i = 0; i < effectiveIndex && i < siblings.length - 1; i++) {
             final siblingId = siblings[i];
-            if (_visibleIndex[siblingId] case final int siblingIndex) {
+            final siblingIndex = _visibleIndexOf(siblingId);
+            if (siblingIndex != _kNotVisible) {
               insertIndex =
                   siblingIndex + 1 + _countVisibleDescendants(siblingId);
             }
           }
         } else {
           // Append after last visible descendant of parent
-          // Note: _countVisibleDescendants only counts nodes in _visibleIndex,
-          // so the newly added node (not yet in _visibleIndex) is not counted.
+          // Note: _countVisibleDescendants only counts visible nodes, so the
+          // newly added node (not yet visible) is not counted.
           insertIndex =
               parentVisibleIndex + 1 + _countVisibleDescendants(parentKey);
         }
-        _visibleOrder.insert(insertIndex, node.key);
+        _visibleInsertKey(insertIndex, node.key);
         _updateIndicesFrom(insertIndex);
         _structureGeneration++;
         if (animate) {
@@ -1044,18 +1441,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// If [animate] is true, the nodes will animate out.
   void remove({required TKey key, bool animate = true}) {
     if (animationDuration == Duration.zero) animate = false;
-    if (!_nodeData.containsKey(key)) {
+    if (!_hasKey(key)) {
       return;
     }
     final descendants = _getDescendants(key);
     final nodesToRemove = [key, ...descendants];
-    if (animate && _visibleIndex.containsKey(key)) {
+    if (animate && _isVisible(key)) {
       // Mark nodes as pending deletion so _finalizeAnimation knows to
       // fully remove them (vs just hiding due to parent collapse)
       _pendingDeletion.addAll(nodesToRemove);
       // Mark all visible nodes as exiting
       for (final nodeId in nodesToRemove) {
-        if (_visibleIndex.containsKey(nodeId)) {
+        if (_isVisible(nodeId)) {
           _startStandaloneExitAnimation(nodeId);
         }
       }
@@ -1075,8 +1472,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Preserves the node's position, expansion state, and animation state.
   /// Notifies listeners so that mounted widgets rebuild with the new data.
   void updateNode(TreeNode<TKey, TData> node) {
-    assert(_nodeData.containsKey(node.key), 'Node ${node.key} not found');
-    _nodeData[node.key] = node;
+    assert(_hasKey(node.key), 'Node ${node.key} not found');
+    _adoptKey(node.key);
+    _dataByNid[_keyToNid[node.key]!] = node;
     // Data-only change: no structural mutation, no visible order shift,
     // no expansion/hasChildren change. Fire the targeted data channel
     // so the element rebuilds only this row instead of sweeping every
@@ -1127,10 +1525,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// children of [parentKey]. Expansion state, animation state, and measured
   /// extents are preserved.
   void reorderChildren(TKey parentKey, List<TKey> orderedKeys) {
-    if (!_nodeData.containsKey(parentKey)) {
+    if (!_hasKey(parentKey)) {
       throw ArgumentError.value(parentKey, "parentKey", "not found");
     }
-    final currentChildren = _children[parentKey] ?? <TKey>[];
+    final currentChildren = _childListOf(parentKey) ?? <TKey>[];
 
     final pendingChildren = <TKey>[];
     final liveChildSet = <TKey>{};
@@ -1153,15 +1551,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
     }
 
-    _children[parentKey] = [...orderedKeys, ...pendingChildren];
+    _setChildList(parentKey, [...orderedKeys, ...pendingChildren]);
     bool needsVisibleRebuild =
-        _expanded[parentKey] == true && _areAncestorsExpanded(parentKey);
+        _isExpandedKey(parentKey) && _areAncestorsExpanded(parentKey);
     if (!needsVisibleRebuild) {
       // Even if the parent is not expanded, children may still be present
       // in _visibleOrder because they are mid-animation (collapse in
       // progress, pending-deletion exit). Those entries would otherwise
       // retain the old order until the animation completes.
-      for (final child in _children[parentKey]!) {
+      for (final child in _childListOf(parentKey)!) {
         if (_nodeToOperationGroup.containsKey(child) ||
             _bulkAnimationGroup?.members.contains(child) == true ||
             _standaloneAnimations.containsKey(child)) {
@@ -1189,12 +1587,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// animation finalizes — callers that need animation on the new position
   /// should trigger it explicitly after the move.
   void moveNode(TKey key, TKey? newParentKey, {int? index}) {
-    assert(_nodeData.containsKey(key), 'Node $key not found');
+    assert(_hasKey(key), 'Node $key not found');
     assert(
-      newParentKey == null || _nodeData.containsKey(newParentKey),
+      newParentKey == null || _hasKey(newParentKey),
       'New parent $newParentKey not found',
     );
-    // Self-reparent would build a cycle in _children[key] and stack-overflow
+    // Self-reparent would build a cycle in _childListOf(key) and stack-overflow
     // _refreshSubtreeDepths. Guard at runtime so release builds don't crash.
     if (newParentKey != null && newParentKey == key) {
       throw StateError("Cannot move $key onto itself");
@@ -1207,7 +1605,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
     }
 
-    final oldParent = _parents[key];
+    final oldParent = _parentKeyOfKey(key);
     // If already under the target parent and no explicit position was
     // requested, nothing to do. With an explicit [index], fall through so the
     // node is repositioned among its existing siblings.
@@ -1221,16 +1619,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     // Remove from old parent's child list (or roots).
     if (oldParent != null) {
-      _children[oldParent]?.remove(key);
+      _childListOf(oldParent)?.remove(key);
     } else {
       _roots.remove(key);
     }
 
     // Insert into new parent's child list (or roots).
-    _parents[key] = newParentKey;
-    final node = _nodeData[key]!;
+    _setParentKey(key, newParentKey);
+    final node = _dataOf(key)!;
     if (newParentKey != null) {
-      final siblings = _children[newParentKey] ??= [];
+      final siblings = _childListOrCreate(newParentKey);
       final effectiveIndex = index ?? (comparator != null ? _sortedIndex(siblings, node) : null);
       if (effectiveIndex != null && effectiveIndex < siblings.length) {
         siblings.insert(effectiveIndex, key);
@@ -1247,7 +1645,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     final newDepth = newParentKey != null
-        ? (_depths[newParentKey] ?? 0) + 1
+        ? (_depthOfKey(newParentKey)) + 1
         : 0;
     _refreshSubtreeDepths(key, newDepth);
 
@@ -1258,8 +1656,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Recursively sets [_depths] for [key] and all its descendants.
   void _refreshSubtreeDepths(TKey key, int depth) {
-    _depths[key] = depth;
-    final children = _children[key];
+    _setDepthKey(key, depth);
+    final children = _childListOf(key);
     if (children != null) {
       for (final childKey in children) {
         _refreshSubtreeDepths(childKey, depth + 1);
@@ -1274,13 +1672,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Expands the given node, revealing its children.
   void expand({required TKey key, bool animate = true}) {
     if (animationDuration == Duration.zero) animate = false;
-    if (!_nodeData.containsKey(key)) {
+    if (!_hasKey(key)) {
       return;
     }
-    if (_expanded[key] == true) {
+    if (_isExpandedKey(key)) {
       return;
     }
-    final children = _children[key];
+    final children = _childListOf(key);
     if (children == null || children.isEmpty) {
       return;
     }
@@ -1293,14 +1691,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // insert into the visible order. When ancestors are later expanded,
     // this node's children will appear immediately.
     if (!_areAncestorsExpanded(key)) {
-      _expanded[key] = true;
+      _setExpandedKey(key, true);
       _notifyStructural();
       return;
     }
-    _expanded[key] = true;
+    _setExpandedKey(key, true);
     // Find where to insert children in visible order
-    final parentIndex = _visibleIndex[key];
-    if (parentIndex == null) {
+    final parentIndex = _visibleIndexOf(key);
+    if (parentIndex == _kNotVisible) {
       return;
     }
 
@@ -1310,7 +1708,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       final nodesToInsert = <TKey>[];
       for (final nodeId in nodesToShow) {
         if (_pendingDeletion.contains(nodeId)) continue;
-        if (!_visibleIndex.containsKey(nodeId)) {
+        if (!_isVisible(nodeId)) {
           nodesToInsert.add(nodeId);
         } else {
           _removeAnimation(nodeId);
@@ -1318,7 +1716,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       if (nodesToInsert.isNotEmpty) {
         final insertIndex = parentIndex + 1;
-        _visibleOrder.insertAll(insertIndex, nodesToInsert);
+        _visibleInsertAllKeys(insertIndex, nodesToInsert);
         _updateIndicesFrom(insertIndex);
       }
       _structureGeneration++;
@@ -1343,7 +1741,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             when anim.type == AnimationType.exiting) {
           // Reverse the exit to an enter with speedMultiplier
           _startStandaloneEnterAnimation(nodeId);
-        } else if (!_visibleIndex.containsKey(nodeId)) {
+        } else if (!_isVisible(nodeId)) {
           // New node not yet visible — insert and animate
           // Find insertion point
           _insertNodeIntoVisibleOrder(nodeId, parentIndex);
@@ -1383,7 +1781,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     for (final nodeId in nodesToShow) {
       if (_pendingDeletion.contains(nodeId)) continue;
       effectiveCount++;
-      if (!_visibleIndex.containsKey(nodeId)) {
+      if (!_isVisible(nodeId)) {
         newNodeCount++;
       }
     }
@@ -1415,16 +1813,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         nodesToInsert.add(nodeId);
       }
       final insertIndex = parentIndex + 1;
-      _visibleOrder.insertAll(insertIndex, nodesToInsert);
+      _visibleInsertAllKeys(insertIndex, nodesToInsert);
       _updateIndicesFrom(insertIndex);
     } else {
       // Mixed path: some visible (exiting), some need insertion
       int currentInsertIndex = parentIndex + 1;
       int insertOffset = 0;
-      int minInsertIndex = _visibleOrder.length;
+      int minInsertIndex = _visibleLen;
       for (final nodeId in nodesToShow) {
         if (_pendingDeletion.contains(nodeId)) continue;
-        final existingIndex = _visibleIndex[nodeId];
+        final existingIndex = _visibleIndexOf(nodeId);
         final capturedExtent = _captureAndRemoveFromGroups(nodeId);
         final nge = NodeGroupExtent(
           startExtent: capturedExtent ?? 0.0,
@@ -1433,7 +1831,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         group.members[nodeId] = nge;
         _nodeToOperationGroup[nodeId] = key;
 
-        if (existingIndex != null) {
+        if (existingIndex != _kNotVisible) {
           // Node already visible (was exiting)
           currentInsertIndex = existingIndex + insertOffset + 1;
         } else {
@@ -1441,14 +1839,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           if (currentInsertIndex < minInsertIndex) {
             minInsertIndex = currentInsertIndex;
           }
-          _visibleOrder.insert(currentInsertIndex, nodeId);
+          _visibleInsertKey(currentInsertIndex, nodeId);
           insertOffset++;
           currentInsertIndex++;
         }
       }
       if (insertOffset > 0) {
-        for (int i = minInsertIndex; i < _visibleOrder.length; i++) {
-          _visibleIndex[_visibleOrder[i]] = i;
+        for (int i = minInsertIndex; i < _visibleLen; i++) {
+          _setVisibleIndexByNid(_visibleOrderNids[i], i);
         }
         _assertIndexConsistency();
       }
@@ -1466,10 +1864,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// their children automatically.
   void collapse({required TKey key, bool animate = true}) {
     if (animationDuration == Duration.zero) animate = false;
-    if (!_nodeData.containsKey(key) || _expanded[key] == false) {
+    if (!_hasKey(key) || !_isExpandedKey(key)) {
       return;
     }
-    _expanded[key] = false;
+    _setExpandedKey(key, false);
     // Find all visible descendants (includes nodes currently entering)
     final descendants = _getVisibleDescendants(key);
     if (descendants.isEmpty) {
@@ -1555,7 +1953,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Toggles the expansion state of the given node.
   void toggle({required TKey key, bool animate = true}) {
-    if (_expanded[key] == true) {
+    if (_isExpandedKey(key)) {
       collapse(key: key, animate: animate);
     } else {
       expand(key: key, animate: animate);
@@ -1574,16 +1972,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     void collectRecursive(TKey key) {
       if (_pendingDeletion.contains(key)) return;
-      final children = _children[key];
+      final children = _childListOf(key);
       if (children == null || children.isEmpty) return;
 
-      final depth = _depths[key] ?? 0;
+      final depth = _depthOfKey(key);
       final withinDepthLimit = maxDepth == null || depth < maxDepth;
 
-      if (withinDepthLimit && _expanded[key] != true) {
+      if (withinDepthLimit && !_isExpandedKey(key)) {
         nodesToExpand.add(key);
         for (final childId in children) {
-          if (!_visibleIndex.containsKey(childId)) {
+          if (!_isVisible(childId)) {
             nodesToShow.add(childId);
           }
         }
@@ -1627,7 +2025,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     // Batch update expansion states
     for (final key in nodesToExpand) {
-      _expanded[key] = true;
+      _setExpandedKey(key, true);
     }
     // Rebuild visible order from scratch (more efficient for bulk operations)
     _rebuildVisibleOrder();
@@ -1659,7 +2057,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
         // Add any new nodes to the group (skip if already in an operation group)
         for (final key in nodesToShow) {
-          if (_visibleIndex.containsKey(key) &&
+          if (_isVisible(key) &&
               !_nodeToOperationGroup.containsKey(key)) {
             _bulkAnimationGroup!.members.add(key);
           }
@@ -1681,7 +2079,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
         // Add new nodes to the bulk group (skip if already in an operation group)
         for (final key in nodesToShow) {
-          if (_visibleIndex.containsKey(key) &&
+          if (_isVisible(key) &&
               !_nodeToOperationGroup.containsKey(key)) {
             _bulkAnimationGroup!.members.add(key);
           }
@@ -1708,7 +2106,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final nodesToCollapse = <TKey>[];
     final nodesToHide = <TKey>[];
     for (final rootId in _roots) {
-      if (_expanded[rootId] == true) {
+      if (_isExpandedKey(rootId)) {
         nodesToCollapse.add(rootId);
         nodesToHide.addAll(_getVisibleDescendants(rootId));
       }
@@ -1720,7 +2118,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     for (final entry in _standaloneAnimations.entries) {
       if (entry.value.type == AnimationType.entering) {
         if (!nodesToHideSet.contains(entry.key)) {
-          if (_parents[entry.key] != null) {
+          if (_parentKeyOfKey(entry.key) != null) {
             nodesToHide.add(entry.key);
             nodesToHideSet.add(entry.key);
           }
@@ -1734,7 +2132,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Group is expanding
         for (final key in group.members.keys) {
           if (!nodesToHideSet.contains(key)) {
-            if (_parents[key] != null) {
+            if (_parentKeyOfKey(key) != null) {
               nodesToHide.add(key);
               nodesToHideSet.add(key);
             }
@@ -1747,7 +2145,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_bulkAnimationGroup != null) {
       for (final key in _bulkAnimationGroup!.members) {
         if (!nodesToHideSet.contains(key)) {
-          if (_parents[key] != null) {
+          if (_parentKeyOfKey(key) != null) {
             nodesToHide.add(key);
             nodesToHideSet.add(key);
           }
@@ -1757,30 +2155,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     if (nodesToHide.isEmpty) {
       if (nodesToCollapse.isNotEmpty) {
-        if (maxDepth == null) {
-          _expanded.updateAll((key, value) => false);
-        } else {
-          _expanded.updateAll((key, value) {
-            if (!value) return false;
-            final depth = _depths[key] ?? 0;
-            return (depth < maxDepth) ? false : value;
-          });
-        }
+        _collapseAllInRegistry(maxDepth);
         _notifyStructural();
       }
       return;
     }
     // Clear expansion state for ALL nodes within depth limit,
     // not just visible ones.
-    if (maxDepth == null) {
-      _expanded.updateAll((key, value) => false);
-    } else {
-      _expanded.updateAll((key, value) {
-        if (!value) return false;
-        final depth = _depths[key] ?? 0;
-        return (depth < maxDepth) ? false : value;
-      });
-    }
+    _collapseAllInRegistry(maxDepth);
     _structureGeneration++;
     if (animate) {
       // Reverse expanding operation groups
@@ -1864,16 +2246,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// More efficient than incremental updates when making bulk changes.
   void _rebuildVisibleOrder() {
-    _visibleOrder.clear();
+    _visibleClear();
 
     void addSubtree(TKey key) {
-      _visibleOrder.add(key);
+      _visibleAddKey(key);
       if (_pendingDeletion.contains(key)) {
         // Don't recurse based on expansion state (prevents zombie children),
         // but DO include children that are also pending deletion and still
         // have running exit animations — they need to stay in _visibleOrder
         // to animate out smoothly.
-        final children = _children[key];
+        final children = _childListOf(key);
         if (children != null) {
           for (final childId in children) {
             if (_pendingDeletion.contains(childId) &&
@@ -1884,8 +2266,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
         return;
       }
-      if (_expanded[key] == true) {
-        final children = _children[key];
+      if (_isExpandedKey(key)) {
+        final children = _childListOf(key);
         if (children != null) {
           for (final childId in children) {
             addSubtree(childId);
@@ -1896,7 +2278,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // animation (e.g. collapsing via an OperationGroup) must remain
         // in the visible order so their exit animation completes smoothly
         // instead of snapping away.
-        final children = _children[key];
+        final children = _childListOf(key);
         if (children != null) {
           for (final childId in children) {
             if (_nodeToOperationGroup.containsKey(childId) ||
@@ -1978,7 +2360,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         subtreeGroupKeys.add(nodeId);
       }
       _removeAnimation(nodeId);
-      final children = _children[nodeId];
+      final children = _childListOf(nodeId);
       if (children != null) {
         for (final child in children) {
           visit(child);
@@ -2064,7 +2446,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _keysToRemoveScratch.clear();
       for (final key in _bulkAnimationGroup!.pendingRemoval) {
         if (!_pendingDeletion.contains(key)) {
-          final parentKey = _parents[key];
+          final parentKey = _parentKeyOfKey(key);
           final shouldRemove = parentKey == null
               ? !_roots.contains(key)
               : !_areAncestorsExpanded(key);
@@ -2109,9 +2491,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       for (final nodeId in group.pendingRemoval) {
         if (_pendingDeletion.contains(nodeId)) {
           // Fully remove the node from all data structures
-          final parentKey = _parents[nodeId];
+          final parentKey = _parentKeyOfKey(nodeId);
           if (parentKey != null) {
-            _children[parentKey]?.remove(nodeId);
+            _childListOf(parentKey)?.remove(nodeId);
           } else {
             _roots.remove(nodeId);
           }
@@ -2119,7 +2501,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           _purgeNodeData(nodeId);
           _keysToRemoveScratch.add(nodeId);
         } else {
-          final parentKey = _parents[nodeId];
+          final parentKey = _parentKeyOfKey(nodeId);
           final shouldRemove = parentKey == null
               ? !_roots.contains(nodeId)
               : !_areAncestorsExpanded(nodeId);
@@ -2292,16 +2674,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       final isDeleted = _pendingDeletion.contains(key);
       if (isDeleted) {
         // Fully remove the node from all data structures
-        final parentKey = _parents[key];
+        final parentKey = _parentKeyOfKey(key);
         if (parentKey != null) {
-          _children[parentKey]?.remove(key);
+          _childListOf(parentKey)?.remove(key);
         } else {
           _roots.remove(key);
         }
         // Also purge descendants that were pending deletion but never got
         // their own exit animation (invisible children of a collapsed node).
         // Must collect before purging `key`, since _getDescendants reads
-        // _children[key].
+        // _childListOf(key).
         final descendants = _getDescendants(key);
         // Skip _visibleOrder.remove — caller batches it
         _purgeNodeData(key);
@@ -2318,7 +2700,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       } else {
         // Node is exiting due to ancestor collapse - remove from visible order
         // if ancestors are still collapsed
-        final parentKey = _parents[key];
+        final parentKey = _parentKeyOfKey(key);
         final shouldRemove = parentKey == null
             ? !_roots.contains(key)
             : !_areAncestorsExpanded(key);
@@ -2331,9 +2713,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // with the guards in collectRecursive and addSubtree, but defend against
     // other code paths), purge it.
     if (_pendingDeletion.contains(key)) {
-      final parentKey = _parents[key];
+      final parentKey = _parentKeyOfKey(key);
       if (parentKey != null) {
-        _children[parentKey]?.remove(key);
+        _childListOf(parentKey)?.remove(key);
       } else {
         _roots.remove(key);
       }
@@ -2344,12 +2726,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return false;
   }
 
-  /// Inserts a node into _visibleOrder at the correct position relative to
-  /// the given parent index.
+  /// Inserts a node into the visible order at the correct position relative
+  /// to the given parent index.
   void _insertNodeIntoVisibleOrder(TKey nodeId, int parentIndex) {
-    final parentKey = _visibleOrder[parentIndex];
+    final parentKey = _visibleKeyAt(parentIndex);
     final insertIndex = parentIndex + 1 + _countVisibleDescendants(parentKey);
-    _visibleOrder.insert(insertIndex, nodeId);
+    _visibleInsertKey(insertIndex, nodeId);
     _updateIndicesFrom(insertIndex);
   }
 
@@ -2367,43 +2749,47 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     _operationGroups.clear();
     _nodeToOperationGroup.clear();
-    _nodeData.clear();
-    _parents.clear();
-    _children.clear();
-    _depths.clear();
-    _expanded.clear();
+    _dataByNid.clear();
+    _childrenByNid.clear();
+    _parentByNid = Int32List(0);
+    _depthByNid = Int32List(0);
+    _expandedByNid = Uint8List(0);
+    _indexByNid = Int32List(0);
     _roots.clear();
-    _visibleOrder.clear();
-    _visibleIndex.clear();
+    _visibleClear();
     _standaloneAnimations.clear();
     _fullExtents.clear();
     _pendingDeletion.clear();
+    _keyToNid.clear();
+    _nidToKey.clear();
+    _freeNids.clear();
+    _nextNid = 0;
   }
 
   void _rebuildVisibleIndex() {
-    _visibleIndex.clear();
-    for (int i = 0; i < _visibleOrder.length; i++) {
-      _visibleIndex[_visibleOrder[i]] = i;
+    _resetVisibleIndexAll();
+    for (int i = 0; i < _visibleLen; i++) {
+      _setVisibleIndexByNid(_visibleOrderNids[i], i);
     }
     _assertIndexConsistency();
   }
 
   /// Updates indices for all nodes from [startIndex] to the end of the list.
   ///
-  /// Call after inserting (single or bulk) into [_visibleOrder].
+  /// Call after inserting (single or bulk) into the visible order.
   void _updateIndicesFrom(int startIndex) {
-    for (int i = startIndex; i < _visibleOrder.length; i++) {
-      _visibleIndex[_visibleOrder[i]] = i;
+    for (int i = startIndex; i < _visibleLen; i++) {
+      _setVisibleIndexByNid(_visibleOrderNids[i], i);
     }
     _assertIndexConsistency();
   }
 
   /// Updates indices after removing items that were at [removeIndex].
-  /// The keys must already be removed from [_visibleIndex] before calling.
+  /// Removed keys must already have had [_clearVisibleIndex] called on them.
   void _updateIndicesAfterRemove(int removeIndex) {
     // Shift indices for nodes after the removal point
-    for (int i = removeIndex; i < _visibleOrder.length; i++) {
-      _visibleIndex[_visibleOrder[i]] = i;
+    for (int i = removeIndex; i < _visibleLen; i++) {
+      _setVisibleIndexByNid(_visibleOrderNids[i], i);
     }
     _assertIndexConsistency();
   }
@@ -2411,21 +2797,70 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Debug assertion to verify index consistency.
   void _assertIndexConsistency() {
     assert(() {
-      for (int i = 0; i < _visibleOrder.length; i++) {
-        final key = _visibleOrder[i];
-        final idx = _visibleIndex[key];
+      int visibleCount = 0;
+      for (int i = 0; i < _visibleLen; i++) {
+        final nid = _visibleOrderNids[i];
+        final idx = _indexByNid[nid];
         if (idx != i) {
+          final key = _nidToKey[nid];
           throw StateError(
-            'Index mismatch: _visibleOrder[$i] = $key, '
-            'but _visibleIndex[$key] = $idx',
+            'Index mismatch: visible[$i] = $key (nid $nid), '
+            'but _indexByNid[$nid] = $idx',
           );
         }
       }
-      if (_visibleIndex.length != _visibleOrder.length) {
+      for (int nid = 0; nid < _nidToKey.length; nid++) {
+        if (_indexByNid[nid] != _kNotVisible) visibleCount++;
+      }
+      if (visibleCount != _visibleLen) {
         throw StateError(
-          'Length mismatch: _visibleIndex has ${_visibleIndex.length} entries, '
-          'but _visibleOrder has ${_visibleOrder.length} entries',
+          'Length mismatch: _indexByNid has $visibleCount visible entries, '
+          'but _visibleLen = $_visibleLen',
         );
+      }
+      _assertNidRegistryConsistency();
+      return true;
+    }());
+  }
+
+  /// Debug-only: verifies the nid registry matches the live node set.
+  /// Every key in [_keyToNid] must reverse-map through [_nidToKey] and
+  /// resolve to a non-null entry in [_dataByNid]; every freed nid must
+  /// have a null reverse entry and a null data slot.
+  void _assertNidRegistryConsistency() {
+    assert(() {
+      if (_dataByNid.length != _nidToKey.length) {
+        throw StateError(
+          '_dataByNid size ${_dataByNid.length} != _nidToKey size '
+          '${_nidToKey.length}',
+        );
+      }
+      for (final entry in _keyToNid.entries) {
+        final key = entry.key;
+        final nid = entry.value;
+        if (nid < 0 || nid >= _nidToKey.length) {
+          throw StateError('nid $nid for key $key out of range '
+              '[0, ${_nidToKey.length})');
+        }
+        if (_nidToKey[nid] != key) {
+          throw StateError(
+            'nid $nid reverse mismatch: _nidToKey[$nid] = ${_nidToKey[nid]}, '
+            'expected $key',
+          );
+        }
+        if (_dataByNid[nid] == null) {
+          throw StateError('nid $nid for key $key has null data slot');
+        }
+      }
+      for (final freed in _freeNids) {
+        if (freed < 0 || freed >= _nidToKey.length) {
+          throw StateError('freed nid $freed out of range');
+        }
+        if (_nidToKey[freed] != null) {
+          throw StateError(
+            'freed nid $freed still has key ${_nidToKey[freed]}',
+          );
+        }
       }
       return true;
     }());
@@ -2441,38 +2876,38 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (keys.isEmpty) return;
     if (keys.length == 1) {
       final key = keys.first;
-      final idx = _visibleIndex[key];
-      if (idx != null &&
-          idx < _visibleOrder.length &&
-          _visibleOrder[idx] == key) {
-        _visibleIndex.remove(key);
-        _visibleOrder.removeAt(idx);
+      final idx = _visibleIndexOf(key);
+      if (idx != _kNotVisible &&
+          idx < _visibleLen &&
+          _visibleKeyAt(idx) == key) {
+        _clearVisibleIndex(key);
+        _visibleRemoveAt(idx);
         _updateIndicesAfterRemove(idx);
         return;
       }
     }
-    // Check if keys form a contiguous range via _visibleIndex.
-    int minIdx = _visibleOrder.length;
+    // Check if keys form a contiguous range via the nid-indexed visibility map.
+    int minIdx = _visibleLen;
     int maxIdx = -1;
     for (final key in keys) {
-      final idx = _visibleIndex[key];
-      if (idx == null) continue;
+      final idx = _visibleIndexOf(key);
+      if (idx == _kNotVisible) continue;
       if (idx < minIdx) minIdx = idx;
       if (idx > maxIdx) maxIdx = idx;
     }
     if (maxIdx >= 0 && maxIdx - minIdx + 1 == keys.length) {
-      // Contiguous: remove from index first, then from list
+      // Contiguous: clear the index first, then remove from the array.
       for (int i = minIdx; i <= maxIdx; i++) {
-        _visibleIndex.remove(_visibleOrder[i]);
+        _indexByNid[_visibleOrderNids[i]] = _kNotVisible;
       }
-      _visibleOrder.removeRange(minIdx, maxIdx + 1);
+      _visibleRemoveRange(minIdx, maxIdx + 1);
       _updateIndicesAfterRemove(minIdx);
     } else {
       // Non-contiguous: remove from index, then list, then full rebuild
       for (final key in keys) {
-        _visibleIndex.remove(key);
+        _clearVisibleIndex(key);
       }
-      _visibleOrder.removeWhere(keys.contains);
+      _visibleRemoveWhereKeyIn(keys);
       _rebuildVisibleIndex();
     }
   }
@@ -2484,7 +2919,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   void _getDescendantsInto(TKey key, List<TKey> result) {
-    final children = _children[key];
+    final children = _childListOf(key);
     if (children == null) return;
     for (final childId in children) {
       result.add(childId);
@@ -2499,12 +2934,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   void _getVisibleDescendantsInto(TKey key, List<TKey> result) {
-    final children = _children[key];
+    final children = _childListOf(key);
     if (children == null) return;
     for (final childId in children) {
-      if (_visibleIndex.containsKey(childId)) {
+      if (_isVisible(childId)) {
         result.add(childId);
-        if (_expanded[childId] == true) {
+        if (_isExpandedKey(childId)) {
           _getVisibleDescendantsInto(childId, result);
         }
       }
@@ -2514,24 +2949,24 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Checks if all ancestors of a node are expanded.
   /// Returns true for root nodes (no ancestors).
   bool _areAncestorsExpanded(TKey key) {
-    TKey? parentKey = _parents[key];
+    TKey? parentKey = _parentKeyOfKey(key);
     while (parentKey != null) {
-      if (_expanded[parentKey] != true) {
+      if (!_isExpandedKey(parentKey)) {
         return false;
       }
-      parentKey = _parents[parentKey];
+      parentKey = _parentKeyOfKey(parentKey);
     }
     return true;
   }
 
   int _countVisibleDescendants(TKey key) {
     int count = 0;
-    final children = _children[key];
-    if (children == null || _expanded[key] != true) {
+    final children = _childListOf(key);
+    if (children == null || !_isExpandedKey(key)) {
       return 0;
     }
     for (final childId in children) {
-      if (_visibleIndex.containsKey(childId)) {
+      if (_isVisible(childId)) {
         count++;
         count += _countVisibleDescendants(childId);
       }
@@ -2552,8 +2987,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     bool includeRoot = true,
   }) {
     if (includeRoot) result.add(key);
-    if (_expanded[key] == true) {
-      final children = _children[key];
+    if (_isExpandedKey(key)) {
+      final children = _childListOf(key);
       if (children != null) {
         for (final childId in children) {
           _flattenSubtreeInto(childId, result);
@@ -2565,11 +3000,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Removes a single key from all internal maps (but not from _visibleOrder,
   /// _roots, or the parent's _children list — those are handled by the caller).
   void _purgeNodeData(TKey key) {
-    _nodeData.remove(key);
-    _parents.remove(key);
-    _children.remove(key);
-    _depths.remove(key);
-    _expanded.remove(key);
     _fullExtents.remove(key);
     // Clean up standalone animation state
     _standaloneAnimations.remove(key);
@@ -2599,30 +3029,31 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _bulkAnimationGroup?.members.remove(key);
     _bulkAnimationGroup?.pendingRemoval.remove(key);
     _pendingDeletion.remove(key);
-    _visibleIndex.remove(key);
+    _clearVisibleIndex(key);
+    _releaseNid(key);
   }
 
   void _removeNodesImmediate(List<TKey> nodeIds) {
     final keysToRemove = nodeIds.toSet();
 
-    // Check visibility and contiguity BEFORE purging (purge removes from _visibleIndex)
-    int minIdx = _visibleOrder.length;
+    // Check visibility and contiguity BEFORE purging (purge clears the index)
+    int minIdx = _visibleLen;
     int maxIdx = -1;
     int visibleCount = 0;
     for (final key in nodeIds) {
-      final idx = _visibleIndex[key];
-      if (idx != null) {
+      final idx = _visibleIndexOf(key);
+      if (idx != _kNotVisible) {
         visibleCount++;
         if (idx < minIdx) minIdx = idx;
         if (idx > maxIdx) maxIdx = idx;
       }
     }
 
-    // Purge node data (removes from _visibleIndex)
+    // Purge node data (releases nid and clears visibility)
     for (final key in nodeIds) {
-      final parentKey = _parents[key];
+      final parentKey = _parentKeyOfKey(key);
       if (parentKey != null) {
-        _children[parentKey]?.remove(key);
+        _childListOf(parentKey)?.remove(key);
       } else {
         _roots.remove(key);
       }
@@ -2633,11 +3064,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (visibleCount > 0) {
       if (maxIdx - minIdx + 1 == visibleCount) {
         // Contiguous removal
-        _visibleOrder.removeRange(minIdx, maxIdx + 1);
+        _visibleRemoveRange(minIdx, maxIdx + 1);
         _updateIndicesAfterRemove(minIdx);
       } else {
         // Non-contiguous removal
-        _visibleOrder.removeWhere(keysToRemove.contains);
+        _visibleRemoveWhereKeyIn(keysToRemove);
         _rebuildVisibleIndex();
       }
     }
@@ -2649,5 +3080,36 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _animationListeners.clear();
     _nodeDataListeners.clear();
     super.dispose();
+  }
+}
+
+/// Read-only [List] view over a [TreeController]'s visible order, backed by
+/// the controller's nid buffer. Every read resolves a nid back to its key
+/// through [TreeController._nidToKey], so the view always reflects the latest
+/// state. Mutation attempts throw.
+class _VisibleNodesView<TKey, TData> extends ListBase<TKey> {
+  _VisibleNodesView(this._controller);
+
+  final TreeController<TKey, TData> _controller;
+
+  @override
+  int get length => _controller._visibleLen;
+
+  @override
+  set length(int value) {
+    throw UnsupportedError('visibleNodes is read-only.');
+  }
+
+  @override
+  TKey operator [](int index) {
+    if (index < 0 || index >= _controller._visibleLen) {
+      throw RangeError.index(index, this, 'index', null, _controller._visibleLen);
+    }
+    return _controller._nidToKey[_controller._visibleOrderNids[index]] as TKey;
+  }
+
+  @override
+  void operator []=(int index, TKey value) {
+    throw UnsupportedError('visibleNodes is read-only.');
   }
 }

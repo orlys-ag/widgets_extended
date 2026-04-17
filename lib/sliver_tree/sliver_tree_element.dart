@@ -284,12 +284,12 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   void _scheduleStaleEviction() {
     if (widget.controller.hasActiveAnimations) return;
 
-    final retained = renderObject.retainedNodeIds;
+    final render = renderObject;
     final staleNodes = <TKey>[];
     for (final nodeId in _children.keys) {
       // Only evict nodes that still exist in the controller but are outside
       // the retention window. Dead nodes are handled by _collectGarbage.
-      if (!retained.contains(nodeId) &&
+      if (!render.isNodeRetained(nodeId) &&
           widget.controller.getNodeData(nodeId) != null) {
         staleNodes.add(nodeId);
       }
@@ -299,10 +299,10 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _inLayout) return;
       // Re-check retention — scroll position may have changed.
-      final currentRetained = renderObject.retainedNodeIds;
+      final render = renderObject;
       owner!.buildScope(this, () {
         for (final nodeId in staleNodes) {
-          if (currentRetained.contains(nodeId)) continue;
+          if (render.isNodeRetained(nodeId)) continue;
           final element = _children.remove(nodeId);
           if (element != null) {
             updateChild(element, null, nodeId);

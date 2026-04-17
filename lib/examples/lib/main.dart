@@ -15,7 +15,10 @@ class App extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple), useMaterial3: true),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+      ),
       home: const SyncedSliverTreeExample(),
     );
   }
@@ -23,7 +26,8 @@ class App extends StatelessWidget {
 
 /// Mutable domain node used by the example.
 class Node {
-  Node({required this.id, required this.name, List<Node>? children}) : children = children ?? <Node>[];
+  Node({required this.id, required this.name, List<Node>? children})
+    : children = children ?? <Node>[];
 
   final String id;
   String name;
@@ -79,7 +83,8 @@ class SyncedSliverTreeExample extends StatefulWidget {
   const SyncedSliverTreeExample({super.key});
 
   @override
-  State<SyncedSliverTreeExample> createState() => _SyncedSliverTreeExampleState();
+  State<SyncedSliverTreeExample> createState() =>
+      _SyncedSliverTreeExampleState();
 }
 
 class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
@@ -165,7 +170,9 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
     final parent = _findById(id);
     if (parent == null) return;
     setState(() {
-      parent.children.add(Node(id: _mintId('${parent.id}/child'), name: 'New child'));
+      parent.children.add(
+        Node(id: _mintId('${parent.id}/child'), name: 'New child'),
+      );
     });
   }
 
@@ -180,7 +187,10 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
     final index = siblings.indexWhere((n) => n.id == id);
     if (index < 0) return;
     setState(() {
-      siblings.insert(index + 1, Node(id: _mintId('sibling'), name: 'New sibling'));
+      siblings.insert(
+        index + 1,
+        Node(id: _mintId('sibling'), name: 'New sibling'),
+      );
     });
   }
 
@@ -236,8 +246,14 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
           onSubmitted: (value) => Navigator.of(context).pop(value),
         ),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('Rename')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Rename'),
+          ),
         ],
       ),
     );
@@ -272,7 +288,13 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('SyncedSliverTree example'),
-        actions: <Widget>[IconButton(tooltip: 'Reset tree', icon: const Icon(Icons.restart_alt), onPressed: _reset)],
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Reset tree',
+            icon: const Icon(Icons.restart_alt),
+            onPressed: _reset,
+          ),
+        ],
       ),
       body: Column(
         children: <Widget>[
@@ -319,7 +341,6 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
                   preserveExpansion: _preserveExpansion,
                   itemBuilder: (context, view) {
                     final isSelected = view.key == _selectedId;
-                    log("x: ${view.depth}");
                     return _TreeTile(
                       view: view,
                       indent: view.depth * _indentWidth,
@@ -347,7 +368,12 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
 // =============================================================================
 
 class _TreeTile extends StatelessWidget {
-  const _TreeTile({required this.view, this.indent = 8, required this.isSelected, required this.onTap});
+  const _TreeTile({
+    required this.view,
+    this.indent = 8,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   final TreeItemView<String, Node> view;
   final double indent;
@@ -357,14 +383,23 @@ class _TreeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bg = isSelected ? theme.colorScheme.primaryContainer : Colors.transparent;
-    final fg = isSelected ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onSurface;
+    final bg = isSelected
+        ? theme.colorScheme.primaryContainer
+        : Colors.transparent;
+    final fg = isSelected
+        ? theme.colorScheme.onPrimaryContainer
+        : theme.colorScheme.onSurface;
     return Material(
       color: bg,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: EdgeInsets.only(left: indent, right: 8.0, top: 6.0, bottom: 6.0),
+          padding: EdgeInsets.only(
+            left: indent,
+            right: 8.0,
+            top: 6.0,
+            bottom: 6.0,
+          ),
           child: Row(
             children: <Widget>[
               SizedBox(
@@ -374,7 +409,12 @@ class _TreeTile extends StatelessWidget {
                     ? IconButton(
                         padding: EdgeInsets.zero,
                         iconSize: 20,
-                        icon: Icon(view.isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right, color: fg),
+                        icon: Icon(
+                          view.isExpanded
+                              ? Icons.keyboard_arrow_down
+                              : Icons.keyboard_arrow_right,
+                          color: fg,
+                        ),
                         onPressed: view.toggle,
                       )
                     : const SizedBox.shrink(),
@@ -398,7 +438,9 @@ class _TreeTile extends StatelessWidget {
               if (view.hasChildren)
                 Text(
                   '${view.childCount}',
-                  style: theme.textTheme.labelSmall?.copyWith(color: fg.withValues(alpha: 0.7)),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: fg.withValues(alpha: 0.7),
+                  ),
                 ),
             ],
           ),
@@ -449,7 +491,9 @@ class _Toolbar extends StatelessWidget {
           Text(
             selectionLabel,
             style: theme.textTheme.labelMedium?.copyWith(
-              color: hasSelection ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+              color: hasSelection
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 6),
@@ -457,14 +501,46 @@ class _Toolbar extends StatelessWidget {
             spacing: 6,
             runSpacing: 6,
             children: <Widget>[
-              _ToolbarButton(icon: Icons.add_box_outlined, label: 'Add root', onPressed: onAddRoot),
-              _ToolbarButton(icon: Icons.subdirectory_arrow_right, label: 'Add child', onPressed: onAddChild),
-              _ToolbarButton(icon: Icons.playlist_add, label: 'Add sibling', onPressed: onAddSibling),
-              _ToolbarButton(icon: Icons.edit_outlined, label: 'Rename', onPressed: onRename),
-              _ToolbarButton(icon: Icons.delete_outline, label: 'Remove', onPressed: onRemove),
-              _ToolbarButton(icon: Icons.arrow_upward, label: 'Move up', onPressed: onMoveUp),
-              _ToolbarButton(icon: Icons.arrow_downward, label: 'Move down', onPressed: onMoveDown),
-              _ToolbarButton(icon: Icons.shuffle, label: 'Shuffle children', onPressed: onShuffle),
+              _ToolbarButton(
+                icon: Icons.add_box_outlined,
+                label: 'Add root',
+                onPressed: onAddRoot,
+              ),
+              _ToolbarButton(
+                icon: Icons.subdirectory_arrow_right,
+                label: 'Add child',
+                onPressed: onAddChild,
+              ),
+              _ToolbarButton(
+                icon: Icons.playlist_add,
+                label: 'Add sibling',
+                onPressed: onAddSibling,
+              ),
+              _ToolbarButton(
+                icon: Icons.edit_outlined,
+                label: 'Rename',
+                onPressed: onRename,
+              ),
+              _ToolbarButton(
+                icon: Icons.delete_outline,
+                label: 'Remove',
+                onPressed: onRemove,
+              ),
+              _ToolbarButton(
+                icon: Icons.arrow_upward,
+                label: 'Move up',
+                onPressed: onMoveUp,
+              ),
+              _ToolbarButton(
+                icon: Icons.arrow_downward,
+                label: 'Move down',
+                onPressed: onMoveDown,
+              ),
+              _ToolbarButton(
+                icon: Icons.shuffle,
+                label: 'Shuffle children',
+                onPressed: onShuffle,
+              ),
             ],
           ),
         ],
@@ -474,7 +550,11 @@ class _Toolbar extends StatelessWidget {
 }
 
 class _ToolbarButton extends StatelessWidget {
-  const _ToolbarButton({required this.icon, required this.label, required this.onPressed});
+  const _ToolbarButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
 
   final IconData icon;
   final String label;
@@ -526,8 +606,16 @@ class _ConfigBar extends StatelessWidget {
         runSpacing: 4,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
-          _SwitchField(label: 'initiallyExpanded', value: initiallyExpanded, onChanged: onInitiallyExpandedChanged),
-          _SwitchField(label: 'preserveExpansion', value: preserveExpansion, onChanged: onPreserveExpansionChanged),
+          _SwitchField(
+            label: 'initiallyExpanded',
+            value: initiallyExpanded,
+            onChanged: onInitiallyExpandedChanged,
+          ),
+          _SwitchField(
+            label: 'preserveExpansion',
+            value: preserveExpansion,
+            onChanged: onPreserveExpansionChanged,
+          ),
           SizedBox(
             width: 240,
             child: Row(
@@ -543,7 +631,13 @@ class _ConfigBar extends StatelessWidget {
                     onChanged: onIndentWidthChanged,
                   ),
                 ),
-                SizedBox(width: 28, child: Text(indentWidth.toStringAsFixed(0), textAlign: TextAlign.end)),
+                SizedBox(
+                  width: 28,
+                  child: Text(
+                    indentWidth.toStringAsFixed(0),
+                    textAlign: TextAlign.end,
+                  ),
+                ),
               ],
             ),
           ),
@@ -554,7 +648,11 @@ class _ConfigBar extends StatelessWidget {
 }
 
 class _SwitchField extends StatelessWidget {
-  const _SwitchField({required this.label, required this.value, required this.onChanged});
+  const _SwitchField({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
 
   final String label;
   final bool value;
