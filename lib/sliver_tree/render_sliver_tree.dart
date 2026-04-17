@@ -50,6 +50,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _stickyByNid = <StickyHeaderInfo<TKey>?>[];
     _stickyHeaders.clear();
     _lastPrecomputedCount = 0;
+    // Bulk-only fast-path caches are visible-position-indexed; any
+    // structure from the old controller is meaningless under the new one.
+    _bulkCumulativesValid = false;
+    _bulkCumulativesCount = 0;
+    _lastBulkAnimationGeneration = -1;
+    _lastFrameUsedBulkCumulatives = false;
     // Drop child map bookkeeping — the actual RenderBoxes stay adopted and
     // will be reconciled on the next layout via the child manager.
     _children.clear();
@@ -96,11 +102,93 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// the layout only reads from slots it just wrote this frame (or a
   /// previous frame under the stable-extent fast path), never from stale
   /// slots left by purged keys.
+  ///
+  /// Under the bulk-only animation fast path ([_bulkCumulativesValid] == true),
+  /// only slots for cache-region nids are kept fresh; offsets for other
+  /// visible nids are read on-demand from [_stableCumulative] / [_bulkFullCumulative].
   Float64List _nodeOffsetsByNid = Float64List(0);
 
   /// Layout-space extents indexed by the controller's internal nid.
   /// Same slot-validity invariant as [_nodeOffsetsByNid].
   Float64List _nodeExtentsByNid = Float64List(0);
+
+  // ──────── Bulk-only animation fast path ────────
+  // When a bulk animation is active AND no op-group/standalone animations
+  // are active, every node's offset collapses to a simple scalar formula:
+  //
+  //   offset(i) = _stableCumulative[i] + _bulkValueCached * _bulkFullCumulative[i]
+  //
+  // where i is the node's position in the controller's visible order. The
+  // cumulatives are indexed by visible position (NOT nid), built once when the
+  // bulk group's membership snapshot changes, and remain valid as the
+  // bulk's scalar value ticks. This turns the O(N)-per-frame Pass 1 walk
+  // during expandAll / collapseAll into O(1).
+
+  /// Prefix sum of stable (non-bulk-member) extents. Size = n+1 where
+  /// n = visible node count at last rebuild. Valid iff [_bulkCumulativesValid].
+  Float64List _stableCumulative = Float64List(0);
+
+  /// Prefix sum of full target extents for bulk members (0 elsewhere).
+  /// Size = n+1 where n = visible node count at last rebuild. Valid iff
+  /// [_bulkCumulativesValid].
+  Float64List _bulkFullCumulative = Float64List(0);
+
+  /// Visible-node count at the last cumulative rebuild.
+  int _bulkCumulativesCount = 0;
+
+  /// Whether [_stableCumulative] / [_bulkFullCumulative] match the current visible order
+  /// and bulk group membership.
+  bool _bulkCumulativesValid = false;
+
+  /// Last observed [TreeController.bulkAnimationGeneration] at cumulative rebuild.
+  int _lastBulkAnimationGeneration = -1;
+
+  /// Cached bulk animation value for the current frame, to avoid
+  /// repeatedly reading it from the controller during inner loops.
+  double _bulkValueCached = 0.0;
+
+  /// Whether the previous frame ran the bulk-only fast path. Used to
+  /// force a full Pass 1 walk on the frame we exit fast path, because
+  /// during the fast path only cache-region nid slots are fresh.
+  bool _lastFrameUsedBulkCumulatives = false;
+
+  /// Rebuilds [_stableCumulative] and [_bulkFullCumulative] from the current visible
+  /// order and bulk group membership. O(N) but amortized across many
+  /// frames of a bulk animation.
+  void _rebuildBulkCumulatives(List<TKey> visibleNodes) {
+    final n = visibleNodes.length;
+    if (_stableCumulative.length < n + 1) {
+      final newLen = math.max(n + 1, math.max(16, _stableCumulative.length * 2));
+      _stableCumulative = Float64List(newLen);
+      _bulkFullCumulative = Float64List(newLen);
+    }
+    double sStable = 0.0;
+    double sBulkFull = 0.0;
+    _stableCumulative[0] = 0.0;
+    _bulkFullCumulative[0] = 0.0;
+    for (int i = 0; i < n; i++) {
+      final key = visibleNodes[i];
+      final full = controller.getEstimatedExtent(key);
+      if (controller.isBulkMember(key)) {
+        sBulkFull += full;
+      } else {
+        // Non-bulk nodes are stable during bulk-only frames (gated by
+        // !hasOpGroupAnimations at entry), so their full extent equals
+        // their current extent.
+        sStable += full;
+      }
+      _stableCumulative[i + 1] = sStable;
+      _bulkFullCumulative[i + 1] = sBulkFull;
+    }
+    _bulkCumulativesCount = n;
+    _bulkCumulativesValid = true;
+  }
+
+  /// Offset at visible index [i] under the bulk-only fast path.
+  /// Caller is responsible for ensuring [_bulkCumulativesValid] is true.
+  double _offsetAtVisibleIndex(int i) {
+    return _stableCumulative[i] + _bulkValueCached * _bulkFullCumulative[i];
+  }
 
   /// Flags indexed by nid: non-zero iff the node lies in the current cache
   /// region. Cleared via [Uint8List.fillRange] at the start of Pass 2 each
@@ -703,8 +791,33 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // ────────────────────────────────────────────────────────────────────────
     double totalScrollExtent;
     final bool hasAnimations = controller.hasActiveAnimations;
+    final bool bulkOnly =
+        controller.isBulkAnimating && !controller.hasOpGroupAnimations;
 
-    if (_structureChanged) {
+    if (bulkOnly) {
+      // Fast path: bulk animation only. Every node's offset is a scalar
+      // function of position via the precomputed cumulatives. Avoid touching
+      // _nodeOffsetsByNid for nodes outside the cache region — that write
+      // is what the per-frame O(N) cost was buying.
+      final bulkGen = controller.bulkAnimationGeneration;
+      final n = visibleNodes.length;
+      if (!_bulkCumulativesValid ||
+          _bulkCumulativesCount != n ||
+          bulkGen != _lastBulkAnimationGeneration ||
+          _structureChanged) {
+        _rebuildBulkCumulatives(visibleNodes);
+        _lastBulkAnimationGeneration = bulkGen;
+        _structureChanged = false;
+      }
+      _bulkValueCached = controller.bulkAnimationValue;
+      totalScrollExtent = _offsetAtVisibleIndex(n);
+      _lastFrameUsedBulkCumulatives = true;
+    } else if (_structureChanged || _lastFrameUsedBulkCumulatives) {
+      // Either the visible order changed OR we just exited the bulk-only
+      // fast path — in both cases the per-nid offset/extent arrays are
+      // not guaranteed fresh for every visible node, so do a full walk.
+      _bulkCumulativesValid = false;
+      _lastFrameUsedBulkCumulatives = false;
       totalScrollExtent = 0.0;
 
       for (final nodeId in visibleNodes) {
@@ -784,12 +897,40 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _inCacheRegionByNid.fillRange(0, _inCacheRegionByNid.length, 0);
     final cacheStartIndex = _findFirstVisibleIndex(visibleNodes, cacheStart);
 
+    // In bulk-only mode, break on the row's *steady-state* (full-space)
+    // position rather than its animated position. At low bulkValue, animated
+    // rows have sub-pixel extents — using animated offsets would admit
+    // thousands of invisible rows into the cache region on frame 1 of
+    // expandAll, causing a mass-mount hitch. Anchoring the band to full-space
+    // caps admission at the count we'd mount at bulkValue=1.
+    final double fullCacheEnd;
+    if (_bulkCumulativesValid && cacheStartIndex < visibleNodes.length) {
+      final fullStart =
+          _stableCumulative[cacheStartIndex] +
+          _bulkFullCumulative[cacheStartIndex];
+      fullCacheEnd = fullStart + remainingCacheExtent;
+    } else {
+      fullCacheEnd = 0.0;
+    }
+
     int cacheEndIndex = cacheStartIndex;
     for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final nid = _controller.nidOf(nodeId);
-      final offset = _nodeOffsetsByNid[nid];
-      if (offset >= cacheEnd) break;
+      final double offset;
+      if (_bulkCumulativesValid) {
+        // Under bulk-only fast path, pull from cumulatives and sync into the
+        // per-nid slots so downstream code (Pass 2, paint-extent, paint,
+        // hit-test) reads correct values without a branch per access.
+        offset = _offsetAtVisibleIndex(i);
+        _nodeOffsetsByNid[nid] = offset;
+        _nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i + 1) - offset;
+        final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
+        if (fullOffset >= fullCacheEnd) break;
+      } else {
+        offset = _nodeOffsetsByNid[nid];
+        if (offset >= cacheEnd) break;
+      }
       _inCacheRegionByNid[nid] = 1;
       cacheEndIndex = i + 1;
     }
@@ -838,6 +979,23 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // that point are unaffected by later-index extent changes.
     if (extentsChanged) {
       _stickyPrecomputeDirty = true;
+
+      if (_bulkCumulativesValid) {
+        // A child's measured size perturbed _fullExtents mid-bulk; the
+        // cumulatives are now inconsistent with truth for positions beyond
+        // firstChangedIdx. Materialize per-nid extents for the affected
+        // tail so _recomputeOffsetsFrom can walk it, then fall back off
+        // the fast path for this frame. The next frame will rebuild cumulatives
+        // fresh via _rebuildBulkCumulatives.
+        for (int i = firstChangedIdx; i < visibleNodes.length; i++) {
+          final nodeId = visibleNodes[i];
+          if (i >= cacheStartIndex && i < cacheEndIndex) continue;
+          final nid = _controller.nidOf(nodeId);
+          _nodeExtentsByNid[nid] = controller.getCurrentExtent(nodeId);
+        }
+        _bulkCumulativesValid = false;
+      }
+
       totalScrollExtent = _recomputeOffsetsFrom(visibleNodes, firstChangedIdx);
 
       // Only rewrite parentData.layoutOffset for cache-region nodes at or
@@ -1040,6 +1198,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     int low = 0;
     int high = nodes.length - 1;
+
+    if (_bulkCumulativesValid && _bulkCumulativesCount == nodes.length) {
+      // Bulk-only fast path: derive offset+extent at each probe from cumulatives
+      // without touching per-nid arrays (which are only kept fresh for
+      // cache-region nids in this mode).
+      while (low < high) {
+        final mid = (low + high) ~/ 2;
+        final offsetEnd = _offsetAtVisibleIndex(mid + 1);
+        if (offsetEnd <= scrollOffset) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      return low;
+    }
 
     while (low < high) {
       final mid = (low + high) ~/ 2;

@@ -284,6 +284,24 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
     });
   }
 
+  void _addTenChildren() {
+    final id = _selectedId;
+    final parent = id == null ? null : _findById(id);
+    setState(() {
+      if (parent == null) {
+        for (var i = 0; i < 10; i++) {
+          _userRoots.add(Node(id: _mintId("root"), name: "New root"));
+        }
+      } else {
+        for (var i = 0; i < 10; i++) {
+          parent.children.add(
+            Node(id: _mintId("${parent.id}/child"), name: "New child"),
+          );
+        }
+      }
+    });
+  }
+
   void _addSibling() {
     final id = _selectedId;
     if (id == null) {
@@ -489,6 +507,7 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
                         selectionLabel: selectionLabel,
                         onAddRoot: _addRoot,
                         onAddChild: _addChild,
+                        onAdd10Children: _addTenChildren,
                         onAddSibling: _addSibling,
                         onRemove: hasSelection ? _removeSelected : null,
                         onRename: hasSelection ? _renameSelected : null,
@@ -767,6 +786,7 @@ class _ActionsPanel extends StatelessWidget {
     required this.selectionLabel,
     required this.onAddRoot,
     required this.onAddChild,
+    required this.onAdd10Children,
     required this.onAddSibling,
     required this.onRemove,
     required this.onRename,
@@ -781,6 +801,7 @@ class _ActionsPanel extends StatelessWidget {
   final String selectionLabel;
   final VoidCallback onAddRoot;
   final VoidCallback onAddChild;
+  final VoidCallback onAdd10Children;
   final VoidCallback onAddSibling;
   final VoidCallback? onRemove;
   final VoidCallback? onRename;
@@ -819,6 +840,11 @@ class _ActionsPanel extends StatelessWidget {
                 icon: Icons.subdirectory_arrow_right,
                 label: "Add child",
                 onPressed: onAddChild,
+              ),
+              _ToolbarButton(
+                icon: Icons.library_add_outlined,
+                label: "Add 10 children",
+                onPressed: onAdd10Children,
               ),
               _ToolbarButton(
                 icon: Icons.playlist_add,

@@ -2100,4 +2100,111 @@ void main() {
       expect(controller.ensureAncestorsExpanded('a1'), 0);
     });
   });
+
+  group('ancestorsExpanded cache', () {
+    // These tests exercise the cached _ancestorsExpandedByNid bit indirectly:
+    // the "exits because ancestor still collapsed" decision in
+    // _onOperationGroupStatusChange / _onBulkAnimationComplete used to do an
+    // O(depth) walk; it now reads the cached bit. The cases below are the
+    // ones most likely to regress if the cache gets out of sync with the
+    // real expansion state.
+
+    testWidgets(
+      'collapse mid-expand: descendants vanish once animations settle',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        // A → B → C, start collapsed.
+        controller.setRoots([TreeNode(key: 'a', data: 'A')]);
+        controller.setChildren('a', [TreeNode(key: 'b', data: 'B')]);
+        controller.setChildren('b', [TreeNode(key: 'c', data: 'C')]);
+
+        controller.expand(key: 'a');
+        controller.expand(key: 'b');
+        // Mid-animation, collapse the root — C's ancestor chain becomes
+        // fully collapsed and it must disappear once animations settle.
+        await tester.pump(const Duration(milliseconds: 50));
+        controller.collapse(key: 'a');
+        await tester.pumpAndSettle();
+
+        expect(controller.visibleNodes, ['a']);
+      },
+    );
+
+    testWidgets(
+      'moveNode under a collapsed parent clears descendants ancestor bit',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        // A (expanded) with child A1.
+        // B (collapsed) is a sibling root.
+        controller.setRoots([
+          TreeNode(key: 'a', data: 'A'),
+          TreeNode(key: 'b', data: 'B'),
+        ]);
+        controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
+        controller.expand(key: 'a', animate: false);
+        expect(controller.visibleNodes, ['a', 'a1', 'b']);
+
+        // Move A1 under B (which is collapsed). A1 must disappear from
+        // visible order, and a subsequent expand of B must show it.
+        controller.moveNode('a1', 'b');
+        expect(controller.visibleNodes, ['a', 'b']);
+
+        controller.expand(key: 'b', animate: false);
+        expect(controller.visibleNodes, ['a', 'b', 'a1']);
+      },
+    );
+
+    testWidgets(
+      'expandAll then collapseAll leaves the cache consistent for re-expand',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        // A 3-level tree with several branches.
+        controller.setRoots([
+          TreeNode(key: 'r1', data: 'R1'),
+          TreeNode(key: 'r2', data: 'R2'),
+        ]);
+        controller.setChildren('r1', [
+          TreeNode(key: 'r1a', data: 'R1A'),
+          TreeNode(key: 'r1b', data: 'R1B'),
+        ]);
+        controller.setChildren('r1a', [TreeNode(key: 'r1a1', data: 'R1A1')]);
+        controller.setChildren('r2', [TreeNode(key: 'r2a', data: 'R2A')]);
+
+        controller.expandAll(animate: false);
+        expect(controller.visibleNodes, [
+          'r1', 'r1a', 'r1a1', 'r1b', 'r2', 'r2a',
+        ]);
+
+        controller.collapseAll(animate: false);
+        expect(controller.visibleNodes, ['r1', 'r2']);
+
+        // If the cache still thinks r1a's ancestors are expanded (stale),
+        // a targeted expand of r1a would skip the "invisible-ancestor"
+        // fast path and try to insert r1a1 at a missing visible index.
+        controller.expand(key: 'r1a', animate: false);
+        expect(controller.visibleNodes, ['r1', 'r2']);
+
+        controller.expand(key: 'r1', animate: false);
+        // Now r1a's ancestors are fully expanded and its own children appear.
+        expect(controller.visibleNodes, [
+          'r1', 'r1a', 'r1a1', 'r1b', 'r2',
+        ]);
+      },
+    );
+  });
 }
