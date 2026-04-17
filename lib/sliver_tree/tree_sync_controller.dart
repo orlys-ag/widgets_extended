@@ -146,11 +146,22 @@ class TreeSyncController<TKey, TData> {
       _clearChildrenTracking(key);
     }
 
-    // 2. Build the post-removal set for insertion index computation.
+    // 2. Build the post-removal list plus a Fenwick tree keyed by desired
+    //    position, seeded with 1s at retained keys' desired positions. The
+    //    insertion loop below uses prefix sums for O(log N) insertion-index
+    //    queries instead of the old O(N) walk over desiredOrder per insert.
+    final desiredPos = <TKey, int>{
+      for (int i = 0; i < desiredKeys.length; i++) desiredKeys[i]: i,
+    };
     final remaining = <TKey>[
       for (final k in _currentRoots)
         if (!toRemove.contains(k)) k,
     ];
+    final remainingBit = _Fenwick(desiredKeys.length);
+    for (final k in remaining) {
+      final p = desiredPos[k];
+      if (p != null) remainingBit.update(p, 1);
+    }
 
     // 3. Insert new roots at their correct position. If a node already
     //    exists in the controller (e.g., promoted from child to root), use
@@ -160,7 +171,8 @@ class TreeSyncController<TKey, TData> {
     for (final node in desired) {
       if (!toAdd.contains(node.key)) continue;
 
-      final targetIndex = _insertionIndex(desiredKeys, remaining, node.key);
+      final p = desiredPos[node.key]!;
+      final targetIndex = remainingBit.prefixSum(p);
 
       if (_controller.getNodeData(node.key) != null) {
         final oldParent = _controller.getParent(node.key);
@@ -173,6 +185,7 @@ class TreeSyncController<TKey, TData> {
         _controller.insertRoot(node, index: targetIndex, animate: animate);
       }
       remaining.insert(targetIndex, node.key);
+      remainingBit.update(p, 1);
       addedRoots.add(node.key);
     }
 
@@ -299,11 +312,22 @@ class TreeSyncController<TKey, TData> {
       _clearChildrenTracking(key);
     }
 
-    // 2. Build the post-removal list for insertion index computation.
+    // 2. Build the post-removal list plus a Fenwick tree keyed by desired
+    //    position, seeded with 1s at retained keys' desired positions. The
+    //    insertion loop below uses prefix sums for O(log N) insertion-index
+    //    queries instead of the old O(N) walk over desiredOrder per insert.
+    final desiredPos = <TKey, int>{
+      for (int i = 0; i < desiredKeys.length; i++) desiredKeys[i]: i,
+    };
     final remaining = <TKey>[
       for (final k in currentKeys)
         if (!toRemove.contains(k)) k,
     ];
+    final remainingBit = _Fenwick(desiredKeys.length);
+    for (final k in remaining) {
+      final p = desiredPos[k];
+      if (p != null) remainingBit.update(p, 1);
+    }
 
     // 3. Insert new children at their correct position. If a node already
     //    exists in the controller (reparented from another location), use
@@ -312,7 +336,8 @@ class TreeSyncController<TKey, TData> {
     for (final node in desired) {
       if (!toAdd.contains(node.key)) continue;
 
-      final targetIndex = _insertionIndex(desiredKeys, remaining, node.key);
+      final p = desiredPos[node.key]!;
+      final targetIndex = remainingBit.prefixSum(p);
 
       if (_controller.getNodeData(node.key) != null) {
         // Read the old parent before the move so we can drop the now-stale
@@ -343,6 +368,7 @@ class TreeSyncController<TKey, TData> {
         }
       }
       remaining.insert(targetIndex, node.key);
+      remainingBit.update(p, 1);
     }
 
     // 4. Update data for retained children whose payload changed.
@@ -586,27 +612,34 @@ class TreeSyncController<TKey, TData> {
     }
     return true;
   }
+}
 
-  /// Computes the insertion index for [key] in [remaining] such that the
-  /// final order matches [desiredOrder].
-  ///
-  /// Walks [desiredOrder] and counts how many keys before [key] are already
-  /// in [remaining]. That count is the correct insertion index.
-  static int _insertionIndex<T>(
-    List<T> desiredOrder,
-    List<T> remaining,
-    T key,
-  ) {
-    final remainingSet = remaining.toSet();
-    int index = 0;
-    for (final k in desiredOrder) {
-      if (k == key) {
-        break;
-      }
-      if (remainingSet.contains(k)) {
-        ++index;
-      }
+/// Minimal Fenwick / binary indexed tree over a fixed-size array of ints.
+///
+/// Used by [TreeSyncController] to compute insertion indices in O(log N)
+/// per call across a batch of insertions, in place of the prior O(N)
+/// linear walk over the desired order.
+class _Fenwick {
+  _Fenwick(int size)
+      : _size = size,
+        _tree = List<int>.filled(size + 1, 0);
+
+  final int _size;
+  final List<int> _tree;
+
+  /// Adds [delta] at 0-based position [pos].
+  void update(int pos, int delta) {
+    for (int i = pos + 1; i <= _size; i += i & -i) {
+      _tree[i] += delta;
     }
-    return index;
+  }
+
+  /// Returns the prefix sum over positions `[0, pos)` (exclusive).
+  int prefixSum(int pos) {
+    int sum = 0;
+    for (int i = pos; i > 0; i -= i & -i) {
+      sum += _tree[i];
+    }
+    return sum;
   }
 }

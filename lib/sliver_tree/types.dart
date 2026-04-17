@@ -19,6 +19,26 @@ enum AnimationType {
   exiting,
 }
 
+/// How [TreeController.animateScrollToKey] handles ancestors of the target
+/// key that are currently collapsed.
+enum AncestorExpansionMode {
+  /// Do not expand any ancestors. If any ancestor of the target is
+  /// collapsed, [TreeController.animateScrollToKey] returns false without
+  /// scrolling.
+  none,
+
+  /// Expand every collapsed ancestor synchronously (no animation) before
+  /// starting the scroll. The layout settles immediately, then the scroll
+  /// animates to the final position.
+  immediate,
+
+  /// Animate the expansion of collapsed ancestors and run the scroll
+  /// concurrently with it. Each animation tick, the scroll tracks the
+  /// target's current (animated) offset so it stays synchronized with
+  /// the layout as ancestors grow.
+  animated,
+}
+
 /// Animation state for a single node (standalone animations only).
 ///
 /// Only nodes that are actively animating via individual expand/collapse have

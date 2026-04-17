@@ -930,26 +930,35 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
             childManager?.createChild(nodeId);
           }
         });
+        // Track whether any measured sticky extent actually differs from the
+        // prior stored (estimated) extent. When all match, Pass 1's offsets
+        // and subtree-bottom precompute are still valid, so both the O(N)
+        // offset recompute and the O(3N) subtree-bottom precompute can be
+        // skipped entirely.
+        bool stickyExtentsChanged = false;
         for (final nodeId in newStickyNodes) {
-          final extent = _layoutNodeChild(
-            nodeId, crossAxisExtent,
-          );
+          final nid = _controller.nidOf(nodeId);
+          final priorExtent = _nodeExtentsByNid[nid];
+          final extent = _layoutNodeChild(nodeId, crossAxisExtent);
           if (extent != null) {
-            _nodeExtentsByNid[_controller.nidOf(nodeId)] = extent;
+            _nodeExtentsByNid[nid] = extent;
+            if (extent != priorExtent) stickyExtentsChanged = true;
           }
         }
-        // Recompute offsets again since new sticky nodes may have changed extents.
-        totalScrollExtent = _recomputeOffsets(visibleNodes);
+        if (stickyExtentsChanged) {
+          totalScrollExtent = _recomputeOffsets(visibleNodes);
+          if (_maxStickyDepth > 0 && !hasAnimations) {
+            _precomputeStableSubtreeBottoms(visibleNodes);
+            _stickyPrecomputeDirty = false;
+          }
+        }
+        // Always write the newly-created sticky children's layoutOffset —
+        // they were outside the cache region during Pass 1 and never had it set.
         for (final nodeId in newStickyNodes) {
           final child = getChildForNode(nodeId);
           if (child == null) continue;
           final parentData = child.parentData! as SliverTreeParentData;
           parentData.layoutOffset = _nodeOffsetsByNid[_controller.nidOf(nodeId)];
-        }
-        // Re-precompute subtree bottoms with updated extents.
-        if (_maxStickyDepth > 0 && !hasAnimations) {
-          _precomputeStableSubtreeBottoms(visibleNodes);
-          _stickyPrecomputeDirty = false;
         }
       }
 

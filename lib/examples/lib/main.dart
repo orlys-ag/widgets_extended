@@ -24,7 +24,7 @@ class App extends StatelessWidget {
 }
 
 /// Discriminator for the kind of row a [Node] renders as.
-enum NodeKind { entry, menuRoot, menuPanel }
+enum NodeKind { entry, menuRoot, menuSection, menuPanel }
 
 /// Mutable domain node used by the example.
 class Node {
@@ -42,7 +42,12 @@ class Node {
 }
 
 const String _menuRootId = "__menu_root__";
-const String _menuPanelId = "__menu_panel__";
+const String _menuActionsId = "__menu_actions__";
+const String _menuActionsPanelId = "__menu_actions_panel__";
+const String _menuSettingsId = "__menu_settings__";
+const String _menuSettingsPanelId = "__menu_settings_panel__";
+const String _menuScrollId = "__menu_scroll__";
+const String _menuScrollPanelId = "__menu_scroll_panel__";
 
 /// Builds the initial example data set. A few extra-large folders are
 /// included so the `animateScrollToKey` demo has somewhere to scroll to.
@@ -129,7 +134,7 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
   // Controls for animateScrollToKey.
   double _scrollAlignment = 0.0;
   int _scrollDurationMs = 300;
-  bool _expandAncestorsOnScroll = true;
+  AncestorExpansionMode _ancestorExpansion = AncestorExpansionMode.animated;
 
   // A Key forces SyncedSliverTree to re-create when tree-wide config changes
   // that are asserted to be immutable after construction (indentWidth, etc.).
@@ -142,7 +147,8 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
   }
 
   /// The full root list shown by the tree: a synthetic Menu root followed
-  /// by the user's data roots.
+  /// by the user's data roots. The menu has three collapsible sub-sections,
+  /// each containing a panel widget.
   List<Node> get _allRoots {
     return <Node>[
       Node(
@@ -151,15 +157,53 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
         kind: NodeKind.menuRoot,
         children: <Node>[
           Node(
-            id: _menuPanelId,
-            name: "menu_panel",
-            kind: NodeKind.menuPanel,
+            id: _menuActionsId,
+            name: "Actions",
+            kind: NodeKind.menuSection,
+            children: <Node>[
+              Node(
+                id: _menuActionsPanelId,
+                name: "actions_panel",
+                kind: NodeKind.menuPanel,
+              ),
+            ],
+          ),
+          Node(
+            id: _menuSettingsId,
+            name: "Settings",
+            kind: NodeKind.menuSection,
+            children: <Node>[
+              Node(
+                id: _menuSettingsPanelId,
+                name: "settings_panel",
+                kind: NodeKind.menuPanel,
+              ),
+            ],
+          ),
+          Node(
+            id: _menuScrollId,
+            name: "animateScrollToKey",
+            kind: NodeKind.menuSection,
+            children: <Node>[
+              Node(
+                id: _menuScrollPanelId,
+                name: "scroll_panel",
+                kind: NodeKind.menuPanel,
+              ),
+            ],
           ),
         ],
       ),
       ..._userRoots,
     ];
   }
+
+  static const Set<String> _menuKeys = <String>{
+    _menuRootId,
+    _menuActionsId,
+    _menuSettingsId,
+    _menuScrollId,
+  };
 
   String _mintId(String base) {
     _nextId += 1;
@@ -372,25 +416,30 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
   }
 
   void _collapseAll(TreeController<String, Node> controller) {
+    // Snapshot the menu's expansion state so collapseAll only collapses the
+    // file tree from the user's perspective — the menu controls stay where
+    // the user left them.
+    final wasExpanded = <String>{
+      for (final key in _menuKeys)
+        if (controller.isExpanded(key)) key,
+    };
     controller.collapseAll();
-    // Keep the menu panel visible after a global collapse so the user
-    // doesn't lose the controls they just clicked.
-    controller.expand(key: _menuRootId);
+    for (final key in wasExpanded) {
+      controller.expand(key: key);
+    }
   }
 
   Future<void> _scrollToSelected(
     TreeController<String, Node> controller,
   ) async {
     final id = _selectedId;
-    if (id == null) {
-      return;
-    }
+    if (id == null) return;
     await controller.animateScrollToKey(
       id,
       scrollController: _scrollController,
       duration: Duration(milliseconds: _scrollDurationMs),
       alignment: _scrollAlignment,
-      expandAncestors: _expandAncestorsOnScroll,
+      ancestorExpansion: _ancestorExpansion,
     );
   }
 
@@ -431,51 +480,67 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
               switch (view.item.kind) {
                 case NodeKind.menuRoot:
                   return _MenuHeaderTile(view: view);
+                case NodeKind.menuSection:
+                  return _MenuSectionTile(view: view);
                 case NodeKind.menuPanel:
-                  return _MenuPanel(
-                    treeController: view.controller,
-                    hasSelection: hasSelection,
-                    selectionLabel: selectionLabel,
-                    onAddRoot: _addRoot,
-                    onAddChild: _addChild,
-                    onAddSibling: _addSibling,
-                    onRemove: hasSelection ? _removeSelected : null,
-                    onRename: hasSelection ? _renameSelected : null,
-                    onMoveUp: hasSelection ? () => _moveSelected(-1) : null,
-                    onMoveDown: hasSelection ? () => _moveSelected(1) : null,
-                    onShuffle: _shuffleChildren,
-                    onExpandAll: () => _expandAll(view.controller),
-                    onCollapseAll: () => _collapseAll(view.controller),
-                    initiallyExpanded: _initiallyExpanded,
-                    preserveExpansion: _preserveExpansion,
-                    indentWidth: _indentWidth,
-                    onInitiallyExpandedChanged: (value) {
-                      setState(() => _initiallyExpanded = value);
-                      _rebuildTreeWidget();
-                    },
-                    onPreserveExpansionChanged: (value) {
-                      setState(() => _preserveExpansion = value);
-                    },
-                    onIndentWidthChanged: (value) {
-                      setState(() => _indentWidth = value);
-                      _rebuildTreeWidget();
-                    },
-                    scrollAlignment: _scrollAlignment,
-                    scrollDurationMs: _scrollDurationMs,
-                    expandAncestorsOnScroll: _expandAncestorsOnScroll,
-                    onScrollAlignmentChanged: (value) {
-                      setState(() => _scrollAlignment = value);
-                    },
-                    onScrollDurationChanged: (value) {
-                      setState(() => _scrollDurationMs = value.round());
-                    },
-                    onExpandAncestorsOnScrollChanged: (value) {
-                      setState(() => _expandAncestorsOnScroll = value);
-                    },
-                    onScrollToSelected: hasSelection
-                        ? () => _scrollToSelected(view.controller)
-                        : null,
-                  );
+                  switch (view.key) {
+                    case _menuActionsPanelId:
+                      return _ActionsPanel(
+                        hasSelection: hasSelection,
+                        selectionLabel: selectionLabel,
+                        onAddRoot: _addRoot,
+                        onAddChild: _addChild,
+                        onAddSibling: _addSibling,
+                        onRemove: hasSelection ? _removeSelected : null,
+                        onRename: hasSelection ? _renameSelected : null,
+                        onMoveUp: hasSelection
+                            ? () => _moveSelected(-1)
+                            : null,
+                        onMoveDown: hasSelection
+                            ? () => _moveSelected(1)
+                            : null,
+                        onShuffle: _shuffleChildren,
+                        onExpandAll: () => _expandAll(view.controller),
+                        onCollapseAll: () => _collapseAll(view.controller),
+                      );
+                    case _menuSettingsPanelId:
+                      return _SettingsPanel(
+                        initiallyExpanded: _initiallyExpanded,
+                        preserveExpansion: _preserveExpansion,
+                        indentWidth: _indentWidth,
+                        onInitiallyExpandedChanged: (value) {
+                          setState(() => _initiallyExpanded = value);
+                          _rebuildTreeWidget();
+                        },
+                        onPreserveExpansionChanged: (value) {
+                          setState(() => _preserveExpansion = value);
+                        },
+                        onIndentWidthChanged: (value) {
+                          setState(() => _indentWidth = value);
+                          _rebuildTreeWidget();
+                        },
+                      );
+                    case _menuScrollPanelId:
+                      return _ScrollPanel(
+                        scrollAlignment: _scrollAlignment,
+                        scrollDurationMs: _scrollDurationMs,
+                        ancestorExpansion: _ancestorExpansion,
+                        onScrollAlignmentChanged: (value) {
+                          setState(() => _scrollAlignment = value);
+                        },
+                        onScrollDurationChanged: (value) {
+                          setState(() => _scrollDurationMs = value.round());
+                        },
+                        onAncestorExpansionChanged: (value) {
+                          setState(() => _ancestorExpansion = value);
+                        },
+                        onScrollToSelected: hasSelection
+                            ? () => _scrollToSelected(view.controller)
+                            : null,
+                      );
+                    default:
+                      return const SizedBox.shrink();
+                  }
                 case NodeKind.entry:
                   final isSelected = view.key == _selectedId;
                   return _TreeTile(
@@ -636,12 +701,71 @@ class _MenuHeaderTile extends StatelessWidget {
 }
 
 // =============================================================================
-// Menu panel — toolbar, settings, and animateScrollToKey controls
+// Sub-section header (collapsible row inside the Menu)
 // =============================================================================
 
-class _MenuPanel extends StatelessWidget {
-  const _MenuPanel({
-    required this.treeController,
+class _MenuSectionTile extends StatelessWidget {
+  const _MenuSectionTile({required this.view});
+
+  final TreeItemView<String, Node> view;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surfaceContainerHigh,
+      child: InkWell(
+        onTap: view.toggle,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 6, 12, 6),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                view.isExpanded
+                    ? Icons.keyboard_arrow_down
+                    : Icons.keyboard_arrow_right,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                view.item.name.toUpperCase(),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                  letterSpacing: 0.8,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Sub-section panels — Actions, Settings, and animateScrollToKey
+// =============================================================================
+
+class _PanelContainer extends StatelessWidget {
+  const _PanelContainer({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      color: theme.colorScheme.surfaceContainerLow,
+      padding: const EdgeInsets.fromLTRB(28, 8, 12, 12),
+      child: child,
+    );
+  }
+}
+
+class _ActionsPanel extends StatelessWidget {
+  const _ActionsPanel({
     required this.hasSelection,
     required this.selectionLabel,
     required this.onAddRoot,
@@ -654,25 +778,10 @@ class _MenuPanel extends StatelessWidget {
     required this.onShuffle,
     required this.onExpandAll,
     required this.onCollapseAll,
-    required this.initiallyExpanded,
-    required this.preserveExpansion,
-    required this.indentWidth,
-    required this.onInitiallyExpandedChanged,
-    required this.onPreserveExpansionChanged,
-    required this.onIndentWidthChanged,
-    required this.scrollAlignment,
-    required this.scrollDurationMs,
-    required this.expandAncestorsOnScroll,
-    required this.onScrollAlignmentChanged,
-    required this.onScrollDurationChanged,
-    required this.onExpandAncestorsOnScrollChanged,
-    required this.onScrollToSelected,
   });
 
-  final TreeController<String, Node> treeController;
   final bool hasSelection;
   final String selectionLabel;
-
   final VoidCallback onAddRoot;
   final VoidCallback onAddChild;
   final VoidCallback onAddSibling;
@@ -684,27 +793,10 @@ class _MenuPanel extends StatelessWidget {
   final VoidCallback onExpandAll;
   final VoidCallback onCollapseAll;
 
-  final bool initiallyExpanded;
-  final bool preserveExpansion;
-  final double indentWidth;
-  final ValueChanged<bool> onInitiallyExpandedChanged;
-  final ValueChanged<bool> onPreserveExpansionChanged;
-  final ValueChanged<double> onIndentWidthChanged;
-
-  final double scrollAlignment;
-  final int scrollDurationMs;
-  final bool expandAncestorsOnScroll;
-  final ValueChanged<double> onScrollAlignmentChanged;
-  final ValueChanged<double> onScrollDurationChanged;
-  final ValueChanged<bool> onExpandAncestorsOnScrollChanged;
-  final VoidCallback? onScrollToSelected;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      color: theme.colorScheme.surfaceContainerLow,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    return _PanelContainer(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -716,9 +808,7 @@ class _MenuPanel extends StatelessWidget {
                   : theme.colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 10),
-          const _SectionLabel("Actions"),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -775,75 +865,144 @@ class _MenuPanel extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          const _SectionLabel("Settings"),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 16,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsPanel extends StatelessWidget {
+  const _SettingsPanel({
+    required this.initiallyExpanded,
+    required this.preserveExpansion,
+    required this.indentWidth,
+    required this.onInitiallyExpandedChanged,
+    required this.onPreserveExpansionChanged,
+    required this.onIndentWidthChanged,
+  });
+
+  final bool initiallyExpanded;
+  final bool preserveExpansion;
+  final double indentWidth;
+  final ValueChanged<bool> onInitiallyExpandedChanged;
+  final ValueChanged<bool> onPreserveExpansionChanged;
+  final ValueChanged<double> onIndentWidthChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _PanelContainer(
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: <Widget>[
+          _SwitchField(
+            label: "initiallyExpanded",
+            value: initiallyExpanded,
+            onChanged: onInitiallyExpandedChanged,
+          ),
+          _SwitchField(
+            label: "preserveExpansion",
+            value: preserveExpansion,
+            onChanged: onPreserveExpansionChanged,
+          ),
+          _LabeledSlider(
+            label: "indentWidth",
+            value: indentWidth,
+            min: 0,
+            max: 48,
+            divisions: 12,
+            width: 240,
+            valueLabel: indentWidth.toStringAsFixed(0),
+            onChanged: onIndentWidthChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ScrollPanel extends StatelessWidget {
+  const _ScrollPanel({
+    required this.scrollAlignment,
+    required this.scrollDurationMs,
+    required this.ancestorExpansion,
+    required this.onScrollAlignmentChanged,
+    required this.onScrollDurationChanged,
+    required this.onAncestorExpansionChanged,
+    required this.onScrollToSelected,
+  });
+
+  final double scrollAlignment;
+  final int scrollDurationMs;
+  final AncestorExpansionMode ancestorExpansion;
+  final ValueChanged<double> onScrollAlignmentChanged;
+  final ValueChanged<double> onScrollDurationChanged;
+  final ValueChanged<AncestorExpansionMode> onAncestorExpansionChanged;
+  final VoidCallback? onScrollToSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return _PanelContainer(
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: <Widget>[
+          _LabeledSlider(
+            label: "alignment",
+            value: scrollAlignment,
+            min: 0.0,
+            max: 1.0,
+            divisions: 10,
+            width: 280,
+            valueLabel: scrollAlignment.toStringAsFixed(1),
+            onChanged: onScrollAlignmentChanged,
+          ),
+          _LabeledSlider(
+            label: "duration (ms)",
+            value: scrollDurationMs.toDouble(),
+            min: 0,
+            max: 2000,
+            divisions: 20,
+            width: 300,
+            valueLabel: "$scrollDurationMs",
+            onChanged: onScrollDurationChanged,
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              _SwitchField(
-                label: "initiallyExpanded",
-                value: initiallyExpanded,
-                onChanged: onInitiallyExpandedChanged,
-              ),
-              _SwitchField(
-                label: "preserveExpansion",
-                value: preserveExpansion,
-                onChanged: onPreserveExpansionChanged,
-              ),
-              _LabeledSlider(
-                label: "indentWidth",
-                value: indentWidth,
-                min: 0,
-                max: 48,
-                divisions: 12,
-                width: 240,
-                valueLabel: indentWidth.toStringAsFixed(0),
-                onChanged: onIndentWidthChanged,
+              const Text("ancestors:"),
+              const SizedBox(width: 8),
+              SegmentedButton<AncestorExpansionMode>(
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                ),
+                segments: const <ButtonSegment<AncestorExpansionMode>>[
+                  ButtonSegment<AncestorExpansionMode>(
+                    value: AncestorExpansionMode.none,
+                    label: Text("none"),
+                  ),
+                  ButtonSegment<AncestorExpansionMode>(
+                    value: AncestorExpansionMode.immediate,
+                    label: Text("immediate"),
+                  ),
+                  ButtonSegment<AncestorExpansionMode>(
+                    value: AncestorExpansionMode.animated,
+                    label: Text("animated"),
+                  ),
+                ],
+                selected: <AncestorExpansionMode>{ancestorExpansion},
+                onSelectionChanged: (selection) {
+                  onAncestorExpansionChanged(selection.first);
+                },
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          const _SectionLabel("animateScrollToKey"),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 16,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              _LabeledSlider(
-                label: "alignment",
-                value: scrollAlignment,
-                min: 0.0,
-                max: 1.0,
-                divisions: 10,
-                width: 280,
-                valueLabel: scrollAlignment.toStringAsFixed(1),
-                onChanged: onScrollAlignmentChanged,
-              ),
-              _LabeledSlider(
-                label: "duration (ms)",
-                value: scrollDurationMs.toDouble(),
-                min: 0,
-                max: 2000,
-                divisions: 20,
-                width: 300,
-                valueLabel: "$scrollDurationMs",
-                onChanged: onScrollDurationChanged,
-              ),
-              _SwitchField(
-                label: "expandAncestors",
-                value: expandAncestorsOnScroll,
-                onChanged: onExpandAncestorsOnScrollChanged,
-              ),
-              FilledButton.icon(
-                onPressed: onScrollToSelected,
-                icon: const Icon(Icons.center_focus_strong, size: 18),
-                label: const Text("Scroll to selected"),
-              ),
-            ],
+          FilledButton.icon(
+            onPressed: onScrollToSelected,
+            icon: const Icon(Icons.center_focus_strong, size: 18),
+            label: const Text("Scroll to selected"),
           ),
         ],
       ),
@@ -854,25 +1013,6 @@ class _MenuPanel extends StatelessWidget {
 // =============================================================================
 // Small UI helpers
 // =============================================================================
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Text(
-      text.toUpperCase(),
-      style: theme.textTheme.labelSmall?.copyWith(
-        color: theme.colorScheme.primary,
-        letterSpacing: 0.8,
-        fontWeight: FontWeight.w700,
-      ),
-    );
-  }
-}
 
 class _ToolbarButton extends StatelessWidget {
   const _ToolbarButton({

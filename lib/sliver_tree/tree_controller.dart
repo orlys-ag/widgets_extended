@@ -325,6 +325,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     _visibleOrderNids[index] = nid;
     _visibleLen++;
+    _invalidateFullOffsetPrefix();
   }
 
   /// Appends [key]'s nid to the end of the visible order. [key] must be
@@ -332,6 +333,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void _visibleAddKey(TKey key) {
     _ensureVisibleCapacity(_visibleLen + 1);
     _visibleOrderNids[_visibleLen++] = _keyToNid[key]!;
+    _invalidateFullOffsetPrefix();
   }
 
   /// Inserts the nids of [keys] at visible index [index], preserving
@@ -347,6 +349,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _visibleOrderNids[index + i] = _keyToNid[keys[i]]!;
     }
     _visibleLen += n;
+    _invalidateFullOffsetPrefix();
   }
 
   /// Removes the entry at visible index [index], shifting the suffix left.
@@ -355,6 +358,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _visibleOrderNids[i] = _visibleOrderNids[i + 1];
     }
     _visibleLen--;
+    _invalidateFullOffsetPrefix();
   }
 
   /// Removes entries in `[start, end)` (half-open) from the visible order.
@@ -365,6 +369,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _visibleOrderNids[i] = _visibleOrderNids[i + n];
     }
     _visibleLen -= n;
+    _invalidateFullOffsetPrefix();
   }
 
   /// Compacts the visible order by dropping every entry whose key appears
@@ -380,6 +385,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (keys.contains(key)) continue;
       _visibleOrderNids[writeIdx++] = nid;
     }
+    if (writeIdx != _visibleLen) {
+      _invalidateFullOffsetPrefix();
+    }
     _visibleLen = writeIdx;
   }
 
@@ -388,6 +396,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [_resetVisibleIndexAll] or zero individual slots.
   void _visibleClear() {
     _visibleLen = 0;
+    _invalidateFullOffsetPrefix();
   }
 
   /// Clears the expanded flag for every registered node whose depth is
@@ -504,6 +513,100 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Scratch set reused to avoid per-frame allocation.
   final Set<TKey> _keysToRemoveScratch = {};
+
+  /// Lazy prefix sum of full (non-animated) extents over the current visible
+  /// order. When valid, `_fullOffsetPrefix[i]` is the sum of
+  /// `_fullExtents[k] ?? defaultExtent` for visible indices `0..i-1`, and
+  /// `_fullOffsetPrefix.length == _visibleLen + 1`.
+  ///
+  /// Invalidated by visible-order mutations and by [setFullExtent] when the
+  /// stored value actually changes. Rebuild is O(N) but amortized: the cache
+  /// survives animation frames because full extents don't change during
+  /// expand/collapse (only the animated extent does).
+  List<double>? _fullOffsetPrefix;
+  bool _fullOffsetPrefixDirty = true;
+
+  void _invalidateFullOffsetPrefix() {
+    _fullOffsetPrefixDirty = true;
+  }
+
+  /// Rebuilds [_fullOffsetPrefix] if dirty or stale. O(N) on rebuild, O(1)
+  /// when the cache is already valid.
+  void _ensureFullOffsetPrefix() {
+    final cached = _fullOffsetPrefix;
+    if (!_fullOffsetPrefixDirty &&
+        cached != null &&
+        cached.length == _visibleLen + 1) {
+      return;
+    }
+    final prefix = List<double>.filled(_visibleLen + 1, 0.0, growable: false);
+    double acc = 0.0;
+    for (int i = 0; i < _visibleLen; i++) {
+      final key = _nidToKey[_visibleOrderNids[i]] as TKey;
+      acc += _fullExtents[key] ?? defaultExtent;
+      prefix[i + 1] = acc;
+    }
+    _fullOffsetPrefix = prefix;
+    _fullOffsetPrefixDirty = false;
+  }
+
+  /// Returns the prefix-sum full-extent offset up to visible index [index]
+  /// (exclusive). Un-measured nodes contribute [defaultExtent]. O(1)
+  /// amortized via [_fullOffsetPrefix].
+  double _fullOffsetAt(int index) {
+    _ensureFullOffsetPrefix();
+    return _fullOffsetPrefix![index];
+  }
+
+  /// Lazy union of every currently-animating key across standalone, operation,
+  /// and bulk groups. Invalidation is signature-based: [_animationStateSig]
+  /// captures total membership counts across all three collections (each is
+  /// O(1)) so any add/remove triggers a rebuild on next access.
+  Set<TKey>? _animatingKeysCache;
+  int _animatingKeysCacheSig = -1;
+
+  /// Cached result of [computeFirstAnimatingVisibleIndex]. Depends on both
+  /// animation state and the visible order, so the signature combines
+  /// [_animationStateSig] with [_structureGeneration].
+  int _firstAnimatingIndexCacheSig = -1;
+  int _firstAnimatingIndexCacheVal = 0;
+
+  /// Cheap O(1) signature over all animation collections. A transfer that
+  /// keeps every collection's length identical would not change the signature,
+  /// but no controller path performs such a transfer atomically — moves always
+  /// pass through `_captureAndRemoveFromGroups` followed by a fresh insert,
+  /// which shifts at least one length on each side.
+  int _animationStateSig() {
+    int s = _standaloneAnimations.length;
+    s = s * 31 + _nodeToOperationGroup.length;
+    s = s * 31 + _operationGroups.length;
+    s = s * 31 + (_bulkAnimationGroup?.members.length ?? 0);
+    return s;
+  }
+
+  /// Returns a set of every currently-animating key. Rebuilt on demand when
+  /// [_animationStateSig] changes.
+  Set<TKey> _ensureAnimatingKeys() {
+    final sig = _animationStateSig();
+    final cached = _animatingKeysCache;
+    if (cached != null && sig == _animatingKeysCacheSig) return cached;
+    final set = <TKey>{};
+    if (_standaloneAnimations.isNotEmpty) {
+      set.addAll(_standaloneAnimations.keys);
+    }
+    if (_operationGroups.isNotEmpty) {
+      for (final g in _operationGroups.values) {
+        set.addAll(g.members.keys);
+      }
+    }
+    final bulk = _bulkAnimationGroup;
+    if (bulk != null && bulk.members.isNotEmpty) {
+      set.addAll(bulk.members);
+    }
+    _animatingKeysCache = set;
+    _animatingKeysCacheSig = sig;
+    return set;
+  }
 
   /// Builds a fresh synthetic entering state for [getAnimationState] to return
   /// for operation or bulk group members that are expanding. A fresh object
@@ -639,25 +742,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// much smaller than the visible-order length.
   int computeFirstAnimatingVisibleIndex() {
     if (!hasActiveAnimations) return _visibleLen;
+    // Cache key combines animation-state signature with structure generation:
+    // the result depends on which keys are animating AND their visible indices.
+    final sig = _animationStateSig() ^ (_structureGeneration * 2654435761);
+    if (sig == _firstAnimatingIndexCacheSig &&
+        _firstAnimatingIndexCacheVal <= _visibleLen) {
+      return _firstAnimatingIndexCacheVal;
+    }
     int min = _visibleLen;
-    void check(TKey k) {
+    for (final k in _ensureAnimatingKeys()) {
       final idx = _visibleIndexOf(k);
       if (idx != _kNotVisible && idx < min) min = idx;
     }
-    for (final group in _operationGroups.values) {
-      for (final k in group.members.keys) {
-        check(k);
-      }
-    }
-    final bulk = _bulkAnimationGroup;
-    if (bulk != null) {
-      for (final k in bulk.members) {
-        check(k);
-      }
-    }
-    for (final k in _standaloneAnimations.keys) {
-      check(k);
-    }
+    _firstAnimatingIndexCacheSig = sig;
+    _firstAnimatingIndexCacheVal = min;
     return min;
   }
 
@@ -679,12 +777,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     );
   }
 
-  /// Whether the given node is currently animating.
+  /// Whether the given node is currently animating. O(1) via the cached
+  /// [_ensureAnimatingKeys] set (rebuilt lazily when animation membership
+  /// changes).
   bool isAnimating(TKey key) {
-    if (_standaloneAnimations.containsKey(key)) return true;
-    if (_nodeToOperationGroup.containsKey(key)) return true;
-    if (_bulkAnimationGroup?.members.contains(key) == true) return true;
-    return false;
+    if (!hasActiveAnimations) return false;
+    return _ensureAnimatingKeys().contains(key);
   }
 
   /// Gets the animation state for a node, or null if not animating.
@@ -820,6 +918,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       _fullExtents[key] = extent;
+      if (oldExtent != extent) _invalidateFullOffsetPrefix();
       return;
     }
 
@@ -835,6 +934,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return;
     }
     _fullExtents[key] = extent;
+    _invalidateFullOffsetPrefix();
     // If node is animating with unknown target, update the animation
     final animation = _standaloneAnimations[key];
     if (animation != null && animation.targetExtent == _unknownExtent) {
@@ -887,16 +987,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }) {
     final targetIndex = _visibleIndexOf(key);
     if (targetIndex < 0) return null;
+    if (extentEstimator == null) {
+      // O(1) via cached prefix sum (rebuilt lazily when invalidated).
+      return _fullOffsetAt(targetIndex);
+    }
+    // Slow path: caller supplied an estimator for un-measured nodes. We can't
+    // use the cache because it falls back to [defaultExtent], which may
+    // disagree with the caller's estimator.
     double offset = 0.0;
     for (int i = 0; i < targetIndex; i++) {
-      final k = visibleNodes[i];
+      final k = _nidToKey[_visibleOrderNids[i]] as TKey;
       final measured = _fullExtents[k];
       if (measured != null) {
         offset += measured;
-      } else if (extentEstimator != null) {
-        offset += extentEstimator(k);
       } else {
-        offset += defaultExtent;
+        offset += extentEstimator(k);
       }
     }
     return offset;
@@ -938,9 +1043,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Animates [scrollController] to reveal [key] in its attached viewport.
   ///
-  /// If [expandAncestors] is true (default), any collapsed ancestors are
-  /// expanded synchronously before scrolling. If false and [key] lives
-  /// under a collapsed ancestor, returns false without scrolling.
+  /// [ancestorExpansion] controls how collapsed ancestors of [key] are
+  /// handled:
+  /// - [AncestorExpansionMode.none]: ancestors are not expanded. If any
+  ///   ancestor of [key] is collapsed, returns false without scrolling.
+  /// - [AncestorExpansionMode.immediate] (default): ancestors are expanded
+  ///   synchronously (no animation) before the scroll begins, so layout is
+  ///   already settled when [scrollController] starts moving.
+  /// - [AncestorExpansionMode.animated]: ancestors animate open while the
+  ///   scroll runs concurrently. Each animation tick the scroll target is
+  ///   re-derived from the current animated offsets so it stays glued to
+  ///   the moving target. A precise jump lands on the settled offset once
+  ///   both finish. In this mode the concurrent phase runs for
+  ///   `max(duration, animationDuration)` so both the expansion and the
+  ///   scroll have time to complete.
   ///
   /// [alignment] controls placement within the viewport:
   /// 0.0 pins the row's top to the viewport top (default), 0.5 centers,
@@ -965,7 +1081,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     Duration duration = const Duration(milliseconds: 300),
     Curve curve = Curves.easeInOut,
     double alignment = 0.0,
-    bool expandAncestors = true,
+    AncestorExpansionMode ancestorExpansion = AncestorExpansionMode.immediate,
     double Function(TKey key)? extentEstimator,
     double sliverBaseOffset = 0.0,
   }) async {
@@ -974,11 +1090,47 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       "alignment must be between 0.0 and 1.0",
     );
 
-    if (expandAncestors) ensureAncestorsExpanded(key);
+    if (!scrollController.hasClients) return false;
+
+    // Collect any ancestors that are currently collapsed.
+    final collapsedAncestors = <TKey>[];
+    {
+      TKey? current = _parentKeyOfKey(key);
+      while (current != null) {
+        if (!isExpanded(current)) collapsedAncestors.add(current);
+        current = _parentKeyOfKey(current);
+      }
+    }
+
+    // Animated concurrent expand+scroll. Falls back to the standard path
+    // when there's nothing to expand or when animations are disabled.
+    if (ancestorExpansion == AncestorExpansionMode.animated &&
+        collapsedAncestors.isNotEmpty &&
+        animationDuration != Duration.zero &&
+        duration != Duration.zero) {
+      return _animatedConcurrentScroll(
+        key: key,
+        ancestors: collapsedAncestors,
+        scrollController: scrollController,
+        duration: duration,
+        curve: curve,
+        alignment: alignment,
+        extentEstimator: extentEstimator,
+        sliverBaseOffset: sliverBaseOffset,
+      );
+    }
+
+    if (ancestorExpansion == AncestorExpansionMode.none &&
+        collapsedAncestors.isNotEmpty) {
+      return false;
+    }
+
+    if (collapsedAncestors.isNotEmpty) {
+      ensureAncestorsExpanded(key);
+    }
 
     final sliverOffset = scrollOffsetOf(key, extentEstimator: extentEstimator);
     if (sliverOffset == null) return false;
-    if (!scrollController.hasClients) return false;
 
     final position = scrollController.position;
     final viewportExtent = position.viewportDimension;
@@ -999,6 +1151,107 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         curve: curve,
       );
     }
+    return true;
+  }
+
+  /// Runs ancestor expansion concurrently with a scroll animation, with
+  /// each animation tick re-deriving the target from the current animated
+  /// offsets. Required because the rendered sliver's `scrollExtent` uses
+  /// animated extents — `position.maxScrollExtent` is undersized while
+  /// ancestors grow, so a one-shot `animateTo` would clamp short.
+  Future<bool> _animatedConcurrentScroll({
+    required TKey key,
+    required List<TKey> ancestors,
+    required ScrollController scrollController,
+    required Duration duration,
+    required Curve curve,
+    required double alignment,
+    required double Function(TKey key)? extentEstimator,
+    required double sliverBaseOffset,
+  }) async {
+    final position = scrollController.position;
+    final initialPixels = position.pixels;
+    final stopwatch = Stopwatch()..start();
+    final scrollMs = duration.inMilliseconds;
+    final expandMs = animationDuration.inMilliseconds;
+    final totalMs = scrollMs > expandMs ? scrollMs : expandMs;
+
+    // Root-first: each expansion runs against an already-visible parent.
+    for (int i = ancestors.length - 1; i >= 0; i--) {
+      expand(key: ancestors[i], animate: true);
+    }
+
+    void follower() {
+      final targetIdx = _visibleIndexOf(key);
+      if (targetIdx < 0) return;
+      final progress = scrollMs == 0
+          ? 1.0
+          : (stopwatch.elapsedMilliseconds / scrollMs).clamp(0.0, 1.0);
+      final tCurved = curve.transform(progress);
+
+      // Base offset from the cached full-extent prefix sum (O(1) amortized).
+      // Then correct for each animating node whose visible index precedes
+      // the target: swap its full extent for its current (animated) extent.
+      // The number of animating nodes is typically tiny compared to N.
+      double currentOffset = _fullOffsetAt(targetIdx);
+      void correct(TKey k) {
+        final idx = _visibleIndexOf(k);
+        if (idx < 0 || idx >= targetIdx) return;
+        final full = _fullExtents[k] ?? defaultExtent;
+        currentOffset += getCurrentExtent(k) - full;
+      }
+      for (final group in _operationGroups.values) {
+        for (final k in group.members.keys) {
+          correct(k);
+        }
+      }
+      final bulk = _bulkAnimationGroup;
+      if (bulk != null) {
+        for (final k in bulk.members) {
+          correct(k);
+        }
+      }
+      for (final k in _standaloneAnimations.keys) {
+        correct(k);
+      }
+
+      final rowExtent = getCurrentExtent(key);
+      final viewportExtent = position.viewportDimension;
+      final desired =
+          sliverBaseOffset + currentOffset - (viewportExtent - rowExtent) * alignment;
+      final desiredClamped = desired.clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      final scroll =
+          initialPixels + (desiredClamped - initialPixels) * tCurved;
+      position.jumpTo(
+        scroll.clamp(position.minScrollExtent, position.maxScrollExtent),
+      );
+    }
+
+    addAnimationListener(follower);
+    await Future<void>.delayed(Duration(milliseconds: totalMs));
+    removeAnimationListener(follower);
+
+    if (!scrollController.hasClients) return true;
+
+    // Final precise snap. Layout is settled, so scrollOffsetOf returns the
+    // exact target — the running clamp may have drifted slightly while
+    // maxScrollExtent was still catching up.
+    final finalOffset = scrollOffsetOf(key, extentEstimator: extentEstimator);
+    if (finalOffset == null) return true;
+    final finalPosition = scrollController.position;
+    final viewportExtent = finalPosition.viewportDimension;
+    final rowExtent = extentOf(key, extentEstimator: extentEstimator);
+    final finalTarget =
+        sliverBaseOffset + finalOffset - (viewportExtent - rowExtent) * alignment;
+    finalPosition.jumpTo(
+      finalTarget.clamp(
+        finalPosition.minScrollExtent,
+        finalPosition.maxScrollExtent,
+      ),
+    );
     return true;
   }
 
@@ -1119,26 +1372,36 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Binary-searches [siblings] for the sorted insertion index of [node]
   /// using [comparator]. Skips pending-deletion keys.
+  ///
+  /// Fast path (no pending deletions): a plain binary search over [siblings]
+  /// with no allocation. Slow path: a linear scan that skips pending-deletion
+  /// entries, still without allocating an intermediate filtered list.
   int _sortedIndex(List<TKey> siblings, TreeNode<TKey, TData> node) {
     assert(comparator != null);
-    // Build a list of live siblings (skip pending-deletion).
-    final live = <TKey>[
-      for (final k in siblings)
-        if (!_pendingDeletion.contains(k)) k,
-    ];
-    int lo = 0, hi = live.length;
-    while (lo < hi) {
-      final mid = (lo + hi) >> 1;
-      final midNode = _dataOf(live[mid])!;
-      if (comparator!(midNode, node) <= 0) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
+    final cmp = comparator!;
+    if (_pendingDeletion.isEmpty) {
+      int lo = 0, hi = siblings.length;
+      while (lo < hi) {
+        final mid = (lo + hi) >> 1;
+        final midNode = _dataOf(siblings[mid])!;
+        if (cmp(midNode, node) <= 0) {
+          lo = mid + 1;
+        } else {
+          hi = mid;
+        }
       }
+      return lo;
     }
-    // Map back to the full siblings list index (including pending-deletion).
-    if (lo >= live.length) return siblings.length;
-    return siblings.indexOf(live[lo]);
+    // Pending-deletion keys are intermixed, so a binary search would need a
+    // rank-mapping structure to locate live entries. A single linear scan is
+    // allocation-free and competitive for typical sibling counts.
+    for (int i = 0; i < siblings.length; i++) {
+      final k = siblings[i];
+      if (_pendingDeletion.contains(k)) continue;
+      final other = _dataOf(k)!;
+      if (cmp(other, node) > 0) return i;
+    }
+    return siblings.length;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -3137,7 +3400,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Removes a single key from all internal maps (but not from _visibleOrder,
   /// _roots, or the parent's _children list — those are handled by the caller).
   void _purgeNodeData(TKey key) {
-    _fullExtents.remove(key);
+    if (_fullExtents.remove(key) != null) _invalidateFullOffsetPrefix();
     // Clean up standalone animation state
     _standaloneAnimations.remove(key);
     // Clean up operation group membership

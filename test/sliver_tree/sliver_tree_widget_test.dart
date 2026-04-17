@@ -948,7 +948,8 @@ void main() {
       expect(scrollController.position.pixels, 100.0);
     });
 
-    testWidgets("expandAncestors=true reveals a collapsed descendant",
+    testWidgets(
+        "ancestorExpansion=immediate reveals a collapsed descendant",
         (tester) async {
       late TreeController<String, String> controller;
       late ScrollController scrollController;
@@ -986,7 +987,7 @@ void main() {
     });
 
     testWidgets(
-        "expandAncestors=false returns false for a collapsed descendant",
+        "ancestorExpansion=none returns false for a collapsed descendant",
         (tester) async {
       late TreeController<String, String> controller;
       late ScrollController scrollController;
@@ -1011,7 +1012,7 @@ void main() {
       final ok = await controller.animateScrollToKey(
         "k2a",
         scrollController: scrollController,
-        expandAncestors: false,
+        ancestorExpansion: AncestorExpansionMode.none,
       );
       expect(ok, false);
       expect(controller.isExpanded("k2"), false);

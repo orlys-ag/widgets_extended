@@ -15,4 +15,9 @@ export 'tree_controller.dart' show TreeController;
 export 'tree_node_builder.dart' show TreeNodeBuilder;
 export 'tree_sync_controller.dart' show TreeSyncController;
 export 'types.dart'
-    show AnimationState, AnimationType, SliverTreeParentData, TreeNode;
+    show
+        AncestorExpansionMode,
+        AnimationState,
+        AnimationType,
+        SliverTreeParentData,
+        TreeNode;
