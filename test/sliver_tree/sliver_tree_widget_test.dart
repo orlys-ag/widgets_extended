@@ -845,6 +845,235 @@ void main() {
       },
     );
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SCROLL-TO-KEY
+  // ══════════════════════════════════════════════════════════════════════════
+
+  group("animateScrollToKey", () {
+    // Estimator matching the harness row height so offset math is
+    // deterministic even for rows that haven't been laid out yet (the
+    // render cache only measures rows in or near the viewport).
+    double estimator50(String _) => 50.0;
+
+    testWidgets("jumps an off-screen target to the top of the viewport",
+        (tester) async {
+      late TreeController<String, String> controller;
+      late ScrollController scrollController;
+
+      await tester.pumpWidget(
+        _ScrollToKeyHarness(
+          rowHeight: 50,
+          rowCount: 40,
+          onReady: (c, s) {
+            controller = c;
+            scrollController = s;
+          },
+        ),
+      );
+      await tester.pump();
+      expect(scrollController.position.pixels, 0.0);
+
+      // k20 sits at y=1000 in sliver-space. alignment=0 → target 1000.
+      final ok = await controller.animateScrollToKey(
+        "k20",
+        scrollController: scrollController,
+        duration: Duration.zero,
+        extentEstimator: estimator50,
+      );
+      expect(ok, true);
+      await tester.pump();
+
+      expect(scrollController.position.pixels, 1000.0);
+      expect(find.text("k20"), findsOneWidget);
+    });
+
+    testWidgets("alignment=0.5 centers the row in the viewport",
+        (tester) async {
+      late TreeController<String, String> controller;
+      late ScrollController scrollController;
+
+      await tester.pumpWidget(
+        _ScrollToKeyHarness(
+          rowHeight: 50,
+          rowCount: 60,
+          onReady: (c, s) {
+            controller = c;
+            scrollController = s;
+          },
+        ),
+      );
+      await tester.pump();
+
+      // k30 at sliver offset 1500. Viewport=400, row=50.
+      // Centered: 1500 - (400 - 50) * 0.5 = 1325.
+      final ok = await controller.animateScrollToKey(
+        "k30",
+        scrollController: scrollController,
+        duration: Duration.zero,
+        alignment: 0.5,
+        extentEstimator: estimator50,
+      );
+      expect(ok, true);
+      await tester.pump();
+      expect(scrollController.position.pixels, 1325.0);
+    });
+
+    testWidgets("clamps target into scroll bounds at the tail", (tester) async {
+      late TreeController<String, String> controller;
+      late ScrollController scrollController;
+
+      await tester.pumpWidget(
+        _ScrollToKeyHarness(
+          rowHeight: 50,
+          rowCount: 10,
+          onReady: (c, s) {
+            controller = c;
+            scrollController = s;
+          },
+        ),
+      );
+      await tester.pump();
+
+      // Total extent = 500, viewport = 400 → maxScrollExtent = 100.
+      // k9 at 450 would pin top there, but clamp caps at 100.
+      final ok = await controller.animateScrollToKey(
+        "k9",
+        scrollController: scrollController,
+        duration: Duration.zero,
+        extentEstimator: estimator50,
+      );
+      expect(ok, true);
+      await tester.pump();
+      expect(scrollController.position.pixels, 100.0);
+    });
+
+    testWidgets("expandAncestors=true reveals a collapsed descendant",
+        (tester) async {
+      late TreeController<String, String> controller;
+      late ScrollController scrollController;
+
+      await tester.pumpWidget(
+        _ScrollToKeyHarness(
+          rowHeight: 50,
+          rowCount: 5,
+          onReady: (c, s) {
+            controller = c;
+            scrollController = s;
+          },
+        ),
+      );
+      await tester.pump();
+
+      controller.setChildren("k2", [
+        TreeNode(key: "k2a", data: "k2a"),
+      ]);
+      await tester.pump();
+
+      expect(controller.getVisibleIndex("k2a"), -1);
+
+      final ok = await controller.animateScrollToKey(
+        "k2a",
+        scrollController: scrollController,
+        duration: Duration.zero,
+        extentEstimator: estimator50,
+      );
+      expect(ok, true);
+      await tester.pump();
+
+      expect(controller.isExpanded("k2"), true);
+      expect(controller.getVisibleIndex("k2a"), greaterThanOrEqualTo(0));
+    });
+
+    testWidgets(
+        "expandAncestors=false returns false for a collapsed descendant",
+        (tester) async {
+      late TreeController<String, String> controller;
+      late ScrollController scrollController;
+
+      await tester.pumpWidget(
+        _ScrollToKeyHarness(
+          rowHeight: 50,
+          rowCount: 5,
+          onReady: (c, s) {
+            controller = c;
+            scrollController = s;
+          },
+        ),
+      );
+      await tester.pump();
+
+      controller.setChildren("k2", [
+        TreeNode(key: "k2a", data: "k2a"),
+      ]);
+      await tester.pump();
+
+      final ok = await controller.animateScrollToKey(
+        "k2a",
+        scrollController: scrollController,
+        expandAncestors: false,
+      );
+      expect(ok, false);
+      expect(controller.isExpanded("k2"), false);
+      expect(scrollController.position.pixels, 0.0);
+    });
+
+    testWidgets("returns false for unknown key", (tester) async {
+      late TreeController<String, String> controller;
+      late ScrollController scrollController;
+
+      await tester.pumpWidget(
+        _ScrollToKeyHarness(
+          rowHeight: 50,
+          rowCount: 5,
+          onReady: (c, s) {
+            controller = c;
+            scrollController = s;
+          },
+        ),
+      );
+      await tester.pump();
+
+      final ok = await controller.animateScrollToKey(
+        "ghost",
+        scrollController: scrollController,
+      );
+      expect(ok, false);
+    });
+
+    testWidgets(
+        "non-zero duration dispatches an animation driven by pumpAndSettle",
+        (tester) async {
+      late TreeController<String, String> controller;
+      late ScrollController scrollController;
+
+      await tester.pumpWidget(
+        _ScrollToKeyHarness(
+          rowHeight: 50,
+          rowCount: 40,
+          onReady: (c, s) {
+            controller = c;
+            scrollController = s;
+          },
+        ),
+      );
+      await tester.pump();
+
+      // Fire-and-forget — do not await the returned Future, since in widget
+      // tests nothing drives the scroll Ticker until pumpAndSettle runs.
+      // The animateTo call dispatches the activity synchronously.
+      // ignore: unawaited_futures
+      controller.animateScrollToKey(
+        "k20",
+        scrollController: scrollController,
+        duration: const Duration(milliseconds: 100),
+        extentEstimator: estimator50,
+      );
+
+      await tester.pumpAndSettle();
+      expect(scrollController.position.pixels, 1000.0);
+    });
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -932,6 +1161,78 @@ class _DynamicHeightHarness extends StatelessWidget {
               },
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Harness that hosts a [SliverTree] and a [ScrollController] so tests can
+/// exercise [TreeController.animateScrollToKey] against a real viewport.
+class _ScrollToKeyHarness extends StatefulWidget {
+  const _ScrollToKeyHarness({
+    required this.rowHeight,
+    required this.rowCount,
+    required this.onReady,
+  });
+  final double rowHeight;
+  final int rowCount;
+  final void Function(
+    TreeController<String, String> controller,
+    ScrollController scrollController,
+  ) onReady;
+
+  @override
+  State<_ScrollToKeyHarness> createState() => _ScrollToKeyHarnessState();
+}
+
+class _ScrollToKeyHarnessState extends State<_ScrollToKeyHarness>
+    with TickerProviderStateMixin {
+  late final TreeController<String, String> _controller;
+  late final ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    _controller = TreeController<String, String>(
+      vsync: this,
+      animationDuration: Duration.zero,
+    );
+    _controller.setRoots([
+      for (int i = 0; i < widget.rowCount; i++)
+        TreeNode(key: "k$i", data: "row $i"),
+    ]);
+    widget.onReady(_controller, _scrollController);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          height: 400,
+          child: CustomScrollView(
+            controller: _scrollController,
+            slivers: [
+              SliverTree<String, String>(
+                controller: _controller,
+                nodeBuilder: (context, key, depth) {
+                  return SizedBox(
+                    height: widget.rowHeight,
+                    child: Text(key),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );

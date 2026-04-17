@@ -866,6 +866,143 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   TKey? getParent(TKey key) => _parentKeyOfKey(key);
 
   // ══════════════════════════════════════════════════════════════════════════
+  // SCROLL-TO-KEY SUPPORT
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Returns the sliver-space scroll offset of [key], or null if [key] is
+  /// not in the current visible order (e.g., ancestors collapsed, or key
+  /// not registered). The offset corresponds to the node's top edge within
+  /// the [SliverTree]'s own scroll extent.
+  ///
+  /// Walks preceding visible nodes and sums their full (non-animated)
+  /// extents, preferring measured values from the render pass and falling
+  /// back to [extentEstimator] or [defaultExtent] for nodes that have
+  /// never been laid out.
+  ///
+  /// For scrollables that contain other slivers above the tree, add those
+  /// slivers' combined extent to the returned value before seeking.
+  double? scrollOffsetOf(
+    TKey key, {
+    double Function(TKey key)? extentEstimator,
+  }) {
+    final targetIndex = _visibleIndexOf(key);
+    if (targetIndex < 0) return null;
+    double offset = 0.0;
+    for (int i = 0; i < targetIndex; i++) {
+      final k = visibleNodes[i];
+      final measured = _fullExtents[k];
+      if (measured != null) {
+        offset += measured;
+      } else if (extentEstimator != null) {
+        offset += extentEstimator(k);
+      } else {
+        offset += defaultExtent;
+      }
+    }
+    return offset;
+  }
+
+  /// Returns the best-known full (non-animated) extent for [key]: the
+  /// measured value if the node has ever been laid out, otherwise
+  /// [extentEstimator] if supplied, otherwise [defaultExtent]. Matches the
+  /// fallback chain used by [scrollOffsetOf].
+  double extentOf(
+    TKey key, {
+    double Function(TKey key)? extentEstimator,
+  }) {
+    final measured = _fullExtents[key];
+    if (measured != null) return measured;
+    if (extentEstimator != null) return extentEstimator(key);
+    return defaultExtent;
+  }
+
+  /// Immediately expands every collapsed ancestor of [key] so that [key]
+  /// becomes part of the visible order. Expansion is synchronous (no
+  /// animation) so a subsequent [scrollOffsetOf] call sees the updated
+  /// structure. Returns the number of ancestors that were expanded.
+  int ensureAncestorsExpanded(TKey key) {
+    final toExpand = <TKey>[];
+    TKey? current = _parentKeyOfKey(key);
+    while (current != null) {
+      if (!isExpanded(current)) toExpand.add(current);
+      current = _parentKeyOfKey(current);
+    }
+    if (toExpand.isEmpty) return 0;
+    // Expand root-first: each expansion operates on a list that already
+    // contains the parent being expanded against.
+    for (int i = toExpand.length - 1; i >= 0; i--) {
+      expand(key: toExpand[i], animate: false);
+    }
+    return toExpand.length;
+  }
+
+  /// Animates [scrollController] to reveal [key] in its attached viewport.
+  ///
+  /// If [expandAncestors] is true (default), any collapsed ancestors are
+  /// expanded synchronously before scrolling. If false and [key] lives
+  /// under a collapsed ancestor, returns false without scrolling.
+  ///
+  /// [alignment] controls placement within the viewport:
+  /// 0.0 pins the row's top to the viewport top (default), 0.5 centers,
+  /// 1.0 pins the row's bottom to the viewport bottom.
+  ///
+  /// For nodes that have never been laid out, [extentEstimator] supplies
+  /// a fallback height; without it, [defaultExtent] is used. A mismatch
+  /// between estimate and actual measurement may cause slight over- or
+  /// undershoot — the render pass that includes the target will snap to
+  /// the exact offset on the next frame.
+  ///
+  /// [sliverBaseOffset] is the scroll-space distance from the top of the
+  /// scrollable's content to the top of this sliver. It is added to the
+  /// computed sliver-local offset. Leave at 0.0 when [SliverTree] is the
+  /// first (or only) sliver in the [CustomScrollView].
+  ///
+  /// Returns true if a scroll was issued, false if [key] could not be
+  /// resolved or [scrollController] has no attached position.
+  Future<bool> animateScrollToKey(
+    TKey key, {
+    required ScrollController scrollController,
+    Duration duration = const Duration(milliseconds: 300),
+    Curve curve = Curves.easeInOut,
+    double alignment = 0.0,
+    bool expandAncestors = true,
+    double Function(TKey key)? extentEstimator,
+    double sliverBaseOffset = 0.0,
+  }) async {
+    assert(
+      alignment >= 0.0 && alignment <= 1.0,
+      "alignment must be between 0.0 and 1.0",
+    );
+
+    if (expandAncestors) ensureAncestorsExpanded(key);
+
+    final sliverOffset = scrollOffsetOf(key, extentEstimator: extentEstimator);
+    if (sliverOffset == null) return false;
+    if (!scrollController.hasClients) return false;
+
+    final position = scrollController.position;
+    final viewportExtent = position.viewportDimension;
+    final rowExtent = extentOf(key, extentEstimator: extentEstimator);
+    final rawTarget =
+        sliverBaseOffset + sliverOffset - (viewportExtent - rowExtent) * alignment;
+    final clamped = rawTarget.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+
+    if (duration == Duration.zero) {
+      position.jumpTo(clamped);
+    } else {
+      await position.animateTo(
+        clamped,
+        duration: duration,
+        curve: curve,
+      );
+    }
+    return true;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // ANIMATION LISTENERS
   // ══════════════════════════════════════════════════════════════════════════
 

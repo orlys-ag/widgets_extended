@@ -1937,4 +1937,167 @@ void main() {
       await tester.pumpAndSettle();
     });
   });
+
+  group('scroll-to-key', () {
+    testWidgets('scrollOffsetOf returns null for unregistered key',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: 'a', data: 'A')]);
+
+      expect(controller.scrollOffsetOf('ghost'), isNull);
+    });
+
+    testWidgets('scrollOffsetOf returns null for key under collapsed ancestor',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: 'a', data: 'A')]);
+      controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
+
+      // 'a' is collapsed, so 'a1' is not in the visible order.
+      expect(controller.scrollOffsetOf('a1'), isNull);
+    });
+
+    testWidgets('scrollOffsetOf sums default extents when nothing measured',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: 'a', data: 'A'),
+        TreeNode(key: 'b', data: 'B'),
+        TreeNode(key: 'c', data: 'C'),
+      ]);
+
+      // No layout has run, so _fullExtents is empty — falls back to
+      // defaultExtent (48.0) per row.
+      expect(controller.scrollOffsetOf('a'), 0.0);
+      expect(controller.scrollOffsetOf('b'), 48.0);
+      expect(controller.scrollOffsetOf('c'), 96.0);
+    });
+
+    testWidgets('scrollOffsetOf honors extentEstimator override',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: 'a', data: 'A'),
+        TreeNode(key: 'b', data: 'B'),
+        TreeNode(key: 'c', data: 'C'),
+      ]);
+
+      double estimator(String k) => k == 'b' ? 100.0 : 20.0;
+
+      // a at 0, b at 20 (a-estimated=20), c at 120 (a-estimated=20 + b-estimated=100)
+      expect(controller.scrollOffsetOf('c', extentEstimator: estimator), 120.0);
+    });
+
+    testWidgets('scrollOffsetOf prefers measured extent over estimator',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: 'a', data: 'A'),
+        TreeNode(key: 'b', data: 'B'),
+      ]);
+
+      // Simulate render-pass measurement: a = 72px.
+      controller.setFullExtent('a', 72.0);
+
+      // Estimator returns 999 for any key, but 'a' is measured at 72.
+      double estimator(String k) => 999.0;
+
+      expect(controller.scrollOffsetOf('b', extentEstimator: estimator), 72.0);
+    });
+
+    testWidgets('extentOf fallback chain: measured → estimator → default',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: 'a', data: 'A'),
+        TreeNode(key: 'b', data: 'B'),
+        TreeNode(key: 'c', data: 'C'),
+      ]);
+      controller.setFullExtent('a', 60.0);
+
+      double estimator(String k) => k == 'b' ? 40.0 : -1.0;
+
+      // Measured wins.
+      expect(controller.extentOf('a', extentEstimator: estimator), 60.0);
+      // Estimator fills in when no measurement.
+      expect(controller.extentOf('b', extentEstimator: estimator), 40.0);
+      // Default when neither.
+      expect(controller.extentOf('c'), TreeController.defaultExtent);
+    });
+
+    testWidgets(
+        'ensureAncestorsExpanded expands chain root-first, returns count',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: 'a', data: 'A')]);
+      controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
+      controller.setChildren('a1', [TreeNode(key: 'a1x', data: 'A1X')]);
+
+      // Nothing expanded yet: 'a1x' is not visible.
+      expect(controller.getVisibleIndex('a1x'), -1);
+
+      final expandedCount = controller.ensureAncestorsExpanded('a1x');
+
+      expect(expandedCount, 2); // 'a' and 'a1'
+      expect(controller.isExpanded('a'), true);
+      expect(controller.isExpanded('a1'), true);
+      expect(controller.visibleNodes, ['a', 'a1', 'a1x']);
+    });
+
+    testWidgets('ensureAncestorsExpanded is a no-op for roots and already-open',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: 'a', data: 'A'),
+        TreeNode(key: 'b', data: 'B'),
+      ]);
+      controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
+      controller.expand(key: 'a', animate: false);
+
+      // Root: nothing to expand.
+      expect(controller.ensureAncestorsExpanded('a'), 0);
+      // Descendant of already-expanded parent: nothing to expand.
+      expect(controller.ensureAncestorsExpanded('a1'), 0);
+    });
+  });
 }

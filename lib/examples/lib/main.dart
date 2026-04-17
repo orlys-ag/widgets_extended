@@ -1,4 +1,3 @@
-import 'dart:developer';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -24,58 +23,86 @@ class App extends StatelessWidget {
   }
 }
 
+/// Discriminator for the kind of row a [Node] renders as.
+enum NodeKind { entry, menuRoot, menuPanel }
+
 /// Mutable domain node used by the example.
 class Node {
-  Node({required this.id, required this.name, List<Node>? children})
-    : children = children ?? <Node>[];
+  Node({
+    required this.id,
+    required this.name,
+    this.kind = NodeKind.entry,
+    List<Node>? children,
+  }) : children = children ?? <Node>[];
 
   final String id;
   String name;
+  final NodeKind kind;
   final List<Node> children;
 }
 
-/// Builds the initial example data set.
+const String _menuRootId = "__menu_root__";
+const String _menuPanelId = "__menu_panel__";
+
+/// Builds the initial example data set. A few extra-large folders are
+/// included so the `animateScrollToKey` demo has somewhere to scroll to.
 List<Node> _buildInitialTree() {
   return <Node>[
     Node(
-      id: 'docs',
-      name: 'Documents',
+      id: "docs",
+      name: "Documents",
       children: <Node>[
         Node(
-          id: 'docs/work',
-          name: 'Work',
+          id: "docs/work",
+          name: "Work",
           children: <Node>[
-            Node(id: 'docs/work/q1', name: 'Q1 report.pdf'),
-            Node(id: 'docs/work/q2', name: 'Q2 report.pdf'),
-            Node(id: 'docs/work/notes', name: 'Meeting notes.md'),
+            Node(id: "docs/work/q1", name: "Q1 report.pdf"),
+            Node(id: "docs/work/q2", name: "Q2 report.pdf"),
+            Node(id: "docs/work/notes", name: "Meeting notes.md"),
           ],
         ),
         Node(
-          id: 'docs/personal',
-          name: 'Personal',
+          id: "docs/personal",
+          name: "Personal",
           children: <Node>[
-            Node(id: 'docs/personal/taxes', name: 'Taxes 2025.pdf'),
-            Node(id: 'docs/personal/cv', name: 'CV.docx'),
+            Node(id: "docs/personal/taxes", name: "Taxes 2025.pdf"),
+            Node(id: "docs/personal/cv", name: "CV.docx"),
           ],
         ),
       ],
     ),
     Node(
-      id: 'media',
-      name: 'Media',
+      id: "media",
+      name: "Media",
       children: <Node>[
         Node(
-          id: 'media/photos',
-          name: 'Photos',
+          id: "media/photos",
+          name: "Photos",
           children: <Node>[
-            Node(id: 'media/photos/trip', name: 'Trip 2024'),
-            Node(id: 'media/photos/family', name: 'Family'),
+            Node(id: "media/photos/trip", name: "Trip 2024"),
+            Node(id: "media/photos/family", name: "Family"),
           ],
         ),
-        Node(id: 'media/music', name: 'Music'),
+        Node(id: "media/music", name: "Music"),
       ],
     ),
-    Node(id: 'downloads', name: 'Downloads'),
+    Node(id: "downloads", name: "Downloads"),
+    Node(
+      id: "gallery",
+      name: "Gallery",
+      children: <Node>[
+        for (int i = 0; i < 40; i++)
+          Node(id: "gallery/img$i", name: "image_$i.png"),
+      ],
+    ),
+    Node(
+      id: "logs",
+      name: "Logs",
+      children: <Node>[
+        for (int i = 0; i < 60; i++)
+          Node(id: "logs/log$i", name: "log_$i.txt"),
+      ],
+    ),
   ];
 }
 
@@ -88,34 +115,68 @@ class SyncedSliverTreeExample extends StatefulWidget {
 }
 
 class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
-  List<Node> _roots = _buildInitialTree();
+  List<Node> _userRoots = _buildInitialTree();
   String? _selectedId;
   int _nextId = 0;
   final _random = math.Random();
+  final ScrollController _scrollController = ScrollController();
 
   // Controls bound to SyncedSliverTree configuration.
   bool _initiallyExpanded = true;
   bool _preserveExpansion = true;
   double _indentWidth = 16;
 
+  // Controls for animateScrollToKey.
+  double _scrollAlignment = 0.0;
+  int _scrollDurationMs = 300;
+  bool _expandAncestorsOnScroll = true;
+
   // A Key forces SyncedSliverTree to re-create when tree-wide config changes
   // that are asserted to be immutable after construction (indentWidth, etc.).
   Key _treeKey = UniqueKey();
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// The full root list shown by the tree: a synthetic Menu root followed
+  /// by the user's data roots.
+  List<Node> get _allRoots {
+    return <Node>[
+      Node(
+        id: _menuRootId,
+        name: "Menu",
+        kind: NodeKind.menuRoot,
+        children: <Node>[
+          Node(
+            id: _menuPanelId,
+            name: "menu_panel",
+            kind: NodeKind.menuPanel,
+          ),
+        ],
+      ),
+      ..._userRoots,
+    ];
+  }
+
   String _mintId(String base) {
     _nextId += 1;
-    return '$base#$_nextId';
+    return "$base#$_nextId";
   }
 
   // ---------------------------------------------------------------------------
-  // Tree lookup helpers
+  // Tree lookup helpers (operate on user data only — menu nodes are excluded)
   // ---------------------------------------------------------------------------
 
   Node? _findById(String id) {
     Node? result;
     void walk(List<Node> list) {
       for (final node in list) {
-        if (result != null) return;
+        if (result != null) {
+          return;
+        }
         if (node.id == id) {
           result = node;
           return;
@@ -124,18 +185,20 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
       }
     }
 
-    walk(_roots);
+    walk(_userRoots);
     return result;
   }
 
   /// Returns the parent list that contains [id] (root list if top-level).
   List<Node>? _parentListOf(String id) {
-    if (_roots.any((n) => n.id == id)) {
-      return _roots;
+    if (_userRoots.any((n) => n.id == id)) {
+      return _userRoots;
     }
     List<Node>? found;
     void walk(Node node) {
-      if (found != null) return;
+      if (found != null) {
+        return;
+      }
       if (node.children.any((c) => c.id == id)) {
         found = node.children;
         return;
@@ -145,7 +208,7 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
       }
     }
 
-    for (final root in _roots) {
+    for (final root in _userRoots) {
       walk(root);
     }
     return found;
@@ -157,7 +220,7 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
 
   void _addRoot() {
     setState(() {
-      _roots.add(Node(id: _mintId('root'), name: 'New root'));
+      _userRoots.add(Node(id: _mintId("root"), name: "New root"));
     });
   }
 
@@ -168,10 +231,12 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
       return;
     }
     final parent = _findById(id);
-    if (parent == null) return;
+    if (parent == null) {
+      return;
+    }
     setState(() {
       parent.children.add(
-        Node(id: _mintId('${parent.id}/child'), name: 'New child'),
+        Node(id: _mintId("${parent.id}/child"), name: "New child"),
       );
     });
   }
@@ -183,22 +248,30 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
       return;
     }
     final siblings = _parentListOf(id);
-    if (siblings == null) return;
+    if (siblings == null) {
+      return;
+    }
     final index = siblings.indexWhere((n) => n.id == id);
-    if (index < 0) return;
+    if (index < 0) {
+      return;
+    }
     setState(() {
       siblings.insert(
         index + 1,
-        Node(id: _mintId('sibling'), name: 'New sibling'),
+        Node(id: _mintId("sibling"), name: "New sibling"),
       );
     });
   }
 
   void _removeSelected() {
     final id = _selectedId;
-    if (id == null) return;
+    if (id == null) {
+      return;
+    }
     final siblings = _parentListOf(id);
-    if (siblings == null) return;
+    if (siblings == null) {
+      return;
+    }
     setState(() {
       siblings.removeWhere((n) => n.id == id);
       _selectedId = null;
@@ -207,12 +280,18 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
 
   void _moveSelected(int delta) {
     final id = _selectedId;
-    if (id == null) return;
+    if (id == null) {
+      return;
+    }
     final siblings = _parentListOf(id);
-    if (siblings == null) return;
+    if (siblings == null) {
+      return;
+    }
     final index = siblings.indexWhere((n) => n.id == id);
     final target = index + delta;
-    if (index < 0 || target < 0 || target >= siblings.length) return;
+    if (index < 0 || target < 0 || target >= siblings.length) {
+      return;
+    }
     setState(() {
       final node = siblings.removeAt(index);
       siblings.insert(target, node);
@@ -221,8 +300,10 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
 
   void _shuffleChildren() {
     final id = _selectedId;
-    final list = id == null ? _roots : _findById(id)?.children;
-    if (list == null || list.length < 2) return;
+    final list = id == null ? _userRoots : _findById(id)?.children;
+    if (list == null || list.length < 2) {
+      return;
+    }
     setState(() {
       list.shuffle(_random);
     });
@@ -230,35 +311,43 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
 
   Future<void> _renameSelected() async {
     final id = _selectedId;
-    if (id == null) return;
+    if (id == null) {
+      return;
+    }
     final node = _findById(id);
-    if (node == null) return;
+    if (node == null) {
+      return;
+    }
 
     final controller = TextEditingController(text: node.name);
     final newName = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename node'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Rename node"),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(border: OutlineInputBorder()),
+            onSubmitted: (value) => Navigator.of(context).pop(value),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Rename'),
-          ),
-        ],
-      ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text("Rename"),
+            ),
+          ],
+        );
+      },
     );
 
-    if (newName == null || newName.isEmpty) return;
+    if (newName == null || newName.isEmpty) {
+      return;
+    }
     setState(() {
       node.name = newName;
     });
@@ -266,7 +355,7 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
 
   void _reset() {
     setState(() {
-      _roots = _buildInitialTree();
+      _userRoots = _buildInitialTree();
       _selectedId = null;
       _nextId = 0;
     });
@@ -278,6 +367,33 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
     });
   }
 
+  void _expandAll(TreeController<String, Node> controller) {
+    controller.expandAll();
+  }
+
+  void _collapseAll(TreeController<String, Node> controller) {
+    controller.collapseAll();
+    // Keep the menu panel visible after a global collapse so the user
+    // doesn't lose the controls they just clicked.
+    controller.expand(key: _menuRootId);
+  }
+
+  Future<void> _scrollToSelected(
+    TreeController<String, Node> controller,
+  ) async {
+    final id = _selectedId;
+    if (id == null) {
+      return;
+    }
+    await controller.animateScrollToKey(
+      id,
+      scrollController: _scrollController,
+      duration: Duration(milliseconds: _scrollDurationMs),
+      alignment: _scrollAlignment,
+      expandAncestors: _expandAncestorsOnScroll,
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
@@ -285,78 +401,97 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
   @override
   Widget build(BuildContext context) {
     final hasSelection = _selectedId != null;
+    final selectionLabel = _selectedId == null
+        ? "No selection — actions apply to roots"
+        : "Selected: ${_findById(_selectedId!)?.name ?? _selectedId}";
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SyncedSliverTree example'),
+        title: const Text("SyncedSliverTree example"),
         actions: <Widget>[
           IconButton(
-            tooltip: 'Reset tree',
+            tooltip: "Reset tree",
             icon: const Icon(Icons.restart_alt),
             onPressed: _reset,
           ),
         ],
       ),
-      body: Column(
-        children: <Widget>[
-          _Toolbar(
-            hasSelection: hasSelection,
-            selectionLabel: _selectedId == null
-                ? 'No selection — actions apply to roots'
-                : 'Selected: ${_findById(_selectedId!)?.name ?? _selectedId}',
-            onAddRoot: _addRoot,
-            onAddChild: _addChild,
-            onAddSibling: _addSibling,
-            onRemove: hasSelection ? _removeSelected : null,
-            onRename: hasSelection ? _renameSelected : null,
-            onMoveUp: hasSelection ? () => _moveSelected(-1) : null,
-            onMoveDown: hasSelection ? () => _moveSelected(1) : null,
-            onShuffle: _shuffleChildren,
-          ),
-          _ConfigBar(
+      body: CustomScrollView(
+        controller: _scrollController,
+        slivers: <Widget>[
+          SyncedSliverTree<String, Node>.hierarchy(
+            key: _treeKey,
+            roots: _allRoots,
+            keyOf: (node) => node.id,
+            childrenOf: (node) => node.children,
             initiallyExpanded: _initiallyExpanded,
             preserveExpansion: _preserveExpansion,
             indentWidth: _indentWidth,
-            onInitiallyExpandedChanged: (value) {
-              setState(() => _initiallyExpanded = value);
-              _rebuildTreeWidget();
-            },
-            onPreserveExpansionChanged: (value) {
-              setState(() => _preserveExpansion = value);
-            },
-            onIndentWidthChanged: (value) {
-              setState(() => _indentWidth = value);
-              _rebuildTreeWidget();
+            itemBuilder: (context, view) {
+              switch (view.item.kind) {
+                case NodeKind.menuRoot:
+                  return _MenuHeaderTile(view: view);
+                case NodeKind.menuPanel:
+                  return _MenuPanel(
+                    treeController: view.controller,
+                    hasSelection: hasSelection,
+                    selectionLabel: selectionLabel,
+                    onAddRoot: _addRoot,
+                    onAddChild: _addChild,
+                    onAddSibling: _addSibling,
+                    onRemove: hasSelection ? _removeSelected : null,
+                    onRename: hasSelection ? _renameSelected : null,
+                    onMoveUp: hasSelection ? () => _moveSelected(-1) : null,
+                    onMoveDown: hasSelection ? () => _moveSelected(1) : null,
+                    onShuffle: _shuffleChildren,
+                    onExpandAll: () => _expandAll(view.controller),
+                    onCollapseAll: () => _collapseAll(view.controller),
+                    initiallyExpanded: _initiallyExpanded,
+                    preserveExpansion: _preserveExpansion,
+                    indentWidth: _indentWidth,
+                    onInitiallyExpandedChanged: (value) {
+                      setState(() => _initiallyExpanded = value);
+                      _rebuildTreeWidget();
+                    },
+                    onPreserveExpansionChanged: (value) {
+                      setState(() => _preserveExpansion = value);
+                    },
+                    onIndentWidthChanged: (value) {
+                      setState(() => _indentWidth = value);
+                      _rebuildTreeWidget();
+                    },
+                    scrollAlignment: _scrollAlignment,
+                    scrollDurationMs: _scrollDurationMs,
+                    expandAncestorsOnScroll: _expandAncestorsOnScroll,
+                    onScrollAlignmentChanged: (value) {
+                      setState(() => _scrollAlignment = value);
+                    },
+                    onScrollDurationChanged: (value) {
+                      setState(() => _scrollDurationMs = value.round());
+                    },
+                    onExpandAncestorsOnScrollChanged: (value) {
+                      setState(() => _expandAncestorsOnScroll = value);
+                    },
+                    onScrollToSelected: hasSelection
+                        ? () => _scrollToSelected(view.controller)
+                        : null,
+                  );
+                case NodeKind.entry:
+                  final isSelected = view.key == _selectedId;
+                  return _TreeTile(
+                    view: view,
+                    indent: view.depth * _indentWidth,
+                    isSelected: isSelected,
+                    onTap: () {
+                      setState(() {
+                        _selectedId = isSelected ? null : view.key;
+                      });
+                    },
+                  );
+              }
             },
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: CustomScrollView(
-              slivers: <Widget>[
-                SyncedSliverTree<String, Node>.hierarchy(
-                  key: _treeKey,
-                  roots: _roots,
-                  keyOf: (node) => node.id,
-                  childrenOf: (node) => node.children,
-                  initiallyExpanded: _initiallyExpanded,
-                  preserveExpansion: _preserveExpansion,
-                  itemBuilder: (context, view) {
-                    final isSelected = view.key == _selectedId;
-                    return _TreeTile(
-                      view: view,
-                      indent: view.depth * _indentWidth,
-                      isSelected: isSelected,
-                      onTap: () {
-                        setState(() {
-                          _selectedId = isSelected ? null : view.key;
-                        });
-                      },
-                    );
-                  },
-                ),
-                const SliverToBoxAdapter(child: SizedBox(height: 24)),
-              ],
-            ),
-          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
       ),
     );
@@ -364,7 +499,7 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
 }
 
 // =============================================================================
-// Tile
+// File / folder tile
 // =============================================================================
 
 class _TreeTile extends StatelessWidget {
@@ -437,7 +572,7 @@ class _TreeTile extends StatelessWidget {
               ),
               if (view.hasChildren)
                 Text(
-                  '${view.childCount}',
+                  "${view.childCount}",
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: fg.withValues(alpha: 0.7),
                   ),
@@ -451,11 +586,62 @@ class _TreeTile extends StatelessWidget {
 }
 
 // =============================================================================
-// Toolbar
+// Menu header (collapsible "Menu" tree row)
 // =============================================================================
 
-class _Toolbar extends StatelessWidget {
-  const _Toolbar({
+class _MenuHeaderTile extends StatelessWidget {
+  const _MenuHeaderTile({required this.view});
+
+  final TreeItemView<String, Node> view;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: InkWell(
+        onTap: view.toggle,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                view.isExpanded
+                    ? Icons.keyboard_arrow_down
+                    : Icons.keyboard_arrow_right,
+                size: 20,
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.tune, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                "Menu",
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                view.isExpanded ? "tap to collapse" : "tap to expand",
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Menu panel — toolbar, settings, and animateScrollToKey controls
+// =============================================================================
+
+class _MenuPanel extends StatelessWidget {
+  const _MenuPanel({
+    required this.treeController,
     required this.hasSelection,
     required this.selectionLabel,
     required this.onAddRoot,
@@ -466,10 +652,27 @@ class _Toolbar extends StatelessWidget {
     required this.onMoveUp,
     required this.onMoveDown,
     required this.onShuffle,
+    required this.onExpandAll,
+    required this.onCollapseAll,
+    required this.initiallyExpanded,
+    required this.preserveExpansion,
+    required this.indentWidth,
+    required this.onInitiallyExpandedChanged,
+    required this.onPreserveExpansionChanged,
+    required this.onIndentWidthChanged,
+    required this.scrollAlignment,
+    required this.scrollDurationMs,
+    required this.expandAncestorsOnScroll,
+    required this.onScrollAlignmentChanged,
+    required this.onScrollDurationChanged,
+    required this.onExpandAncestorsOnScrollChanged,
+    required this.onScrollToSelected,
   });
 
+  final TreeController<String, Node> treeController;
   final bool hasSelection;
   final String selectionLabel;
+
   final VoidCallback onAddRoot;
   final VoidCallback onAddChild;
   final VoidCallback onAddSibling;
@@ -478,13 +681,30 @@ class _Toolbar extends StatelessWidget {
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
   final VoidCallback onShuffle;
+  final VoidCallback onExpandAll;
+  final VoidCallback onCollapseAll;
+
+  final bool initiallyExpanded;
+  final bool preserveExpansion;
+  final double indentWidth;
+  final ValueChanged<bool> onInitiallyExpandedChanged;
+  final ValueChanged<bool> onPreserveExpansionChanged;
+  final ValueChanged<double> onIndentWidthChanged;
+
+  final double scrollAlignment;
+  final int scrollDurationMs;
+  final bool expandAncestorsOnScroll;
+  final ValueChanged<double> onScrollAlignmentChanged;
+  final ValueChanged<double> onScrollDurationChanged;
+  final ValueChanged<bool> onExpandAncestorsOnScrollChanged;
+  final VoidCallback? onScrollToSelected;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      color: theme.colorScheme.surfaceContainerHighest,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      color: theme.colorScheme.surfaceContainerLow,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -496,54 +716,159 @@ class _Toolbar extends StatelessWidget {
                   : theme.colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
+          const _SectionLabel("Actions"),
+          const SizedBox(height: 4),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: <Widget>[
               _ToolbarButton(
                 icon: Icons.add_box_outlined,
-                label: 'Add root',
+                label: "Add root",
                 onPressed: onAddRoot,
               ),
               _ToolbarButton(
                 icon: Icons.subdirectory_arrow_right,
-                label: 'Add child',
+                label: "Add child",
                 onPressed: onAddChild,
               ),
               _ToolbarButton(
                 icon: Icons.playlist_add,
-                label: 'Add sibling',
+                label: "Add sibling",
                 onPressed: onAddSibling,
               ),
               _ToolbarButton(
                 icon: Icons.edit_outlined,
-                label: 'Rename',
+                label: "Rename",
                 onPressed: onRename,
               ),
               _ToolbarButton(
                 icon: Icons.delete_outline,
-                label: 'Remove',
+                label: "Remove",
                 onPressed: onRemove,
               ),
               _ToolbarButton(
                 icon: Icons.arrow_upward,
-                label: 'Move up',
+                label: "Move up",
                 onPressed: onMoveUp,
               ),
               _ToolbarButton(
                 icon: Icons.arrow_downward,
-                label: 'Move down',
+                label: "Move down",
                 onPressed: onMoveDown,
               ),
               _ToolbarButton(
                 icon: Icons.shuffle,
-                label: 'Shuffle children',
+                label: "Shuffle children",
                 onPressed: onShuffle,
+              ),
+              _ToolbarButton(
+                icon: Icons.unfold_more,
+                label: "Expand all",
+                onPressed: onExpandAll,
+              ),
+              _ToolbarButton(
+                icon: Icons.unfold_less,
+                label: "Collapse all",
+                onPressed: onCollapseAll,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const _SectionLabel("Settings"),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 16,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              _SwitchField(
+                label: "initiallyExpanded",
+                value: initiallyExpanded,
+                onChanged: onInitiallyExpandedChanged,
+              ),
+              _SwitchField(
+                label: "preserveExpansion",
+                value: preserveExpansion,
+                onChanged: onPreserveExpansionChanged,
+              ),
+              _LabeledSlider(
+                label: "indentWidth",
+                value: indentWidth,
+                min: 0,
+                max: 48,
+                divisions: 12,
+                width: 240,
+                valueLabel: indentWidth.toStringAsFixed(0),
+                onChanged: onIndentWidthChanged,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const _SectionLabel("animateScrollToKey"),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 16,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              _LabeledSlider(
+                label: "alignment",
+                value: scrollAlignment,
+                min: 0.0,
+                max: 1.0,
+                divisions: 10,
+                width: 280,
+                valueLabel: scrollAlignment.toStringAsFixed(1),
+                onChanged: onScrollAlignmentChanged,
+              ),
+              _LabeledSlider(
+                label: "duration (ms)",
+                value: scrollDurationMs.toDouble(),
+                min: 0,
+                max: 2000,
+                divisions: 20,
+                width: 300,
+                valueLabel: "$scrollDurationMs",
+                onChanged: onScrollDurationChanged,
+              ),
+              _SwitchField(
+                label: "expandAncestors",
+                value: expandAncestorsOnScroll,
+                onChanged: onExpandAncestorsOnScrollChanged,
+              ),
+              FilledButton.icon(
+                onPressed: onScrollToSelected,
+                icon: const Icon(Icons.center_focus_strong, size: 18),
+                label: const Text("Scroll to selected"),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Small UI helpers
+// =============================================================================
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      text.toUpperCase(),
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: theme.colorScheme.primary,
+        letterSpacing: 0.8,
+        fontWeight: FontWeight.w700,
       ),
     );
   }
@@ -574,79 +899,6 @@ class _ToolbarButton extends StatelessWidget {
   }
 }
 
-// =============================================================================
-// Config bar
-// =============================================================================
-
-class _ConfigBar extends StatelessWidget {
-  const _ConfigBar({
-    required this.initiallyExpanded,
-    required this.preserveExpansion,
-    required this.indentWidth,
-    required this.onInitiallyExpandedChanged,
-    required this.onPreserveExpansionChanged,
-    required this.onIndentWidthChanged,
-  });
-
-  final bool initiallyExpanded;
-  final bool preserveExpansion;
-  final double indentWidth;
-  final ValueChanged<bool> onInitiallyExpandedChanged;
-  final ValueChanged<bool> onPreserveExpansionChanged;
-  final ValueChanged<double> onIndentWidthChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      color: theme.colorScheme.surfaceContainerLow,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Wrap(
-        spacing: 16,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: <Widget>[
-          _SwitchField(
-            label: 'initiallyExpanded',
-            value: initiallyExpanded,
-            onChanged: onInitiallyExpandedChanged,
-          ),
-          _SwitchField(
-            label: 'preserveExpansion',
-            value: preserveExpansion,
-            onChanged: onPreserveExpansionChanged,
-          ),
-          SizedBox(
-            width: 240,
-            child: Row(
-              children: <Widget>[
-                const Text('indentWidth'),
-                Expanded(
-                  child: Slider(
-                    value: indentWidth,
-                    min: 0,
-                    max: 48,
-                    divisions: 12,
-                    label: indentWidth.toStringAsFixed(0),
-                    onChanged: onIndentWidthChanged,
-                  ),
-                ),
-                SizedBox(
-                  width: 28,
-                  child: Text(
-                    indentWidth.toStringAsFixed(0),
-                    textAlign: TextAlign.end,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _SwitchField extends StatelessWidget {
   const _SwitchField({
     required this.label,
@@ -667,6 +919,54 @@ class _SwitchField extends StatelessWidget {
         const SizedBox(width: 4),
         Text(label),
       ],
+    );
+  }
+}
+
+class _LabeledSlider extends StatelessWidget {
+  const _LabeledSlider({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.divisions,
+    required this.width,
+    required this.valueLabel,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int divisions;
+  final double width;
+  final String valueLabel;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Row(
+        children: <Widget>[
+          Text(label),
+          Expanded(
+            child: Slider(
+              value: value,
+              min: min,
+              max: max,
+              divisions: divisions,
+              label: valueLabel,
+              onChanged: onChanged,
+            ),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(valueLabel, textAlign: TextAlign.end),
+          ),
+        ],
+      ),
     );
   }
 }
