@@ -104,8 +104,7 @@ List<Node> _buildInitialTree() {
       id: "logs",
       name: "Logs",
       children: <Node>[
-        for (int i = 0; i < 60; i++)
-          Node(id: "logs/log$i", name: "log_$i.txt"),
+        for (int i = 0; i < 60; i++) Node(id: "logs/log$i", name: "log_$i.txt"),
       ],
     ),
   ];
@@ -493,9 +492,7 @@ class _SyncedSliverTreeExampleState extends State<SyncedSliverTreeExample> {
                         onAddSibling: _addSibling,
                         onRemove: hasSelection ? _removeSelected : null,
                         onRename: hasSelection ? _renameSelected : null,
-                        onMoveUp: hasSelection
-                            ? () => _moveSelected(-1)
-                            : null,
+                        onMoveUp: hasSelection ? () => _moveSelected(-1) : null,
                         onMoveDown: hasSelection
                             ? () => _moveSelected(1)
                             : null,
@@ -969,15 +966,14 @@ class _ScrollPanel extends StatelessWidget {
             valueLabel: "$scrollDurationMs",
             onChanged: onScrollDurationChanged,
           ),
-          Row(
+          Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               const Text("ancestors:"),
               const SizedBox(width: 8),
               SegmentedButton<AncestorExpansionMode>(
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                ),
+                style: const ButtonStyle(visualDensity: VisualDensity.compact),
                 segments: const <ButtonSegment<AncestorExpansionMode>>[
                   ButtonSegment<AncestorExpansionMode>(
                     value: AncestorExpansionMode.none,
