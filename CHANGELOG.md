@@ -1,9 +1,6 @@
-## 0.0.9
-
-- Added animateScrollToKey: scroll to node by key
-
 ## 0.0.8
 
+- Added animateScrollToKey: scroll to node by key
 - Various fixes and optimizations
 
 ## 0.0.7
