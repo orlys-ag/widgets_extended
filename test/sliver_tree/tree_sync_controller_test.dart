@@ -560,6 +560,268 @@ void main() {
       sync.dispose();
       controller.dispose();
     });
+
+    testWidgets(
+      "re-adding a filtered root before its exit completes restores its subtree",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        sync = TreeSyncController(treeController: controller);
+
+        sync.syncRoots(
+          [
+            TreeNode(key: "today", data: "Today"),
+            TreeNode(key: "overdue", data: "Overdue"),
+          ],
+          childrenOf: (key) => switch (key) {
+            "today" => [TreeNode(key: "t1", data: "Task 1")],
+            "overdue" => [TreeNode(key: "o1", data: "Task 2")],
+            _ => [],
+          },
+          animate: false,
+        );
+        controller.expandAll(animate: false);
+        expect(controller.visibleNodes, ["today", "t1", "overdue", "o1"]);
+
+        sync.syncRoots(
+          [TreeNode(key: "today", data: "Today")],
+          childrenOf: (key) => switch (key) {
+            "today" => [TreeNode(key: "t1", data: "Task 1")],
+            _ => [],
+          },
+          animate: true,
+        );
+
+        await tester.pump(const Duration(milliseconds: 120));
+
+        sync.syncRoots(
+          [
+            TreeNode(key: "today", data: "Today"),
+            TreeNode(key: "overdue", data: "Overdue"),
+          ],
+          childrenOf: (key) => switch (key) {
+            "today" => [TreeNode(key: "t1", data: "Task 1")],
+            "overdue" => [TreeNode(key: "o1", data: "Task 2")],
+            _ => [],
+          },
+          animate: true,
+        );
+
+        await tester.pumpAndSettle();
+
+        expect(controller.getNodeData("overdue"), isNotNull);
+        expect(controller.getNodeData("o1"), isNotNull);
+        expect(controller.isExpanded("overdue"), true);
+        expect(controller.visibleNodes, ["today", "t1", "overdue", "o1"]);
+
+        sync.dispose();
+        controller.dispose();
+      },
+    );
+
+    testWidgets(
+      "re-adding a filtered child before its exit completes restores descendants",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        sync = TreeSyncController(treeController: controller);
+
+        sync.syncRoots(
+          [TreeNode(key: "root", data: "Root")],
+          childrenOf: (key) => switch (key) {
+            "root" => [TreeNode(key: "mid", data: "Mid")],
+            "mid" => [TreeNode(key: "leaf", data: "Leaf")],
+            _ => [],
+          },
+          animate: false,
+        );
+        controller.expand(key: "root", animate: false);
+        controller.expand(key: "mid", animate: false);
+        expect(controller.visibleNodes, ["root", "mid", "leaf"]);
+
+        sync.syncRoots(
+          [TreeNode(key: "root", data: "Root")],
+          childrenOf: (key) => switch (key) {
+            "root" => <TreeNode<String, String>>[],
+            _ => [],
+          },
+          animate: true,
+        );
+
+        await tester.pump(const Duration(milliseconds: 120));
+
+        sync.syncRoots(
+          [TreeNode(key: "root", data: "Root")],
+          childrenOf: (key) => switch (key) {
+            "root" => [TreeNode(key: "mid", data: "Mid")],
+            "mid" => [TreeNode(key: "leaf", data: "Leaf")],
+            _ => [],
+          },
+          animate: true,
+        );
+
+        await tester.pumpAndSettle();
+
+        expect(controller.getNodeData("mid"), isNotNull);
+        expect(controller.getNodeData("leaf"), isNotNull);
+        expect(controller.isExpanded("root"), true);
+        expect(controller.isExpanded("mid"), true);
+        expect(controller.visibleNodes, ["root", "mid", "leaf"]);
+
+        sync.dispose();
+        controller.dispose();
+      },
+    );
+
+    testWidgets(
+      "promoting an exiting child to a root reverses from its current extent",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        sync = TreeSyncController(treeController: controller);
+
+        sync.syncRoots(
+          [
+            TreeNode(key: "parent", data: "Parent"),
+            TreeNode(key: "sibling", data: "Sibling"),
+          ],
+          childrenOf: (key) => switch (key) {
+            "parent" => [TreeNode(key: "child", data: "Child")],
+            _ => <TreeNode<String, String>>[],
+          },
+          animate: false,
+        );
+        controller.expand(key: "parent", animate: false);
+        controller.setFullExtent("child", 48.0);
+
+        sync.syncRoots(
+          [
+            TreeNode(key: "parent", data: "Parent"),
+            TreeNode(key: "sibling", data: "Sibling"),
+          ],
+          childrenOf: (key) => const <TreeNode<String, String>>[],
+          animate: true,
+        );
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
+
+        final extentDuringRemoval = controller.getCurrentExtent("child");
+        expect(extentDuringRemoval, greaterThan(0.0));
+        expect(extentDuringRemoval, lessThan(48.0));
+
+        sync.syncRoots(
+          [
+            TreeNode(key: "parent", data: "Parent"),
+            TreeNode(key: "sibling", data: "Sibling"),
+            TreeNode(key: "child", data: "Child"),
+          ],
+          childrenOf: (key) => const <TreeNode<String, String>>[],
+          animate: true,
+        );
+
+        final extentAfterReadd = controller.getCurrentExtent("child");
+        expect(
+          extentAfterReadd,
+          closeTo(extentDuringRemoval, 0.01),
+          reason:
+              "A child restored as a root mid-exit should reverse from its "
+              "current extent instead of snapping fully open.",
+        );
+
+        await tester.pumpAndSettle();
+
+        expect(controller.getParent("child"), isNull);
+        expect(controller.visibleNodes, ["parent", "sibling", "child"]);
+
+        sync.dispose();
+        controller.dispose();
+      },
+    );
+
+    testWidgets(
+      "reparenting an exiting child reverses from its current extent",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        sync = TreeSyncController(treeController: controller);
+
+        sync.syncRoots(
+          [
+            TreeNode(key: "a", data: "A"),
+            TreeNode(key: "b", data: "B"),
+          ],
+          childrenOf: (key) => switch (key) {
+            "a" => [TreeNode(key: "x", data: "X")],
+            "b" => [TreeNode(key: "b1", data: "B1")],
+            _ => <TreeNode<String, String>>[],
+          },
+          animate: false,
+        );
+        controller.expand(key: "a", animate: false);
+        controller.expand(key: "b", animate: false);
+        controller.setFullExtent("x", 48.0);
+
+        sync.syncRoots(
+          [
+            TreeNode(key: "a", data: "A"),
+            TreeNode(key: "b", data: "B"),
+          ],
+          childrenOf: (key) => switch (key) {
+            "b" => [TreeNode(key: "b1", data: "B1")],
+            _ => <TreeNode<String, String>>[],
+          },
+          animate: true,
+        );
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
+
+        final extentDuringRemoval = controller.getCurrentExtent("x");
+        expect(extentDuringRemoval, greaterThan(0.0));
+        expect(extentDuringRemoval, lessThan(48.0));
+
+        sync.syncRoots(
+          [
+            TreeNode(key: "a", data: "A"),
+            TreeNode(key: "b", data: "B"),
+          ],
+          childrenOf: (key) => switch (key) {
+            "b" => [
+              TreeNode(key: "x", data: "X"),
+              TreeNode(key: "b1", data: "B1"),
+            ],
+            _ => <TreeNode<String, String>>[],
+          },
+          animate: true,
+        );
+
+        final extentAfterReadd = controller.getCurrentExtent("x");
+        expect(
+          extentAfterReadd,
+          closeTo(extentDuringRemoval, 0.01),
+          reason:
+              "A child restored under a new parent mid-exit should reverse "
+              "from its current extent instead of snapping fully open.",
+        );
+
+        await tester.pumpAndSettle();
+
+        expect(controller.getParent("x"), "b");
+        expect(controller.visibleNodes, ["a", "b", "x", "b1"]);
+
+        sync.dispose();
+        controller.dispose();
+      },
+    );
   });
 
   group("sync controller recreation preserves state", () {

@@ -1586,6 +1586,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     TreeNode<TKey, TData> node, {
     int? index,
     bool animate = true,
+    bool preservePendingSubtreeState = false,
   }) {
     if (animationDuration == Duration.zero) animate = false;
     // If the node is pending deletion, cancel the deletion
@@ -1616,9 +1617,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           _roots.insert(clamped, node.key);
         }
       }
-      _cancelDeletion(node.key, animate: animate);
+      _cancelDeletion(
+        node.key,
+        animate: animate,
+        preserveSubtreeState: preservePendingSubtreeState,
+      );
       _adoptKey(node.key);
       _dataByNid[_keyToNid[node.key]!] = node;
+      if (preservePendingSubtreeState) {
+        _rebuildVisibleOrder();
+        _structureGeneration++;
+        _notifyStructural();
+        return;
+      }
       // Reset expansion state so a subsequent expand() works cleanly.
       _setExpandedKey(node.key, false);
       // Descendants had their exit animations reversed by _cancelDeletion,
@@ -1834,6 +1845,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     required TreeNode<TKey, TData> node,
     int? index,
     bool animate = true,
+    bool preservePendingSubtreeState = false,
   }) {
     if (animationDuration == Duration.zero) animate = false;
     assert(
@@ -1881,9 +1893,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           siblings.insert(clamped, node.key);
         }
       }
-      _cancelDeletion(node.key, animate: animate);
+      _cancelDeletion(
+        node.key,
+        animate: animate,
+        preserveSubtreeState: preservePendingSubtreeState,
+      );
       _adoptKey(node.key);
       _dataByNid[_keyToNid[node.key]!] = node;
+      if (preservePendingSubtreeState) {
+        _rebuildVisibleOrder();
+        _structureGeneration++;
+        _notifyStructural();
+        return;
+      }
       // Reset expansion state so a subsequent expand() works cleanly.
       _setExpandedKey(node.key, false);
       // Descendants had their exit animations reversed by _cancelDeletion,
@@ -3127,7 +3149,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// have it torn down immediately) would also yank them out of any
   /// unrelated [OperationGroup] they still belong to via
   /// [_captureAndRemoveFromGroups], leaving that group short a member.
-  void _cancelDeletion(TKey key, {bool animate = true}) {
+  void _cancelDeletion(
+    TKey key, {
+    bool animate = true,
+    bool preserveSubtreeState = false,
+  }) {
     if (animationDuration == Duration.zero) animate = false;
     _pendingDeletion.remove(key);
     if (animate) {
@@ -3138,7 +3164,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final descendants = _getDescendants(key);
     for (final nodeId in descendants) {
       _pendingDeletion.remove(nodeId);
-      _removeAnimation(nodeId);
+      if (!animate) {
+        _removeAnimation(nodeId);
+        continue;
+      }
+      final animation = _standaloneAnimations[nodeId];
+      if (preserveSubtreeState &&
+          animation != null &&
+          animation.type == AnimationType.exiting) {
+        _startStandaloneEnterAnimation(nodeId);
+      } else {
+        _removeAnimation(nodeId);
+      }
     }
   }
 

@@ -176,8 +176,21 @@ class TreeSyncController<TKey, TData> {
 
       if (_controller.getNodeData(node.key) != null) {
         final oldParent = _controller.getParent(node.key);
-        _controller.updateNode(node);
-        _controller.moveNode(node.key, null, index: targetIndex);
+        // A node that is desired again while its exit animation is still
+        // in flight is a re-insert, not a generic move, even if it is
+        // coming back under a different parent or as a root.
+        final preservePendingSubtreeState = _controller.isExiting(node.key);
+        if (preservePendingSubtreeState || oldParent == null) {
+          _controller.insertRoot(
+            node,
+            index: targetIndex,
+            animate: animate,
+            preservePendingSubtreeState: preservePendingSubtreeState,
+          );
+        } else {
+          _controller.updateNode(node);
+          _controller.moveNode(node.key, null, index: targetIndex);
+        }
         if (oldParent != null) {
           _currentChildren[oldParent]?.remove(node.key);
         }
@@ -346,8 +359,22 @@ class TreeSyncController<TKey, TData> {
         // present under oldParent, skip the moveNode, and diverge from the
         // controller's actual state.
         final oldParent = _controller.getParent(node.key);
-        _controller.updateNode(node);
-        _controller.moveNode(node.key, parentKey, index: targetIndex);
+        // A node that is desired again while its exit animation is still
+        // in flight is a re-insert, not a generic move, even if it is
+        // being restored under a different parent.
+        final preservePendingSubtreeState = _controller.isExiting(node.key);
+        if (preservePendingSubtreeState || oldParent == parentKey) {
+          _controller.insert(
+            parentKey: parentKey,
+            node: node,
+            index: targetIndex,
+            animate: animate,
+            preservePendingSubtreeState: preservePendingSubtreeState,
+          );
+        } else {
+          _controller.updateNode(node);
+          _controller.moveNode(node.key, parentKey, index: targetIndex);
+        }
         if (oldParent != null && oldParent != parentKey) {
           _currentChildren[oldParent]?.remove(node.key);
         }

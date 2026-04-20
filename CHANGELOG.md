@@ -1,3 +1,7 @@
+## 0.0.9
+
+- Attempt to fix re-insert animation regression
+
 ## 0.0.8
 
 - Added animateScrollToKey: scroll to node by key

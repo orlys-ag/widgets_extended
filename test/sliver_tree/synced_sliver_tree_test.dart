@@ -636,6 +636,66 @@ void main() {
       },
     );
   });
+
+  group("mid-animation filter toggles", () {
+    testWidgets(
+      "re-adding a filtered subtree reverses from its current extent",
+      (tester) async {
+        const fullTree = <_FlatItem>[
+          _FlatItem(id: "today", label: "Today"),
+          _FlatItem(id: "overdue", label: "Overdue"),
+          _FlatItem(id: "t1", label: "Task 1", parentId: "today"),
+          _FlatItem(id: "o1", label: "Task 2", parentId: "overdue"),
+        ];
+        const filteredTree = <_FlatItem>[
+          _FlatItem(id: "today", label: "Today"),
+          _FlatItem(id: "t1", label: "Task 1", parentId: "today"),
+        ];
+
+        await tester.pumpWidget(
+          _MidAnimationFilterHarness(items: fullTree),
+        );
+        await tester.pump();
+
+        final harness = tester.state<_MidAnimationFilterHarnessState>(
+          find.byType(_MidAnimationFilterHarness),
+        );
+        final controller = harness.treeController;
+
+        expect(controller.getCurrentExtent("o1"), closeTo(48.0, 0.01));
+
+        await tester.pumpWidget(
+          _MidAnimationFilterHarness(items: filteredTree),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
+
+        final extentDuringRemoval = controller.getCurrentExtent("o1");
+        expect(extentDuringRemoval, greaterThan(0.0));
+        expect(extentDuringRemoval, lessThan(48.0));
+
+        await tester.pumpWidget(
+          _MidAnimationFilterHarness(items: fullTree),
+        );
+        await tester.pump();
+
+        final extentAfterReadd = controller.getCurrentExtent("o1");
+        expect(
+          extentAfterReadd,
+          closeTo(extentDuringRemoval, 0.01),
+          reason:
+              "A subtree restored mid-exit should reverse from its current "
+              "measured extent instead of snapping closed and restarting.",
+        );
+
+        await tester.pumpAndSettle();
+        expect(find.text("Today"), findsOneWidget);
+        expect(find.text("Overdue"), findsOneWidget);
+        expect(find.text("Task 1"), findsOneWidget);
+        expect(find.text("Task 2"), findsOneWidget);
+      },
+    );
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -683,6 +743,52 @@ class _PreserveExpansionFlipState
               preserveExpansion: widget.preserveExpansion,
               initiallyExpanded: widget.initiallyExpanded,
               animationDuration: Duration.zero,
+              itemBuilder: (context, node) {
+                _capturedController = node.controller;
+                return SizedBox(height: 48, child: Text(node.item.label));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MidAnimationFilterHarness extends StatefulWidget {
+  const _MidAnimationFilterHarness({required this.items});
+
+  final List<_FlatItem> items;
+
+  @override
+  State<_MidAnimationFilterHarness> createState() =>
+      _MidAnimationFilterHarnessState();
+}
+
+class _MidAnimationFilterHarnessState
+    extends State<_MidAnimationFilterHarness> {
+  TreeController<String, _FlatItem>? _capturedController;
+
+  TreeController<String, _FlatItem> get treeController {
+    return _capturedController!;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: CustomScrollView(
+          slivers: <Widget>[
+            SyncedSliverTree<String, _FlatItem>.flat(
+              items: widget.items,
+              keyOf: (item) {
+                return item.id;
+              },
+              parentOf: (item) {
+                return item.parentId;
+              },
+              initiallyExpanded: true,
+              animationDuration: const Duration(milliseconds: 300),
               itemBuilder: (context, node) {
                 _capturedController = node.controller;
                 return SizedBox(height: 48, child: Text(node.item.label));
