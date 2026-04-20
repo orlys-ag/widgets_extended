@@ -1077,6 +1077,74 @@ void main() {
         controller.dispose();
       },
     );
+
+    testWidgets(
+      "preservePendingSubtreeState keeps tree coherent when parent is collapsed",
+      (tester) async {
+        // Collapse 'a' mid-animation, then remove mid-collapse, then re-insert
+        // with preservePendingSubtreeState=true. Since 'a' was collapsed at the
+        // time of remove, its descendants must NOT be left visible under a
+        // collapsed parent after the reversed animations complete.
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+        controller.expand(key: "a", animate: false);
+        expect(controller.visibleNodes, ["a", "a1"]);
+
+        controller.collapse(key: "a");
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(controller.isExpanded("a"), false);
+
+        controller.remove(key: "a");
+        await tester.pump(const Duration(milliseconds: 50));
+
+        controller.insertRoot(
+          TreeNode(key: "a", data: "A"),
+          preservePendingSubtreeState: true,
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          controller.visibleNodes,
+          ["a"],
+          reason:
+              "Preserving subtree state must not park descendants in the "
+              "visible order under a collapsed ancestor.",
+        );
+      },
+    );
+
+    testWidgets(
+      "preservePendingSubtreeState reverses descendants when parent was expanded",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+        controller.expand(key: "a", animate: false);
+
+        controller.remove(key: "a");
+        await tester.pump(const Duration(milliseconds: 80));
+
+        controller.insertRoot(
+          TreeNode(key: "a", data: "A"),
+          preservePendingSubtreeState: true,
+        );
+        await tester.pumpAndSettle();
+
+        expect(controller.isExpanded("a"), true);
+        expect(controller.visibleNodes, ["a", "a1"]);
+      },
+    );
   });
 
   group("reorderChildren during collapse animation", () {

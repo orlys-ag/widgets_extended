@@ -3169,9 +3169,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         continue;
       }
       final animation = _standaloneAnimations[nodeId];
+      // Only reverse a descendant's exit into an enter if it would be
+      // visible under the preserved expansion chain. Otherwise the enter
+      // animation would finish with the node parked in the visible order
+      // under a collapsed ancestor, leaving the tree incoherent until the
+      // next rebuild hides it.
       if (preserveSubtreeState &&
           animation != null &&
-          animation.type == AnimationType.exiting) {
+          animation.type == AnimationType.exiting &&
+          _ancestorsExpandedFast(nodeId)) {
         _startStandaloneEnterAnimation(nodeId);
       } else {
         _removeAnimation(nodeId);
