@@ -670,7 +670,10 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 120));
 
+        final rootExtentDuringRemoval = controller.getCurrentExtent("overdue");
         final extentDuringRemoval = controller.getCurrentExtent("o1");
+        expect(rootExtentDuringRemoval, greaterThan(0.0));
+        expect(rootExtentDuringRemoval, lessThan(48.0));
         expect(extentDuringRemoval, greaterThan(0.0));
         expect(extentDuringRemoval, lessThan(48.0));
 
@@ -692,6 +695,166 @@ void main() {
         expect(find.text("Today"), findsOneWidget);
         expect(find.text("Overdue"), findsOneWidget);
         expect(find.text("Task 1"), findsOneWidget);
+        expect(find.text("Task 2"), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      "switching filters while one subtree exits preserves the restored subtree extent",
+      (tester) async {
+        const fullTree = <_FlatItem>[
+          _FlatItem(id: "today", label: "Today"),
+          _FlatItem(id: "overdue", label: "Overdue"),
+          _FlatItem(id: "t1", label: "Task 1", parentId: "today"),
+          _FlatItem(id: "o1", label: "Task 2", parentId: "overdue"),
+        ];
+        const todayOnly = <_FlatItem>[
+          _FlatItem(id: "today", label: "Today"),
+          _FlatItem(id: "t1", label: "Task 1", parentId: "today"),
+        ];
+        const overdueOnly = <_FlatItem>[
+          _FlatItem(id: "overdue", label: "Overdue"),
+          _FlatItem(id: "o1", label: "Task 2", parentId: "overdue"),
+        ];
+
+        await tester.pumpWidget(
+          _MidAnimationFilterHarness(items: fullTree),
+        );
+        await tester.pump();
+
+        final harness = tester.state<_MidAnimationFilterHarnessState>(
+          find.byType(_MidAnimationFilterHarness),
+        );
+        final controller = harness.treeController;
+
+        await tester.pumpWidget(
+          _MidAnimationFilterHarness(items: todayOnly),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
+
+        final rootExtentDuringRemoval = controller.getCurrentExtent("overdue");
+        final extentDuringRemoval = controller.getCurrentExtent("o1");
+        expect(rootExtentDuringRemoval, greaterThan(0.0));
+        expect(rootExtentDuringRemoval, lessThan(48.0));
+        expect(extentDuringRemoval, greaterThan(0.0));
+        expect(extentDuringRemoval, lessThan(48.0));
+
+        await tester.pumpWidget(
+          _MidAnimationFilterHarness(items: overdueOnly),
+        );
+        await tester.pump();
+
+        final rootExtentAfterSwitch = controller.getCurrentExtent("overdue");
+        final extentAfterSwitch = controller.getCurrentExtent("o1");
+        expect(
+          rootExtentAfterSwitch,
+          closeTo(rootExtentDuringRemoval, 0.01),
+          reason:
+              "The restored section row should continue from its current "
+              "extent instead of snapping fully open during the overlap "
+              "transition.",
+        );
+        expect(
+          extentAfterSwitch,
+          closeTo(extentDuringRemoval, 0.01),
+          reason:
+              "A subtree restored while another subtree begins exiting "
+              "should continue from its current extent instead of snapping "
+              "fully open.",
+        );
+        expect(
+          controller.isAnimating("o1"),
+          isTrue,
+          reason:
+              "The restored subtree should still report animation "
+              "membership so the render layer keeps clipping it during the "
+              "overlap transition.",
+        );
+        expect(
+          controller.isAnimating("today"),
+          isTrue,
+          reason:
+              "The newly filtered-out subtree should still be exiting at "
+              "the same time the restored subtree animates back in.",
+        );
+
+        await tester.pumpAndSettle();
+        expect(find.text("Overdue"), findsOneWidget);
+        expect(find.text("Task 2"), findsOneWidget);
+        expect(find.text("Today"), findsNothing);
+        expect(find.text("Task 1"), findsNothing);
+      },
+    );
+
+    testWidgets(
+      "nodes mode with sticky headers restores an exiting section smoothly during another remove",
+      (tester) async {
+        const fullTree = <_FlatItem>[
+          _FlatItem(id: "today", label: "Today"),
+          _FlatItem(id: "overdue", label: "Overdue"),
+          _FlatItem(id: "t1", label: "Task 1", parentId: "today"),
+          _FlatItem(id: "o1", label: "Task 2", parentId: "overdue"),
+        ];
+        const todayOnly = <_FlatItem>[
+          _FlatItem(id: "today", label: "Today"),
+          _FlatItem(id: "t1", label: "Task 1", parentId: "today"),
+        ];
+        const overdueOnly = <_FlatItem>[
+          _FlatItem(id: "overdue", label: "Overdue"),
+          _FlatItem(id: "o1", label: "Task 2", parentId: "overdue"),
+        ];
+
+        await tester.pumpWidget(
+          _MidAnimationNodesHarness(items: fullTree),
+        );
+        await tester.pump();
+
+        final harness = tester.state<_MidAnimationNodesHarnessState>(
+          find.byType(_MidAnimationNodesHarness),
+        );
+        final controller = harness.treeController;
+
+        await tester.pumpWidget(
+          _MidAnimationNodesHarness(items: todayOnly),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
+
+        final rootExtentDuringRemoval = controller.getCurrentExtent("overdue");
+        final childExtentDuringRemoval = controller.getCurrentExtent("o1");
+        expect(rootExtentDuringRemoval, greaterThan(0.0));
+        expect(rootExtentDuringRemoval, lessThan(48.0));
+        expect(childExtentDuringRemoval, greaterThan(0.0));
+        expect(childExtentDuringRemoval, lessThan(48.0));
+
+        await tester.pumpWidget(
+          _MidAnimationNodesHarness(items: overdueOnly),
+        );
+        await tester.pump();
+
+        final rootExtentAfterSwitch = controller.getCurrentExtent("overdue");
+        final childExtentAfterSwitch = controller.getCurrentExtent("o1");
+        expect(
+          rootExtentAfterSwitch,
+          closeTo(rootExtentDuringRemoval, 0.01),
+          reason:
+              "The restored section row should continue from its current "
+              "extent instead of snapping fully open in nodes mode.",
+        );
+        expect(
+          childExtentAfterSwitch,
+          closeTo(childExtentDuringRemoval, 0.01),
+          reason:
+              "The restored child row should continue from its current "
+              "extent instead of snapping fully open in nodes mode.",
+        );
+        expect(controller.isAnimating("overdue"), isTrue);
+        expect(controller.isAnimating("o1"), isTrue);
+        expect(controller.isAnimating("today"), isTrue);
+
+        await tester.pumpAndSettle();
+        expect(find.text("Overdue"), findsOneWidget);
         expect(find.text("Task 2"), findsOneWidget);
       },
     );
@@ -788,6 +951,58 @@ class _MidAnimationFilterHarnessState
                 return item.parentId;
               },
               initiallyExpanded: true,
+              animationDuration: const Duration(milliseconds: 300),
+              itemBuilder: (context, node) {
+                _capturedController = node.controller;
+                return SizedBox(height: 48, child: Text(node.item.label));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MidAnimationNodesHarness extends StatefulWidget {
+  const _MidAnimationNodesHarness({required this.items});
+
+  final List<_FlatItem> items;
+
+  @override
+  State<_MidAnimationNodesHarness> createState() =>
+      _MidAnimationNodesHarnessState();
+}
+
+class _MidAnimationNodesHarnessState
+    extends State<_MidAnimationNodesHarness> {
+  TreeController<String, _FlatItem>? _capturedController;
+
+  TreeController<String, _FlatItem> get treeController {
+    return _capturedController!;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final snapshot = TreeSnapshot<String, _FlatItem>.fromFlat(
+      items: widget.items,
+      keyOf: (item) {
+        return item.id;
+      },
+      parentOf: (item) {
+        return item.parentId;
+      },
+    );
+
+    return MaterialApp(
+      home: Scaffold(
+        body: CustomScrollView(
+          slivers: <Widget>[
+            SyncedSliverTree<String, _FlatItem>.nodes(
+              roots: snapshot.buildRoots(),
+              childrenOf: snapshot.buildChildren,
+              initiallyExpanded: true,
+              maxStickyDepth: 1,
               animationDuration: const Duration(milliseconds: 300),
               itemBuilder: (context, node) {
                 _capturedController = node.controller;

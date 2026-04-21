@@ -353,6 +353,102 @@ void main() {
   );
 
   testWidgets(
+    "rendered extent smooth - re-insert while another remove is active",
+    (tester) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 300),
+        animationCurve: Curves.linear,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+        TreeNode(key: "c", data: "C"),
+        TreeNode(key: "d", data: "D"),
+      ]);
+      controller.setChildren("b", [TreeNode(key: "b1", data: "B1")]);
+      controller.expand(key: "b", animate: false);
+
+      await tester.pumpWidget(_buildTree(controller));
+      await tester.pumpAndSettle();
+
+      controller.remove(key: "b");
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+
+      final midBExit = _sampleRenderState(tester);
+      expect(midBExit["b"]!.visibleExtent, greaterThan(0.0));
+      expect(midBExit["b1"]!.visibleExtent, greaterThan(0.0));
+
+      controller.remove(key: "d");
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 40));
+
+      final preReinsert = _sampleRenderState(tester);
+      // ignore: avoid_print
+      print("Pre-reinsert overlap: $preReinsert");
+      // ignore: avoid_print
+      print(
+        "Pre-reinsert overlap animating: "
+        "b=${controller.isAnimating("b")} "
+        "b1=${controller.isAnimating("b1")} "
+        "d=${controller.isAnimating("d")}",
+      );
+
+      controller.insertRoot(
+        TreeNode(key: "b", data: "B"),
+        index: 1,
+        preservePendingSubtreeState: true,
+      );
+      await tester.pump(Duration.zero);
+
+      final postReinsert = _sampleRenderState(tester);
+      // ignore: avoid_print
+      print("Post-reinsert overlap: $postReinsert");
+      // ignore: avoid_print
+      print(
+        "Post-reinsert overlap animating: "
+        "b=${controller.isAnimating("b")} "
+        "b1=${controller.isAnimating("b1")} "
+        "d=${controller.isAnimating("d")}",
+      );
+
+      expect(
+        postReinsert["b"]!.visibleExtent,
+        closeTo(preReinsert["b"]!.visibleExtent, 2),
+        reason:
+            "b should resume from its current mid-exit extent instead of "
+            "jumping to full height while another remove is active.",
+      );
+      expect(
+        postReinsert["b1"]!.visibleExtent,
+        closeTo(preReinsert["b1"]!.visibleExtent, 2),
+        reason:
+            "b1 should also resume smoothly instead of snapping open when "
+            "b is restored during another remove.",
+      );
+      expect(
+        controller.isAnimating("b"),
+        isTrue,
+        reason:
+            "If b stops reporting animation membership here, the render "
+            "layer stops clipping and the row appears to jump fully open.",
+      );
+      expect(
+        controller.isAnimating("b1"),
+        isTrue,
+        reason:
+            "b1 should remain clipped by animation membership during the "
+            "overlap restore.",
+      );
+
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
     "remove-reinsert-remove again does not corrupt descendant state",
     (tester) async {
       // After remove + default reinsert, descendants are kept mid-exit with

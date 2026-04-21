@@ -2365,6 +2365,72 @@ void main() {
 
       await tester.pumpAndSettle();
     });
+
+    testWidgets(
+      "invalidates caches when overlapping transitions keep animation counts unchanged",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+          TreeNode(key: "c", data: "C"),
+          TreeNode(key: "d", data: "D"),
+        ]);
+        controller.setFullExtent("a", 48.0);
+        controller.setFullExtent("b", 48.0);
+        controller.setFullExtent("c", 48.0);
+        controller.setFullExtent("d", 48.0);
+
+        controller.remove(key: "c");
+        controller.remove(key: "d");
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 60));
+
+        expect(controller.isAnimating("c"), isTrue);
+        expect(controller.isAnimating("d"), isTrue);
+        expect(controller.computeFirstAnimatingVisibleIndex(), 2);
+
+        // Replace one animating key with a different one while keeping the
+        // total number of active animations unchanged.
+        controller.insertRoot(
+          TreeNode(key: "d", data: "D"),
+          index: 3,
+          animate: false,
+        );
+        controller.remove(key: "a");
+        await tester.pump();
+
+        expect(
+          controller.isAnimating("a"),
+          isTrue,
+          reason:
+              "Animation membership must refresh when one key stops "
+              "animating and another starts in the same overlap window.",
+        );
+        expect(
+          controller.isAnimating("d"),
+          isFalse,
+          reason:
+              "The cache must drop keys whose animation was cancelled even "
+              "when the total animation count stays the same.",
+        );
+        expect(
+          controller.computeFirstAnimatingVisibleIndex(),
+          0,
+          reason:
+              "The first animating index must move to the new earliest "
+              "animating row instead of reusing stale cached membership.",
+        );
+
+        await tester.pumpAndSettle();
+      },
+    );
   });
 
   group('scroll-to-key', () {

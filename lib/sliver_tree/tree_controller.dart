@@ -669,8 +669,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Lazy union of every currently-animating key across standalone, operation,
   /// and bulk groups. Invalidation is signature-based: [_animationStateSig]
-  /// captures total membership counts across all three collections (each is
-  /// O(1)) so any add/remove triggers a rebuild on next access.
+  /// walks the current animation topology so overlapping transitions that keep
+  /// collection lengths constant still invalidate correctly on next access.
   Set<TKey>? _animatingKeysCache;
   int _animatingKeysCacheSig = -1;
 
@@ -686,10 +686,31 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// pass through `_captureAndRemoveFromGroups` followed by a fresh insert,
   /// which shifts at least one length on each side.
   int _animationStateSig() {
-    int s = _standaloneAnimations.length;
-    s = s * 31 + _nodeToOperationGroup.length;
-    s = s * 31 + _operationGroups.length;
-    s = s * 31 + (_bulkAnimationGroup?.members.length ?? 0);
+    int s = 17;
+    for (final entry in _standaloneAnimations.entries) {
+      s = Object.hash(s, entry.key, entry.value.type);
+    }
+    for (final entry in _operationGroups.entries) {
+      final groupKey = entry.key;
+      final group = entry.value;
+      s = Object.hash(s, groupKey, group.members.length);
+      for (final memberKey in group.members.keys) {
+        s = Object.hash(s, groupKey, memberKey);
+      }
+      for (final pendingKey in group.pendingRemoval) {
+        s = Object.hash(s, groupKey, pendingKey, 1);
+      }
+    }
+    final bulk = _bulkAnimationGroup;
+    if (bulk != null) {
+      s = Object.hash(s, bulk.members.length, bulk.pendingRemoval.length);
+      for (final memberKey in bulk.members) {
+        s = Object.hash(s, memberKey);
+      }
+      for (final pendingKey in bulk.pendingRemoval) {
+        s = Object.hash(s, pendingKey, 1);
+      }
+    }
     return s;
   }
 
