@@ -1924,6 +1924,122 @@ void main() {
     );
   });
 
+  group("remove and re-add across intermediate animation states", () {
+    testWidgets(
+      "remove during expand then re-add and re-expand preserves the child's current extent",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+        controller.setFullExtent("a", 48);
+        controller.setFullExtent("a1", 48);
+
+        controller.expand(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 100));
+
+        expect(controller.getCurrentExtent("a1"), greaterThan(0.0));
+        expect(controller.getCurrentExtent("a1"), lessThan(48.0));
+
+        controller.remove(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 80));
+
+        final extentBeforeReadd = controller.getCurrentExtent("a1");
+        expect(extentBeforeReadd, greaterThan(0.0));
+        expect(extentBeforeReadd, lessThan(48.0));
+
+        controller.insertRoot(TreeNode(key: "a", data: "A"));
+        controller.expand(key: "a");
+
+        final extentAfterReexpand = controller.getCurrentExtent("a1");
+        expect(
+          extentAfterReexpand,
+          closeTo(extentBeforeReadd, 0.01),
+          reason:
+              "A child restored while its parent transitions from remove "
+              "back to expand should resume from the current extent instead "
+              "of skipping to a different size.",
+        );
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1000));
+        expect(
+          controller.hasActiveAnimations,
+          isFalse,
+          reason:
+              "The remove -> re-add -> re-expand transition should settle "
+              "cleanly instead of leaving orphaned animation state behind.",
+        );
+        expect(controller.visibleNodes, ["a", "a1"]);
+        expect(controller.getCurrentExtent("a1"), 48.0);
+      },
+    );
+
+    testWidgets(
+      "remove during expandAll then re-add and expandAll preserves the child's current extent",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+        controller.setFullExtent("a", 48);
+        controller.setFullExtent("a1", 48);
+
+        controller.expandAll();
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 100));
+
+        expect(controller.getCurrentExtent("a1"), greaterThan(0.0));
+        expect(controller.getCurrentExtent("a1"), lessThan(48.0));
+
+        controller.remove(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 80));
+
+        final extentBeforeReadd = controller.getCurrentExtent("a1");
+        expect(extentBeforeReadd, greaterThan(0.0));
+        expect(extentBeforeReadd, lessThan(48.0));
+
+        controller.insertRoot(TreeNode(key: "a", data: "A"));
+        controller.expandAll();
+
+        final extentAfterReexpand = controller.getCurrentExtent("a1");
+        expect(
+          extentAfterReexpand,
+          closeTo(extentBeforeReadd, 0.01),
+          reason:
+              "A child restored while switching from remove back to "
+              "expandAll should resume from the current extent instead of "
+              "skipping to a different size.",
+        );
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1000));
+        expect(
+          controller.hasActiveAnimations,
+          isFalse,
+          reason:
+              "The remove -> re-add -> expandAll transition should settle "
+              "cleanly instead of leaving orphaned animation state behind.",
+        );
+        expect(controller.visibleNodes, ["a", "a1"]);
+        expect(controller.getCurrentExtent("a1"), 48.0);
+      },
+    );
+  });
+
   // ════════════════════════════════════════════════════════════════════════════
   // BUG REGRESSION: moveNode silently ignores explicit index when the node is
   // already under the target parent.

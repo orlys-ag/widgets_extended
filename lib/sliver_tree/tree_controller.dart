@@ -2919,6 +2919,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           group.members.remove(key);
           group.pendingRemoval.remove(key);
           _nodeToOperationGroup.remove(key);
+          _disposeOperationGroupIfEmpty(opGroupKey, group);
           return extent;
         }
       }
@@ -2942,6 +2943,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     return null;
+  }
+
+  void _disposeOperationGroupIfEmpty(
+    TKey operationKey,
+    OperationGroup<TKey> group,
+  ) {
+    if (group.members.isNotEmpty || group.pendingRemoval.isNotEmpty) {
+      return;
+    }
+    if (!identical(_operationGroups[operationKey], group)) {
+      return;
+    }
+    _operationGroups.remove(operationKey);
+    group.dispose();
   }
 
   /// Cancels pending-deletion and all animation state for [key] and all
@@ -2996,6 +3011,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (group != null) {
         group.members.remove(key);
         group.pendingRemoval.remove(key);
+        _disposeOperationGroupIfEmpty(opGroupKey, group);
       }
     }
     // Also remove from bulk animation group
