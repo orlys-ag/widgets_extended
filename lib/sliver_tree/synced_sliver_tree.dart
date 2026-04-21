@@ -647,6 +647,13 @@ class _SyncedSliverTreeState<TKey, TItem>
     final previousChildrenByParent = _hasSyncedOnce
         ? _syncController.snapshotCurrentChildren()
         : null;
+    // Capture the set of keys with remembered expansion state BEFORE the
+    // sync. syncRoots will clear entries as part of _restoreExpansion /
+    // _pruneExpansionMemory, so by the time _expandParentsThatGainedChildren
+    // runs below, the memory no longer reflects which keys were filtered
+    // out previously — and the heuristic would wrongly auto-expand a
+    // re-added, user-collapsed section.
+    final rememberedBeforeSync = _syncController.snapshotRememberedKeys();
 
     switch (widget._mode) {
       case _SyncedSliverTreeMode.tree:
@@ -689,6 +696,7 @@ class _SyncedSliverTreeState<TKey, TItem>
       _expandParentsThatGainedChildren(
         previousChildrenByParent,
         _syncController.snapshotCurrentChildren(),
+        rememberedBeforeSync,
         animate: animate,
       );
     }
@@ -782,7 +790,8 @@ class _SyncedSliverTreeState<TKey, TItem>
 
   void _expandParentsThatGainedChildren(
     Map<TKey, List<TKey>> oldChildrenByParent,
-    Map<TKey, List<TKey>> newChildrenByParent, {
+    Map<TKey, List<TKey>> newChildrenByParent,
+    Set<TKey> rememberedBeforeSync, {
     required bool animate,
   }) {
     for (final entry in newChildrenByParent.entries) {
@@ -800,6 +809,14 @@ class _SyncedSliverTreeState<TKey, TItem>
       final hadChildrenBefore =
           oldChildren != null && oldChildren.isNotEmpty;
       if (hadChildrenBefore) {
+        continue;
+      }
+
+      // Skip parents that were filtered out previously and are now being
+      // re-added. TreeSyncController's _restoreExpansion is authoritative
+      // for those — auto-expanding here would override a user's explicit
+      // collapse recorded before the parent was removed.
+      if (rememberedBeforeSync.contains(parentKey)) {
         continue;
       }
 

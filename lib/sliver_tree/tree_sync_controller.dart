@@ -499,6 +499,17 @@ class TreeSyncController<TKey, TData> {
     _expansionMemory.clear();
   }
 
+  /// Returns the set of keys currently held in expansion memory.
+  ///
+  /// A key is present here only if it was previously removed by
+  /// [syncRoots]/[syncChildren] and its expansion state was recorded
+  /// for restoration on re-add. Intended for callers (e.g., the auto-expand
+  /// heuristic in [SyncedSliverTree]) that need to distinguish a genuinely
+  /// new key from one that is being re-added after having been filtered out.
+  Set<TKey> snapshotRememberedKeys() {
+    return _expansionMemory.keys.toSet();
+  }
+
   /// Releases resources. Call before disposing the underlying [TreeController].
   void dispose() {
     _expansionMemory.clear();
