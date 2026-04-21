@@ -722,7 +722,7 @@ void main() {
       );
     });
 
-    testWidgets("structural mutation still rebuilds every mounted row", (
+    testWidgets("expand rebuilds only the toggled node, not its siblings", (
       tester,
     ) async {
       final controller = TreeController<String, String>(
@@ -749,13 +749,22 @@ void main() {
 
       final before = Map<String, int>.from(buildCounts);
 
-      // expand() is a structural mutation — it must still refresh all
-      // mounted rows (closures may depend on expansion state, etc.).
+      // expand() declares affectedKeys={a}: only "a" (whose chevron/state
+      // flips) rebuilds. "b" is an unrelated sibling and must not rebuild.
+      // "a1" enters visible order via createChild, not a refresh.
       controller.expand(key: "a");
       await tester.pump();
 
-      expect(buildCounts["a"]!, greaterThan(before["a"]!));
-      expect(buildCounts["b"]!, greaterThan(before["b"]!));
+      expect(
+        buildCounts["a"]!,
+        greaterThan(before["a"]!),
+        reason: "the toggled node must rebuild so its chevron updates",
+      );
+      expect(
+        buildCounts["b"],
+        before["b"],
+        reason: "unrelated sibling must not rebuild on a scoped expand",
+      );
     });
 
     testWidgets(

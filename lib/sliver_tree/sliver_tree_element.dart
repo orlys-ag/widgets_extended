@@ -77,14 +77,14 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   void mount(Element? parent, Object? newSlot) {
     super.mount(parent, newSlot);
     renderObject.childManager = this;
-    widget.controller.addListener(_onControllerChanged);
+    widget.controller.addStructuralListener(_onStructuralChange);
     widget.controller.addAnimationListener(_onAnimationTick);
     widget.controller.addNodeDataListener(_onNodeDataChanged);
   }
 
   @override
   void unmount() {
-    widget.controller.removeListener(_onControllerChanged);
+    widget.controller.removeStructuralListener(_onStructuralChange);
     widget.controller.removeAnimationListener(_onAnimationTick);
     widget.controller.removeNodeDataListener(_onNodeDataChanged);
     _gcScheduled = false;
@@ -103,10 +103,10 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     super.update(newWidget);
 
     if (oldWidget.controller != newWidget.controller) {
-      oldWidget.controller.removeListener(_onControllerChanged);
+      oldWidget.controller.removeStructuralListener(_onStructuralChange);
       oldWidget.controller.removeAnimationListener(_onAnimationTick);
       oldWidget.controller.removeNodeDataListener(_onNodeDataChanged);
-      newWidget.controller.addListener(_onControllerChanged);
+      newWidget.controller.addStructuralListener(_onStructuralChange);
       newWidget.controller.addAnimationListener(_onAnimationTick);
       newWidget.controller.addNodeDataListener(_onNodeDataChanged);
       renderObject.controller = newWidget.controller;
@@ -184,11 +184,47 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     }
   }
 
-  void _onControllerChanged() {
+  /// Handles structural notifications from the controller.
+  ///
+  /// [affectedKeys] semantics (set by the controller):
+  ///   - `null` — scope unknown; do a full refresh of every mounted row.
+  ///   - empty set — structural change occurred but no mounted row's
+  ///     builder output changed (new rows first-build via [createChild],
+  ///     removed rows GC'd); only relayout + GC are required.
+  ///   - non-empty set — refresh exactly the listed keys that are
+  ///     currently mounted.
+  void _onStructuralChange(Set<TKey>? affectedKeys) {
     renderObject.markNeedsLayout();
-    _needsFullRefresh = true;
-    markNeedsBuild();
     _scheduleGarbageCollection();
+
+    if (affectedKeys == null) {
+      _needsFullRefresh = true;
+      _dirtyDataNodes.clear();
+      markNeedsBuild();
+      return;
+    }
+
+    if (affectedKeys.isEmpty) {
+      // Structural mutation with no builder-output change. Layout + GC only.
+      return;
+    }
+
+    if (_needsFullRefresh) {
+      // A prior (still-pending) notify already queued a full refresh; the
+      // upcoming rebuild subsumes this one.
+      return;
+    }
+
+    bool anyMounted = false;
+    for (final key in affectedKeys) {
+      if (_children.containsKey(key)) {
+        _dirtyDataNodes.add(key);
+        anyMounted = true;
+      }
+    }
+    if (anyMounted) {
+      markNeedsBuild();
+    }
   }
 
   /// Called on pure animation ticks (no structural change).

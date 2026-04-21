@@ -231,8 +231,13 @@ extension _TreeControllerAnimationOps<TKey, TData>
     // expandAll() call time and already fired _notifyStructural then. Firing
     // here a second time makes SliverTreeElement mark every mounted row dirty
     // and rebuild it, producing the end-of-animation rebuild spike.
+    //
+    // Affected keys: empty. The bulk path only removes entries from _order;
+    // it never touches parent child lists, so no parent's hasChildren can
+    // flip. Newly-visible rows first-build via createChild; removed rows
+    // are GC'd by SliverTreeElement. No mounted row needs a widget refresh.
     if (didMutateOrder) {
-      _notifyStructural();
+      _notifyStructural(affectedKeys: const {});
     }
   }
 
@@ -261,12 +266,22 @@ extension _TreeControllerAnimationOps<TKey, TData>
     } else if (status == AnimationStatus.dismissed) {
       // Collapse done (value = 0). Remove nodes from visible order.
       _keysToRemoveScratch.clear();
+      // Captures parents whose child list just became empty via pending-
+      // deletion removals. Must be populated inside the loop — right after
+      // the parent-list .remove(nodeId) and before _purgeNodeData(nodeId),
+      // because _purgeNodeData releases nodeId's nid and clears its parent
+      // mapping, so _parentKeyOfKey would return null afterwards.
+      final affectedParents = <TKey>{};
       for (final nodeId in group.pendingRemoval) {
         if (_pendingDeletion.contains(nodeId)) {
           // Fully remove the node from all data structures
           final parentKey = _parentKeyOfKey(nodeId);
           if (parentKey != null) {
-            _childListOf(parentKey)?.remove(nodeId);
+            final siblings = _childListOf(parentKey);
+            siblings?.remove(nodeId);
+            if (siblings == null || siblings.isEmpty) {
+              affectedParents.add(parentKey);
+            }
           } else {
             _roots.remove(nodeId);
           }
@@ -299,8 +314,12 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // Only notify when visible order actually changed. If every pending-
       // removal member was already hidden (ancestor re-collapsed mid-flight,
       // reparented, etc.), this branch is structurally a no-op.
+      //
+      // Affected keys: parents whose hasChildren flipped false. Removed
+      // rows are GC'd by SliverTreeElement. Remaining visible rows retain
+      // their builder output (depth/data/parent unchanged).
       if (didMutateOrder) {
-        _notifyStructural();
+        _notifyStructural(affectedKeys: affectedParents);
       }
     }
   }
@@ -451,18 +470,45 @@ extension _TreeControllerAnimationOps<TKey, TData>
       }
     }
 
-    // Finalize completed standalone animations
+    // Finalize completed standalone animations.
+    //
+    // Capture parents of pending-deletion keys before calling
+    // _finalizeAnimation — that method purges the key (releasing its nid),
+    // so _parentKeyOfKey would return null afterwards.
+    final parentBeforeFinalize = <TKey, TKey>{};
+    for (final key in completed) {
+      if (_pendingDeletion.contains(key)) {
+        final parent = _parentKeyOfKey(key);
+        if (parent != null) {
+          parentBeforeFinalize[key] = parent;
+        }
+      }
+    }
+
     _keysToRemoveScratch.clear();
+    final affectedParents = <TKey>{};
     for (final key in completed) {
       if (_finalizeAnimation(key)) {
         _keysToRemoveScratch.add(key);
+        // After finalize, check if the captured parent's child list is
+        // now empty → its hasChildren flipped false. Parent may itself
+        // be pending-deletion (purged by a sibling's finalize); in that
+        // case _childListOf returns null and we record it anyway — a
+        // dead key in affectedKeys is a cheap no-op at the element side.
+        final parent = parentBeforeFinalize[key];
+        if (parent != null) {
+          final siblings = _childListOf(parent);
+          if (siblings == null || siblings.isEmpty) {
+            affectedParents.add(parent);
+          }
+        }
       }
     }
 
     if (_keysToRemoveScratch.isNotEmpty) {
       _removeFromVisibleOrder(_keysToRemoveScratch);
       _structureGeneration++;
-      _notifyStructural();
+      _notifyStructural(affectedKeys: affectedParents);
     }
 
     _notifyAnimationListeners();

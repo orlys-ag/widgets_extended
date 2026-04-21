@@ -481,6 +481,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// structural change (e.g. [updateNode]). Receives the changed key.
   final List<void Function(TKey)> _nodeDataListeners = [];
 
+  /// Listeners notified on structural mutations with an optional set of
+  /// affected keys. A `null` set means "scope unknown — full refresh"; an
+  /// empty set means "structural change happened, but no mounted row's
+  /// builder output changed" (valid when the effect is absorbed by
+  /// `createChild` for new rows and GC for removed rows); a non-empty set
+  /// lists exactly the keys whose builder output may differ.
+  final List<void Function(Set<TKey>? affectedKeys)> _structuralListeners = [];
+
   /// Depth of nested [runBatch] calls. Mutations inside a batch defer
   /// their structural notification to the outermost [runBatch] exit.
   int _batchDepth = 0;
@@ -493,6 +501,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// the structural notification fires so that targeted row refreshes see
   /// a coherent post-batch state.
   Set<TKey>? _batchDirtyDataNodes;
+
+  /// Union of [affectedKeys] sets passed to [_notifyStructural] inside the
+  /// current [runBatch]. Fired as a single set at the outermost batch exit.
+  /// Null when no mutation has specified affected keys yet.
+  Set<TKey>? _batchAffectedStructuralKeys;
+
+  /// Poison pill: set to true when any in-batch [_notifyStructural] call
+  /// passes `affectedKeys: null`. Forces a full refresh at batch exit even
+  /// if other in-batch calls carried specific keys.
+  bool _batchAffectedStructuralUnknown = false;
 
   /// Default extent for nodes that haven't been measured yet.
   static const double defaultExtent = 48.0;
@@ -1360,6 +1378,38 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
   }
 
+  /// Registers a callback that fires on structural mutations with an
+  /// optional set of affected keys. See [_structuralListeners] for the
+  /// semantics of the argument.
+  ///
+  /// This is a finer-grained channel than [addListener] ([ChangeNotifier]).
+  /// External callers that only need to know "something changed" can keep
+  /// using [addListener] — [notifyListeners] still fires from
+  /// [_notifyStructural]. Listeners that can do targeted work (e.g. the
+  /// sliver tree element refreshing only specific mounted rows) should
+  /// prefer this channel.
+  void addStructuralListener(void Function(Set<TKey>? affectedKeys) listener) {
+    _structuralListeners.add(listener);
+  }
+
+  /// Removes a previously registered structural listener.
+  void removeStructuralListener(
+    void Function(Set<TKey>? affectedKeys) listener,
+  ) {
+    _structuralListeners.remove(listener);
+  }
+
+  void _fireStructuralListeners(Set<TKey>? affectedKeys) {
+    // Snapshot before iteration so a listener that synchronously mutates
+    // the controller (triggering a reentrant notify) does not corrupt this
+    // walk. Same pattern as [_fireNodeDataListeners].
+    final listeners =
+        List<void Function(Set<TKey>?)>.of(_structuralListeners);
+    for (final listener in listeners) {
+      listener(affectedKeys);
+    }
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   // BATCHING
   // ══════════════════════════════════════════════════════════════════════════
@@ -1386,13 +1436,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (_batchDepth == 0) {
         final didStructural = _batchDidRequestStructural;
         final dirtyData = _batchDirtyDataNodes;
+        final structuralAffected = _batchAffectedStructuralUnknown
+            ? null
+            : _batchAffectedStructuralKeys;
         _batchDidRequestStructural = false;
         _batchDirtyDataNodes = null;
+        _batchAffectedStructuralKeys = null;
+        _batchAffectedStructuralUnknown = false;
         // Fire structural first: a structural notify causes the element to
         // mark itself for a full refresh, which subsumes any data-only
         // refresh for the same keys. Firing data first would queue a
         // targeted refresh that the full refresh then redundantly repeats.
         if (didStructural) {
+          _fireStructuralListeners(structuralAffected);
           notifyListeners();
         }
         if (dirtyData != null && dirtyData.isNotEmpty) {
@@ -1407,11 +1463,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Fires a structural notification, or records the intent when inside
   /// [runBatch]. All in-controller mutation paths call this instead of
   /// [notifyListeners] directly so batching works uniformly.
-  void _notifyStructural() {
+  ///
+  /// [affectedKeys] narrows the refresh scope for listeners subscribed via
+  /// [addStructuralListener]:
+  ///   - `null` — scope unknown; listeners should do a full refresh.
+  ///   - empty set — structural change occurred but no mounted row's
+  ///     builder output changed; listeners need only relayout/GC.
+  ///   - non-empty set — exactly these keys need refresh.
+  ///
+  /// Inside [runBatch], `null` is a poison pill: any in-batch call with
+  /// `null` forces the coalesced exit notification to use `null`, even if
+  /// other in-batch calls carried specific sets.
+  ///
+  /// External observers via [addListener] (ChangeNotifier) always see a
+  /// single `notifyListeners()` fire regardless of [affectedKeys].
+  void _notifyStructural({Set<TKey>? affectedKeys}) {
     if (_batchDepth > 0) {
       _batchDidRequestStructural = true;
+      if (affectedKeys == null) {
+        _batchAffectedStructuralUnknown = true;
+        _batchAffectedStructuralKeys = null;
+      } else if (!_batchAffectedStructuralUnknown) {
+        (_batchAffectedStructuralKeys ??= <TKey>{}).addAll(affectedKeys);
+      }
       return;
     }
+    _fireStructuralListeners(affectedKeys);
     notifyListeners();
   }
 
@@ -1479,6 +1556,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     _rebuildVisibleIndex();
     _structureGeneration++;
+    // Bulk wholesale replacement: _clear() purged every prior key. Callers
+    // frequently reuse the same TKey identities, and any retained mounted
+    // Element's builder output may differ. Keep the conservative full
+    // refresh rather than try to enumerate every retained key.
     _notifyStructural();
   }
 
@@ -1532,6 +1613,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (preservePendingSubtreeState) {
         _rebuildVisibleOrder();
         _structureGeneration++;
+        // Cancelling a pending deletion restores the node (and possibly
+        // descendants) to the tree. Downstream builder-output effects span
+        // the restored subtree plus any ancestor whose hasChildren state
+        // flips; enumerating all of that precisely is complex, so fall back
+        // to a full refresh.
         _notifyStructural();
         return;
       }
@@ -1577,7 +1663,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _rebuildVisibleOrder();
         _structureGeneration++;
       }
-      _notifyStructural();
+      // Data payload for node.key was just overwritten — rebuild its row.
+      _notifyStructural(affectedKeys: <TKey>{node.key});
       return;
     }
 
@@ -1614,7 +1701,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _startStandaloneEnterAnimation(node.key);
     }
 
-    _notifyStructural();
+    // Fresh root: the new key enters visible order via createChild, not a
+    // refresh. Roots have no parent whose hasChildren could flip, and no
+    // sibling's builder output depends on the new key. Empty set.
+    _notifyStructural(affectedKeys: const {});
   }
 
   /// Calculates the visible order index for inserting a root at the given root index.
@@ -1738,6 +1828,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
+    // Bulk child replacement: old children (and their subtrees) were purged,
+    // new children registered. Any retained row under [parentKey] may have
+    // its builder output differ — fall back to a full refresh.
     _notifyStructural();
   }
 
@@ -1804,6 +1897,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (preservePendingSubtreeState) {
         _rebuildVisibleOrder();
         _structureGeneration++;
+        // See insertRoot's matching branch: cancelling a pending deletion
+        // may restore a subtree and flip ancestor hasChildren state — fall
+        // back to a full refresh.
         _notifyStructural();
         return;
       }
@@ -1848,7 +1944,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _rebuildVisibleOrder();
         _structureGeneration++;
       }
-      _notifyStructural();
+      // Data payload for node.key was just overwritten — rebuild its row.
+      _notifyStructural(affectedKeys: <TKey>{node.key});
       return;
     }
     final parentDepth = _depthOfKey(parentKey);
@@ -1861,6 +1958,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _setExpandedKey(node.key, false);
     // Add to parent's children
     final siblings = _childListOrCreate(parentKey);
+    final parentHadChildren = siblings.isNotEmpty;
     final effectiveIndex =
         index ?? (comparator != null ? _sortedIndex(siblings, node) : null);
     if (effectiveIndex != null && effectiveIndex < siblings.length) {
@@ -1898,7 +1996,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
     }
-    _notifyStructural();
+    // The new key enters via createChild. The only retained row whose
+    // builder output can change is the parent — and only when its
+    // hasChildren state just flipped from false → true (the chevron
+    // appears for the first time).
+    final affected = <TKey>{};
+    if (!parentHadChildren) {
+      affected.add(parentKey);
+    }
+    _notifyStructural(affectedKeys: affected);
   }
 
   /// Removes a node and all its descendants from the tree.
@@ -1911,6 +2017,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     final descendants = _getDescendants(key);
     final nodesToRemove = [key, ...descendants];
+    // Capture the parent BEFORE mutation; _removeNodesImmediate purges the
+    // node and releases its nid, after which _parentKeyOfKey returns null.
+    final parentKey = _parentKeyOfKey(key);
+    final affected = <TKey>{};
     if (animate && _order.contains(key)) {
       // Mark nodes as pending deletion so _finalizeAnimation knows to
       // fully remove them (vs just hiding due to parent collapse)
@@ -1921,11 +2031,22 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           _startStandaloneExitAnimation(nodeId);
         }
       }
+      // Animated path: parent's child list is not mutated until exit
+      // animations complete; the hasChildren-flip refresh is fired from
+      // the standalone-tick / group-dismissed sites at completion time.
     } else {
       _removeNodesImmediate(nodesToRemove);
       _structureGeneration++;
+      // Immediate path: if [key] was the last child under its parent, the
+      // parent's hasChildren just flipped true → false.
+      if (parentKey != null) {
+        final siblings = _childListOf(parentKey);
+        if (siblings == null || siblings.isEmpty) {
+          affected.add(parentKey);
+        }
+      }
     }
-    _notifyStructural();
+    _notifyStructural(affectedKeys: affected);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1981,7 +2102,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       ..addAll(pendingRoots);
     _rebuildVisibleOrder();
     _structureGeneration++;
-    _notifyStructural();
+    // Pure reorder: positions change but no row's builder output does
+    // (nodeBuilder signature takes (context, key, depth) — no index). The
+    // sliver's layout repositions elements in place.
+    _notifyStructural(affectedKeys: const {});
   }
 
   /// Reorders the children of [parentKey] to match [orderedKeys].
@@ -2037,7 +2161,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _rebuildVisibleOrder();
       _structureGeneration++;
     }
-    _notifyStructural();
+    // See reorderRoots: pure reorder — no builder output changes.
+    _notifyStructural(affectedKeys: const {});
   }
 
   /// Moves a node from its current parent to [newParentKey].
@@ -2075,6 +2200,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // requested, nothing to do. With an explicit [index], fall through so the
     // node is repositioned among its existing siblings.
     if (oldParent == newParentKey && index == null) return;
+
+    // Snapshot state needed to compute precise affected-keys after the move.
+    final oldDepth = _depthOfKey(key);
+    final newParentWasEmpty = newParentKey != null
+        ? (_childListOf(newParentKey)?.isEmpty ?? true)
+        : false;
 
     // Cancel any animation/deletion state tied to the moved subtree's old
     // position. Without this, a node caught mid-exit-animation would still
@@ -2116,7 +2247,27 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _rebuildVisibleOrder();
     _structureGeneration++;
-    _notifyStructural();
+
+    final affected = <TKey>{};
+    // If the moved subtree's depth changed, every row in it must rebuild
+    // — nodeBuilder receives `depth` as an argument and indentation scales
+    // with it. Use _flattenSubtree so we enumerate the currently-expanded
+    // rows (the only ones that can be mounted).
+    if (newDepth != oldDepth) {
+      affected.addAll(_flattenSubtree(key, includeRoot: true));
+    }
+    // Old parent may have just lost its last child (hasChildren true → false).
+    if (oldParent != null) {
+      final siblings = _childListOf(oldParent);
+      if (siblings == null || siblings.isEmpty) {
+        affected.add(oldParent);
+      }
+    }
+    // New parent may have just gained its first child (hasChildren false → true).
+    if (newParentKey != null && newParentWasEmpty) {
+      affected.add(newParentKey);
+    }
+    _notifyStructural(affectedKeys: affected);
   }
 
   /// Recursively sets [_depths] for [key] and all its descendants.
@@ -2157,7 +2308,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // this node's children will appear immediately.
     if (!_ancestorsExpandedFast(key)) {
       _setExpandedKey(key, true);
-      _notifyStructural();
+      _notifyStructural(affectedKeys: <TKey>{key});
       return;
     }
     _setExpandedKey(key, true);
@@ -2185,7 +2336,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _updateIndicesFrom(insertIndex);
       }
       _structureGeneration++;
-      _notifyStructural();
+      _notifyStructural(affectedKeys: <TKey>{key});
       return;
     }
 
@@ -2225,7 +2376,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       _structureGeneration++;
-      _notifyStructural();
+      _notifyStructural(affectedKeys: <TKey>{key});
       return;
     }
 
@@ -2330,7 +2481,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     controller.forward();
-    _notifyStructural();
+    _notifyStructural(affectedKeys: <TKey>{key});
   }
 
   /// Collapses the given node, hiding its children.
@@ -2347,7 +2498,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Find all visible descendants (includes nodes currently entering)
     final descendants = _getVisibleDescendants(key);
     if (descendants.isEmpty) {
-      _notifyStructural();
+      _notifyStructural(affectedKeys: <TKey>{key});
       return;
     }
 
@@ -2364,7 +2515,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _removeFromVisibleOrder(toRemove);
         _structureGeneration++;
       }
-      _notifyStructural();
+      _notifyStructural(affectedKeys: <TKey>{key});
       return;
     }
 
@@ -2392,7 +2543,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _startStandaloneExitAnimation(nodeId, triggeringAncestorId: key);
       }
       _structureGeneration++;
-      _notifyStructural();
+      _notifyStructural(affectedKeys: <TKey>{key});
       return;
     }
 
@@ -2431,7 +2582,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     controller.reverse();
-    _notifyStructural();
+    _notifyStructural(affectedKeys: <TKey>{key});
   }
 
   /// Toggles the expansion state of the given node.
@@ -2586,6 +2737,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _removeAnimation(key);
       }
     }
+    // Bulk expansion touches many ancestors' expansion state + every
+    // previously-collapsed node now flips its chevron. Enumerating the
+    // affected set precisely is error-prone; fall back to a full refresh.
     _notifyStructural();
   }
 
@@ -2648,6 +2802,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (nodesToHide.isEmpty) {
       if (nodesToCollapse.isNotEmpty) {
         _collapseAllInRegistry(maxDepth);
+        // Bulk expansion-state clear — see main collapseAll branch below.
         _notifyStructural();
       }
       return;
@@ -2738,6 +2893,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _removeFromVisibleOrder(toRemove);
       }
     }
+    // Bulk expansion-state clear: every node whose isExpanded state flipped
+    // may render differently (chevron rotation, etc.). The set can span
+    // arbitrary subtrees; fall back to a full refresh.
     _notifyStructural();
   }
 
@@ -2801,6 +2959,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _clear();
     _animationListeners.clear();
     _nodeDataListeners.clear();
+    _structuralListeners.clear();
     super.dispose();
   }
 }

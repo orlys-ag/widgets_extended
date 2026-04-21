@@ -914,6 +914,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
 
     int cacheEndIndex = cacheStartIndex;
+    // Steady-state accumulator for the non-bulk (op-group) path. Mirrors the
+    // rationale of the bulk branch above: at low animation values, entering
+    // rows have sub-pixel animated extents, so reading live offsets would
+    // admit the entire entering subtree into the cache region on frame 1 of
+    // a single-node expand — e.g. all 1150 children of a large parent,
+    // causing a mass-mount / mass-rebuild hitch. We cap admission at what
+    // the cache region would hold at steady state (full extents for
+    // entering rows, live extent for the rest).
+    double steadyAccum = 0.0;
     for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final nid = _controller.nidOf(nodeId);
@@ -930,9 +939,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       } else {
         offset = _nodeOffsetsByNid[nid];
         if (offset >= cacheEnd) break;
+        if (steadyAccum >= remainingCacheExtent) break;
       }
       _inCacheRegionByNid[nid] = 1;
       cacheEndIndex = i + 1;
+      if (!_bulkCumulativesValid) {
+        final anim = controller.getAnimationState(nodeId);
+        final double contribution;
+        if (anim != null && anim.type == AnimationType.entering) {
+          contribution = controller.getEstimatedExtent(nodeId);
+        } else {
+          contribution = _nodeExtentsByNid[nid];
+        }
+        steadyAccum += contribution;
+      }
     }
 
     // Create children for nodes in cache region
