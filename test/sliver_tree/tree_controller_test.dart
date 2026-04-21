@@ -1367,6 +1367,251 @@ void main() {
     );
   });
 
+  group("Path-1 reversal of captured mid-flight members", () {
+    testWidgets(
+      "re-expand after a collapse that captured a mid-flight descendant "
+      "animates toward full extent, not the captured value",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        // A → B → C. Only A starts expanded.
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+        controller.setFullExtent("a", 48);
+        controller.setFullExtent("b", 48);
+        controller.setFullExtent("c", 48);
+        controller.expand(key: "a", animate: false);
+        expect(controller.visibleNodes, ["a", "b"]);
+
+        // Expand B with animation. C joins Gb with target = 48 (full).
+        controller.expand(key: "b");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 200));
+        // Mid-flight: C ≈ 24 (half of full).
+        expect(controller.getCurrentExtent("c"), closeTo(24, 5));
+
+        // Collapse A. Path-2 fresh collapse captures C from Gb at ≈24 and
+        // stores it as Ga.member[c].targetExtent. Pre-fix, this captured
+        // value stuck around when we reversed the collapse.
+        controller.collapse(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 100));
+
+        // Re-expand A. Path-1 reversal of Ga. With the fix, Ga.member[c]
+        // .targetExtent is restored to the full extent so the forward
+        // animation terminates at 48. Without the fix, C would cap out at
+        // the captured ≈24 and snap to 48 at group disposal.
+        controller.expand(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 50));
+
+        // Ga.controller ≈ 0.875 (reverse reached 0.75, then forward ran
+        // 50ms of the 100ms remaining). With fix: lerp(0, 48, 0.875) ≈ 42.
+        // Without fix: lerp(0, 24, 0.875) ≈ 21.
+        expect(
+          controller.getCurrentExtent("c"),
+          greaterThan(28),
+          reason: "C should be animating toward its full 48-pixel extent "
+              "after the collapse reversal, not capped at its captured "
+              "mid-flight value.",
+        );
+
+        await tester.pumpAndSettle();
+        expect(controller.visibleNodes, ["a", "b", "c"]);
+        expect(controller.getCurrentExtent("c"), 48);
+      },
+    );
+
+    testWidgets(
+      "re-collapse after an expand that captured a mid-flight descendant "
+      "animates toward zero extent, not the captured start",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        // A → B → C. A expanded, B expanded. C is visible and fully sized.
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+        controller.setFullExtent("a", 48);
+        controller.setFullExtent("b", 48);
+        controller.setFullExtent("c", 48);
+        controller.expand(key: "a", animate: false);
+        controller.expand(key: "b", animate: false);
+        expect(controller.visibleNodes, ["a", "b", "c"]);
+
+        // Collapse B with animation. C starts shrinking via Gb
+        // (start=0, target=48, controller reversing from 1.0).
+        controller.collapse(key: "b");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(controller.getCurrentExtent("c"), closeTo(24, 5));
+
+        // Expand A — but A is already expanded. Expand B instead to force
+        // Path-2 expand while C is mid-collapse via Gb.
+        // Actually: Path-1 expand of Gb reverses the collapse. To hit
+        // Path-2 expand with a captured non-zero start, we need a fresh
+        // operation group. Collapse A first to remove Gb, then re-expand.
+        controller.collapse(key: "a");
+        await tester.pumpAndSettle();
+        // Rebuild mid-flight setup: expand A with B already flagged
+        // expanded. Expand B to trigger a fresh Gb, then mid-flight
+        // capture into a new expand via A-level.
+        controller.expand(key: "a", animate: false);
+        controller.collapse(key: "b", animate: false);
+        controller.expand(key: "b");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 200));
+        // C mid-entering via Gb at ≈24.
+
+        // Now collapse A. Path-2 fresh collapse captures C at ≈24 into Ga
+        // with (start=0, target≈24). This is the "captured target" path.
+        controller.collapse(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 100));
+
+        // Re-expand A. Path-1 reversal of Ga. Fix ensures target is
+        // restored to 48; re-collapse should still terminate at 0.
+        controller.expand(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 50));
+        // Collapse A again. Path-1 reversal of Ga's forward. With fix,
+        // each member's startExtent is normalized to 0 so the reversal
+        // terminates at a fully-collapsed (0) extent.
+        controller.collapse(key: "a");
+        await tester.pumpAndSettle();
+
+        // After full settle, only "a" is visible and C has been removed.
+        expect(controller.visibleNodes, ["a"]);
+      },
+    );
+  });
+
+  group("bulk reversal of captured mid-flight members", () {
+    testWidgets(
+      "expandAll reversing an in-flight collapse group restores each "
+      "member's targetExtent to full, not the captured mid-flight value",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        // A → B → C. Only A starts expanded.
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+        controller.setFullExtent("a", 48);
+        controller.setFullExtent("b", 48);
+        controller.setFullExtent("c", 48);
+        controller.expand(key: "a", animate: false);
+
+        // Expand B mid-flight. C joins Gb with target = 48.
+        controller.expand(key: "b");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(controller.getCurrentExtent("c"), closeTo(24, 5));
+
+        // Collapse A. Path-2 fresh collapse captures C from Gb at ≈24
+        // into Ga with members[c].targetExtent ≈ 24.
+        controller.collapse(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 100));
+
+        // expandAll reverses Ga via controller.forward(). The fix must
+        // normalize Ga.members[c].targetExtent back to 48 so the forward
+        // reversal terminates at the full natural extent. Without the
+        // fix, the lerp tops out at the captured ≈24 and snaps to 48
+        // when the group disposes.
+        controller.expandAll();
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 50));
+
+        expect(
+          controller.getCurrentExtent("c"),
+          greaterThan(28),
+          reason: "C should be animating toward its full 48-pixel extent "
+              "during expandAll's reversal of the collapsing Ga, not "
+              "capped at its captured mid-flight value.",
+        );
+
+        await tester.pumpAndSettle();
+        expect(controller.visibleNodes, ["a", "b", "c"]);
+        expect(controller.getCurrentExtent("c"), 48);
+      },
+    );
+
+    testWidgets(
+      "collapseAll reversing an in-flight expand group normalizes each "
+      "member's startExtent to 0, not the captured mid-flight value",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        // A → B → C. All expanded so C is visible at full extent.
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
+        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+        controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+        controller.setFullExtent("a", 48);
+        controller.setFullExtent("b", 48);
+        controller.setFullExtent("c", 48);
+        controller.expand(key: "a", animate: false);
+        controller.expand(key: "b", animate: false);
+        expect(controller.visibleNodes, ["a", "b", "c"]);
+
+        // collapseAll drives a bulk collapse. B, C shrink via the bulk
+        // group (start=0, target=48, controller 1 → 0).
+        controller.collapseAll();
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(controller.getCurrentExtent("b"), closeTo(24, 5));
+
+        // Expand A fresh while B, C are mid-collapse in the bulk.
+        // Path-2 fresh expand of A captures B's ≈24 mid-flight extent
+        // as startExtent into Ga. Ga.members[b] = (≈24, 48).
+        controller.expand(key: "a");
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 50));
+
+        // Now collapseAll again. This reverses Ga via controller.reverse().
+        // The fix must normalize Ga.members[b].startExtent to 0 so the
+        // reversal terminates at a fully-collapsed 0. Without the fix,
+        // the lerp bottoms out at the captured ≈24 and visually snaps
+        // to 0 on group disposal.
+        controller.collapseAll();
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 30));
+
+        expect(
+          controller.getCurrentExtent("b"),
+          lessThan(20),
+          reason: "B should be collapsing toward 0 during collapseAll's "
+              "reversal of the expanding Ga, not anchored at its "
+              "captured mid-flight start value.",
+        );
+
+        await tester.pumpAndSettle();
+        expect(controller.visibleNodes, ["a"]);
+      },
+    );
+  });
+
   group("collapse with no visible descendants", () {
     testWidgets(
       "notifies listeners when collapsing a node whose children aren't visible",

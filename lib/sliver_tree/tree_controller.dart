@@ -1091,11 +1091,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (animation.type == AnimationType.entering) {
         animation.targetExtent = extent;
         animation.updateExtent(animationCurve);
-      } else if (animation.type == AnimationType.exiting) {
-        // For exiting, start extent might need updating
-        animation.startExtent = extent;
-        animation.updateExtent(animationCurve);
       }
+      // For exiting animations, startExtent is historical (the extent at the
+      // moment the exit began, potentially captured mid-transition from an
+      // earlier source). Overwriting it with the freshly-measured full extent
+      // would retroactively rewrite where the exit started and jump the row
+      // forward on the next tick. Let the exit run from its original
+      // startExtent to 0 without interference.
     }
   }
 
@@ -1631,14 +1633,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         return;
       }
       // Reset expansion state so a subsequent expand() works cleanly.
+      // Descendants that were mid-exit are left alone by _cancelDeletion
+      // and continue animating out under the restored parent via
+      // _rebuildVisibleOrder's "collapsed with active animations" branch.
+      // Yanking them here would visually jump following rows upward by
+      // the descendant's current extent in a single frame.
       _setExpandedKey(node.key, false);
-      // Descendants had their exit animations reversed by _cancelDeletion,
-      // but the parent is now collapsed so they should not be visible.
-      // Remove their animations and rebuild the visible order.
-      final descendants = _getDescendants(node.key);
-      for (final desc in descendants) {
-        _removeAnimation(desc);
-      }
       _rebuildVisibleOrder();
       _structureGeneration++;
       _notifyStructural();
@@ -1907,14 +1907,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         return;
       }
       // Reset expansion state so a subsequent expand() works cleanly.
+      // Descendants that were mid-exit are left alone by _cancelDeletion
+      // and continue animating out under the restored parent via
+      // _rebuildVisibleOrder's "collapsed with active animations" branch.
+      // Yanking them here would visually jump following rows upward by
+      // the descendant's current extent in a single frame.
       _setExpandedKey(node.key, false);
-      // Descendants had their exit animations reversed by _cancelDeletion,
-      // but the parent is now collapsed so they should not be visible.
-      // Remove their animations and rebuild the visible order.
-      final descendants = _getDescendants(node.key);
-      for (final desc in descendants) {
-        _removeAnimation(desc);
-      }
       _rebuildVisibleOrder();
       _structureGeneration++;
       _notifyStructural();
@@ -2293,6 +2291,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (existingGroup != null) {
       // Path 1: Reversing a collapse — group already exists
       existingGroup.pendingRemoval.clear();
+      // Restore each member's targetExtent to its full (natural) extent.
+      // A prior fresh collapse may have captured mid-flight extents below
+      // full (e.g., nodes taken from a bulk or standalone animation), so
+      // computeExtent at value=1 would stop at the captured value and
+      // snap to full on group disposal. Updating here ensures the
+      // reversal terminates at the correct natural size.
+      for (final entry in existingGroup.members.entries) {
+        entry.value.targetExtent =
+            _fullExtents[entry.key] ?? _unknownExtent;
+      }
       existingGroup.controller.forward();
 
       // Handle descendants NOT in this group (from nested expansions)
@@ -2306,9 +2314,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           // Reverse the exit to an enter with speedMultiplier
           _startStandaloneEnterAnimation(nodeId);
         } else if (!_isVisible(nodeId)) {
-          // New node not yet visible — insert and animate
-          // Find insertion point
-          _insertNodeIntoVisibleOrder(nodeId, parentIndex);
+          // New node not yet visible — insert at correct sibling position
+          // and animate. _insertNodeIntoVisibleOrder appends at the end of
+          // the grandparent's subtree, which drops the node past its
+          // following siblings when they are already in the visible order.
+          _insertNewNodeAmongSiblings(nodeId);
           _startStandaloneEnterAnimation(nodeId);
         }
       }
@@ -2460,8 +2470,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final existingGroup = _operationGroups[key];
     if (existingGroup != null) {
       // Path 1: Reversing an expand — group already exists
-      for (final nodeId in existingGroup.members.keys) {
-        existingGroup.pendingRemoval.add(nodeId);
+      // Normalize each member's startExtent to 0 so the reversal
+      // terminates at fully-collapsed (value=0 → extent=0). A prior
+      // fresh expand may have captured a non-zero start from a node
+      // that was mid-animation, which would leave a residual visible
+      // extent at dismissal and cause a visible snap when the member
+      // is removed from the visible order.
+      for (final entry in existingGroup.members.entries) {
+        entry.value.startExtent = 0.0;
+        existingGroup.pendingRemoval.add(entry.key);
       }
       existingGroup.controller.reverse();
 
@@ -2603,6 +2620,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         final group = entry.value;
         if (group.pendingRemoval.isNotEmpty) {
           group.pendingRemoval.clear();
+          // Restore each member's targetExtent to full so the reversal
+          // terminates at the correct natural size instead of at a
+          // captured mid-flight value.
+          for (final member in group.members.entries) {
+            member.value.targetExtent =
+                _fullExtents[member.key] ?? _unknownExtent;
+          }
           group.controller.forward();
         }
       }
@@ -2742,6 +2766,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             if (!_pendingDeletion.contains(nodeId)) {
               group.pendingRemoval.add(nodeId);
             }
+          }
+          // Normalize startExtent to 0 so the reversal terminates at
+          // zero instead of at a captured mid-flight start value.
+          for (final member in group.members.entries) {
+            member.value.startExtent = 0.0;
           }
           group.controller.reverse();
         }
@@ -3142,13 +3171,26 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Cancels a pending deletion for a node and all its descendants.
   ///
   /// Reverses the exit animation of [key] into an enter animation so the
-  /// re-inserted node animates back in. Descendants are cleared of pending
-  /// deletion and their animations are simply removed: the caller always
-  /// forces expansion to false on the restored node, so descendants will not
-  /// be visible. Starting an enter animation for each descendant (only to
-  /// have it torn down immediately) would also yank them out of any
-  /// unrelated [OperationGroup] they still belong to via
-  /// [_captureAndRemoveFromGroups], leaving that group short a member.
+  /// re-inserted node animates back in.
+  ///
+  /// Descendant handling has three branches:
+  ///
+  /// 1. [preserveSubtreeState] is true AND the descendant was mid-exit AND
+  ///    its ancestor chain is expanded: reverse its exit into an enter so
+  ///    the whole subtree animates back in coherently with [key].
+  /// 2. The descendant was mid-exit but case 1 does not apply: clear its
+  ///    pending-deletion marker but leave the exit animation running so the
+  ///    row shrinks away smoothly under the restored (collapsed) parent.
+  ///    Yanking the animation here would drop the descendant's current
+  ///    extent from the visible order in a single frame, jumping every
+  ///    following row upward. Because pending-deletion is cleared,
+  ///    [_finalizeAnimation] takes the non-deleted branch and only removes
+  ///    the descendant from the visible order, preserving its structural
+  ///    data so an ancestor re-expand can restore it.
+  /// 3. The descendant had no active exit animation (e.g. it was under a
+  ///    collapsed ancestor when the remove started, or it was a
+  ///    just-adopted zombie): clear its pending-deletion marker and any
+  ///    residual animation state. Nothing is visible to disrupt.
   void _cancelDeletion(
     TKey key, {
     bool animate = true,
@@ -3163,23 +3205,26 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     final descendants = _getDescendants(key);
     for (final nodeId in descendants) {
-      _pendingDeletion.remove(nodeId);
       if (!animate) {
+        _pendingDeletion.remove(nodeId);
         _removeAnimation(nodeId);
         continue;
       }
       final animation = _standaloneAnimations[nodeId];
-      // Only reverse a descendant's exit into an enter if it would be
-      // visible under the preserved expansion chain. Otherwise the enter
-      // animation would finish with the node parked in the visible order
-      // under a collapsed ancestor, leaving the tree incoherent until the
-      // next rebuild hides it.
+      final isExitingDescendant =
+          animation != null && animation.type == AnimationType.exiting;
       if (preserveSubtreeState &&
-          animation != null &&
-          animation.type == AnimationType.exiting &&
+          isExitingDescendant &&
           _ancestorsExpandedFast(nodeId)) {
+        _pendingDeletion.remove(nodeId);
         _startStandaloneEnterAnimation(nodeId);
+      } else if (isExitingDescendant) {
+        // Case 2: clear pending-deletion so _finalizeAnimation preserves the
+        // node's structural data, but let the exit animation run to
+        // completion so the visible row shrinks away smoothly.
+        _pendingDeletion.remove(nodeId);
       } else {
+        _pendingDeletion.remove(nodeId);
         _removeAnimation(nodeId);
       }
     }
@@ -3324,11 +3369,27 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return false;
   }
 
-  /// Inserts a node into the visible order at the correct position relative
-  /// to the given parent index.
-  void _insertNodeIntoVisibleOrder(TKey nodeId, int parentIndex) {
-    final parentKey = _visibleKeyAt(parentIndex);
-    final insertIndex = parentIndex + 1 + _countVisibleDescendants(parentKey);
+  /// Inserts [nodeId] into the visible order at the DFS position implied by
+  /// its place among its real parent's children list. Used when restoring
+  /// visibility to a node whose siblings may already be in the visible order
+  /// (e.g. re-expanding a collapsing operation group after a mid-collapse
+  /// insert). Falls back to a no-op if the node's parent isn't visible.
+  void _insertNewNodeAmongSiblings(TKey nodeId) {
+    final parent = _parentKeyOfKey(nodeId);
+    if (parent == null) return;
+    final parentVisibleIndex = _visibleIndexOf(parent);
+    if (parentVisibleIndex == _kNotVisible) return;
+    final siblings = _childListOf(parent);
+    int insertIndex = parentVisibleIndex + 1;
+    if (siblings != null) {
+      for (final sib in siblings) {
+        if (sib == nodeId) break;
+        final sibIdx = _visibleIndexOf(sib);
+        if (sibIdx != _kNotVisible) {
+          insertIndex = sibIdx + 1 + _countVisibleDescendants(sib);
+        }
+      }
+    }
     _visibleInsertKey(insertIndex, nodeId);
     _updateIndicesFrom(insertIndex);
   }
@@ -3486,15 +3547,23 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
     // Check if keys form a contiguous range via the nid-indexed visibility map.
+    // Compare against [visibleCount] (not keys.length): a caller can pass a
+    // key whose nid was already released (e.g. an op group's dismissed
+    // handler purges pendingDeletion members before batching the visible-
+    // order removal). Those keys report _kNotVisible here, and using
+    // keys.length would let the fast path fire when non-key rows sit in the
+    // range gap, clobbering unrelated siblings.
     int minIdx = _visibleLen;
     int maxIdx = -1;
+    int visibleCount = 0;
     for (final key in keys) {
       final idx = _visibleIndexOf(key);
       if (idx == _kNotVisible) continue;
+      visibleCount++;
       if (idx < minIdx) minIdx = idx;
       if (idx > maxIdx) maxIdx = idx;
     }
-    if (maxIdx >= 0 && maxIdx - minIdx + 1 == keys.length) {
+    if (maxIdx >= 0 && maxIdx - minIdx + 1 == visibleCount) {
       // Contiguous: clear the index first, then remove from the array.
       for (int i = minIdx; i <= maxIdx; i++) {
         _indexByNid[_visibleOrderNids[i]] = _kNotVisible;
@@ -3546,11 +3615,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   int _countVisibleDescendants(TKey key) {
+    // Walk structural children regardless of [key]'s own expansion state:
+    // a collapsed node can still have children in the visible order when
+    // they are mid-animation (see _rebuildVisibleOrder's "collapsed with
+    // active animations" branch). Gating on _isExpandedKey here would
+    // under-count those rows and cause _insertNewNodeAmongSiblings /
+    // insert() to place new siblings in the middle of a mid-collapsing
+    // subtree instead of after it.
     int count = 0;
     final children = _childListOf(key);
-    if (children == null || !_isExpandedKey(key)) {
-      return 0;
-    }
+    if (children == null) return 0;
     for (final childId in children) {
       if (_isVisible(childId)) {
         count++;
