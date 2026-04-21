@@ -56,6 +56,11 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Whether garbage collection is already scheduled.
   bool _gcScheduled = false;
 
+  /// Whether stale-node eviction is already scheduled for a post-frame
+  /// callback. Dedupes across layout passes so continuous scroll doesn't
+  /// queue one callback per frame (each of which would walk [_children]).
+  bool _staleEvictionScheduled = false;
+
   /// Set by [reassemble] to signal that [update] should invalidate children.
   bool _didReassemble = false;
 
@@ -88,6 +93,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     widget.controller.removeAnimationListener(_onAnimationTick);
     widget.controller.removeNodeDataListener(_onNodeDataChanged);
     _gcScheduled = false;
+    _staleEvictionScheduled = false;
     super.unmount();
   }
 
@@ -259,8 +265,10 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
 
   /// Removes elements for nodes that no longer exist in the controller.
   ///
-  /// Only evicts dead nodes (removed from the tree entirely). Stale-node
-  /// eviction (nodes outside the cache region) is not yet implemented.
+  /// Only evicts *dead* nodes (removed from the tree entirely). Stale-node
+  /// eviction (mounted rows that scrolled outside the cache region) is
+  /// handled separately by [_scheduleStaleEviction] on a post-layout
+  /// cadence.
   void _collectGarbage() {
     final controller = widget.controller;
     final deadNodes = <TKey>[];
@@ -314,37 +322,58 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Schedules eviction of mounted children that are outside the cache
   /// region and not needed as sticky headers.
   ///
-  /// Skipped during animations to avoid evicting nodes that may re-enter
-  /// the viewport. Runs as a post-frame callback so that `dropChild` /
-  /// `markNeedsLayout` is called between frames, not during layout.
+  /// Skipped while animations are active so exiting rows keep their
+  /// element until the animation settles. The [_staleEvictionScheduled]
+  /// flag dedupes across layout passes — continuous scroll fires
+  /// `didFinishLayout` every frame, but we only want one post-frame
+  /// eviction sweep per frame. The [_children] walk happens inside the
+  /// post-frame callback (not in the hot layout path) so per-layout cost
+  /// stays O(1).
   void _scheduleStaleEviction() {
+    if (_staleEvictionScheduled) return;
     if (widget.controller.hasActiveAnimations) return;
-
-    final render = renderObject;
-    final staleNodes = <TKey>[];
-    for (final nodeId in _children.keys) {
-      // Only evict nodes that still exist in the controller but are outside
-      // the retention window. Dead nodes are handled by _collectGarbage.
-      if (!render.isNodeRetained(nodeId) &&
-          widget.controller.getNodeData(nodeId) != null) {
-        staleNodes.add(nodeId);
-      }
-    }
-    if (staleNodes.isEmpty) return;
+    _staleEvictionScheduled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _staleEvictionScheduled = false;
       if (!mounted || _inLayout) return;
-      // Re-check retention — scroll position may have changed.
+      // An animation may have started between scheduling and firing —
+      // e.g. the user expanded a node in the same frame. Bail out so we
+      // don't evict a row that's about to begin its enter/exit animation.
+      if (widget.controller.hasActiveAnimations) return;
+
       final render = renderObject;
+      final staleNodes = <TKey>[];
+      for (final nodeId in _children.keys) {
+        // Dead rows are handled by [_collectGarbage]; skip them here so
+        // both paths don't race over the same element.
+        if (widget.controller.getNodeData(nodeId) == null) continue;
+        if (!render.isNodeRetained(nodeId)) {
+          staleNodes.add(nodeId);
+        }
+      }
+      if (staleNodes.isEmpty) return;
+
+      // Batch evictions to cap per-frame work after a large scroll.
+      // Scale with stale count so big sweeps clear quickly without
+      // pathologically long pauses.
+      final maxPerPass = staleNodes.length.clamp(50, 200);
+      final evictNow = staleNodes.length <= maxPerPass
+          ? staleNodes
+          : staleNodes.sublist(0, maxPerPass);
+
       owner!.buildScope(this, () {
-        for (final nodeId in staleNodes) {
-          if (render.isNodeRetained(nodeId)) continue;
+        for (final nodeId in evictNow) {
           final element = _children.remove(nodeId);
           if (element != null) {
             updateChild(element, null, nodeId);
           }
         }
       });
+
+      if (staleNodes.length > maxPerPass) {
+        _scheduleStaleEviction();
+      }
     });
   }
 

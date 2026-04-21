@@ -446,4 +446,70 @@ void main() {
     expect(counts["b"]!, greaterThan(before["b"]!));
     expect(find.text("B-updated"), findsOneWidget);
   });
+
+  testWidgets(
+    "rows scrolled far outside the cache region are evicted",
+    (tester) async {
+      // Without stale eviction, every row the user ever scrolled past stays
+      // mounted forever. A parent rebuild (or anything else that walks
+      // _children) then pays O(everythingEverMounted) instead of
+      // O(cacheRegionSize). This test pins the eviction contract: scroll
+      // a row well outside the cache band, and when we come back, it must
+      // have been re-created (not just reused).
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        for (int i = 0; i < 200; i++) TreeNode(key: "r$i", data: "R$i"),
+      ]);
+
+      final builds = <String, int>{};
+      final scrollController = ScrollController();
+      addTearDown(scrollController.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomScrollView(
+              controller: scrollController,
+              slivers: [
+                SliverTree<String, String>(
+                  controller: controller,
+                  nodeBuilder: (context, key, depth) {
+                    builds[key] = (builds[key] ?? 0) + 1;
+                    return SizedBox(height: 48, child: Text(key));
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // r5 is at offset ~240 — inside the initial viewport.
+      expect(builds["r5"], 1);
+
+      // Scroll far past r5. At 48px/row the default cache band (~250px
+      // leading + viewport + ~250px trailing) can't possibly cover offset
+      // ~240 from scrollOffset 5000 — r5 is unambiguously stale.
+      scrollController.jumpTo(5000);
+      await tester.pump();
+      await tester.pump(); // let the post-frame eviction callback drain
+
+      // Scroll back — r5 must re-enter the cache region from scratch,
+      // proving it was evicted rather than held mounted the whole time.
+      scrollController.jumpTo(0);
+      await tester.pump();
+
+      expect(
+        builds["r5"]!,
+        greaterThan(1),
+        reason:
+            "r5 should have been evicted when scrolled far out of cache, "
+            "and rebuilt on return",
+      );
+    },
+  );
 }
