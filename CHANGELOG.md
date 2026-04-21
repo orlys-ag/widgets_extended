@@ -1,3 +1,7 @@
+## 0.0.10
+
+- Optimized expansion of nodes with many children.
+
 ## 0.0.9
 
 - Fix re-insert animation regression
