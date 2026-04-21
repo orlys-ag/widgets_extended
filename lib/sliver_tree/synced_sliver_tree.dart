@@ -623,13 +623,15 @@ class _SyncedSliverTreeState<TKey, TItem>
   void didUpdateWidget(SyncedSliverTree<TKey, TItem> oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    assert(
-      oldWidget.animationDuration == widget.animationDuration &&
-          oldWidget.animationCurve == widget.animationCurve &&
-          oldWidget.indentWidth == widget.indentWidth,
-      "SyncedSliverTree animationDuration, animationCurve, and indentWidth "
-      "cannot be changed after creation. Use a Key to force recreation.",
-    );
+    if (oldWidget.animationDuration != widget.animationDuration) {
+      _treeController.animationDuration = widget.animationDuration;
+    }
+    if (oldWidget.animationCurve != widget.animationCurve) {
+      _treeController.animationCurve = widget.animationCurve;
+    }
+    if (oldWidget.indentWidth != widget.indentWidth) {
+      _treeController.indentWidth = widget.indentWidth;
+    }
 
     if (widget.preserveExpansion != oldWidget.preserveExpansion) {
       _syncController.dispose();

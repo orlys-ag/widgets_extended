@@ -508,8 +508,9 @@ void main() {
 
         // After settle, no animation → no clip shift → localToGlobal reports
         // the natural offset.
-        final settledTopLeft =
-            tester.getTopLeft(find.byKey(const ValueKey("row-n")));
+        final settledTopLeft = tester.getTopLeft(
+          find.byKey(const ValueKey("row-n")),
+        );
         expect(settledTopLeft.dy, closeTo(0, 0.5));
       },
     );
@@ -523,77 +524,76 @@ void main() {
   // ══════════════════════════════════════════════════════════════════════════
 
   group("nodeBuilder invocation during animation", () {
-    testWidgets(
-      "rows are not rebuilt on intermediate animation ticks",
-      (tester) async {
-        // Structural notifications (expand, animation completion) rebuild
-        // every mounted row — that's by design and covered elsewhere. This
-        // test pins the middle of an animation: pure extent-interpolation
-        // ticks that only call markNeedsLayout must not trigger rebuilds.
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationDuration: const Duration(milliseconds: 600),
-          animationCurve: Curves.linear,
-        );
-        addTearDown(controller.dispose);
+    testWidgets("rows are not rebuilt on intermediate animation ticks", (
+      tester,
+    ) async {
+      // Structural notifications (expand, animation completion) rebuild
+      // every mounted row — that's by design and covered elsewhere. This
+      // test pins the middle of an animation: pure extent-interpolation
+      // ticks that only call markNeedsLayout must not trigger rebuilds.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 600),
+        animationCurve: Curves.linear,
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([
-          TreeNode(key: "a", data: "A"),
-          TreeNode(key: "b", data: "B"),
-        ]);
-        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
+      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
 
-        final buildCounts = <String, int>{};
+      final buildCounts = <String, int>{};
 
-        await tester.pumpWidget(
-          buildTestTree(
-            controller: controller,
-            nodeBuilder: (context, key, depth) {
-              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
-              return SizedBox(height: 48, child: Text(key));
-            },
-          ),
-        );
-        await tester.pump();
+      await tester.pumpWidget(
+        buildTestTree(
+          controller: controller,
+          nodeBuilder: (context, key, depth) {
+            buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+            return SizedBox(height: 48, child: Text(key));
+          },
+        ),
+      );
+      await tester.pump();
 
-        // Kick off an animated expand. The expand() call itself notifies
-        // listeners, which schedules a rebuild of mounted rows and creates
-        // 'a1' on the next layout pass.
-        controller.expand(key: "a");
-        await tester.pump(const Duration(milliseconds: 1));
+      // Kick off an animated expand. The expand() call itself notifies
+      // listeners, which schedules a rebuild of mounted rows and creates
+      // 'a1' on the next layout pass.
+      controller.expand(key: "a");
+      await tester.pump(const Duration(milliseconds: 1));
 
-        // Capture baseline counts AFTER the expand-triggered rebuild has
-        // landed. We're now mid-animation (≈0% progress of 600ms).
-        final baselineA = buildCounts["a"] ?? 0;
-        final baselineB = buildCounts["b"] ?? 0;
-        final baselineA1 = buildCounts["a1"] ?? 0;
+      // Capture baseline counts AFTER the expand-triggered rebuild has
+      // landed. We're now mid-animation (≈0% progress of 600ms).
+      final baselineA = buildCounts["a"] ?? 0;
+      final baselineB = buildCounts["b"] ?? 0;
+      final baselineA1 = buildCounts["a1"] ?? 0;
 
-        // Pump several pure-tick frames. Total ≈100ms — well inside the
-        // 600ms animation, so no completion notification fires.
-        for (int i = 0; i < 5; i++) {
-          await tester.pump(const Duration(milliseconds: 20));
-        }
+      // Pump several pure-tick frames. Total ≈100ms — well inside the
+      // 600ms animation, so no completion notification fires.
+      for (int i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
 
-        // During those intermediate ticks no rebuilds should have happened.
-        expect(
-          buildCounts["a"],
-          baselineA,
-          reason: "row 'a' was rebuilt on animation ticks",
-        );
-        expect(
-          buildCounts["b"],
-          baselineB,
-          reason: "row 'b' was rebuilt on animation ticks",
-        );
-        expect(
-          buildCounts["a1"],
-          baselineA1,
-          reason: "row 'a1' was rebuilt on animation ticks",
-        );
+      // During those intermediate ticks no rebuilds should have happened.
+      expect(
+        buildCounts["a"],
+        baselineA,
+        reason: "row 'a' was rebuilt on animation ticks",
+      );
+      expect(
+        buildCounts["b"],
+        baselineB,
+        reason: "row 'b' was rebuilt on animation ticks",
+      );
+      expect(
+        buildCounts["a1"],
+        baselineA1,
+        reason: "row 'a1' was rebuilt on animation ticks",
+      );
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -644,9 +644,7 @@ void main() {
 
         final positionsAfterSettle = <String, double>{
           for (final key in ["a", "b", "c", "d"])
-            key: tester
-                .getTopLeft(find.byKey(ValueKey("row-$key")))
-                .dy,
+            key: tester.getTopLeft(find.byKey(ValueKey("row-$key"))).dy,
         };
 
         // Pump a bunch of idle frames — each re-enters performLayout with
@@ -675,86 +673,90 @@ void main() {
   // ══════════════════════════════════════════════════════════════════════════
 
   group("Targeted data refresh", () {
-    testWidgets(
-      "updateNode on one node does not rebuild sibling rows",
-      (tester) async {
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationDuration: Duration.zero,
-        );
-        addTearDown(controller.dispose);
-        controller.setRoots([
-          TreeNode(key: "a", data: "A"),
-          TreeNode(key: "b", data: "B"),
-          TreeNode(key: "c", data: "C"),
-        ]);
+    testWidgets("updateNode on one node does not rebuild sibling rows", (
+      tester,
+    ) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+        TreeNode(key: "c", data: "C"),
+      ]);
 
-        final buildCounts = <String, int>{};
-        await tester.pumpWidget(
-          buildTestTree(
-            controller: controller,
-            nodeBuilder: (context, key, depth) {
-              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
-              final data = controller.getNodeData(key)?.data ?? "";
-              return SizedBox(height: 48, child: Text(data));
-            },
-          ),
-        );
+      final buildCounts = <String, int>{};
+      await tester.pumpWidget(
+        buildTestTree(
+          controller: controller,
+          nodeBuilder: (context, key, depth) {
+            buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+            final data = controller.getNodeData(key)?.data ?? "";
+            return SizedBox(height: 48, child: Text(data));
+          },
+        ),
+      );
 
-        expect(buildCounts["a"], 1);
-        expect(buildCounts["b"], 1);
-        expect(buildCounts["c"], 1);
+      expect(buildCounts["a"], 1);
+      expect(buildCounts["b"], 1);
+      expect(buildCounts["c"], 1);
 
-        controller.updateNode(TreeNode(key: "b", data: "B-updated"));
-        await tester.pump();
+      controller.updateNode(TreeNode(key: "b", data: "B-updated"));
+      await tester.pump();
 
-        // Visible row updated.
-        expect(find.text("B-updated"), findsOneWidget);
-        // Only b's builder ran again. a and c are untouched.
-        expect(buildCounts["b"], 2);
-        expect(buildCounts["a"], 1,
-            reason: "sibling 'a' must not rebuild on unrelated updateNode");
-        expect(buildCounts["c"], 1,
-            reason: "sibling 'c' must not rebuild on unrelated updateNode");
-      },
-    );
+      // Visible row updated.
+      expect(find.text("B-updated"), findsOneWidget);
+      // Only b's builder ran again. a and c are untouched.
+      expect(buildCounts["b"], 2);
+      expect(
+        buildCounts["a"],
+        1,
+        reason: "sibling 'a' must not rebuild on unrelated updateNode",
+      );
+      expect(
+        buildCounts["c"],
+        1,
+        reason: "sibling 'c' must not rebuild on unrelated updateNode",
+      );
+    });
 
-    testWidgets(
-      "structural mutation still rebuilds every mounted row",
-      (tester) async {
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationDuration: Duration.zero,
-        );
-        addTearDown(controller.dispose);
-        controller.setRoots([
-          TreeNode(key: "a", data: "A"),
-          TreeNode(key: "b", data: "B"),
-        ]);
-        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+    testWidgets("structural mutation still rebuilds every mounted row", (
+      tester,
+    ) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
+      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
 
-        final buildCounts = <String, int>{};
-        await tester.pumpWidget(
-          buildTestTree(
-            controller: controller,
-            nodeBuilder: (context, key, depth) {
-              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
-              return SizedBox(height: 48, child: Text(key));
-            },
-          ),
-        );
+      final buildCounts = <String, int>{};
+      await tester.pumpWidget(
+        buildTestTree(
+          controller: controller,
+          nodeBuilder: (context, key, depth) {
+            buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+            return SizedBox(height: 48, child: Text(key));
+          },
+        ),
+      );
 
-        final before = Map<String, int>.from(buildCounts);
+      final before = Map<String, int>.from(buildCounts);
 
-        // expand() is a structural mutation — it must still refresh all
-        // mounted rows (closures may depend on expansion state, etc.).
-        controller.expand(key: "a");
-        await tester.pump();
+      // expand() is a structural mutation — it must still refresh all
+      // mounted rows (closures may depend on expansion state, etc.).
+      controller.expand(key: "a");
+      await tester.pump();
 
-        expect(buildCounts["a"]!, greaterThan(before["a"]!));
-        expect(buildCounts["b"]!, greaterThan(before["b"]!));
-      },
-    );
+      expect(buildCounts["a"]!, greaterThan(before["a"]!));
+      expect(buildCounts["b"]!, greaterThan(before["b"]!));
+    });
 
     testWidgets(
       "updateNode on an off-screen node does not trigger any rebuild",
@@ -766,8 +768,7 @@ void main() {
         addTearDown(controller.dispose);
         // 50 roots — only a handful are mounted at once given 48px rows.
         controller.setRoots([
-          for (int i = 0; i < 50; i++)
-            TreeNode(key: "r$i", data: "R$i"),
+          for (int i = 0; i < 50; i++) TreeNode(key: "r$i", data: "R$i"),
         ]);
 
         final buildCounts = <String, int>{};
@@ -784,8 +785,11 @@ void main() {
 
         // Pick a key that was never mounted.
         final String offscreenKey = "r49";
-        expect(buildCounts.containsKey(offscreenKey), isFalse,
-            reason: "sanity: last root shouldn't be mounted in initial viewport");
+        expect(
+          buildCounts.containsKey(offscreenKey),
+          isFalse,
+          reason: "sanity: last root shouldn't be mounted in initial viewport",
+        );
 
         final snapshot = Map<String, int>.from(buildCounts);
 
@@ -794,9 +798,13 @@ void main() {
 
         // Build counts of mounted rows must be unchanged.
         for (final entry in snapshot.entries) {
-          expect(buildCounts[entry.key], entry.value,
-              reason: "mounted row '${entry.key}' must not rebuild for an "
-                  "updateNode on an off-screen key");
+          expect(
+            buildCounts[entry.key],
+            entry.value,
+            reason:
+                "mounted row '${entry.key}' must not rebuild for an "
+                "updateNode on an off-screen key",
+          );
         }
       },
     );
@@ -856,8 +864,9 @@ void main() {
     // render cache only measures rows in or near the viewport).
     double estimator50(String _) => 50.0;
 
-    testWidgets("jumps an off-screen target to the top of the viewport",
-        (tester) async {
+    testWidgets("jumps an off-screen target to the top of the viewport", (
+      tester,
+    ) async {
       late TreeController<String, String> controller;
       late ScrollController scrollController;
 
@@ -888,8 +897,9 @@ void main() {
       expect(find.text("k20"), findsOneWidget);
     });
 
-    testWidgets("alignment=0.5 centers the row in the viewport",
-        (tester) async {
+    testWidgets("alignment=0.5 centers the row in the viewport", (
+      tester,
+    ) async {
       late TreeController<String, String> controller;
       late ScrollController scrollController;
 
@@ -948,9 +958,9 @@ void main() {
       expect(scrollController.position.pixels, 100.0);
     });
 
-    testWidgets(
-        "ancestorExpansion=immediate reveals a collapsed descendant",
-        (tester) async {
+    testWidgets("ancestorExpansion=immediate reveals a collapsed descendant", (
+      tester,
+    ) async {
       late TreeController<String, String> controller;
       late ScrollController scrollController;
 
@@ -966,9 +976,7 @@ void main() {
       );
       await tester.pump();
 
-      controller.setChildren("k2", [
-        TreeNode(key: "k2a", data: "k2a"),
-      ]);
+      controller.setChildren("k2", [TreeNode(key: "k2a", data: "k2a")]);
       await tester.pump();
 
       expect(controller.getVisibleIndex("k2a"), -1);
@@ -987,37 +995,36 @@ void main() {
     });
 
     testWidgets(
-        "ancestorExpansion=none returns false for a collapsed descendant",
-        (tester) async {
-      late TreeController<String, String> controller;
-      late ScrollController scrollController;
+      "ancestorExpansion=none returns false for a collapsed descendant",
+      (tester) async {
+        late TreeController<String, String> controller;
+        late ScrollController scrollController;
 
-      await tester.pumpWidget(
-        _ScrollToKeyHarness(
-          rowHeight: 50,
-          rowCount: 5,
-          onReady: (c, s) {
-            controller = c;
-            scrollController = s;
-          },
-        ),
-      );
-      await tester.pump();
+        await tester.pumpWidget(
+          _ScrollToKeyHarness(
+            rowHeight: 50,
+            rowCount: 5,
+            onReady: (c, s) {
+              controller = c;
+              scrollController = s;
+            },
+          ),
+        );
+        await tester.pump();
 
-      controller.setChildren("k2", [
-        TreeNode(key: "k2a", data: "k2a"),
-      ]);
-      await tester.pump();
+        controller.setChildren("k2", [TreeNode(key: "k2a", data: "k2a")]);
+        await tester.pump();
 
-      final ok = await controller.animateScrollToKey(
-        "k2a",
-        scrollController: scrollController,
-        ancestorExpansion: AncestorExpansionMode.none,
-      );
-      expect(ok, false);
-      expect(controller.isExpanded("k2"), false);
-      expect(scrollController.position.pixels, 0.0);
-    });
+        final ok = await controller.animateScrollToKey(
+          "k2a",
+          scrollController: scrollController,
+          ancestorExpansion: AncestorExpansionMode.none,
+        );
+        expect(ok, false);
+        expect(controller.isExpanded("k2"), false);
+        expect(scrollController.position.pixels, 0.0);
+      },
+    );
 
     testWidgets("returns false for unknown key", (tester) async {
       late TreeController<String, String> controller;
@@ -1043,37 +1050,38 @@ void main() {
     });
 
     testWidgets(
-        "non-zero duration dispatches an animation driven by pumpAndSettle",
-        (tester) async {
-      late TreeController<String, String> controller;
-      late ScrollController scrollController;
+      "non-zero duration dispatches an animation driven by pumpAndSettle",
+      (tester) async {
+        late TreeController<String, String> controller;
+        late ScrollController scrollController;
 
-      await tester.pumpWidget(
-        _ScrollToKeyHarness(
-          rowHeight: 50,
-          rowCount: 40,
-          onReady: (c, s) {
-            controller = c;
-            scrollController = s;
-          },
-        ),
-      );
-      await tester.pump();
+        await tester.pumpWidget(
+          _ScrollToKeyHarness(
+            rowHeight: 50,
+            rowCount: 40,
+            onReady: (c, s) {
+              controller = c;
+              scrollController = s;
+            },
+          ),
+        );
+        await tester.pump();
 
-      // Fire-and-forget — do not await the returned Future, since in widget
-      // tests nothing drives the scroll Ticker until pumpAndSettle runs.
-      // The animateTo call dispatches the activity synchronously.
-      // ignore: unawaited_futures
-      controller.animateScrollToKey(
-        "k20",
-        scrollController: scrollController,
-        duration: const Duration(milliseconds: 100),
-        extentEstimator: estimator50,
-      );
+        // Fire-and-forget — do not await the returned Future, since in widget
+        // tests nothing drives the scroll Ticker until pumpAndSettle runs.
+        // The animateTo call dispatches the activity synchronously.
+        // ignore: unawaited_futures
+        controller.animateScrollToKey(
+          "k20",
+          scrollController: scrollController,
+          duration: const Duration(milliseconds: 100),
+          extentEstimator: estimator50,
+        );
 
-      await tester.pumpAndSettle();
-      expect(scrollController.position.pixels, 1000.0);
-    });
+        await tester.pumpAndSettle();
+        expect(scrollController.position.pixels, 1000.0);
+      },
+    );
   });
 }
 
@@ -1181,7 +1189,8 @@ class _ScrollToKeyHarness extends StatefulWidget {
   final void Function(
     TreeController<String, String> controller,
     ScrollController scrollController,
-  ) onReady;
+  )
+  onReady;
 
   @override
   State<_ScrollToKeyHarness> createState() => _ScrollToKeyHarnessState();
@@ -1226,10 +1235,7 @@ class _ScrollToKeyHarnessState extends State<_ScrollToKeyHarness>
               SliverTree<String, String>(
                 controller: _controller,
                 nodeBuilder: (context, key, depth) {
-                  return SizedBox(
-                    height: widget.rowHeight,
-                    child: Text(key),
-                  );
+                  return SizedBox(height: widget.rowHeight, child: Text(key));
                 },
               ),
             ],
