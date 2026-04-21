@@ -1,6 +1,7 @@
 ## 0.0.9
 
 - Fix re-insert animation regression
+- Fix expansion persistence regression
 
 ## 0.0.8
 
