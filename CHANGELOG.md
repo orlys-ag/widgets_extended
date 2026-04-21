@@ -1,6 +1,6 @@
 ## 0.0.9
 
-- Attempt to fix re-insert animation regression
+- Fix re-insert animation regression
 
 ## 0.0.8
 
