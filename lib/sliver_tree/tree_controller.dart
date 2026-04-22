@@ -873,6 +873,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [RenderObject.markNeedsLayout] based on this flag.
   bool get hasActiveSlides => _slideAnimations.isNotEmpty;
 
+  /// Maximum |currentDelta| across every active slide entry, or 0.0 when
+  /// no slides are active.
+  ///
+  /// The render object uses this as a "slide overreach" to widen its build
+  /// and iteration ranges during a FLIP slide: a row whose *structural* y
+  /// is outside the viewport can still be painted inside the viewport if
+  /// its slide delta translates it there, and conversely a row whose
+  /// structural y is inside the viewport can translate out. Both ranges
+  /// (build window in performLayout, iteration window in paint/hit-test)
+  /// need to extend by this amount on each side to cover the displaced
+  /// rows — otherwise a swap of two large subtrees paints a visible gap
+  /// where a sliding row should appear.
+  ///
+  /// Shrinks toward 0.0 as the slide progresses (since entries'
+  /// currentDelta lerps to 0), so the transient overbuild contracts with
+  /// the animation.
+  double get maxActiveSlideAbsDelta {
+    if (_slideAnimations.isEmpty) return 0.0;
+    double m = 0.0;
+    for (final entry in _slideAnimations.values) {
+      final d = entry.currentDelta.abs();
+      if (d > m) m = d;
+    }
+    return m;
+  }
+
   /// Current slide delta for [key] in scroll-space y, or 0.0 if the node is
   /// not currently sliding. Read by [RenderSliverTree.paint],
   /// [RenderSliverTree.applyPaintTransform], and the hit-test path on

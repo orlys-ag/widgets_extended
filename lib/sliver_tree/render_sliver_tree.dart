@@ -885,6 +885,31 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final cacheStart = scrollOffset + cacheOrigin;
     final cacheEnd = cacheStart + remainingCacheExtent;
 
+    // FLIP-slide overreach (Option A): during a slide, a row's painted y
+    // can differ from its structural y by up to `slideOverreach` px in
+    // either direction. Widen the effective cache region by that amount
+    // so rows whose painted y lies in the viewport — but whose structural
+    // y is outside the normal cache region — still get built. Without
+    // this, a swap of two large subtrees leaves a visible gap at the slot
+    // where a sliding row should appear (no child created for it), and
+    // the gap does NOT resolve on scroll because the build decision still
+    // only considers structural offsets. Overreach shrinks to 0 as the
+    // slide progresses (see [TreeController.maxActiveSlideAbsDelta]), so
+    // the transient overbuild contracts with the animation.
+    //
+    // Future optimization (Option B): replace this blanket clamp with a
+    // per-entry precise union. For each active slide, compute the
+    // structural index range whose painted y (structural + currentDelta)
+    // intersects the cache region, then union those ranges with the
+    // normal cache-region index range. This eliminates the transient
+    // overbuild for the common case of a few small slides, at the cost
+    // of a per-entry scan every frame. Worth doing only when the
+    // overbuild measurably hurts — large-subtree swaps are rare and
+    // short-lived, so the blanket clamp is usually fine.
+    final slideOverreach = controller.maxActiveSlideAbsDelta;
+    final effectiveCacheStart = cacheStart - slideOverreach;
+    final effectiveCacheEnd = cacheEnd + slideOverreach;
+
     // ────────────────────────────────────────────────────────────────────────
     // PASS 1: Calculate offsets and extents
     // ────────────────────────────────────────────────────────────────────────
@@ -994,7 +1019,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Clear prior-layout cache-region flags in one memset-style pass, then
     // mark the slice [cacheStartIndex, cacheEndIndex) as this frame's members.
     _inCacheRegionByNid.fillRange(0, _inCacheRegionByNid.length, 0);
-    final cacheStartIndex = _findFirstVisibleIndex(visibleNodes, cacheStart);
+    final cacheStartIndex =
+        _findFirstVisibleIndex(visibleNodes, effectiveCacheStart);
 
     // In bulk-only mode, break on the row's *steady-state* (full-space)
     // position rather than its animated position. At low bulkValue, animated
@@ -1007,7 +1033,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final fullStart =
           _stableCumulative[cacheStartIndex] +
           _bulkFullCumulative[cacheStartIndex];
-      fullCacheEnd = fullStart + remainingCacheExtent;
+      fullCacheEnd = fullStart + remainingCacheExtent + slideOverreach;
     } else {
       fullCacheEnd = 0.0;
     }
@@ -1037,8 +1063,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         if (fullOffset >= fullCacheEnd) break;
       } else {
         offset = _nodeOffsetsByNid[nid];
-        if (offset >= cacheEnd) break;
-        if (steadyAccum >= remainingCacheExtent) break;
+        if (offset >= effectiveCacheEnd) break;
+        if (steadyAccum >= remainingCacheExtent + slideOverreach) break;
       }
       _inCacheRegionByNid[nid] = 1;
       cacheEndIndex = i + 1;
@@ -1402,7 +1428,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final remainingPaintExtent = constraints.remainingPaintExtent;
     final visibleNodes = controller.visibleNodes;
 
-    final startIndex = _findFirstVisibleIndex(visibleNodes, scrollOffset);
+    // Widen the paint iteration start by the active FLIP-slide overreach
+    // so rows structurally before the viewport but painting INTO it (via
+    // a positive slide delta) are not skipped. `_paintRow` already bails
+    // on rows whose painted y lies past the viewport, so extra iterated
+    // rows on the bottom edge are harmless. See the matching comment in
+    // `performLayout` for why structural offsets alone aren't enough.
+    final slideOverreach = controller.maxActiveSlideAbsDelta;
+    final startIndex =
+        _findFirstVisibleIndex(visibleNodes, scrollOffset - slideOverreach);
 
     // Pass A: Paint non-sticky nodes. Rows with a non-zero slide delta are
     // deferred to a second sub-pass so they paint on top of static rows —
@@ -1590,9 +1624,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (hit) return true;
     }
 
-    // Phase 2: Test normal nodes (skip sticky IDs).
+    // Phase 2: Test normal nodes (skip sticky IDs). Widen the start by
+    // the FLIP-slide overreach so a tap on a row whose structural y is
+    // above the hit offset — but which has slid down into the tap point
+    // — is still tested. The per-row `localMainAxisPosition` bounds
+    // check below naturally skips non-overlapping rows, so iterating
+    // extra rows at the top is cheap.
+    final slideOverreach = controller.maxActiveSlideAbsDelta;
     final hitOffset = scrollOffset + mainAxisPosition;
-    final startIndex = _findFirstVisibleIndex(visibleNodes, hitOffset);
+    final startIndex =
+        _findFirstVisibleIndex(visibleNodes, hitOffset - slideOverreach);
 
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
