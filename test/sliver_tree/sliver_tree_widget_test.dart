@@ -1267,6 +1267,129 @@ void main() {
       },
     );
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Expansion animation smoothness
+  // ══════════════════════════════════════════════════════════════════════════
+
+  group("expansion animation", () {
+    testWidgets(
+      "siblings below a parent with many children interpolate their "
+      "position each frame (no snap-on-settle regression)",
+      (tester) async {
+        // Regression: RenderSliverTree.performLayout Pass 2 caps cache-region
+        // admission at `steadyAccum >= remainingCacheExtent` to prevent
+        // mass-mounting when a node with a huge fanout expands. Pass 2 then
+        // only writes `parentData.layoutOffset` for admitted nodes, so a
+        // sibling that was mounted BEFORE the expand() but now falls outside
+        // the post-expand admission window keeps its pre-expand
+        // parentData.layoutOffset across every animation frame. The sibling
+        // appears pinned at its old Y until the settle frame, when Pass 1's
+        // "Transitional frame" branch re-walks all visible nodes and
+        // rewrites offsets — producing a visible snap.
+        //
+        // Pre-fix: the sibling's Y is constant through the animation and
+        // jumps on the last frame.
+        // Post-fix: the sibling's Y advances smoothly each frame.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        const rowHeight = 30.0;
+        // Enough children that their combined full extent (30 * 60 = 1800px)
+        // overflows the 300px-viewport + 250px-cache admission budget and
+        // triggers the steadyAccum cap before reaching the sibling "S".
+        const childCount = 60;
+
+        controller.setRoots([
+          TreeNode(key: "P", data: "P"),
+          TreeNode(key: "S", data: "S"),
+        ]);
+        controller.setChildren("P", [
+          for (int i = 0; i < childCount; i++)
+            TreeNode(key: "c$i", data: "c$i"),
+        ]);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 300,
+                child: CustomScrollView(
+                  slivers: [
+                    SliverTree<String, String>(
+                      controller: controller,
+                      nodeBuilder: (context, key, depth) {
+                        return SizedBox(height: rowHeight, child: Text(key));
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Pre-expand: P at y=0, S at y=rowHeight.
+        final yBefore = tester.getTopLeft(find.text("S")).dy;
+        expect(yBefore, rowHeight);
+
+        controller.expand(key: "P");
+
+        // Sample S's Y position across the animation window. S may be pushed
+        // off the viewport by the expansion — that's fine, it stays mounted
+        // throughout the animation because stale-node eviction is gated on
+        // hasActiveAnimations in the SliverTreeElement.
+        final samples = <double>[];
+        for (int i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          final finder = find.text("S");
+          if (finder.evaluate().isEmpty) {
+            samples.add(double.nan);
+          } else {
+            samples.add(tester.getTopLeft(finder).dy);
+          }
+        }
+        await tester.pumpAndSettle();
+
+        // Find the first frame where S actually moved.
+        int firstMovedFrame = -1;
+        for (int i = 0; i < samples.length; i++) {
+          if (samples[i].isNaN) continue;
+          if ((samples[i] - yBefore).abs() > 1.0) {
+            firstMovedFrame = i;
+            break;
+          }
+        }
+        expect(
+          firstMovedFrame,
+          isNot(-1),
+          reason:
+              "sibling 'S' never moved from its pre-expand Y=$yBefore during "
+              "any of the 20 animation-window frames. samples=$samples. "
+              "This is the siblings-snap-on-settle regression: the admission "
+              "cap excluded 'S' from [cacheStartIndex, cacheEndIndex), and "
+              "Pass 2 didn't refresh parentData.layoutOffset for already-"
+              "mounted out-of-band children during the animation.",
+        );
+        // At 400ms / 16ms-per-frame the animation spans ~25 frames; any
+        // movement within the first 8 samples confirms smooth progression
+        // rather than a settle-only snap.
+        expect(
+          firstMovedFrame,
+          lessThan(8),
+          reason:
+              "sibling 'S' didn't start moving until frame $firstMovedFrame "
+              "of the 20-sample animation window. samples=$samples. "
+              "Expansion is not pushing the sibling smoothly each frame.",
+        );
+      },
+    );
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════════

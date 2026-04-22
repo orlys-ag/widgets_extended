@@ -1203,6 +1203,42 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           scrollOffset + paintExtent < totalScrollExtent,
     );
 
+    // Refresh parentData.layoutOffset for children mounted in a prior
+    // frame that now fall outside [cacheStartIndex, cacheEndIndex). The
+    // admission cap (steadyAccum / fullCacheEnd) deliberately limits *new*
+    // mounts to prevent mass-mounting during large expansions, but
+    // siblings below the expanding subtree that were already mounted keep
+    // their pre-expand parentData.layoutOffset — causing them to paint at
+    // stale positions through the whole animation and only snap into place
+    // on the settle frame, when Pass 1's "Transitional frame" branch
+    // finally rewrites extents.
+    //
+    // Placed after the sticky pass so any _recomputeOffsets triggered by
+    // stickyExtentsChanged has already landed in _nodeOffsetsByNid /
+    // cumulatives before we write to parentData.
+    //
+    // Only runs during active animations; pure scrolling doesn't mutate
+    // offsets so cached parentData is already correct.
+    if (hasAnimations && _children.isNotEmpty) {
+      for (int i = 0; i < visibleNodes.length; i++) {
+        if (i >= cacheStartIndex && i < cacheEndIndex) continue;
+        final nodeId = visibleNodes[i];
+        final child = getChildForNode(nodeId);
+        if (child == null) continue;
+        final nid = _controller.nidOf(nodeId);
+        final double offset;
+        if (_bulkCumulativesValid) {
+          // Bulk-only fast path: per-nid offset slots are not kept fresh
+          // for out-of-cache-region nids — derive from cumulatives.
+          offset = _offsetAtVisibleIndex(i);
+        } else {
+          offset = _nodeOffsetsByNid[nid];
+        }
+        final parentData = child.parentData! as SliverTreeParentData;
+        parentData.layoutOffset = offset;
+      }
+    }
+
     _lastVisibleNodeCount = visibleNodes.length;
     _lastTotalScrollExtent = totalScrollExtent;
     _animationsWereActive = hasAnimations;
