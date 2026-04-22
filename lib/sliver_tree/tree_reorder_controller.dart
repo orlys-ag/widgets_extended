@@ -13,8 +13,6 @@
 /// converted once per [updateDrag].
 library;
 
-import 'dart:async';
-
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -248,8 +246,15 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// starts the FLIP slide animation to interpolate old → new positions.
   ///
   /// If no valid target is currently resolved, behaves like [cancelDrag].
-  /// Completes after one post-frame callback (after the FLIP "after"
-  /// snapshot is taken), but the slide animation itself runs async.
+  ///
+  /// The slide is installed IN-FRAME by the sliver render object: this
+  /// method asks the render object to capture a baseline of current painted
+  /// offsets BEFORE mutating the controller; the next `performLayout`
+  /// (triggered by that mutation) snapshots the post-mutation offsets and
+  /// installs a FLIP slide from baseline → current. The paint pass of the
+  /// same frame then renders rows at their prior painted position and
+  /// slides them toward their new structural position smoothly — no
+  /// one-frame "jump to new position, then slide back" flicker.
   Future<void> endDrag() async {
     final session = _session;
     if (session == null) return;
@@ -262,8 +267,14 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
     _autoScrollTicker.stop();
     _lastAutoScrollTick = null;
 
-    final renderObject = session.renderObject;
-    final priorOffsets = renderObject.snapshotVisibleOffsets();
+    // Stage the FLIP baseline BEFORE mutating. The render object's next
+    // performLayout will consume it and install the slide in-frame,
+    // avoiding the post-frame gap that used to produce a single-frame
+    // flicker of each moved row at its destination.
+    session.renderObject.beginSlideBaseline(
+      duration: slideDuration,
+      curve: slideCurve,
+    );
 
     final currentParent = treeController.getParent(session.draggedKey);
     final sameParent = currentParent == target.parentKey;
@@ -296,18 +307,6 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
         index: target.indexInFinalList,
       );
     }
-
-    await _afterNextFrame();
-    // Session may have been cancelled during the await (e.g. widget
-    // disposed). If so, the slide is still a valid animation on the
-    // controller's state — start it anyway for visual continuity.
-    final currentOffsets = renderObject.snapshotVisibleOffsets();
-    treeController.animateSlideFromOffsets(
-      priorOffsets,
-      currentOffsets,
-      duration: slideDuration,
-      curve: slideCurve,
-    );
 
     _session = null;
     notifyListeners();
@@ -627,18 +626,6 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
         notifyListeners();
       }
     }
-  }
-
-  /// Completes after the next frame has been laid out and painted.
-  Future<void> _afterNextFrame() {
-    final completer = Completer<void>();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!completer.isCompleted) completer.complete();
-    });
-    // Nudge the scheduler so a frame happens even when nothing else has
-    // marked the pipeline dirty (slide-only paths can otherwise miss it).
-    WidgetsBinding.instance.ensureVisualUpdate();
-    return completer.future;
   }
 }
 

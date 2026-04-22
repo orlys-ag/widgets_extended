@@ -4,6 +4,7 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/animation.dart';
 import 'package:flutter/rendering.dart';
 
 import 'sliver_tree_element.dart';
@@ -266,6 +267,64 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     markNeedsLayout();
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // FLIP slide baseline — set by a caller (typically TreeReorderController)
+  // BEFORE it mutates the controller. The next [performLayout] consumes the
+  // baseline IN-FRAME: it takes a second snapshot after the new offsets have
+  // been computed and calls [TreeController.animateSlideFromOffsets] so the
+  // paint pass of the SAME frame renders rows at their prior painted position
+  // (slide at progress 0) — avoiding the one-frame "jump to new position,
+  // then slide back to old" flicker that a post-frame callback would produce.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Map<TKey, double>? _pendingSlideBaseline;
+  Duration? _pendingSlideDuration;
+  Curve? _pendingSlideCurve;
+
+  /// Captures the current painted offsets so the next [performLayout] can
+  /// install a FLIP slide from them to the post-mutation offsets.
+  ///
+  /// Call this BEFORE invoking a structural mutation on the controller
+  /// (`reorderRoots`, `reorderChildren`, `moveNode`). Calling it after
+  /// the mutation would capture the already-new offsets and produce a
+  /// zero-delta (no visible slide). A second call before consumption
+  /// overwrites the pending baseline — the latest request wins.
+  void beginSlideBaseline({
+    required Duration duration,
+    required Curve curve,
+  }) {
+    _pendingSlideBaseline = snapshotVisibleOffsets();
+    _pendingSlideDuration = duration;
+    _pendingSlideCurve = curve;
+  }
+
+  /// Consumes a pending baseline (if any) by snapshotting post-mutation
+  /// offsets and installing the FLIP slide. Safe to call when none is
+  /// pending — returns immediately.
+  ///
+  /// Runs inside [performLayout]. [TreeController.animateSlideFromOffsets]
+  /// is safe to call here because the slide is driven by a raw [Ticker]:
+  /// `Ticker.start()` does not fire listeners synchronously, so the first
+  /// tick — and with it the listener chain that reaches `markNeedsLayout`
+  /// / `markNeedsPaint` on this sliver — lands on the next vsync, outside
+  /// layout.
+  void _consumeSlideBaselineIfAny() {
+    final baseline = _pendingSlideBaseline;
+    if (baseline == null) return;
+    final duration = _pendingSlideDuration!;
+    final curve = _pendingSlideCurve!;
+    _pendingSlideBaseline = null;
+    _pendingSlideDuration = null;
+    _pendingSlideCurve = null;
+    final current = snapshotVisibleOffsets();
+    controller.animateSlideFromOffsets(
+      baseline,
+      current,
+      duration: duration,
+      curve: curve,
+    );
+  }
+
   /// Reallocates scratch arrays to fit [_lastPrecomputedCount] (or empty
   /// if zero). Call when the tree shrinks significantly and memory matters.
   void trimScratchArrays() {
@@ -397,6 +456,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
   @override
   void detach() {
+    // A pending FLIP baseline that was never consumed (widget unmounted
+    // between mutation and next frame) would leak the offset map and
+    // trip stale-state assertions on re-attach. Drop it eagerly.
+    _pendingSlideBaseline = null;
+    _pendingSlideDuration = null;
+    _pendingSlideCurve = null;
     super.detach();
     for (final child in _children.values) {
       child.detach();
@@ -1276,6 +1341,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _lastVisibleNodeCount = visibleNodes.length;
     _lastTotalScrollExtent = totalScrollExtent;
     _animationsWereActive = hasAnimations;
+
+    // If a caller (TreeReorderController.endDrag) staged a FLIP slide
+    // baseline before the structural mutation that triggered this layout,
+    // install the slide now — AFTER all parentData.layoutOffset writes so
+    // `snapshotVisibleOffsets()` reads the post-mutation structural truth,
+    // but BEFORE paint in the same frame so the first paint already renders
+    // rows at their prior painted position (slide at progress 0).
+    _consumeSlideBaselineIfAny();
+
     childManager?.didFinishLayout();
   }
 

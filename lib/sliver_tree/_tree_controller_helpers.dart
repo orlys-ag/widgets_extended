@@ -18,8 +18,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     }
     _operationGroups.clear();
     _nodeToOperationGroup.clear();
-    _slideController?.dispose();
-    _slideController = null;
+    _slideTicker?.dispose();
+    _slideTicker = null;
     _slideAnimations.clear();
     _dataByNid.clear();
     _childrenByNid.clear();

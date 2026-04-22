@@ -483,11 +483,29 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// have an enter/exit extent animation — the two channels compose at paint.
   final Map<TKey, SlideAnimation<TKey>> _slideAnimations = {};
 
-  /// Lazy [AnimationController] driving every entry in [_slideAnimations].
-  /// One shared controller is sufficient because all active slides share the
-  /// same start time (FLIP from the same mutation) and reset together.
+  /// Lazy [Ticker] driving every entry in [_slideAnimations]. One shared
+  /// ticker is sufficient because all active slides share the same start
+  /// time (FLIP from the same mutation) and reset together.
+  ///
+  /// Why a raw [Ticker] and not an [AnimationController]: a ticker's
+  /// callbacks fire exclusively from the scheduler's transient-callbacks
+  /// phase (next vsync after [Ticker.start]). This means
+  /// [animateSlideFromOffsets] can be invoked from inside
+  /// [RenderObject.performLayout] — the listener chain reaches the sliver
+  /// element's `_onAnimationTick` only from the next vsync, when
+  /// `markNeedsLayout`/`markNeedsPaint` are legal.
+  ///
+  /// An [AnimationController], by contrast, fires listeners synchronously
+  /// from its `value=` setter (and from `reset()`/`forward(from:)`), so
+  /// starting it mid-layout would trip `_debugCanPerformMutations`.
+  ///
   /// Disposed in [dispose]; stopped when [_slideAnimations] empties.
-  AnimationController? _slideController;
+  Ticker? _slideTicker;
+
+  /// Total duration of the current slide batch. All entries in
+  /// [_slideAnimations] share this duration — progress at a tick with
+  /// elapsed `e` is `e / _slideDuration`.
+  Duration _slideDuration = const Duration(milliseconds: 220);
 
   /// Listeners notified on every animation tick (layout-only updates).
   final List<VoidCallback> _animationListeners = [];
@@ -1081,6 +1099,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// does **not** touch layout, and is **not** counted in
   /// [hasActiveAnimations]. It fires on the animation-listener channel on
   /// every tick and on completion; see the slide tick handler for ordering.
+  ///
+  /// Safe to invoke from inside [RenderObject.performLayout]: the slide is
+  /// driven by a [Ticker] whose first callback fires on the next vsync (in
+  /// `SchedulerPhase.transientCallbacks`). No listeners fire synchronously
+  /// from this call, so there is no path that reaches
+  /// `markNeedsLayout`/`markNeedsPaint` on a sliver currently being laid
+  /// out. The per-entry `currentDelta` is seeded to `startDelta`, so the
+  /// paint pass of the same frame reads the pre-mutation position.
   void animateSlideFromOffsets(
     Map<TKey, double> priorOffsets,
     Map<TKey, double> currentOffsets, {
@@ -1089,11 +1115,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }) {
     if (animationDuration == Duration.zero || duration == Duration.zero) {
       // No-animation mode: drop any in-flight slide and return. Callers that
-      // want the controller to "settle" synchronously see hasActiveSlides
-      // == false immediately.
+      // want the slide machinery to "settle" synchronously see
+      // hasActiveSlides == false immediately.
       if (_slideAnimations.isNotEmpty) {
         _slideAnimations.clear();
-        _slideController?.stop();
+        _slideTicker?.stop();
       }
       return;
     }
@@ -1133,44 +1159,26 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     if (_slideAnimations.isEmpty) {
-      _slideController?.stop();
+      _slideTicker?.stop();
       return;
     }
+    if (installed == 0) return;
 
-    final ctrl = _slideController ??= _createSlideController();
-    ctrl.duration = duration;
-    // Reset to 0 and forward() — this is equivalent to "start a fresh slide
-    // shared by every entry". We deliberately don't preserve any in-flight
-    // progress: each entry's `progress` is reset above (for replaced) or
-    // initialized to 0 (for new), so driving from 0→1 is correct.
-    if (installed > 0) {
-      ctrl.value = 0.0;
-      ctrl.forward();
-    }
+    // (Re)start the shared progress clock. Stop-then-start resets the
+    // ticker's elapsed time to zero so progress begins at 0 for every entry
+    // in this batch. [Ticker.start] does NOT fire callbacks synchronously —
+    // the first tick lands on the next vsync, so this is safe to call from
+    // inside [RenderObject.performLayout].
+    _slideDuration = duration;
+    final ticker = _slideTicker ??= _vsync.createTicker(_onSlideTick);
+    if (ticker.isActive) ticker.stop();
+    ticker.start();
   }
 
-  /// Lazily creates the shared slide [AnimationController]. Invoked by
-  /// [animateSlideFromOffsets] only when a slide actually needs to start.
-  AnimationController _createSlideController() {
-    final ctrl = AnimationController(
-      vsync: _vsync,
-      duration: const Duration(milliseconds: 220),
-    );
-    ctrl.addListener(_onSlideTick);
-    // Status listener mirrors the tick handler's completion branch — covers
-    // the edge where AnimationController fires addListener at value < 1.0
-    // on its last tick and only the completed status callback marks the end.
-    // _onSlideTick is idempotent on completion (snaps to zero, tears down).
-    ctrl.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        _onSlideTick();
-      }
-    });
-    return ctrl;
-  }
-
-  /// Tick handler for slide animations. **Ordering matters** — see the
-  /// inline comments. Final zero-delta paint is guaranteed because:
+  /// Tick handler for slide animations. Elapsed time comes from the ticker
+  /// (reset to zero on each fresh batch via stop+start in
+  /// [animateSlideFromOffsets]). **Ordering matters** — see the inline
+  /// comments. Final zero-delta paint is guaranteed because:
   ///
   /// 1. Progress and [SlideAnimation.currentDelta] are updated for every
   ///    entry; on completion, currentDelta is snapped to exact 0.0 so the
@@ -1180,22 +1188,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///    `_onAnimationTick` takes the slide branch and schedules
   ///    `markNeedsPaint`. That paint reads `getSlideDelta(key) == 0.0`.
   /// 3. Only after the paint has been scheduled do we clear the map and
-  ///    stop the controller. No further tick will fire, so there is no
-  ///    "second paint needed" window.
-  void _onSlideTick() {
+  ///    stop the ticker. No further tick will fire, so there is no "second
+  ///    paint needed" window.
+  void _onSlideTick(Duration elapsed) {
     if (_slideAnimations.isEmpty) {
+      _slideTicker?.stop();
       return;
     }
-    final ctrl = _slideController;
-    if (ctrl == null) {
-      return;
-    }
-
-    final raw = ctrl.value;
+    final totalUs = _slideDuration.inMicroseconds;
+    final raw = totalUs <= 0 ? 1.0 : elapsed.inMicroseconds / totalUs;
     final complete = raw >= 1.0 - 1e-9;
 
     for (final entry in _slideAnimations.values) {
-      entry.progress = complete ? 1.0 : raw;
+      entry.progress = complete ? 1.0 : raw.clamp(0.0, 1.0);
       final t = entry.curve.transform(entry.progress);
       entry.currentDelta = complete
           ? 0.0
@@ -1206,7 +1211,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     if (complete) {
       _slideAnimations.clear();
-      ctrl.stop();
+      _slideTicker?.stop();
     }
   }
 
