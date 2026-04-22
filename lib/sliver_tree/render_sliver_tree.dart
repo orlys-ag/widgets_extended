@@ -1330,7 +1330,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     final startIndex = _findFirstVisibleIndex(visibleNodes, scrollOffset);
 
-    // Pass A: Paint non-sticky nodes normally.
+    // Pass A: Paint non-sticky nodes. Rows with a non-zero slide delta are
+    // deferred to a second sub-pass so they paint on top of static rows —
+    // without this, an upward-moving row that hasn't yet crossed into its
+    // final index slot would be covered by siblings sliding down past it.
+    // Among sliding rows, sort by ascending |delta| so the row that moved
+    // the most (typically the just-dropped row) paints last and lands on
+    // top. Ties preserve natural iteration order.
+    List<int>? slidingIndices;
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final nid = _controller.nidOf(nodeId);
@@ -1341,38 +1348,48 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final child = getChildForNode(nodeId);
       if (child == null) continue;
 
-      final parentData = child.parentData! as SliverTreeParentData;
-      final nodeOffset = parentData.layoutOffset;
-      final nodeExtent = parentData.visibleExtent;
-
       // Paint-only FLIP slide delta — read from the controller on every
       // frame so localToGlobal / semantics (which can resolve between
       // ticks) always see the current value.
       final slideDelta = controller.getSlideDelta(nodeId);
 
-      if (nodeOffset + slideDelta >= scrollOffset + remainingPaintExtent) {
-        // A node whose painted position lies past the paint region can't
-        // be visible; skip. Note we can't `break` — a later node might
-        // have a negative slideDelta that puts it back in view.
+      if (slideDelta != 0.0) {
+        (slidingIndices ??= <int>[]).add(i);
         continue;
       }
 
-      final paintOffset = offset +
-          Offset(parentData.indent, nodeOffset - scrollOffset + slideDelta);
+      _paintRow(
+        context: context,
+        offset: offset,
+        nodeId: nodeId,
+        child: child,
+        slideDelta: 0.0,
+        scrollOffset: scrollOffset,
+        remainingPaintExtent: remainingPaintExtent,
+      );
+    }
 
-      // Clip if animating (individual or bulk) and extent is less than full size
-      if (controller.isAnimating(nodeId) && nodeExtent < child.size.height) {
-        final yOffset = -(child.size.height - nodeExtent);
-        context.pushClipRect(
-          needsCompositing,
-          paintOffset,
-          Rect.fromLTWH(0, 0, child.size.width, nodeExtent),
-          (context, offset) {
-            context.paintChild(child, offset + Offset(0, yOffset));
-          },
+    if (slidingIndices != null) {
+      slidingIndices.sort((a, b) {
+        final da = controller.getSlideDelta(visibleNodes[a]).abs();
+        final db = controller.getSlideDelta(visibleNodes[b]).abs();
+        final cmp = da.compareTo(db);
+        if (cmp != 0) return cmp;
+        return a.compareTo(b);
+      });
+      for (final i in slidingIndices) {
+        final nodeId = visibleNodes[i];
+        final child = getChildForNode(nodeId);
+        if (child == null) continue;
+        _paintRow(
+          context: context,
+          offset: offset,
+          nodeId: nodeId,
+          child: child,
+          slideDelta: controller.getSlideDelta(nodeId),
+          scrollOffset: scrollOffset,
+          remainingPaintExtent: remainingPaintExtent,
         );
-      } else {
-        context.paintChild(child, paintOffset);
       }
     }
 
@@ -1410,6 +1427,44 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           context.paintChild(child, offset);
         },
       );
+    }
+  }
+
+  void _paintRow({
+    required PaintingContext context,
+    required Offset offset,
+    required TKey nodeId,
+    required RenderBox child,
+    required double slideDelta,
+    required double scrollOffset,
+    required double remainingPaintExtent,
+  }) {
+    final parentData = child.parentData! as SliverTreeParentData;
+    final nodeOffset = parentData.layoutOffset;
+    final nodeExtent = parentData.visibleExtent;
+
+    // A node whose painted position lies past the paint region can't be
+    // visible; skip. The caller can't `break` on this — a later node might
+    // have a negative slideDelta that puts it back in view.
+    if (nodeOffset + slideDelta >= scrollOffset + remainingPaintExtent) {
+      return;
+    }
+
+    final paintOffset = offset +
+        Offset(parentData.indent, nodeOffset - scrollOffset + slideDelta);
+
+    if (controller.isAnimating(nodeId) && nodeExtent < child.size.height) {
+      final yOffset = -(child.size.height - nodeExtent);
+      context.pushClipRect(
+        needsCompositing,
+        paintOffset,
+        Rect.fromLTWH(0, 0, child.size.width, nodeExtent),
+        (context, offset) {
+          context.paintChild(child, offset + Offset(0, yOffset));
+        },
+      );
+    } else {
+      context.paintChild(child, paintOffset);
     }
   }
 
