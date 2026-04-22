@@ -448,9 +448,7 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
     // Cycle filter: can't parent under self or under a descendant.
     if (parentKey != null) {
       if (parentKey == dragged) return null;
-      if (treeController.getDescendants(dragged).contains(parentKey)) {
-        return null;
-      }
+      if (_isStrictDescendantOf(parentKey, dragged)) return null;
     }
 
     // Same-parent final-list index adjustment. Same-parent drops take a
@@ -499,7 +497,7 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// Whether [candidate] lies inside [rootKey]'s subtree (inclusive).
   bool _isSameOrDescendant(TKey candidate, TKey rootKey) {
     if (candidate == rootKey) return true;
-    return treeController.getDescendants(rootKey).contains(candidate);
+    return _isStrictDescendantOf(candidate, rootKey);
   }
 
   /// Cheap "can this row accept children as a drop target?" heuristic: the
@@ -507,10 +505,22 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// policies (leaf-only, depth limits) flow through [canAcceptDrop].
   bool _canTargetAcceptInto(TKey targetKey, TKey draggedKey) {
     if (targetKey == draggedKey) return false;
-    if (treeController.getDescendants(draggedKey).contains(targetKey)) {
-      return false;
-    }
+    if (_isStrictDescendantOf(targetKey, draggedKey)) return false;
     return true;
+  }
+
+  /// Whether [node] is a strict descendant (not [ancestor] itself) of
+  /// [ancestor]. O(depth) ancestor walk with no allocation — the drop-target
+  /// resolution path asks this up to three times per pointer move, and the
+  /// alternative `getDescendants(ancestor).contains(node)` materialized a
+  /// fresh list of every descendant on each call.
+  bool _isStrictDescendantOf(TKey node, TKey ancestor) {
+    TKey? current = treeController.getParent(node);
+    while (current != null) {
+      if (current == ancestor) return true;
+      current = treeController.getParent(current);
+    }
+    return false;
   }
 
   // ──────── Autoscroll ────────

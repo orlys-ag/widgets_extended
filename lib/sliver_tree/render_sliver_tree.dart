@@ -1148,9 +1148,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // rows have sub-pixel animated extents, so reading live offsets would
     // admit the entire entering subtree into the cache region on frame 1 of
     // a single-node expand — e.g. all 1150 children of a large parent,
-    // causing a mass-mount / mass-rebuild hitch. We cap admission at what
-    // the cache region would hold at steady state (full extents for
-    // entering rows, live extent for the rest).
+    // causing a mass-mount / mass-rebuild hitch. The same shape of bug hits
+    // exiting (collapsing) rows near the END of the animation: as each row
+    // shrinks toward zero, the live extent contribution falls, and the
+    // cache region admits progressively more of the shrinking subtree,
+    // mass-mounting thousands of rows that are about to be removed from
+    // the visible order at dismiss.
+    //
+    // The fix: cap admission against the FULL extent for any row with an
+    // in-flight extent animation — enter or exit — so the cache region
+    // holds the same number of logical rows throughout the animation as
+    // it would at steady state.
     double steadyAccum = 0.0;
     for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
@@ -1173,13 +1181,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       _inCacheRegionByNid[nid] = 1;
       cacheEndIndex = i + 1;
       if (!_bulkCumulativesValid) {
-        final anim = controller.getAnimationState(nodeId);
-        final double contribution;
-        if (anim != null && anim.type == AnimationType.entering) {
-          contribution = controller.getEstimatedExtent(nodeId);
-        } else {
-          contribution = _nodeExtentsByNid[nid];
-        }
+        // [isAnimating] is O(1) (cached). Using it here avoids the synthetic
+        // [AnimationState] allocation that [getAnimationState] did, and covers
+        // exits (op-group pendingRemoval, bulk pendingRemoval, standalone
+        // exit) that the prior `anim.type == entering` check missed.
+        final contribution = controller.isAnimating(nodeId)
+            ? controller.getEstimatedExtent(nodeId)
+            : _nodeExtentsByNid[nid];
         steadyAccum += contribution;
       }
     }
