@@ -1,6 +1,7 @@
 ## 0.0.12
 
 - Fix missing case to clip content above viewport when at max extent.
+- Fix animation skip when drag and dropping a collapsing node.
 
 ## 0.0.11
 
