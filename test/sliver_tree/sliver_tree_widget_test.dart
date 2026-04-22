@@ -1091,6 +1091,181 @@ void main() {
         expect(scrollController.position.pixels, 1000.0);
       },
     );
+
+    testWidgets(
+      "animated ancestor expansion holds the returned Future until the "
+      "terminal V=1.0 tick fires (no end-of-scroll jumpTo hitch)",
+      (tester) async {
+        // Regression: an earlier implementation awaited a wall-clock timer
+        // (Future.delayed(totalMs) / Stopwatch.elapsedMilliseconds) before
+        // removing the follower and issuing a final jumpTo. Because
+        // _InterpolationSimulation.isDone uses strict `>`, every expansion
+        // AnimationController's terminal V=1.0 tick fires ~1 vsync AFTER the
+        // nominal duration — i.e. AFTER the wall-clock timer. So the scroll
+        // Future resolved while the operation groups were still in
+        // [_operationGroups], and the follower-computed position was still
+        // using animated-extent offsets (<100%). The post-loop jumpTo then
+        // snapped the residual in a single frame, visible as a hitch
+        // proportional to the fanout of collapsed ancestors.
+        //
+        // The fix: wait on the captured operation groups' identity
+        // disappearing from [_operationGroups] (which happens after the
+        // status listener fires following V=1.0), not a wall-clock timer.
+        //
+        // This test fails under the old wall-clock-timer implementation
+        // because the ticker has not yet advanced past the nominal duration
+        // at the moment the timer fires, so the groups are still registered
+        // when the Future resolves.
+        late TreeController<String, String> controller;
+        late ScrollController scrollController;
+
+        await tester.pumpWidget(
+          _DeepCollapsedTreeHarness(
+            rowHeight: 50,
+            treeAnimationDuration: const Duration(milliseconds: 300),
+            onReady: (c, s) {
+              controller = c;
+              scrollController = s;
+            },
+          ),
+        );
+        await tester.pump();
+
+        bool scrollResolved = false;
+        bool animationsActiveAtResolve = false;
+
+        // Fire-and-forget. pump() drives the expansion tickers AND the
+        // _animatedConcurrentScroll follower loop.
+        // ignore: unawaited_futures
+        controller
+            .animateScrollToKey(
+              "leaf9",
+              scrollController: scrollController,
+              duration: const Duration(milliseconds: 300),
+              ancestorExpansion: AncestorExpansionMode.animated,
+              extentEstimator: (_) => 50.0,
+            )
+            .then((_) {
+              scrollResolved = true;
+              animationsActiveAtResolve = controller.hasActiveAnimations;
+            });
+
+        // Pump well past the 300ms animation. Use 16ms steps so the ticker
+        // advances vsync-aligned, mirroring production frame cadence.
+        for (int i = 0; i < 50; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          if (scrollResolved) break;
+        }
+
+        expect(
+          scrollResolved,
+          true,
+          reason: "animateScrollToKey future never resolved",
+        );
+        expect(
+          animationsActiveAtResolve,
+          false,
+          reason:
+              "scroll Future resolved while expansion animations were still "
+              "active. That is the end-of-scroll hitch regression: the "
+              "follower was removed before the terminal V=1.0 tick, and the "
+              "post-loop jumpTo had to snap the residual offset in a single "
+              "frame.",
+        );
+
+        // Final sanity: target is visible and its ancestors are expanded.
+        expect(controller.isExpanded("r19"), true);
+        expect(controller.isExpanded("r19_c0"), true);
+        expect(controller.isExpanded("r19_c0_g0"), true);
+        expect(controller.getVisibleIndex("leaf9"), greaterThanOrEqualTo(0));
+      },
+    );
+
+    testWidgets(
+      "animated ancestor expansion invoked outside a frame after idle "
+      "animates smoothly (no instant-jump from stale last-vsync time)",
+      (tester) async {
+        // Regression: a previous implementation captured elapsed time via
+        // `SchedulerBinding.currentFrameTimeStamp` / `currentSystemFrameTimeStamp`
+        // at call time. When the call happens outside a frame (e.g. a
+        // button-press handler after the app has been idle), that returns
+        // the timestamp of the LAST vsync — which can be hundreds of ms in
+        // the past. On the very first animation frame the follower computed
+        // `elapsed / scrollMs > 1`, clamped progress to 1.0, and jumpTo'd
+        // the final offset in a single frame. Visible as an instant snap
+        // with no animation — the user report.
+        //
+        // The fix drives progress from a dedicated AnimationController
+        // whose Ticker sets `_startTime` on its first tick (i.e. anchored
+        // to the first animation frame, not the last pre-idle vsync), so
+        // the curve traverses the full 0→1 range regardless of idle time.
+        late TreeController<String, String> controller;
+        late ScrollController scrollController;
+
+        await tester.pumpWidget(
+          _DeepCollapsedTreeHarness(
+            rowHeight: 50,
+            treeAnimationDuration: const Duration(milliseconds: 300),
+            onReady: (c, s) {
+              controller = c;
+              scrollController = s;
+            },
+          ),
+        );
+        await tester.pump();
+
+        // Simulate app-idle: advance fake time with no frames scheduled.
+        // This moves `currentSystemFrameTimeStamp`'s last known vsync
+        // arbitrarily far into the past relative to when we next invoke
+        // the scroll — the exact precondition for the stale-timestamp
+        // bug.
+        await tester.pump(const Duration(seconds: 2));
+
+        // Fire the scroll from outside a frame.
+        // ignore: unawaited_futures
+        controller.animateScrollToKey(
+          "leaf9",
+          scrollController: scrollController,
+          duration: const Duration(milliseconds: 300),
+          ancestorExpansion: AncestorExpansionMode.animated,
+          extentEstimator: (_) => 50.0,
+        );
+
+        // Sample scroll position every frame through the 300ms scroll
+        // window. Pre-fix, the FIRST post-idle frame would already be at
+        // the final offset. Post-fix, the position advances across many
+        // frames.
+        final samples = <double>[];
+        for (int i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          samples.add(scrollController.position.pixels);
+        }
+
+        // Partway through the animation (around 50% of duration ≈ frame
+        // 9), the scroll should be strictly between initial (0.0) and
+        // final. An instant-jump would leave this sample at the final
+        // offset already.
+        final midFinal = scrollController.position.pixels;
+        final midSample = samples[8];
+        expect(
+          midSample,
+          greaterThan(0.0),
+          reason: "scroll had not started moving by mid-animation",
+        );
+        expect(
+          midSample,
+          lessThan(midFinal - 1.0),
+          reason:
+              "scroll jumped directly to the final offset on an early frame; "
+              "mid-sample=$midSample final=$midFinal samples=$samples. "
+              "This is the instant-jump regression: the timing source "
+              "captured a stale last-vsync timestamp, so the follower's "
+              "first progress reading was already >= 1.0.",
+        );
+
+        await tester.pumpAndSettle();
+      },
+    );
   });
 }
 
@@ -1222,6 +1397,108 @@ class _ScrollToKeyHarnessState extends State<_ScrollToKeyHarness>
       for (int i = 0; i < widget.rowCount; i++)
         TreeNode(key: "k$i", data: "row $i"),
     ]);
+    widget.onReady(_controller, _scrollController);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          height: 400,
+          child: CustomScrollView(
+            controller: _scrollController,
+            slivers: [
+              SliverTree<String, String>(
+                controller: _controller,
+                nodeBuilder: (context, key, depth) {
+                  return SizedBox(height: widget.rowHeight, child: Text(key));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Harness with a deeply-nested, fully-collapsed ancestor chain leading to a
+/// buried target node. Used to exercise [AncestorExpansionMode.animated] on
+/// `animateScrollToKey`, where multiple operation groups must run to
+/// completion concurrently with the scroll timeline.
+///
+/// Tree layout (all ancestors collapsed initially):
+///   r0..r18                         (19 roots, no children)
+///   r19                             (root; expands to reveal r19_c0..c9)
+///     r19_c0                        (expands to reveal r19_c0_g0..g9)
+///       r19_c0_g0                   (expands to reveal leaf0..leaf9)
+///         leaf0..leaf8              (siblings BEFORE the target)
+///         leaf9                     (← target: the LAST child)
+///       r19_c0_g1..r19_c0_g9        (siblings after the target's grandparent)
+///     r19_c1..r19_c9                (siblings after the target's parent)
+///   r20..r39                        (20 roots after)
+///
+/// Putting the target at the tail of the deepest expansion list ensures that
+/// 9 extents animate BEFORE the target's offset — amplifying the visible
+/// hitch that the wall-clock-timer implementation would produce at the end
+/// of the scroll.
+class _DeepCollapsedTreeHarness extends StatefulWidget {
+  const _DeepCollapsedTreeHarness({
+    required this.rowHeight,
+    required this.treeAnimationDuration,
+    required this.onReady,
+  });
+  final double rowHeight;
+  final Duration treeAnimationDuration;
+  final void Function(
+    TreeController<String, String> controller,
+    ScrollController scrollController,
+  )
+  onReady;
+
+  @override
+  State<_DeepCollapsedTreeHarness> createState() =>
+      _DeepCollapsedTreeHarnessState();
+}
+
+class _DeepCollapsedTreeHarnessState extends State<_DeepCollapsedTreeHarness>
+    with TickerProviderStateMixin {
+  late final TreeController<String, String> _controller;
+  late final ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    _controller = TreeController<String, String>(
+      vsync: this,
+      animationDuration: widget.treeAnimationDuration,
+    );
+
+    final roots = <TreeNode<String, String>>[
+      for (int i = 0; i < 40; i++) TreeNode(key: "r$i", data: "r$i"),
+    ];
+    _controller.setRoots(roots);
+
+    _controller.setChildren("r19", [
+      for (int c = 0; c < 10; c++) TreeNode(key: "r19_c$c", data: "r19_c$c"),
+    ]);
+    _controller.setChildren("r19_c0", [
+      for (int g = 0; g < 10; g++)
+        TreeNode(key: "r19_c0_g$g", data: "r19_c0_g$g"),
+    ]);
+    _controller.setChildren("r19_c0_g0", [
+      for (int l = 0; l < 10; l++) TreeNode(key: "leaf$l", data: "leaf$l"),
+    ]);
+
     widget.onReady(_controller, _scrollController);
   }
 

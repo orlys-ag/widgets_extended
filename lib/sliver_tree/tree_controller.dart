@@ -1230,8 +1230,33 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }) async {
     final position = scrollController.position;
     final initialPixels = position.pixels;
-    final stopwatch = Stopwatch()..start();
-    final scrollMs = duration.inMilliseconds;
+
+    // Dedicated progress animation for the scroll curve. Using an
+    // AnimationController (rather than scheduler timestamps or a
+    // wall-clock Stopwatch) gives three properties at once:
+    //
+    //   • Safe to create outside a frame. `Ticker._startTime` is set on
+    //     the first tick via `_startTime ??= timeStamp`, so calling this
+    //     from e.g. a button-press handler never trips the
+    //     `currentFrameTimeStamp != null` assertion.
+    //
+    //   • Correctly anchors t=0 to the first animation frame, not to the
+    //     last vsync before the call. Reading
+    //     `SchedulerBinding.currentSystemFrameTimeStamp` at call time
+    //     would capture whenever the last frame happened to render — if
+    //     the app was idle for hundreds of ms before the button tap, the
+    //     very first follower tick would see `elapsed >> duration`,
+    //     clamp progress to 1.0, and jumpTo the final offset in one
+    //     frame (visible as an instant snap with no animation).
+    //
+    //   • Drives the same Ticker pipeline as the expansion groups, so
+    //     FakeAsync widget tests advance all timelines together with
+    //     `tester.pump(duration)`.
+    final scrollProgress = AnimationController(
+      vsync: _vsync,
+      duration: duration,
+    );
+    scrollProgress.addListener(_notifyAnimationListeners);
 
     // Root-first: each expansion runs against an already-visible parent.
     for (int i = ancestors.length - 1; i >= 0; i--) {
@@ -1248,13 +1273,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (group != null) startedGroups.add(group);
     }
 
+    scrollProgress.forward();
+
     void follower() {
       final targetIdx = _order.indexOf(key);
       if (targetIdx < 0) return;
-      final progress = scrollMs == 0
-          ? 1.0
-          : (stopwatch.elapsedMilliseconds / scrollMs).clamp(0.0, 1.0);
-      final tCurved = curve.transform(progress);
+      final tCurved = curve.transform(scrollProgress.value);
 
       // Base offset from the cached full-extent prefix sum (O(1) amortized).
       // Then correct for each animating node whose visible index precedes
@@ -1303,8 +1327,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     // Wait for two independent timelines to both complete:
     //
-    //   1. The scroll's own wall-clock timeline (scrollMs), so the
-    //      curve actually reaches 1.0 via the follower.
+    //   1. The dedicated scroll progress controller ([scrollProgress]),
+    //      so the curve actually reaches 1.0 via the follower.
     //   2. Every ancestor expansion's terminal V=1.0 tick. That tick fires
     //      on the vsync AFTER the nominal duration (Flutter's
     //      `_InterpolationSimulation.isDone` transitions true only once
@@ -1327,9 +1351,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     while (true) {
       if (!scrollController.hasClients) {
         removeAnimationListener(follower);
+        scrollProgress.dispose();
         return true;
       }
-      final scrollDone = stopwatch.elapsedMilliseconds >= scrollMs;
+      final scrollDone =
+          scrollProgress.status == AnimationStatus.completed ||
+          scrollProgress.status == AnimationStatus.dismissed;
       bool expansionDone = true;
       for (final g in startedGroups) {
         if (identical(_operationGroups[g.operationKey], g)) {
@@ -1342,6 +1369,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     removeAnimationListener(follower);
+    scrollProgress.dispose();
 
     if (!scrollController.hasClients) return true;
 
@@ -1455,8 +1483,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Snapshot before iteration so a listener that synchronously mutates
     // the controller (triggering a reentrant notify) does not corrupt this
     // walk. Same pattern as [_fireNodeDataListeners].
-    final listeners =
-        List<void Function(Set<TKey>?)>.of(_structuralListeners);
+    final listeners = List<void Function(Set<TKey>?)>.of(_structuralListeners);
     for (final listener in listeners) {
       listener(affectedKeys);
     }
