@@ -885,6 +885,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final cacheStart = scrollOffset + cacheOrigin;
     final cacheEnd = cacheStart + remainingCacheExtent;
 
+    // If a caller (TreeReorderController.endDrag) staged a FLIP slide
+    // baseline before the structural mutation that triggered this layout,
+    // install the slide NOW — before Pass 2's build-range decision, so
+    // `maxActiveSlideAbsDelta` reflects the just-installed deltas and Pass
+    // 2 builds rows sliding INTO the viewport from outside the structural
+    // cache region. `snapshotVisibleOffsets()` walks `visibleNodes` with
+    // `getCurrentExtent`, which is independent of Pass 1's per-nid offset
+    // array, so calling it before Pass 1 is safe.
+    _consumeSlideBaselineIfAny();
+
     // FLIP-slide overreach (Option A): during a slide, a row's painted y
     // can differ from its structural y by up to `slideOverreach` px in
     // either direction. Widen the effective cache region by that amount
@@ -1367,14 +1377,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _lastVisibleNodeCount = visibleNodes.length;
     _lastTotalScrollExtent = totalScrollExtent;
     _animationsWereActive = hasAnimations;
-
-    // If a caller (TreeReorderController.endDrag) staged a FLIP slide
-    // baseline before the structural mutation that triggered this layout,
-    // install the slide now — AFTER all parentData.layoutOffset writes so
-    // `snapshotVisibleOffsets()` reads the post-mutation structural truth,
-    // but BEFORE paint in the same frame so the first paint already renders
-    // rows at their prior painted position (slide at progress 0).
-    _consumeSlideBaselineIfAny();
 
     childManager?.didFinishLayout();
   }

@@ -426,5 +426,129 @@ void main() {
       expect(h.tree.hasActiveSlides, false,
           reason: "slides must clear after pumpAndSettle");
     });
+
+    testWidgets(
+      "row structurally outside the cache region but sliding INTO the "
+      "viewport is still built and painted (no mid-slide gap)",
+      (tester) async {
+        // Regression guard for the slide-overreach widening of performLayout /
+        // paint / hit-test. Setup: 30 roots (50 px each, total 1500 px) in a
+        // 500 px viewport (cacheExtent defaults to 250 px, so the normal
+        // build band is y≈0–750). Moving the first root to the last position
+        // creates a slide entry with startDelta=-1450 (new structural
+        // y=1450, prior painted y=0). That row's structural y is well
+        // outside the 750 px-wide cache region, so the pre-fix build loop
+        // would not create a child for it — the viewport would show blank
+        // pixels at y=0 where the sliding row should appear. With the
+        // overreach fix, the build range is widened by |max slideDelta|,
+        // the child is mounted, and its RenderBox can be located via
+        // find.byKey.
+        final tree = TreeController<String, int>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 800),
+          animationCurve: Curves.linear,
+        );
+        tree.setRoots([
+          for (var i = 0; i < 30; i++)
+            TreeNode(key: "r$i", data: i),
+        ]);
+
+        final reorder = TreeReorderController<String, int>(
+          treeController: tree,
+          vsync: tester,
+          slideDuration: const Duration(milliseconds: 800),
+          slideCurve: Curves.linear,
+        );
+        addTearDown(() {
+          reorder.dispose();
+          tree.dispose();
+        });
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 500, // viewport
+                child: CustomScrollView(
+                  slivers: [
+                    SliverReorderableTree<String, int>(
+                      controller: tree,
+                      reorderController: reorder,
+                      dropIndicatorColor: _kIndicatorColor,
+                      nodeBuilder: (context, key, depth, wrap) {
+                        return wrap(
+                          child: SizedBox(
+                            key: ValueKey("row-$key"),
+                            height: 50,
+                            child: Text(key),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Precondition: with no slide active, row r0 is structurally at y=0
+        // and row r25 is at y=1250 (well outside the 500px viewport plus
+        // 250px default cacheExtent → not built).
+        expect(tester.getTopLeft(find.byKey(const ValueKey("row-r0"))).dy,
+            closeTo(0, 0.001));
+        expect(find.byKey(const ValueKey("row-r25")), findsNothing,
+            reason: "r25 at structural y=1250 must be outside the viewport "
+                "pre-slide so the test exercises the 'build from outside "
+                "cache region' path");
+
+        // Capture the FLIP baseline, then reorder r0 to the end. With
+        // animationDuration > 0, this installs a slide entry for every row
+        // whose offset changed. r0's slide delta = prior(0) - current(950)
+        // = -950, so it should paint at y=0 on the first post-mutation frame
+        // while its structural y is at 950.
+        final render = tester.renderObject<RenderSliverTree<String, int>>(
+          find.byType(SliverTree<String, int>),
+        );
+        render.beginSlideBaseline(
+          duration: const Duration(milliseconds: 800),
+          curve: Curves.linear,
+        );
+        final newOrder = [
+          for (var i = 1; i < 30; i++) "r$i",
+          "r0",
+        ];
+        tree.reorderRoots(newOrder);
+        await tester.pump(); // drive the frame that installs the slide
+
+        // At this point a slide is in flight. Without the overreach fix, r0
+        // (structural y=1450) would not be built because the build range is
+        // computed from scrollOffset alone (0 to 500 + cacheExtent). With
+        // the fix, the build range widens by |startDelta|=1450 so r0 is
+        // created, and its painted y sits at its prior position (y=0).
+        expect(tree.hasActiveSlides, true,
+            reason: "baseline + reorder must install a slide so this test "
+                "actually exercises the overreach path");
+
+        final r0Finder = find.byKey(const ValueKey("row-r0"));
+        expect(r0Finder, findsOneWidget,
+            reason: "r0 is structurally far below the viewport but its "
+                "painted y lies inside the viewport — the overreach widening "
+                "must build it, or a visual gap appears where it should "
+                "paint");
+
+        // Its painted y should be near its prior position (y=0), not near
+        // its new structural position (y=950).
+        final r0Top = tester.getTopLeft(r0Finder).dy;
+        expect(r0Top, lessThan(100),
+            reason: "just after the slide install, r0 should paint at its "
+                "prior y≈0 (not its new structural y≈1450)");
+
+        // Drain the slide animation so the framework's ticker-leak check
+        // doesn't flag the in-flight slide ticker at test teardown.
+        await tester.pumpAndSettle();
+      },
+    );
   });
 }
