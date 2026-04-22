@@ -1232,12 +1232,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final initialPixels = position.pixels;
     final stopwatch = Stopwatch()..start();
     final scrollMs = duration.inMilliseconds;
-    final expandMs = animationDuration.inMilliseconds;
-    final totalMs = scrollMs > expandMs ? scrollMs : expandMs;
 
     // Root-first: each expansion runs against an already-visible parent.
     for (int i = ancestors.length - 1; i >= 0; i--) {
       expand(key: ancestors[i], animate: true);
+    }
+
+    // Snapshot the operation groups we just started. We wait on identity
+    // (not operationKey lookup) so a concurrent collapse + re-expand of
+    // the same ancestor — which would swap in a fresh group under the
+    // same key — does not mask our targets as already settled.
+    final startedGroups = <OperationGroup<TKey>>[];
+    for (final ancestor in ancestors) {
+      final group = _operationGroups[ancestor];
+      if (group != null) startedGroups.add(group);
     }
 
     void follower() {
@@ -1292,14 +1300,58 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     addAnimationListener(follower);
-    await Future<void>.delayed(Duration(milliseconds: totalMs));
+
+    // Wait for two independent timelines to both complete:
+    //
+    //   1. The scroll's own wall-clock timeline (scrollMs), so the
+    //      curve actually reaches 1.0 via the follower.
+    //   2. Every ancestor expansion's terminal V=1.0 tick. That tick fires
+    //      on the vsync AFTER the nominal duration (Flutter's
+    //      `_InterpolationSimulation.isDone` transitions true only once
+    //      `elapsed > duration`), and is observable externally by the
+    //      operation group's identity disappearing from [_operationGroups]
+    //      (the status listener removes + disposes it when completed).
+    //
+    // The previous implementation awaited `Future.delayed(totalMs)`, a
+    // wall-clock timer. Because the terminal tick lands ~1 frame after
+    // the nominal duration, the timer consistently removed the follower
+    // BEFORE the tick fired — the scroll froze at the next-to-last
+    // follower call (V < 1), and the post-loop jumpTo then snapped the
+    // residual distance in a single frame. Visible as an end-of-scroll
+    // hitch whose magnitude scales with the fanout of collapsed
+    // ancestors (more animating preceding nodes → larger residual).
+    //
+    // Yielding via `endOfFrame` keeps the ticker driving the follower
+    // between polls, so each ancestor's final V=1.0 tick runs through
+    // the follower while it is still registered.
+    while (true) {
+      if (!scrollController.hasClients) {
+        removeAnimationListener(follower);
+        return true;
+      }
+      final scrollDone = stopwatch.elapsedMilliseconds >= scrollMs;
+      bool expansionDone = true;
+      for (final g in startedGroups) {
+        if (identical(_operationGroups[g.operationKey], g)) {
+          expansionDone = false;
+          break;
+        }
+      }
+      if (scrollDone && expansionDone) break;
+      await SchedulerBinding.instance.endOfFrame;
+    }
+
     removeAnimationListener(follower);
 
     if (!scrollController.hasClients) return true;
 
-    // Final precise snap. Layout is settled, so scrollOffsetOf returns the
-    // exact target — the running clamp may have drifted slightly while
-    // maxScrollExtent was still catching up.
+    // Final precise snap. In the nominal case the follower already landed
+    // on the settled target (every captured group fired its V=1.0 tick
+    // through the follower before the loop exited), so this jump is a
+    // no-op. It still matters when a caller-provided [extentEstimator]
+    // disagrees with [defaultExtent] for unmeasured preceding nodes, or
+    // when an ancestor expansion was cancelled mid-flight (e.g. user
+    // collapse) and its group vanished before reaching V=1.
     final finalOffset = scrollOffsetOf(key, extentEstimator: extentEstimator);
     if (finalOffset == null) return true;
     final finalPosition = scrollController.position;

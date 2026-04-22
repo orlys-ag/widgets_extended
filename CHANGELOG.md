@@ -1,3 +1,8 @@
+## 0.0.11
+
+- Stale node eviction
+- Scroll to node jump fix
+
 ## 0.0.10
 
 - Optimized expansion of nodes with many children.
