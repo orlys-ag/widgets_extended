@@ -74,6 +74,14 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// subsumes [_dirtyDataNodes].
   bool _needsFullRefresh = false;
 
+  /// Whether the last animation tick observed [TreeController.hasActiveAnimations]
+  /// as true. Used by [_onAnimationTick] so the settle tick (where the
+  /// controller has already cleared animation state before notifying) still
+  /// triggers [RenderObject.markNeedsLayout]. Without this, completed extent
+  /// animations would never relayout and the render would remain at the
+  /// partial animated value instead of the final settled extent.
+  bool _priorTickHadAnimations = false;
+
   // ══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
   // ══════════════════════════════════════════════════════════════════════════
@@ -234,9 +242,34 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   }
 
   /// Called on pure animation ticks (no structural change).
-  /// Only triggers relayout — no GC scheduling needed.
+  ///
+  /// Routes to [RenderObject.markNeedsLayout] for extent animations
+  /// (enter/exit/bulk/op-group) — they change structural layout.
+  ///
+  /// Routes to [RenderObject.markNeedsPaint] for slide-only ticks — slide
+  /// is paint-only; structural layout is unchanged and marking layout dirty
+  /// would trigger an unnecessary relayout every frame.
+  ///
+  /// The completion tick of an extent animation fires **after** the
+  /// controller has cleared its state (so [TreeController.hasActiveAnimations]
+  /// is already false). We still need a final relayout to settle the final
+  /// extent, which is why [_priorTickHadAnimations] is checked — if the
+  /// previous tick saw active animations, the current tick is the settle
+  /// tick and must relayout even though the flag is now false.
+  ///
+  /// The completion tick of a slide fires **before** the controller clears
+  /// its entries, so `hasActiveSlides` is still true and the paint branch
+  /// schedules a final paint at `currentDelta == 0.0`. After that there's
+  /// no further tick; the clear-and-stop is a no-visual-change operation.
   void _onAnimationTick() {
-    renderObject.markNeedsLayout();
+    final c = widget.controller;
+    final active = c.hasActiveAnimations;
+    if (active || _priorTickHadAnimations) {
+      renderObject.markNeedsLayout();
+    } else if (c.hasActiveSlides) {
+      renderObject.markNeedsPaint();
+    }
+    _priorTickHadAnimations = active;
   }
 
   /// Called when a single node's data changed (via [TreeController.updateNode])

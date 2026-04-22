@@ -474,6 +474,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// exit animation completes.
   final Set<TKey> _pendingDeletion = {};
 
+  /// Active FLIP slide animations, keyed by node. A node present here is
+  /// painted with a vertical translation equal to [SlideAnimation.currentDelta];
+  /// structural layout is unaffected (slide is paint-only).
+  ///
+  /// Populated by [animateSlideFromOffsets] and cleared by the slide tick
+  /// handler on completion. A node can simultaneously be a slide entry and
+  /// have an enter/exit extent animation — the two channels compose at paint.
+  final Map<TKey, SlideAnimation<TKey>> _slideAnimations = {};
+
+  /// Lazy [AnimationController] driving every entry in [_slideAnimations].
+  /// One shared controller is sufficient because all active slides share the
+  /// same start time (FLIP from the same mutation) and reset together.
+  /// Disposed in [dispose]; stopped when [_slideAnimations] empties.
+  AnimationController? _slideController;
+
   /// Listeners notified on every animation tick (layout-only updates).
   final List<VoidCallback> _animationListeners = [];
 
@@ -750,14 +765,107 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return _childListOf(key)?.length ?? 0;
   }
 
+  /// Returns all descendants of [key] in pre-order (children, grandchildren,
+  /// ...). Does not include [key] itself. Returns an empty list if [key] has
+  /// no children or is not present.
+  ///
+  /// Intended for drop-target validation (cycle prevention): a node cannot
+  /// be reparented under any of its own descendants.
+  List<TKey> getDescendants(TKey key) => _getDescendants(key);
+
+  /// Whether [key] is pending deletion — present in the structural maps but
+  /// animating out and scheduled for purge once the animation settles.
+  ///
+  /// Drop-target resolution should skip pending-deletion rows: they are
+  /// visually vanishing and cannot be valid reorder targets. Also used as
+  /// the predicate for filtering [rootKeys] / [getChildren] down to the
+  /// live sets accepted by [reorderRoots] / [reorderChildren].
+  bool isPendingDeletion(TKey key) => _pendingDeletion.contains(key);
+
+  /// Root keys that are not pending deletion.
+  ///
+  /// Matches the input contract of [reorderRoots]: the reorder API
+  /// validates `orderedKeys` against exactly this set and re-appends
+  /// pending-deletion entries internally. Passing the full [rootKeys] to
+  /// [reorderRoots] would fail the length check when any root is mid-exit.
+  List<TKey> get liveRootKeys {
+    if (_pendingDeletion.isEmpty) return List<TKey>.of(_roots);
+    final result = <TKey>[];
+    for (final k in _roots) {
+      if (!_pendingDeletion.contains(k)) result.add(k);
+    }
+    return result;
+  }
+
+  /// Children of [parent] that are not pending deletion.
+  ///
+  /// Matches the input contract of [reorderChildren]. Returns an empty list
+  /// if [parent] is not present or has no children.
+  List<TKey> getLiveChildren(TKey parent) {
+    final full = _childListOf(parent);
+    if (full == null || full.isEmpty) return const [];
+    if (_pendingDeletion.isEmpty) return List<TKey>.of(full);
+    final result = <TKey>[];
+    for (final k in full) {
+      if (!_pendingDeletion.contains(k)) result.add(k);
+    }
+    return result;
+  }
+
+  /// Returns the zero-based index of [key] within the **live** sibling list
+  /// of its parent (or the live root list, if [key] is a root). Returns -1
+  /// if [key] is not present or is itself pending deletion.
+  ///
+  /// Live-space — not full-list-space — so the returned index directly
+  /// matches positions in [liveRootKeys] / [getLiveChildren] and the input
+  /// space of [reorderRoots] / [reorderChildren].
+  int getIndexInParent(TKey key) {
+    if (!_hasKey(key) || _pendingDeletion.contains(key)) return -1;
+    final parent = _parentKeyOfKey(key);
+    final List<TKey> full = parent == null
+        ? _roots
+        : (_childListOf(parent) ?? <TKey>[]);
+    int liveIndex = 0;
+    for (final k in full) {
+      if (k == key) return liveIndex;
+      if (!_pendingDeletion.contains(k)) liveIndex++;
+    }
+    return -1;
+  }
+
   /// Whether any nodes are currently animating.
   ///
   /// Used by the element and render object to defer expensive operations
   /// (like stale-node eviction and sticky precomputation) during animation.
+  ///
+  /// **Slide animations are deliberately excluded.** Slide is paint-only —
+  /// it does not change layout, sticky geometry, or eviction decisions.
+  /// Callers that care about slide state read [hasActiveSlides] instead.
   bool get hasActiveAnimations =>
       _standaloneAnimations.isNotEmpty ||
       _operationGroups.isNotEmpty ||
       (_bulkAnimationGroup != null && !_bulkAnimationGroup!.isEmpty);
+
+  /// Whether any FLIP slide animations are currently active.
+  ///
+  /// Deliberately separate from [hasActiveAnimations]: slide is paint-only
+  /// and must not be mixed into the sticky-throttle / eviction-deferral
+  /// signal that [hasActiveAnimations] drives. The sliver element routes
+  /// slide-only ticks to [RenderObject.markNeedsPaint] rather than
+  /// [RenderObject.markNeedsLayout] based on this flag.
+  bool get hasActiveSlides => _slideAnimations.isNotEmpty;
+
+  /// Current slide delta for [key] in scroll-space y, or 0.0 if the node is
+  /// not currently sliding. Read by [RenderSliverTree.paint],
+  /// [RenderSliverTree.applyPaintTransform], and the hit-test path on
+  /// every frame (no caching — staleness-safe under tick-without-paint).
+  double getSlideDelta(TKey key) {
+    final slide = _slideAnimations[key];
+    if (slide == null) {
+      return 0.0;
+    }
+    return slide.currentDelta;
+  }
 
   /// True when a bulk animation group is currently active and has members
   /// animating in either direction.
@@ -948,6 +1056,158 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           : fullExtent * (1.0 - t);
     }
     return lerpDouble(animation.startExtent, animation.targetExtent, t)!;
+  }
+
+  /// Starts a FLIP slide animation for every visible node whose position in
+  /// scroll-space changed between [priorOffsets] (pre-mutation) and
+  /// [currentOffsets] (post-mutation). Produce both with
+  /// [RenderSliverTree.snapshotVisibleOffsets] — the first **before** the
+  /// structural mutation, the second from inside a
+  /// [WidgetsBinding.addPostFrameCallback] **after** the mutation's layout
+  /// has run.
+  ///
+  /// A node present in both maps with `priorOffsets[key] != currentOffsets[key]`
+  /// receives a new [SlideAnimation] with `startDelta = prior - current`.
+  /// A node only in one map is ignored (it was either added or removed and
+  /// has its own enter/exit animation for that). A zero delta installs no
+  /// entry.
+  ///
+  /// Composes with an in-flight slide: if [key] already has an entry,
+  /// its `startDelta` is replaced with `currentDelta_old + (prior - current)`
+  /// and `progress` is reset to 0.0. This preserves the currently rendered
+  /// position as the new animation's starting point (no visual jump).
+  ///
+  /// Slide is paint-only: it does **not** fire the structural-change channel,
+  /// does **not** touch layout, and is **not** counted in
+  /// [hasActiveAnimations]. It fires on the animation-listener channel on
+  /// every tick and on completion; see the slide tick handler for ordering.
+  void animateSlideFromOffsets(
+    Map<TKey, double> priorOffsets,
+    Map<TKey, double> currentOffsets, {
+    Duration duration = const Duration(milliseconds: 220),
+    Curve curve = Curves.easeOutCubic,
+  }) {
+    if (animationDuration == Duration.zero || duration == Duration.zero) {
+      // No-animation mode: drop any in-flight slide and return. Callers that
+      // want the controller to "settle" synchronously see hasActiveSlides
+      // == false immediately.
+      if (_slideAnimations.isNotEmpty) {
+        _slideAnimations.clear();
+        _slideController?.stop();
+      }
+      return;
+    }
+
+    int installed = 0;
+    for (final entry in currentOffsets.entries) {
+      final key = entry.key;
+      final current = entry.value;
+      final prior = priorOffsets[key];
+      if (prior == null) continue;
+      final rawDelta = prior - current;
+      final existing = _slideAnimations[key];
+      if (existing == null) {
+        if (rawDelta == 0.0) continue;
+        _slideAnimations[key] = SlideAnimation<TKey>(
+          startDelta: rawDelta,
+          curve: curve,
+        );
+        installed++;
+      } else {
+        // Composition: the new prior/current describes the mutation that just
+        // happened, but the node was already sliding. Preserve the currently
+        // rendered visual position (existing.currentDelta + rawDelta gives
+        // "how far is the node from its new structural offset") as the new
+        // starting delta so the slide continues seamlessly.
+        final composed = existing.currentDelta + rawDelta;
+        if (composed == 0.0) {
+          _slideAnimations.remove(key);
+          continue;
+        }
+        existing.startDelta = composed;
+        existing.currentDelta = composed;
+        existing.progress = 0.0;
+        existing.curve = curve;
+        installed++;
+      }
+    }
+
+    if (_slideAnimations.isEmpty) {
+      _slideController?.stop();
+      return;
+    }
+
+    final ctrl = _slideController ??= _createSlideController();
+    ctrl.duration = duration;
+    // Reset to 0 and forward() — this is equivalent to "start a fresh slide
+    // shared by every entry". We deliberately don't preserve any in-flight
+    // progress: each entry's `progress` is reset above (for replaced) or
+    // initialized to 0 (for new), so driving from 0→1 is correct.
+    if (installed > 0) {
+      ctrl.value = 0.0;
+      ctrl.forward();
+    }
+  }
+
+  /// Lazily creates the shared slide [AnimationController]. Invoked by
+  /// [animateSlideFromOffsets] only when a slide actually needs to start.
+  AnimationController _createSlideController() {
+    final ctrl = AnimationController(
+      vsync: _vsync,
+      duration: const Duration(milliseconds: 220),
+    );
+    ctrl.addListener(_onSlideTick);
+    // Status listener mirrors the tick handler's completion branch — covers
+    // the edge where AnimationController fires addListener at value < 1.0
+    // on its last tick and only the completed status callback marks the end.
+    // _onSlideTick is idempotent on completion (snaps to zero, tears down).
+    ctrl.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _onSlideTick();
+      }
+    });
+    return ctrl;
+  }
+
+  /// Tick handler for slide animations. **Ordering matters** — see the
+  /// inline comments. Final zero-delta paint is guaranteed because:
+  ///
+  /// 1. Progress and [SlideAnimation.currentDelta] are updated for every
+  ///    entry; on completion, currentDelta is snapped to exact 0.0 so the
+  ///    final painted position matches structural layout pixel-exactly.
+  /// 2. The animation-listener channel fires **before** the map is cleared.
+  ///    [hasActiveSlides] is still true, so the sliver element's
+  ///    `_onAnimationTick` takes the slide branch and schedules
+  ///    `markNeedsPaint`. That paint reads `getSlideDelta(key) == 0.0`.
+  /// 3. Only after the paint has been scheduled do we clear the map and
+  ///    stop the controller. No further tick will fire, so there is no
+  ///    "second paint needed" window.
+  void _onSlideTick() {
+    if (_slideAnimations.isEmpty) {
+      return;
+    }
+    final ctrl = _slideController;
+    if (ctrl == null) {
+      return;
+    }
+
+    final raw = ctrl.value;
+    final complete = raw >= 1.0 - 1e-9;
+
+    for (final entry in _slideAnimations.values) {
+      entry.progress = complete ? 1.0 : raw;
+      final t = entry.curve.transform(entry.progress);
+      entry.currentDelta = complete
+          ? 0.0
+          : lerpDouble(entry.startDelta, 0.0, t)!;
+    }
+
+    _notifyAnimationListeners();
+
+    if (complete) {
+      _slideAnimations.clear();
+      ctrl.stop();
+    }
   }
 
   /// Stores the measured full extent for a node.

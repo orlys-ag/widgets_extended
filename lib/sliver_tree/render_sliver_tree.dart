@@ -317,6 +317,40 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// Gets the child for the given node ID, or null if not present.
   RenderBox? getChildForNode(TKey id) => _children[id];
 
+  /// A per-node snapshot of the painted position (in scroll-space) for every
+  /// visible node. Painted y = structural y + that node's own slide delta.
+  ///
+  /// Used as the "before" baseline for FLIP slide animation. Calling this
+  /// again post-mutation produces the "after" baseline; the per-node
+  /// difference is the new slide's startDelta.
+  ///
+  /// Coordinate space: scroll-space, matching [SliverTreeParentData.layoutOffset].
+  ///
+  /// Slide deltas are paint-only: a node's delta shifts only that node's
+  /// painted position and never contributes to the structural accumulator
+  /// used for subsequent rows.
+  ///
+  /// O(N_visible). Walks [TreeController.visibleNodes] independently of
+  /// [_nodeOffsetsByNid], so the result is correct even under the bulk-only
+  /// fast path (where the nid-indexed array is not fresh for every node).
+  Map<TKey, double> snapshotVisibleOffsets() {
+    final result = <TKey, double>{};
+    double structural = 0.0;
+    for (final key in controller.visibleNodes) {
+      final slide = controller.getSlideDelta(key);
+      result[key] = structural + slide;
+      structural += _currentVisibleExtentOf(key);
+    }
+    return result;
+  }
+
+  /// Structural extent of [key] accounting for any in-flight enter/exit
+  /// animation — same value Pass 1 would compute. Does not include slide
+  /// delta (slide is paint-only).
+  double _currentVisibleExtentOf(TKey key) {
+    return controller.getCurrentExtent(key);
+  }
+
   /// Inserts a child for the specified node.
   void insertChild(RenderBox child, TKey nodeId) {
     // Defensive drop of any prior box at this slot. Normal lifecycle pairs
@@ -1311,10 +1345,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final nodeOffset = parentData.layoutOffset;
       final nodeExtent = parentData.visibleExtent;
 
-      if (nodeOffset >= scrollOffset + remainingPaintExtent) break;
+      // Paint-only FLIP slide delta — read from the controller on every
+      // frame so localToGlobal / semantics (which can resolve between
+      // ticks) always see the current value.
+      final slideDelta = controller.getSlideDelta(nodeId);
 
-      final paintOffset =
-          offset + Offset(parentData.indent, nodeOffset - scrollOffset);
+      if (nodeOffset + slideDelta >= scrollOffset + remainingPaintExtent) {
+        // A node whose painted position lies past the paint region can't
+        // be visible; skip. Note we can't `break` — a later node might
+        // have a negative slideDelta that puts it back in view.
+        continue;
+      }
+
+      final paintOffset = offset +
+          Offset(parentData.indent, nodeOffset - scrollOffset + slideDelta);
 
       // Clip if animating (individual or bulk) and extent is less than full size
       if (controller.isAnimating(nodeId) && nodeExtent < child.size.height) {
@@ -1439,8 +1483,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final nodeOffset = parentData.layoutOffset;
       final nodeExtent = parentData.visibleExtent;
 
+      // Shift the hit coordinate by the node's current slide delta so a
+      // tap lands on the visually-displaced child rather than on the
+      // structural position nobody sees during a slide.
+      final slideDelta = controller.getSlideDelta(nodeId);
       final localMainAxisPosition =
-          mainAxisPosition + scrollOffset - nodeOffset;
+          mainAxisPosition + scrollOffset - nodeOffset - slideDelta;
       if (localMainAxisPosition < 0) continue;
       if (localMainAxisPosition >= nodeExtent) continue;
 
@@ -1459,9 +1507,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           ? (child.size.height - nodeExtent)
           : 0.0;
 
+      final paintedMainOffset = nodeOffset - scrollOffset + slideDelta;
       final hit = result.addWithAxisOffset(
-        paintOffset: Offset(parentData.indent, nodeOffset - scrollOffset),
-        mainAxisOffset: nodeOffset - scrollOffset,
+        paintOffset: Offset(parentData.indent, paintedMainOffset),
+        mainAxisOffset: paintedMainOffset,
         crossAxisOffset: parentData.indent,
         mainAxisPosition: mainAxisPosition,
         crossAxisPosition: crossAxisPosition,
@@ -1521,10 +1570,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         ? (child.size.height - parentData.visibleExtent)
         : 0.0;
 
+    // Include the node's current slide delta (paint-only FLIP offset) so
+    // callers that resolve coordinates via applyPaintTransform — localToGlobal,
+    // focus traversal, semantics, Scrollable.ensureVisible — track the
+    // visually-displaced row during a slide.
+    final slideDelta = nodeId != null
+        ? controller.getSlideDelta(nodeId as TKey)
+        : 0.0;
+
     final scrollOffset = constraints.scrollOffset;
     transform.translateByDouble(
       parentData.indent,
-      parentData.layoutOffset - scrollOffset - yAdjust,
+      parentData.layoutOffset - scrollOffset - yAdjust + slideDelta,
       0.0,
       1.0,
     );

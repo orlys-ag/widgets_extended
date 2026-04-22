@@ -103,6 +103,10 @@ extension _TreeControllerAnimationOps<TKey, TData>
         subtreeGroupKeys.add(nodeId);
       }
       _removeAnimation(nodeId);
+      // Drop any in-flight slide for this subtree member: the delta was
+      // computed against the node's previous position and continuing it
+      // would paint at the wrong offset relative to the new layout.
+      _slideAnimations.remove(nodeId);
       final children = _childListOf(nodeId);
       if (children != null) {
         for (final child in children) {

@@ -17,6 +17,10 @@ enum AnimationType {
 
   /// Node is disappearing (from remove or parent collapse).
   exiting,
+
+  /// Node is sliding from an old scroll-space offset toward its new one
+  /// (FLIP animation on reorder). Paint-only: structural extent is unchanged.
+  sliding,
 }
 
 /// How [TreeController.animateScrollToKey] handles ancestors of the target
@@ -93,6 +97,45 @@ class AnimationState {
   String toString() =>
       "AnimationState($type, progress: ${progress.toStringAsFixed(2)}, "
       "extent: ${currentExtent.toStringAsFixed(1)})";
+}
+
+/// Slide animation state for a single node in a FLIP-style reorder.
+///
+/// Unlike [AnimationState], which interpolates **extent** (size) and is
+/// applied at layout, [SlideAnimation] interpolates **offset delta** and is
+/// applied at paint. The node's structural position is always its
+/// post-mutation offset; [currentDelta] shifts only the painted pixels so
+/// the node visually slides from its old position toward its new one.
+///
+/// [startDelta] = old scroll-space offset - new scroll-space offset (the
+/// distance the node appears to travel). [currentDelta] = lerp(startDelta,
+/// 0, curve(progress)); when progress reaches 1, currentDelta is snapped
+/// to exactly 0.0 (see [TreeController]'s slide tick handler).
+class SlideAnimation<TKey> {
+  SlideAnimation({
+    required this.startDelta,
+    required this.curve,
+    this.progress = 0.0,
+  }) : currentDelta = startDelta;
+
+  /// Initial scroll-space delta: old painted offset minus new structural
+  /// offset. Positive means the node appears above its final position at
+  /// t=0; negative means below.
+  double startDelta;
+
+  /// Animation progress from 0.0 to 1.0. Driven by a shared slide
+  /// [AnimationController] in [TreeController].
+  double progress;
+
+  /// The curve applied to the progress when computing [currentDelta].
+  Curve curve;
+
+  /// The interpolated current delta, applied at paint time as a vertical
+  /// translation. Snapped to exactly 0.0 at completion.
+  double currentDelta;
+
+  /// Whether this animation has completed.
+  bool get isComplete => progress >= 1.0;
 }
 
 /// Shared animation controller for bulk expand/collapse operations.
