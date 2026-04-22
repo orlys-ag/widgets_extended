@@ -33,6 +33,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     _fullExtents.clear();
     _pendingDeletion.clear();
     _nids.clear();
+    _bumpAnimGen();
   }
 
   void _rebuildVisibleIndex() {
@@ -245,14 +246,19 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       _invalidateFullOffsetPrefix();
     }
     // Clean up standalone animation state
-    _standaloneAnimations.remove(key);
+    if (_standaloneAnimations.remove(key) != null) {
+      _bumpAnimGen();
+    }
     // Clean up operation group membership
     final opGroupKey = _nodeToOperationGroup.remove(key);
     if (opGroupKey != null) {
       final group = _operationGroups[opGroupKey];
       if (group != null) {
-        group.members.remove(key);
-        group.pendingRemoval.remove(key);
+        final removedMember = group.members.remove(key) != null;
+        final removedPending = group.pendingRemoval.remove(key);
+        if (removedMember || removedPending) {
+          _bumpAnimGen();
+        }
       }
     }
     // If [key] IS an operation key (the node that triggered an expand/collapse),
@@ -266,6 +272,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
           _nodeToOperationGroup.remove(memberKey);
         }
       }
+      _bumpAnimGen();
       orphanGroup.dispose();
     }
     // Clean up bulk animation group membership
@@ -274,7 +281,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       final removedMember = bulk.members.remove(key);
       final removedPending = bulk.pendingRemoval.remove(key);
       if (removedMember || removedPending) {
-        _bulkAnimationGeneration++;
+        _bumpBulkGen();
       }
     }
     _pendingDeletion.remove(key);

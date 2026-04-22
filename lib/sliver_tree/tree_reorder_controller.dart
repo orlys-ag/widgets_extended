@@ -358,10 +358,10 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
     return scrollable.position.pixels + viewportLocal.dy;
   }
 
-  /// Walks [TreeController.visibleNodes] paired with
-  /// [RenderSliverTree.snapshotVisibleOffsets], finds the row whose
-  /// `[offset, offset + extent)` contains the scroll-space pointer y,
-  /// classifies above/into/below, and resolves `(parentKey, indexInFinalList)`.
+  /// Finds the live row the pointer sits over via
+  /// [RenderSliverTree.findRowAtPaintedY], classifies above/into/below, and
+  /// resolves `(parentKey, indexInFinalList)`. Pending-deletion rows are
+  /// vanishing and cannot be valid drop targets; the lookup skips them.
   void _recomputeDropTarget() {
     final session = _session;
     if (session == null) return;
@@ -370,60 +370,17 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
       session.scrollable,
     );
 
-    final offsets = session.renderObject.snapshotVisibleOffsets();
-    final visible = treeController.visibleNodes;
-    if (visible.isEmpty) {
-      session.currentTarget = null;
-      return;
-    }
-
-    // Find the first live row whose [offset, offset + extent) contains
-    // scrollPointerY. Pending-deletion rows are vanishing and cannot be
-    // valid drop targets; fall through to the nearest live neighbor.
-    TKey? hoveredKey;
-    double hoveredOffset = 0.0;
-    double hoveredExtent = 0.0;
-    for (final key in visible) {
-      if (treeController.isPendingDeletion(key)) continue;
-      final offset = offsets[key];
-      if (offset == null) continue;
-      final extent = treeController.getCurrentExtent(key);
-      if (scrollPointerY < offset) {
-        // Pointer is above this row; if no earlier row captured it,
-        // treat this row as the hovered one at its top edge.
-        hoveredKey ??= key;
-        hoveredOffset = offset;
-        hoveredExtent = extent;
-        break;
-      }
-      if (scrollPointerY < offset + extent) {
-        hoveredKey = key;
-        hoveredOffset = offset;
-        hoveredExtent = extent;
-        break;
-      }
-    }
-    // Pointer past the last row — anchor to the last live row's bottom.
-    if (hoveredKey == null) {
-      for (int i = visible.length - 1; i >= 0; i--) {
-        final key = visible[i];
-        if (treeController.isPendingDeletion(key)) continue;
-        hoveredKey = key;
-        hoveredOffset = offsets[key] ?? 0.0;
-        hoveredExtent = treeController.getCurrentExtent(key);
-        break;
-      }
-    }
-    if (hoveredKey == null) {
+    final hovered = session.renderObject.findRowAtPaintedY(scrollPointerY);
+    if (hovered == null) {
       session.currentTarget = null;
       return;
     }
 
     final resolved = _resolveZone(
       session: session,
-      targetKey: hoveredKey,
-      targetOffset: hoveredOffset,
-      targetExtent: hoveredExtent,
+      targetKey: hovered.key,
+      targetOffset: hovered.paintedOffset,
+      targetExtent: hovered.extent,
       scrollPointerY: scrollPointerY,
     );
     session.currentTarget = resolved;

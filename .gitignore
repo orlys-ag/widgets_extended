@@ -31,5 +31,5 @@ migrate_working_dir/
 /coverage/
 CLAUDE.md
 AGENTS.md
-lib/examples
+examples
 plans

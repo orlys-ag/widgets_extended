@@ -1214,6 +1214,70 @@ void main() {
     );
   });
 
+  group("moveNode during collapse animation", () {
+    testWidgets(
+      "collapsing node preserves its op group on reparent and finishes the animation",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: "host", data: "Host"),
+          TreeNode(key: "x", data: "X"),
+        ]);
+        controller.setChildren("host", [TreeNode(key: "h1", data: "H1")]);
+        controller.setChildren("x", [
+          TreeNode(key: "y", data: "Y"),
+          TreeNode(key: "z", data: "Z"),
+        ]);
+        controller.expand(key: "host", animate: false);
+        controller.expand(key: "x", animate: false);
+
+        // Start collapsing 'x' — descendants y, z enter the op group's
+        // pendingRemoval and remain in visible order while their extents
+        // animate to zero.
+        controller.collapse(key: "x");
+        // Two pumps: the first primes the AnimationController ticker
+        // (first tick fires at elapsed=0); the second advances it.
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(controller.visibleNodes, ["host", "h1", "x", "y", "z"]);
+        expect(controller.getAnimatedExtent("y", 48.0), lessThan(48.0));
+
+        // Reparent 'x' mid-collapse. The fix preserves 'x's op group so the
+        // animation continues against the new position. Before the fix,
+        // _cancelAnimationStateForSubtree disposed the group and
+        // _rebuildVisibleOrder dropped y, z — the collapse "snapped" to
+        // completion at the drop.
+        controller.moveNode("x", "host");
+
+        // The op-group descendants must remain in visible order at their
+        // mid-animation extents so the collapse plays out at the new location
+        // instead of snapping.
+        expect(controller.visibleNodes.contains("y"), isTrue);
+        expect(controller.visibleNodes.contains("z"), isTrue);
+        final yExtentMid = controller.getAnimatedExtent("y", 48.0);
+        expect(yExtentMid, greaterThan(0.0));
+        expect(yExtentMid, lessThan(48.0));
+
+        // Let the animation finish. At dismiss, the op group's handler
+        // removes y, z from visible order (x is still collapsed), and x
+        // ends up parented under 'host' with no visible descendants.
+        await tester.pumpAndSettle();
+
+        expect(controller.getParent("x"), "host");
+        expect(controller.isExpanded("x"), isFalse);
+        expect(controller.visibleNodes, ["host", "h1", "x"]);
+        // y, z are still structurally children of x.
+        expect(controller.getChildren("x"), ["y", "z"]);
+      },
+    );
+  });
+
   group("insert with pending-deletion node", () {
     testWidgets(
       "honors parentKey when node is pending deletion under another parent",

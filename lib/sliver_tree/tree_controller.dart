@@ -602,59 +602,51 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return _fullOffsetPrefix![index];
   }
 
-  /// Lazy union of every currently-animating key across standalone, operation,
-  /// and bulk groups. Invalidation is signature-based: [_animationStateSig]
-  /// walks the current animation topology so overlapping transitions that keep
-  /// collection lengths constant still invalidate correctly on next access.
+  /// Monotonically increasing counter bumped on any mutation to
+  /// animation-state membership (standalone animations, operation-group
+  /// members or pendingRemoval, bulk-group members or pendingRemoval).
+  /// Serves as the O(1) cache signature for [_animatingKeysCache] and
+  /// [_firstAnimatingIndexCacheVal] so per-frame queries like
+  /// [isAnimating] don't rescan every animating node per call.
+  ///
+  /// All animation-state mutations flow through [_bumpAnimGen] (direct or
+  /// via [_bumpBulkGen], which also bumps [_bulkAnimationGeneration]).
+  int _animationGeneration = 0;
+
+  /// Union of every currently-animating key across standalone, operation,
+  /// and bulk groups. Rebuilt on demand when [_animationGeneration] changes.
   Set<TKey>? _animatingKeysCache;
-  int _animatingKeysCacheSig = -1;
+  int _animatingKeysCacheGen = -1;
 
   /// Cached result of [computeFirstAnimatingVisibleIndex]. Depends on both
-  /// animation state and the visible order, so the signature combines
-  /// [_animationStateSig] with [_structureGeneration].
+  /// animation state and the visible order, so the cache key combines
+  /// [_animationGeneration] with [_structureGeneration].
   int _firstAnimatingIndexCacheSig = -1;
   int _firstAnimatingIndexCacheVal = 0;
 
-  /// Cheap O(1) signature over all animation collections. A transfer that
-  /// keeps every collection's length identical would not change the signature,
-  /// but no controller path performs such a transfer atomically — moves always
-  /// pass through `_captureAndRemoveFromGroups` followed by a fresh insert,
-  /// which shifts at least one length on each side.
-  int _animationStateSig() {
-    int s = 17;
-    for (final entry in _standaloneAnimations.entries) {
-      s = Object.hash(s, entry.key, entry.value.type);
-    }
-    for (final entry in _operationGroups.entries) {
-      final groupKey = entry.key;
-      final group = entry.value;
-      s = Object.hash(s, groupKey, group.members.length);
-      for (final memberKey in group.members.keys) {
-        s = Object.hash(s, groupKey, memberKey);
-      }
-      for (final pendingKey in group.pendingRemoval) {
-        s = Object.hash(s, groupKey, pendingKey, 1);
-      }
-    }
-    final bulk = _bulkAnimationGroup;
-    if (bulk != null) {
-      s = Object.hash(s, bulk.members.length, bulk.pendingRemoval.length);
-      for (final memberKey in bulk.members) {
-        s = Object.hash(s, memberKey);
-      }
-      for (final pendingKey in bulk.pendingRemoval) {
-        s = Object.hash(s, pendingKey, 1);
-      }
-    }
-    return s;
+  /// Bumps [_animationGeneration] so the next call to [_ensureAnimatingKeys]
+  /// or [computeFirstAnimatingVisibleIndex] rebuilds its cache. Must be
+  /// called from every path that mutates standalone, operation-group, or
+  /// bulk-group membership. Paths that mutate bulk state use [_bumpBulkGen].
+  void _bumpAnimGen() {
+    _animationGeneration++;
+  }
+
+  /// Bumps both the broad [_animationGeneration] and the bulk-specific
+  /// [_bulkAnimationGeneration]. Call from any path that mutates
+  /// [_bulkAnimationGroup]'s identity or membership.
+  void _bumpBulkGen() {
+    _animationGeneration++;
+    _bulkAnimationGeneration++;
   }
 
   /// Returns a set of every currently-animating key. Rebuilt on demand when
-  /// [_animationStateSig] changes.
+  /// [_animationGeneration] changes.
   Set<TKey> _ensureAnimatingKeys() {
-    final sig = _animationStateSig();
     final cached = _animatingKeysCache;
-    if (cached != null && sig == _animatingKeysCacheSig) return cached;
+    if (cached != null && _animationGeneration == _animatingKeysCacheGen) {
+      return cached;
+    }
     final set = <TKey>{};
     if (_standaloneAnimations.isNotEmpty) {
       set.addAll(_standaloneAnimations.keys);
@@ -669,7 +661,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       set.addAll(bulk.members);
     }
     _animatingKeysCache = set;
-    _animatingKeysCacheSig = sig;
+    _animatingKeysCacheGen = _animationGeneration;
     return set;
   }
 
@@ -956,9 +948,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// much smaller than the visible-order length.
   int computeFirstAnimatingVisibleIndex() {
     if (!hasActiveAnimations) return _order.length;
-    // Cache key combines animation-state signature with structure generation:
+    // Cache key combines animation generation with structure generation:
     // the result depends on which keys are animating AND their visible indices.
-    final sig = _animationStateSig() ^ (_structureGeneration * 2654435761);
+    final sig = _animationGeneration ^ (_structureGeneration * 2654435761);
     if (sig == _firstAnimatingIndexCacheSig &&
         _firstAnimatingIndexCacheVal <= _order.length) {
       return _firstAnimatingIndexCacheVal;
@@ -2714,7 +2706,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final existingGroup = _operationGroups[key];
     if (existingGroup != null) {
       // Path 1: Reversing a collapse — group already exists
-      existingGroup.pendingRemoval.clear();
+      if (existingGroup.pendingRemoval.isNotEmpty) {
+        existingGroup.pendingRemoval.clear();
+        _bumpAnimGen();
+      }
       // Restore each member's targetExtent to its full (natural) extent.
       // A prior fresh collapse may have captured mid-flight extents below
       // full (e.g., nodes taken from a bulk or standalone animation), so
@@ -2763,6 +2758,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       operationKey: key,
     );
     _operationGroups[key] = group;
+    _bumpAnimGen();
 
     controller.addListener(_notifyAnimationListeners);
     controller.addStatusListener((status) {
@@ -2903,6 +2899,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         entry.value.startExtent = 0.0;
         existingGroup.pendingRemoval.add(entry.key);
       }
+      _bumpAnimGen();
       existingGroup.controller.reverse();
 
       // Handle descendants NOT in this group (from nested expansions)
@@ -2929,6 +2926,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       operationKey: key,
     );
     _operationGroups[key] = group;
+    _bumpAnimGen();
 
     controller.addListener(_notifyAnimationListeners);
     controller.addStatusListener((status) {
@@ -3039,10 +3037,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Start animations for newly visible nodes and reverse exiting animations
     if (animate) {
       // Reverse collapsing operation groups
+      bool opGroupReversed = false;
       for (final entry in _operationGroups.entries) {
         final group = entry.value;
         if (group.pendingRemoval.isNotEmpty) {
           group.pendingRemoval.clear();
+          opGroupReversed = true;
           // Restore each member's targetExtent to full so the reversal
           // terminates at the correct natural size instead of at a
           // captured mid-flight value.
@@ -3053,6 +3053,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           group.controller.forward();
         }
       }
+      if (opGroupReversed) _bumpAnimGen();
 
       // Check if there's a collapsing bulk animation we can reverse
       if (_bulkAnimationGroup != null &&
@@ -3077,7 +3078,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
         // Reverse the controller direction
         _bulkAnimationGroup!.controller.forward();
-        _bulkAnimationGeneration++;
+        _bumpBulkGen();
       } else {
         // Dispose old group and create fresh to avoid status listener race
         _disposeBulkAnimationGroup();
@@ -3099,7 +3100,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
         // Start expanding (value 0 -> 1)
         _bulkAnimationGroup!.controller.forward();
-        _bulkAnimationGeneration++;
+        _bumpBulkGen();
       }
     } else {
       // Remove animations if not animating
@@ -3183,6 +3184,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _structureGeneration++;
     if (animate) {
       // Reverse expanding operation groups
+      bool opGroupReversed = false;
       for (final entry in _operationGroups.entries) {
         final group = entry.value;
         if (group.pendingRemoval.isEmpty) {
@@ -3190,6 +3192,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           for (final nodeId in group.members.keys) {
             if (!_pendingDeletion.contains(nodeId)) {
               group.pendingRemoval.add(nodeId);
+              opGroupReversed = true;
             }
           }
           // Normalize startExtent to 0 so the reversal terminates at
@@ -3200,6 +3203,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           group.controller.reverse();
         }
       }
+      if (opGroupReversed) _bumpAnimGen();
 
       // Check if there's an expanding bulk animation we can reverse
       if (_bulkAnimationGroup != null &&
@@ -3223,7 +3227,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
         // Reverse the controller direction
         _bulkAnimationGroup!.controller.reverse();
-        _bulkAnimationGeneration++;
+        _bumpBulkGen();
       } else {
         // Dispose old group and create fresh with value=1.0
         _disposeBulkAnimationGroup();
@@ -3248,7 +3252,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         if (_bulkAnimationGroup!.members.isNotEmpty) {
           _bulkAnimationGroup!.controller.reverse();
         }
-        _bulkAnimationGeneration++;
+        _bumpBulkGen();
       }
     } else {
       // Remove immediately

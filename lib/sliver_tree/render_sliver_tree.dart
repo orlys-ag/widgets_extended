@@ -410,6 +410,100 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     return controller.getCurrentExtent(key);
   }
 
+  /// Finds the first live (non-pending-deletion) visible row whose painted
+  /// scroll-space range `[paintedOffset, paintedOffset + extent)` contains
+  /// [scrollY], falling back to the last live row when [scrollY] sits past
+  /// the bottom of the tree. Returns null when the visible order is empty or
+  /// every entry is pending-deletion.
+  ///
+  /// Painted offsets include the node's current FLIP slide delta, matching
+  /// what [snapshotVisibleOffsets] would return — but without allocating an
+  /// O(N) map. Designed for [TreeReorderController], which polls the hovered
+  /// row every pointer move and every autoscroll tick; the previous
+  /// implementation materialized a `Map<TKey, double>` for the whole tree on
+  /// each call.
+  ///
+  /// Fast path (no active slides): O(log N) via binary search on
+  /// structural offsets, plus a forward scan to skip pending-deletion rows.
+  ///
+  /// Slow path (active slides): O(N) linear scan — slide deltas can reorder
+  /// painted positions relative to structural positions, so binary search
+  /// over structural offsets is unsafe. A slide only overlaps a drag when
+  /// the user starts a new drag while a prior commit's FLIP is still
+  /// animating (≤ slideDuration).
+  ({TKey key, double paintedOffset, double extent})? findRowAtPaintedY(
+    double scrollY,
+  ) {
+    final visible = controller.visibleNodes;
+    if (visible.isEmpty) return null;
+
+    if (controller.hasActiveSlides) {
+      TKey? lastLiveKey;
+      double lastLiveOffset = 0.0;
+      double lastLiveExtent = 0.0;
+      double structural = 0.0;
+      for (final key in visible) {
+        final extent = controller.getCurrentExtent(key);
+        final slide = controller.getSlideDelta(key);
+        final paintedOffset = structural + slide;
+        if (!controller.isPendingDeletion(key)) {
+          if (scrollY < paintedOffset + extent) {
+            return (
+              key: key,
+              paintedOffset: paintedOffset,
+              extent: extent,
+            );
+          }
+          lastLiveKey = key;
+          lastLiveOffset = paintedOffset;
+          lastLiveExtent = extent;
+        }
+        structural += extent;
+      }
+      if (lastLiveKey == null) return null;
+      return (
+        key: lastLiveKey,
+        paintedOffset: lastLiveOffset,
+        extent: lastLiveExtent,
+      );
+    }
+
+    // Fast path: no slides active, painted offset == structural offset.
+    final startIdx = _findFirstVisibleIndex(visible, scrollY);
+    for (int i = startIdx; i < visible.length; i++) {
+      final key = visible[i];
+      if (controller.isPendingDeletion(key)) continue;
+      return _liveRowAt(i, key);
+    }
+    // Past the end (or every trailing row is pending-deletion) — walk back
+    // for the last live row.
+    for (int i = visible.length - 1; i >= 0; i--) {
+      final key = visible[i];
+      if (controller.isPendingDeletion(key)) continue;
+      return _liveRowAt(i, key);
+    }
+    return null;
+  }
+
+  ({TKey key, double paintedOffset, double extent}) _liveRowAt(
+    int visibleIndex,
+    TKey key,
+  ) {
+    final double offset;
+    final double extent;
+    if (_bulkCumulativesValid) {
+      // Per-nid slots aren't kept fresh for out-of-cache-region nids under
+      // the bulk fast path; derive from cumulatives.
+      offset = _offsetAtVisibleIndex(visibleIndex);
+      extent = _offsetAtVisibleIndex(visibleIndex + 1) - offset;
+    } else {
+      final nid = _controller.nidOf(key);
+      offset = _nodeOffsetsByNid[nid];
+      extent = _nodeExtentsByNid[nid];
+    }
+    return (key: key, paintedOffset: offset, extent: extent);
+  }
+
   /// Inserts a child for the specified node.
   void insertChild(RenderBox child, TKey nodeId) {
     // Defensive drop of any prior box at this slot. Normal lifecycle pairs
@@ -1334,8 +1428,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // remainingPaintExtent (which includes space occupied by later slivers)
       // gave false negatives and missed clipping. Also flag when a sticky
       // header's inflated bottom was clamped against remainingPaintExtent.
+      // The `scrollOffset > 0` clause mirrors RenderSliverMultiBoxAdaptor:
+      // when the first visible row starts before scrollOffset, it paints at
+      // a negative y relative to the sliver's paint origin. Without this
+      // flag, the viewport skips its clip layer and the partial top row
+      // spills above the sliver — visible at max scroll extent, where the
+      // "content extends below" clause is false.
       hasVisualOverflow: stickyInflationClamped ||
-          scrollOffset + paintExtent < totalScrollExtent,
+          scrollOffset + paintExtent < totalScrollExtent ||
+          scrollOffset > 0.0,
     );
 
     // Refresh parentData.layoutOffset for children mounted in a prior
