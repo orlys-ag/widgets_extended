@@ -857,6 +857,123 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      "collapsing a subtree pre-mounts following rows so they do not "
+      "pop in at dismiss (flicker-as-they-appear regression)",
+      (tester) async {
+        // Regression for the flicker visible when collapsing a node with
+        // many children whose subtree pushes following rows past the
+        // cache region.
+        //
+        // Pre-fix: the admission cap (using FULL extent for exits)
+        // matched the pre-collapse admission set throughout the entire
+        // animation. Following non-descendant rows — which were OUTSIDE
+        // the cache region pre-collapse because the collapsing subtree's
+        // height pushed them past the cache extent — remained outside
+        // the cache region for every animation frame, then got mounted
+        // in one shot at dismiss.
+        //
+        // Fix: dual-view admission tracks a post-animation accumulator
+        // where exits contribute 0 toward the budget. Non-exit following
+        // rows admit via the post view once the loop has iterated past
+        // the exits, so they are mounted DURING the collapse. At dismiss
+        // they are already present — no pop.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        const childCount = 200;
+        const followerCount = 10;
+        controller.setRoots([
+          TreeNode(key: "p", data: "P"),
+          for (int i = 0; i < followerCount; i++)
+            TreeNode(key: "f$i", data: "F$i"),
+        ]);
+        controller.setChildren("p", [
+          for (int i = 0; i < childCount; i++)
+            TreeNode(key: "c$i", data: "C$i"),
+        ]);
+        controller.expand(key: "p", animate: false);
+
+        final buildCounts = <String, int>{};
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 600,
+                child: CustomScrollView(
+                  slivers: [
+                    SliverTree<String, String>(
+                      controller: controller,
+                      nodeBuilder: (context, key, depth) {
+                        buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+                        return SizedBox(height: 48, child: Text(key));
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Baseline: with 200 children of 'p' expanded at the top of a
+        // 600px viewport + cache extent, the followers are well past
+        // the cache region and have never been built.
+        final followerBuildsBefore = <String, int>{
+          for (int i = 0; i < followerCount; i++)
+            "f$i": buildCounts["f$i"] ?? 0,
+        };
+        expect(
+          followerBuildsBefore.values.every((c) => c == 0),
+          isTrue,
+          reason: "test pre-condition: followers must be outside the "
+              "pre-collapse cache region so the scenario exercises the "
+              "fix, not just steady-state admission. "
+              "Actual: $followerBuildsBefore",
+        );
+
+        // Kick off the collapse and step through the animation. At each
+        // mid-animation frame, check whether any follower has been
+        // built. We expect at least one follower to be mounted BEFORE
+        // dismiss — the dual-view admission should have pulled them in
+        // via the post view.
+        controller.collapse(key: "p");
+
+        bool anyFollowerBuiltMidAnimation = false;
+        // Animation is 300 ms; sample roughly every 50 ms.
+        for (int step = 0; step < 5; step++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          for (int i = 0; i < followerCount; i++) {
+            if ((buildCounts["f$i"] ?? 0) > 0) {
+              anyFollowerBuiltMidAnimation = true;
+              break;
+            }
+          }
+          if (anyFollowerBuiltMidAnimation) break;
+        }
+
+        expect(
+          anyFollowerBuiltMidAnimation,
+          isTrue,
+          reason: "following rows must be pre-mounted during the collapse "
+              "animation; otherwise they pop in at dismiss and the user "
+              "sees the flicker this fix targets.",
+        );
+
+        // Drain the remainder of the animation — structural correctness
+        // check, not the primary assertion.
+        await tester.pumpAndSettle();
+        expect(controller.isExpanded("p"), isFalse);
+        expect(controller.visibleNodes.first, "p");
+      },
+    );
   });
 
   // ══════════════════════════════════════════════════════════════════════════

@@ -27,6 +27,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     _depthByNid = Int32List(0);
     _expandedByNid = Uint8List(0);
     _ancestorsExpandedByNid = Uint8List(0);
+    _visibleSubtreeSizeByNid = Int32List(0);
     _roots.clear();
     _order.reset();
     _standaloneAnimations.clear();
@@ -159,14 +160,30 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     return result;
   }
 
+  /// Iterative DFS pre-order collection of every descendant of [key]
+  /// (excluding [key] itself). Children are pushed in reverse so the
+  /// first child pops first; this matches the original recursive
+  /// implementation's visit order, which [remove] and other callers
+  /// depend on.
   void _getDescendantsInto(TKey key, List<TKey> result) {
-    final children = _childListOf(key);
-    if (children == null) {
+    final stack = <TKey>[];
+    final seed = _childListOf(key);
+    if (seed == null) {
       return;
     }
-    for (final childId in children) {
-      result.add(childId);
-      _getDescendantsInto(childId, result);
+    for (int i = seed.length - 1; i >= 0; i--) {
+      stack.add(seed[i]);
+    }
+    while (stack.isNotEmpty) {
+      final k = stack.removeLast();
+      result.add(k);
+      final children = _childListOf(k);
+      if (children == null) {
+        continue;
+      }
+      for (int i = children.length - 1; i >= 0; i--) {
+        stack.add(children[i]);
+      }
     }
   }
 
@@ -176,41 +193,40 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     return result;
   }
 
+  /// Iterative DFS collection of every visible descendant of [key].
+  ///
+  /// A node is emitted when it is in the visible order. The original
+  /// recursive version gated *descent into grandchildren* on the child's
+  /// expansion state but **did not** gate the top-level walk on [key]'s
+  /// own expansion — callers such as [collapse] deliberately flip
+  /// expanded=false before asking which descendants to hide, and rely
+  /// on the first level being returned regardless.
   void _getVisibleDescendantsInto(TKey key, List<TKey> result) {
-    final children = _childListOf(key);
-    if (children == null) {
+    final seed = _childListOf(key);
+    if (seed == null) {
       return;
     }
-    for (final childId in children) {
-      if (_order.contains(childId)) {
-        result.add(childId);
-        if (_isExpandedKey(childId)) {
-          _getVisibleDescendantsInto(childId, result);
-        }
+    final stack = <TKey>[];
+    for (int i = seed.length - 1; i >= 0; i--) {
+      stack.add(seed[i]);
+    }
+    while (stack.isNotEmpty) {
+      final k = stack.removeLast();
+      if (!_order.contains(k)) {
+        continue;
+      }
+      result.add(k);
+      if (!_isExpandedKey(k)) {
+        continue;
+      }
+      final children = _childListOf(k);
+      if (children == null) {
+        continue;
+      }
+      for (int i = children.length - 1; i >= 0; i--) {
+        stack.add(children[i]);
       }
     }
-  }
-
-  int _countVisibleDescendants(TKey key) {
-    // Walk structural children regardless of [key]'s own expansion state:
-    // a collapsed node can still have children in the visible order when
-    // they are mid-animation (see _rebuildVisibleOrder's "collapsed with
-    // active animations" branch). Gating on _isExpandedKey here would
-    // under-count those rows and cause _insertNewNodeAmongSiblings /
-    // insert() to place new siblings in the middle of a mid-collapsing
-    // subtree instead of after it.
-    int count = 0;
-    final children = _childListOf(key);
-    if (children == null) {
-      return 0;
-    }
-    for (final childId in children) {
-      if (_order.contains(childId)) {
-        count++;
-        count += _countVisibleDescendants(childId);
-      }
-    }
-    return count;
   }
 
   /// Flattens a subtree into a list of node IDs in depth-first order.
@@ -220,6 +236,10 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     return result;
   }
 
+  /// Iterative DFS pre-order flatten. Only descends into expanded nodes
+  /// (matching the original recursive behaviour). Emits [key] itself
+  /// iff [includeRoot], then every descendant reachable through the
+  /// expanded subtree in DFS pre-order.
   void _flattenSubtreeInto(
     TKey key,
     List<TKey> result, {
@@ -228,12 +248,29 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     if (includeRoot) {
       result.add(key);
     }
-    if (_isExpandedKey(key)) {
-      final children = _childListOf(key);
-      if (children != null) {
-        for (final childId in children) {
-          _flattenSubtreeInto(childId, result);
-        }
+    if (!_isExpandedKey(key)) {
+      return;
+    }
+    final stack = <TKey>[];
+    final seed = _childListOf(key);
+    if (seed == null) {
+      return;
+    }
+    for (int i = seed.length - 1; i >= 0; i--) {
+      stack.add(seed[i]);
+    }
+    while (stack.isNotEmpty) {
+      final k = stack.removeLast();
+      result.add(k);
+      if (!_isExpandedKey(k)) {
+        continue;
+      }
+      final children = _childListOf(k);
+      if (children == null) {
+        continue;
+      }
+      for (int i = children.length - 1; i >= 0; i--) {
+        stack.add(children[i]);
       }
     }
   }

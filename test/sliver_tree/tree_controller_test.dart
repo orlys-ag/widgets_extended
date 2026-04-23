@@ -2766,4 +2766,553 @@ void main() {
       },
     );
   });
+
+  group('deep tree ancestors-expanded propagation', () {
+    // A single parent-chain this deep would stack-overflow the previous
+    // recursive implementation of
+    // [_propagateAncestorsExpandedToDescendants]; Dart's default stack
+    // limit sits well under 100k frames. The iterative rewrite uses a
+    // heap-allocated worklist so only total node count matters.
+    const int chainDepth = 20000;
+
+    List<String> buildChainKeys() {
+      return [for (int i = 0; i < chainDepth; i++) 'n$i'];
+    }
+
+    void buildChain(TreeController<String, String> controller) {
+      final keys = buildChainKeys();
+      controller.setRoots([TreeNode(key: keys.first, data: keys.first)]);
+      for (int i = 1; i < keys.length; i++) {
+        controller.insert(
+          parentKey: keys[i - 1],
+          node: TreeNode(key: keys[i], data: keys[i]),
+          animate: false,
+        );
+      }
+    }
+
+    testWidgets('expandAll over a 20k-deep chain does not stack-overflow',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      buildChain(controller);
+
+      controller.expandAll(animate: false);
+
+      expect(controller.visibleNodes.length, chainDepth);
+      expect(controller.visibleNodes.first, 'n0');
+      expect(controller.visibleNodes.last, 'n${chainDepth - 1}');
+    });
+
+    testWidgets('targeted expand at the root of a deep chain propagates',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      buildChain(controller);
+
+      // All descendants start expanded=false. Pre-expand each inner node
+      // without making the chain visible (root stays collapsed), then flip
+      // the root's expanded bit: propagation must reach every descendant
+      // iteratively.
+      for (int i = 1; i < chainDepth - 1; i++) {
+        controller.expand(key: 'n$i', animate: false);
+      }
+      expect(controller.visibleNodes, ['n0']);
+
+      controller.expand(key: 'n0', animate: false);
+
+      expect(controller.visibleNodes.length, chainDepth);
+    });
+
+    testWidgets('collapseAll then expandAll on a deep chain stays consistent',
+        (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      buildChain(controller);
+
+      controller.expandAll(animate: false);
+      expect(controller.visibleNodes.length, chainDepth);
+
+      controller.collapseAll(animate: false);
+      expect(controller.visibleNodes, ['n0']);
+
+      controller.expandAll(animate: false);
+      expect(controller.visibleNodes.length, chainDepth);
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // A2: OperationGroup installation invariant
+  //
+  // The fresh-expand and fresh-collapse Path-2 branches route through
+  // [_installOperationGroup], which asserts the target slot is empty and
+  // defensively disposes any prior occupant before overwriting. These
+  // tests drive the public API through scenarios that force Path 2 to
+  // run twice for the same key (with intervening purge + reinsert)
+  // mid-animation, and verify no assertion fires, no stale controllers
+  // keep ticking, and the final state is correct.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  group('OperationGroup install invariant', () {
+    testWidgets(
+      'mid-animation remove + reinsert + re-expand does not orphan a controller',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: 'r', data: 'R')]);
+        controller.setChildren('r', [
+          TreeNode(key: 'c1', data: 'C1'),
+          TreeNode(key: 'c2', data: 'C2'),
+        ]);
+
+        int animationTickCount = 0;
+        controller.addAnimationListener(() => animationTickCount++);
+
+        // Fresh expand creates OperationGroup G1 under 'r'. Pump one frame
+        // so the controller starts ticking but the animation is not yet
+        // complete.
+        controller.expand(key: 'r');
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(animationTickCount, greaterThan(0));
+
+        // Remove 'r' mid-animation. _purgeNodeData must tear down G1 and
+        // dispose its controller so no stale ticks remain.
+        controller.remove(key: 'r', animate: false);
+        await tester.pump();
+        final tickCountAfterRemove = animationTickCount;
+
+        // Wait out the original animation duration. If G1's controller is
+        // truly disposed, no further ticks fire. If it were orphaned
+        // (still-running ticker, still-registered listener), the counter
+        // would keep incrementing here.
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(
+          animationTickCount,
+          tickCountAfterRemove,
+          reason: 'disposed controller must not continue ticking',
+        );
+
+        // Reinsert 'r' and re-expand. This forces Path 2 to run a second
+        // time for the same key, which would fire
+        // [_installOperationGroup]'s assertion if the prior slot had not
+        // been cleared by the purge.
+        controller.setRoots([TreeNode(key: 'r', data: 'R')]);
+        controller.setChildren('r', [
+          TreeNode(key: 'c1', data: 'C1'),
+          TreeNode(key: 'c2', data: 'C2'),
+        ]);
+        controller.expand(key: 'r');
+        await tester.pumpAndSettle();
+
+        expect(controller.visibleNodes, ['r', 'c1', 'c2']);
+        expect(controller.isExpanded('r'), true);
+      },
+    );
+
+    testWidgets(
+      'repeated expand/collapse cycles on the same key do not accumulate groups',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 200),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: 'r', data: 'R')]);
+        controller.setChildren('r', [TreeNode(key: 'c', data: 'C')]);
+
+        int animationTickCount = 0;
+        controller.addAnimationListener(() => animationTickCount++);
+
+        // Drive 10 full expand/collapse cycles. Each expand/collapse must
+        // run Path 2 once (no prior group survives the preceding
+        // pumpAndSettle). If any cycle leaves an orphaned controller
+        // behind, the tick counter after the final settle will continue
+        // rising past a stable baseline.
+        for (int i = 0; i < 10; i++) {
+          controller.expand(key: 'r');
+          await tester.pumpAndSettle();
+          controller.collapse(key: 'r');
+          await tester.pumpAndSettle();
+        }
+
+        final stableTickCount = animationTickCount;
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(
+          animationTickCount,
+          stableTickCount,
+          reason: 'no orphaned controllers should continue ticking',
+        );
+      },
+    );
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // B3: visible-subtree-size cache drives O(1) insert-position lookups
+  //
+  // Before the cache, the `insert()` hot path did an O(sibling-index)
+  // scan with an O(visibleSubtreeSize) `_countVisibleDescendants` call
+  // inside — pushing a populate-a-parent pattern to O(k³) in the sibling
+  // fan-out. These tests stress that path at scale (500 siblings, each
+  // with a pre-built subtree) and also cross-check the cache against
+  // the reference visible order after each incremental mutation.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  group('visible-subtree-size cache', () {
+    testWidgets(
+      'sequential tail-insert of 500 children with pre-built subtrees completes quickly',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: 'root', data: 'R')]);
+
+        const int siblingCount = 500;
+        const int grandchildrenPerChild = 3;
+
+        // Bootstrap: seed root with c0 while it is still collapsed, then
+        // expand root so subsequent inserts run against a visible parent
+        // (the hot path the cache is meant to accelerate). [expand] is a
+        // no-op on a childless parent, so the bootstrap is necessary.
+        controller.insert(
+          parentKey: 'root',
+          node: TreeNode(key: 'c0', data: 'c0'),
+          animate: false,
+        );
+        controller.setChildren('c0', [
+          for (int g = 0; g < grandchildrenPerChild; g++)
+            TreeNode(key: 'c0_g$g', data: 'c0_g$g'),
+        ]);
+        controller.expand(key: 'c0', animate: false);
+        controller.expand(key: 'root', animate: false);
+
+        // Main loop: insert c1..c499 at the tail. Each child gets 3
+        // pre-built grandchildren so the prior-sibling subtree size is
+        // non-trivial (would have forced the old cubic path to walk
+        // ~750k nodes in total across the batch).
+        final stopwatch = Stopwatch()..start();
+        for (int i = 1; i < siblingCount; i++) {
+          final childKey = 'c$i';
+          controller.insert(
+            parentKey: 'root',
+            node: TreeNode(key: childKey, data: childKey),
+            animate: false,
+          );
+          controller.setChildren(childKey, [
+            for (int g = 0; g < grandchildrenPerChild; g++)
+              TreeNode(key: '${childKey}_g$g', data: '${childKey}_g$g'),
+          ]);
+          controller.expand(key: childKey, animate: false);
+        }
+        stopwatch.stop();
+
+        // Structural correctness: visible order must be pre-order DFS
+        // with every child followed by its three grandchildren.
+        final expected = <String>['root'];
+        for (int i = 0; i < siblingCount; i++) {
+          expected.add('c$i');
+          for (int g = 0; g < grandchildrenPerChild; g++) {
+            expected.add('c${i}_g$g');
+          }
+        }
+        expect(controller.visibleNodes, expected);
+
+        // A correctly-cached implementation runs in ~100 ms on a dev
+        // machine; the previous cubic path took multiple seconds. The
+        // ceiling below is deliberately generous to avoid flakes on
+        // slow CI — it still catches a regression to cubic behavior
+        // (which would exceed several seconds).
+        expect(
+          stopwatch.elapsed.inMilliseconds,
+          lessThan(2000),
+          reason: 'insert batch must not regress to cubic behavior',
+        );
+      },
+    );
+
+    testWidgets(
+      'head-insert of 200 children maintains correct visible order',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: 'root', data: 'R')]);
+
+        const int n = 200;
+        // Bootstrap: insert h0 while root is collapsed, expand root,
+        // then insert the rest at index 0 so each insert runs against
+        // an already-expanded parent.
+        controller.insert(
+          parentKey: 'root',
+          node: TreeNode(key: 'h0', data: 'h0'),
+          animate: false,
+        );
+        controller.expand(key: 'root', animate: false);
+
+        // Insert at index 0 each time (reverse-order head insertion).
+        // This exercises the cache because each prior sibling that gets
+        // skipped over has its visible-subtree-size read once, not
+        // walked. A regression in the cache would yield a scrambled
+        // order.
+        for (int i = 1; i < n; i++) {
+          controller.insert(
+            parentKey: 'root',
+            node: TreeNode(key: 'h$i', data: 'h$i'),
+            index: 0,
+            animate: false,
+          );
+        }
+
+        // Head inserts produce reverse order: h${n-1} first, ..., h0 last.
+        final expected = <String>['root'];
+        for (int i = n - 1; i >= 0; i--) {
+          expected.add('h$i');
+        }
+        expect(controller.visibleNodes, expected);
+      },
+    );
+
+    testWidgets(
+      'interleaved insert + expand + collapse keeps cache consistent',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: 'root', data: 'R')]);
+
+        // Build a small tree with known expansion dynamics, then drive
+        // a mix of operations. After each phase, a [collapseAll] +
+        // [expandAll] round-trips through [_rebuildVisibleOrder], which
+        // runs [_assertVisibleSubtreeSizeConsistency] in debug. A
+        // desynced cache would fire that assertion, failing the test.
+        for (int i = 0; i < 20; i++) {
+          controller.insert(
+            parentKey: 'root',
+            node: TreeNode(key: 'a$i', data: 'a$i'),
+            animate: false,
+          );
+          for (int j = 0; j < 5; j++) {
+            controller.insert(
+              parentKey: 'a$i',
+              node: TreeNode(key: 'a${i}_$j', data: 'a${i}_$j'),
+              animate: false,
+            );
+          }
+        }
+        controller.expand(key: 'root', animate: false);
+        for (int i = 0; i < 20; i += 2) {
+          controller.expand(key: 'a$i', animate: false);
+        }
+        // Force a rebuild + invariant check.
+        controller.collapseAll(animate: false);
+        controller.expandAll(animate: false);
+
+        // Structural cross-check: visible order matches manual DFS.
+        final expected = <String>['root'];
+        for (int i = 0; i < 20; i++) {
+          expected.add('a$i');
+          for (int j = 0; j < 5; j++) {
+            expected.add('a${i}_$j');
+          }
+        }
+        expect(controller.visibleNodes, expected);
+      },
+    );
+
+    testWidgets(
+      'move subtree between parents updates ancestor sums correctly',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([
+          TreeNode(key: 'p1', data: 'P1'),
+          TreeNode(key: 'p2', data: 'P2'),
+        ]);
+        controller.setChildren('p1', [
+          TreeNode(key: 's', data: 'S'),
+        ]);
+        controller.setChildren('s', [
+          TreeNode(key: 's1', data: 'S1'),
+          TreeNode(key: 's2', data: 'S2'),
+          TreeNode(key: 's3', data: 'S3'),
+        ]);
+        // Give p2 a child so [expand(p2)] has something to reveal later;
+        // [expand] is a no-op on childless parents.
+        controller.setChildren('p2', [TreeNode(key: 'p2c', data: 'P2C')]);
+        controller.expand(key: 'p1', animate: false);
+        controller.expand(key: 's', animate: false);
+        controller.expand(key: 'p2', animate: false);
+        expect(controller.visibleNodes, [
+          'p1', 's', 's1', 's2', 's3', 'p2', 'p2c',
+        ]);
+
+        // Move 's' (size = 4: itself + 3 descendants) from p1 to p2.
+        // The [_setParentKey] reparent branch must subtract 4 from p1's
+        // ancestry and add 4 to p2's. If it miscomputes, a subsequent
+        // tail-insert under p1 or p2 will land in the wrong visible
+        // slot because the insert math reads the parent's cached size.
+        controller.moveNode('s', 'p2');
+        expect(controller.visibleNodes, [
+          'p1', 'p2', 'p2c', 's', 's1', 's2', 's3',
+        ]);
+
+        // Tail-insert under p1 — p1 is childless + collapsed now
+        // (moveNode removed 's' which was its only child). Re-expanding
+        // it after adding a new child exercises the cache: if p1's
+        // cached size still held the pre-move value, the visible-order
+        // math would place later inserts wrong.
+        controller.insert(
+          parentKey: 'p1',
+          node: TreeNode(key: 'new1', data: 'new1'),
+          animate: false,
+        );
+        controller.expand(key: 'p1', animate: false);
+        expect(controller.visibleNodes, [
+          'p1', 'new1', 'p2', 'p2c', 's', 's1', 's2', 's3',
+        ]);
+
+        // Tail-insert under p2 — should land after the entire 's'
+        // subtree. If the cache for p2 still held the pre-move value,
+        // the new node would land inside the 's' subtree.
+        controller.insert(
+          parentKey: 'p2',
+          node: TreeNode(key: 'new2', data: 'new2'),
+          animate: false,
+        );
+        expect(controller.visibleNodes, [
+          'p1', 'new1', 'p2', 'p2c', 's', 's1', 's2', 's3', 'new2',
+        ]);
+      },
+    );
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // A1 cohort follow-up: _cancelAnimationStateForSubtree is invoked at the
+  // start of every moveNode. Prior to this conversion it used two recursive
+  // inner closures (collectPreservedOpGroups + visit), which stack-overflowed
+  // on a sufficiently deep dragged subtree. The iterative single-pass version
+  // uses a heap worklist and must preserve op-group state for groups whose
+  // operationKey lives inside the moved subtree — the invariant that makes
+  // single-pass pre-order DFS correct.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  group('moveNode on a deep subtree', () {
+    testWidgets(
+      'reparenting a 5000-deep chain does not stack-overflow',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        // Build: root 'host' (destination for the move) and a chain
+        // 'n0 → n1 → ... → n4999' that we will reparent under 'host'
+        // in one call. _cancelAnimationStateForSubtree walks the
+        // entire chain; a recursive implementation overflows here.
+        const chainDepth = 5000;
+        controller.setRoots([
+          TreeNode(key: 'host', data: 'H'),
+          TreeNode(key: 'n0', data: 'n0'),
+        ]);
+        for (int i = 1; i < chainDepth; i++) {
+          controller.insert(
+            parentKey: 'n${i - 1}',
+            node: TreeNode(key: 'n$i', data: 'n$i'),
+            animate: false,
+          );
+        }
+
+        // Reparent the whole chain. The iterative walker must visit
+        // every one of the 5000 nodes to purge per-node animation
+        // state; a recursive implementation would stack-overflow
+        // before returning.
+        controller.moveNode('n0', 'host');
+
+        expect(controller.getParent('n0'), 'host');
+        expect(controller.getDepth('n0'), 1);
+        // Depth of the deepest node should be old depth + 1 (chain was
+        // rooted at depth 0, now at depth 1 under 'host').
+        expect(controller.getDepth('n${chainDepth - 1}'), chainDepth);
+      },
+    );
+
+    testWidgets(
+      'reparenting preserves in-flight op-group animation inside the moved subtree',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        // Build: host + source parent 'p' with a collapsible inner
+        // subtree. The op-group's operationKey ('inner') lives inside
+        // the moved subtree, so single-pass pre-order DFS must add
+        // 'inner' to preservedOpKeys before visiting its members.
+        controller.setRoots([
+          TreeNode(key: 'host', data: 'H'),
+          TreeNode(key: 'p', data: 'P'),
+        ]);
+        controller.setChildren('p', [
+          TreeNode(key: 'inner', data: 'I'),
+        ]);
+        controller.setChildren('inner', [
+          TreeNode(key: 'x', data: 'X'),
+          TreeNode(key: 'y', data: 'Y'),
+        ]);
+        controller.expand(key: 'p', animate: false);
+        controller.expand(key: 'inner', animate: false);
+
+        // Start a real (animated) collapse on 'inner'. This creates an
+        // op-group with operationKey='inner' and members {x, y}.
+        controller.collapse(key: 'inner');
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(controller.hasActiveAnimations, isTrue);
+
+        // Reparent 'p' (which contains 'inner' and its collapsing
+        // members). The op-group's operationKey is inside the moved
+        // subtree; the iterative walker must add 'inner' to
+        // preservedOpKeys on visit and then preserve x/y's op-group
+        // membership when it visits them later in pre-order.
+        controller.moveNode('p', 'host');
+
+        // Pump through the rest of the animation; it should complete
+        // cleanly against the post-move position without snapping.
+        await tester.pumpAndSettle();
+        expect(controller.getParent('p'), 'host');
+        expect(controller.isExpanded('inner'), isFalse);
+        // After collapse settles, x/y are no longer visible.
+        expect(controller.visibleNodes.contains('x'), isFalse);
+        expect(controller.visibleNodes.contains('y'), isFalse);
+      },
+    );
+  });
 }

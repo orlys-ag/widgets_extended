@@ -160,6 +160,33 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// tail of every bulk animation.
   Uint8List _ancestorsExpandedByNid = Uint8List(0);
 
+  /// Per-nid count of currently-visible entries in the subtree rooted at
+  /// this nid, **including this nid itself when it is in `_order`**.
+  ///
+  /// Invariant (debug-asserted): for every live nid,
+  /// `_visibleSubtreeSizeByNid[nid] == (nid in _order ? 1 : 0)
+  ///     + sum over children c of _visibleSubtreeSizeByNid[c]`.
+  ///
+  /// Maintained incrementally: every mutation that changes an
+  /// individual nid's presence in `_order` flows through
+  /// [_onNidVisibilityGained] / [_onNidVisibilityLost], each of which
+  /// walks the parent chain applying a ±1 delta in O(depth). Bulk
+  /// mutations that rebuild the order wholesale (see
+  /// [_rebuildVisibleOrder]) suppress those per-event callbacks and
+  /// recompute the whole array in a single O(N) post-order pass via
+  /// [_rebuildVisibleSubtreeSizes].
+  ///
+  /// Replaces the O(visibleSubtreeSize) `_countVisibleDescendants` walks
+  /// that previously appeared inside O(k) sibling loops in the insert
+  /// hot paths, closing an O(k × subtree) cost on child populations.
+  Int32List _visibleSubtreeSizeByNid = Int32List(0);
+
+  /// Whether per-nid visibility callbacks should skip their incremental
+  /// delta propagation. Set during bulk rebuilds
+  /// ([_rebuildVisibleOrder]) that will recompute the derived state in
+  /// a single O(N) pass afterwards.
+  bool _suppressSubtreeSizeUpdates = false;
+
   // ══════════════════════════════════════════════════════════════════════════
   // INTERNAL NID REGISTRY
   // ══════════════════════════════════════════════════════════════════════════
@@ -196,6 +223,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _depthByNid[nid] = 0;
     _expandedByNid[nid] = 0;
     _ancestorsExpandedByNid[nid] = 1;
+    _visibleSubtreeSizeByNid[nid] = 0;
     _order.clearIndexByNid(nid);
     return nid;
   }
@@ -225,6 +253,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _ancestorsExpandedByNid,
     );
     _ancestorsExpandedByNid = newAncestorsExpanded;
+    final newVisibleSubtreeSize = Int32List(cap);
+    newVisibleSubtreeSize.setRange(
+      0,
+      _visibleSubtreeSizeByNid.length,
+      _visibleSubtreeSizeByNid,
+    );
+    _visibleSubtreeSizeByNid = newVisibleSubtreeSize;
     _order.resizeIndex(cap);
   }
 
@@ -251,9 +286,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Also refreshes the cached [_ancestorsExpandedByNid] bit for [key] and
   /// propagates the change through [key]'s subtree so the cache stays
   /// consistent with the new ancestor chain.
+  ///
+  /// Reparenting also shifts [key]'s visible-subtree contribution from
+  /// the old parent chain to the new one. The subtree's own visible
+  /// count is unchanged (the members are the same); only which
+  /// ancestors account for them changes.
   void _setParentKey(TKey key, TKey? parent) {
     final nid = _nids[key]!;
-    _parentByNid[nid] = parent == null ? _kNoParent : _nids[parent]!;
+    final oldParentNid = _parentByNid[nid];
+    final newParentNid = parent == null ? _kNoParent : _nids[parent]!;
+    if (oldParentNid != newParentNid &&
+        !_suppressSubtreeSizeUpdates &&
+        nid < _visibleSubtreeSizeByNid.length) {
+      final delta = _visibleSubtreeSizeByNid[nid];
+      if (delta != 0) {
+        // Detach from the old ancestor chain, then attach to the new.
+        // Walk from the parent (not from `nid` itself) because the
+        // subtree rooted at `nid` has not changed its own composition.
+        if (oldParentNid != _kNoParent) {
+          _bumpVisibleSubtreeSizeFromSelf(oldParentNid, -delta);
+        }
+        if (newParentNid != _kNoParent) {
+          _bumpVisibleSubtreeSizeFromSelf(newParentNid, delta);
+        }
+      }
+    }
+    _parentByNid[nid] = newParentNid;
     final newAe = _computeAncestorsExpanded(nid);
     if (_ancestorsExpandedByNid[nid] != newAe) {
       _ancestorsExpandedByNid[nid] = newAe;
@@ -274,6 +332,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _depthByNid[nid] = 0;
     _expandedByNid[nid] = 0;
     _ancestorsExpandedByNid[nid] = 0;
+    _visibleSubtreeSizeByNid[nid] = 0;
     _order.clearIndexByNid(nid);
   }
 
@@ -366,16 +425,31 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Short-circuits on descendants whose current bit already matches: under
   /// the maintained invariant, their whole subtree is also already
   /// consistent.
+  ///
+  /// Iterative (explicit worklist) rather than recursive so deep trees do
+  /// not risk a Dart stack overflow. Sibling visit order is irrelevant —
+  /// each child's new bit depends only on its parent, never on siblings.
   void _propagateAncestorsExpandedToDescendants(TKey key, int childAe) {
-    final children = _childListOf(key);
-    if (children == null || children.isEmpty) return;
-    for (final child in children) {
-      final childNid = _nids[child];
-      if (childNid == null) continue;
-      if (_ancestorsExpandedByNid[childNid] == childAe) continue;
-      _ancestorsExpandedByNid[childNid] = childAe;
-      final grandAe = (childAe != 0 && _expandedByNid[childNid] != 0) ? 1 : 0;
-      _propagateAncestorsExpandedToDescendants(child, grandAe);
+    // Parallel stacks: the node at parents[i] has children that should
+    // receive ancestorsExpanded == childAes[i]. Seeded with the initial
+    // (key, childAe) pair; grows one entry per descendant whose bit is
+    // actually updated (short-circuited descendants are never pushed).
+    final parents = <TKey>[key];
+    final childAes = <int>[childAe];
+    while (parents.isNotEmpty) {
+      final parent = parents.removeLast();
+      final ae = childAes.removeLast();
+      final children = _childListOf(parent);
+      if (children == null || children.isEmpty) continue;
+      for (final child in children) {
+        final childNid = _nids[child];
+        if (childNid == null) continue;
+        if (_ancestorsExpandedByNid[childNid] == ae) continue;
+        _ancestorsExpandedByNid[childNid] = ae;
+        final grandAe = (ae != 0 && _expandedByNid[childNid] != 0) ? 1 : 0;
+        parents.add(child);
+        childAes.add(grandAe);
+      }
     }
   }
 
@@ -435,11 +509,130 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Flattened visible-order buffer: maintains the dense nid array plus the
   /// reverse nid → visible-index map. Mutations invalidate the full-extent
-  /// prefix sum via the [onOrderMutated] callback.
+  /// prefix sum via the [onOrderMutated] callback, and per-nid
+  /// add/remove callbacks drive the incremental maintenance of
+  /// [_visibleSubtreeSizeByNid].
   late final VisibleOrderBuffer<TKey> _order = VisibleOrderBuffer<TKey>(
     registry: _nids,
     onOrderMutated: _invalidateFullOffsetPrefix,
+    onNidAdded: _onNidVisibilityGained,
+    onNidRemoved: _onNidVisibilityLost,
   );
+
+  /// Handler for "nid [nid] just entered the visible order." Propagates
+  /// +1 up the ancestor chain to keep [_visibleSubtreeSizeByNid]
+  /// consistent. Skips propagation during a bulk rebuild that will
+  /// recompute the array from scratch afterwards.
+  void _onNidVisibilityGained(int nid) {
+    if (_suppressSubtreeSizeUpdates) return;
+    _bumpVisibleSubtreeSizeFromSelf(nid, 1);
+  }
+
+  /// Handler for "nid [nid] just left the visible order." Propagates
+  /// -1 up the ancestor chain.
+  void _onNidVisibilityLost(int nid) {
+    if (_suppressSubtreeSizeUpdates) return;
+    _bumpVisibleSubtreeSizeFromSelf(nid, -1);
+  }
+
+  /// Adds [delta] to [_visibleSubtreeSizeByNid] at [startNid] and at
+  /// every ancestor. Stops at the root (`_kNoParent`). O(depth).
+  ///
+  /// Used for both visibility changes (where [startNid] is the node
+  /// whose order membership flipped) and reparenting (where [startNid]
+  /// is the moved subtree's parent, and the moved subtree itself does
+  /// not change its own size slot).
+  void _bumpVisibleSubtreeSizeFromSelf(int startNid, int delta) {
+    if (delta == 0) return;
+    int cur = startNid;
+    while (cur != _kNoParent && cur >= 0 && cur < _visibleSubtreeSizeByNid.length) {
+      _visibleSubtreeSizeByNid[cur] += delta;
+      cur = _parentByNid[cur];
+    }
+  }
+
+  /// Rebuilds [_visibleSubtreeSizeByNid] wholesale from the current
+  /// tree structure and `_order` membership. O(N) via iterative
+  /// pre-order walk followed by reverse-order summation (equivalent to
+  /// iterative post-order). Used after bulk operations that rebuild
+  /// the visible order in one shot.
+  void _rebuildVisibleSubtreeSizes() {
+    _visibleSubtreeSizeByNid.fillRange(
+      0,
+      _visibleSubtreeSizeByNid.length,
+      0,
+    );
+    // Pre-order DFS to collect nids. Reverse pre-order is a valid
+    // post-order for the purpose of summing children before parents.
+    final preOrderNids = <int>[];
+    final stack = <TKey>[];
+    for (int i = _roots.length - 1; i >= 0; i--) {
+      stack.add(_roots[i]);
+    }
+    final indexByNid = _order.indexByNid;
+    while (stack.isNotEmpty) {
+      final key = stack.removeLast();
+      final nid = _nids[key];
+      if (nid == null) continue;
+      preOrderNids.add(nid);
+      final children = _childListOf(key);
+      if (children == null) continue;
+      for (int i = children.length - 1; i >= 0; i--) {
+        stack.add(children[i]);
+      }
+    }
+    // Walk reverse pre-order. For each nid, its own contribution is 1
+    // if it is currently in [_order], 0 otherwise. Children have
+    // already been summed because they appear later in pre-order.
+    for (int i = preOrderNids.length - 1; i >= 0; i--) {
+      final nid = preOrderNids[i];
+      final key = _nids.keyOf(nid);
+      int size = indexByNid[nid] == VisibleOrderBuffer.kNotVisible ? 0 : 1;
+      if (key != null) {
+        final children = _childListOf(key);
+        if (children != null) {
+          for (final child in children) {
+            final childNid = _nids[child];
+            if (childNid != null) {
+              size += _visibleSubtreeSizeByNid[childNid];
+            }
+          }
+        }
+      }
+      _visibleSubtreeSizeByNid[nid] = size;
+    }
+  }
+
+  /// Debug-only consistency check for [_visibleSubtreeSizeByNid].
+  /// Walks the tree and verifies every live nid's size slot equals the
+  /// structural definition.
+  void _assertVisibleSubtreeSizeConsistency() {
+    assert(() {
+      final indexByNid = _order.indexByNid;
+      for (int nid = 0; nid < _nids.length; nid++) {
+        final key = _nids.keyOf(nid);
+        if (key == null) continue;
+        int expected =
+            indexByNid[nid] == VisibleOrderBuffer.kNotVisible ? 0 : 1;
+        final children = _childListOf(key);
+        if (children != null) {
+          for (final child in children) {
+            final childNid = _nids[child];
+            if (childNid != null) {
+              expected += _visibleSubtreeSizeByNid[childNid];
+            }
+          }
+        }
+        if (_visibleSubtreeSizeByNid[nid] != expected) {
+          throw StateError(
+            "_visibleSubtreeSizeByNid[$nid] (key=$key) = "
+            "${_visibleSubtreeSizeByNid[nid]}, expected $expected",
+          );
+        }
+      }
+      return true;
+    }());
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ANIMATION STATE
@@ -2332,23 +2525,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_isExpandedKey(parentKey)) {
       final parentVisibleIndex = _order.indexOf(parentKey);
       if (parentVisibleIndex != VisibleOrderBuffer.kNotVisible) {
-        int insertIndex = parentVisibleIndex + 1;
-        // Find position among siblings
+        // Fast path: the visible insertion index equals the parent's
+        // visible index plus every prior sibling's visible-subtree
+        // contribution. Cache lookups are O(1) per sibling, so the
+        // whole computation is O(prior-sibling-count) — one array
+        // read per sibling, no nested descendant walks.
+        int insertIndex;
         if (effectiveIndex != null) {
-          for (int i = 0; i < effectiveIndex && i < siblings.length - 1; i++) {
-            final siblingId = siblings[i];
-            final siblingIndex = _order.indexOf(siblingId);
-            if (siblingIndex != VisibleOrderBuffer.kNotVisible) {
-              insertIndex =
-                  siblingIndex + 1 + _countVisibleDescendants(siblingId);
+          insertIndex = parentVisibleIndex + 1;
+          final limit = effectiveIndex < siblings.length - 1
+              ? effectiveIndex
+              : siblings.length - 1;
+          for (int i = 0; i < limit; i++) {
+            final siblingNid = _nids[siblings[i]];
+            if (siblingNid != null) {
+              insertIndex += _visibleSubtreeSizeByNid[siblingNid];
             }
           }
         } else {
-          // Append after last visible descendant of parent
-          // Note: _countVisibleDescendants only counts visible nodes, so the
-          // newly added node (not yet visible) is not counted.
+          // Append after last visible descendant of parent. Parent is
+          // visible (checked above) so its cached subtree size counts
+          // itself + all currently-visible descendants; subtracting
+          // 1 for the parent itself and adding 1 for "position after"
+          // yields parentVisibleIndex + subtreeSize directly.
+          final parentNid = _nids[parentKey]!;
           insertIndex =
-              parentVisibleIndex + 1 + _countVisibleDescendants(parentKey);
+              parentVisibleIndex + _visibleSubtreeSizeByNid[parentNid];
         }
         _order.insertKey(insertIndex, node.key);
         _updateIndicesFrom(insertIndex);
@@ -2632,13 +2834,25 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _notifyStructural(affectedKeys: affected);
   }
 
-  /// Recursively sets [_depths] for [key] and all its descendants.
+  /// Sets [_depths] for [key] and all its descendants. Iterative so deep
+  /// trees do not stack-overflow. Depth for each descendant is computed
+  /// on visit from the entry paired with it in the worklist, not derived
+  /// from its parent's already-written depth, so visit order is irrelevant.
   void _refreshSubtreeDepths(TKey key, int depth) {
-    _setDepthKey(key, depth);
-    final children = _childListOf(key);
-    if (children != null) {
+    final keys = <TKey>[key];
+    final depths = <int>[depth];
+    while (keys.isNotEmpty) {
+      final k = keys.removeLast();
+      final d = depths.removeLast();
+      _setDepthKey(k, d);
+      final children = _childListOf(k);
+      if (children == null) {
+        continue;
+      }
+      final childDepth = d + 1;
       for (final childKey in children) {
-        _refreshSubtreeDepths(childKey, depth + 1);
+        keys.add(childKey);
+        depths.add(childDepth);
       }
     }
   }
@@ -2757,16 +2971,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       curve: animationCurve,
       operationKey: key,
     );
-    _operationGroups[key] = group;
-    _bumpAnimGen();
-
-    controller.addListener(_notifyAnimationListeners);
-    controller.addStatusListener((status) {
-      // Identity guard: if the group under [key] has been replaced (e.g. after
-      // a purge + re-expand), ignore status events from the stale instance.
-      if (!identical(_operationGroups[key], group)) return;
-      _onOperationGroupStatusChange(key, status);
-    });
+    _installOperationGroup(key, group);
 
     // Fast path check: count new vs existing nodes
     int newNodeCount = 0;
@@ -2925,16 +3130,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       curve: animationCurve,
       operationKey: key,
     );
-    _operationGroups[key] = group;
-    _bumpAnimGen();
-
-    controller.addListener(_notifyAnimationListeners);
-    controller.addStatusListener((status) {
-      // Identity guard: if the group under [key] has been replaced (e.g. after
-      // a purge + re-expand), ignore status events from the stale instance.
-      if (!identical(_operationGroups[key], group)) return;
-      _onOperationGroupStatusChange(key, status);
-    });
+    _installOperationGroup(key, group);
 
     for (final nodeId in descendants) {
       if (_pendingDeletion.contains(nodeId)) continue;
@@ -2972,10 +3168,22 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final nodesToShow = <TKey>[];
     final nodesToReverseExit = <TKey>[];
 
-    void collectRecursive(TKey key) {
-      if (_pendingDeletion.contains(key)) return;
+    // Iterative DFS. Depth is recomputed per-visit via [_depthOfKey]
+    // (matching the original recursive implementation) so we do not
+    // need to carry depth along in a parallel stack.
+    final stack = <TKey>[];
+    for (final rootId in _roots) {
+      stack.add(rootId);
+    }
+    while (stack.isNotEmpty) {
+      final key = stack.removeLast();
+      if (_pendingDeletion.contains(key)) {
+        continue;
+      }
       final children = _childListOf(key);
-      if (children == null || children.isEmpty) return;
+      if (children == null || children.isEmpty) {
+        continue;
+      }
 
       final depth = _depthOfKey(key);
       final withinDepthLimit = maxDepth == null || depth < maxDepth;
@@ -3010,17 +3218,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
 
-      // Only recurse into children if within depth limit.
+      // Only descend into children if within depth limit.
       if (withinDepthLimit) {
         for (final childId in children) {
-          collectRecursive(childId);
+          stack.add(childId);
         }
       }
-    }
-
-    // Collect from all roots
-    for (final rootId in _roots) {
-      collectRecursive(rootId);
     }
     if (nodesToExpand.isEmpty && nodesToReverseExit.isEmpty) {
       return;
@@ -3276,56 +3479,71 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Rebuilds the entire visible order from the tree structure.
   ///
   /// More efficient than incremental updates when making bulk changes.
+  /// Iterative DFS so deep trees do not stack-overflow. Children are
+  /// pushed in reverse order so popping yields the original
+  /// left-to-right pre-order visit sequence the recursive version
+  /// produced (and which the visible-order buffer expects).
+  ///
+  /// Suppresses per-nid visibility callbacks during the rebuild and
+  /// recomputes [_visibleSubtreeSizeByNid] in one O(N) post-order pass
+  /// afterwards. Firing the incremental callback N times would be
+  /// O(N·depth), which degenerates to O(N²) on deep trees.
   void _rebuildVisibleOrder() {
+    _suppressSubtreeSizeUpdates = true;
     _order.clear();
 
-    void addSubtree(TKey key) {
+    final stack = <TKey>[];
+    for (int i = _roots.length - 1; i >= 0; i--) {
+      stack.add(_roots[i]);
+    }
+
+    while (stack.isNotEmpty) {
+      final key = stack.removeLast();
       _order.addKey(key);
+      final children = _childListOf(key);
+      if (children == null) {
+        continue;
+      }
+
       if (_pendingDeletion.contains(key)) {
         // Don't recurse based on expansion state (prevents zombie children),
         // but DO include children that are also pending deletion and still
         // have running exit animations — they need to stay in _visibleOrder
         // to animate out smoothly.
-        final children = _childListOf(key);
-        if (children != null) {
-          for (final childId in children) {
-            if (_pendingDeletion.contains(childId) &&
-                _standaloneAnimations.containsKey(childId)) {
-              addSubtree(childId);
-            }
+        for (int i = children.length - 1; i >= 0; i--) {
+          final childId = children[i];
+          if (_pendingDeletion.contains(childId) &&
+              _standaloneAnimations.containsKey(childId)) {
+            stack.add(childId);
           }
         }
-        return;
-      }
-      if (_isExpandedKey(key)) {
-        final children = _childListOf(key);
-        if (children != null) {
-          for (final childId in children) {
-            addSubtree(childId);
-          }
+      } else if (_isExpandedKey(key)) {
+        for (int i = children.length - 1; i >= 0; i--) {
+          stack.add(children[i]);
         }
       } else {
         // Parent is collapsed, but children that are still in an active
         // animation (e.g. collapsing via an OperationGroup) must remain
         // in the visible order so their exit animation completes smoothly
         // instead of snapping away.
-        final children = _childListOf(key);
-        if (children != null) {
-          for (final childId in children) {
-            if (_nodeToOperationGroup.containsKey(childId) ||
-                _bulkAnimationGroup?.members.contains(childId) == true ||
-                _standaloneAnimations.containsKey(childId)) {
-              addSubtree(childId);
-            }
+        for (int i = children.length - 1; i >= 0; i--) {
+          final childId = children[i];
+          if (_nodeToOperationGroup.containsKey(childId) ||
+              _bulkAnimationGroup?.members.contains(childId) == true ||
+              _standaloneAnimations.containsKey(childId)) {
+            stack.add(childId);
           }
         }
       }
     }
 
-    for (final rootId in _roots) {
-      addSubtree(rootId);
-    }
     _rebuildVisibleIndex();
+    _rebuildVisibleSubtreeSizes();
+    _suppressSubtreeSizeUpdates = false;
+    assert(() {
+      _assertVisibleSubtreeSizeConsistency();
+      return true;
+    }());
   }
 
   @override

@@ -1143,60 +1143,126 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
 
     int cacheEndIndex = cacheStartIndex;
-    // Steady-state accumulator for the non-bulk (op-group) path. Mirrors the
-    // rationale of the bulk branch above: at low animation values, entering
-    // rows have sub-pixel animated extents, so reading live offsets would
-    // admit the entire entering subtree into the cache region on frame 1 of
-    // a single-node expand — e.g. all 1150 children of a large parent,
-    // causing a mass-mount / mass-rebuild hitch. The same shape of bug hits
-    // exiting (collapsing) rows near the END of the animation: as each row
-    // shrinks toward zero, the live extent contribution falls, and the
-    // cache region admits progressively more of the shrinking subtree,
-    // mass-mounting thousands of rows that are about to be removed from
-    // the visible order at dismiss.
+    // Dual-view admission for the non-bulk (op-group) path.
     //
-    // The fix: cap admission against the FULL extent for any row with an
-    // in-flight extent animation — enter or exit — so the cache region
-    // holds the same number of logical rows throughout the animation as
-    // it would at steady state.
-    double steadyAccum = 0.0;
+    // Two running accumulators track the cache budget in parallel:
+    //
+    //   liveAccum  — per-row contribution using FULL extent for any animating
+    //                row (enter or exit). Preserves the original
+    //                "steady-state" accumulator's role of capping admission
+    //                at the pre-animation row count during enters (prevents
+    //                mass-mounting the entering subtree on frame 1 of an
+    //                expand).
+    //
+    //   postAccum  — per-row contribution using TARGET extent: full for
+    //                enters, 0 for exits, live for non-animating. Tracks
+    //                what the cumulative layout will look like AFTER the
+    //                animation settles.
+    //
+    // A row is admitted when it passes either view (with the constraint
+    // that exits can only be admitted via the LIVE view — a row that will
+    // be gone after the animation does not belong in the post-animation
+    // cache set). The loop stops iterating only when BOTH views agree no
+    // future row could be admitted.
+    //
+    // During a collapse of a many-child parent: exits beyond the live
+    // window fail the live check and — being exits — are excluded from
+    // the post view, so they are iterated past but not admitted. Once we
+    // reach the non-exit following rows, the post view admits them based
+    // on their post-animation positions, pre-mounting them before dismiss
+    // and eliminating the "flicker as they appear" pop. During an expand,
+    // the live-view cap still prevents mass-mounting the full entering
+    // subtree.
+    //
+    // Post-animation offset is tracked relative to the live offset of the
+    // row at [cacheStartIndex] — rows before the cache start are treated
+    // as stable (the common case for animations on a parent visible in
+    // the viewport).
+    double liveAccum = 0.0;
+    double postAccum = 0.0;
+    final double postOffsetOrigin = cacheStartIndex < visibleNodes.length
+        ? _nodeOffsetsByNid[_controller.nidOf(visibleNodes[cacheStartIndex])]
+        : 0.0;
+    double postOffsetCumul = 0.0;
+    final double budgetCap = remainingCacheExtent + slideOverreach;
     for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final nid = _controller.nidOf(nodeId);
-      final double offset;
       if (_bulkCumulativesValid) {
         // Under bulk-only fast path, pull from cumulatives and sync into the
         // per-nid slots so downstream code (Pass 2, paint-extent, paint,
         // hit-test) reads correct values without a branch per access.
-        offset = _offsetAtVisibleIndex(i);
+        final offset = _offsetAtVisibleIndex(i);
         _nodeOffsetsByNid[nid] = offset;
         _nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i + 1) - offset;
         final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
         if (fullOffset >= fullCacheEnd) break;
+        _inCacheRegionByNid[nid] = 1;
+        cacheEndIndex = i + 1;
+        continue;
+      }
+
+      final double liveOffset = _nodeOffsetsByNid[nid];
+      final double postOffset = postOffsetOrigin + postOffsetCumul;
+
+      final bool liveBudgetOk =
+          liveOffset < effectiveCacheEnd && liveAccum < budgetCap;
+      final bool postBudgetOk =
+          postOffset < effectiveCacheEnd && postAccum < budgetCap;
+
+      // Both views failed — offsets and accumulators only grow, so no
+      // future row can be admitted.
+      if (!liveBudgetOk && !postBudgetOk) {
+        break;
+      }
+
+      // [isAnimating] and [isExiting] are O(1) (cached). Using them here
+      // avoids the synthetic [AnimationState] allocation that
+      // [getAnimationState] did. Exits must admit via the LIVE view only;
+      // they have no post-animation position and should not be pre-mounted
+      // just because the post view has budget.
+      final bool isAnimating = controller.isAnimating(nodeId);
+      final bool isExit = isAnimating && controller.isExiting(nodeId);
+      final bool admit = liveBudgetOk || (!isExit && postBudgetOk);
+      if (admit) {
+        _inCacheRegionByNid[nid] = 1;
+        cacheEndIndex = i + 1;
+      }
+
+      // Update accumulators regardless of admission — the budget is a
+      // cumulative quantity measured over every row the loop has
+      // considered, not just admitted ones. Future-row break decisions
+      // depend on these.
+      final double liveContribution;
+      final double postContribution;
+      if (isAnimating) {
+        final full = controller.getEstimatedExtent(nodeId);
+        liveContribution = full;
+        postContribution = isExit ? 0.0 : full;
       } else {
-        offset = _nodeOffsetsByNid[nid];
-        if (offset >= effectiveCacheEnd) break;
-        if (steadyAccum >= remainingCacheExtent + slideOverreach) break;
+        final live = _nodeExtentsByNid[nid];
+        liveContribution = live;
+        postContribution = live;
       }
-      _inCacheRegionByNid[nid] = 1;
-      cacheEndIndex = i + 1;
-      if (!_bulkCumulativesValid) {
-        // [isAnimating] is O(1) (cached). Using it here avoids the synthetic
-        // [AnimationState] allocation that [getAnimationState] did, and covers
-        // exits (op-group pendingRemoval, bulk pendingRemoval, standalone
-        // exit) that the prior `anim.type == entering` check missed.
-        final contribution = controller.isAnimating(nodeId)
-            ? controller.getEstimatedExtent(nodeId)
-            : _nodeExtentsByNid[nid];
-        steadyAccum += contribution;
-      }
+      liveAccum += liveContribution;
+      postAccum += postContribution;
+      postOffsetCumul += postContribution;
     }
 
-    // Create children for nodes in cache region
+    // Create children for nodes in the cache region.
+    //
+    // The range `[cacheStartIndex, cacheEndIndex)` may contain rows that
+    // were iterated but not admitted (e.g. off-screen exits during a
+    // collapse — iterated past to reach the post-animation-visible
+    // following rows, but not admitted themselves). Gate on
+    // `_inCacheRegionByNid[nid]` so skipped rows do not trigger a build.
     if (cacheEndIndex > cacheStartIndex) {
       invokeLayoutCallback<SliverConstraints>((SliverConstraints constraints) {
         for (int i = cacheStartIndex; i < cacheEndIndex; i++) {
-          childManager?.createChild(visibleNodes[i]);
+          final nodeId = visibleNodes[i];
+          final nid = _controller.nidOf(nodeId);
+          if (_inCacheRegionByNid[nid] == 0) continue;
+          childManager?.createChild(nodeId);
         }
       });
     }
