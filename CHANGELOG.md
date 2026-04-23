@@ -3,6 +3,7 @@
 - Fix missing case to clip content above viewport when at max extent.
 - Fix animation skip when drag and dropping a collapsing node.
 - Optimize collapsing of nodes with many children.
+- Fix visual flicker when collapsing a node with many children.
 
 ## 0.0.11
 
