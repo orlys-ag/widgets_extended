@@ -20,15 +20,29 @@ import '_node_id_registry.dart';
 ///
 /// Mutating operations invoke the [onOrderMutated] callback so the
 /// owner can invalidate derived caches (e.g. the full-extent prefix sum).
+///
+/// Operations that change an individual nid's membership in the order
+/// also invoke the per-nid [onNidAdded] / [onNidRemoved] callbacks so
+/// owners can maintain per-nid aggregates incrementally (e.g. the
+/// visible-subtree-size cache). These are **not** fired from the bulk
+/// [clear] / [reset] paths — those expect the owner to perform a
+/// wholesale rebuild of derived state instead of processing N
+/// individual events.
 class VisibleOrderBuffer<TKey> {
   VisibleOrderBuffer({
     required NodeIdRegistry<TKey> registry,
     required void Function() onOrderMutated,
+    void Function(int nid)? onNidAdded,
+    void Function(int nid)? onNidRemoved,
   })  : _nids = registry,
-        _onMutated = onOrderMutated;
+        _onMutated = onOrderMutated,
+        _onNidAdded = onNidAdded,
+        _onNidRemoved = onNidRemoved;
 
   final NodeIdRegistry<TKey> _nids;
   final void Function() _onMutated;
+  final void Function(int nid)? _onNidAdded;
+  final void Function(int nid)? _onNidRemoved;
 
   /// Sentinel in [indexByNid] meaning "not currently in the visible
   /// order". Freed nids also carry this value so a recycled nid starts
@@ -161,6 +175,7 @@ class VisibleOrderBuffer<TKey> {
     }
     _orderNids[index] = nid;
     _len++;
+    _onNidAdded?.call(nid);
     _onMutated();
   }
 
@@ -173,7 +188,9 @@ class VisibleOrderBuffer<TKey> {
   /// Appends [key]'s nid to the tail of the order. [key] must be registered.
   void addKey(TKey key) {
     _ensureOrderCapacity(_len + 1);
-    _orderNids[_len++] = _nids[key]!;
+    final nid = _nids[key]!;
+    _orderNids[_len++] = nid;
+    _onNidAdded?.call(nid);
     _onMutated();
   }
 
@@ -189,19 +206,28 @@ class VisibleOrderBuffer<TKey> {
       _orderNids[i + n] = _orderNids[i];
     }
     for (int i = 0; i < n; i++) {
-      _orderNids[index + i] = _nids[keys[i]]!;
+      final nid = _nids[keys[i]]!;
+      _orderNids[index + i] = nid;
     }
     _len += n;
+    final cb = _onNidAdded;
+    if (cb != null) {
+      for (int i = 0; i < n; i++) {
+        cb(_orderNids[index + i]);
+      }
+    }
     _onMutated();
   }
 
   /// Removes the entry at visible position [index], shifting the suffix
   /// left by one.
   void removeAt(int index) {
+    final removed = _orderNids[index];
     for (int i = index; i < _len - 1; i++) {
       _orderNids[i] = _orderNids[i + 1];
     }
     _len--;
+    _onNidRemoved?.call(removed);
     _onMutated();
   }
 
@@ -210,6 +236,12 @@ class VisibleOrderBuffer<TKey> {
     final n = end - start;
     if (n <= 0) {
       return;
+    }
+    final cb = _onNidRemoved;
+    if (cb != null) {
+      for (int i = start; i < end; i++) {
+        cb(_orderNids[i]);
+      }
     }
     for (int i = start; i < _len - n; i++) {
       _orderNids[i] = _orderNids[i + n];
@@ -221,7 +253,13 @@ class VisibleOrderBuffer<TKey> {
   /// Compacts the order by dropping every entry whose key is in [keys], or
   /// whose nid has been released. Preserves the relative order of kept
   /// entries.
+  ///
+  /// Per-nid removal callbacks fire only for dropped nids whose key is
+  /// still live at call time. Released nids are assumed to have already
+  /// been cleaned up in per-nid aggregate caches by the path that
+  /// released them (e.g. `_releaseNid`).
   void removeWhereKeyIn(Set<TKey> keys) {
+    final cb = _onNidRemoved;
     int writeIdx = 0;
     for (int readIdx = 0; readIdx < _len; readIdx++) {
       final nid = _orderNids[readIdx];
@@ -230,6 +268,7 @@ class VisibleOrderBuffer<TKey> {
         continue;
       }
       if (keys.contains(key)) {
+        cb?.call(nid);
         continue;
       }
       _orderNids[writeIdx++] = nid;

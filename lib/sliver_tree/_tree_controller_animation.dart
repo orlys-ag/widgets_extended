@@ -47,6 +47,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
           group.members.remove(key);
           group.pendingRemoval.remove(key);
           _nodeToOperationGroup.remove(key);
+          _bumpAnimGen();
           _disposeOperationGroupIfEmpty(opGroupKey, group);
           return extent;
         }
@@ -60,13 +61,14 @@ extension _TreeControllerAnimationOps<TKey, TData>
       final extent = full * _bulkAnimationGroup!.value;
       _bulkAnimationGroup!.members.remove(key);
       _bulkAnimationGroup!.pendingRemoval.remove(key);
-      _bulkAnimationGeneration++;
+      _bumpBulkGen();
       return extent;
     }
 
     // 3. Check standalone animations
     final standalone = _standaloneAnimations.remove(key);
     if (standalone != null) {
+      _bumpAnimGen();
       return standalone.currentExtent;
     }
 
@@ -84,46 +86,122 @@ extension _TreeControllerAnimationOps<TKey, TData>
       return;
     }
     _operationGroups.remove(operationKey);
+    _bumpAnimGen();
     group.dispose();
   }
 
-  /// Cancels pending-deletion and all animation state for [key] and all
-  /// of its descendants. Intended for use when a subtree is reparented —
-  /// its prior animation state was computed against the old position and
-  /// must not continue to drive finalize/purge after the move.
+  /// Consolidates the duplicated listener-wiring that the fresh-expand
+  /// and fresh-collapse Path-2 branches used to do inline. Asserts the
+  /// Path-2 invariant that the slot is empty at install time, so any
+  /// future code path that violates it fails loudly in debug rather
+  /// than silently orphaning a controller.
+  ///
+  /// The status listener's identity guard prevents a stale controller's
+  /// final synchronous status event (during the narrow window between
+  /// `_operationGroups.remove` and `group.dispose()`) from mutating a
+  /// newer group that has taken its slot.
+  void _installOperationGroup(TKey key, OperationGroup<TKey> group) {
+    assert(
+      _operationGroups[key] == null,
+      "_installOperationGroup: slot for $key already occupied; the "
+      "fresh-expand / fresh-collapse paths must only reach here when "
+      "the prior path-1 branch early-returned.",
+    );
+
+    _operationGroups[key] = group;
+    _bumpAnimGen();
+
+    group.controller.addListener(_notifyAnimationListeners);
+    group.controller.addStatusListener((status) {
+      if (!identical(_operationGroups[key], group)) return;
+      _onOperationGroupStatusChange(key, status);
+    });
+  }
+
+  /// Prepares [key]'s subtree for reparenting. Clears in-flight slide
+  /// animations (their deltas were computed against the prior position and
+  /// would paint at the wrong offset post-move) and pending-deletion state,
+  /// and detaches subtree members from **external** animation sources whose
+  /// anchor stays at the old position: standalone state, the bulk group, and
+  /// operation groups whose `operationKey` lives outside the moved subtree.
+  ///
+  /// Operation groups whose `operationKey` lives **inside** the moved subtree
+  /// are preserved intact. Their members are all in the subtree too, so both
+  /// the timeline and the affected rows land together at the new position;
+  /// the dismiss handler's `_ancestorsExpandedFast` check naturally routes
+  /// hides against the new ancestry. Without this preservation, a node
+  /// dragged mid-collapse would snap to its fully-collapsed state on drop
+  /// instead of finishing the animation.
+  ///
+  /// Implementation note: single-pass iterative pre-order DFS. Safe to
+  /// fold preservation collection into the same pass as detach work
+  /// because op-group operation keys are always ancestors of their
+  /// members (members are created via `_flattenSubtree(key,
+  /// includeRoot: false)` with `_nodeToOperationGroup[member] = key`).
+  /// Pre-order visits ancestors before descendants, so by the time we
+  /// process a node, every ancestor inside the subtree has already been
+  /// added to [preservedOpKeys] if applicable — the membership lookup
+  /// is correct. If this traversal order ever changes to BFS or
+  /// post-order, the lookup will silently desync; keep pre-order or
+  /// split into two passes again.
+  ///
+  /// Iterative (heap worklist) so deep dragged subtrees cannot
+  /// stack-overflow. Children pushed in reverse so pops preserve the
+  /// left-to-right visit order the two recursive closures used to
+  /// produce.
   void _cancelAnimationStateForSubtree(TKey key) {
-    // Also dispose any OperationGroup whose operationKey is inside the moved
-    // subtree. Its controller would otherwise keep running and, on dismiss,
-    // remove the (now relocated) members from _visibleOrder — destroying the
-    // moved subtree under its new parent.
-    final subtreeGroupKeys = <TKey>[];
-    void visit(TKey nodeId) {
-      _pendingDeletion.remove(nodeId);
+    final preservedOpKeys = <TKey>{};
+    final stack = <TKey>[key];
+    while (stack.isNotEmpty) {
+      final nodeId = stack.removeLast();
+
+      // Add to preservedOpKeys BEFORE the detach branch so the lookup
+      // `preservedOpKeys.contains(opGroupKey)` below resolves correctly
+      // for nodes whose op-group's operationKey IS this node (rare but
+      // possible in principle; harmless in practice since
+      // _nodeToOperationGroup never points a member at itself).
       if (_operationGroups.containsKey(nodeId)) {
-        subtreeGroupKeys.add(nodeId);
+        preservedOpKeys.add(nodeId);
       }
-      _removeAnimation(nodeId);
+
+      _pendingDeletion.remove(nodeId);
+      _slideAnimations.remove(nodeId);
+
+      final opGroupKey = _nodeToOperationGroup[nodeId];
+      if (opGroupKey != null && preservedOpKeys.contains(opGroupKey)) {
+        // Member of a preserved op group — keep its op-group state intact
+        // so the animation continues against the post-move position.
+        // Still detach from standalone / bulk sources defensively: a node
+        // shouldn't be in both an op group and another source, but any
+        // residue would otherwise drive a stray animation anchored to the
+        // pre-move layout.
+        if (_standaloneAnimations.remove(nodeId) != null) {
+          _bumpAnimGen();
+        }
+        final bulk = _bulkAnimationGroup;
+        if (bulk != null) {
+          final removedMember = bulk.members.remove(nodeId);
+          final removedPending = bulk.pendingRemoval.remove(nodeId);
+          if (removedMember || removedPending) {
+            _bumpBulkGen();
+          }
+        }
+      } else {
+        // External-source cleanup: removes from standalone, external op
+        // group (detaching the member), and bulk. Op group disposal, if
+        // the external group becomes empty, is handled inside
+        // _removeAnimation via _disposeOperationGroupIfEmpty.
+        _removeAnimation(nodeId);
+      }
+
       final children = _childListOf(nodeId);
-      if (children != null) {
-        for (final child in children) {
-          visit(child);
-        }
+      if (children == null) continue;
+      // Reverse-push so the first child pops first, preserving the
+      // pre-order left-to-right visit sequence the recursive closures
+      // produced.
+      for (int i = children.length - 1; i >= 0; i--) {
+        stack.add(children[i]);
       }
-    }
-
-    visit(key);
-
-    for (final groupKey in subtreeGroupKeys) {
-      final group = _operationGroups.remove(groupKey);
-      if (group == null) {
-        continue;
-      }
-      for (final member in group.members.keys) {
-        if (_nodeToOperationGroup[member] == groupKey) {
-          _nodeToOperationGroup.remove(member);
-        }
-      }
-      group.dispose();
     }
 
     if (_standaloneAnimations.isEmpty) {
@@ -134,13 +212,19 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// Removes an animation from all sources and cleans up group membership.
   AnimationState? _removeAnimation(TKey key) {
     final state = _standaloneAnimations.remove(key);
+    if (state != null) {
+      _bumpAnimGen();
+    }
     // Remove from operation group
     final opGroupKey = _nodeToOperationGroup.remove(key);
     if (opGroupKey != null) {
       final group = _operationGroups[opGroupKey];
       if (group != null) {
-        group.members.remove(key);
-        group.pendingRemoval.remove(key);
+        final removedMember = group.members.remove(key) != null;
+        final removedPending = group.pendingRemoval.remove(key);
+        if (removedMember || removedPending) {
+          _bumpAnimGen();
+        }
         _disposeOperationGroupIfEmpty(opGroupKey, group);
       }
     }
@@ -150,7 +234,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       final removedMember = bulk.members.remove(key);
       final removedPending = bulk.pendingRemoval.remove(key);
       if (removedMember || removedPending) {
-        _bulkAnimationGeneration++;
+        _bumpBulkGen();
       }
     }
     return state;
@@ -178,7 +262,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       }
     });
 
-    _bulkAnimationGeneration++;
+    _bumpBulkGen();
     return group;
   }
 
@@ -188,7 +272,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     // Set to null first to prevent callback interference
     _bulkAnimationGroup = null;
     if (group != null) {
-      _bulkAnimationGeneration++;
+      _bumpBulkGen();
     }
     group?.dispose();
   }
@@ -262,6 +346,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
         _nodeToOperationGroup.remove(nodeId);
       }
       _operationGroups.remove(operationKey);
+      _bumpAnimGen();
       group.dispose();
     } else if (status == AnimationStatus.dismissed) {
       // Collapse done (value = 0). Remove nodes from visible order.
@@ -310,6 +395,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
         didMutateOrder = true;
       }
       _operationGroups.remove(operationKey);
+      _bumpAnimGen();
       group.dispose();
       // Only notify when visible order actually changed. If every pending-
       // removal member was already hidden (ancestor re-collapsed mid-flight,
@@ -343,6 +429,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       triggeringAncestorId: triggeringAncestorId,
       speedMultiplier: speedMultiplier,
     );
+    _bumpAnimGen();
     _ensureStandaloneTickerRunning();
   }
 
@@ -429,6 +516,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       triggeringAncestorId: triggeringAncestorId,
       speedMultiplier: speedMultiplier,
     );
+    _bumpAnimGen();
     _ensureStandaloneTickerRunning();
   }
 
@@ -524,6 +612,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     if (state == null) {
       return false;
     }
+    _bumpAnimGen();
 
     if (state.type == AnimationType.exiting) {
       final isDeleted = _pendingDeletion.contains(key);
@@ -598,13 +687,18 @@ extension _TreeControllerAnimationOps<TKey, TData>
     final siblings = _childListOf(parent);
     int insertIndex = parentVisibleIndex + 1;
     if (siblings != null) {
+      // Fast path via [_visibleSubtreeSizeByNid]: one O(1) cache read
+      // per prior sibling instead of the former O(visibleSubtreeSize)
+      // `_countVisibleDescendants` walk inside an O(siblingIndex)
+      // loop. Keeps re-expansion of an operation group linear in the
+      // sibling count regardless of per-sibling subtree depth.
       for (final sib in siblings) {
         if (sib == nodeId) {
           break;
         }
-        final sibIdx = _order.indexOf(sib);
-        if (sibIdx != VisibleOrderBuffer.kNotVisible) {
-          insertIndex = sibIdx + 1 + _countVisibleDescendants(sib);
+        final sibNid = _nids[sib];
+        if (sibNid != null) {
+          insertIndex += _visibleSubtreeSizeByNid[sibNid];
         }
       }
     }

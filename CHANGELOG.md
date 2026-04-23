@@ -1,7 +1,14 @@
+## 0.0.12
+
+- Fix missing case to clip content above viewport when at max extent.
+- Fix animation skip when drag and dropping a collapsing node.
+- Optimize collapsing of nodes with many children.
+- Fix visual flicker when collapsing a node with many children.
+
 ## 0.0.11
 
-- Stale node eviction
-- Scroll to node jump fix
+- Stale node eviction.
+- Scroll to node jump fix.
 
 ## 0.0.10
 
@@ -9,33 +16,33 @@
 
 ## 0.0.9
 
-- Fix re-insert animation regression
-- Fix expansion persistence regression
+- Fix re-insert animation regression.
+- Fix expansion persistence regression.
 
 ## 0.0.8
 
-- Added animateScrollToKey: scroll to node by key
-- Various fixes and optimizations
+- Added animateScrollToKey: scroll to node by key.
+- Various fixes and optimizations.
 
 ## 0.0.7
 
-- Add SyncedTreeNode + new constructors
+- Add SyncedTreeNode + new constructors.
 
 ## 0.0.6
 
-- Refactor TreeMapView into SyncedSliverTree
+- Refactor TreeMapView into SyncedSliverTree.
 
 ## 0.0.5
 
-- test: add test for expansion memory during animated removal and re-addition
+- test: add test for expansion memory during animated removal and re-addition.
 
 ## 0.0.4
 
-- Fix expansion state for multi-sync
+- Fix expansion state for multi-sync.
 
 ## 0.0.3
 
-- Fix expansion state history
+- Fix expansion state history.
 
 ## 0.0.2
 

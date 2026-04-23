@@ -594,6 +594,386 @@ void main() {
 
       await tester.pumpAndSettle();
     });
+
+    testWidgets(
+      "DIAGNOSTIC: builder invocations across a collapse lifecycle",
+      (tester) async {
+        // Measures how many times nodeBuilder is invoked for each key across
+        // start-of-collapse, mid-animation, and end-of-collapse (settle tick
+        // + post-frame) WITHOUT any external subscription to the controller.
+        // If the hypothesis "external subscription amplifies an empty-set
+        // notifyListeners into a full refresh" is correct, this test should
+        // show NO rebuilds of descendants at settle time.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "x", data: "X")]);
+        controller.setChildren("x", [
+          for (int i = 0; i < 5; i++) TreeNode(key: "y$i", data: "Y$i"),
+        ]);
+        controller.expand(key: "x", animate: false);
+
+        final buildCounts = <String, int>{};
+
+        await tester.pumpWidget(
+          buildTestTree(
+            controller: controller,
+            nodeBuilder: (context, key, depth) {
+              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+              return SizedBox(height: 48, child: Text(key));
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Record baseline after mount + initial layout.
+        final baseline = Map<String, int>.from(buildCounts);
+
+        // Start the collapse. Only 'x' should rebuild (its isExpanded
+        // flipped). Descendants should not.
+        controller.collapse(key: "x");
+        await tester.pump(const Duration(milliseconds: 1));
+        final afterStart = Map<String, int>.from(buildCounts);
+        final xDeltaStart = (afterStart["x"] ?? 0) - (baseline["x"] ?? 0);
+
+        // Pump well into the animation (but before settle).
+        await tester.pump(const Duration(milliseconds: 100));
+        final mid = Map<String, int>.from(buildCounts);
+
+        // Run to completion and beyond (post-frame stale-eviction).
+        await tester.pumpAndSettle();
+        final afterSettle = Map<String, int>.from(buildCounts);
+
+        // Expectations: only 'x' rebuilds on the start (isExpanded flip);
+        // descendants y0..y4 are NOT rebuilt at any phase.
+        for (int i = 0; i < 5; i++) {
+          final k = "y$i";
+          expect(
+            afterSettle[k],
+            baseline[k],
+            reason: "descendant $k should not rebuild during collapse "
+                "(baseline=${baseline[k]}, afterSettle=${afterSettle[k]})",
+          );
+        }
+        // Mid-animation ticks must not rebuild anything past what the start
+        // already triggered.
+        expect(mid["x"], afterStart["x"], reason: "'x' rebuilt mid-anim");
+        expect(xDeltaStart, greaterThanOrEqualTo(1));
+      },
+    );
+
+    testWidgets(
+      "external ChangeNotifier subscriber does not amplify collapse dismiss "
+      "into a rebuild of every mounted row (Option C regression)",
+      (tester) async {
+        // Regression for the "rebuild spike at end of collapse" issue.
+        //
+        // An ancestor that listens to the tree controller (here via
+        // ListenableBuilder) rebuilds SliverTree's ancestor on every
+        // notifyListeners — including the empty-set notification fired at
+        // collapse dismiss. Under the previous design, SliverTree.update
+        // always walked _children.keys and re-invoked nodeBuilder for every
+        // mounted row; descendants of the collapsed node were still in
+        // `_children` (stale eviction is deferred to post-frame) and all
+        // got rebuilt moments before eviction. The fix defers refresh to
+        // `createChild` during layout, which only iterates retained
+        // (cache-region / sticky) children.
+        //
+        // This test pins the property by measuring the DELTA across the
+        // dismiss boundary. At mid-animation descendants are still in
+        // visible order; at settle they are not. The fix ensures no
+        // descendant gets a fresh `nodeBuilder` invocation in that window.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "x", data: "X")]);
+        controller.setChildren("x", [
+          for (int i = 0; i < 10; i++) TreeNode(key: "y$i", data: "Y$i"),
+        ]);
+        controller.expand(key: "x", animate: false);
+
+        final buildCounts = <String, int>{};
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) {
+                  return CustomScrollView(
+                    slivers: [
+                      SliverTree<String, String>(
+                        controller: controller,
+                        nodeBuilder: (context, key, depth) {
+                          buildCounts[key] =
+                              (buildCounts[key] ?? 0) + 1;
+                          return SizedBox(height: 48, child: Text(key));
+                        },
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Kick off the collapse. The notifyListeners fires immediately,
+        // so ListenableBuilder rebuilds once and visible descendants pick
+        // up a legitimate refresh — that's fine and expected; we don't
+        // assert against it.
+        controller.collapse(key: "x");
+        // Prime the ticker and run a couple of intermediate frames so the
+        // collapse-start refresh has landed.
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 100));
+
+        // Snapshot just before the dismiss boundary.
+        final midAnim = Map<String, int>.from(buildCounts);
+
+        // Run past dismiss and all post-frame callbacks.
+        await tester.pumpAndSettle();
+
+        // Property under test: between mid-animation and settle, NO
+        // descendant should have been rebuilt. At dismiss the descendants
+        // leave the visible order, so they're no longer retained by the
+        // render object — `createChild` must not reach them. The pre-fix
+        // SliverTree.update would have rebuilt every mounted row here.
+        for (int i = 0; i < 10; i++) {
+          final k = "y$i";
+          final delta = (buildCounts[k] ?? 0) - (midAnim[k] ?? 0);
+          expect(
+            delta,
+            0,
+            reason: "descendant $k was rebuilt $delta time(s) between "
+                "mid-animation and settle — the external ListenableBuilder "
+                "notify at dismiss amplified into a full-refresh. Option "
+                "C deferral to createChild should have skipped it because "
+                "$k is out of the cache region after dismiss.",
+          );
+        }
+      },
+    );
+
+    testWidgets(
+      "collapsing a subtree with many children does not mass-mount them as "
+      "extents shrink (cache-admission cap regression)",
+      (tester) async {
+        // Regression for the "2.5k rebuilds for 2.7k children" spike.
+        //
+        // Pass 2 caps cache-region admission via a `steadyAccum` that
+        // sums per-row extents. Before this fix, collapsing rows
+        // contributed their LIVE (shrinking) extent — as each row shrank
+        // toward zero, the accumulator filled more slowly, and the cache
+        // region admitted progressively more of the collapsing subtree.
+        // By late animation, thousands of previously off-screen rows had
+        // entered the cache region and each had fired `createChild` →
+        // `nodeBuilder`.
+        //
+        // The fix: collapsing rows contribute their FULL extent to
+        // `steadyAccum`, matching what expanding rows already did. The
+        // cache region admits a stable count of rows throughout the
+        // animation.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        // Build a tree with many children under 'x'. At 48px per row and
+        // a ~600px default viewport + ~500px cache extent total, the
+        // cache region should hold ≈ 23 rows at steady state.
+        const childCount = 200;
+        controller.setRoots([TreeNode(key: "x", data: "X")]);
+        controller.setChildren("x", [
+          for (int i = 0; i < childCount; i++)
+            TreeNode(key: "y$i", data: "Y$i"),
+        ]);
+        controller.expand(key: "x", animate: false);
+
+        final buildCounts = <String, int>{};
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 600,
+                child: CustomScrollView(
+                  slivers: [
+                    SliverTree<String, String>(
+                      controller: controller,
+                      nodeBuilder: (context, key, depth) {
+                        buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+                        return SizedBox(height: 48, child: Text(key));
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final afterInitial = Map<String, int>.from(buildCounts);
+
+        // Trigger the collapse and run the animation to completion.
+        controller.collapse(key: "x");
+        await tester.pumpAndSettle();
+
+        // Count children that were rebuilt (or freshly built) across the
+        // collapse. A well-behaved implementation admits only the rows
+        // that actually fit in the cache region at steady state —
+        // roughly a couple dozen at most. The pre-fix implementation
+        // would rebuild the vast majority of the ~200 children.
+        int rebuiltCount = 0;
+        for (int i = 0; i < childCount; i++) {
+          final k = "y$i";
+          final delta = (buildCounts[k] ?? 0) - (afterInitial[k] ?? 0);
+          if (delta > 0) rebuiltCount++;
+        }
+
+        // Allow generous headroom for cache-region rows that legitimately
+        // re-render during the collapse (their extent animates). The key
+        // property is that the count stays bounded by cache size, not by
+        // total subtree size.
+        expect(
+          rebuiltCount,
+          lessThan(50),
+          reason: "collapsing a subtree mass-mounted $rebuiltCount of "
+              "$childCount rows — the cache-region admission cap is "
+              "scaling with the shrinking live extent instead of the "
+              "full extent.",
+        );
+      },
+    );
+
+    testWidgets(
+      "collapsing a subtree pre-mounts following rows so they do not "
+      "pop in at dismiss (flicker-as-they-appear regression)",
+      (tester) async {
+        // Regression for the flicker visible when collapsing a node with
+        // many children whose subtree pushes following rows past the
+        // cache region.
+        //
+        // Pre-fix: the admission cap (using FULL extent for exits)
+        // matched the pre-collapse admission set throughout the entire
+        // animation. Following non-descendant rows — which were OUTSIDE
+        // the cache region pre-collapse because the collapsing subtree's
+        // height pushed them past the cache extent — remained outside
+        // the cache region for every animation frame, then got mounted
+        // in one shot at dismiss.
+        //
+        // Fix: dual-view admission tracks a post-animation accumulator
+        // where exits contribute 0 toward the budget. Non-exit following
+        // rows admit via the post view once the loop has iterated past
+        // the exits, so they are mounted DURING the collapse. At dismiss
+        // they are already present — no pop.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 300),
+          animationCurve: Curves.linear,
+        );
+        addTearDown(controller.dispose);
+
+        const childCount = 200;
+        const followerCount = 10;
+        controller.setRoots([
+          TreeNode(key: "p", data: "P"),
+          for (int i = 0; i < followerCount; i++)
+            TreeNode(key: "f$i", data: "F$i"),
+        ]);
+        controller.setChildren("p", [
+          for (int i = 0; i < childCount; i++)
+            TreeNode(key: "c$i", data: "C$i"),
+        ]);
+        controller.expand(key: "p", animate: false);
+
+        final buildCounts = <String, int>{};
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 600,
+                child: CustomScrollView(
+                  slivers: [
+                    SliverTree<String, String>(
+                      controller: controller,
+                      nodeBuilder: (context, key, depth) {
+                        buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+                        return SizedBox(height: 48, child: Text(key));
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Baseline: with 200 children of 'p' expanded at the top of a
+        // 600px viewport + cache extent, the followers are well past
+        // the cache region and have never been built.
+        final followerBuildsBefore = <String, int>{
+          for (int i = 0; i < followerCount; i++)
+            "f$i": buildCounts["f$i"] ?? 0,
+        };
+        expect(
+          followerBuildsBefore.values.every((c) => c == 0),
+          isTrue,
+          reason: "test pre-condition: followers must be outside the "
+              "pre-collapse cache region so the scenario exercises the "
+              "fix, not just steady-state admission. "
+              "Actual: $followerBuildsBefore",
+        );
+
+        // Kick off the collapse and step through the animation. At each
+        // mid-animation frame, check whether any follower has been
+        // built. We expect at least one follower to be mounted BEFORE
+        // dismiss — the dual-view admission should have pulled them in
+        // via the post view.
+        controller.collapse(key: "p");
+
+        bool anyFollowerBuiltMidAnimation = false;
+        // Animation is 300 ms; sample roughly every 50 ms.
+        for (int step = 0; step < 5; step++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          for (int i = 0; i < followerCount; i++) {
+            if ((buildCounts["f$i"] ?? 0) > 0) {
+              anyFollowerBuiltMidAnimation = true;
+              break;
+            }
+          }
+          if (anyFollowerBuiltMidAnimation) break;
+        }
+
+        expect(
+          anyFollowerBuiltMidAnimation,
+          isTrue,
+          reason: "following rows must be pre-mounted during the collapse "
+              "animation; otherwise they pop in at dismiss and the user "
+              "sees the flicker this fix targets.",
+        );
+
+        // Drain the remainder of the animation — structural correctness
+        // check, not the primary assertion.
+        await tester.pumpAndSettle();
+        expect(controller.isExpanded("p"), isFalse);
+        expect(controller.visibleNodes.first, "p");
+      },
+    );
   });
 
   // ══════════════════════════════════════════════════════════════════════════

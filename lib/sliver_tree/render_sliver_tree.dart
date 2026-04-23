@@ -4,6 +4,7 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/animation.dart';
 import 'package:flutter/rendering.dart';
 
 import 'sliver_tree_element.dart';
@@ -266,6 +267,64 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     markNeedsLayout();
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // FLIP slide baseline — set by a caller (typically TreeReorderController)
+  // BEFORE it mutates the controller. The next [performLayout] consumes the
+  // baseline IN-FRAME: it takes a second snapshot after the new offsets have
+  // been computed and calls [TreeController.animateSlideFromOffsets] so the
+  // paint pass of the SAME frame renders rows at their prior painted position
+  // (slide at progress 0) — avoiding the one-frame "jump to new position,
+  // then slide back to old" flicker that a post-frame callback would produce.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Map<TKey, double>? _pendingSlideBaseline;
+  Duration? _pendingSlideDuration;
+  Curve? _pendingSlideCurve;
+
+  /// Captures the current painted offsets so the next [performLayout] can
+  /// install a FLIP slide from them to the post-mutation offsets.
+  ///
+  /// Call this BEFORE invoking a structural mutation on the controller
+  /// (`reorderRoots`, `reorderChildren`, `moveNode`). Calling it after
+  /// the mutation would capture the already-new offsets and produce a
+  /// zero-delta (no visible slide). A second call before consumption
+  /// overwrites the pending baseline — the latest request wins.
+  void beginSlideBaseline({
+    required Duration duration,
+    required Curve curve,
+  }) {
+    _pendingSlideBaseline = snapshotVisibleOffsets();
+    _pendingSlideDuration = duration;
+    _pendingSlideCurve = curve;
+  }
+
+  /// Consumes a pending baseline (if any) by snapshotting post-mutation
+  /// offsets and installing the FLIP slide. Safe to call when none is
+  /// pending — returns immediately.
+  ///
+  /// Runs inside [performLayout]. [TreeController.animateSlideFromOffsets]
+  /// is safe to call here because the slide is driven by a raw [Ticker]:
+  /// `Ticker.start()` does not fire listeners synchronously, so the first
+  /// tick — and with it the listener chain that reaches `markNeedsLayout`
+  /// / `markNeedsPaint` on this sliver — lands on the next vsync, outside
+  /// layout.
+  void _consumeSlideBaselineIfAny() {
+    final baseline = _pendingSlideBaseline;
+    if (baseline == null) return;
+    final duration = _pendingSlideDuration!;
+    final curve = _pendingSlideCurve!;
+    _pendingSlideBaseline = null;
+    _pendingSlideDuration = null;
+    _pendingSlideCurve = null;
+    final current = snapshotVisibleOffsets();
+    controller.animateSlideFromOffsets(
+      baseline,
+      current,
+      duration: duration,
+      curve: curve,
+    );
+  }
+
   /// Reallocates scratch arrays to fit [_lastPrecomputedCount] (or empty
   /// if zero). Call when the tree shrinks significantly and memory matters.
   void trimScratchArrays() {
@@ -317,6 +376,134 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// Gets the child for the given node ID, or null if not present.
   RenderBox? getChildForNode(TKey id) => _children[id];
 
+  /// A per-node snapshot of the painted position (in scroll-space) for every
+  /// visible node. Painted y = structural y + that node's own slide delta.
+  ///
+  /// Used as the "before" baseline for FLIP slide animation. Calling this
+  /// again post-mutation produces the "after" baseline; the per-node
+  /// difference is the new slide's startDelta.
+  ///
+  /// Coordinate space: scroll-space, matching [SliverTreeParentData.layoutOffset].
+  ///
+  /// Slide deltas are paint-only: a node's delta shifts only that node's
+  /// painted position and never contributes to the structural accumulator
+  /// used for subsequent rows.
+  ///
+  /// O(N_visible). Walks [TreeController.visibleNodes] independently of
+  /// [_nodeOffsetsByNid], so the result is correct even under the bulk-only
+  /// fast path (where the nid-indexed array is not fresh for every node).
+  Map<TKey, double> snapshotVisibleOffsets() {
+    final result = <TKey, double>{};
+    double structural = 0.0;
+    for (final key in controller.visibleNodes) {
+      final slide = controller.getSlideDelta(key);
+      result[key] = structural + slide;
+      structural += _currentVisibleExtentOf(key);
+    }
+    return result;
+  }
+
+  /// Structural extent of [key] accounting for any in-flight enter/exit
+  /// animation — same value Pass 1 would compute. Does not include slide
+  /// delta (slide is paint-only).
+  double _currentVisibleExtentOf(TKey key) {
+    return controller.getCurrentExtent(key);
+  }
+
+  /// Finds the first live (non-pending-deletion) visible row whose painted
+  /// scroll-space range `[paintedOffset, paintedOffset + extent)` contains
+  /// [scrollY], falling back to the last live row when [scrollY] sits past
+  /// the bottom of the tree. Returns null when the visible order is empty or
+  /// every entry is pending-deletion.
+  ///
+  /// Painted offsets include the node's current FLIP slide delta, matching
+  /// what [snapshotVisibleOffsets] would return — but without allocating an
+  /// O(N) map. Designed for [TreeReorderController], which polls the hovered
+  /// row every pointer move and every autoscroll tick; the previous
+  /// implementation materialized a `Map<TKey, double>` for the whole tree on
+  /// each call.
+  ///
+  /// Fast path (no active slides): O(log N) via binary search on
+  /// structural offsets, plus a forward scan to skip pending-deletion rows.
+  ///
+  /// Slow path (active slides): O(N) linear scan — slide deltas can reorder
+  /// painted positions relative to structural positions, so binary search
+  /// over structural offsets is unsafe. A slide only overlaps a drag when
+  /// the user starts a new drag while a prior commit's FLIP is still
+  /// animating (≤ slideDuration).
+  ({TKey key, double paintedOffset, double extent})? findRowAtPaintedY(
+    double scrollY,
+  ) {
+    final visible = controller.visibleNodes;
+    if (visible.isEmpty) return null;
+
+    if (controller.hasActiveSlides) {
+      TKey? lastLiveKey;
+      double lastLiveOffset = 0.0;
+      double lastLiveExtent = 0.0;
+      double structural = 0.0;
+      for (final key in visible) {
+        final extent = controller.getCurrentExtent(key);
+        final slide = controller.getSlideDelta(key);
+        final paintedOffset = structural + slide;
+        if (!controller.isPendingDeletion(key)) {
+          if (scrollY < paintedOffset + extent) {
+            return (
+              key: key,
+              paintedOffset: paintedOffset,
+              extent: extent,
+            );
+          }
+          lastLiveKey = key;
+          lastLiveOffset = paintedOffset;
+          lastLiveExtent = extent;
+        }
+        structural += extent;
+      }
+      if (lastLiveKey == null) return null;
+      return (
+        key: lastLiveKey,
+        paintedOffset: lastLiveOffset,
+        extent: lastLiveExtent,
+      );
+    }
+
+    // Fast path: no slides active, painted offset == structural offset.
+    final startIdx = _findFirstVisibleIndex(visible, scrollY);
+    for (int i = startIdx; i < visible.length; i++) {
+      final key = visible[i];
+      if (controller.isPendingDeletion(key)) continue;
+      return _liveRowAt(i, key);
+    }
+    // Past the end (or every trailing row is pending-deletion) — walk back
+    // for the last live row.
+    for (int i = visible.length - 1; i >= 0; i--) {
+      final key = visible[i];
+      if (controller.isPendingDeletion(key)) continue;
+      return _liveRowAt(i, key);
+    }
+    return null;
+  }
+
+  ({TKey key, double paintedOffset, double extent}) _liveRowAt(
+    int visibleIndex,
+    TKey key,
+  ) {
+    final double offset;
+    final double extent;
+    if (_bulkCumulativesValid) {
+      // Per-nid slots aren't kept fresh for out-of-cache-region nids under
+      // the bulk fast path; derive from cumulatives.
+      offset = _offsetAtVisibleIndex(visibleIndex);
+      extent = _offsetAtVisibleIndex(visibleIndex + 1) - offset;
+    } else {
+      final nid = _controller.nidOf(key);
+      offset = _nodeOffsetsByNid[nid];
+      extent = _nodeExtentsByNid[nid];
+    }
+    return (key: key, paintedOffset: offset, extent: extent);
+  }
+
   /// Inserts a child for the specified node.
   void insertChild(RenderBox child, TKey nodeId) {
     // Defensive drop of any prior box at this slot. Normal lifecycle pairs
@@ -363,6 +550,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
   @override
   void detach() {
+    // A pending FLIP baseline that was never consumed (widget unmounted
+    // between mutation and next frame) would leak the offset map and
+    // trip stale-state assertions on re-attach. Drop it eagerly.
+    _pendingSlideBaseline = null;
+    _pendingSlideDuration = null;
+    _pendingSlideCurve = null;
     super.detach();
     for (final child in _children.values) {
       child.detach();
@@ -786,6 +979,41 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final cacheStart = scrollOffset + cacheOrigin;
     final cacheEnd = cacheStart + remainingCacheExtent;
 
+    // If a caller (TreeReorderController.endDrag) staged a FLIP slide
+    // baseline before the structural mutation that triggered this layout,
+    // install the slide NOW — before Pass 2's build-range decision, so
+    // `maxActiveSlideAbsDelta` reflects the just-installed deltas and Pass
+    // 2 builds rows sliding INTO the viewport from outside the structural
+    // cache region. `snapshotVisibleOffsets()` walks `visibleNodes` with
+    // `getCurrentExtent`, which is independent of Pass 1's per-nid offset
+    // array, so calling it before Pass 1 is safe.
+    _consumeSlideBaselineIfAny();
+
+    // FLIP-slide overreach (Option A): during a slide, a row's painted y
+    // can differ from its structural y by up to `slideOverreach` px in
+    // either direction. Widen the effective cache region by that amount
+    // so rows whose painted y lies in the viewport — but whose structural
+    // y is outside the normal cache region — still get built. Without
+    // this, a swap of two large subtrees leaves a visible gap at the slot
+    // where a sliding row should appear (no child created for it), and
+    // the gap does NOT resolve on scroll because the build decision still
+    // only considers structural offsets. Overreach shrinks to 0 as the
+    // slide progresses (see [TreeController.maxActiveSlideAbsDelta]), so
+    // the transient overbuild contracts with the animation.
+    //
+    // Future optimization (Option B): replace this blanket clamp with a
+    // per-entry precise union. For each active slide, compute the
+    // structural index range whose painted y (structural + currentDelta)
+    // intersects the cache region, then union those ranges with the
+    // normal cache-region index range. This eliminates the transient
+    // overbuild for the common case of a few small slides, at the cost
+    // of a per-entry scan every frame. Worth doing only when the
+    // overbuild measurably hurts — large-subtree swaps are rare and
+    // short-lived, so the blanket clamp is usually fine.
+    final slideOverreach = controller.maxActiveSlideAbsDelta;
+    final effectiveCacheStart = cacheStart - slideOverreach;
+    final effectiveCacheEnd = cacheEnd + slideOverreach;
+
     // ────────────────────────────────────────────────────────────────────────
     // PASS 1: Calculate offsets and extents
     // ────────────────────────────────────────────────────────────────────────
@@ -895,7 +1123,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Clear prior-layout cache-region flags in one memset-style pass, then
     // mark the slice [cacheStartIndex, cacheEndIndex) as this frame's members.
     _inCacheRegionByNid.fillRange(0, _inCacheRegionByNid.length, 0);
-    final cacheStartIndex = _findFirstVisibleIndex(visibleNodes, cacheStart);
+    final cacheStartIndex =
+        _findFirstVisibleIndex(visibleNodes, effectiveCacheStart);
 
     // In bulk-only mode, break on the row's *steady-state* (full-space)
     // position rather than its animated position. At low bulkValue, animated
@@ -908,58 +1137,132 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final fullStart =
           _stableCumulative[cacheStartIndex] +
           _bulkFullCumulative[cacheStartIndex];
-      fullCacheEnd = fullStart + remainingCacheExtent;
+      fullCacheEnd = fullStart + remainingCacheExtent + slideOverreach;
     } else {
       fullCacheEnd = 0.0;
     }
 
     int cacheEndIndex = cacheStartIndex;
-    // Steady-state accumulator for the non-bulk (op-group) path. Mirrors the
-    // rationale of the bulk branch above: at low animation values, entering
-    // rows have sub-pixel animated extents, so reading live offsets would
-    // admit the entire entering subtree into the cache region on frame 1 of
-    // a single-node expand — e.g. all 1150 children of a large parent,
-    // causing a mass-mount / mass-rebuild hitch. We cap admission at what
-    // the cache region would hold at steady state (full extents for
-    // entering rows, live extent for the rest).
-    double steadyAccum = 0.0;
+    // Dual-view admission for the non-bulk (op-group) path.
+    //
+    // Two running accumulators track the cache budget in parallel:
+    //
+    //   liveAccum  — per-row contribution using FULL extent for any animating
+    //                row (enter or exit). Preserves the original
+    //                "steady-state" accumulator's role of capping admission
+    //                at the pre-animation row count during enters (prevents
+    //                mass-mounting the entering subtree on frame 1 of an
+    //                expand).
+    //
+    //   postAccum  — per-row contribution using TARGET extent: full for
+    //                enters, 0 for exits, live for non-animating. Tracks
+    //                what the cumulative layout will look like AFTER the
+    //                animation settles.
+    //
+    // A row is admitted when it passes either view (with the constraint
+    // that exits can only be admitted via the LIVE view — a row that will
+    // be gone after the animation does not belong in the post-animation
+    // cache set). The loop stops iterating only when BOTH views agree no
+    // future row could be admitted.
+    //
+    // During a collapse of a many-child parent: exits beyond the live
+    // window fail the live check and — being exits — are excluded from
+    // the post view, so they are iterated past but not admitted. Once we
+    // reach the non-exit following rows, the post view admits them based
+    // on their post-animation positions, pre-mounting them before dismiss
+    // and eliminating the "flicker as they appear" pop. During an expand,
+    // the live-view cap still prevents mass-mounting the full entering
+    // subtree.
+    //
+    // Post-animation offset is tracked relative to the live offset of the
+    // row at [cacheStartIndex] — rows before the cache start are treated
+    // as stable (the common case for animations on a parent visible in
+    // the viewport).
+    double liveAccum = 0.0;
+    double postAccum = 0.0;
+    final double postOffsetOrigin = cacheStartIndex < visibleNodes.length
+        ? _nodeOffsetsByNid[_controller.nidOf(visibleNodes[cacheStartIndex])]
+        : 0.0;
+    double postOffsetCumul = 0.0;
+    final double budgetCap = remainingCacheExtent + slideOverreach;
     for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final nid = _controller.nidOf(nodeId);
-      final double offset;
       if (_bulkCumulativesValid) {
         // Under bulk-only fast path, pull from cumulatives and sync into the
         // per-nid slots so downstream code (Pass 2, paint-extent, paint,
         // hit-test) reads correct values without a branch per access.
-        offset = _offsetAtVisibleIndex(i);
+        final offset = _offsetAtVisibleIndex(i);
         _nodeOffsetsByNid[nid] = offset;
         _nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i + 1) - offset;
         final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
         if (fullOffset >= fullCacheEnd) break;
+        _inCacheRegionByNid[nid] = 1;
+        cacheEndIndex = i + 1;
+        continue;
+      }
+
+      final double liveOffset = _nodeOffsetsByNid[nid];
+      final double postOffset = postOffsetOrigin + postOffsetCumul;
+
+      final bool liveBudgetOk =
+          liveOffset < effectiveCacheEnd && liveAccum < budgetCap;
+      final bool postBudgetOk =
+          postOffset < effectiveCacheEnd && postAccum < budgetCap;
+
+      // Both views failed — offsets and accumulators only grow, so no
+      // future row can be admitted.
+      if (!liveBudgetOk && !postBudgetOk) {
+        break;
+      }
+
+      // [isAnimating] and [isExiting] are O(1) (cached). Using them here
+      // avoids the synthetic [AnimationState] allocation that
+      // [getAnimationState] did. Exits must admit via the LIVE view only;
+      // they have no post-animation position and should not be pre-mounted
+      // just because the post view has budget.
+      final bool isAnimating = controller.isAnimating(nodeId);
+      final bool isExit = isAnimating && controller.isExiting(nodeId);
+      final bool admit = liveBudgetOk || (!isExit && postBudgetOk);
+      if (admit) {
+        _inCacheRegionByNid[nid] = 1;
+        cacheEndIndex = i + 1;
+      }
+
+      // Update accumulators regardless of admission — the budget is a
+      // cumulative quantity measured over every row the loop has
+      // considered, not just admitted ones. Future-row break decisions
+      // depend on these.
+      final double liveContribution;
+      final double postContribution;
+      if (isAnimating) {
+        final full = controller.getEstimatedExtent(nodeId);
+        liveContribution = full;
+        postContribution = isExit ? 0.0 : full;
       } else {
-        offset = _nodeOffsetsByNid[nid];
-        if (offset >= cacheEnd) break;
-        if (steadyAccum >= remainingCacheExtent) break;
+        final live = _nodeExtentsByNid[nid];
+        liveContribution = live;
+        postContribution = live;
       }
-      _inCacheRegionByNid[nid] = 1;
-      cacheEndIndex = i + 1;
-      if (!_bulkCumulativesValid) {
-        final anim = controller.getAnimationState(nodeId);
-        final double contribution;
-        if (anim != null && anim.type == AnimationType.entering) {
-          contribution = controller.getEstimatedExtent(nodeId);
-        } else {
-          contribution = _nodeExtentsByNid[nid];
-        }
-        steadyAccum += contribution;
-      }
+      liveAccum += liveContribution;
+      postAccum += postContribution;
+      postOffsetCumul += postContribution;
     }
 
-    // Create children for nodes in cache region
+    // Create children for nodes in the cache region.
+    //
+    // The range `[cacheStartIndex, cacheEndIndex)` may contain rows that
+    // were iterated but not admitted (e.g. off-screen exits during a
+    // collapse — iterated past to reach the post-animation-visible
+    // following rows, but not admitted themselves). Gate on
+    // `_inCacheRegionByNid[nid]` so skipped rows do not trigger a build.
     if (cacheEndIndex > cacheStartIndex) {
       invokeLayoutCallback<SliverConstraints>((SliverConstraints constraints) {
         for (int i = cacheStartIndex; i < cacheEndIndex; i++) {
-          childManager?.createChild(visibleNodes[i]);
+          final nodeId = visibleNodes[i];
+          final nid = _controller.nidOf(nodeId);
+          if (_inCacheRegionByNid[nid] == 0) continue;
+          childManager?.createChild(nodeId);
         }
       });
     }
@@ -1199,8 +1502,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // remainingPaintExtent (which includes space occupied by later slivers)
       // gave false negatives and missed clipping. Also flag when a sticky
       // header's inflated bottom was clamped against remainingPaintExtent.
+      // The `scrollOffset > 0` clause mirrors RenderSliverMultiBoxAdaptor:
+      // when the first visible row starts before scrollOffset, it paints at
+      // a negative y relative to the sliver's paint origin. Without this
+      // flag, the viewport skips its clip layer and the partial top row
+      // spills above the sliver — visible at max scroll extent, where the
+      // "content extends below" clause is false.
       hasVisualOverflow: stickyInflationClamped ||
-          scrollOffset + paintExtent < totalScrollExtent,
+          scrollOffset + paintExtent < totalScrollExtent ||
+          scrollOffset > 0.0,
     );
 
     // Refresh parentData.layoutOffset for children mounted in a prior
@@ -1242,6 +1552,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _lastVisibleNodeCount = visibleNodes.length;
     _lastTotalScrollExtent = totalScrollExtent;
     _animationsWereActive = hasAnimations;
+
     childManager?.didFinishLayout();
   }
 
@@ -1294,9 +1605,24 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final remainingPaintExtent = constraints.remainingPaintExtent;
     final visibleNodes = controller.visibleNodes;
 
-    final startIndex = _findFirstVisibleIndex(visibleNodes, scrollOffset);
+    // Widen the paint iteration start by the active FLIP-slide overreach
+    // so rows structurally before the viewport but painting INTO it (via
+    // a positive slide delta) are not skipped. `_paintRow` already bails
+    // on rows whose painted y lies past the viewport, so extra iterated
+    // rows on the bottom edge are harmless. See the matching comment in
+    // `performLayout` for why structural offsets alone aren't enough.
+    final slideOverreach = controller.maxActiveSlideAbsDelta;
+    final startIndex =
+        _findFirstVisibleIndex(visibleNodes, scrollOffset - slideOverreach);
 
-    // Pass A: Paint non-sticky nodes normally.
+    // Pass A: Paint non-sticky nodes. Rows with a non-zero slide delta are
+    // deferred to a second sub-pass so they paint on top of static rows —
+    // without this, an upward-moving row that hasn't yet crossed into its
+    // final index slot would be covered by siblings sliding down past it.
+    // Among sliding rows, sort by ascending |delta| so the row that moved
+    // the most (typically the just-dropped row) paints last and lands on
+    // top. Ties preserve natural iteration order.
+    List<int>? slidingIndices;
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final nid = _controller.nidOf(nodeId);
@@ -1307,28 +1633,48 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final child = getChildForNode(nodeId);
       if (child == null) continue;
 
-      final parentData = child.parentData! as SliverTreeParentData;
-      final nodeOffset = parentData.layoutOffset;
-      final nodeExtent = parentData.visibleExtent;
+      // Paint-only FLIP slide delta — read from the controller on every
+      // frame so localToGlobal / semantics (which can resolve between
+      // ticks) always see the current value.
+      final slideDelta = controller.getSlideDelta(nodeId);
 
-      if (nodeOffset >= scrollOffset + remainingPaintExtent) break;
+      if (slideDelta != 0.0) {
+        (slidingIndices ??= <int>[]).add(i);
+        continue;
+      }
 
-      final paintOffset =
-          offset + Offset(parentData.indent, nodeOffset - scrollOffset);
+      _paintRow(
+        context: context,
+        offset: offset,
+        nodeId: nodeId,
+        child: child,
+        slideDelta: 0.0,
+        scrollOffset: scrollOffset,
+        remainingPaintExtent: remainingPaintExtent,
+      );
+    }
 
-      // Clip if animating (individual or bulk) and extent is less than full size
-      if (controller.isAnimating(nodeId) && nodeExtent < child.size.height) {
-        final yOffset = -(child.size.height - nodeExtent);
-        context.pushClipRect(
-          needsCompositing,
-          paintOffset,
-          Rect.fromLTWH(0, 0, child.size.width, nodeExtent),
-          (context, offset) {
-            context.paintChild(child, offset + Offset(0, yOffset));
-          },
+    if (slidingIndices != null) {
+      slidingIndices.sort((a, b) {
+        final da = controller.getSlideDelta(visibleNodes[a]).abs();
+        final db = controller.getSlideDelta(visibleNodes[b]).abs();
+        final cmp = da.compareTo(db);
+        if (cmp != 0) return cmp;
+        return a.compareTo(b);
+      });
+      for (final i in slidingIndices) {
+        final nodeId = visibleNodes[i];
+        final child = getChildForNode(nodeId);
+        if (child == null) continue;
+        _paintRow(
+          context: context,
+          offset: offset,
+          nodeId: nodeId,
+          child: child,
+          slideDelta: controller.getSlideDelta(nodeId),
+          scrollOffset: scrollOffset,
+          remainingPaintExtent: remainingPaintExtent,
         );
-      } else {
-        context.paintChild(child, paintOffset);
       }
     }
 
@@ -1366,6 +1712,44 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           context.paintChild(child, offset);
         },
       );
+    }
+  }
+
+  void _paintRow({
+    required PaintingContext context,
+    required Offset offset,
+    required TKey nodeId,
+    required RenderBox child,
+    required double slideDelta,
+    required double scrollOffset,
+    required double remainingPaintExtent,
+  }) {
+    final parentData = child.parentData! as SliverTreeParentData;
+    final nodeOffset = parentData.layoutOffset;
+    final nodeExtent = parentData.visibleExtent;
+
+    // A node whose painted position lies past the paint region can't be
+    // visible; skip. The caller can't `break` on this — a later node might
+    // have a negative slideDelta that puts it back in view.
+    if (nodeOffset + slideDelta >= scrollOffset + remainingPaintExtent) {
+      return;
+    }
+
+    final paintOffset = offset +
+        Offset(parentData.indent, nodeOffset - scrollOffset + slideDelta);
+
+    if (controller.isAnimating(nodeId) && nodeExtent < child.size.height) {
+      final yOffset = -(child.size.height - nodeExtent);
+      context.pushClipRect(
+        needsCompositing,
+        paintOffset,
+        Rect.fromLTWH(0, 0, child.size.width, nodeExtent),
+        (context, offset) {
+          context.paintChild(child, offset + Offset(0, yOffset));
+        },
+      );
+    } else {
+      context.paintChild(child, paintOffset);
     }
   }
 
@@ -1417,9 +1801,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (hit) return true;
     }
 
-    // Phase 2: Test normal nodes (skip sticky IDs).
+    // Phase 2: Test normal nodes (skip sticky IDs). Widen the start by
+    // the FLIP-slide overreach so a tap on a row whose structural y is
+    // above the hit offset — but which has slid down into the tap point
+    // — is still tested. The per-row `localMainAxisPosition` bounds
+    // check below naturally skips non-overlapping rows, so iterating
+    // extra rows at the top is cheap.
+    final slideOverreach = controller.maxActiveSlideAbsDelta;
     final hitOffset = scrollOffset + mainAxisPosition;
-    final startIndex = _findFirstVisibleIndex(visibleNodes, hitOffset);
+    final startIndex =
+        _findFirstVisibleIndex(visibleNodes, hitOffset - slideOverreach);
 
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
@@ -1439,8 +1830,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final nodeOffset = parentData.layoutOffset;
       final nodeExtent = parentData.visibleExtent;
 
+      // Shift the hit coordinate by the node's current slide delta so a
+      // tap lands on the visually-displaced child rather than on the
+      // structural position nobody sees during a slide.
+      final slideDelta = controller.getSlideDelta(nodeId);
       final localMainAxisPosition =
-          mainAxisPosition + scrollOffset - nodeOffset;
+          mainAxisPosition + scrollOffset - nodeOffset - slideDelta;
       if (localMainAxisPosition < 0) continue;
       if (localMainAxisPosition >= nodeExtent) continue;
 
@@ -1459,9 +1854,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           ? (child.size.height - nodeExtent)
           : 0.0;
 
+      final paintedMainOffset = nodeOffset - scrollOffset + slideDelta;
       final hit = result.addWithAxisOffset(
-        paintOffset: Offset(parentData.indent, nodeOffset - scrollOffset),
-        mainAxisOffset: nodeOffset - scrollOffset,
+        paintOffset: Offset(parentData.indent, paintedMainOffset),
+        mainAxisOffset: paintedMainOffset,
         crossAxisOffset: parentData.indent,
         mainAxisPosition: mainAxisPosition,
         crossAxisPosition: crossAxisPosition,
@@ -1521,10 +1917,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         ? (child.size.height - parentData.visibleExtent)
         : 0.0;
 
+    // Include the node's current slide delta (paint-only FLIP offset) so
+    // callers that resolve coordinates via applyPaintTransform — localToGlobal,
+    // focus traversal, semantics, Scrollable.ensureVisible — track the
+    // visually-displaced row during a slide.
+    final slideDelta = nodeId != null
+        ? controller.getSlideDelta(nodeId as TKey)
+        : 0.0;
+
     final scrollOffset = constraints.scrollOffset;
     transform.translateByDouble(
       parentData.indent,
-      parentData.layoutOffset - scrollOffset - yAdjust,
+      parentData.layoutOffset - scrollOffset - yAdjust + slideDelta,
       0.0,
       1.0,
     );

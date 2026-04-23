@@ -64,15 +64,36 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Set by [reassemble] to signal that [update] should invalidate children.
   bool _didReassemble = false;
 
-  /// Keys whose data changed since the last build. Refreshed surgically
-  /// in [performRebuild] instead of walking every mounted child.
-  final Set<TKey> _dirtyDataNodes = {};
+  /// Keys whose mounted widget may be stale and needs refresh.
+  ///
+  /// Populated by three sources:
+  ///   - [update] (parent rebuild): every mounted key is queued so rows
+  ///     pick up the new `nodeBuilder` closure / captured parent state.
+  ///   - [_onStructuralChange]: null affectedKeys queues every mounted
+  ///     key; a non-empty set queues only the listed mounted keys.
+  ///   - [_onNodeDataChanged]: queues the single affected mounted key.
+  ///
+  /// Consumed lazily in [createChild] during the next layout: cache-
+  /// region and sticky children are rebuilt there; off-screen queued
+  /// entries wait until they re-enter the cache region (refreshed on
+  /// re-entry) or until stale eviction fires (discarded).
+  ///
+  /// This bounds refresh work by "what the viewport actually needs this
+  /// frame" instead of walking `_children.keys` unconditionally on every
+  /// parent rebuild. Without this bound, an external listener that
+  /// rebuilds SliverTree's ancestor (e.g. `ListenableBuilder` on the
+  /// controller) would cause `update` to rebuild every mounted row —
+  /// including off-screen descendants that are moments away from
+  /// stale-eviction. See `sliver_tree_widget_test.dart` regressions.
+  final Set<TKey> _dirtyKeys = {};
 
-  /// Set when the controller fired a structural notification (or any event
-  /// that may have changed expansion / visible order / depth / closures).
-  /// Forces [performRebuild] to refresh every mounted child, which
-  /// subsumes [_dirtyDataNodes].
-  bool _needsFullRefresh = false;
+  /// Whether the last animation tick observed [TreeController.hasActiveAnimations]
+  /// as true. Used by [_onAnimationTick] so the settle tick (where the
+  /// controller has already cleared animation state before notifying) still
+  /// triggers [RenderObject.markNeedsLayout]. Without this, completed extent
+  /// animations would never relayout and the render would remain at the
+  /// partial animated value instead of the final settled extent.
+  bool _priorTickHadAnimations = false;
 
   // ══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
@@ -116,74 +137,47 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       newWidget.controller.addAnimationListener(_onAnimationTick);
       newWidget.controller.addNodeDataListener(_onNodeDataChanged);
       renderObject.controller = newWidget.controller;
+      // Old-controller keys are meaningless under the new controller;
+      // drop the queue and let createChild rebuild against fresh data.
+      _dirtyKeys.clear();
     }
 
     if (_didReassemble) {
       _didReassemble = false;
       _invalidateAllChildren();
       renderObject.markStructureChanged();
+      return;
     }
 
-    // Parent rebuild: nodeBuilder closure may have captured new state,
-    // so every mounted row must be refreshed. This supersedes any
-    // targeted data-refresh already queued.
-    _needsFullRefresh = true;
-    _dirtyDataNodes.clear();
-    _refreshMountedChildren();
-    _needsFullRefresh = false;
+    // Parent rebuild: the `nodeBuilder` closure may have captured new
+    // state. Queue every mounted row for lazy refresh and trigger a
+    // layout pass — retained rows rebuild in [createChild] within the
+    // same frame; off-screen rows wait for re-entry or discard. This
+    // bounds the rebuild fan-out to the retained set (≈ cache region),
+    // not the full mounted set. See [_dirtyKeys] doc.
+    _dirtyKeys.addAll(_children.keys);
+    renderObject.markNeedsLayout();
   }
 
   @override
   void performRebuild() {
     super.performRebuild();
-    // Triggered by markNeedsBuild. Two entry points:
-    //  - _onControllerChanged (structural): _needsFullRefresh is true.
-    //  - _onNodeDataChanged (per-key data): only _dirtyDataNodes is populated.
-    // Full refresh subsumes targeted refresh, so check it first.
-    if (_needsFullRefresh) {
-      _needsFullRefresh = false;
-      _dirtyDataNodes.clear();
-      _refreshMountedChildren();
-    } else if (_dirtyDataNodes.isNotEmpty) {
-      final keys = List<TKey>.of(_dirtyDataNodes);
-      _dirtyDataNodes.clear();
-      _refreshMountedChildren(only: keys);
-    }
-  }
-
-  /// Refreshes mounted children with fresh widgets from the current
-  /// [SliverTree.nodeBuilder].
-  ///
-  /// When [only] is null, every mounted row is refreshed (used for
-  /// structural notifications and parent rebuilds). When provided, only
-  /// the listed keys are refreshed — the per-key data-change fast path.
-  void _refreshMountedChildren({Iterable<TKey>? only}) {
-    if (_children.isEmpty) return;
-    final keysToRefresh = only ?? _children.keys.toList();
-    for (final key in keysToRefresh) {
-      final oldElement = _children[key];
-      if (oldElement == null) continue;
-      // Skip nodes that no longer exist — GC will clean them up.
-      if (widget.controller.getNodeData(key) == null) continue;
-      final depth = widget.controller.getDepth(key);
-      final newWidget = widget.nodeBuilder(this, key, depth);
-      final newElement = updateChild(oldElement, newWidget, key);
-      if (newElement != null) {
-        _children[key] = newElement;
-      } else {
-        _children.remove(key);
-      }
-    }
+    // All widget-refresh work happens lazily in [createChild] during
+    // layout (see [_dirtyKeys]). If the framework marks us dirty, the
+    // super call satisfies that contract — the actual reconciliation
+    // lands when the next layout fires and iterates cache-region keys.
   }
 
   /// Deactivates all existing children so they are recreated with the
   /// current widget's [SliverTree.nodeBuilder] on the next layout pass.
   ///
-  /// Called from [update], which already runs inside the framework's build
-  /// scope, so no additional [BuildOwner.buildScope] call is needed.
+  /// Called from [update] (under `_didReassemble`), which already runs
+  /// inside the framework's build scope, so no additional
+  /// [BuildOwner.buildScope] call is needed.
   void _invalidateAllChildren() {
     final childrenToDeactivate = Map.of(_children);
     _children.clear();
+    _dirtyKeys.clear();
 
     for (final entry in childrenToDeactivate.entries) {
       updateChild(entry.value, null, entry.key);
@@ -193,61 +187,76 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Handles structural notifications from the controller.
   ///
   /// [affectedKeys] semantics (set by the controller):
-  ///   - `null` — scope unknown; do a full refresh of every mounted row.
+  ///   - `null` — scope unknown; every mounted row may need refresh.
+  ///     Queued lazily; consumed in [createChild] for retained rows.
   ///   - empty set — structural change occurred but no mounted row's
   ///     builder output changed (new rows first-build via [createChild],
-  ///     removed rows GC'd); only relayout + GC are required.
-  ///   - non-empty set — refresh exactly the listed keys that are
-  ///     currently mounted.
+  ///     removed rows GC'd); only relayout + GC are required. Nothing
+  ///     is added to [_dirtyKeys]; avoiding this queue is what keeps an
+  ///     external `ChangeNotifier` subscriber that rebuilds SliverTree's
+  ///     ancestor from amplifying the empty-set notify into a refresh
+  ///     sweep over off-screen descendants.
+  ///   - non-empty set — queue exactly the listed mounted keys.
   void _onStructuralChange(Set<TKey>? affectedKeys) {
     renderObject.markNeedsLayout();
     _scheduleGarbageCollection();
 
     if (affectedKeys == null) {
-      _needsFullRefresh = true;
-      _dirtyDataNodes.clear();
-      markNeedsBuild();
+      _dirtyKeys.addAll(_children.keys);
       return;
     }
 
     if (affectedKeys.isEmpty) {
-      // Structural mutation with no builder-output change. Layout + GC only.
       return;
     }
 
-    if (_needsFullRefresh) {
-      // A prior (still-pending) notify already queued a full refresh; the
-      // upcoming rebuild subsumes this one.
-      return;
-    }
-
-    bool anyMounted = false;
     for (final key in affectedKeys) {
       if (_children.containsKey(key)) {
-        _dirtyDataNodes.add(key);
-        anyMounted = true;
+        _dirtyKeys.add(key);
       }
-    }
-    if (anyMounted) {
-      markNeedsBuild();
     }
   }
 
   /// Called on pure animation ticks (no structural change).
-  /// Only triggers relayout — no GC scheduling needed.
+  ///
+  /// Routes to [RenderObject.markNeedsLayout] for extent animations
+  /// (enter/exit/bulk/op-group) — they change structural layout.
+  ///
+  /// Routes to [RenderObject.markNeedsPaint] for slide-only ticks — slide
+  /// is paint-only; structural layout is unchanged and marking layout dirty
+  /// would trigger an unnecessary relayout every frame.
+  ///
+  /// The completion tick of an extent animation fires **after** the
+  /// controller has cleared its state (so [TreeController.hasActiveAnimations]
+  /// is already false). We still need a final relayout to settle the final
+  /// extent, which is why [_priorTickHadAnimations] is checked — if the
+  /// previous tick saw active animations, the current tick is the settle
+  /// tick and must relayout even though the flag is now false.
+  ///
+  /// The completion tick of a slide fires **before** the controller clears
+  /// its entries, so `hasActiveSlides` is still true and the paint branch
+  /// schedules a final paint at `currentDelta == 0.0`. After that there's
+  /// no further tick; the clear-and-stop is a no-visual-change operation.
   void _onAnimationTick() {
-    renderObject.markNeedsLayout();
+    final c = widget.controller;
+    final active = c.hasActiveAnimations;
+    if (active || _priorTickHadAnimations) {
+      renderObject.markNeedsLayout();
+    } else if (c.hasActiveSlides) {
+      renderObject.markNeedsPaint();
+    }
+    _priorTickHadAnimations = active;
   }
 
   /// Called when a single node's data changed (via [TreeController.updateNode])
   /// without any structural mutation. Queues a targeted rebuild of just
-  /// that row instead of sweeping every mounted child.
+  /// that row, consumed lazily by [createChild] during the next layout.
   void _onNodeDataChanged(TKey key) {
-    // Node not mounted — nothing to refresh. Don't mark dirty or schedule
-    // a build, otherwise we'd do a no-op pass for every off-screen update.
+    // Node not mounted — nothing to refresh. Don't queue or schedule a
+    // layout, otherwise we'd do a no-op pass for every off-screen update.
     if (!_children.containsKey(key)) return;
-    _dirtyDataNodes.add(key);
-    markNeedsBuild();
+    _dirtyKeys.add(key);
+    renderObject.markNeedsLayout();
   }
 
   /// Schedules cleanup of elements for nodes that no longer exist.
@@ -292,6 +301,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     owner!.buildScope(this, () {
       for (final nodeId in evictNow) {
         final element = _children.remove(nodeId);
+        _dirtyKeys.remove(nodeId);
         if (element != null) {
           updateChild(element, null, nodeId);
         }
@@ -365,6 +375,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       owner!.buildScope(this, () {
         for (final nodeId in evictNow) {
           final element = _children.remove(nodeId);
+          _dirtyKeys.remove(nodeId);
           if (element != null) {
             updateChild(element, null, nodeId);
           }
@@ -380,21 +391,30 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   @override
   void createChild(TKey nodeId) {
     assert(_inLayout, 'createChild must be called during layout');
-    final key = nodeId;
-    // If child already exists, nothing to do
-    if (_children.containsKey(key)) {
+    final existing = _children[nodeId];
+    // Three cases handled here:
+    //   1. No existing element: build a fresh widget via [nodeBuilder].
+    //   2. Existing element, queued as dirty by a prior update / notify:
+    //      rebuild with a fresh widget so the row picks up any new state
+    //      captured by the `nodeBuilder` closure or new controller data.
+    //   3. Existing element, not dirty: no-op — this is the hot path
+    //      every layout hits for already-mounted cache-region keys.
+    final needsRefresh = existing != null && _dirtyKeys.remove(nodeId);
+    if (existing != null && !needsRefresh) {
       return;
     }
     owner!.buildScope(this, () {
-      final nodeData = widget.controller.getNodeData(key);
+      final nodeData = widget.controller.getNodeData(nodeId);
       if (nodeData == null) {
         return;
       }
-      final depth = widget.controller.getDepth(key);
-      final childWidget = widget.nodeBuilder(this, key, depth);
-      final element = updateChild(null, childWidget, key);
+      final depth = widget.controller.getDepth(nodeId);
+      final childWidget = widget.nodeBuilder(this, nodeId, depth);
+      final element = updateChild(existing, childWidget, nodeId);
       if (element != null) {
-        _children[key] = element;
+        _children[nodeId] = element;
+      } else if (existing != null) {
+        _children.remove(nodeId);
       }
     });
   }
