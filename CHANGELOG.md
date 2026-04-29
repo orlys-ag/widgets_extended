@@ -1,3 +1,11 @@
+## 0.0.13
+
+- Add `SectionedSliverList`: a header + items convenience sliver built
+  on top of `SliverTree`.
+- Fix animation issue when adding/removing many times quickly.
+- Fix visible-subtree-size cache desync across all node-purge paths.
+- Fix node removal desync.
+
 ## 0.0.12
 
 - Fix missing case to clip content above viewport when at max extent.

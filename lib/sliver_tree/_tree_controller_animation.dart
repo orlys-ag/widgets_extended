@@ -350,29 +350,25 @@ extension _TreeControllerAnimationOps<TKey, TData>
       group.dispose();
     } else if (status == AnimationStatus.dismissed) {
       // Collapse done (value = 0). Remove nodes from visible order.
+      //
+      // pendingRemoval splits into two semantic categories:
+      //   (1) _pendingDeletion members: fully purge (unlink → cache
+      //       decrement → release nid). Order compaction is batched.
+      //   (2) Others: structurally still present; just leave _order if
+      //       their ancestors are no longer expanded. No purge.
+      //
+      // Both categories funnel into _keysToRemoveScratch for one
+      // batched _removeFromVisibleOrder call afterwards.
       _keysToRemoveScratch.clear();
-      // Captures parents whose child list just became empty via pending-
-      // deletion removals. Must be populated inside the loop — right after
-      // the parent-list .remove(nodeId) and before _purgeNodeData(nodeId),
-      // because _purgeNodeData releases nodeId's nid and clears its parent
-      // mapping, so _parentKeyOfKey would return null afterwards.
-      final affectedParents = <TKey>{};
+      final categoryOne = <TKey>[];
+      final parentsOfCategoryOne = <TKey>{};
       for (final nodeId in group.pendingRemoval) {
         if (_pendingDeletion.contains(nodeId)) {
-          // Fully remove the node from all data structures
+          categoryOne.add(nodeId);
           final parentKey = _parentKeyOfKey(nodeId);
           if (parentKey != null) {
-            final siblings = _childListOf(parentKey);
-            siblings?.remove(nodeId);
-            if (siblings == null || siblings.isEmpty) {
-              affectedParents.add(parentKey);
-            }
-          } else {
-            _roots.remove(nodeId);
+            parentsOfCategoryOne.add(parentKey);
           }
-          _nodeToOperationGroup.remove(nodeId);
-          _purgeNodeData(nodeId);
-          _keysToRemoveScratch.add(nodeId);
         } else {
           final parentKey = _parentKeyOfKey(nodeId);
           final shouldRemove = parentKey == null
@@ -381,9 +377,31 @@ extension _TreeControllerAnimationOps<TKey, TData>
           if (shouldRemove) {
             _keysToRemoveScratch.add(nodeId);
           }
-          _nodeToOperationGroup.remove(nodeId);
         }
+        _nodeToOperationGroup.remove(nodeId);
       }
+
+      // Process category (1) via the unified helper, deferring order
+      // compaction so it batches with category (2) below.
+      final affectedParents = <TKey>{};
+      if (categoryOne.isNotEmpty) {
+        _purgeAndRemoveFromOrder(categoryOne, compactOrder: false);
+        // Detect parents whose child list became empty as a result.
+        // The helper purged the children and released their nids; the
+        // captured parents may themselves have been purged (their key
+        // looked up returns null). _childListOf handles unregistered
+        // keys by returning null — treat that as "child list empty"
+        // for the affectedKeys signal (a dead key in affectedKeys is a
+        // cheap no-op at the element side).
+        for (final parent in parentsOfCategoryOne) {
+          final siblings = _childListOf(parent);
+          if (siblings == null || siblings.isEmpty) {
+            affectedParents.add(parent);
+          }
+        }
+        _keysToRemoveScratch.addAll(categoryOne);
+      }
+
       // Clean up remaining members not in pendingRemoval
       for (final nodeId in group.members.keys) {
         _nodeToOperationGroup.remove(nodeId);
@@ -629,6 +647,47 @@ extension _TreeControllerAnimationOps<TKey, TData>
         // Must collect before purging `key`, since _getDescendants reads
         // _childListOf(key).
         final descendants = _getDescendants(key);
+
+        // Decrement the visible-subtree-size cache up the parent chain
+        // BEFORE any purge releases the nids. The actual removal of
+        // entries from _orderNids is deferred and batched in
+        // _removeFromVisibleOrder, but by then _releaseNid has cleared
+        // _parentByNid for every released nid — the visibility-loss
+        // callback fired from the deferred removal would walk a broken
+        // parent chain and never reach the real ancestors. Doing the
+        // bookkeeping here, while parent links are still intact,
+        // preserves the cache invariant.
+        //
+        // Visible loss = key (if visible) + every visible descendant
+        // about to be purged in the loop below. We DO NOT count
+        // descendants that have their own animation in flight — those
+        // will finalize separately and decrement themselves.
+        if (parentKey != null) {
+          int visibleLoss = 0;
+          final keyNid = _nids[key];
+          if (keyNid != null &&
+              _order.indexByNid[keyNid] != VisibleOrderBuffer.kNotVisible) {
+            visibleLoss++;
+          }
+          for (final desc in descendants) {
+            if (_pendingDeletion.contains(desc) &&
+                !_standaloneAnimations.containsKey(desc)) {
+              final descNid = _nids[desc];
+              if (descNid != null &&
+                  _order.indexByNid[descNid] !=
+                      VisibleOrderBuffer.kNotVisible) {
+                visibleLoss++;
+              }
+            }
+          }
+          if (visibleLoss > 0) {
+            final parentNid = _nids[parentKey];
+            if (parentNid != null) {
+              _bumpVisibleSubtreeSizeFromSelf(parentNid, -visibleLoss);
+            }
+          }
+        }
+
         // Skip _visibleOrder.remove — caller batches it
         _purgeNodeData(key);
         for (final desc in descendants) {
@@ -655,15 +714,11 @@ extension _TreeControllerAnimationOps<TKey, TData>
 
     // Safety net: if an entering node is pending deletion (shouldn't happen
     // with the guards in collectRecursive and addSubtree, but defend against
-    // other code paths), purge it.
+    // other code paths), purge it. Order compaction is deferred to the
+    // caller's batched _removeFromVisibleOrder; we just signal via
+    // `return true` that the key should be added to that batch.
     if (_pendingDeletion.contains(key)) {
-      final parentKey = _parentKeyOfKey(key);
-      if (parentKey != null) {
-        _childListOf(parentKey)?.remove(key);
-      } else {
-        _roots.remove(key);
-      }
-      _purgeNodeData(key);
+      _purgeAndRemoveFromOrder([key], compactOrder: false);
       return true;
     }
 

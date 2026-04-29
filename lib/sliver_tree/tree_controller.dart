@@ -185,7 +185,27 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// delta propagation. Set during bulk rebuilds
   /// ([_rebuildVisibleOrder]) that will recompute the derived state in
   /// a single O(N) pass afterwards.
+  ///
+  /// Read directly inside [_onNidVisibilityGained] / [_onNidVisibilityLost]
+  /// and [_setParentKey]. **Writes go through
+  /// [_runWithSubtreeSizeUpdatesSuppressed]** — never flip the flag by
+  /// hand, since the wrapper preserves the prior value (re-entrant safe)
+  /// and guarantees the flag is restored even if the wrapped body throws.
   bool _suppressSubtreeSizeUpdates = false;
+
+  /// Runs [body] with [_suppressSubtreeSizeUpdates] forced to true,
+  /// restoring the prior value (not necessarily false) on return.
+  /// Use this around bulk order mutations whose per-nid callbacks
+  /// would otherwise double-count cache updates.
+  void _runWithSubtreeSizeUpdatesSuppressed(void Function() body) {
+    final wasSuppressed = _suppressSubtreeSizeUpdates;
+    _suppressSubtreeSizeUpdates = true;
+    try {
+      body();
+    } finally {
+      _suppressSubtreeSizeUpdates = wasSuppressed;
+    }
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // INTERNAL NID REGISTRY
@@ -546,7 +566,25 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (delta == 0) return;
     int cur = startNid;
     while (cur != _kNoParent && cur >= 0 && cur < _visibleSubtreeSizeByNid.length) {
-      _visibleSubtreeSizeByNid[cur] += delta;
+      // Refuse to mutate a freed slot. In debug, surface the violation;
+      // in release, bail out — corrupting a freed slot causes downstream
+      // visibility-cache bugs once the nid is recycled.
+      if (_nids.keyOf(cur) == null) {
+        assert(
+          false,
+          "_bumpVisibleSubtreeSizeFromSelf walked through freed nid $cur "
+          "from start nid $startNid (delta=$delta)",
+        );
+        break;
+      }
+      final next = _visibleSubtreeSizeByNid[cur] + delta;
+      assert(
+        next >= 0,
+        "visible-subtree-size would go negative at nid $cur "
+        "(current=${_visibleSubtreeSizeByNid[cur]}, delta=$delta, "
+        "key=${_nids.keyOf(cur)})",
+      );
+      _visibleSubtreeSizeByNid[cur] = next;
       cur = _parentByNid[cur];
     }
   }
@@ -573,7 +611,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     while (stack.isNotEmpty) {
       final key = stack.removeLast();
       final nid = _nids[key];
-      if (nid == null) continue;
+      if (nid == null) {
+        assert(false, "key $key has no nid during _rebuildVisibleSubtreeSizes");
+        continue;
+      }
       preOrderNids.add(nid);
       final children = _childListOf(key);
       if (children == null) continue;
@@ -600,6 +641,24 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       _visibleSubtreeSizeByNid[nid] = size;
+    }
+  }
+
+  /// Debug-only consistency check for [_visibleSubtreeSizeByNid].
+  /// Exposed for fuzz tests via [debugAssertVisibleSubtreeSizeConsistency].
+  @visibleForTesting
+  void debugAssertVisibleSubtreeSizeConsistency() =>
+      _assertVisibleSubtreeSizeConsistency();
+
+  /// All currently-live keys, in nid order. Debug-only accessor for tests
+  /// that need to pick a random key from the live set.
+  @visibleForTesting
+  Iterable<TKey> get debugAllKeys sync* {
+    for (int nid = 0; nid < _nids.length; nid++) {
+      final key = _nids.keyOf(nid);
+      if (key != null) {
+        yield key;
+      }
     }
   }
 
@@ -2334,21 +2393,36 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
 
+      // Decrement the parent's visible-subtree-size cache by the
+      // count of visible old descendants BEFORE _purgeNodeData
+      // releases their nids. Mirrors the fix in _removeNodesImmediate
+      // and _finalizeAnimation: the deferred order-buffer compaction
+      // below cannot fire useful visibility-loss callbacks once the
+      // released nids' parent chains are cleared.
+      if (visibleCount > 0) {
+        final parentNid = _nids[parentKey];
+        if (parentNid != null) {
+          _bumpVisibleSubtreeSizeFromSelf(parentNid, -visibleCount);
+        }
+      }
+
       final oldKeySet = allOldKeys.toSet();
       for (final key in allOldKeys) {
         _purgeNodeData(key);
       }
 
       if (visibleCount > 0) {
-        if (maxIdx - minIdx + 1 == visibleCount) {
-          // Contiguous removal
-          _order.removeRange(minIdx, maxIdx + 1);
-          _updateIndicesAfterRemove(minIdx);
-        } else {
-          // Non-contiguous removal
-          _order.removeWhereKeyIn(oldKeySet);
-          _rebuildVisibleIndex();
-        }
+        _runWithSubtreeSizeUpdatesSuppressed(() {
+          if (maxIdx - minIdx + 1 == visibleCount) {
+            // Contiguous removal
+            _order.removeRange(minIdx, maxIdx + 1);
+            _updateIndicesAfterRemove(minIdx);
+          } else {
+            // Non-contiguous removal
+            _order.removeWhereKeyIn(oldKeySet);
+            _rebuildVisibleIndex();
+          }
+        });
         _structureGeneration++;
       }
     }
@@ -3489,7 +3563,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// afterwards. Firing the incremental callback N times would be
   /// O(N·depth), which degenerates to O(N²) on deep trees.
   void _rebuildVisibleOrder() {
-    _suppressSubtreeSizeUpdates = true;
+    _runWithSubtreeSizeUpdatesSuppressed(_rebuildVisibleOrderImpl);
+  }
+
+  void _rebuildVisibleOrderImpl() {
     _order.clear();
 
     final stack = <TKey>[];
@@ -3539,11 +3616,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _rebuildVisibleIndex();
     _rebuildVisibleSubtreeSizes();
-    _suppressSubtreeSizeUpdates = false;
-    assert(() {
-      _assertVisibleSubtreeSizeConsistency();
-      return true;
-    }());
+    // No post-rebuild consistency check: _rebuildVisibleSubtreeSizes uses
+    // the same recursive sum formula as _assertVisibleSubtreeSizeConsistency,
+    // so the check is tautological here. The fuzz test covers the
+    // incremental path where the cross-check is meaningful.
   }
 
   @override

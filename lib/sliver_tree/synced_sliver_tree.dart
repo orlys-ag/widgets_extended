@@ -15,6 +15,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 
+import '_sync_helpers.dart';
 import 'sliver_tree_widget.dart';
 import 'synced_tree_node.dart';
 import 'tree_controller.dart';
@@ -695,10 +696,11 @@ class _SyncedSliverTreeState<TKey, TItem>
     }
 
     if (previousChildrenByParent != null && widget.initiallyExpanded) {
-      _expandParentsThatGainedChildren(
-        previousChildrenByParent,
-        _syncController.snapshotCurrentChildren(),
-        rememberedBeforeSync,
+      expandParentsThatGainedChildren<TKey, TItem>(
+        controller: _treeController,
+        oldChildrenByParent: previousChildrenByParent,
+        newChildrenByParent: _syncController.snapshotCurrentChildren(),
+        rememberedBeforeSync: rememberedBeforeSync,
         animate: animate,
       );
     }
@@ -788,51 +790,6 @@ class _SyncedSliverTreeState<TKey, TItem>
       roots: roots,
       childrenByParent: childrenByParent,
     );
-  }
-
-  void _expandParentsThatGainedChildren(
-    Map<TKey, List<TKey>> oldChildrenByParent,
-    Map<TKey, List<TKey>> newChildrenByParent,
-    Set<TKey> rememberedBeforeSync, {
-    required bool animate,
-  }) {
-    // Batch: without this, every expand() inside the loop fires its own
-    // structural notification, which the sliver element turns into a full
-    // refresh over every mounted row. K gained-children parents → K × N
-    // rebuilds. Wrapping coalesces the fan-out into one post-loop refresh.
-    _treeController.runBatch(() {
-      for (final entry in newChildrenByParent.entries) {
-        final parentKey = entry.key;
-
-        if (entry.value.isEmpty) {
-          continue;
-        }
-
-        // Only auto-expand a parent that is gaining its FIRST children in
-        // this sync. If the parent already had children previously, the
-        // user may have deliberately collapsed it; silently re-expanding
-        // on a sibling addition would override that intent.
-        final oldChildren = oldChildrenByParent[parentKey];
-        final hadChildrenBefore =
-            oldChildren != null && oldChildren.isNotEmpty;
-        if (hadChildrenBefore) {
-          continue;
-        }
-
-        // Skip parents that were filtered out previously and are now being
-        // re-added. TreeSyncController's _restoreExpansion is authoritative
-        // for those — auto-expanding here would override a user's explicit
-        // collapse recorded before the parent was removed.
-        if (rememberedBeforeSync.contains(parentKey)) {
-          continue;
-        }
-
-        if (_treeController.getNodeData(parentKey) != null &&
-            !_treeController.isExpanded(parentKey)) {
-          _treeController.expand(key: parentKey, animate: animate);
-        }
-      }
-    });
   }
 
   @override

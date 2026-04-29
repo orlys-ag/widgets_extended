@@ -236,12 +236,25 @@ class TreeSyncController<TKey, TData> {
     //    After recursive children sync, any former roots that were reparented
     //    into the new tree have been moved out, so the controller's live
     //    roots should match desiredKeys (possibly in a different order).
+    //
+    //    `reorderRoots` validates against the controller's `liveRootKeys`
+    //    (roots not in `_pendingDeletion`), so callers that mirror the
+    //    raw `rootKeys` view back into `desired` while a section's exit
+    //    animation is still in flight would otherwise pass the exiting
+    //    key in `desiredKeys` and trip the length check. Filter
+    //    `desiredKeys` against `isExiting` here so the exit is honored
+    //    (the row keeps animating out) without breaking the rest of the
+    //    reorder.
     final liveRoots = <TKey>[
       for (final k in _controller.rootKeys)
         if (!_controller.isExiting(k)) k,
     ];
-    if (!_listEquals(liveRoots, desiredKeys)) {
-      _controller.reorderRoots(desiredKeys);
+    final liveDesiredKeys = <TKey>[
+      for (final k in desiredKeys)
+        if (!_controller.isExiting(k)) k,
+    ];
+    if (!_listEquals(liveRoots, liveDesiredKeys)) {
+      _controller.reorderRoots(liveDesiredKeys);
     }
 
     // 7. Restore expansion state for newly inserted roots after their
@@ -409,8 +422,21 @@ class TreeSyncController<TKey, TData> {
     }
 
     // 5. Reorder all live children to match desired order if needed.
-    if (!_listEquals(remaining, desiredKeys)) {
-      _controller.reorderChildren(parentKey, desiredKeys);
+    //    Filter out keys whose exit animation is still in flight: they
+    //    are not in the controller's `liveChildren` set that
+    //    `reorderChildren` validates against, so passing them would trip
+    //    the length check. The exiting rows continue animating out
+    //    untouched.
+    final liveDesiredKeys = <TKey>[
+      for (final k in desiredKeys)
+        if (!_controller.isExiting(k)) k,
+    ];
+    final liveRemaining = <TKey>[
+      for (final k in remaining)
+        if (!_controller.isExiting(k)) k,
+    ];
+    if (!_listEquals(liveRemaining, liveDesiredKeys)) {
+      _controller.reorderChildren(parentKey, liveDesiredKeys);
     }
 
     // 6. Update tracking state.

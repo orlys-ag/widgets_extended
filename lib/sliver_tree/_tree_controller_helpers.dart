@@ -326,28 +326,68 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     _releaseNid(key);
   }
 
-  void _removeNodesImmediate(List<TKey> nodeIds) {
-    final keysToRemove = nodeIds.toSet();
+  /// Unified node removal: decrements the visible-subtree-size cache up
+  /// the parent chain for every visible node about to be purged, then
+  /// unlinks each from its parent's child list (or `_roots`), purges
+  /// node data (releasing nids), and finally compacts `_order`.
+  ///
+  /// Use this for the **general case** where caller wants to fully
+  /// remove a set of arbitrary keys. Two specialized sites bypass it
+  /// because they already know all removed keys share an immediate
+  /// parent and exploit a single bulk decrement: [setChildren] and
+  /// `_finalizeAnimation`'s deletion branch.
+  ///
+  /// [keysToRemoveSet] is an optional pre-built set used for the
+  /// "first surviving ancestor" walk; if null, the helper builds one
+  /// from [nodesToRemove]. Pass it when the caller already has the set
+  /// in hand to avoid the rebuild cost.
+  ///
+  /// [compactOrder] controls whether step 5 (order-buffer compaction)
+  /// runs. Pass `false` when the caller will batch order compaction
+  /// across multiple invocations (e.g. the operation-group dismissed
+  /// handler, which combines its own category-2 keys into one
+  /// `_removeFromVisibleOrder` call).
+  ///
+  /// Callers retain responsibility for any *other* per-site cleanup
+  /// (e.g. clearing `_nodeToOperationGroup` membership) before invoking
+  /// this helper.
+  void _purgeAndRemoveFromOrder(
+    Iterable<TKey> nodesToRemove, {
+    Set<TKey>? keysToRemoveSet,
+    bool compactOrder = true,
+  }) {
+    final keysSet = keysToRemoveSet ?? nodesToRemove.toSet();
+    if (keysSet.isEmpty) {
+      return;
+    }
 
-    // Check visibility and contiguity BEFORE purging (purge clears the index)
-    int minIdx = _order.length;
-    int maxIdx = -1;
-    int visibleCount = 0;
-    for (final key in nodeIds) {
-      final idx = _order.indexOf(key);
-      if (idx != VisibleOrderBuffer.kNotVisible) {
-        visibleCount++;
-        if (idx < minIdx) {
-          minIdx = idx;
+    // Step 1: cache decrement (first surviving ancestor walk). Must run
+    // before unlink/purge because _bumpVisibleSubtreeSizeFromSelf reads
+    // _parentByNid, and _purgeNodeData → _releaseNid clears it.
+    for (final key in nodesToRemove) {
+      final nid = _nids[key];
+      if (nid == null) {
+        continue;
+      }
+      if (_order.indexByNid[nid] == VisibleOrderBuffer.kNotVisible) {
+        continue;
+      }
+      var ancestorNid = _parentByNid[nid];
+      while (ancestorNid != TreeController._kNoParent && ancestorNid >= 0) {
+        final ancestorKey = _nids.keyOf(ancestorNid);
+        if (ancestorKey == null || !keysSet.contains(ancestorKey)) {
+          break;
         }
-        if (idx > maxIdx) {
-          maxIdx = idx;
-        }
+        ancestorNid = _parentByNid[ancestorNid];
+      }
+      if (ancestorNid != TreeController._kNoParent && ancestorNid >= 0) {
+        _bumpVisibleSubtreeSizeFromSelf(ancestorNid, -1);
       }
     }
 
-    // Purge node data (releases nid and clears visibility)
-    for (final key in nodeIds) {
+    // Step 2: unlink and purge (combined per key — purge clears the
+    // parent pointer, so unlink must happen first within each iteration).
+    for (final key in nodesToRemove) {
       final parentKey = _parentKeyOfKey(key);
       if (parentKey != null) {
         _childListOf(parentKey)?.remove(key);
@@ -357,18 +397,19 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       _purgeNodeData(key);
     }
 
-    // Update visible order
-    if (visibleCount > 0) {
-      if (maxIdx - minIdx + 1 == visibleCount) {
-        // Contiguous removal
-        _order.removeRange(minIdx, maxIdx + 1);
-        _updateIndicesAfterRemove(minIdx);
-      } else {
-        // Non-contiguous removal
-        _order.removeWhereKeyIn(keysToRemove);
-        _rebuildVisibleIndex();
-      }
+    // Step 3: order compaction. _removeFromVisibleOrder handles released
+    // nids correctly (its non-contiguous path sweeps zombies via
+    // removeWhereKeyIn's null-key check). Suppress per-nid callbacks
+    // because the cache was already decremented in Step 1.
+    if (compactOrder) {
+      _runWithSubtreeSizeUpdatesSuppressed(() {
+        _removeFromVisibleOrder(keysSet);
+      });
     }
+  }
+
+  void _removeNodesImmediate(List<TKey> nodeIds) {
+    _purgeAndRemoveFromOrder(nodeIds);
   }
 }
 
