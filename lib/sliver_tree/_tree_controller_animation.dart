@@ -66,7 +66,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     }
 
     // 3. Check standalone animations
-    final standalone = _standaloneAnimations.remove(key);
+    final standalone = _clearStandalone(key);
     if (standalone != null) {
       _bumpAnimGen();
       return standalone.currentExtent;
@@ -165,7 +165,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       }
 
       _clearPendingDeletion(nodeId);
-      _slideAnimations.remove(nodeId);
+      _clearSlide(nodeId);
 
       final opGroupKey = _operationGroupOf(nodeId);
       if (opGroupKey != null && preservedOpKeys.contains(opGroupKey)) {
@@ -175,7 +175,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
         // shouldn't be in both an op group and another source, but any
         // residue would otherwise drive a stray animation anchored to the
         // pre-move layout.
-        if (_standaloneAnimations.remove(nodeId) != null) {
+        if (_clearStandalone(nodeId) != null) {
           _bumpAnimGen();
         }
         final bulk = _bulkAnimationGroup;
@@ -204,14 +204,14 @@ extension _TreeControllerAnimationOps<TKey, TData>
       }
     }
 
-    if (_standaloneAnimations.isEmpty) {
+    if (!_hasAnyStandalone) {
       _standaloneTicker?.stop();
     }
   }
 
   /// Removes an animation from all sources and cleans up group membership.
   AnimationState? _removeAnimation(TKey key) {
-    final state = _standaloneAnimations.remove(key);
+    final state = _clearStandalone(key);
     if (state != null) {
       _bumpAnimGen();
     }
@@ -440,12 +440,15 @@ extension _TreeControllerAnimationOps<TKey, TData>
         ? _computeAnimationSpeedMultiplier(full - startExtent, full)
         : 1.0;
 
-    _standaloneAnimations[key] = AnimationState(
-      type: AnimationType.entering,
-      startExtent: startExtent,
-      targetExtent: targetExtent,
-      triggeringAncestorId: triggeringAncestorId,
-      speedMultiplier: speedMultiplier,
+    _setStandalone(
+      key,
+      AnimationState(
+        type: AnimationType.entering,
+        startExtent: startExtent,
+        targetExtent: targetExtent,
+        triggeringAncestorId: triggeringAncestorId,
+        speedMultiplier: speedMultiplier,
+      ),
     );
     _bumpAnimGen();
     _ensureStandaloneTickerRunning();
@@ -495,7 +498,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
         _removeAnimation(nodeId);
         continue;
       }
-      final animation = _standaloneAnimations[nodeId];
+      final animation = _standaloneAt(nodeId);
       final isExitingDescendant =
           animation != null && animation.type == AnimationType.exiting;
       if (preserveSubtreeState &&
@@ -527,12 +530,15 @@ extension _TreeControllerAnimationOps<TKey, TData>
       full,
     );
 
-    _standaloneAnimations[key] = AnimationState(
-      type: AnimationType.exiting,
-      startExtent: currentExtent,
-      targetExtent: 0.0,
-      triggeringAncestorId: triggeringAncestorId,
-      speedMultiplier: speedMultiplier,
+    _setStandalone(
+      key,
+      AnimationState(
+        type: AnimationType.exiting,
+        startExtent: currentExtent,
+        targetExtent: 0.0,
+        triggeringAncestorId: triggeringAncestorId,
+        speedMultiplier: speedMultiplier,
+      ),
     );
     _bumpAnimGen();
     _ensureStandaloneTickerRunning();
@@ -550,7 +556,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// Ticker callback for standalone (individual) animations only.
   /// Bulk and operation group animations are driven by AnimationController.
   void _onStandaloneTick(Duration elapsed) {
-    if (_standaloneAnimations.isEmpty) {
+    if (!_hasAnyStandalone) {
       _standaloneTicker?.stop();
       return;
     }
@@ -565,14 +571,16 @@ extension _TreeControllerAnimationOps<TKey, TData>
     _lastStandaloneTickTime = elapsed;
     final progressDelta = dt.inMicroseconds / animationDuration.inMicroseconds;
 
-    // Process standalone animations
+    // Process standalone animations. Iterate the working set rather than
+    // scanning the dense array — most slots are null in steady state, and
+    // the working set tracks exactly the live ones.
     final completed = <TKey>[];
-    for (final entry in _standaloneAnimations.entries) {
-      final state = entry.value;
+    for (final nid in _activeStandaloneNids) {
+      final state = _standaloneByNid[nid]!;
       state.progress += progressDelta * state.speedMultiplier;
       state.updateExtent(animationCurve);
       if (state.isComplete) {
-        completed.add(entry.key);
+        completed.add(_nids.keyOfUnchecked(nid));
       }
     }
 
@@ -620,13 +628,13 @@ extension _TreeControllerAnimationOps<TKey, TData>
     _notifyAnimationListeners();
 
     // Stop ticker if no more standalone animations
-    if (_standaloneAnimations.isEmpty) {
+    if (!_hasAnyStandalone) {
       _standaloneTicker?.stop();
     }
   }
 
   bool _finalizeAnimation(TKey key) {
-    final state = _standaloneAnimations.remove(key);
+    final state = _clearStandalone(key);
     if (state == null) {
       return false;
     }
@@ -671,7 +679,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
           }
           for (final desc in descendants) {
             if (_isPendingDeletion(desc) &&
-                !_standaloneAnimations.containsKey(desc)) {
+                !_hasStandalone(desc)) {
               final descNid = _nids[desc];
               if (descNid != null &&
                   _order.indexByNid[descNid] !=
@@ -695,7 +703,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
           // Visible descendants with their own animation will finalize
           // themselves when their animation completes.
           if (_isPendingDeletion(desc) &&
-              !_standaloneAnimations.containsKey(desc)) {
+              !_hasStandalone(desc)) {
             _purgeNodeData(desc);
           }
         }

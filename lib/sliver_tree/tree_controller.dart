@@ -146,9 +146,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// directly continues to compile. Forwards to [NodeStore.nids].
   NodeIdRegistry<TKey> get _nids => _store.nids;
 
-  /// Grows controller-owned per-nid arrays (visible-subtree-size and the
-  /// order buffer's reverse index) to match the store's new capacity.
-  /// Wired into [_store] via its [NodeStore.onCapacityGrew] callback.
+  /// Grows controller-owned per-nid arrays (visible-subtree-size, the
+  /// order buffer's reverse index, and the five animation-state arrays)
+  /// to match the store's new capacity. Wired into [_store] via its
+  /// [NodeStore.onCapacityGrew] callback.
   void _onStoreCapacityGrew(int newCapacity) {
     if (newCapacity > _visibleSubtreeSizeByNid.length) {
       final grown = Int32List(newCapacity);
@@ -158,6 +159,42 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _visibleSubtreeSizeByNid,
       );
       _visibleSubtreeSizeByNid = grown;
+    }
+    if (newCapacity > _fullExtentByNid.length) {
+      final oldLen = _fullExtentByNid.length;
+      final grown = Float64List(newCapacity);
+      grown.setRange(0, oldLen, _fullExtentByNid);
+      // Float64List defaults to 0.0; explicitly mark new slots as
+      // unmeasured so callers can distinguish "never measured" from
+      // "measured 0.0" via the < 0 sentinel.
+      grown.fillRange(oldLen, newCapacity, _unmeasuredExtent);
+      _fullExtentByNid = grown;
+    }
+    if (newCapacity > _isPendingDeletionByNid.length) {
+      final grown = Uint8List(newCapacity);
+      grown.setRange(0, _isPendingDeletionByNid.length, _isPendingDeletionByNid);
+      _isPendingDeletionByNid = grown;
+    }
+    if (newCapacity > _opGroupKeyByNid.length) {
+      final grown = List<TKey?>.filled(newCapacity, null);
+      for (int i = 0; i < _opGroupKeyByNid.length; i++) {
+        grown[i] = _opGroupKeyByNid[i];
+      }
+      _opGroupKeyByNid = grown;
+    }
+    if (newCapacity > _standaloneByNid.length) {
+      final grown = List<AnimationState?>.filled(newCapacity, null);
+      for (int i = 0; i < _standaloneByNid.length; i++) {
+        grown[i] = _standaloneByNid[i];
+      }
+      _standaloneByNid = grown;
+    }
+    if (newCapacity > _slideByNid.length) {
+      final grown = List<SlideAnimation<TKey>?>.filled(newCapacity, null);
+      for (int i = 0; i < _slideByNid.length; i++) {
+        grown[i] = _slideByNid[i];
+      }
+      _slideByNid = grown;
     }
     _order.resizeIndex(newCapacity);
   }
@@ -231,9 +268,25 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return nid;
     }
     // Reset the controller-owned per-nid slots. The store has already
-    // reset its own slots; the visibility arrays live here.
+    // reset its own slots; visibility + animation arrays live here.
     _visibleSubtreeSizeByNid[nid] = 0;
     _order.clearIndexByNid(nid);
+    _fullExtentByNid[nid] = _unmeasuredExtent;
+    if (_isPendingDeletionByNid[nid] != 0) {
+      // Recycled slot from a prior occupant that was pending-deletion;
+      // counter would otherwise drift.
+      _pendingDeletionCount--;
+      _isPendingDeletionByNid[nid] = 0;
+    }
+    _opGroupKeyByNid[nid] = null;
+    if (_standaloneByNid[nid] != null) {
+      _standaloneByNid[nid] = null;
+      _activeStandaloneNids.remove(nid);
+    }
+    if (_slideByNid[nid] != null) {
+      _slideByNid[nid] = null;
+      _activeSlideNids.remove(nid);
+    }
     return nid;
   }
 
@@ -281,6 +334,24 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (nid == null) return;
     _visibleSubtreeSizeByNid[nid] = 0;
     _order.clearIndexByNid(nid);
+    // Clear the animation-state slots. If the slot held pending-deletion,
+    // the counter must be decremented; the helper handles it. The slot
+    // value itself is reset so a later [_adoptKey] that recycles the nid
+    // doesn't read stale data.
+    if (_isPendingDeletionByNid[nid] != 0) {
+      _isPendingDeletionByNid[nid] = 0;
+      _pendingDeletionCount--;
+    }
+    _fullExtentByNid[nid] = _unmeasuredExtent;
+    _opGroupKeyByNid[nid] = null;
+    if (_standaloneByNid[nid] != null) {
+      _standaloneByNid[nid] = null;
+      _activeStandaloneNids.remove(nid);
+    }
+    if (_slideByNid[nid] != null) {
+      _slideByNid[nid] = null;
+      _activeSlideNids.remove(nid);
+    }
   }
 
   /// Nullable lookup of the [TreeNode] record for [key].
@@ -513,9 +584,54 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // ANIMATION STATE
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Animation state for nodes animating via standalone ticker.
-  /// Used for inserts, removes, and cross-group transitions.
-  final Map<TKey, AnimationState> _standaloneAnimations = {};
+  /// Standalone animation state per nid. null = node is not animating
+  /// via the standalone ticker. Reads / writes go through [_standaloneAt],
+  /// [_setStandalone], [_clearStandalone] so the
+  /// [_activeStandaloneNids] working set stays in sync — do NOT mutate
+  /// directly.
+  List<AnimationState?> _standaloneByNid = <AnimationState?>[];
+
+  /// Live "set of nids that have a non-null _standaloneByNid slot."
+  /// The standalone ticker iterates this set instead of scanning the
+  /// whole array. Mutated in lockstep with every write to
+  /// [_standaloneByNid] via the helpers below.
+  final Set<int> _activeStandaloneNids = <int>{};
+
+  /// Reads the standalone animation state for [key], or null when none.
+  AnimationState? _standaloneAt(TKey key) {
+    final nid = _nids[key];
+    return nid == null ? null : _standaloneByNid[nid];
+  }
+
+  /// Sets the standalone animation state for [key]. Maintains
+  /// [_activeStandaloneNids]. [key] must be registered.
+  void _setStandalone(TKey key, AnimationState state) {
+    final nid = _nids[key]!;
+    final prev = _standaloneByNid[nid];
+    _standaloneByNid[nid] = state;
+    if (prev == null) _activeStandaloneNids.add(nid);
+  }
+
+  /// Clears the standalone animation state for [key]. Returns the prior
+  /// state (null if absent). Maintains [_activeStandaloneNids].
+  AnimationState? _clearStandalone(TKey key) {
+    final nid = _nids[key];
+    if (nid == null) return null;
+    final prev = _standaloneByNid[nid];
+    if (prev == null) return null;
+    _standaloneByNid[nid] = null;
+    _activeStandaloneNids.remove(nid);
+    return prev;
+  }
+
+  /// Whether [key] has a standalone animation. O(1).
+  bool _hasStandalone(TKey key) {
+    final nid = _nids[key];
+    return nid != null && _standaloneByNid[nid] != null;
+  }
+
+  /// Whether any nodes are animating via standalone ticker. O(1).
+  bool get _hasAnyStandalone => _activeStandaloneNids.isNotEmpty;
 
   /// Ticker for standalone animations only.
   Ticker? _standaloneTicker;
@@ -530,97 +646,125 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Key is the operation key (the node whose expand/collapse created the group).
   final Map<TKey, OperationGroup<TKey>> _operationGroups = {};
 
-  /// Per-node state that is keyed-access only (no ticker iteration). Holds
-  /// what used to live in three separate maps: `_fullExtents`,
-  /// `_pendingDeletion`, and `_nodeToOperationGroup`. See
-  /// [NodeAnimationState] for the rationale and the field semantics.
-  ///
-  /// Entries are removed once every field reverts to its absent sentinel,
-  /// so `_animStates.isEmpty` and `.length` stay accurate as cheap proxies.
-  final Map<TKey, NodeAnimationState<TKey>> _animStates = {};
+  // ──────── Per-node animation state (dense ECS arrays) ────────
+  //
+  // Five nid-indexed arrays hold every per-node animation field. Reads
+  // and writes go through the accessor methods below; do NOT touch the
+  // arrays directly outside those helpers, since several have
+  // working-set invariants (the two `_active*Nids` sets must stay in
+  // sync with their backing arrays). Capacity is grown in lockstep with
+  // NodeStore via [_onStoreCapacityGrew]; reset via [_clear].
 
-  /// Counter mirroring how many entries in [_animStates] currently have
-  /// `isPendingDeletion == true`. Maintained by every set/clear of that
-  /// field so callers that need the former `_pendingDeletionCount == 0`
-  /// fast-skip (`liveRootKeys`, `getLiveChildren`, `_sortedIndex`) keep
-  /// their O(1) gate.
+  /// Cached measured full extent. Sentinel `-1.0` = unmeasured.
+  /// Float64List default is 0.0, so [_onStoreCapacityGrew] and
+  /// [_adoptKey] explicitly fill new slots with `_unmeasuredExtent`.
+  /// Note: a measured extent of exactly 0.0 is a valid value (zero-height
+  /// row); the < 0 sentinel keeps that distinction.
+  Float64List _fullExtentByNid = Float64List(0);
+
+  /// Sentinel value in [_fullExtentByNid] meaning "never measured."
+  /// Re-exported as a controller constant rather than reusing
+  /// [_unknownExtent] from the animation part file so this file's
+  /// initialization paths don't depend on the part-file load order.
+  static const double _unmeasuredExtent = -1.0;
+
+  /// Pending-deletion flag. 0 = not pending, 1 = pending.
+  Uint8List _isPendingDeletionByNid = Uint8List(0);
+
+  /// Counter mirroring how many slots in [_isPendingDeletionByNid]
+  /// currently hold 1. Maintained by every set/clear so callers that
+  /// need the O(1) "any pending?" fast-skip (`liveRootKeys`,
+  /// `getLiveChildren`, `_sortedIndex`) keep their gate cheap.
   int _pendingDeletionCount = 0;
 
-  /// Returns the [NodeAnimationState] for [key], creating one when missing.
-  /// Use only when about to write a field. For pure reads, prefer
-  /// `_animStates[key]?.field` so empty entries aren't materialized.
-  NodeAnimationState<TKey> _animStateOrCreate(TKey key) {
-    return _animStates[key] ??= NodeAnimationState<TKey>();
-  }
+  /// Operation-group key for each nid. null = node is not a member of
+  /// any operation group. Stored as `List<TKey?>` because TKey is generic.
+  List<TKey?> _opGroupKeyByNid = <TKey?>[];
 
   /// O(1) "is [key] pending deletion?" check.
-  bool _isPendingDeletion(TKey key) =>
-      _animStates[key]?.isPendingDeletion ?? false;
+  bool _isPendingDeletion(TKey key) {
+    final nid = _nids[key];
+    return nid != null && _isPendingDeletionByNid[nid] != 0;
+  }
 
   /// Marks [key] as pending deletion, maintaining [_pendingDeletionCount].
   void _markPendingDeletion(TKey key) {
-    final state = _animStateOrCreate(key);
-    if (!state.isPendingDeletion) {
-      state.isPendingDeletion = true;
+    final nid = _nids[key];
+    if (nid == null) return;
+    if (_isPendingDeletionByNid[nid] == 0) {
+      _isPendingDeletionByNid[nid] = 1;
       _pendingDeletionCount++;
     }
   }
 
   /// Clears the pending-deletion flag for [key], maintaining
-  /// [_pendingDeletionCount] and removing the entry when it becomes empty.
+  /// [_pendingDeletionCount].
   void _clearPendingDeletion(TKey key) {
-    final state = _animStates[key];
-    if (state == null || !state.isPendingDeletion) return;
-    state.isPendingDeletion = false;
-    _pendingDeletionCount--;
-    if (state.isEmpty) _animStates.remove(key);
+    final nid = _nids[key];
+    if (nid == null) return;
+    if (_isPendingDeletionByNid[nid] != 0) {
+      _isPendingDeletionByNid[nid] = 0;
+      _pendingDeletionCount--;
+    }
   }
 
   /// Returns the operation-group key [key] currently belongs to, or null.
-  TKey? _operationGroupOf(TKey key) =>
-      _animStates[key]?.operationGroupKey;
+  TKey? _operationGroupOf(TKey key) {
+    final nid = _nids[key];
+    return nid == null ? null : _opGroupKeyByNid[nid];
+  }
 
   /// Whether [key] is currently a member of any operation group.
-  bool _hasOperationGroup(TKey key) =>
-      _animStates[key]?.operationGroupKey != null;
+  bool _hasOperationGroup(TKey key) {
+    final nid = _nids[key];
+    return nid != null && _opGroupKeyByNid[nid] != null;
+  }
 
   /// Sets [key]'s operation-group membership to [opKey].
   void _setOperationGroup(TKey key, TKey opKey) {
-    _animStateOrCreate(key).operationGroupKey = opKey;
+    final nid = _nids[key];
+    if (nid == null) return;
+    _opGroupKeyByNid[nid] = opKey;
   }
 
   /// Clears [key]'s operation-group membership and returns the previous
-  /// value (null if it had no membership). Removes the entry when it
-  /// becomes empty.
+  /// value (null if it had no membership).
   TKey? _clearOperationGroup(TKey key) {
-    final state = _animStates[key];
-    if (state == null) return null;
-    final prev = state.operationGroupKey;
-    state.operationGroupKey = null;
-    if (state.isEmpty) _animStates.remove(key);
+    final nid = _nids[key];
+    if (nid == null) return null;
+    final prev = _opGroupKeyByNid[nid];
+    if (prev != null) {
+      _opGroupKeyByNid[nid] = null;
+    }
     return prev;
   }
 
   /// Returns the cached full extent for [key], or null if never measured.
-  double? _fullExtentOf(TKey key) => _animStates[key]?.fullExtent;
+  double? _fullExtentOf(TKey key) {
+    final nid = _nids[key];
+    if (nid == null) return null;
+    final ext = _fullExtentByNid[nid];
+    return ext < 0 ? null : ext;
+  }
 
-  /// Sets the cached full extent for [key]. Returns the previous value.
+  /// Sets the cached full extent for [key]. Returns the previous value
+  /// (null if previously unmeasured).
   double? _setFullExtentRaw(TKey key, double extent) {
-    final state = _animStateOrCreate(key);
-    final prev = state.fullExtent;
-    state.fullExtent = extent;
-    return prev;
+    final nid = _nids[key];
+    if (nid == null) return null;
+    final prev = _fullExtentByNid[nid];
+    _fullExtentByNid[nid] = extent;
+    return prev < 0 ? null : prev;
   }
 
   /// Clears the cached full extent for [key]. Returns the previous value
-  /// (null if absent). Removes the entry when it becomes empty.
+  /// (null if previously unmeasured).
   double? _clearFullExtent(TKey key) {
-    final state = _animStates[key];
-    if (state == null) return null;
-    final prev = state.fullExtent;
-    if (prev == null) return null;
-    state.fullExtent = null;
-    if (state.isEmpty) _animStates.remove(key);
+    final nid = _nids[key];
+    if (nid == null) return null;
+    final prev = _fullExtentByNid[nid];
+    if (prev < 0) return null;
+    _fullExtentByNid[nid] = _unmeasuredExtent;
     return prev;
   }
 
@@ -629,9 +773,50 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// structural layout is unaffected (slide is paint-only).
   ///
   /// Populated by [animateSlideFromOffsets] and cleared by the slide tick
-  /// handler on completion. A node can simultaneously be a slide entry and
-  /// have an enter/exit extent animation — the two channels compose at paint.
-  final Map<TKey, SlideAnimation<TKey>> _slideAnimations = {};
+  /// handler on completion. A node can simultaneously have a slide entry
+  /// and an enter/exit extent animation — the two channels compose at
+  /// paint.
+  ///
+  /// Reads / writes go through [_slideAt], [_setSlide], [_clearSlide],
+  /// [_clearAllSlides] so the [_activeSlideNids] working set stays in
+  /// sync — do NOT mutate this array directly.
+  List<SlideAnimation<TKey>?> _slideByNid = <SlideAnimation<TKey>?>[];
+
+  /// Live "set of nids that have a non-null _slideByNid slot." Drives
+  /// [_onSlideTick] iteration and [maxActiveSlideAbsDelta] scan.
+  final Set<int> _activeSlideNids = <int>{};
+
+  SlideAnimation<TKey>? _slideAt(TKey key) {
+    final nid = _nids[key];
+    return nid == null ? null : _slideByNid[nid];
+  }
+
+  void _setSlide(TKey key, SlideAnimation<TKey> slide) {
+    final nid = _nids[key]!;
+    final prev = _slideByNid[nid];
+    _slideByNid[nid] = slide;
+    if (prev == null) _activeSlideNids.add(nid);
+  }
+
+  SlideAnimation<TKey>? _clearSlide(TKey key) {
+    final nid = _nids[key];
+    if (nid == null) return null;
+    final prev = _slideByNid[nid];
+    if (prev == null) return null;
+    _slideByNid[nid] = null;
+    _activeSlideNids.remove(nid);
+    return prev;
+  }
+
+  /// Drops every active slide entry. O(active slides).
+  void _clearAllSlides() {
+    for (final nid in _activeSlideNids) {
+      _slideByNid[nid] = null;
+    }
+    _activeSlideNids.clear();
+  }
+
+  bool get _hasAnySlide => _activeSlideNids.isNotEmpty;
 
   /// Lazy [Ticker] driving every entry in [_slideAnimations]. One shared
   /// ticker is sufficient because all active slides share the same start
@@ -735,9 +920,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     final prefix = List<double>.filled(_order.length + 1, 0.0, growable: false);
     double acc = 0.0;
+    final orderNids = _order.orderNids;
     for (int i = 0; i < _order.length; i++) {
-      final key = _nids.keyOfUnchecked(_order.orderNids[i]);
-      acc += _fullExtentOf(key) ?? defaultExtent;
+      final ext = _fullExtentByNid[orderNids[i]];
+      acc += ext < 0 ? defaultExtent : ext;
       prefix[i + 1] = acc;
     }
     _fullOffsetPrefix = prefix;
@@ -798,8 +984,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return cached;
     }
     final set = <TKey>{};
-    if (_standaloneAnimations.isNotEmpty) {
-      set.addAll(_standaloneAnimations.keys);
+    if (_hasAnyStandalone) {
+      for (final nid in _activeStandaloneNids) {
+        set.add(_nids.keyOfUnchecked(nid));
+      }
     }
     if (_operationGroups.isNotEmpty) {
       for (final g in _operationGroups.values) {
@@ -901,8 +1089,73 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// occurs. Panics (unchecked read) if [visibleIndex] is out of range.
   int visibleNidAt(int visibleIndex) => _order.orderNids[visibleIndex];
 
+  /// Read-only view over the visible-order nid buffer for hot-path
+  /// consumers that walk all visible positions and want to skip the
+  /// per-position [visibleNidAt] dispatch. The underlying buffer's
+  /// length may exceed [visibleNodeCount] — only the first N entries
+  /// are valid. The buffer itself is mutated in place by structural
+  /// changes; callers must not retain the reference across mutations.
+  Int32List get debugOrderNidsView => _order.orderNids;
+
   /// Depth for [nid] (0 for roots). No [TKey] hash. [nid] must be live.
   int depthOfNid(int nid) => _store.depthByNid[nid];
+
+  /// Estimated full extent for the live [nid] — measured value when
+  /// available, [defaultExtent] otherwise. Hot-path equivalent of
+  /// [getEstimatedExtent] that avoids the [TKey]→nid hash. Caller must
+  /// guarantee [nid] is live and within range.
+  double getEstimatedExtentNid(int nid) {
+    final ext = _fullExtentByNid[nid];
+    return ext < 0 ? defaultExtent : ext;
+  }
+
+  /// Current animated extent for the live [nid]. Hot-path equivalent of
+  /// [getCurrentExtent]; resolves the same bulk → operation-group →
+  /// standalone fallback chain but reads from per-nid arrays where
+  /// possible. Caller must guarantee [nid] is live and within range.
+  double getCurrentExtentNid(int nid) {
+    final fullRaw = _fullExtentByNid[nid];
+    final full = fullRaw < 0 ? defaultExtent : fullRaw;
+    // 1. Bulk
+    final bulk = _bulkAnimationGroup;
+    if (bulk != null) {
+      final key = _nids.keyOfUnchecked(nid);
+      if (bulk.members.contains(key)) {
+        return full * bulk.value;
+      }
+    }
+    // 2. Operation group
+    final opKey = _opGroupKeyByNid[nid];
+    if (opKey != null) {
+      final group = _operationGroups[opKey];
+      if (group != null) {
+        final key = _nids.keyOfUnchecked(nid);
+        final member = group.members[key];
+        if (member != null) {
+          return member.computeExtent(group.curvedValue, full);
+        }
+      }
+    }
+    // 3. Standalone
+    final animation = _standaloneByNid[nid];
+    if (animation == null) return full;
+    final t = animationCurve.transform(animation.progress.clamp(0.0, 1.0));
+    if (animation.targetExtent == _unknownExtent) {
+      return animation.type == AnimationType.entering
+          ? full * t
+          : full * (1.0 - t);
+    }
+    return lerpDouble(animation.startExtent, animation.targetExtent, t)!;
+  }
+
+  /// Slide delta for the live [nid] (paint-only FLIP offset), or 0.0 when
+  /// the node is not currently sliding. Hot-path equivalent of
+  /// [getSlideDelta] — read every paint, hit-test, and transform call
+  /// for visible rows, so saving the [TKey]→nid hash matters.
+  double getSlideDeltaNid(int nid) {
+    final slide = _slideByNid[nid];
+    return slide == null ? 0.0 : slide.currentDelta;
+  }
 
   /// Gets the horizontal indent for the given node.
   double getIndent(TKey key) {
@@ -1002,7 +1255,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// it does not change layout, sticky geometry, or eviction decisions.
   /// Callers that care about slide state read [hasActiveSlides] instead.
   bool get hasActiveAnimations =>
-      _standaloneAnimations.isNotEmpty ||
+      _hasAnyStandalone ||
       _operationGroups.isNotEmpty ||
       (_bulkAnimationGroup != null && !_bulkAnimationGroup!.isEmpty);
 
@@ -1013,7 +1266,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// signal that [hasActiveAnimations] drives. The sliver element routes
   /// slide-only ticks to [RenderObject.markNeedsPaint] rather than
   /// [RenderObject.markNeedsLayout] based on this flag.
-  bool get hasActiveSlides => _slideAnimations.isNotEmpty;
+  bool get hasActiveSlides => _hasAnySlide;
 
   /// Maximum |currentDelta| across every active slide entry, or 0.0 when
   /// no slides are active.
@@ -1032,10 +1285,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// currentDelta lerps to 0), so the transient overbuild contracts with
   /// the animation.
   double get maxActiveSlideAbsDelta {
-    if (_slideAnimations.isEmpty) return 0.0;
+    if (!_hasAnySlide) return 0.0;
     double m = 0.0;
-    for (final entry in _slideAnimations.values) {
-      final d = entry.currentDelta.abs();
+    for (final nid in _activeSlideNids) {
+      final d = _slideByNid[nid]!.currentDelta.abs();
       if (d > m) m = d;
     }
     return m;
@@ -1046,7 +1299,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [RenderSliverTree.applyPaintTransform], and the hit-test path on
   /// every frame (no caching — staleness-safe under tick-without-paint).
   double getSlideDelta(TKey key) {
-    final slide = _slideAnimations[key];
+    final slide = _slideAt(key);
     if (slide == null) {
       return 0.0;
     }
@@ -1078,7 +1331,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// currently active. When false and [isBulkAnimating] is true, the render
   /// object can use its scalar-offset fast path for the whole frame.
   bool get hasOpGroupAnimations =>
-      _operationGroups.isNotEmpty || _standaloneAnimations.isNotEmpty;
+      _operationGroups.isNotEmpty || _hasAnyStandalone;
 
   /// Monotonic counter that bumps whenever the bulk animation group is
   /// created, destroyed, or its member set changes. The render object uses
@@ -1191,7 +1444,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// collapsing groups.
   AnimationState? getAnimationState(TKey key) {
     // 1. Standalone animations
-    final standalone = _standaloneAnimations[key];
+    final standalone = _standaloneAt(key);
     if (standalone != null) return standalone;
 
     // 2. Operation group
@@ -1236,7 +1489,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (group != null && group.pendingRemoval.contains(key)) return true;
     }
     // Check standalone animations
-    final animation = _standaloneAnimations[key];
+    final animation = _standaloneAt(key);
     return animation != null && animation.type == AnimationType.exiting;
   }
 
@@ -1275,7 +1528,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     // 3. Check standalone animations
-    final animation = _standaloneAnimations[key];
+    final animation = _standaloneAt(key);
     if (animation == null) return fullExtent;
 
     final t = animationCurve.transform(animation.progress.clamp(0.0, 1.0));
@@ -1328,8 +1581,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // No-animation mode: drop any in-flight slide and return. Callers that
       // want the slide machinery to "settle" synchronously see
       // hasActiveSlides == false immediately.
-      if (_slideAnimations.isNotEmpty) {
-        _slideAnimations.clear();
+      if (_hasAnySlide) {
+        _clearAllSlides();
         _slideTicker?.stop();
       }
       return;
@@ -1342,12 +1595,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       final prior = priorOffsets[key];
       if (prior == null) continue;
       final rawDelta = prior - current;
-      final existing = _slideAnimations[key];
+      final existing = _slideAt(key);
       if (existing == null) {
         if (rawDelta == 0.0) continue;
-        _slideAnimations[key] = SlideAnimation<TKey>(
-          startDelta: rawDelta,
-          curve: curve,
+        _setSlide(
+          key,
+          SlideAnimation<TKey>(startDelta: rawDelta, curve: curve),
         );
         installed++;
       } else {
@@ -1358,7 +1611,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // starting delta so the slide continues seamlessly.
         final composed = existing.currentDelta + rawDelta;
         if (composed == 0.0) {
-          _slideAnimations.remove(key);
+          _clearSlide(key);
           continue;
         }
         existing.startDelta = composed;
@@ -1369,7 +1622,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
-    if (_slideAnimations.isEmpty) {
+    if (!_hasAnySlide) {
       _slideTicker?.stop();
       return;
     }
@@ -1402,7 +1655,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///    stop the ticker. No further tick will fire, so there is no "second
   ///    paint needed" window.
   void _onSlideTick(Duration elapsed) {
-    if (_slideAnimations.isEmpty) {
+    if (!_hasAnySlide) {
       _slideTicker?.stop();
       return;
     }
@@ -1410,7 +1663,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final raw = totalUs <= 0 ? 1.0 : elapsed.inMicroseconds / totalUs;
     final complete = raw >= 1.0 - 1e-9;
 
-    for (final entry in _slideAnimations.values) {
+    for (final nid in _activeSlideNids) {
+      final entry = _slideByNid[nid]!;
       entry.progress = complete ? 1.0 : raw.clamp(0.0, 1.0);
       final t = entry.curve.transform(entry.progress);
       entry.currentDelta = complete
@@ -1421,7 +1675,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _notifyAnimationListeners();
 
     if (complete) {
-      _slideAnimations.clear();
+      _clearAllSlides();
       _slideTicker?.stop();
     }
   }
@@ -1462,7 +1716,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     if (oldExtent == extent) {
       // Still resolve unknown targets even when extent matches.
-      final animation = _standaloneAnimations[key];
+      final animation = _standaloneAt(key);
       if (animation != null && animation.targetExtent == _unknownExtent) {
         if (animation.type == AnimationType.entering) {
           animation.targetExtent = extent;
@@ -1474,7 +1728,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _setFullExtentRaw(key, extent);
     _invalidateFullOffsetPrefix();
     // If node is animating with unknown target, update the animation
-    final animation = _standaloneAnimations[key];
+    final animation = _standaloneAt(key);
     if (animation != null && animation.targetExtent == _unknownExtent) {
       // Now we know the real extent - update the animation state
       if (animation.type == AnimationType.entering) {
@@ -1779,8 +2033,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           correct(k);
         }
       }
-      for (final k in _standaloneAnimations.keys) {
-        correct(k);
+      for (final nid in _activeStandaloneNids) {
+        correct(_nids.keyOfUnchecked(nid));
       }
 
       final rowExtent = getCurrentExtent(key);
@@ -2732,7 +2986,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       for (final child in _childListOf(parentKey)!) {
         if (_hasOperationGroup(child) ||
             _bulkAnimationGroup?.members.contains(child) == true ||
-            _standaloneAnimations.containsKey(child)) {
+            _hasStandalone(child)) {
           needsVisibleRebuild = true;
           break;
         }
@@ -2958,7 +3212,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         if (_isPendingDeletion(nodeId)) continue;
         if (existingGroup.members.containsKey(nodeId)) continue;
 
-        if (_standaloneAnimations[nodeId] case final anim?
+        if (_standaloneAt(nodeId) case final anim?
             when anim.type == AnimationType.exiting) {
           // Reverse the exit to an enter with speedMultiplier
           _startStandaloneEnterAnimation(nodeId);
@@ -3217,7 +3471,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // Still check children for exiting animations regardless of depth.
       for (final childId in children) {
         // Check standalone exiting
-        final animation = _standaloneAnimations[childId];
+        final animation = _standaloneAt(childId);
         if (animation != null && animation.type == AnimationType.exiting) {
           if (!_isPendingDeletion(childId)) {
             nodesToReverseExit.add(childId);
@@ -3352,14 +3606,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final nodesToHideSet = nodesToHide.toSet();
 
     // Check standalone entering animations
-    for (final entry in _standaloneAnimations.entries) {
-      if (entry.value.type == AnimationType.entering) {
-        if (!nodesToHideSet.contains(entry.key)) {
-          if (_parentKeyOfKey(entry.key) != null) {
-            nodesToHide.add(entry.key);
-            nodesToHideSet.add(entry.key);
-          }
-        }
+    for (final nid in _activeStandaloneNids) {
+      final state = _standaloneByNid[nid]!;
+      if (state.type != AnimationType.entering) continue;
+      final key = _nids.keyOfUnchecked(nid);
+      if (nodesToHideSet.contains(key)) continue;
+      if (_parentKeyOfKey(key) != null) {
+        nodesToHide.add(key);
+        nodesToHideSet.add(key);
       }
     }
 
@@ -3458,7 +3712,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         for (final key in nodesToHide) {
           if (_isPendingDeletion(key)) continue;
           if (_hasOperationGroup(key)) continue;
-          if (_standaloneAnimations.containsKey(key)) {
+          if (_hasStandalone(key)) {
             // Reverse standalone animation smoothly
             _startStandaloneExitAnimation(key);
           } else {
@@ -3533,7 +3787,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         for (int i = children.length - 1; i >= 0; i--) {
           final childId = children[i];
           if (_isPendingDeletion(childId) &&
-              _standaloneAnimations.containsKey(childId)) {
+              _hasStandalone(childId)) {
             stack.add(childId);
           }
         }
@@ -3550,7 +3804,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           final childId = children[i];
           if (_hasOperationGroup(childId) ||
               _bulkAnimationGroup?.members.contains(childId) == true ||
-              _standaloneAnimations.containsKey(childId)) {
+              _hasStandalone(childId)) {
             stack.add(childId);
           }
         }

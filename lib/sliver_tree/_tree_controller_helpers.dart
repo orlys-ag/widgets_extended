@@ -19,14 +19,18 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     _operationGroups.clear();
     _slideTicker?.dispose();
     _slideTicker = null;
-    _slideAnimations.clear();
+    _slideByNid = <SlideAnimation<TKey>?>[];
+    _activeSlideNids.clear();
     _store.clear();
     _visibleSubtreeSizeByNid = Int32List(0);
+    _fullExtentByNid = Float64List(0);
+    _isPendingDeletionByNid = Uint8List(0);
+    _opGroupKeyByNid = <TKey?>[];
+    _standaloneByNid = <AnimationState?>[];
+    _activeStandaloneNids.clear();
+    _pendingDeletionCount = 0;
     _roots.clear();
     _order.reset();
-    _standaloneAnimations.clear();
-    _animStates.clear();
-    _pendingDeletionCount = 0;
     _bumpAnimGen();
   }
 
@@ -55,6 +59,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     assert(() {
       _order.debugAssertConsistent();
       _assertNidRegistryConsistency();
+      _assertAnimationStateConsistency();
       return true;
     }());
   }
@@ -64,6 +69,87 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   void _assertNidRegistryConsistency() {
     assert(() {
       _store.debugAssertConsistent();
+      return true;
+    }());
+  }
+
+  /// Debug-only: verifies the per-nid animation arrays agree with their
+  /// working-set counters / sets.
+  ///
+  /// 1. [_pendingDeletionCount] equals the number of 1-bits in
+  ///    [_isPendingDeletionByNid] across live nids.
+  /// 2. [_activeStandaloneNids] contains exactly the nids whose
+  ///    [_standaloneByNid] slot is non-null.
+  /// 3. [_activeSlideNids] contains exactly the nids whose
+  ///    [_slideByNid] slot is non-null.
+  /// 4. Every [_isPendingDeletionByNid] = 1 / non-null _standaloneByNid /
+  ///    non-null _slideByNid lives at a registered nid (no orphans
+  ///    surviving past [_releaseNid]).
+  void _assertAnimationStateConsistency() {
+    assert(() {
+      // Counter check.
+      int pdCount = 0;
+      for (int nid = 0; nid < _nids.length; nid++) {
+        if (_isPendingDeletionByNid[nid] != 0) {
+          if (_nids.keyOf(nid) == null) {
+            throw StateError(
+              "_isPendingDeletionByNid[$nid] = 1 for freed slot",
+            );
+          }
+          pdCount++;
+        }
+      }
+      if (pdCount != _pendingDeletionCount) {
+        throw StateError(
+          "_pendingDeletionCount = $_pendingDeletionCount, "
+          "but counted $pdCount slots set",
+        );
+      }
+      // Standalone working-set check.
+      int standaloneCount = 0;
+      for (int nid = 0; nid < _nids.length; nid++) {
+        if (_standaloneByNid[nid] != null) {
+          if (_nids.keyOf(nid) == null) {
+            throw StateError(
+              "_standaloneByNid[$nid] non-null for freed slot",
+            );
+          }
+          if (!_activeStandaloneNids.contains(nid)) {
+            throw StateError(
+              "_standaloneByNid[$nid] non-null but missing from "
+              "_activeStandaloneNids",
+            );
+          }
+          standaloneCount++;
+        }
+      }
+      if (_activeStandaloneNids.length != standaloneCount) {
+        throw StateError(
+          "_activeStandaloneNids has ${_activeStandaloneNids.length} entries, "
+          "but only $standaloneCount nids carry a standalone slot",
+        );
+      }
+      // Slide working-set check.
+      int slideCount = 0;
+      for (int nid = 0; nid < _nids.length; nid++) {
+        if (_slideByNid[nid] != null) {
+          if (_nids.keyOf(nid) == null) {
+            throw StateError("_slideByNid[$nid] non-null for freed slot");
+          }
+          if (!_activeSlideNids.contains(nid)) {
+            throw StateError(
+              "_slideByNid[$nid] non-null but missing from _activeSlideNids",
+            );
+          }
+          slideCount++;
+        }
+      }
+      if (_activeSlideNids.length != slideCount) {
+        throw StateError(
+          "_activeSlideNids has ${_activeSlideNids.length} entries, "
+          "but only $slideCount nids carry a slide slot",
+        );
+      }
       return true;
     }());
   }
@@ -259,7 +345,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       _invalidateFullOffsetPrefix();
     }
     // Clean up standalone animation state
-    if (_standaloneAnimations.remove(key) != null) {
+    if (_clearStandalone(key) != null) {
       _bumpAnimGen();
     }
     // Clean up operation group membership

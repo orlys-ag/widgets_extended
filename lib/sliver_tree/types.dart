@@ -311,45 +311,6 @@ class SliverTreeParentData extends ParentData {
   }
 }
 
-/// Per-node mutable state that lives outside the structural store but is
-/// keyed by node identity rather than scanned by an animation ticker.
-/// Consolidates the three formerly-parallel maps `_fullExtents`,
-/// `_pendingDeletion`, and `_nodeToOperationGroup` into one record so
-/// every mutation site updates a single lookup instead of three.
-///
-/// Each field defaults to its "absent" sentinel (null for [fullExtent]
-/// and [operationGroupKey]; false for [isPendingDeletion]). When every
-/// field is at its sentinel the entry is logically empty and should be
-/// removed from the owning map.
-///
-/// The two ticker-iterated maps (`_standaloneAnimations`,
-/// `_slideAnimations`) are deliberately kept separate: their hot path is
-/// `for (entry in map.entries)` from a per-vsync callback, so folding
-/// them into this record would force every tick to scan irrelevant
-/// entries (or maintain a parallel working set, which negates the
-/// cohesion win).
-class NodeAnimationState<TKey> {
-  NodeAnimationState();
-
-  /// Cached measured full extent. Null when the node has not yet been
-  /// laid out.
-  double? fullExtent;
-
-  /// Whether the node is mid-exit due to [TreeController.remove] (versus a
-  /// parent collapse). True between the call to remove and the eventual
-  /// purge from the structural store when the exit animation completes.
-  bool isPendingDeletion = false;
-
-  /// Operation key (the node whose expand/collapse created the group) for
-  /// the operation group this node currently belongs to, or null.
-  TKey? operationGroupKey;
-
-  /// True when no field carries information — the owning map should
-  /// remove the entry.
-  bool get isEmpty =>
-      fullExtent == null && !isPendingDeletion && operationGroupKey == null;
-}
-
 /// Snapshot of the controller's bulk-animation state at a single point in
 /// time, fetched as one unit so render-layer hot paths can avoid the four
 /// separate getter calls (`isBulkAnimating`, `bulkAnimationValue`,

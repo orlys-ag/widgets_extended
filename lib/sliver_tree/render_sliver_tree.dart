@@ -174,9 +174,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     double sBulkFull = 0.0;
     _stableCumulative[0] = 0.0;
     _bulkFullCumulative[0] = 0.0;
+    // Read nids straight from the order buffer to skip the
+    // [TKey]→nid hash inside this O(N)-per-frame loop. Membership
+    // checks still go through the snapshot (which holds Set refs).
+    final orderNids = controller.debugOrderNidsView;
     for (int i = 0; i < n; i++) {
+      final nid = orderNids[i];
       final key = visibleNodes[i];
-      final full = controller.getEstimatedExtent(key);
+      final full = controller.getEstimatedExtentNid(nid);
       if (bulkData.containsMember(key)) {
         sBulkFull += full;
       } else {
@@ -350,19 +355,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   Map<TKey, double> snapshotVisibleOffsets() {
     final result = <TKey, double>{};
     double structural = 0.0;
-    for (final key in controller.visibleNodes) {
-      final slide = controller.getSlideDelta(key);
-      result[key] = structural + slide;
-      structural += _currentVisibleExtentOf(key);
+    final visible = controller.visibleNodes;
+    final orderNids = controller.debugOrderNidsView;
+    for (int i = 0; i < visible.length; i++) {
+      final nid = orderNids[i];
+      final slide = controller.getSlideDeltaNid(nid);
+      result[visible[i]] = structural + slide;
+      structural += controller.getCurrentExtentNid(nid);
     }
     return result;
-  }
-
-  /// Structural extent of [key] accounting for any in-flight enter/exit
-  /// animation — same value Pass 1 would compute. Does not include slide
-  /// delta (slide is paint-only).
-  double _currentVisibleExtentOf(TKey key) {
-    return controller.getCurrentExtent(key);
   }
 
   /// Finds the first live (non-pending-deletion) visible row whose painted
@@ -397,9 +398,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       double lastLiveOffset = 0.0;
       double lastLiveExtent = 0.0;
       double structural = 0.0;
-      for (final key in visible) {
-        final extent = controller.getCurrentExtent(key);
-        final slide = controller.getSlideDelta(key);
+      final orderNids = controller.debugOrderNidsView;
+      for (int i = 0; i < visible.length; i++) {
+        final nid = orderNids[i];
+        final key = visible[i];
+        final extent = controller.getCurrentExtentNid(nid);
+        final slide = controller.getSlideDeltaNid(nid);
         final paintedOffset = structural + slide;
         if (!controller.isPendingDeletion(key)) {
           if (scrollY < paintedOffset + extent) {
@@ -803,10 +807,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           totalScrollExtent =
               _nodeOffsetsByNid[prevNid] + _nodeExtentsByNid[prevNid];
         }
+        final orderNids = controller.debugOrderNidsView;
         for (int i = firstAnimIdx; i < visibleNodes.length; i++) {
-          final nodeId = visibleNodes[i];
-          final newExtent = controller.getCurrentExtent(nodeId);
-          final nid = _controller.nidOf(nodeId);
+          final nid = orderNids[i];
+          final newExtent = controller.getCurrentExtentNid(nid);
           _nodeOffsetsByNid[nid] = totalScrollExtent;
           _nodeExtentsByNid[nid] = newExtent;
           totalScrollExtent += newExtent;
@@ -822,9 +826,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       totalScrollExtent = 0.0;
       bool foundAnimating = false;
 
-      for (final nodeId in visibleNodes) {
-        final newExtent = controller.getCurrentExtent(nodeId);
-        final nid = _controller.nidOf(nodeId);
+      final orderNids = controller.debugOrderNidsView;
+      for (int i = 0; i < visibleNodes.length; i++) {
+        final nid = orderNids[i];
+        final newExtent = controller.getCurrentExtentNid(nid);
         final oldExtent = _nodeExtentsByNid[nid];
 
         if (!foundAnimating && oldExtent == newExtent) {
@@ -1034,11 +1039,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // tail so _recomputeOffsetsFrom can walk it, then fall back off
         // the fast path for this frame. The next frame will rebuild cumulatives
         // fresh via _rebuildBulkCumulatives.
+        final orderNids = controller.debugOrderNidsView;
         for (int i = firstChangedIdx; i < visibleNodes.length; i++) {
-          final nodeId = visibleNodes[i];
           if (i >= cacheStartIndex && i < cacheEndIndex) continue;
-          final nid = _controller.nidOf(nodeId);
-          _nodeExtentsByNid[nid] = controller.getCurrentExtent(nodeId);
+          final nid = orderNids[i];
+          _nodeExtentsByNid[nid] = controller.getCurrentExtentNid(nid);
         }
         _bulkCumulativesValid = false;
       }
@@ -1356,7 +1361,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // Paint-only FLIP slide delta — read from the controller on every
       // frame so localToGlobal / semantics (which can resolve between
       // ticks) always see the current value.
-      final slideDelta = controller.getSlideDelta(nodeId);
+      final slideDelta = controller.getSlideDeltaNid(nid);
 
       if (slideDelta != 0.0) {
         (slidingIndices ??= <int>[]).add(i);
@@ -1375,9 +1380,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
 
     if (slidingIndices != null) {
+      final orderNids = controller.debugOrderNidsView;
       slidingIndices.sort((a, b) {
-        final da = controller.getSlideDelta(visibleNodes[a]).abs();
-        final db = controller.getSlideDelta(visibleNodes[b]).abs();
+        final da = controller.getSlideDeltaNid(orderNids[a]).abs();
+        final db = controller.getSlideDeltaNid(orderNids[b]).abs();
         final cmp = da.compareTo(db);
         if (cmp != 0) return cmp;
         return a.compareTo(b);
@@ -1391,7 +1397,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           offset: offset,
           nodeId: nodeId,
           child: child,
-          slideDelta: controller.getSlideDelta(nodeId),
+          slideDelta: controller.getSlideDeltaNid(orderNids[i]),
           scrollOffset: scrollOffset,
           remainingPaintExtent: remainingPaintExtent,
         );
@@ -1554,7 +1560,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // Shift the hit coordinate by the node's current slide delta so a
       // tap lands on the visually-displaced child rather than on the
       // structural position nobody sees during a slide.
-      final slideDelta = controller.getSlideDelta(nodeId);
+      final slideDelta = controller.getSlideDeltaNid(nid);
       final localMainAxisPosition =
           mainAxisPosition + scrollOffset - nodeOffset - slideDelta;
       if (localMainAxisPosition < 0) continue;
@@ -1613,9 +1619,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final parentData = child.parentData! as SliverTreeParentData;
     final nodeId = parentData.nodeId;
 
+    // Resolve nid once and reuse it for sticky / animating / slide
+    // checks below — three queries that all share the same key→nid hash.
+    final nid = nodeId == null ? -1 : _controller.nidOf(nodeId as TKey);
+
     // Check if this child is a sticky header (O(1) lookup).
-    if (nodeId != null) {
-      final sticky = _sticky.infoForNid(_controller.nidOf(nodeId as TKey));
+    if (nid >= 0) {
+      final sticky = _sticky.infoForNid(nid);
       if (sticky != null) {
         transform.translateByDouble(sticky.indent, sticky.pinnedY, 0.0, 1.0);
         return;
@@ -1639,9 +1649,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // callers that resolve coordinates via applyPaintTransform — localToGlobal,
     // focus traversal, semantics, Scrollable.ensureVisible — track the
     // visually-displaced row during a slide.
-    final slideDelta = nodeId != null
-        ? controller.getSlideDelta(nodeId as TKey)
-        : 0.0;
+    final slideDelta = nid >= 0 ? controller.getSlideDeltaNid(nid) : 0.0;
 
     final scrollOffset = constraints.scrollOffset;
     transform.translateByDouble(
