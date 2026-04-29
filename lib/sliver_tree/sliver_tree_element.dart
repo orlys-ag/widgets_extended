@@ -140,6 +140,15 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       // Old-controller keys are meaningless under the new controller;
       // drop the queue and let createChild rebuild against fresh data.
       _dirtyKeys.clear();
+      // Schedule a GC pass: keys that existed under the old controller
+      // but not under the new one would otherwise survive as stale
+      // elements (the renderObject's _children map was cleared in the
+      // controller setter, but the Elements themselves remain in
+      // _children, still in the widget tree, with no live nodeData).
+      // Without this, a parent rebuild can swap controllers and leave
+      // dead rows participating in find/semantics/focus until the next
+      // structural notification on the new controller fires GC.
+      _scheduleGarbageCollection();
     }
 
     if (_didReassemble) {

@@ -666,10 +666,13 @@ extension _TreeControllerAnimationOps<TKey, TData>
         // bookkeeping here, while parent links are still intact,
         // preserves the cache invariant.
         //
-        // Visible loss = key (if visible) + every visible descendant
-        // about to be purged in the loop below. We DO NOT count
-        // descendants that have their own animation in flight — those
-        // will finalize separately and decrement themselves.
+        // Visible loss = key (if visible) + every visible pending-deletion
+        // descendant. Descendants with their own in-flight animation are
+        // counted here too: when they later finalize, their parent slot
+        // points to this nid (which is about to be freed), so
+        // _parentKeyOfKey returns null and their own visibleLoss block
+        // is skipped. Without pre-counting them here, the ancestor's
+        // cache would stay inflated by the descendant count forever.
         if (parentKey != null) {
           int visibleLoss = 0;
           final keyNid = _nids[key];
@@ -678,8 +681,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
             visibleLoss++;
           }
           for (final desc in descendants) {
-            if (_isPendingDeletion(desc) &&
-                !_hasStandalone(desc)) {
+            if (_isPendingDeletion(desc)) {
               final descNid = _nids[desc];
               if (descNid != null &&
                   _order.indexByNid[descNid] !=

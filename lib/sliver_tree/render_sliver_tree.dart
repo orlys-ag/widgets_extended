@@ -64,9 +64,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _bulkCumulativesCount = 0;
     _lastBulkAnimationGeneration = -1;
     _lastFrameUsedBulkCumulatives = false;
-    // Drop child map bookkeeping — the actual RenderBoxes stay adopted and
-    // will be reconciled on the next layout via the child manager.
-    _children.clear();
+    // Do NOT clear `_children`: it is keyed by user TKey, not by the
+    // controller's internal nid space, so a key shared between the old
+    // and new controller (e.g. the user keeps the same node identity
+    // when swapping data sources) maps to the same already-adopted
+    // RenderBox. Clearing the map would orphan that box (it stays
+    // adopted in the parent-child relationship but vanishes from the
+    // iteration map, so paint/hit-test/visitChildren skip it), and the
+    // element-side update path won't re-insert it because in-place
+    // widget updates don't trigger `insertRenderObjectChild`.
+    //
+    // Stale entries for keys that exist only under the old controller
+    // are evicted by the element manager's GC pass (scheduled from
+    // `update` when the controller swaps), which calls
+    // `removeRenderObjectChild` and properly drops the adopted box.
     markNeedsLayout();
   }
 

@@ -78,6 +78,13 @@ class StickyHeaderComputer<TKey, TData> {
   /// paint, hit-test, transform, and `isNodeRetained`.
   List<StickyHeaderInfo<TKey>?> _stickyByNid = <StickyHeaderInfo<TKey>?>[];
 
+  /// Nids written into [_stickyByNid] this frame. Tracked separately from
+  /// [_stickyHeaders] so the next frame's clear loop can null its slots
+  /// without going through `nidOf(sticky.nodeId)` — a freed key would
+  /// resolve to `noNid` and the slot would survive into the next frame,
+  /// leaking stickiness onto whichever fresh key recycles that nid.
+  final List<int> _writtenStickyNids = <int>[];
+
   // ────────────────────────────────────────────────────────────────────────
   // PRECOMPUTE SCRATCH (rebuilt each layout, reused across frames)
   // ────────────────────────────────────────────────────────────────────────
@@ -117,6 +124,7 @@ class StickyHeaderComputer<TKey, TData> {
   void reset() {
     _stickyByNid = <StickyHeaderInfo<TKey>?>[];
     _stickyHeaders.clear();
+    _writtenStickyNids.clear();
     dirty = true;
     _lastStickyScrollOffset = double.nan;
     _lastPrecomputedCount = 0;
@@ -203,16 +211,23 @@ class StickyHeaderComputer<TKey, TData> {
   /// next non-throttled recompute.
   void purgeExitingDuringThrottle() {
     if (_stickyHeaders.isEmpty) return;
+    // Track removals so [_writtenStickyNids] stays in sync with
+    // [_stickyByNid] for the next recompute's clear loop.
+    final purgedNids = <int>{};
     _stickyHeaders.removeWhere((s) {
       if (_controller.isExiting(s.nodeId)) {
         final nid = _controller.nidOf(s.nodeId);
         if (nid >= 0 && nid < _stickyByNid.length) {
           _stickyByNid[nid] = null;
+          purgedNids.add(nid);
         }
         return true;
       }
       return false;
     });
+    if (purgedNids.isNotEmpty) {
+      _writtenStickyNids.removeWhere(purgedNids.contains);
+    }
   }
 
   // ────────────────────────────────────────────────────────────────────────
@@ -460,16 +475,19 @@ class StickyHeaderComputer<TKey, TData> {
     required Float64List nodeExtentsByNid,
     required FindFirstVisibleIndex<TKey> findFirstVisibleIndex,
   }) {
-    // Null out prior-layout sticky entries before recomputing. The nid
-    // slots for nodes that remain sticky this frame are rewritten below;
-    // slots for nodes that no longer qualify stay null, which doubles as
-    // the "is-sticky" membership test used by paint/hit-test/semantics.
-    for (final sticky in _stickyHeaders) {
-      final nid = _controller.nidOf(sticky.nodeId);
+    // Null out prior-layout sticky entries before recomputing. Iterate
+    // [_writtenStickyNids] (the nids we wrote LAST frame) instead of
+    // resolving keys back to nids — a key that was freed since last
+    // layout (immediate-purge removal) would yield `noNid`, leaving the
+    // stale entry to leak stickiness onto whichever fresh key recycles
+    // the nid. The nid handle is stable until reallocation, so clearing
+    // through it is correct even when the original occupant is gone.
+    for (final nid in _writtenStickyNids) {
       if (nid >= 0 && nid < _stickyByNid.length) {
         _stickyByNid[nid] = null;
       }
     }
+    _writtenStickyNids.clear();
     _stickyHeaders.clear();
 
     double? parentPinnedY;
@@ -496,7 +514,9 @@ class StickyHeaderComputer<TKey, TData> {
           indent: indent,
         );
         _stickyHeaders.add(info);
-        _stickyByNid[_controller.nidOf(candidateId)] = info;
+        final nid = _controller.nidOf(candidateId);
+        _stickyByNid[nid] = info;
+        _writtenStickyNids.add(nid);
 
         parentPinnedY = pinnedY;
         return true;
