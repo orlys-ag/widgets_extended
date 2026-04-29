@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter/animation.dart';
 import 'package:flutter/rendering.dart';
 
+import '_sticky_header_computer.dart';
 import 'sliver_tree_element.dart';
 import 'tree_controller.dart';
 import 'types.dart';
@@ -20,7 +21,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     required TreeController<TKey, TData> controller,
     int maxStickyDepth = 0,
   }) : _controller = controller,
-       _maxStickyDepth = maxStickyDepth;
+       _maxStickyDepth = maxStickyDepth,
+       _sticky = StickyHeaderComputer<TKey, TData>(
+         controller: controller,
+         maxStickyDepth: maxStickyDepth,
+       );
+
+  /// Sticky-header computation + cache. Owns every piece of state that
+  /// exists solely to compute and cache sticky-header positions; see
+  /// [StickyHeaderComputer].
+  final StickyHeaderComputer<TKey, TData> _sticky;
 
   // ══════════════════════════════════════════════════════════════════════════
   // PROPERTIES
@@ -31,26 +41,23 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   set controller(TreeController<TKey, TData> value) {
     if (_controller == value) return;
     _controller = value;
+    _sticky.controller = value;
     // Stale per-node caches keyed by the old controller's keys would
     // produce wrong geometry on the next layout — especially if the new
     // controller's structureGeneration happens to match the cached value
     // (fresh controllers start at 0). Reset everything that's keyed by
     // node and force a structure-change pass.
     _structureChanged = true;
-    _stickyPrecomputeDirty = true;
     _lastStructureGeneration = -1;
     _lastVisibleNodeCount = 0;
     _lastTotalScrollExtent = 0.0;
     _animationsWereActive = false;
-    _lastStickyScrollOffset = double.nan;
     // Nid-indexed arrays are sized against the old controller; reset to
     // empty and let [_ensureLayoutCapacity] regrow against the new one.
     _nodeOffsetsByNid = Float64List(0);
     _nodeExtentsByNid = Float64List(0);
     _inCacheRegionByNid = Uint8List(0);
-    _stickyByNid = <StickyHeaderInfo<TKey>?>[];
-    _stickyHeaders.clear();
-    _lastPrecomputedCount = 0;
+    _sticky.reset();
     // Bulk-only fast-path caches are visible-position-indexed; any
     // structure from the old controller is meaningless under the new one.
     _bulkCumulativesValid = false;
@@ -68,6 +75,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   set maxStickyDepth(int value) {
     if (_maxStickyDepth == value) return;
     _maxStickyDepth = value;
+    _sticky.maxStickyDepth = value;
     markNeedsLayout();
   }
 
@@ -89,14 +97,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
   /// Last observed structure generation from the controller.
   int _lastStructureGeneration = -1;
-
-  /// Frame counter for throttling sticky header recomputation during animation.
-  int _stickyThrottleCounter = 0;
-
-  /// Scroll offset observed on the last frame that computed sticky headers.
-  /// Used to force a recompute when the user scrolls during an animation, so
-  /// sticky [pinnedY] values don't lag behind the actual scroll position.
-  double _lastStickyScrollOffset = double.nan;
 
   /// Layout-space offsets indexed by the controller's internal nid. Slots
   /// for nids not present in [TreeController.visibleNodes] are undefined —
@@ -156,7 +156,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// Rebuilds [_stableCumulative] and [_bulkFullCumulative] from the current visible
   /// order and bulk group membership. O(N) but amortized across many
   /// frames of a bulk animation.
-  void _rebuildBulkCumulatives(List<TKey> visibleNodes) {
+  ///
+  /// Reads the per-key bulk membership through [bulkData] (a single
+  /// snapshot fetched once at the start of the frame) so the inner loop
+  /// avoids the four-getter tax on the controller surface.
+  void _rebuildBulkCumulatives(
+    List<TKey> visibleNodes,
+    BulkAnimationData<TKey> bulkData,
+  ) {
     final n = visibleNodes.length;
     if (_stableCumulative.length < n + 1) {
       final newLen = math.max(n + 1, math.max(16, _stableCumulative.length * 2));
@@ -170,7 +177,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     for (int i = 0; i < n; i++) {
       final key = visibleNodes[i];
       final full = controller.getEstimatedExtent(key);
-      if (controller.isBulkMember(key)) {
+      if (bulkData.containsMember(key)) {
         sBulkFull += full;
       } else {
         // Non-bulk nodes are stable during bulk-only frames (gated by
@@ -196,11 +203,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// layout, then set for every cache-region member.
   Uint8List _inCacheRegionByNid = Uint8List(0);
 
-  /// Sticky header info indexed by nid. Null when the node is not currently
-  /// a sticky header. Serves as both membership flag (non-null means sticky)
-  /// and the data payload used by paint/hit-test/transform.
-  List<StickyHeaderInfo<TKey>?> _stickyByNid = <StickyHeaderInfo<TKey>?>[];
-
   /// Grows all nid-indexed layout arrays to match the controller's current
   /// nid capacity. Doubles on each realloc so amortized growth is O(1)
   /// per node insertion.
@@ -220,11 +222,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final newCacheFlags = Uint8List(cap);
     newCacheFlags.setRange(0, _inCacheRegionByNid.length, _inCacheRegionByNid);
     _inCacheRegionByNid = newCacheFlags;
-    final newSticky = List<StickyHeaderInfo<TKey>?>.filled(cap, null);
-    for (int i = 0; i < _stickyByNid.length; i++) {
-      newSticky[i] = _stickyByNid[i];
-    }
-    _stickyByNid = newSticky;
+    _sticky.resizeForCapacity(cap);
   }
 
   /// Whether structure changed since last layout.
@@ -238,24 +236,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// extents snapshot the final (progress=1) values.
   bool _animationsWereActive = false;
 
-  /// Whether sticky subtree precomputation needs to re-run.
-  /// Set on structure change, extent change, or animation-to-idle transition.
-  /// Cleared after [_precomputeStableSubtreeBottoms] completes.
-  bool _stickyPrecomputeDirty = true;
-
-  /// Computed sticky headers for the current layout, ordered root→leaf.
-  final List<StickyHeaderInfo<TKey>> _stickyHeaders = [];
-
-  // Stable subtree precompute caches (rebuilt each layout, reused across frames).
-  // Use nullable backing lists that are replaced when capacity grows, avoiding
-  // the Dart issue where setting .length on a non-nullable List<int> fails.
-  List<int> _depthScratch = List<int>.empty();
-  List<double> _stablePrefix = List<double>.empty();
-  List<int> _subtreeEndIndex = List<int>.empty();
-  List<double> _subtreeBottomByIndex = List<double>.empty();
-  final List<int> _indexStack = <int>[];
-  int _lastPrecomputedCount = 0;
-
   /// Marks the tree structure as changed, clears layout caches, and
   /// requests a new layout pass.
   ///
@@ -263,7 +243,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// recreated with the new `nodeBuilder`.
   void markStructureChanged() {
     _structureChanged = true;
-    _stickyPrecomputeDirty = true;
+    _sticky.dirty = true;
     markNeedsLayout();
   }
 
@@ -325,38 +305,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     );
   }
 
-  /// Reallocates scratch arrays to fit [_lastPrecomputedCount] (or empty
-  /// if zero). Call when the tree shrinks significantly and memory matters.
-  void trimScratchArrays() {
-    final n = _lastPrecomputedCount;
-    if (n == 0) {
-      _depthScratch = List<int>.empty();
-      _stablePrefix = List<double>.empty();
-      _subtreeEndIndex = List<int>.empty();
-      _subtreeBottomByIndex = List<double>.empty();
-    } else {
-      _depthScratch = List<int>.filled(n, 0);
-      _stablePrefix = List<double>.filled(n + 1, 0.0);
-      _subtreeEndIndex = List<int>.filled(n, 0);
-      _subtreeBottomByIndex = List<double>.filled(n, 0.0);
-    }
-  }
+  /// Reallocates sticky-precompute scratch arrays to fit the last
+  /// precomputed count (or empty if zero). Call when the tree shrinks
+  /// significantly and memory matters.
+  void trimScratchArrays() => _sticky.trimScratchArrays();
 
-  /// Pre-allocates scratch arrays for [capacity] nodes. Useful when the
-  /// tree size is known upfront to avoid incremental resizing.
-  void resizeScratchArrays(int capacity) {
-    if (capacity <= 0) {
-      _depthScratch = List<int>.empty();
-      _stablePrefix = List<double>.empty();
-      _subtreeEndIndex = List<int>.empty();
-      _subtreeBottomByIndex = List<double>.empty();
-    } else {
-      _depthScratch = List<int>.filled(capacity, 0);
-      _stablePrefix = List<double>.filled(capacity + 1, 0.0);
-      _subtreeEndIndex = List<int>.filled(capacity, 0);
-      _subtreeBottomByIndex = List<double>.filled(capacity, 0.0);
-    }
-  }
+  /// Pre-allocates sticky-precompute scratch arrays for [capacity] nodes.
+  /// Useful when the tree size is known upfront to avoid incremental
+  /// resizing.
+  void resizeScratchArrays(int capacity) =>
+      _sticky.resizeScratchArrays(capacity);
 
   /// Whether the given node is retained by the current layout — i.e. it is
   /// in the cache region or is a sticky header. Used by the element to
@@ -367,10 +325,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     if (nid < _inCacheRegionByNid.length && _inCacheRegionByNid[nid] != 0) {
       return true;
     }
-    if (nid < _stickyByNid.length && _stickyByNid[nid] != null) {
-      return true;
-    }
-    return false;
+    return _sticky.isSticky(nid);
   }
 
   /// Gets the child for the given node ID, or null if not present.
@@ -572,7 +527,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   @override
   void visitChildrenForSemantics(RenderObjectVisitor visitor) {
     // Sticky headers paint on top, shallowest first (visual top).
-    for (final sticky in _stickyHeaders) {
+    for (final sticky in _sticky.headers) {
       final child = getChildForNode(sticky.nodeId);
       if (child == null) continue;
       if (controller.getNodeData(sticky.nodeId) == null) continue;
@@ -582,11 +537,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Then in-flow visible nodes, skipping any already emitted as sticky.
     for (final nodeId in controller.visibleNodes) {
       final nid = _controller.nidOf(nodeId);
-      if (nid >= 0 &&
-          nid < _stickyByNid.length &&
-          _stickyByNid[nid] != null) {
-        continue;
-      }
+      if (_sticky.isSticky(nid)) continue;
       final child = getChildForNode(nodeId);
       if (child == null) continue;
       if (controller.getNodeData(nodeId) == null) continue;
@@ -612,242 +563,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   // ══════════════════════════════════════════════════════════════════════════
   // STICKY HEADER COMPUTATION
   // ══════════════════════════════════════════════════════════════════════════
-
-  /// Computes the bottom edge of a node's subtree using DFS ordering.
-  ///
-  /// Bug 2 fix: When a descendant is entering (expand animation), its animated
-  /// extent is growing from 0 which would cause the parent header to get pushed
-  /// up prematurely. To prevent bounce, we use full (target) extents for
-  /// entering descendants and recompute their offset contribution stably.
-  double _computeSubtreeBottom(TKey nodeId, List<TKey> visibleNodes) {
-    final index = controller.getVisibleIndex(nodeId);
-    if (index < 0) return 0.0;
-    final nodeDepth = controller.getDepth(nodeId);
-
-    // Walk descendants, accumulating stable offsets using full extents for
-    // entering nodes. This prevents push-up bounce during expand animations.
-    final nid = _controller.nidOf(nodeId);
-    double stableOffset = _nodeOffsetsByNid[nid];
-    stableOffset += _nodeExtentsByNid[nid];
-    double bottom = stableOffset;
-
-    for (int i = index + 1; i < visibleNodes.length; i++) {
-      final childId = visibleNodes[i];
-      if (controller.getDepth(childId) <= nodeDepth) break;
-
-      final animation = controller.getAnimationState(childId);
-      final double childExtent;
-      if (animation != null && animation.type == AnimationType.entering) {
-        // Use full (target) extent instead of animated extent to keep bottom stable.
-        childExtent = controller.getEstimatedExtent(childId);
-      } else {
-        childExtent = _nodeExtentsByNid[_controller.nidOf(childId)];
-      }
-
-      final childEnd = stableOffset + childExtent;
-      if (childEnd > bottom) bottom = childEnd;
-      stableOffset += childExtent;
-    }
-    return bottom;
-  }
-
-  /// Precomputes subtree bottom offsets for all visible nodes in O(N).
-  ///
-  /// Uses the same "entering nodes use full estimated extent" logic as
-  /// [_computeSubtreeBottom], but does it for the entire visible list in
-  /// three linear passes instead of per-candidate descent scanning.
-  ///
-  /// After this call, [_subtreeBottomByIndex] contains the subtree bottom
-  /// (in scroll-space) for each index in [visibleNodes].
-  void _precomputeStableSubtreeBottoms(List<TKey> visibleNodes) {
-    final n = visibleNodes.length;
-    if (n == 0) return;
-
-    // Resize scratch arrays if needed (reuse across frames when possible).
-    if (_depthScratch.length < n) {
-      _depthScratch = List<int>.filled(n, 0);
-      _subtreeEndIndex = List<int>.filled(n, 0);
-      _subtreeBottomByIndex = List<double>.filled(n, 0.0);
-      _stablePrefix = List<double>.filled(n + 1, 0.0);
-    }
-    _stablePrefix[0] = 0.0;
-
-    // Pass A: depths + stable prefix sums.
-    for (int i = 0; i < n; i++) {
-      final nodeId = visibleNodes[i];
-
-      final depth = controller.getDepth(nodeId);
-      _depthScratch[i] = depth;
-
-      final anim = controller.getAnimationState(nodeId);
-      final double stableExtent;
-      if (anim != null && anim.type == AnimationType.entering) {
-        // Use full extent so ancestor push-up doesn't bounce during expand.
-        stableExtent = controller.getEstimatedExtent(nodeId);
-      } else {
-        stableExtent = _nodeExtentsByNid[_controller.nidOf(nodeId)];
-      }
-
-      _stablePrefix[i + 1] = _stablePrefix[i] + stableExtent;
-    }
-
-    // Pass B: subtree end index for each node using a monotonic depth stack.
-    _indexStack.clear();
-    for (int i = 0; i < n; i++) {
-      final depth = _depthScratch[i];
-
-      while (_indexStack.isNotEmpty &&
-          depth <= _depthScratch[_indexStack.last]) {
-        final j = _indexStack.removeLast();
-        _subtreeEndIndex[j] = i - 1;
-      }
-      _indexStack.add(i);
-    }
-    while (_indexStack.isNotEmpty) {
-      final j = _indexStack.removeLast();
-      _subtreeEndIndex[j] = n - 1;
-    }
-
-    // Pass C: subtree bottom per node.
-    // For each node i: bottom = (node's actual end) + (stable sum of descendants).
-    for (int i = 0; i < n; i++) {
-      final nid = _controller.nidOf(visibleNodes[i]);
-      final actualEnd = _nodeOffsetsByNid[nid] + _nodeExtentsByNid[nid];
-
-      final end = _subtreeEndIndex[i];
-      final descendantStableSum = _stablePrefix[end + 1] - _stablePrefix[i + 1];
-
-      _subtreeBottomByIndex[i] = actualEnd + descendantStableSum;
-    }
-    _lastPrecomputedCount = n;
-  }
-
-  /// Returns the ancestor of [nodeId] at the given [targetDepth], or null.
-  TKey? _ancestorAtDepth(TKey nodeId, int targetDepth) {
-    TKey? current = nodeId;
-    while (current != null) {
-      final depth = controller.getDepth(current);
-      if (depth == targetDepth) return current;
-      if (depth < targetDepth) return null;
-      current = controller.getParent(current);
-    }
-    return null;
-  }
-
-  /// Iterates sticky candidates top-down, calling [onCandidate] for each
-  /// valid depth. Stops when the chain breaks (animation, no children, etc.)
-  /// or when [onCandidate] returns false.
-  ///
-  /// Shared probe logic for both [_identifyPotentialStickyNodes] and
-  /// [_computeStickyHeaders].
-  void _forEachStickyCandidate(
-    double scrollOffset,
-    double overlap,
-    List<TKey> visibleNodes,
-    bool Function(TKey candidateId, double pinnedY, double extent, double stackTop) onCandidate,
-  ) {
-    if (_maxStickyDepth <= 0 || visibleNodes.isEmpty) return;
-
-    double stackTop = math.max(0.0, overlap);
-    TKey? parentStickyId;
-
-    for (int targetDepth = 0; targetDepth < _maxStickyDepth; targetDepth++) {
-      final probeScrollY = scrollOffset + stackTop;
-      final probeIndex = _findFirstVisibleIndex(visibleNodes, probeScrollY);
-      if (probeIndex >= visibleNodes.length) break;
-
-      final nodeAtProbe = visibleNodes[probeIndex];
-      final candidateId = _ancestorAtDepth(nodeAtProbe, targetDepth);
-      if (candidateId == null) break;
-
-      if (parentStickyId != null &&
-          controller.getParent(candidateId) != parentStickyId) {
-        break;
-      }
-
-      if (controller.isAnimating(candidateId)) break;
-      if (!controller.hasChildren(candidateId)) break;
-
-      // Candidate must be in the current visible list — otherwise its
-      // offset slot holds stale data from a prior layout pass (or zero).
-      final candidateIndex = controller.getVisibleIndex(candidateId);
-      if (candidateIndex < 0) break;
-      final naturalOffset = _nodeOffsetsByNid[_controller.nidOf(candidateId)];
-
-      final naturalY = naturalOffset - scrollOffset;
-      if (naturalY > stackTop) break;
-
-      final extent = controller.getEstimatedExtent(candidateId);
-      final subtreeBottom =
-          (candidateIndex >= 0 && candidateIndex < _lastPrecomputedCount)
-              ? _subtreeBottomByIndex[candidateIndex]
-              : _computeSubtreeBottom(candidateId, visibleNodes);
-      final pushUpY = (subtreeBottom - scrollOffset) - extent;
-
-      final pinnedY = math.min(stackTop, pushUpY);
-
-      if (pinnedY + extent <= stackTop) break;
-
-      if (!onCandidate(candidateId, pinnedY, extent, stackTop)) break;
-
-      parentStickyId = candidateId;
-      stackTop = pinnedY + extent;
-    }
-  }
-
-  /// Lightweight pre-pass that identifies nodes which might need to be
-  /// sticky. Used before Pass 2 to force-create their render objects.
-  Set<TKey> _identifyPotentialStickyNodes(double scrollOffset, double overlap, List<TKey> visibleNodes) {
-    final result = <TKey>{};
-    _forEachStickyCandidate(scrollOffset, overlap, visibleNodes,
-        (candidateId, pinnedY, extent, stackTop) {
-      result.add(candidateId);
-      return true;
-    });
-    return result;
-  }
-
-  /// Computes sticky headers based on scroll position.
-  ///
-  /// Called after Pass 2 when actual extents and offsets are available.
-  /// [overlap] is `constraints.overlap` — the number of pixels at the top
-  /// covered by a preceding pinned sliver (e.g. PinnedHeaderSliver).
-  void _computeStickyHeaders(double scrollOffset, double overlap, List<TKey> visibleNodes) {
-    // Null out prior-layout sticky entries before recomputing. The nid slots
-    // for nodes that remain sticky this frame are rewritten below; slots for
-    // nodes that no longer qualify stay null, which doubles as the
-    // "is-sticky" membership test used by paint/hit-test/semantics.
-    for (final sticky in _stickyHeaders) {
-      final nid = _controller.nidOf(sticky.nodeId);
-      if (nid >= 0 && nid < _stickyByNid.length) {
-        _stickyByNid[nid] = null;
-      }
-    }
-    _stickyHeaders.clear();
-
-    double? parentPinnedY;
-    _forEachStickyCandidate(scrollOffset, overlap, visibleNodes,
-        (candidateId, pinnedY, extent, stackTop) {
-      // Deeper headers can slide behind parent, but must never go above parent TOP.
-      if (parentPinnedY != null) {
-        pinnedY = math.max(parentPinnedY!, pinnedY);
-        if (pinnedY + extent <= stackTop) return false;
-      }
-
-      final indent = controller.getIndent(candidateId);
-      final info = StickyHeaderInfo<TKey>(
-        nodeId: candidateId,
-        pinnedY: pinnedY,
-        extent: extent,
-        indent: indent,
-      );
-      _stickyHeaders.add(info);
-      _stickyByNid[_controller.nidOf(candidateId)] = info;
-
-      parentPinnedY = pinnedY;
-      return true;
-    });
-  }
+  //
+  // Owned by [_sticky] (see [StickyHeaderComputer]). The render object
+  // hands off scroll inputs and per-nid offset/extent arrays each layout;
+  // paint, hit-test, and transform read [_sticky.headers] /
+  // [_sticky.infoForNid] for the per-frame results.
 
   /// Recomputes [_nodeOffsetsByNid] from current [_nodeExtentsByNid] and
   /// returns the new total scroll extent. Call after Pass 2 when extents
@@ -960,12 +680,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Detect structure changes
     if (controller.structureGeneration != _lastStructureGeneration) {
       _structureChanged = true;
-      _stickyPrecomputeDirty = true;
+      _sticky.dirty = true;
       _lastStructureGeneration = controller.structureGeneration;
     }
     if (visibleNodes.length != _lastVisibleNodeCount) {
       _structureChanged = true;
-      _stickyPrecomputeDirty = true;
+      _sticky.dirty = true;
     }
 
     final scrollOffset = constraints.scrollOffset;
@@ -1019,25 +739,29 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // ────────────────────────────────────────────────────────────────────────
     double totalScrollExtent;
     final bool hasAnimations = controller.hasActiveAnimations;
+    // Fetch the bulk-animation snapshot once so downstream branches share a
+    // single read of value/generation/membership. Per-key membership
+    // queries inside _rebuildBulkCumulatives go through this snapshot too.
+    final BulkAnimationData<TKey> bulkData = controller.bulkAnimationData();
     final bool bulkOnly =
-        controller.isBulkAnimating && !controller.hasOpGroupAnimations;
+        bulkData.isValid && !controller.hasOpGroupAnimations;
 
     if (bulkOnly) {
       // Fast path: bulk animation only. Every node's offset is a scalar
       // function of position via the precomputed cumulatives. Avoid touching
       // _nodeOffsetsByNid for nodes outside the cache region — that write
       // is what the per-frame O(N) cost was buying.
-      final bulkGen = controller.bulkAnimationGeneration;
+      final bulkGen = bulkData.generation;
       final n = visibleNodes.length;
       if (!_bulkCumulativesValid ||
           _bulkCumulativesCount != n ||
           bulkGen != _lastBulkAnimationGeneration ||
           _structureChanged) {
-        _rebuildBulkCumulatives(visibleNodes);
+        _rebuildBulkCumulatives(visibleNodes, bulkData);
         _lastBulkAnimationGeneration = bulkGen;
         _structureChanged = false;
       }
-      _bulkValueCached = controller.bulkAnimationValue;
+      _bulkValueCached = bulkData.value;
       totalScrollExtent = _offsetAtVisibleIndex(n);
       _lastFrameUsedBulkCumulatives = true;
     } else if (_structureChanged || _lastFrameUsedBulkCumulatives) {
@@ -1301,7 +1025,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // only walk from the first changed index forward — offsets before
     // that point are unaffected by later-index extent changes.
     if (extentsChanged) {
-      _stickyPrecomputeDirty = true;
+      _sticky.dirty = true;
 
       if (_bulkCumulativesValid) {
         // A child's measured size perturbed _fullExtents mid-bulk; the
@@ -1335,65 +1059,51 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
 
     // Precompute subtree bottoms BEFORE sticky identification so that
-    // _identifyPotentialStickyNodes can use O(1) lookups instead of
-    // O(n)-per-candidate subtree scans.
-    // Skip during animation: _identifyPotentialStickyNodes bails on animating
-    // nodes anyway, so the O(3N) precomputation is wasted. The fallback
-    // per-candidate _computeSubtreeBottom is trivially cheap since it also
-    // bails immediately.
-    // Also skip when nothing changed since last precomputation (pure scrolling).
+    // candidate probing can use O(1) lookups instead of O(n)-per-candidate
+    // subtree scans. Skip during animation: candidate probing bails on
+    // animating nodes anyway, so the O(3N) precomputation is wasted. The
+    // fallback per-candidate scan inside the computer is trivially cheap
+    // since it also bails immediately. Also skip when nothing changed
+    // since last precomputation (pure scrolling).
     if (_animationsWereActive && !hasAnimations) {
-      _stickyPrecomputeDirty = true; // animation just settled — one final pass
+      _sticky.dirty = true; // animation just settled — one final pass
     }
-    if (_maxStickyDepth > 0 && !hasAnimations && _stickyPrecomputeDirty) {
-      _precomputeStableSubtreeBottoms(visibleNodes);
-      _stickyPrecomputeDirty = false;
+    if (_maxStickyDepth > 0 && !hasAnimations && _sticky.dirty) {
+      _sticky.precomputeStableSubtreeBottoms(
+        visibleNodes: visibleNodes,
+        nodeOffsetsByNid: _nodeOffsetsByNid,
+        nodeExtentsByNid: _nodeExtentsByNid,
+      );
+      _sticky.dirty = false;
     } else if (hasAnimations || _maxStickyDepth == 0) {
-      _lastPrecomputedCount = 0; // force fallback to per-candidate scan
+      _sticky.invalidatePrecompute();
     }
 
     // Throttle sticky header recomputation during animation: only recompute
-    // every 3rd frame. Both _identifyPotentialStickyNodes and
-    // _computeStickyHeaders bail on animating candidates anyway, so results
-    // are approximate and largely unchanged frame-to-frame.
-    //
-    // Exception: if the user scrolled since the last sticky computation, we
-    // MUST recompute. pinnedY is relative to scrollOffset, and stale values
+    // every 3rd frame. The candidate probe bails on animating candidates
+    // anyway, so results are approximate and largely unchanged frame-to-
+    // frame. Exception: scrolling since the last sticky computation forces
+    // a recompute — pinnedY is relative to scrollOffset, and stale values
     // produce visible header jitter plus wrong hit-test coordinates.
-    final bool scrolledSinceLastSticky =
-        _lastStickyScrollOffset != scrollOffset;
-    final bool skipStickyRecompute;
-    if (controller.hasActiveAnimations && _maxStickyDepth > 0) {
-      _stickyThrottleCounter++;
-      skipStickyRecompute = !scrolledSinceLastSticky &&
-          (_stickyThrottleCounter % 3) != 0;
-    } else {
-      _stickyThrottleCounter = 0;
-      skipStickyRecompute = false;
-    }
+    final bool skipStickyRecompute = !_sticky.shouldRecomputeThisFrame(
+      hasActiveAnimations: controller.hasActiveAnimations,
+      scrollOffset: scrollOffset,
+    );
 
     if (skipStickyRecompute) {
       // Even when throttling, purge entries for nodes that just started
       // exiting so a stale pinned row doesn't keep painting / inflate
       // paintExtent for another 1–2 frames.
-      if (_stickyHeaders.isNotEmpty) {
-        _stickyHeaders.removeWhere((s) {
-          if (controller.isExiting(s.nodeId)) {
-            final nid = _controller.nidOf(s.nodeId);
-            if (nid >= 0 && nid < _stickyByNid.length) {
-              _stickyByNid[nid] = null;
-            }
-            return true;
-          }
-          return false;
-        });
-      }
+      _sticky.purgeExitingDuringThrottle();
     } else {
       // Identify sticky candidates now that offsets and precomputed data are ready.
-      final potentialStickyNodes = _identifyPotentialStickyNodes(
-        scrollOffset,
-        constraints.overlap,
-        visibleNodes,
+      final potentialStickyNodes = _sticky.identifyPotentialStickyNodes(
+        scrollOffset: scrollOffset,
+        overlap: constraints.overlap,
+        visibleNodes: visibleNodes,
+        nodeOffsetsByNid: _nodeOffsetsByNid,
+        nodeExtentsByNid: _nodeExtentsByNid,
+        findFirstVisibleIndex: _findFirstVisibleIndex,
       );
 
       // Force-create and layout any sticky nodes not already in cache region.
@@ -1429,8 +1139,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         if (stickyExtentsChanged) {
           totalScrollExtent = _recomputeOffsets(visibleNodes);
           if (_maxStickyDepth > 0 && !hasAnimations) {
-            _precomputeStableSubtreeBottoms(visibleNodes);
-            _stickyPrecomputeDirty = false;
+            _sticky.precomputeStableSubtreeBottoms(
+              visibleNodes: visibleNodes,
+              nodeOffsetsByNid: _nodeOffsetsByNid,
+              nodeExtentsByNid: _nodeExtentsByNid,
+            );
+            _sticky.dirty = false;
           }
         }
         // Always write the newly-created sticky children's layoutOffset —
@@ -1443,8 +1157,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         }
       }
 
-      _computeStickyHeaders(scrollOffset, constraints.overlap, visibleNodes);
-      _lastStickyScrollOffset = scrollOffset;
+      _sticky.computeStickyHeaders(
+        scrollOffset: scrollOffset,
+        overlap: constraints.overlap,
+        visibleNodes: visibleNodes,
+        nodeOffsetsByNid: _nodeOffsetsByNid,
+        nodeExtentsByNid: _nodeExtentsByNid,
+        findFirstVisibleIndex: _findFirstVisibleIndex,
+      );
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1477,7 +1197,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // paint at pinnedY (near viewport top) but content may have scrolled far
     // enough that the natural paint extent doesn't cover them, causing clipping.
     bool stickyInflationClamped = false;
-    for (final sticky in _stickyHeaders) {
+    for (final sticky in _sticky.headers) {
       final stickyBottom = sticky.pinnedY + sticky.extent;
       if (stickyBottom > remainingPaintExtent) {
         // This header would extend past our paint budget and overlap the
@@ -1626,7 +1346,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final nid = _controller.nidOf(nodeId);
-      if (nid >= 0 && nid < _stickyByNid.length && _stickyByNid[nid] != null) {
+      if (_sticky.isSticky(nid)) {
         continue;
       }
 
@@ -1680,8 +1400,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Pass B: Paint sticky headers (deepest first so shallower paints on top).
     final paintExtent = geometry!.paintExtent;
-    for (int i = _stickyHeaders.length - 1; i >= 0; i--) {
-      final sticky = _stickyHeaders[i];
+    final stickyHeaders = _sticky.headers;
+    for (int i = stickyHeaders.length - 1; i >= 0; i--) {
+      final sticky = stickyHeaders[i];
       final child = getChildForNode(sticky.nodeId);
       if (child == null) continue;
       // Skip nodes currently animating out. Sticky recompute is throttled
@@ -1768,7 +1489,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Phase 1: Test sticky headers first (they're visually on top).
     // Iterate shallowest first (index 0) = topmost = first hit priority.
-    for (final sticky in _stickyHeaders) {
+    for (final sticky in _sticky.headers) {
       final child = getChildForNode(sticky.nodeId);
       if (child == null) continue;
       if (controller.isExiting(sticky.nodeId)) continue;
@@ -1815,7 +1536,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nodeId = visibleNodes[i];
       final nid = _controller.nidOf(nodeId);
-      if (nid >= 0 && nid < _stickyByNid.length && _stickyByNid[nid] != null) {
+      if (_sticky.isSticky(nid)) {
         continue;
       }
 
@@ -1894,13 +1615,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Check if this child is a sticky header (O(1) lookup).
     if (nodeId != null) {
-      final nid = _controller.nidOf(nodeId as TKey);
-      if (nid >= 0 && nid < _stickyByNid.length) {
-        final sticky = _stickyByNid[nid];
-        if (sticky != null) {
-          transform.translateByDouble(sticky.indent, sticky.pinnedY, 0.0, 1.0);
-          return;
-        }
+      final sticky = _sticky.infoForNid(_controller.nidOf(nodeId as TKey));
+      if (sticky != null) {
+        transform.translateByDouble(sticky.indent, sticky.pinnedY, 0.0, 1.0);
+        return;
       }
     }
 
@@ -1946,11 +1664,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final parentData = child.parentData! as SliverTreeParentData;
     final nodeId = parentData.nodeId;
     if (nodeId != null) {
-      final nid = _controller.nidOf(nodeId as TKey);
-      if (nid >= 0 && nid < _stickyByNid.length) {
-        final sticky = _stickyByNid[nid];
-        if (sticky != null) return sticky.pinnedY;
-      }
+      final sticky = _sticky.infoForNid(_controller.nidOf(nodeId as TKey));
+      if (sticky != null) return sticky.pinnedY;
     }
     return parentData.layoutOffset - constraints.scrollOffset;
   }

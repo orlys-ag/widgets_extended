@@ -36,28 +36,28 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// removes it from that source, and returns the extent (or null if not animating).
   double? _captureAndRemoveFromGroups(TKey key) {
     // 1. Check operation group
-    final opGroupKey = _nodeToOperationGroup[key];
+    final opGroupKey = _operationGroupOf(key);
     if (opGroupKey != null) {
       final group = _operationGroups[opGroupKey];
       if (group != null) {
         final member = group.members[key];
         if (member != null) {
-          final full = _fullExtents[key] ?? TreeController.defaultExtent;
+          final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
           final extent = member.computeExtent(group.curvedValue, full);
           group.members.remove(key);
           group.pendingRemoval.remove(key);
-          _nodeToOperationGroup.remove(key);
+          _clearOperationGroup(key);
           _bumpAnimGen();
           _disposeOperationGroupIfEmpty(opGroupKey, group);
           return extent;
         }
       }
-      _nodeToOperationGroup.remove(key);
+      _clearOperationGroup(key);
     }
 
     // 2. Check bulk animation group
     if (_bulkAnimationGroup?.members.contains(key) == true) {
-      final full = _fullExtents[key] ?? TreeController.defaultExtent;
+      final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
       final extent = full * _bulkAnimationGroup!.value;
       _bulkAnimationGroup!.members.remove(key);
       _bulkAnimationGroup!.pendingRemoval.remove(key);
@@ -164,10 +164,10 @@ extension _TreeControllerAnimationOps<TKey, TData>
         preservedOpKeys.add(nodeId);
       }
 
-      _pendingDeletion.remove(nodeId);
+      _clearPendingDeletion(nodeId);
       _slideAnimations.remove(nodeId);
 
-      final opGroupKey = _nodeToOperationGroup[nodeId];
+      final opGroupKey = _operationGroupOf(nodeId);
       if (opGroupKey != null && preservedOpKeys.contains(opGroupKey)) {
         // Member of a preserved op group — keep its op-group state intact
         // so the animation continues against the post-move position.
@@ -216,7 +216,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       _bumpAnimGen();
     }
     // Remove from operation group
-    final opGroupKey = _nodeToOperationGroup.remove(key);
+    final opGroupKey = _clearOperationGroup(key);
     if (opGroupKey != null) {
       final group = _operationGroups[opGroupKey];
       if (group != null) {
@@ -288,7 +288,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     if (controller.status == AnimationStatus.dismissed) {
       _keysToRemoveScratch.clear();
       for (final key in _bulkAnimationGroup!.pendingRemoval) {
-        if (!_pendingDeletion.contains(key)) {
+        if (!_isPendingDeletion(key)) {
           final parentKey = _parentKeyOfKey(key);
           final shouldRemove = parentKey == null
               ? !_roots.contains(key)
@@ -343,7 +343,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // notifyListeners here would force SliverTreeElement to rebuild every
       // mounted row for nothing.
       for (final nodeId in group.members.keys) {
-        _nodeToOperationGroup.remove(nodeId);
+        _clearOperationGroup(nodeId);
       }
       _operationGroups.remove(operationKey);
       _bumpAnimGen();
@@ -363,7 +363,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       final categoryOne = <TKey>[];
       final parentsOfCategoryOne = <TKey>{};
       for (final nodeId in group.pendingRemoval) {
-        if (_pendingDeletion.contains(nodeId)) {
+        if (_isPendingDeletion(nodeId)) {
           categoryOne.add(nodeId);
           final parentKey = _parentKeyOfKey(nodeId);
           if (parentKey != null) {
@@ -378,7 +378,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
             _keysToRemoveScratch.add(nodeId);
           }
         }
-        _nodeToOperationGroup.remove(nodeId);
+        _clearOperationGroup(nodeId);
       }
 
       // Process category (1) via the unified helper, deferring order
@@ -404,7 +404,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
 
       // Clean up remaining members not in pendingRemoval
       for (final nodeId in group.members.keys) {
-        _nodeToOperationGroup.remove(nodeId);
+        _clearOperationGroup(nodeId);
       }
       bool didMutateOrder = false;
       if (_keysToRemoveScratch.isNotEmpty) {
@@ -432,10 +432,10 @@ extension _TreeControllerAnimationOps<TKey, TData>
     // Capture current animated extent from any source BEFORE removing
     final capturedExtent = _captureAndRemoveFromGroups(key);
     final startExtent = capturedExtent ?? 0.0;
-    final targetExtent = _fullExtents[key] ?? _unknownExtent;
+    final targetExtent = _fullExtentOf(key) ?? _unknownExtent;
 
     // Compute speed multiplier for proportional timing
-    final full = _fullExtents[key] ?? TreeController.defaultExtent;
+    final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
     final speedMultiplier = startExtent > 0
         ? _computeAnimationSpeedMultiplier(full - startExtent, full)
         : 1.0;
@@ -482,7 +482,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     if (animationDuration == Duration.zero) {
       animate = false;
     }
-    _pendingDeletion.remove(key);
+    _clearPendingDeletion(key);
     if (animate) {
       _startStandaloneEnterAnimation(key);
     } else {
@@ -491,7 +491,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     final descendants = _getDescendants(key);
     for (final nodeId in descendants) {
       if (!animate) {
-        _pendingDeletion.remove(nodeId);
+        _clearPendingDeletion(nodeId);
         _removeAnimation(nodeId);
         continue;
       }
@@ -501,15 +501,15 @@ extension _TreeControllerAnimationOps<TKey, TData>
       if (preserveSubtreeState &&
           isExitingDescendant &&
           _ancestorsExpandedFast(nodeId)) {
-        _pendingDeletion.remove(nodeId);
+        _clearPendingDeletion(nodeId);
         _startStandaloneEnterAnimation(nodeId);
       } else if (isExitingDescendant) {
         // Case 2: clear pending-deletion so _finalizeAnimation preserves the
         // node's structural data, but let the exit animation run to
         // completion so the visible row shrinks away smoothly.
-        _pendingDeletion.remove(nodeId);
+        _clearPendingDeletion(nodeId);
       } else {
-        _pendingDeletion.remove(nodeId);
+        _clearPendingDeletion(nodeId);
         _removeAnimation(nodeId);
       }
     }
@@ -518,10 +518,10 @@ extension _TreeControllerAnimationOps<TKey, TData>
   void _startStandaloneExitAnimation(TKey key, {TKey? triggeringAncestorId}) {
     // Capture current animated extent from any source BEFORE removing
     final capturedExtent = _captureAndRemoveFromGroups(key);
-    final currentExtent = capturedExtent ?? (_fullExtents[key] ?? 0.0);
+    final currentExtent = capturedExtent ?? (_fullExtentOf(key) ?? 0.0);
 
     // Compute speed multiplier for proportional timing
-    final full = _fullExtents[key] ?? TreeController.defaultExtent;
+    final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
     final speedMultiplier = _computeAnimationSpeedMultiplier(
       currentExtent,
       full,
@@ -583,7 +583,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     // so _parentKeyOfKey would return null afterwards.
     final parentBeforeFinalize = <TKey, TKey>{};
     for (final key in completed) {
-      if (_pendingDeletion.contains(key)) {
+      if (_isPendingDeletion(key)) {
         final parent = _parentKeyOfKey(key);
         if (parent != null) {
           parentBeforeFinalize[key] = parent;
@@ -633,7 +633,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     _bumpAnimGen();
 
     if (state.type == AnimationType.exiting) {
-      final isDeleted = _pendingDeletion.contains(key);
+      final isDeleted = _isPendingDeletion(key);
       if (isDeleted) {
         // Fully remove the node from all data structures
         final parentKey = _parentKeyOfKey(key);
@@ -670,7 +670,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
             visibleLoss++;
           }
           for (final desc in descendants) {
-            if (_pendingDeletion.contains(desc) &&
+            if (_isPendingDeletion(desc) &&
                 !_standaloneAnimations.containsKey(desc)) {
               final descNid = _nids[desc];
               if (descNid != null &&
@@ -694,7 +694,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
           // Only purge orphans that have no active exit animation.
           // Visible descendants with their own animation will finalize
           // themselves when their animation completes.
-          if (_pendingDeletion.contains(desc) &&
+          if (_isPendingDeletion(desc) &&
               !_standaloneAnimations.containsKey(desc)) {
             _purgeNodeData(desc);
           }
@@ -717,7 +717,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     // other code paths), purge it. Order compaction is deferred to the
     // caller's batched _removeFromVisibleOrder; we just signal via
     // `return true` that the key should be added to that batch.
-    if (_pendingDeletion.contains(key)) {
+    if (_isPendingDeletion(key)) {
       _purgeAndRemoveFromOrder([key], compactOrder: false);
       return true;
     }

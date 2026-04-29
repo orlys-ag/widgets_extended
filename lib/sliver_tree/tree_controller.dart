@@ -9,6 +9,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '_node_id_registry.dart';
+import '_node_store.dart';
 import '_visible_order_buffer.dart';
 import 'types.dart';
 
@@ -118,47 +119,48 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // ══════════════════════════════════════════════════════════════════════════
   // ECS-STYLE COMPONENT STORAGE
   // ══════════════════════════════════════════════════════════════════════════
-
-  /// Node data indexed by nid (see INTERNAL NID REGISTRY below). Entries
-  /// for freed nids are null. Look up by key via [_nids].
-  final List<TreeNode<TKey, TData>?> _dataByNid = <TreeNode<TKey, TData>?>[];
-
-  /// Parent nid for each node, indexed by nid. [_kNoParent] for roots and
-  /// freed slots. Dense, capacity ≥ `_nids.length`; grown by
-  /// [_ensureDenseCapacity].
-  Int32List _parentByNid = Int32List(0);
+  //
+  // Structural per-nid state (parent, children, depth, expansion, ancestors-
+  // expanded cache) lives inside [_store]. Visibility-related per-nid state
+  // ([_visibleSubtreeSizeByNid] below, plus the order buffer's reverse
+  // index) stays here on the controller because it describes what is
+  // currently rendered, not what the tree looks like structurally.
+  //
+  // The store grows its dense arrays in lockstep with the controller's
+  // own per-nid arrays via the [onCapacityGrew] callback wired up in the
+  // initializer for [_store].
 
   /// Sentinel value in nid-indexed parent arrays meaning "no parent" (root
-  /// node) or "slot is free". Same sentinel is safe for both because a
-  /// freed nid is never queried through [_nids].
-  static const int _kNoParent = -1;
+  /// node) or "slot is free". Re-exported as a controller-private constant
+  /// so existing call sites that referenced `_kNoParent` don't have to
+  /// switch to the imported [kNoParentNid] symbol all over the file.
+  static const int _kNoParent = kNoParentNid;
 
-  /// Ordered list of child keys for each node, indexed by the parent's
-  /// nid. Inner lists remain keyed by [TKey] for now — a later phase can
-  /// convert them to child-nid lists once consumers use nids directly.
-  final List<List<TKey>?> _childrenByNid = <List<TKey>?>[];
+  /// Structural-component store. Owns the nid registry plus every dense
+  /// per-nid array describing tree structure. See [NodeStore].
+  late final NodeStore<TKey, TData> _store = NodeStore<TKey, TData>(
+    onCapacityGrew: _onStoreCapacityGrew,
+  );
 
-  /// Cached depth for each node (0 for roots), indexed by nid. Entries for
-  /// freed nids are 0. Grown by [_ensureDenseCapacity].
-  Int32List _depthByNid = Int32List(0);
+  /// Convenience alias preserved so existing code that referenced `_nids`
+  /// directly continues to compile. Forwards to [NodeStore.nids].
+  NodeIdRegistry<TKey> get _nids => _store.nids;
 
-  /// Expansion state for each node, indexed by nid. 0 = collapsed,
-  /// 1 = expanded. Entries for freed nids are 0.
-  Uint8List _expandedByNid = Uint8List(0);
-
-  /// Cached "all ancestors expanded" bit for each node, indexed by nid. 1
-  /// means every ancestor in the chain to the root is expanded (so the node
-  /// is reachable by traversing the visible structure). Roots always carry
-  /// 1 since they have no ancestors. A node's own expanded flag does not
-  /// contribute. Maintained incrementally by [_setExpandedKey],
-  /// [_setParentKey], and [_adoptKey]; rebuilt wholesale by
-  /// [_rebuildAllAncestorsExpanded] after bulk operations. Entries for
-  /// freed nids are 0.
-  ///
-  /// Replaces the O(depth) walk in the former `_areAncestorsExpanded` with
-  /// an O(1) array read. The old walk was called up to O(N) times at the
-  /// tail of every bulk animation.
-  Uint8List _ancestorsExpandedByNid = Uint8List(0);
+  /// Grows controller-owned per-nid arrays (visible-subtree-size and the
+  /// order buffer's reverse index) to match the store's new capacity.
+  /// Wired into [_store] via its [NodeStore.onCapacityGrew] callback.
+  void _onStoreCapacityGrew(int newCapacity) {
+    if (newCapacity > _visibleSubtreeSizeByNid.length) {
+      final grown = Int32List(newCapacity);
+      grown.setRange(
+        0,
+        _visibleSubtreeSizeByNid.length,
+        _visibleSubtreeSizeByNid,
+      );
+      _visibleSubtreeSizeByNid = grown;
+    }
+    _order.resizeIndex(newCapacity);
+  }
 
   /// Per-nid count of currently-visible entries in the subtree rooted at
   /// this nid, **including this nid itself when it is in `_order`**.
@@ -208,112 +210,49 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // INTERNAL NID REGISTRY
+  // STRUCTURAL DELEGATORS
   // ══════════════════════════════════════════════════════════════════════════
   //
-  // Every live key is assigned a stable internal integer "nid". The dense
-  // per-nid arrays above are indexed by nid (ints hash and compare faster
-  // than arbitrary TKey, enabling Float64List / Int32List storage for
-  // hot-path state). The mapping itself lives in [_nids]; see
-  // [NodeIdRegistry].
-
-  /// Bidirectional key↔nid registry with free-list recycling. Owns the
-  /// [TKey] ↔ `int` mapping; the per-nid dense arrays above are owned by
-  /// the controller and grown in lockstep with [_nids.length].
-  final NodeIdRegistry<TKey> _nids = NodeIdRegistry<TKey>();
+  // Thin wrappers over [_store] that preserve the original `_adoptKey` /
+  // `_setParentKey` / etc. names so the rest of the controller (and its
+  // part files) need no rewrites at every call site. Logic that mixes
+  // structural and visibility concerns (like the visible-subtree-size
+  // adjustment in [_setParentKey]) stays here on the controller because
+  // the controller is the only owner of the visibility-side state.
 
   /// Returns the nid for [key], allocating one if the key isn't registered.
   /// Idempotent for already-registered keys. Grows every dense per-nid
-  /// array in lockstep so callers can safely index them at the returned nid.
+  /// array (structural and visibility) in lockstep so callers can safely
+  /// index them at the returned nid.
   int _adoptKey(TKey key) {
-    final result = _nids.allocate(key);
+    final result = _store.adopt(key);
     final nid = result.nid;
     if (!result.isNew) {
       return nid;
     }
-    if (result.grew) {
-      _dataByNid.add(null);
-      _childrenByNid.add(null);
-      _ensureDenseCapacity(_nids.length);
-    } else {
-      _dataByNid[nid] = null;
-      _childrenByNid[nid] = null;
-    }
-    _parentByNid[nid] = _kNoParent;
-    _depthByNid[nid] = 0;
-    _expandedByNid[nid] = 0;
-    _ancestorsExpandedByNid[nid] = 1;
+    // Reset the controller-owned per-nid slots. The store has already
+    // reset its own slots; the visibility arrays live here.
     _visibleSubtreeSizeByNid[nid] = 0;
     _order.clearIndexByNid(nid);
     return nid;
   }
 
-  /// Grows every typed-data nid-indexed array to at least [needed] slots.
-  /// Doubles capacity on each realloc so amortized growth is O(1) per
-  /// [_adoptKey] call.
-  void _ensureDenseCapacity(int needed) {
-    if (needed <= _parentByNid.length) return;
-    int cap = _parentByNid.isEmpty ? 8 : _parentByNid.length;
-    while (cap < needed) {
-      cap *= 2;
-    }
-    final newParent = Int32List(cap);
-    newParent.setRange(0, _parentByNid.length, _parentByNid);
-    _parentByNid = newParent;
-    final newDepth = Int32List(cap);
-    newDepth.setRange(0, _depthByNid.length, _depthByNid);
-    _depthByNid = newDepth;
-    final newExpanded = Uint8List(cap);
-    newExpanded.setRange(0, _expandedByNid.length, _expandedByNid);
-    _expandedByNid = newExpanded;
-    final newAncestorsExpanded = Uint8List(cap);
-    newAncestorsExpanded.setRange(
-      0,
-      _ancestorsExpandedByNid.length,
-      _ancestorsExpandedByNid,
-    );
-    _ancestorsExpandedByNid = newAncestorsExpanded;
-    final newVisibleSubtreeSize = Int32List(cap);
-    newVisibleSubtreeSize.setRange(
-      0,
-      _visibleSubtreeSizeByNid.length,
-      _visibleSubtreeSizeByNid,
-    );
-    _visibleSubtreeSizeByNid = newVisibleSubtreeSize;
-    _order.resizeIndex(cap);
-  }
-
-  /// Returns the parent nid for [key], or [_kNoParent] if [key] is a root
-  /// or unregistered. Hot path — no allocation, no exception.
-  int _parentNidOfKey(TKey key) {
-    final nid = _nids[key];
-    return nid == null ? _kNoParent : _parentByNid[nid];
-  }
-
   /// Returns the parent key for [key], or null if [key] is a root or
-  /// unregistered. Equivalent to the old `_parentKeyOfKey(key)`.
+  /// unregistered.
   ///
   /// The parent nid slot can be null when the parent has already been
   /// freed ahead of this node in a removal sweep, so the reverse lookup
   /// must tolerate a null result.
-  TKey? _parentKeyOfKey(TKey key) {
-    final pNid = _parentNidOfKey(key);
-    return pNid == _kNoParent ? null : _nids.keyOf(pNid);
-  }
+  TKey? _parentKeyOfKey(TKey key) => _store.parentOf(key);
 
   /// Sets the parent of [key] to [parent] (or null for root). [key] must
   /// already be registered; [parent] must also be registered (unless null).
-  /// Also refreshes the cached [_ancestorsExpandedByNid] bit for [key] and
-  /// propagates the change through [key]'s subtree so the cache stays
-  /// consistent with the new ancestor chain.
-  ///
-  /// Reparenting also shifts [key]'s visible-subtree contribution from
-  /// the old parent chain to the new one. The subtree's own visible
-  /// count is unchanged (the members are the same); only which
-  /// ancestors account for them changes.
+  /// Refreshes the cached ancestors-expanded bit and propagates the change
+  /// through [key]'s subtree, plus shifts [key]'s visible-subtree
+  /// contribution from the old parent chain to the new one.
   void _setParentKey(TKey key, TKey? parent) {
     final nid = _nids[key]!;
-    final oldParentNid = _parentByNid[nid];
+    final oldParentNid = _store.parentByNid[nid];
     final newParentNid = parent == null ? _kNoParent : _nids[parent]!;
     if (oldParentNid != newParentNid &&
         !_suppressSubtreeSizeUpdates &&
@@ -331,194 +270,67 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
     }
-    _parentByNid[nid] = newParentNid;
-    final newAe = _computeAncestorsExpanded(nid);
-    if (_ancestorsExpandedByNid[nid] != newAe) {
-      _ancestorsExpandedByNid[nid] = newAe;
-      final childAe = (newAe != 0 && _expandedByNid[nid] != 0) ? 1 : 0;
-      _propagateAncestorsExpandedToDescendants(key, childAe);
-    }
+    _store.setParent(key, parent);
   }
 
   /// Releases the nid associated with [key] back to the pool. Clears every
   /// per-nid dense array slot so a future [_adoptKey] that recycles the nid
   /// sees a clean state.
   void _releaseNid(TKey key) {
-    final nid = _nids.release(key);
+    final nid = _store.release(key);
     if (nid == null) return;
-    _dataByNid[nid] = null;
-    _parentByNid[nid] = _kNoParent;
-    _childrenByNid[nid] = null;
-    _depthByNid[nid] = 0;
-    _expandedByNid[nid] = 0;
-    _ancestorsExpandedByNid[nid] = 0;
     _visibleSubtreeSizeByNid[nid] = 0;
     _order.clearIndexByNid(nid);
   }
 
-  /// Nullable lookup of the [TreeNode] record for [key]. Equivalent to the
-  /// old `_nodeData[key]` — returns null if [key] is not registered.
-  TreeNode<TKey, TData>? _dataOf(TKey key) {
-    final nid = _nids[key];
-    return nid == null ? null : _dataByNid[nid];
-  }
+  /// Nullable lookup of the [TreeNode] record for [key].
+  TreeNode<TKey, TData>? _dataOf(TKey key) => _store.dataOf(key);
 
-  /// Whether [key] currently has a node record. Equivalent to the old
-  /// `_nodeData.containsKey(key)`.
-  bool _hasKey(TKey key) => _nids.contains(key);
+  /// Whether [key] currently has a node record.
+  bool _hasKey(TKey key) => _store.has(key);
 
   /// Returns the child key list for [key], or null if unregistered or no
-  /// list has been allocated yet. Equivalent to the old `_childListOf(key)`.
-  List<TKey>? _childListOf(TKey key) {
-    final nid = _nids[key];
-    return nid == null ? null : _childrenByNid[nid];
-  }
+  /// list has been allocated yet.
+  List<TKey>? _childListOf(TKey key) => _store.childListOf(key);
 
   /// Returns the child key list for [key], allocating an empty list if
   /// none exists. [key] must already be registered.
-  /// Equivalent to the old `_childListOrCreate(key)`.
-  List<TKey> _childListOrCreate(TKey key) {
-    final nid = _nids[key]!;
-    return _childrenByNid[nid] ??= <TKey>[];
-  }
+  List<TKey> _childListOrCreate(TKey key) => _store.childListOrCreate(key);
 
   /// Replaces the child key list for [key]. [key] must be registered.
-  /// Equivalent to the old `_children[key] = list`.
-  void _setChildList(TKey key, List<TKey> list) {
-    _childrenByNid[_nids[key]!] = list;
-  }
+  void _setChildList(TKey key, List<TKey> list) =>
+      _store.setChildList(key, list);
 
   /// Depth for [key], or 0 if unregistered.
-  /// Equivalent to the old `_depthOfKey(key)`.
-  int _depthOfKey(TKey key) {
-    final nid = _nids[key];
-    return nid == null ? 0 : _depthByNid[nid];
-  }
+  int _depthOfKey(TKey key) => _store.depthOf(key);
 
   /// Sets the depth for [key]. [key] must be registered.
-  void _setDepthKey(TKey key, int depth) {
-    _depthByNid[_nids[key]!] = depth;
-  }
+  void _setDepthKey(TKey key, int depth) => _store.setDepth(key, depth);
 
   /// Whether [key] is currently expanded. Returns false if unregistered.
-  /// Equivalent to the old `_isExpandedKey(key)` / `_isExpandedKey(key)`.
-  bool _isExpandedKey(TKey key) {
-    final nid = _nids[key];
-    return nid != null && _expandedByNid[nid] != 0;
-  }
+  bool _isExpandedKey(TKey key) => _store.isExpanded(key);
 
   /// Sets the expansion flag for [key]. [key] must be registered.
-  /// Equivalent to the old `_expanded[key] = expanded`.
   ///
-  /// By default propagates the change through [_ancestorsExpandedByNid] for
-  /// descendants so ancestor-expansion queries stay O(1). Pass
+  /// By default propagates the change through the ancestors-expanded cache
+  /// for descendants so ancestor-expansion queries stay O(1). Pass
   /// [propagate] as `false` in bulk paths that rebuild the cache wholesale
-  /// via [_rebuildAllAncestorsExpanded] — per-call propagation would
-  /// compound to O(N × subtree) across the batch.
-  void _setExpandedKey(TKey key, bool expanded, {bool propagate = true}) {
-    final nid = _nids[key]!;
-    final newVal = expanded ? 1 : 0;
-    if (_expandedByNid[nid] == newVal) return;
-    _expandedByNid[nid] = newVal;
-    // Children's ae bit equals expanded(key) && ae(key). If ae(key) is 0,
-    // children's ae is already 0 and unaffected by this flip.
-    if (propagate && _ancestorsExpandedByNid[nid] != 0) {
-      _propagateAncestorsExpandedToDescendants(key, newVal);
-    }
-  }
+  /// via [_rebuildAllAncestorsExpanded].
+  void _setExpandedKey(TKey key, bool expanded, {bool propagate = true}) =>
+      _store.setExpanded(key, expanded, propagate: propagate);
 
-  /// Computes the ancestors-expanded bit for [nid] from its parent's state.
-  /// Roots (and detached nodes) return 1.
-  int _computeAncestorsExpanded(int nid) {
-    final parentNid = _parentByNid[nid];
-    if (parentNid == _kNoParent) return 1;
-    return (_expandedByNid[parentNid] != 0 &&
-            _ancestorsExpandedByNid[parentNid] != 0)
-        ? 1
-        : 0;
-  }
+  /// Rebuilds the ancestors-expanded cache wholesale from the current roots.
+  void _rebuildAllAncestorsExpanded() =>
+      _store.rebuildAllAncestorsExpanded(_roots);
 
-  /// Sets the ancestors-expanded bit for every descendant of [key]. The
-  /// bit assigned to [key]'s direct children is [childAe]; grandchildren
-  /// then get `(expanded(child) && childAe)`, and so on.
-  ///
-  /// Short-circuits on descendants whose current bit already matches: under
-  /// the maintained invariant, their whole subtree is also already
-  /// consistent.
-  ///
-  /// Iterative (explicit worklist) rather than recursive so deep trees do
-  /// not risk a Dart stack overflow. Sibling visit order is irrelevant —
-  /// each child's new bit depends only on its parent, never on siblings.
-  void _propagateAncestorsExpandedToDescendants(TKey key, int childAe) {
-    // Parallel stacks: the node at parents[i] has children that should
-    // receive ancestorsExpanded == childAes[i]. Seeded with the initial
-    // (key, childAe) pair; grows one entry per descendant whose bit is
-    // actually updated (short-circuited descendants are never pushed).
-    final parents = <TKey>[key];
-    final childAes = <int>[childAe];
-    while (parents.isNotEmpty) {
-      final parent = parents.removeLast();
-      final ae = childAes.removeLast();
-      final children = _childListOf(parent);
-      if (children == null || children.isEmpty) continue;
-      for (final child in children) {
-        final childNid = _nids[child];
-        if (childNid == null) continue;
-        if (_ancestorsExpandedByNid[childNid] == ae) continue;
-        _ancestorsExpandedByNid[childNid] = ae;
-        final grandAe = (ae != 0 && _expandedByNid[childNid] != 0) ? 1 : 0;
-        parents.add(child);
-        childAes.add(grandAe);
-      }
-    }
-  }
-
-  /// Rebuilds [_ancestorsExpandedByNid] wholesale in a single pass from the
-  /// roots. Used by bulk operations (collapseAll / expandAll /
-  /// [_collapseAllInRegistry]) that bypass per-call propagation.
-  void _rebuildAllAncestorsExpanded() {
-    _ancestorsExpandedByNid.fillRange(0, _ancestorsExpandedByNid.length, 0);
-    for (final rootKey in _roots) {
-      final rootNid = _nids[rootKey];
-      if (rootNid == null) continue;
-      _ancestorsExpandedByNid[rootNid] = 1;
-      final childAe = _expandedByNid[rootNid] != 0 ? 1 : 0;
-      _propagateAncestorsExpandedToDescendants(rootKey, childAe);
-    }
-  }
-
-  /// O(1) "are all ancestors of [key] expanded?" check, backed by the
-  /// cached [_ancestorsExpandedByNid] array. Returns true for roots and
-  /// unregistered keys (the latter preserves the semantics of the original
-  /// [_areAncestorsExpanded] walk, which returned true when there was no
-  /// parent chain to traverse).
-  bool _ancestorsExpandedFast(TKey key) {
-    final nid = _nids[key];
-    if (nid == null) return true;
-    return _ancestorsExpandedByNid[nid] != 0;
-  }
+  /// O(1) "are all ancestors of [key] expanded?" check.
+  bool _ancestorsExpandedFast(TKey key) => _store.ancestorsExpandedFast(key);
 
   /// Clears the expanded flag for every registered node whose depth is
-  /// less than [maxDepth] (or for every node when [maxDepth] is null).
-  /// Equivalent to the old `_expanded.updateAll` calls used by
-  /// [collapseAll]. Freed nids are already 0 so skipping them is optional
-  /// — we iterate only live ones to avoid spurious work in very sparse
-  /// registries.
-  void _collapseAllInRegistry(int? maxDepth) {
-    if (maxDepth == null) {
-      _expandedByNid.fillRange(0, _expandedByNid.length, 0);
-    } else {
-      final n = _nids.length;
-      for (int nid = 0; nid < n; nid++) {
-        if (_nids.isFree(nid)) continue;
-        if (_expandedByNid[nid] == 0) continue;
-        if (_depthByNid[nid] < maxDepth) {
-          _expandedByNid[nid] = 0;
-        }
-      }
-    }
-    _rebuildAllAncestorsExpanded();
-  }
+  /// less than [maxDepth] (or for every node when [maxDepth] is null), then
+  /// rebuilds the ancestors-expanded cache.
+  void _collapseAllInRegistry(int? maxDepth) =>
+      _store.collapseAllInRegistry(maxDepth, _roots);
 
   // ══════════════════════════════════════════════════════════════════════════
   // VISIBILITY STATE
@@ -564,6 +376,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// not change its own size slot).
   void _bumpVisibleSubtreeSizeFromSelf(int startNid, int delta) {
     if (delta == 0) return;
+    // Cache the parent-array reference locally so the loop doesn't pay a
+    // store-getter call per ancestor walked. Same pattern as
+    // [_purgeAndRemoveFromOrder]'s ancestor walk.
+    final parentByNid = _store.parentByNid;
     int cur = startNid;
     while (cur != _kNoParent && cur >= 0 && cur < _visibleSubtreeSizeByNid.length) {
       // Refuse to mutate a freed slot. In debug, surface the violation;
@@ -585,7 +401,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         "key=${_nids.keyOf(cur)})",
       );
       _visibleSubtreeSizeByNid[cur] = next;
-      cur = _parentByNid[cur];
+      cur = parentByNid[cur];
     }
   }
 
@@ -714,17 +530,99 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Key is the operation key (the node whose expand/collapse created the group).
   final Map<TKey, OperationGroup<TKey>> _operationGroups = {};
 
-  /// Reverse lookup: node key → operation group key.
-  /// Provides O(1) group membership checks.
-  final Map<TKey, TKey> _nodeToOperationGroup = {};
+  /// Per-node state that is keyed-access only (no ticker iteration). Holds
+  /// what used to live in three separate maps: `_fullExtents`,
+  /// `_pendingDeletion`, and `_nodeToOperationGroup`. See
+  /// [NodeAnimationState] for the rationale and the field semantics.
+  ///
+  /// Entries are removed once every field reverts to its absent sentinel,
+  /// so `_animStates.isEmpty` and `.length` stay accurate as cheap proxies.
+  final Map<TKey, NodeAnimationState<TKey>> _animStates = {};
 
-  /// Cached full extents for nodes (measured size before animation).
-  final Map<TKey, double> _fullExtents = {};
+  /// Counter mirroring how many entries in [_animStates] currently have
+  /// `isPendingDeletion == true`. Maintained by every set/clear of that
+  /// field so callers that need the former `_pendingDeletionCount == 0`
+  /// fast-skip (`liveRootKeys`, `getLiveChildren`, `_sortedIndex`) keep
+  /// their O(1) gate.
+  int _pendingDeletionCount = 0;
 
-  /// Nodes pending deletion (animating out due to remove(), not collapse).
-  /// These nodes should be fully removed from data structures when their
-  /// exit animation completes.
-  final Set<TKey> _pendingDeletion = {};
+  /// Returns the [NodeAnimationState] for [key], creating one when missing.
+  /// Use only when about to write a field. For pure reads, prefer
+  /// `_animStates[key]?.field` so empty entries aren't materialized.
+  NodeAnimationState<TKey> _animStateOrCreate(TKey key) {
+    return _animStates[key] ??= NodeAnimationState<TKey>();
+  }
+
+  /// O(1) "is [key] pending deletion?" check.
+  bool _isPendingDeletion(TKey key) =>
+      _animStates[key]?.isPendingDeletion ?? false;
+
+  /// Marks [key] as pending deletion, maintaining [_pendingDeletionCount].
+  void _markPendingDeletion(TKey key) {
+    final state = _animStateOrCreate(key);
+    if (!state.isPendingDeletion) {
+      state.isPendingDeletion = true;
+      _pendingDeletionCount++;
+    }
+  }
+
+  /// Clears the pending-deletion flag for [key], maintaining
+  /// [_pendingDeletionCount] and removing the entry when it becomes empty.
+  void _clearPendingDeletion(TKey key) {
+    final state = _animStates[key];
+    if (state == null || !state.isPendingDeletion) return;
+    state.isPendingDeletion = false;
+    _pendingDeletionCount--;
+    if (state.isEmpty) _animStates.remove(key);
+  }
+
+  /// Returns the operation-group key [key] currently belongs to, or null.
+  TKey? _operationGroupOf(TKey key) =>
+      _animStates[key]?.operationGroupKey;
+
+  /// Whether [key] is currently a member of any operation group.
+  bool _hasOperationGroup(TKey key) =>
+      _animStates[key]?.operationGroupKey != null;
+
+  /// Sets [key]'s operation-group membership to [opKey].
+  void _setOperationGroup(TKey key, TKey opKey) {
+    _animStateOrCreate(key).operationGroupKey = opKey;
+  }
+
+  /// Clears [key]'s operation-group membership and returns the previous
+  /// value (null if it had no membership). Removes the entry when it
+  /// becomes empty.
+  TKey? _clearOperationGroup(TKey key) {
+    final state = _animStates[key];
+    if (state == null) return null;
+    final prev = state.operationGroupKey;
+    state.operationGroupKey = null;
+    if (state.isEmpty) _animStates.remove(key);
+    return prev;
+  }
+
+  /// Returns the cached full extent for [key], or null if never measured.
+  double? _fullExtentOf(TKey key) => _animStates[key]?.fullExtent;
+
+  /// Sets the cached full extent for [key]. Returns the previous value.
+  double? _setFullExtentRaw(TKey key, double extent) {
+    final state = _animStateOrCreate(key);
+    final prev = state.fullExtent;
+    state.fullExtent = extent;
+    return prev;
+  }
+
+  /// Clears the cached full extent for [key]. Returns the previous value
+  /// (null if absent). Removes the entry when it becomes empty.
+  double? _clearFullExtent(TKey key) {
+    final state = _animStates[key];
+    if (state == null) return null;
+    final prev = state.fullExtent;
+    if (prev == null) return null;
+    state.fullExtent = null;
+    if (state.isEmpty) _animStates.remove(key);
+    return prev;
+  }
 
   /// Active FLIP slide animations, keyed by node. A node present here is
   /// painted with a vertical translation equal to [SlideAnimation.currentDelta];
@@ -839,7 +737,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     double acc = 0.0;
     for (int i = 0; i < _order.length; i++) {
       final key = _nids.keyOfUnchecked(_order.orderNids[i]);
-      acc += _fullExtents[key] ?? defaultExtent;
+      acc += _fullExtentOf(key) ?? defaultExtent;
       prefix[i + 1] = acc;
     }
     _fullOffsetPrefix = prefix;
@@ -1004,7 +902,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   int visibleNidAt(int visibleIndex) => _order.orderNids[visibleIndex];
 
   /// Depth for [nid] (0 for roots). No [TKey] hash. [nid] must be live.
-  int depthOfNid(int nid) => _depthByNid[nid];
+  int depthOfNid(int nid) => _store.depthByNid[nid];
 
   /// Gets the horizontal indent for the given node.
   double getIndent(TKey key) {
@@ -1042,7 +940,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// visually vanishing and cannot be valid reorder targets. Also used as
   /// the predicate for filtering [rootKeys] / [getChildren] down to the
   /// live sets accepted by [reorderRoots] / [reorderChildren].
-  bool isPendingDeletion(TKey key) => _pendingDeletion.contains(key);
+  bool isPendingDeletion(TKey key) => _isPendingDeletion(key);
 
   /// Root keys that are not pending deletion.
   ///
@@ -1051,10 +949,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// pending-deletion entries internally. Passing the full [rootKeys] to
   /// [reorderRoots] would fail the length check when any root is mid-exit.
   List<TKey> get liveRootKeys {
-    if (_pendingDeletion.isEmpty) return List<TKey>.of(_roots);
+    if (_pendingDeletionCount == 0) return List<TKey>.of(_roots);
     final result = <TKey>[];
     for (final k in _roots) {
-      if (!_pendingDeletion.contains(k)) result.add(k);
+      if (!_isPendingDeletion(k)) result.add(k);
     }
     return result;
   }
@@ -1066,10 +964,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   List<TKey> getLiveChildren(TKey parent) {
     final full = _childListOf(parent);
     if (full == null || full.isEmpty) return const [];
-    if (_pendingDeletion.isEmpty) return List<TKey>.of(full);
+    if (_pendingDeletionCount == 0) return List<TKey>.of(full);
     final result = <TKey>[];
     for (final k in full) {
-      if (!_pendingDeletion.contains(k)) result.add(k);
+      if (!_isPendingDeletion(k)) result.add(k);
     }
     return result;
   }
@@ -1082,7 +980,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// matches positions in [liveRootKeys] / [getLiveChildren] and the input
   /// space of [reorderRoots] / [reorderChildren].
   int getIndexInParent(TKey key) {
-    if (!_hasKey(key) || _pendingDeletion.contains(key)) return -1;
+    if (!_hasKey(key) || _isPendingDeletion(key)) return -1;
     final parent = _parentKeyOfKey(key);
     final List<TKey> full = parent == null
         ? _roots
@@ -1090,7 +988,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     int liveIndex = 0;
     for (final k in full) {
       if (k == key) return liveIndex;
-      if (!_pendingDeletion.contains(k)) liveIndex++;
+      if (!_isPendingDeletion(k)) liveIndex++;
     }
     return -1;
   }
@@ -1188,6 +1086,49 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   int get bulkAnimationGeneration => _bulkAnimationGeneration;
   int _bulkAnimationGeneration = 0;
 
+  /// Singleton "no bulk animation active" snapshot. Resolves to the
+  /// const-shared sentinel inside [BulkAnimationData] — no allocation per
+  /// call. Cached on the controller so the common case (no bulk animation
+  /// in flight) costs zero allocation per layout.
+  late final BulkAnimationData<TKey> _inactiveBulkData =
+      BulkAnimationData.inactive<TKey>();
+
+  /// Captures every per-frame bulk-animation field the render object reads
+  /// during a single layout — `isValid` (formerly [isBulkAnimating]),
+  /// `value` (formerly [bulkAnimationValue]), `generation` (formerly
+  /// [bulkAnimationGeneration]), `memberCount`, and a per-key membership
+  /// query (formerly [isBulkMember]) — into one snapshot.
+  ///
+  /// Render-layer hot paths that previously called four scattered getters
+  /// per layout (with `isBulkMember` invoked once per visible node inside
+  /// the cumulative rebuild) can now fetch the snapshot once and read it
+  /// for the rest of the frame, restoring the cohesion the four-getter
+  /// surface lost.
+  ///
+  /// Per-layout cost: zero allocation when no bulk group is active
+  /// (returns the cached [_inactiveBulkData] sentinel); one snapshot
+  /// allocation when active. The snapshot holds direct references to the
+  /// group's `members` and `pendingRemoval` sets — no union or copy — so
+  /// `containsMember` runs in O(1) without per-frame set construction.
+  ///
+  /// The returned snapshot captures the set references at call time. A
+  /// subsequent mutation to the controller's internal bulk group will be
+  /// reflected through the held set references; callers that need a
+  /// stable view across mutations must copy the relevant fields out.
+  BulkAnimationData<TKey> bulkAnimationData() {
+    final group = _bulkAnimationGroup;
+    if (group == null ||
+        (group.members.isEmpty && group.pendingRemoval.isEmpty)) {
+      return _inactiveBulkData;
+    }
+    return BulkAnimationData.snapshot<TKey>(
+      value: group.value,
+      generation: _bulkAnimationGeneration,
+      members: group.members,
+      pendingRemoval: group.pendingRemoval,
+    );
+  }
+
   /// Returns the smallest [_visibleOrder] index among all currently-animating
   /// nodes, or [visibleNodeCount] when none are visible / none are animating.
   ///
@@ -1254,7 +1195,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (standalone != null) return standalone;
 
     // 2. Operation group
-    final groupKey = _nodeToOperationGroup[key];
+    final groupKey = _operationGroupOf(key);
     if (groupKey != null) {
       final group = _operationGroups[groupKey];
       if (group != null && !group.pendingRemoval.contains(key)) {
@@ -1289,7 +1230,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Check bulk group pending removal
     if (_bulkAnimationGroup?.pendingRemoval.contains(key) == true) return true;
     // Check operation group pending removal
-    final groupKey = _nodeToOperationGroup[key];
+    final groupKey = _operationGroupOf(key);
     if (groupKey != null) {
       final group = _operationGroups[groupKey];
       if (group != null && group.pendingRemoval.contains(key)) return true;
@@ -1303,12 +1244,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// Returns the cached measured extent if available, otherwise [defaultExtent].
   double getEstimatedExtent(TKey key) {
-    return _fullExtents[key] ?? defaultExtent;
+    return _fullExtentOf(key) ?? defaultExtent;
   }
 
   /// Gets the current extent for a node, accounting for animation.
   double getCurrentExtent(TKey key) {
-    return getAnimatedExtent(key, _fullExtents[key] ?? defaultExtent);
+    return getAnimatedExtent(key, _fullExtentOf(key) ?? defaultExtent);
   }
 
   /// Gets the animated extent for a node.
@@ -1322,7 +1263,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     // 2. Check operation group
-    final groupKey = _nodeToOperationGroup[key];
+    final groupKey = _operationGroupOf(key);
     if (groupKey != null) {
       final group = _operationGroups[groupKey];
       if (group != null) {
@@ -1489,10 +1430,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// Called by the render object after laying out a child.
   void setFullExtent(TKey key, double extent) {
-    final oldExtent = _fullExtents[key];
+    final oldExtent = _fullExtentOf(key);
 
     // Check operation group member — resolve unknown extents
-    final groupKey = _nodeToOperationGroup[key];
+    final groupKey = _operationGroupOf(key);
     if (groupKey != null) {
       final group = _operationGroups[groupKey];
       if (group != null) {
@@ -1514,7 +1455,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           }
         }
       }
-      _fullExtents[key] = extent;
+      _setFullExtentRaw(key, extent);
       if (oldExtent != extent) _invalidateFullOffsetPrefix();
       return;
     }
@@ -1530,7 +1471,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       return;
     }
-    _fullExtents[key] = extent;
+    _setFullExtentRaw(key, extent);
     _invalidateFullOffsetPrefix();
     // If node is animating with unknown target, update the animation
     final animation = _standaloneAnimations[key];
@@ -1596,7 +1537,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     double offset = 0.0;
     for (int i = 0; i < targetIndex; i++) {
       final k = _nids.keyOfUnchecked(_order.orderNids[i]);
-      final measured = _fullExtents[k];
+      final measured = _fullExtentOf(k);
       if (measured != null) {
         offset += measured;
       } else {
@@ -1611,7 +1552,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [extentEstimator] if supplied, otherwise [defaultExtent]. Matches the
   /// fallback chain used by [scrollOffsetOf].
   double extentOf(TKey key, {double Function(TKey key)? extentEstimator}) {
-    final measured = _fullExtents[key];
+    final measured = _fullExtentOf(key);
     if (measured != null) return measured;
     if (extentEstimator != null) return extentEstimator(key);
     return defaultExtent;
@@ -1823,7 +1764,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       void correct(TKey k) {
         final idx = _order.indexOf(k);
         if (idx < 0 || idx >= targetIdx) return;
-        final full = _fullExtents[k] ?? defaultExtent;
+        final full = _fullExtentOf(k) ?? defaultExtent;
         currentOffset += getCurrentExtent(k) - full;
       }
 
@@ -2115,7 +2056,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   int _sortedIndex(List<TKey> siblings, TreeNode<TKey, TData> node) {
     assert(comparator != null);
     final cmp = comparator!;
-    if (_pendingDeletion.isEmpty) {
+    if (_pendingDeletionCount == 0) {
       int lo = 0, hi = siblings.length;
       while (lo < hi) {
         final mid = (lo + hi) >> 1;
@@ -2133,7 +2074,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // allocation-free and competitive for typical sibling counts.
     for (int i = 0; i < siblings.length; i++) {
       final k = siblings[i];
-      if (_pendingDeletion.contains(k)) continue;
+      if (_isPendingDeletion(k)) continue;
       final other = _dataOf(k)!;
       if (cmp(other, node) > 0) return i;
     }
@@ -2160,7 +2101,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         : roots;
     for (final node in sorted) {
       _adoptKey(node.key);
-      _dataByNid[_nids[node.key]!] = node;
+      _store.setData(node.key, node);
       _setParentKey(node.key, null);
       _setChildList(node.key, []);
       _setDepthKey(node.key, 0);
@@ -2190,7 +2131,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }) {
     if (animationDuration == Duration.zero) animate = false;
     // If the node is pending deletion, cancel the deletion
-    if (_pendingDeletion.contains(node.key)) {
+    if (_isPendingDeletion(node.key)) {
       // If the node was pending deletion under a non-null parent, detach
       // it and re-attach as a root. Without this relocation, cancelling
       // the deletion would resurrect it under its old parent, silently
@@ -2223,7 +2164,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         preserveSubtreeState: preservePendingSubtreeState,
       );
       _adoptKey(node.key);
-      _dataByNid[_nids[node.key]!] = node;
+      _store.setData(node.key, node);
       if (preservePendingSubtreeState) {
         _rebuildVisibleOrder();
         _structureGeneration++;
@@ -2254,7 +2195,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // insertRoot(index:) contract instead of silently dropping the index.
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
-      _dataByNid[_nids[node.key]!] = node;
+      _store.setData(node.key, node);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != null) {
         // Different parent — delegate to moveNode.
@@ -2284,7 +2225,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     // Add to data structures
     _adoptKey(node.key);
-    _dataByNid[_nids[node.key]!] = node;
+    _store.setData(node.key, node);
     _setParentKey(node.key, null);
     _setChildList(node.key, []);
     _setDepthKey(node.key, 0);
@@ -2340,7 +2281,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void setChildren(TKey parentKey, List<TreeNode<TKey, TData>> children) {
     assert(_hasKey(parentKey), 'Parent node $parentKey not found');
     assert(
-      !_pendingDeletion.contains(parentKey),
+      !_isPendingDeletion(parentKey),
       'Cannot setChildren on $parentKey while it is animating out '
       '(pending deletion). The parent will be purged when its exit animation '
       'completes, leaving the new children orphaned.',
@@ -2435,7 +2376,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     for (final child in sorted) {
       _adoptKey(child.key);
-      _dataByNid[_nids[child.key]!] = child;
+      _store.setData(child.key, child);
       _setParentKey(child.key, parentKey);
       _setChildList(child.key, []);
       _setDepthKey(child.key, parentDepth + 1);
@@ -2476,13 +2417,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (animationDuration == Duration.zero) animate = false;
     assert(_hasKey(parentKey), "Parent node $parentKey not found");
     assert(
-      !_pendingDeletion.contains(parentKey),
+      !_isPendingDeletion(parentKey),
       "Cannot insert under $parentKey while it is animating out "
       "(pending deletion). The parent will be purged when its exit animation "
       "completes, leaving the new child orphaned.",
     );
     // If the node is pending deletion, cancel the deletion
-    if (_pendingDeletion.contains(node.key)) {
+    if (_isPendingDeletion(node.key)) {
       // If the pending-deletion node lives under a different parent (or is
       // a root), move it to [parentKey] before cancelling the deletion.
       // Without this relocation, cancelDeletion would resurrect the node
@@ -2522,7 +2463,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         preserveSubtreeState: preservePendingSubtreeState,
       );
       _adoptKey(node.key);
-      _dataByNid[_nids[node.key]!] = node;
+      _store.setData(node.key, node);
       if (preservePendingSubtreeState) {
         _rebuildVisibleOrder();
         _structureGeneration++;
@@ -2550,7 +2491,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // insert(parentKey:, index:) contract instead of silently dropping it.
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
-      _dataByNid[_nids[node.key]!] = node;
+      _store.setData(node.key, node);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != parentKey) {
         // Different parent — delegate to moveNode.
@@ -2580,7 +2521,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final parentDepth = _depthOfKey(parentKey);
     // Add to data structures
     _adoptKey(node.key);
-    _dataByNid[_nids[node.key]!] = node;
+    _store.setData(node.key, node);
     _setParentKey(node.key, parentKey);
     _setChildList(node.key, []);
     _setDepthKey(node.key, parentDepth + 1);
@@ -2662,7 +2603,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (animate && _order.contains(key)) {
       // Mark nodes as pending deletion so _finalizeAnimation knows to
       // fully remove them (vs just hiding due to parent collapse)
-      _pendingDeletion.addAll(nodesToRemove);
+      for (final nodeId in nodesToRemove) {
+        _markPendingDeletion(nodeId);
+      }
       // Mark all visible nodes as exiting
       for (final nodeId in nodesToRemove) {
         if (_order.contains(nodeId)) {
@@ -2698,7 +2641,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void updateNode(TreeNode<TKey, TData> node) {
     assert(_hasKey(node.key), 'Node ${node.key} not found');
     _adoptKey(node.key);
-    _dataByNid[_nids[node.key]!] = node;
+    _store.setData(node.key, node);
     // Data-only change: no structural mutation, no visible order shift,
     // no expansion/hasChildren change. Fire the targeted data channel
     // so the element rebuilds only this row instead of sweeping every
@@ -2715,7 +2658,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final pendingRoots = <TKey>[];
     final liveRootSet = <TKey>{};
     for (final k in _roots) {
-      if (_pendingDeletion.contains(k)) {
+      if (_isPendingDeletion(k)) {
         pendingRoots.add(k);
       } else {
         liveRootSet.add(k);
@@ -2760,7 +2703,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final pendingChildren = <TKey>[];
     final liveChildSet = <TKey>{};
     for (final k in currentChildren) {
-      if (_pendingDeletion.contains(k)) {
+      if (_isPendingDeletion(k)) {
         pendingChildren.add(k);
       } else {
         liveChildSet.add(k);
@@ -2787,7 +2730,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // progress, pending-deletion exit). Those entries would otherwise
       // retain the old order until the animation completes.
       for (final child in _childListOf(parentKey)!) {
-        if (_nodeToOperationGroup.containsKey(child) ||
+        if (_hasOperationGroup(child) ||
             _bulkAnimationGroup?.members.contains(child) == true ||
             _standaloneAnimations.containsKey(child)) {
           needsVisibleRebuild = true;
@@ -2973,7 +2916,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       final nodesToShow = _flattenSubtree(key, includeRoot: false);
       final nodesToInsert = <TKey>[];
       for (final nodeId in nodesToShow) {
-        if (_pendingDeletion.contains(nodeId)) continue;
+        if (_isPendingDeletion(nodeId)) continue;
         if (!_order.contains(nodeId)) {
           nodesToInsert.add(nodeId);
         } else {
@@ -3005,14 +2948,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // snap to full on group disposal. Updating here ensures the
       // reversal terminates at the correct natural size.
       for (final entry in existingGroup.members.entries) {
-        entry.value.targetExtent = _fullExtents[entry.key] ?? _unknownExtent;
+        entry.value.targetExtent = _fullExtentOf(entry.key) ?? _unknownExtent;
       }
       existingGroup.controller.forward();
 
       // Handle descendants NOT in this group (from nested expansions)
       final nodesToShow = _flattenSubtree(key, includeRoot: false);
       for (final nodeId in nodesToShow) {
-        if (_pendingDeletion.contains(nodeId)) continue;
+        if (_isPendingDeletion(nodeId)) continue;
         if (existingGroup.members.containsKey(nodeId)) continue;
 
         if (_standaloneAnimations[nodeId] case final anim?
@@ -3051,7 +2994,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     int newNodeCount = 0;
     int effectiveCount = 0;
     for (final nodeId in nodesToShow) {
-      if (_pendingDeletion.contains(nodeId)) continue;
+      if (_isPendingDeletion(nodeId)) continue;
       effectiveCount++;
       if (!_order.contains(nodeId)) {
         newNodeCount++;
@@ -3061,27 +3004,27 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (newNodeCount == 0) {
       // All nodes already visible (reversing collapse animation)
       for (final nodeId in nodesToShow) {
-        if (_pendingDeletion.contains(nodeId)) continue;
+        if (_isPendingDeletion(nodeId)) continue;
         final capturedExtent = _captureAndRemoveFromGroups(nodeId);
         final nge = NodeGroupExtent(
           startExtent: capturedExtent ?? 0.0,
-          targetExtent: _fullExtents[nodeId] ?? _unknownExtent,
+          targetExtent: _fullExtentOf(nodeId) ?? _unknownExtent,
         );
         group.members[nodeId] = nge;
-        _nodeToOperationGroup[nodeId] = key;
+        _setOperationGroup(nodeId, key);
       }
     } else if (newNodeCount == effectiveCount) {
       // All nodes need insertion (normal expand)
       final nodesToInsert = <TKey>[];
       for (final nodeId in nodesToShow) {
-        if (_pendingDeletion.contains(nodeId)) continue;
+        if (_isPendingDeletion(nodeId)) continue;
         final capturedExtent = _captureAndRemoveFromGroups(nodeId);
         final nge = NodeGroupExtent(
           startExtent: capturedExtent ?? 0.0,
-          targetExtent: _fullExtents[nodeId] ?? _unknownExtent,
+          targetExtent: _fullExtentOf(nodeId) ?? _unknownExtent,
         );
         group.members[nodeId] = nge;
-        _nodeToOperationGroup[nodeId] = key;
+        _setOperationGroup(nodeId, key);
         nodesToInsert.add(nodeId);
       }
       final insertIndex = parentIndex + 1;
@@ -3093,15 +3036,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       int insertOffset = 0;
       int minInsertIndex = _order.length;
       for (final nodeId in nodesToShow) {
-        if (_pendingDeletion.contains(nodeId)) continue;
+        if (_isPendingDeletion(nodeId)) continue;
         final existingIndex = _order.indexOf(nodeId);
         final capturedExtent = _captureAndRemoveFromGroups(nodeId);
         final nge = NodeGroupExtent(
           startExtent: capturedExtent ?? 0.0,
-          targetExtent: _fullExtents[nodeId] ?? _unknownExtent,
+          targetExtent: _fullExtentOf(nodeId) ?? _unknownExtent,
         );
         group.members[nodeId] = nge;
-        _nodeToOperationGroup[nodeId] = key;
+        _setOperationGroup(nodeId, key);
 
         if (existingIndex != VisibleOrderBuffer.kNotVisible) {
           // Node already visible (was exiting)
@@ -3151,7 +3094,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // Remove immediately from visible order
       final toRemove = <TKey>{};
       for (final nodeId in descendants) {
-        if (!_pendingDeletion.contains(nodeId)) {
+        if (!_isPendingDeletion(nodeId)) {
           toRemove.add(nodeId);
           _removeAnimation(nodeId);
         }
@@ -3183,7 +3126,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
       // Handle descendants NOT in this group (from nested expansions)
       for (final nodeId in descendants) {
-        if (_pendingDeletion.contains(nodeId)) continue;
+        if (_isPendingDeletion(nodeId)) continue;
         if (existingGroup.members.containsKey(nodeId)) continue;
         // Create standalone exit animation with speedMultiplier
         _startStandaloneExitAnimation(nodeId, triggeringAncestorId: key);
@@ -3207,15 +3150,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _installOperationGroup(key, group);
 
     for (final nodeId in descendants) {
-      if (_pendingDeletion.contains(nodeId)) continue;
+      if (_isPendingDeletion(nodeId)) continue;
       final capturedExtent = _captureAndRemoveFromGroups(nodeId);
       final nge = NodeGroupExtent(
         startExtent: 0.0,
-        targetExtent: capturedExtent ?? (_fullExtents[nodeId] ?? defaultExtent),
+        targetExtent: capturedExtent ?? (_fullExtentOf(nodeId) ?? defaultExtent),
       );
       group.members[nodeId] = nge;
       group.pendingRemoval.add(nodeId);
-      _nodeToOperationGroup[nodeId] = key;
+      _setOperationGroup(nodeId, key);
     }
 
     _structureGeneration++;
@@ -3251,7 +3194,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     while (stack.isNotEmpty) {
       final key = stack.removeLast();
-      if (_pendingDeletion.contains(key)) {
+      if (_isPendingDeletion(key)) {
         continue;
       }
       final children = _childListOf(key);
@@ -3276,16 +3219,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Check standalone exiting
         final animation = _standaloneAnimations[childId];
         if (animation != null && animation.type == AnimationType.exiting) {
-          if (!_pendingDeletion.contains(childId)) {
+          if (!_isPendingDeletion(childId)) {
             nodesToReverseExit.add(childId);
           }
         }
         // Check operation group exiting (pendingRemoval)
-        final opGroupKey = _nodeToOperationGroup[childId];
+        final opGroupKey = _operationGroupOf(childId);
         if (opGroupKey != null) {
           final opGroup = _operationGroups[opGroupKey];
           if (opGroup != null && opGroup.pendingRemoval.contains(childId)) {
-            if (!_pendingDeletion.contains(childId)) {
+            if (!_isPendingDeletion(childId)) {
               nodesToReverseExit.add(childId);
             }
           }
@@ -3325,7 +3268,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           // captured mid-flight value.
           for (final member in group.members.entries) {
             member.value.targetExtent =
-                _fullExtents[member.key] ?? _unknownExtent;
+                _fullExtentOf(member.key) ?? _unknownExtent;
           }
           group.controller.forward();
         }
@@ -3341,14 +3284,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
         // Reverse standalone exit animations smoothly
         for (final key in nodesToReverseExit) {
-          if (!_nodeToOperationGroup.containsKey(key)) {
+          if (!_hasOperationGroup(key)) {
             _startStandaloneEnterAnimation(key);
           }
         }
 
         // Add any new nodes to the group (skip if already in an operation group)
         for (final key in nodesToShow) {
-          if (_order.contains(key) && !_nodeToOperationGroup.containsKey(key)) {
+          if (_order.contains(key) && !_hasOperationGroup(key)) {
             _bulkAnimationGroup!.members.add(key);
           }
         }
@@ -3363,14 +3306,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
         // Reverse standalone exit animations smoothly
         for (final key in nodesToReverseExit) {
-          if (!_nodeToOperationGroup.containsKey(key)) {
+          if (!_hasOperationGroup(key)) {
             _startStandaloneEnterAnimation(key);
           }
         }
 
         // Add new nodes to the bulk group (skip if already in an operation group)
         for (final key in nodesToShow) {
-          if (_order.contains(key) && !_nodeToOperationGroup.containsKey(key)) {
+          if (_order.contains(key) && !_hasOperationGroup(key)) {
             _bulkAnimationGroup!.members.add(key);
           }
         }
@@ -3467,7 +3410,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         if (group.pendingRemoval.isEmpty) {
           // Group is expanding — reverse it
           for (final nodeId in group.members.keys) {
-            if (!_pendingDeletion.contains(nodeId)) {
+            if (!_isPendingDeletion(nodeId)) {
               group.pendingRemoval.add(nodeId);
               opGroupReversed = true;
             }
@@ -3488,16 +3431,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           _bulkAnimationGroup!.pendingRemoval.isEmpty) {
         // Mark all members for removal when animation completes at 0
         for (final key in _bulkAnimationGroup!.members) {
-          if (!_pendingDeletion.contains(key)) {
+          if (!_isPendingDeletion(key)) {
             _bulkAnimationGroup!.pendingRemoval.add(key);
           }
         }
 
         // Handle additional nodes not in any group
         for (final key in nodesToHide) {
-          if (_pendingDeletion.contains(key)) continue;
+          if (_isPendingDeletion(key)) continue;
           if (!_bulkAnimationGroup!.members.contains(key) &&
-              !_nodeToOperationGroup.containsKey(key)) {
+              !_hasOperationGroup(key)) {
             _startStandaloneExitAnimation(key);
           }
         }
@@ -3513,8 +3456,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Add nodes to the bulk group, keeping individually-animating
         // nodes on their own timeline for smooth transitions.
         for (final key in nodesToHide) {
-          if (_pendingDeletion.contains(key)) continue;
-          if (_nodeToOperationGroup.containsKey(key)) continue;
+          if (_isPendingDeletion(key)) continue;
+          if (_hasOperationGroup(key)) continue;
           if (_standaloneAnimations.containsKey(key)) {
             // Reverse standalone animation smoothly
             _startStandaloneExitAnimation(key);
@@ -3535,7 +3478,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // Remove immediately
       final toRemove = <TKey>{};
       for (final key in nodesToHide) {
-        if (!_pendingDeletion.contains(key)) {
+        if (!_isPendingDeletion(key)) {
           toRemove.add(key);
           _removeAnimation(key);
         }
@@ -3582,14 +3525,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         continue;
       }
 
-      if (_pendingDeletion.contains(key)) {
+      if (_isPendingDeletion(key)) {
         // Don't recurse based on expansion state (prevents zombie children),
         // but DO include children that are also pending deletion and still
         // have running exit animations — they need to stay in _visibleOrder
         // to animate out smoothly.
         for (int i = children.length - 1; i >= 0; i--) {
           final childId = children[i];
-          if (_pendingDeletion.contains(childId) &&
+          if (_isPendingDeletion(childId) &&
               _standaloneAnimations.containsKey(childId)) {
             stack.add(childId);
           }
@@ -3605,7 +3548,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // instead of snapping away.
         for (int i = children.length - 1; i >= 0; i--) {
           final childId = children[i];
-          if (_nodeToOperationGroup.containsKey(childId) ||
+          if (_hasOperationGroup(childId) ||
               _bulkAnimationGroup?.members.contains(childId) == true ||
               _standaloneAnimations.containsKey(childId)) {
             stack.add(childId);

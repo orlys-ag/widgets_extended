@@ -311,6 +311,142 @@ class SliverTreeParentData extends ParentData {
   }
 }
 
+/// Per-node mutable state that lives outside the structural store but is
+/// keyed by node identity rather than scanned by an animation ticker.
+/// Consolidates the three formerly-parallel maps `_fullExtents`,
+/// `_pendingDeletion`, and `_nodeToOperationGroup` into one record so
+/// every mutation site updates a single lookup instead of three.
+///
+/// Each field defaults to its "absent" sentinel (null for [fullExtent]
+/// and [operationGroupKey]; false for [isPendingDeletion]). When every
+/// field is at its sentinel the entry is logically empty and should be
+/// removed from the owning map.
+///
+/// The two ticker-iterated maps (`_standaloneAnimations`,
+/// `_slideAnimations`) are deliberately kept separate: their hot path is
+/// `for (entry in map.entries)` from a per-vsync callback, so folding
+/// them into this record would force every tick to scan irrelevant
+/// entries (or maintain a parallel working set, which negates the
+/// cohesion win).
+class NodeAnimationState<TKey> {
+  NodeAnimationState();
+
+  /// Cached measured full extent. Null when the node has not yet been
+  /// laid out.
+  double? fullExtent;
+
+  /// Whether the node is mid-exit due to [TreeController.remove] (versus a
+  /// parent collapse). True between the call to remove and the eventual
+  /// purge from the structural store when the exit animation completes.
+  bool isPendingDeletion = false;
+
+  /// Operation key (the node whose expand/collapse created the group) for
+  /// the operation group this node currently belongs to, or null.
+  TKey? operationGroupKey;
+
+  /// True when no field carries information — the owning map should
+  /// remove the entry.
+  bool get isEmpty =>
+      fullExtent == null && !isPendingDeletion && operationGroupKey == null;
+}
+
+/// Snapshot of the controller's bulk-animation state at a single point in
+/// time, fetched as one unit so render-layer hot paths can avoid the four
+/// separate getter calls (`isBulkAnimating`, `bulkAnimationValue`,
+/// `bulkAnimationGeneration`, `isBulkMember`) that would otherwise be
+/// needed each layout.
+///
+/// `isValid` is true exactly when a bulk animation group exists and has
+/// active members. Read [value] / [generation] / [containsMember] only on
+/// a valid snapshot — on an invalid snapshot they hold zero defaults.
+class BulkAnimationData<TKey> {
+  const BulkAnimationData._({
+    required this.isValid,
+    required this.value,
+    required this.generation,
+    required this.memberCount,
+    required Set<TKey>? members,
+    required Set<TKey>? pendingRemoval,
+  }) : _members = members,
+       _pendingRemoval = pendingRemoval;
+
+  static const BulkAnimationData<Never> _inactiveSentinel =
+      BulkAnimationData<Never>._(
+        isValid: false,
+        value: 0.0,
+        generation: 0,
+        memberCount: 0,
+        members: null,
+        pendingRemoval: null,
+      );
+
+  /// The "no bulk animation active" snapshot. Returns a const-shared
+  /// sentinel cast to [TKey] — no allocation per call. Safe to cache once
+  /// per controller. Soundness: every field on the sentinel that depends
+  /// on [TKey] is null, so [containsMember] never inspects the cast set.
+  static BulkAnimationData<TKey> inactive<TKey>() =>
+      _inactiveSentinel as BulkAnimationData<TKey>;
+
+  /// Constructs a snapshot from the controller's current bulk state.
+  /// Internal use only — call [TreeController.bulkAnimationData]. Holds
+  /// references to the underlying sets; does not copy or union them, so
+  /// no per-frame allocation beyond the snapshot record itself.
+  static BulkAnimationData<TKey> snapshot<TKey>({
+    required double value,
+    required int generation,
+    required Set<TKey> members,
+    required Set<TKey> pendingRemoval,
+  }) {
+    return BulkAnimationData<TKey>._(
+      isValid: true,
+      value: value,
+      generation: generation,
+      // Mirrors AnimationGroup.memberCount semantics — the count of
+      // currently-animating bulk members. NOT a union with pendingRemoval:
+      // collapse paths populate both sets with the SAME keys (a member
+      // that is also marked for post-animation removal), so summing the
+      // two would double-count. Callers that need to know whether a
+      // specific key is tracked should call `containsMember` instead.
+      memberCount: members.length,
+      members: members,
+      pendingRemoval: pendingRemoval,
+    );
+  }
+
+  /// Whether a bulk animation group is currently active. When false, every
+  /// other field carries a zero / empty default.
+  final bool isValid;
+
+  /// Curved animation value (0..1) for the bulk group. Zero on an invalid
+  /// snapshot.
+  final double value;
+
+  /// Monotonic counter that bumps whenever the bulk group is created,
+  /// destroyed, or its member set changes. Render-layer caches keyed by
+  /// position-indexed cumulatives use this as the staleness signature.
+  final int generation;
+
+  /// Live member count on the source group — mirrors
+  /// `AnimationGroup.memberCount`. **Does not** add pendingRemoval, since
+  /// collapse paths populate both sets with overlapping keys (the
+  /// to-be-removed members are also live during the animation). Callers
+  /// that need a per-key membership check should use [containsMember].
+  final int memberCount;
+
+  final Set<TKey>? _members;
+  final Set<TKey>? _pendingRemoval;
+
+  /// Whether [key] is a member of the bulk group (in either the live
+  /// member set or the pending-removal set). Always false on an invalid
+  /// snapshot.
+  bool containsMember(TKey key) {
+    final m = _members;
+    if (m != null && m.contains(key)) return true;
+    final p = _pendingRemoval;
+    return p != null && p.contains(key);
+  }
+}
+
 /// Computed sticky header position for a single node.
 ///
 /// Created during layout, consumed during paint and hit-test.

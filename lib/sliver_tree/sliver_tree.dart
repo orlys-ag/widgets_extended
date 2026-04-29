@@ -23,6 +23,7 @@ export 'types.dart'
         AncestorExpansionMode,
         AnimationState,
         AnimationType,
+        BulkAnimationData,
         SliverTreeParentData,
         SlideAnimation,
         TreeNode;

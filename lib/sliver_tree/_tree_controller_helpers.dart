@@ -17,23 +17,16 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       group.dispose();
     }
     _operationGroups.clear();
-    _nodeToOperationGroup.clear();
     _slideTicker?.dispose();
     _slideTicker = null;
     _slideAnimations.clear();
-    _dataByNid.clear();
-    _childrenByNid.clear();
-    _parentByNid = Int32List(0);
-    _depthByNid = Int32List(0);
-    _expandedByNid = Uint8List(0);
-    _ancestorsExpandedByNid = Uint8List(0);
+    _store.clear();
     _visibleSubtreeSizeByNid = Int32List(0);
     _roots.clear();
     _order.reset();
     _standaloneAnimations.clear();
-    _fullExtents.clear();
-    _pendingDeletion.clear();
-    _nids.clear();
+    _animStates.clear();
+    _pendingDeletionCount = 0;
     _bumpAnimGen();
   }
 
@@ -66,28 +59,11 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     }());
   }
 
-  /// Debug-only: verifies the per-nid data slots match the registry, then
-  /// delegates cross-checking of the forward/reverse maps to the registry.
-  /// Every live nid must reverse-map correctly and resolve to a non-null
-  /// entry in [_dataByNid]; every freed nid must have a null data slot.
+  /// Debug-only: delegates the per-nid data + registry consistency check to
+  /// the [NodeStore].
   void _assertNidRegistryConsistency() {
     assert(() {
-      if (_dataByNid.length != _nids.length) {
-        throw StateError(
-          "_dataByNid size ${_dataByNid.length} != registry size "
-          "${_nids.length}",
-        );
-      }
-      for (int nid = 0; nid < _nids.length; nid++) {
-        final key = _nids.keyOf(nid);
-        if (key == null) {
-          continue;
-        }
-        if (_dataByNid[nid] == null) {
-          throw StateError("nid $nid for key $key has null data slot");
-        }
-      }
-      _nids.debugAssertConsistent();
+      _store.debugAssertConsistent();
       return true;
     }());
   }
@@ -279,7 +255,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   /// order, _roots, or the parent's children list — those are handled by
   /// the caller).
   void _purgeNodeData(TKey key) {
-    if (_fullExtents.remove(key) != null) {
+    if (_clearFullExtent(key) != null) {
       _invalidateFullOffsetPrefix();
     }
     // Clean up standalone animation state
@@ -287,7 +263,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       _bumpAnimGen();
     }
     // Clean up operation group membership
-    final opGroupKey = _nodeToOperationGroup.remove(key);
+    final opGroupKey = _clearOperationGroup(key);
     if (opGroupKey != null) {
       final group = _operationGroups[opGroupKey];
       if (group != null) {
@@ -305,8 +281,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     final orphanGroup = _operationGroups.remove(key);
     if (orphanGroup != null) {
       for (final memberKey in orphanGroup.members.keys) {
-        if (_nodeToOperationGroup[memberKey] == key) {
-          _nodeToOperationGroup.remove(memberKey);
+        if (_operationGroupOf(memberKey) == key) {
+          _clearOperationGroup(memberKey);
         }
       }
       _bumpAnimGen();
@@ -321,7 +297,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
         _bumpBulkGen();
       }
     }
-    _pendingDeletion.remove(key);
+    _clearPendingDeletion(key);
     _order.clearIndexOf(key);
     _releaseNid(key);
   }
@@ -372,13 +348,14 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       if (_order.indexByNid[nid] == VisibleOrderBuffer.kNotVisible) {
         continue;
       }
-      var ancestorNid = _parentByNid[nid];
+      final parentByNid = _store.parentByNid;
+      var ancestorNid = parentByNid[nid];
       while (ancestorNid != TreeController._kNoParent && ancestorNid >= 0) {
         final ancestorKey = _nids.keyOf(ancestorNid);
         if (ancestorKey == null || !keysSet.contains(ancestorKey)) {
           break;
         }
-        ancestorNid = _parentByNid[ancestorNid];
+        ancestorNid = parentByNid[ancestorNid];
       }
       if (ancestorNid != TreeController._kNoParent && ancestorNid >= 0) {
         _bumpVisibleSubtreeSizeFromSelf(ancestorNid, -1);
