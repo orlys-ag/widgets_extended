@@ -301,9 +301,14 @@ class _ItemViewListenerState<SKey, IKey, Section, Item>
     if (item == null || section == null) {
       return const SizedBox.shrink();
     }
-    final indexInSection = widget.controller
-        .itemsOf(widget.sectionKey)
-        .indexOf(widget.itemKey);
+    // Use the controller's LIVE-list index (mirrors what _buildItem
+    // passes to the outer itemBuilder). The previous
+    // `itemsOf(sectionKey).indexOf(itemKey)` returned the FULL-list
+    // index — including pending-deletion siblings — so the inner
+    // builder disagreed with the outer about a row's position whenever
+    // a sibling was mid-exit. It also avoids the per-build O(N)
+    // allocation of the items list.
+    final indexInSection = widget.controller.indexOfItem(widget.itemKey);
     final view = ItemView<SKey, IKey, Section, Item>(
       key: widget.itemKey,
       item: item,

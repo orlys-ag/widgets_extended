@@ -100,6 +100,7 @@ class TreeSyncController<TKey, TData> {
     List<TreeNode<TKey, TData>> Function(TKey key)? childrenOf,
     bool animate = true,
   }) {
+    _assertNoDuplicateKeys(desired, "syncRoots");
     _controller.runBatch(() {
       _syncRootsImpl(desired, childrenOf: childrenOf, animate: animate);
     });
@@ -203,6 +204,18 @@ class TreeSyncController<TKey, TData> {
     }
 
     // 4. Update data for retained roots whose payload changed.
+    //
+    //    Retained roots that are mid-exit-animation are intentionally
+    //    LEFT alone here: a pending-deletion node is still in the
+    //    controller's `rootKeys` (and therefore in the `currentSet`
+    //    that `initializeTracking` snapshots), so a caller mirroring
+    //    `controller.rootKeys` back into `desired` would otherwise
+    //    have its imperative `remove()` silently undone by an automatic
+    //    `insertRoot(preservePendingSubtreeState: true)` here. Callers
+    //    that want a removed root to come back mid-animation should
+    //    mirror live state via `liveRootKeys` (so the row drops out of
+    //    `currentSet` on the next sync and the toAdd branch handles
+    //    cancellation) or call `insertRoot` themselves.
     final retained = desiredSet.intersection(currentSet);
     for (final node in desired) {
       if (!retained.contains(node.key)) continue;
@@ -297,6 +310,7 @@ class TreeSyncController<TKey, TData> {
     List<TreeNode<TKey, TData>> desired, {
     bool animate = true,
   }) {
+    _assertNoDuplicateKeys(desired, "syncChildren($parentKey)");
     // Silently ignore unknown parents. Without this guard, a release build
     // skips TreeController.insert's debug assert and writes _parents[child] =
     // parentKey for a ghost parent, creating a zombie subtree unreachable
@@ -307,6 +321,29 @@ class TreeSyncController<TKey, TData> {
     _controller.runBatch(() {
       _syncChildrenImpl(parentKey, desired, animate: animate);
     });
+  }
+
+  /// Throws [ArgumentError] when [desired] contains the same key more
+  /// than once. The diff machinery downstream dedupes via a set, but the
+  /// per-position loops walk the raw list — duplicates land in the
+  /// internal `remaining` tracker and `_currentChildren`/`_currentRoots`
+  /// snapshots, producing wrong Fenwick offsets and stale tracking on
+  /// subsequent syncs. `TreeController.setRoots`/`setChildren` already
+  /// enforce this for the imperative path; matching it here closes the
+  /// declarative path.
+  static void _assertNoDuplicateKeys<TKey, TData>(
+    List<TreeNode<TKey, TData>> desired,
+    String context,
+  ) {
+    if (desired.length < 2) {
+      return;
+    }
+    final seen = <TKey>{};
+    for (final node in desired) {
+      if (!seen.add(node.key)) {
+        throw ArgumentError("Duplicate key ${node.key} in $context");
+      }
+    }
   }
 
   void _syncChildrenImpl(
@@ -412,6 +449,12 @@ class TreeSyncController<TKey, TData> {
     }
 
     // 4. Update data for retained children whose payload changed.
+    //    See `_syncRootsImpl` step 4 for the rationale: pending-deletion
+    //    nodes are intentionally NOT auto-cancelled here — that policy
+    //    would silently undo an imperative `removeItem` whose mirror
+    //    cycle through the widget includes the still-present pending
+    //    row. Mirror via `liveItemsOf` to express "post-mutation intent"
+    //    instead of full state.
     final retained = desiredSet.intersection(currentSet);
     for (final node in desired) {
       if (!retained.contains(node.key)) continue;
@@ -496,16 +539,16 @@ class TreeSyncController<TKey, TData> {
       ..addAll(_controller.rootKeys);
     _currentChildren.clear();
 
-    void trackChildren(TKey key) {
+    // Iterative DFS so deep linear chains do not stack-overflow Dart's
+    // recursion limit (typically ~10k–20k frames).
+    final stack = <TKey>[..._currentRoots];
+    while (stack.isNotEmpty) {
+      final key = stack.removeLast();
       final children = _controller.getChildren(key);
       _currentChildren[key] = List<TKey>.of(children);
       for (final childKey in children) {
-        trackChildren(childKey);
+        stack.add(childKey);
       }
-    }
-
-    for (final rootKey in _currentRoots) {
-      trackChildren(rootKey);
     }
   }
 
@@ -547,77 +590,107 @@ class TreeSyncController<TKey, TData> {
   // PRIVATE HELPERS
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Recursively clears [_currentChildren] tracking for [key] and all its
-  /// tracked descendants. Must be called when a node is removed so that
-  /// future [syncChildren] calls don't diff against stale state.
+  /// Clears [_currentChildren] tracking for [key] and all its tracked
+  /// descendants. Must be called when a node is removed so that future
+  /// [syncChildren] calls don't diff against stale state.
+  ///
+  /// Iterative DFS so deep linear chains do not stack-overflow.
   void _clearChildrenTracking(TKey key) {
-    final children = _currentChildren.remove(key);
-    if (children != null) {
-      for (final childKey in children) {
-        _clearChildrenTracking(childKey);
+    final stack = <TKey>[key];
+    while (stack.isNotEmpty) {
+      final current = stack.removeLast();
+      final children = _currentChildren.remove(current);
+      if (children != null) {
+        for (final childKey in children) {
+          stack.add(childKey);
+        }
       }
     }
   }
 
-  /// Recursively collects all desired descendant keys into
-  /// [_globallyDesiredChildren].
+  /// Collects all desired descendant keys into [_globallyDesiredChildren].
+  ///
+  /// Iterative DFS so deep desired trees do not stack-overflow.
   void _collectDesiredDescendants(
     List<TreeNode<TKey, TData>> nodes,
     List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
   ) {
-    for (final node in nodes) {
+    final stack = <TreeNode<TKey, TData>>[...nodes];
+    while (stack.isNotEmpty) {
+      final node = stack.removeLast();
       final children = childrenOf(node.key);
       for (final child in children) {
         _globallyDesiredChildren!.add(child.key);
+        stack.add(child);
       }
-      _collectDesiredDescendants(children, childrenOf);
     }
   }
 
-  /// Recursively syncs children for each node, then recurses into
-  /// their children.
+  /// Syncs children for each node, then descends into their children.
+  /// After all descendants are synced, restores expansion bottom-up so
+  /// each `expand()` sees its children already registered.
+  ///
+  /// Iterative DFS so deep desired trees do not stack-overflow. The
+  /// restore phase walks `restoreOrder` in reverse — the order keys are
+  /// pushed in is top-down (parent before children); reversing yields
+  /// the bottom-up order the recursive version produced.
   void _syncChildrenRecursive(
     List<TreeNode<TKey, TData>> nodes,
     List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
     Set<TKey> newlyAdded,
     bool animate,
   ) {
-    for (final node in nodes) {
+    final stack = <TreeNode<TKey, TData>>[];
+    final restoreOrder = <TKey>[];
+    for (int i = nodes.length - 1; i >= 0; i--) {
+      stack.add(nodes[i]);
+    }
+    while (stack.isNotEmpty) {
+      final node = stack.removeLast();
       final children = childrenOf(node.key);
       syncChildren(
         node.key,
         children,
         animate: newlyAdded.contains(node.key) ? false : animate,
       );
-      _syncChildrenRecursive(children, childrenOf, newlyAdded, animate);
-      // Restore expansion for children after their full subtrees are synced.
-      // This is deferred from syncChildren because expand() requires the
-      // node to already have children registered in the controller.
+      // Defer restore to after all descendants are synced (bottom-up).
       for (final child in children) {
-        _restoreExpansion(child.key, animate: animate);
+        restoreOrder.add(child.key);
       }
+      // Push children for recursion (reversed so first child pops first,
+      // matching the recursive version's left-to-right visit order).
+      for (int i = children.length - 1; i >= 0; i--) {
+        stack.add(children[i]);
+      }
+    }
+    // Restore in reverse push order = bottom-up, matching recursion's
+    // post-order placement of `_restoreExpansion(child.key, ...)` after
+    // `_syncChildrenRecursive(children, ...)` returned.
+    for (int i = restoreOrder.length - 1; i >= 0; i--) {
+      _restoreExpansion(restoreOrder[i], animate: animate);
     }
   }
 
   /// Remembers the expansion state of [key] and all its descendants before
   /// removal. This is necessary because [TreeController.remove] purges the
   /// entire subtree, so descendant expansion states would be lost.
+  ///
+  /// Iterative DFS so deep linear chains do not stack-overflow.
   void _rememberExpansion(TKey key) {
     if (!preserveExpansion || maxExpansionMemorySize <= 0) {
       return;
     }
-    _rememberExpansionRecursive(key);
+    final stack = <TKey>[key];
+    while (stack.isNotEmpty) {
+      final current = stack.removeLast();
+      _expansionMemory[current] = _controller.isExpanded(current);
+      for (final childKey in _controller.getChildren(current)) {
+        stack.add(childKey);
+      }
+    }
     // Evict oldest entries if over capacity.
     while (_expansionMemory.length > maxExpansionMemorySize) {
       _expansionMemory.remove(_expansionMemory.keys.first);
-    }
-  }
-
-  /// Recursively stores the expansion state for [key] and its descendants.
-  void _rememberExpansionRecursive(TKey key) {
-    _expansionMemory[key] = _controller.isExpanded(key);
-    for (final childKey in _controller.getChildren(key)) {
-      _rememberExpansionRecursive(childKey);
     }
   }
 

@@ -214,6 +214,9 @@ class SectionedSliverListState<SKey, IKey, Section, Item>
         _internalController = null;
       }
       _adoptController();
+      // Controller swap == effectively a fresh mount against the new
+      // controller; treat as first sync so the heuristic in [_sync]
+      // can decide whether to apply initial-expansion config.
       _sync(animate: true, isFirstSync: true);
       return;
     }
@@ -330,9 +333,40 @@ class SectionedSliverListState<SKey, IKey, Section, Item>
   }
 
   void _sync({required bool animate, required bool isFirstSync}) {
-    final knownSections = isFirstSync
-        ? <SKey>{}
-        : _activeController.sections.toSet();
+    // Snapshot the controller's CURRENT sections before [setSections]
+    // mutates it. Sections present here are pre-existing and may be
+    // treated as "known" — initial-expansion config then applies only
+    // to sections that genuinely appear for the first time in this
+    // sync.
+    //
+    // The "treat as known" decision is asymmetric between first and
+    // subsequent syncs:
+    //
+    //   • Subsequent syncs always use the snapshot — the user may have
+    //     mutated expansion via the controller between rebuilds and
+    //     that state must be preserved.
+    //
+    //   • First sync uses a heuristic: if ANY section in the snapshot
+    //     is currently expanded, the user has set explicit state on
+    //     the controller before mounting — preserve it by treating all
+    //     existing sections as known. If NO section is expanded, the
+    //     controller is in its default state (e.g., freshly populated
+    //     via `setSections` with no explicit expansion) — treat as
+    //     empty so the widget's `initiallyExpanded` /
+    //     `initialSectionExpansion` config drives expansion. Without
+    //     this heuristic, mounting against a pre-populated controller
+    //     with default-collapsed sections silently overrides
+    //     `initiallyExpanded: true`.
+    final Set<SKey> knownSections;
+    if (isFirstSync) {
+      final currentSections = _activeController.sections;
+      final hasExplicitExpansion =
+          currentSections.any(_activeController.isExpanded);
+      knownSections =
+          hasExplicitExpansion ? currentSections.toSet() : <SKey>{};
+    } else {
+      knownSections = _activeController.sections.toSet();
+    }
     final desired = _normalizedSections();
     _activeController.setSections(desired, animate: animate);
 

@@ -66,10 +66,48 @@ final class SectionPayload<Section, Item> extends SecPayload<Section, Item> {
   const SectionPayload(this.value);
 
   final Section value;
+
+  /// Compares the wrapped section value, NOT wrapper identity. Two
+  /// distinct wrapper instances around the same `Section` value must be
+  /// equal — otherwise [TreeNode.==] (which delegates to `data.==`)
+  /// would always report data as changed on every sync, forcing
+  /// `TreeSyncController` to fire `updateNode` for every retained
+  /// section header on every rebuild.
+  @override
+  bool operator ==(Object other) {
+    return other is SectionPayload<Section, Item> && other.value == value;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(SectionPayload, value);
+  }
+
+  @override
+  String toString() {
+    return "SectionPayload($value)";
+  }
 }
 
 final class ItemPayload<Section, Item> extends SecPayload<Section, Item> {
   const ItemPayload(this.value);
 
   final Item value;
+
+  /// Compares the wrapped item value, NOT wrapper identity. See the
+  /// rationale on [SectionPayload.==].
+  @override
+  bool operator ==(Object other) {
+    return other is ItemPayload<Section, Item> && other.value == value;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(ItemPayload, value);
+  }
+
+  @override
+  String toString() {
+    return "ItemPayload($value)";
+  }
 }

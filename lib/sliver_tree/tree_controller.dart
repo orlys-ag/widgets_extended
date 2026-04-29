@@ -1589,6 +1589,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     int installed = 0;
+    final touched = <int>{};
     for (final entry in currentOffsets.entries) {
       final key = entry.key;
       final current = entry.value;
@@ -1602,6 +1603,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           key,
           SlideAnimation<TKey>(startDelta: rawDelta, curve: curve),
         );
+        // The set was just populated for this key — capture it.
+        final nid = _nids[key];
+        if (nid != null) touched.add(nid);
         installed++;
       } else {
         // Composition: the new prior/current describes the mutation that just
@@ -1618,7 +1622,37 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         existing.currentDelta = composed;
         existing.progress = 0.0;
         existing.curve = curve;
+        final nid = _nids[key];
+        if (nid != null) touched.add(nid);
         installed++;
+      }
+    }
+
+    // Re-baseline every active slide that this call did NOT touch. The
+    // shared ticker is stop+start'd below so its elapsed time resets to
+    // zero; on the next tick, every entry's progress is recomputed as
+    // elapsed/duration. Without re-baselining, an un-touched slide would
+    // see progress snap from its mid-flight value back to ~0, which lerps
+    // currentDelta back to its ORIGINAL startDelta — a visible jump.
+    //
+    // Fix: capture the un-touched slide's CURRENT visual position into
+    // its startDelta and reset its progress to 0. The next tick now lerps
+    // from the just-frozen visual position toward 0, continuing smoothly.
+    // The total settle time for un-touched slides effectively extends to
+    // the new duration, but visual continuity is preserved (the jump is
+    // the worse of the two failure modes).
+    if (_activeSlideNids.length != touched.length) {
+      for (final nid in _activeSlideNids) {
+        if (touched.contains(nid)) continue;
+        final entry = _slideByNid[nid]!;
+        if (entry.currentDelta == 0.0) {
+          // Already settled — let the next tick mark complete and clear.
+          continue;
+        }
+        entry.startDelta = entry.currentDelta;
+        entry.progress = 0.0;
+        // Keep the un-touched entry's existing curve; the caller's curve
+        // applies only to slides this call introduced or composed.
       }
     }
 
@@ -3027,6 +3061,22 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (newParentKey != null && _getDescendants(key).contains(newParentKey)) {
       throw StateError(
         "Cannot move $key under its own descendant $newParentKey",
+      );
+    }
+    // Reparenting under a pending-deletion node would orphan the moved
+    // subtree when the new parent's exit animation finalizes:
+    // `_finalizeAnimation` only purges descendants that are themselves
+    // pending-deletion, so a non-pending child is left behind with a stale
+    // `parentKey` pointing at a freed nid, and the grandparent's
+    // visible-subtree-size cache is decremented for a row that still
+    // exists. Mirror the policy `insert(parentKey:)` already enforces.
+    // Runtime check (not just an assert) so release builds also reject
+    // this rather than silently corrupting state.
+    if (newParentKey != null && _isPendingDeletion(newParentKey)) {
+      throw StateError(
+        "Cannot move $key under $newParentKey while $newParentKey is "
+        "animating out (pending deletion). The parent will be purged when "
+        "its exit animation completes, leaving the moved subtree orphaned.",
       );
     }
 

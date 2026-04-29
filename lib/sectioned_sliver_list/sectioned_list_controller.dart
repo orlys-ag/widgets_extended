@@ -295,11 +295,18 @@ class SectionedListController<SKey, IKey, Section, Item> {
   void moveSection(SKey key, int toIndex) {
     _checkNotDisposed();
     _requireSection(key, "moveSection");
-    final order = sections;
-    final removed = order.toList()..remove(key);
-    final clamped = toIndex.clamp(0, removed.length);
-    removed.insert(clamped, key);
-    reorderSections(removed);
+    if (_tree.isPendingDeletion(SectionKey<SKey, IKey>(key))) {
+      _throwMissing("moveSection", "section $key is being removed");
+    }
+    // Use the LIVE list — `reorderSections` → `_tree.reorderRoots`
+    // validates against the live root set (excludes pending-deletion).
+    // The previous full-list form would build a proposed order
+    // including pending-deletion siblings and trip the validation when
+    // a sibling section was mid-exit-animation.
+    final order = liveSections..remove(key);
+    final clamped = toIndex.clamp(0, order.length);
+    order.insert(clamped, key);
+    reorderSections(order);
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -365,11 +372,19 @@ class SectionedListController<SKey, IKey, Section, Item> {
   void moveItemInSection(IKey key, int toIndex) {
     _checkNotDisposed();
     _requireItem(key, "moveItemInSection");
+    if (_tree.isPendingDeletion(ItemKey<SKey, IKey>(key))) {
+      _throwMissing("moveItemInSection", "item $key is being removed");
+    }
     final parentKey = sectionOf(key);
     if (parentKey == null) {
       _throwMissing("moveItemInSection", "item $key has no parent section");
     }
-    final siblings = itemsOf(parentKey as SKey).toList()..remove(key);
+    // Use the LIVE list — `reorderItems` → `_tree.reorderChildren`
+    // validates against the live child set (excludes pending-deletion).
+    // The previous full-list form built a proposed order including
+    // pending-deletion siblings and tripped the validation when an
+    // item sibling was mid-exit-animation.
+    final siblings = liveItemsOf(parentKey as SKey)..remove(key);
     final clamped = toIndex.clamp(0, siblings.length);
     siblings.insert(clamped, key);
     reorderItems(parentKey, siblings);
@@ -463,6 +478,11 @@ class SectionedListController<SKey, IKey, Section, Item> {
   }
 
   /// Section keys in render order. Returns `[]` when empty.
+  ///
+  /// Includes sections that are mid-exit-animation (pending-deletion).
+  /// Use [liveSections] when you need only sections that aren't being
+  /// removed — e.g., when constructing a list for `reorderSections`,
+  /// which validates against the live set.
   List<SKey> get sections {
     _checkNotDisposed();
     final raw = _tree.rootKeys;
@@ -472,12 +492,47 @@ class SectionedListController<SKey, IKey, Section, Item> {
     ];
   }
 
+  /// Section keys in render order, EXCLUDING sections currently mid-
+  /// exit-animation. Returns `[]` when no live sections exist.
+  ///
+  /// This is the input shape `reorderSections` expects.
+  List<SKey> get liveSections {
+    _checkNotDisposed();
+    final raw = _tree.liveRootKeys;
+    return <SKey>[
+      for (final k in raw)
+        if (_assertIsSection(k)) (k as SectionKey<SKey, IKey>).value,
+    ];
+  }
+
   /// Item keys for [sectionKey] in render order. Returns `[]` when the
   /// section does not exist or has no items — call [hasSection] to
   /// disambiguate if needed.
+  ///
+  /// Includes items that are mid-exit-animation (pending-deletion).
+  /// Use [liveItemsOf] when you need only items that aren't being
+  /// removed — e.g., when constructing a list for `reorderItems`,
+  /// which validates against the live set.
   List<IKey> itemsOf(SKey sectionKey) {
     _checkNotDisposed();
     final children = _tree.getChildren(SectionKey<SKey, IKey>(sectionKey));
+    if (children.isEmpty) {
+      return const [];
+    }
+    return <IKey>[
+      for (final k in children)
+        if (_assertIsItem(k)) (k as ItemKey<SKey, IKey>).value,
+    ];
+  }
+
+  /// Item keys for [sectionKey] in render order, EXCLUDING items
+  /// currently mid-exit-animation. Returns `[]` when no live items
+  /// exist (or the section is unknown).
+  ///
+  /// This is the input shape `reorderItems` expects.
+  List<IKey> liveItemsOf(SKey sectionKey) {
+    _checkNotDisposed();
+    final children = _tree.getLiveChildren(SectionKey<SKey, IKey>(sectionKey));
     if (children.isEmpty) {
       return const [];
     }
@@ -497,6 +552,21 @@ class SectionedListController<SKey, IKey, Section, Item> {
   int itemCount(SKey sectionKey) {
     _checkNotDisposed();
     return _tree.getChildCount(SectionKey<SKey, IKey>(sectionKey));
+  }
+
+  /// Position of [itemKey] among its section's children in
+  /// **live-list space** (skipping pending-deletion siblings). Returns
+  /// `-1` when [itemKey] is not present, is itself pending-deletion, or
+  /// is not an item.
+  ///
+  /// Mirrors what `_buildItem` in the widget passes as
+  /// `ItemView.indexInSection`, so callers — including the
+  /// `view.watch(...)` selective-rebuild widget — can compute the same
+  /// value without scanning a freshly-allocated `itemsOf(sectionKey)`
+  /// list.
+  int indexOfItem(IKey itemKey) {
+    _checkNotDisposed();
+    return _tree.getIndexInParent(ItemKey<SKey, IKey>(itemKey));
   }
 
   // ──────────────────────────────────────────────────────────────────

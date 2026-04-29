@@ -164,7 +164,31 @@ class TreeSnapshot<TKey, TItem> {
     final childrenByParent = <TKey, List<TKey>>{};
     final visiting = <TKey>{};
 
-    void visit(TItem item, {required bool isRoot}) {
+    // Iterative DFS so deep hierarchies do not stack-overflow Dart's
+    // recursion limit. Two parallel stacks: `items` holds the work
+    // queue; `exitMarkers` mirrors it as `null` for entry frames or as
+    // the key whose `visiting` slot must be cleared on exit (post-order).
+    final items = <TItem>[];
+    final isRootStack = <bool>[];
+    final exitMarkers = <TKey?>[];
+
+    for (final root in roots) {
+      items.add(root);
+      isRootStack.add(true);
+      exitMarkers.add(null);
+    }
+
+    while (items.isNotEmpty) {
+      final item = items.removeLast();
+      final isRoot = isRootStack.removeLast();
+      final exitKey = exitMarkers.removeLast();
+
+      if (exitKey != null) {
+        // Post-order pop: leaving this key's subtree.
+        visiting.remove(exitKey);
+        continue;
+      }
+
       final key = keyOf(item);
       if (!visiting.add(key)) {
         throw ArgumentError(
@@ -184,6 +208,9 @@ class TreeSnapshot<TKey, TItem> {
 
       final childKeys = <TKey>[];
       final seenChildren = <TKey>{};
+      // Resolve children once so we can both populate childrenByParent and
+      // push them in the correct visit order (last-pushed = first-popped).
+      final childItems = <TItem>[];
       for (final child in childrenOf(item)) {
         final childKey = keyOf(child);
         if (!seenChildren.add(childKey)) {
@@ -193,16 +220,26 @@ class TreeSnapshot<TKey, TItem> {
           );
         }
         childKeys.add(childKey);
-        visit(child, isRoot: false);
+        childItems.add(child);
       }
       if (childKeys.isNotEmpty) {
         childrenByParent[key] = childKeys;
       }
-      visiting.remove(key);
-    }
 
-    for (final root in roots) {
-      visit(root, isRoot: true);
+      // Push exit marker FIRST so it pops AFTER all children — preserves
+      // the recursive version's `visiting.remove(key)` placement at the
+      // tail of the function body.
+      items.add(item); // placeholder, ignored on exit pop
+      isRootStack.add(false);
+      exitMarkers.add(key);
+
+      // Then push children in reverse so the first child pops first,
+      // matching the recursive version's left-to-right visit order.
+      for (int i = childItems.length - 1; i >= 0; i--) {
+        items.add(childItems[i]);
+        isRootStack.add(false);
+        exitMarkers.add(null);
+      }
     }
 
     return TreeSnapshot<TKey, TItem>(
@@ -356,24 +393,48 @@ class TreeSnapshot<TKey, TItem> {
     final visited = <TKey>{};
     final visiting = <TKey>{};
 
-    void visit(TKey key) {
-      if (!visiting.add(key)) {
-        throw ArgumentError(
-          "TreeSnapshot contains a cycle involving key \"$key\".",
-        );
-      }
-      for (final childKey in childrenByParent[key] ?? <TKey>[]) {
-        if (!visited.contains(childKey)) {
-          visit(childKey);
-        }
-      }
-      visiting.remove(key);
-      visited.add(key);
-    }
-
+    // Iterative DFS so deep trees do not stack-overflow Dart's
+    // recursion limit. Two parallel stacks: `keys` is the work queue,
+    // `exits` carries `null` for entry frames and the key that should
+    // be moved from `visiting` to `visited` on the matching post-order
+    // pop.
+    final keys = <TKey>[];
+    final exits = <TKey?>[];
     for (final rootKey in roots) {
-      if (!visited.contains(rootKey)) {
-        visit(rootKey);
+      if (visited.contains(rootKey)) continue;
+      keys.add(rootKey);
+      exits.add(null);
+      while (keys.isNotEmpty) {
+        final key = keys.removeLast();
+        final exitKey = exits.removeLast();
+
+        if (exitKey != null) {
+          // Post-order pop: subtree fully validated.
+          visiting.remove(exitKey);
+          visited.add(exitKey);
+          continue;
+        }
+
+        if (visited.contains(key)) continue;
+        if (!visiting.add(key)) {
+          throw ArgumentError(
+            "TreeSnapshot contains a cycle involving key \"$key\".",
+          );
+        }
+
+        // Push exit marker first so it pops AFTER all children.
+        keys.add(key);
+        exits.add(key);
+
+        final children = childrenByParent[key];
+        if (children != null) {
+          for (int i = children.length - 1; i >= 0; i--) {
+            final childKey = children[i];
+            if (visited.contains(childKey)) continue;
+            keys.add(childKey);
+            exits.add(null);
+          }
+        }
       }
     }
 
@@ -741,11 +802,42 @@ class _SyncedSliverTreeState<TKey, TItem>
     final childrenByParent = <TKey, List<TreeNode<TKey, TItem>>>{};
     final seen = <TKey>{};
     final visiting = <TKey>{};
+    // Iterative DFS so deep input trees do not stack-overflow Dart's
+    // recursion limit. Tracks each node's [TreeNode] in [nodeByKey] so
+    // the post-order exit phase can populate `childrenByParent[key]`
+    // by looking up each child's already-built [TreeNode] — sidesteps
+    // the recursive version's "visit child returns its TreeNode for the
+    // parent's list" pattern.
+    final nodeByKey = <TKey, TreeNode<TKey, TItem>>{};
 
-    TreeNode<TKey, TItem> visit(
-      SyncedTreeNode<TKey, TItem> node, {
-      required bool isRoot,
-    }) {
+    final stack = <SyncedTreeNode<TKey, TItem>>[];
+    final isRootStack = <bool>[];
+    // true = post-order exit frame, false = pre-order entry frame.
+    final exitMarkers = <bool>[];
+
+    for (final root in tree) {
+      stack.add(root);
+      isRootStack.add(true);
+      exitMarkers.add(false);
+    }
+
+    while (stack.isNotEmpty) {
+      final node = stack.removeLast();
+      final isRoot = isRootStack.removeLast();
+      final isExit = exitMarkers.removeLast();
+
+      if (isExit) {
+        visiting.remove(node.key);
+        if (node.children.isNotEmpty) {
+          final childNodes = <TreeNode<TKey, TItem>>[];
+          for (final child in node.children) {
+            childNodes.add(nodeByKey[child.key]!);
+          }
+          childrenByParent[node.key] = childNodes;
+        }
+        continue;
+      }
+
       final key = node.key;
       if (!visiting.add(key)) {
         throw ArgumentError(
@@ -758,12 +850,9 @@ class _SyncedSliverTreeState<TKey, TItem>
         );
       }
 
-      final treeNode = TreeNode<TKey, TItem>(key: key, data: node.data);
-      if (isRoot) {
-        roots.add(treeNode);
-      }
-
-      final childNodes = <TreeNode<TKey, TItem>>[];
+      // Pre-validate sibling-key uniqueness within node.children. Done
+      // before the recursion so the error matches the recursive version's
+      // throw site (parent context, not deep inside the child's visit).
       final seenChildren = <TKey>{};
       for (final child in node.children) {
         if (!seenChildren.add(child.key)) {
@@ -772,18 +861,29 @@ class _SyncedSliverTreeState<TKey, TItem>
             "\"${child.key}\" under parent \"$key\".",
           );
         }
-        childNodes.add(visit(child, isRoot: false));
-      }
-      if (childNodes.isNotEmpty) {
-        childrenByParent[key] = childNodes;
       }
 
-      visiting.remove(key);
-      return treeNode;
-    }
+      final treeNode = TreeNode<TKey, TItem>(key: key, data: node.data);
+      nodeByKey[key] = treeNode;
+      if (isRoot) {
+        roots.add(treeNode);
+      }
 
-    for (final root in tree) {
-      visit(root, isRoot: true);
+      // Push exit marker FIRST so it pops AFTER all children — the
+      // recursive version's `visiting.remove(key)` and its
+      // `childrenByParent[key] = childNodes` happen at the tail of the
+      // function body, after all child recursion completes.
+      stack.add(node);
+      isRootStack.add(false);
+      exitMarkers.add(true);
+
+      // Then push children in reverse so the first child pops first,
+      // preserving left-to-right visit order.
+      for (int i = node.children.length - 1; i >= 0; i--) {
+        stack.add(node.children[i]);
+        isRootStack.add(false);
+        exitMarkers.add(false);
+      }
     }
 
     return _NormalizedTreeInput<TKey, TItem>(
