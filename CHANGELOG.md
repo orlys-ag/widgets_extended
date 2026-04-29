@@ -5,6 +5,8 @@
 - Fix animation issue when adding/removing many times quickly.
 - Fix visible-subtree-size cache desync across all node-purge paths.
 - Fix node removal desync.
+- Replace recursive code with iterative.
+- Add various tests.
 
 ## 0.0.12
 
