@@ -815,8 +815,13 @@ class _SyncedSliverTreeState<TKey, TItem>
     // true = post-order exit frame, false = pre-order entry frame.
     final exitMarkers = <bool>[];
 
-    for (final root in tree) {
-      stack.add(root);
+    // Push roots in reverse so the first root pops first, preserving
+    // input order — same trick as the children push below.
+    final rootList = tree is List<SyncedTreeNode<TKey, TItem>>
+        ? tree
+        : tree.toList(growable: false);
+    for (int i = rootList.length - 1; i >= 0; i--) {
+      stack.add(rootList[i]);
       isRootStack.add(true);
       exitMarkers.add(false);
     }

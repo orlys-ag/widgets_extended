@@ -1,3 +1,8 @@
+## 0.0.15
+
+- Fix root node ordering regression caused by switching from recursive to
+iterative. Root nodes were being reversed.
+
 ## 0.0.14
 
 - Fix animation of nested collapsing/expanding nodes when parent collapse or

@@ -135,6 +135,51 @@ void main() {
       expect(find.text("1|root|Child"), findsOneWidget);
     });
 
+    testWidgets(
+      "preserves input order for multiple roots (regression: 0.0.14 "
+      "iterative DFS reversed roots)",
+      (tester) async {
+        final tree = <SyncedTreeNode<String, String>>[
+          SyncedTreeNode<String, String>(key: "favorites", data: "Favorites"),
+          SyncedTreeNode<String, String>(key: "workspaces", data: "MyWorkspaces"),
+          SyncedTreeNode<String, String>(key: "shared", data: "Shared"),
+        ];
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: CustomScrollView(
+                slivers: <Widget>[
+                  SyncedSliverTree<String, String>(
+                    tree: tree,
+                    initiallyExpanded: true,
+                    animationDuration: Duration.zero,
+                    itemBuilder: (context, node) {
+                      return SizedBox(height: 48, child: Text(node.item));
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        final favoritesY = tester.getTopLeft(find.text("Favorites")).dy;
+        final workspacesY = tester.getTopLeft(find.text("MyWorkspaces")).dy;
+        final sharedY = tester.getTopLeft(find.text("Shared")).dy;
+
+        expect(
+          favoritesY < workspacesY && workspacesY < sharedY,
+          isTrue,
+          reason:
+              "Roots must render in input order. The 0.0.14 iterative "
+              "_normalizeTree pushed roots forward but popped LIFO, "
+              "reversing them on screen.",
+        );
+      },
+    );
+
     testWidgets("throws on duplicate keys", (tester) async {
       final tree = <SyncedTreeNode<String, String>>[
         SyncedTreeNode<String, String>(
