@@ -3678,16 +3678,55 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Animated collapse
     final existingGroup = _operationGroups[key];
     if (existingGroup != null) {
-      // Path 1: Reversing an expand — group already exists
-      // Normalize each member's startExtent to 0 so the reversal
-      // terminates at fully-collapsed (value=0 → extent=0). A prior
-      // fresh expand may have captured a non-zero start from a node
-      // that was mid-animation, which would leave a residual visible
-      // extent at dismissal and cause a visible snap when the member
-      // is removed from the visible order.
+      // Path 1: Reversing an expand — group already exists.
+      //
+      // This is the mirror of the expand Path-1 reversal block in
+      // [expand]. We rebase each member's animation envelope so the
+      // visual position at the moment of reversal is preserved (no
+      // jump), then animate smoothly down to fully-collapsed (extent
+      // = 0) over the full configured duration.
+      //
+      // Why an unconditional `startExtent = 0` is wrong here: the
+      // expand Path-1 branch leaves members with a non-zero
+      // startExtent (the rebased current extent) so its own boundary
+      // is jump-free. If we then reverse THAT into a collapse, simply
+      // forcing startExtent back to 0 makes `lerp(0, target,
+      // currentValue)` evaluate to a different extent than the
+      // pre-reversal lerp at the same controller value — visually a
+      // snap down. We instead rebase target to the current visual
+      // extent and reset the controller to value=1.0 so the reversal
+      // re-plays from `currentExtent → 0` smoothly.
+      //
+      // Convention reminder (see types.dart): startExtent corresponds
+      // to value=0 (collapsed), targetExtent corresponds to value=1
+      // (expanded). For a collapse, the controller plays in reverse
+      // from value=1 to value=0, so the row visually shrinks from
+      // target down to start. To collapse from `currentExtent` down
+      // to 0 we set start=0 and target=currentExtent.
+      //
+      // Resetting `controller.value = 1.0` fires the `completed`
+      // status listener synchronously, which would dispose this
+      // group on completion. The listener has an identity guard
+      // (`identical(_operationGroups[key], group)`), so we briefly
+      // detach the group around the value=1.0 store, let the gated
+      // completed event fire harmlessly, then re-attach for the
+      // actual `reverse()` call.
+      final preReversalCurvedValue = existingGroup.curvedValue;
       for (final entry in existingGroup.members.entries) {
+        final full = _fullExtentOf(entry.key) ?? defaultExtent;
+        final currentExtent = entry.value.computeExtent(
+          preReversalCurvedValue,
+          full,
+        );
         entry.value.startExtent = 0.0;
+        entry.value.targetExtent = currentExtent;
         existingGroup.pendingRemoval.add(entry.key);
+      }
+      _operationGroups.remove(key);
+      try {
+        existingGroup.controller.value = 1.0;
+      } finally {
+        _operationGroups[key] = existingGroup;
       }
       _bumpAnimGen();
       existingGroup.controller.reverse();

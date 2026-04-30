@@ -369,6 +369,88 @@ void main() {
       await tester.pump(const Duration(milliseconds: 220));
       expect(controller.getCurrentExtent("c"), closeTo(48, 0.5));
     });
+
+    testWidgets(
+        "collapse → mid-flight expand → mid-flight collapse preserves "
+        "visual continuity at every Path-1 reversal boundary",
+        (tester) async {
+      // Regression: after the smooth-rebase fix in the expand Path-1
+      // branch, members carry a non-zero startExtent reflecting their
+      // visual position at the boundary. The collapse Path-1 branch was
+      // unconditionally setting startExtent back to 0, which makes the
+      // lerp evaluate at a different point at the same controller value
+      // — visually, a hard jump down the moment the second collapse
+      // begins.
+      //
+      // This test threads a sequence of three reversals and asserts
+      // continuity across each boundary.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 400),
+        animationCurve: Curves.linear,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([const TreeNode(key: "p", data: "P")]);
+      controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
+      controller.expand(key: "p", animate: false);
+      controller.setFullExtent("c", 48.0);
+
+      // c starts visible at full extent.
+      expect(controller.getCurrentExtent("c"), 48);
+
+      // 1. Collapse P. c shrinks from 48 toward 0 over 400ms.
+      controller.collapse(key: "p", animate: true);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 200));
+      final extentMidCollapse = controller.getCurrentExtent("c");
+      expect(extentMidCollapse, closeTo(24, 5));
+
+      // 2. Expand P mid-collapse. Path-1 reverse-collapse (rebase +
+      // value reset). First frame must hold at extentMidCollapse.
+      controller.expand(key: "p", animate: true);
+      await tester.pump(const Duration(milliseconds: 1));
+      final extentAfterFirstReversal = controller.getCurrentExtent("c");
+      expect(
+        extentAfterFirstReversal,
+        closeTo(extentMidCollapse, 1.5),
+        reason: "Boundary 1 (collapse → expand) must hold the visual "
+            "position. Got $extentAfterFirstReversal, expected ≈ "
+            "$extentMidCollapse",
+      );
+
+      // Run the re-expand for a while so c grows above extentMidCollapse.
+      await tester.pump(const Duration(milliseconds: 120));
+      final extentMidReExpand = controller.getCurrentExtent("c");
+      expect(
+        extentMidReExpand,
+        greaterThan(extentMidCollapse + 1),
+        reason: "Sanity: c should be growing past $extentMidCollapse "
+            "during re-expand. Got $extentMidReExpand",
+      );
+      expect(extentMidReExpand, lessThan(48));
+
+      // 3. Collapse P again, mid-re-expand. Path-1 reverse-expand. The
+      // first frame after this second reversal must hold at
+      // extentMidReExpand — no snap down to a smaller value.
+      controller.collapse(key: "p", animate: true);
+      await tester.pump(const Duration(milliseconds: 1));
+      final extentAfterSecondReversal = controller.getCurrentExtent("c");
+      expect(
+        extentAfterSecondReversal,
+        closeTo(extentMidReExpand, 1.5),
+        reason: "Boundary 2 (expand → collapse) must hold the visual "
+            "position. Got $extentAfterSecondReversal, expected ≈ "
+            "$extentMidReExpand. A value lower than this indicates the "
+            "Path-1 reverse-expand branch is overwriting startExtent "
+            "and losing the smooth rebase from the prior reversal.",
+      );
+
+      // Settle and confirm c ends fully hidden (only "p" visible, c
+      // removed from visible order via the dismissed handler).
+      await tester.pumpAndSettle();
+      expect(controller.visibleNodes.toList(), equals(["p"]));
+    });
   });
 
   group("expandAll ↔ collapseAll reversal", () {

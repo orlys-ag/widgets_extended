@@ -1,3 +1,9 @@
+## 0.0.14
+
+- Fix animation of nested collapsing/expanding nodes when parent collapse or
+expand state is toggled mid-animation.
+- Fix animation collapse-expand-collapse behavior.
+
 ## 0.0.13
 
 - Add `SectionedSliverList`: a header + items convenience sliver built
