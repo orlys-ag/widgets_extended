@@ -25,6 +25,11 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     _visibleSubtreeSizeByNid = Int32List(0);
     _fullExtentByNid = Float64List(0);
     _isPendingDeletionByNid = Uint8List(0);
+    _isAnimatingByNid = Uint8List(0);
+    _isExitingByNid = Uint8List(0);
+    _isBulkMemberByNid = Uint8List(0);
+    _writtenAnimatingNids.clear();
+    _writtenExitingNids.clear();
     _opGroupKeyByNid = <TKey?>[];
     _standaloneByNid = <AnimationState?>[];
     _activeStandaloneNids.clear();
@@ -377,8 +382,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     // Clean up bulk animation group membership
     final bulk = _bulkAnimationGroup;
     if (bulk != null) {
-      final removedMember = bulk.members.remove(key);
-      final removedPending = bulk.pendingRemoval.remove(key);
+      final removedMember = _removeBulkMember(key);
+      final removedPending = _removeBulkPending(key);
       if (removedMember || removedPending) {
         _bumpBulkGen();
       }

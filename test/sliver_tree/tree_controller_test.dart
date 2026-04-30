@@ -1466,29 +1466,54 @@ void main() {
         controller.collapse(key: "a");
         await tester.pump(const Duration(milliseconds: 1));
         await tester.pump(const Duration(milliseconds: 100));
+        // Capture C's extent at the exact moment of reversal — Path 1
+        // must preserve this across the boundary (smooth continuity).
+        final cExtentAtReversal = controller.getCurrentExtent("c");
 
-        // Re-expand A. Path-1 reversal of Ga. With the fix, Ga.member[c]
-        // .targetExtent is restored to the full extent so the forward
-        // animation terminates at 48. Without the fix, C would cap out at
-        // the captured ≈24 and snap to 48 at group disposal.
+        // Re-expand A. Path-1 reversal of Ga. Each member's startExtent
+        // is rebased to its current visual extent, targetExtent is
+        // restored to full, and the controller is reset to value=0
+        // before forward(), so the animation plays smoothly from
+        // currentExtent up to full over the configured duration.
         controller.expand(key: "a");
         await tester.pump(const Duration(milliseconds: 1));
-        await tester.pump(const Duration(milliseconds: 50));
 
-        // Ga.controller ≈ 0.875 (reverse reached 0.75, then forward ran
-        // 50ms of the 100ms remaining). With fix: lerp(0, 48, 0.875) ≈ 42.
-        // Without fix: lerp(0, 24, 0.875) ≈ 21.
+        // First frame after reversal: C's extent must be effectively
+        // unchanged from cExtentAtReversal (smooth continuity, no jump
+        // up to near-48 and no snap-down to 0).
         expect(
           controller.getCurrentExtent("c"),
-          greaterThan(28),
-          reason: "C should be animating toward its full 48-pixel extent "
-              "after the collapse reversal, not capped at its captured "
-              "mid-flight value.",
+          closeTo(cExtentAtReversal, 1.5),
+          reason: "Path 1 smooth reversal must preserve the visual "
+              "position; first frame after reversal should be ≈ "
+              "$cExtentAtReversal, not 0 and not the captured ≈24.",
+        );
+
+        // Pump roughly half the new full-duration animation. C should
+        // be growing UP toward full and clearly below 48.
+        await tester.pump(const Duration(milliseconds: 200));
+        final cMidExpand = controller.getCurrentExtent("c");
+        expect(
+          cMidExpand,
+          greaterThan(cExtentAtReversal),
+          reason: "C should be animating UP from $cExtentAtReversal "
+              "toward full.",
+        );
+        expect(
+          cMidExpand,
+          lessThan(48),
+          reason: "Animation hasn't completed yet at 200ms of 400ms.",
         );
 
         await tester.pumpAndSettle();
         expect(controller.visibleNodes, ["a", "b", "c"]);
-        expect(controller.getCurrentExtent("c"), 48);
+        expect(
+          controller.getCurrentExtent("c"),
+          48,
+          reason: "After settling, C reaches its full 48-pixel extent — "
+              "Ga.member[c].targetExtent was correctly restored to full, "
+              "not capped at the captured ≈24.",
+        );
       },
     );
 

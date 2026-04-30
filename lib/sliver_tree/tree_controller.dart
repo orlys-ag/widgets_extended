@@ -175,6 +175,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       grown.setRange(0, _isPendingDeletionByNid.length, _isPendingDeletionByNid);
       _isPendingDeletionByNid = grown;
     }
+    if (newCapacity > _isAnimatingByNid.length) {
+      final grown = Uint8List(newCapacity);
+      grown.setRange(0, _isAnimatingByNid.length, _isAnimatingByNid);
+      _isAnimatingByNid = grown;
+    }
+    if (newCapacity > _isExitingByNid.length) {
+      final grown = Uint8List(newCapacity);
+      grown.setRange(0, _isExitingByNid.length, _isExitingByNid);
+      _isExitingByNid = grown;
+    }
+    if (newCapacity > _isBulkMemberByNid.length) {
+      final grown = Uint8List(newCapacity);
+      grown.setRange(0, _isBulkMemberByNid.length, _isBulkMemberByNid);
+      _isBulkMemberByNid = grown;
+    }
     if (newCapacity > _opGroupKeyByNid.length) {
       final grown = List<TKey?>.filled(newCapacity, null);
       for (int i = 0; i < _opGroupKeyByNid.length; i++) {
@@ -642,6 +657,89 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// reverse or replace this group.
   AnimationGroup<TKey>? _bulkAnimationGroup;
 
+  /// Nid-indexed mirror of `_bulkAnimationGroup.members ∪ pendingRemoval`.
+  /// Slot is `1` when the corresponding nid is in either set.
+  /// Maintained incrementally by every site that mutates bulk membership;
+  /// reset when the bulk group is created or disposed.
+  Uint8List _isBulkMemberByNid = Uint8List(0);
+
+  /// Adds [key] to `_bulkAnimationGroup.members` and updates the nid-keyed
+  /// mirror. Caller is responsible for `_bumpBulkGen()` if needed.
+  void _addBulkMember(TKey key) {
+    final group = _bulkAnimationGroup;
+    if (group == null) return;
+    if (group.members.add(key)) {
+      final nid = _nids[key];
+      if (nid != null && nid < _isBulkMemberByNid.length) {
+        _isBulkMemberByNid[nid] = 1;
+      }
+    }
+  }
+
+  /// Removes [key] from `_bulkAnimationGroup.members` and updates the
+  /// mirror (only clears the slot when the key is also not in
+  /// `pendingRemoval`).
+  bool _removeBulkMember(TKey key) {
+    final group = _bulkAnimationGroup;
+    if (group == null) return false;
+    final removed = group.members.remove(key);
+    if (removed && !group.pendingRemoval.contains(key)) {
+      final nid = _nids[key];
+      if (nid != null && nid < _isBulkMemberByNid.length) {
+        _isBulkMemberByNid[nid] = 0;
+      }
+    }
+    return removed;
+  }
+
+  /// Adds [key] to `_bulkAnimationGroup.pendingRemoval` and updates the
+  /// nid-keyed mirror.
+  void _addBulkPending(TKey key) {
+    final group = _bulkAnimationGroup;
+    if (group == null) return;
+    if (group.pendingRemoval.add(key)) {
+      final nid = _nids[key];
+      if (nid != null && nid < _isBulkMemberByNid.length) {
+        _isBulkMemberByNid[nid] = 1;
+      }
+    }
+  }
+
+  /// Removes [key] from `_bulkAnimationGroup.pendingRemoval` and updates
+  /// the mirror (only clears the slot when the key is also not in
+  /// `members`).
+  bool _removeBulkPending(TKey key) {
+    final group = _bulkAnimationGroup;
+    if (group == null) return false;
+    final removed = group.pendingRemoval.remove(key);
+    if (removed && !group.members.contains(key)) {
+      final nid = _nids[key];
+      if (nid != null && nid < _isBulkMemberByNid.length) {
+        _isBulkMemberByNid[nid] = 0;
+      }
+    }
+    return removed;
+  }
+
+  /// Clears `_bulkAnimationGroup.pendingRemoval` in one shot, dropping
+  /// mirror bits for any keys that were ONLY in pendingRemoval (not also
+  /// in members). In current code paths `pendingRemoval ⊆ members` for
+  /// bulk groups, so in practice no mirror bit is cleared — but this
+  /// helper is defensively correct under any future invariant change.
+  void _clearBulkPending() {
+    final group = _bulkAnimationGroup;
+    if (group == null) return;
+    for (final key in group.pendingRemoval) {
+      if (!group.members.contains(key)) {
+        final nid = _nids[key];
+        if (nid != null && nid < _isBulkMemberByNid.length) {
+          _isBulkMemberByNid[nid] = 0;
+        }
+      }
+    }
+    group.pendingRemoval.clear();
+  }
+
   /// Per-operation animation groups (for individual expand/collapse).
   /// Key is the operation key (the node whose expand/collapse created the group).
   final Map<TKey, OperationGroup<TKey>> _operationGroups = {};
@@ -954,6 +1052,28 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   Set<TKey>? _animatingKeysCache;
   int _animatingKeysCacheGen = -1;
 
+  /// Nid-indexed mirror of [_ensureAnimatingKeys]'s result. Slot is `1`
+  /// when the corresponding nid is animating in any source (standalone,
+  /// operation group, bulk group). Rebuilt lazily alongside
+  /// [_animatingKeysCache] when [_animationGeneration] changes.
+  Uint8List _isAnimatingByNid = Uint8List(0);
+
+  /// Nid-indexed mirror of [isExiting]. Slot is `1` when the corresponding
+  /// nid is exiting in any source (pending-removal in a bulk or operation
+  /// group, or a standalone exit animation). Rebuilt alongside
+  /// [_isAnimatingByNid].
+  Uint8List _isExitingByNid = Uint8List(0);
+
+  /// Nids written into [_isAnimatingByNid] by the last
+  /// [_ensureAnimatingKeys] rebuild. Drives the sparse clear at the start
+  /// of each rebuild — zeroing only the slots actually dirtied avoids an
+  /// O(nidCapacity) memset on every animation-generation bump. Same pattern
+  /// as `_writtenCacheRegionNids` in `RenderSliverTree`.
+  final List<int> _writtenAnimatingNids = <int>[];
+
+  /// Nids written into [_isExitingByNid] by the last rebuild.
+  final List<int> _writtenExitingNids = <int>[];
+
   /// Cached result of [computeFirstAnimatingVisibleIndex]. Depends on both
   /// animation state and the visible order, so the cache key combines
   /// [_animationGeneration] with [_structureGeneration].
@@ -977,30 +1097,108 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   /// Returns a set of every currently-animating key. Rebuilt on demand when
-  /// [_animationGeneration] changes.
+  /// [_animationGeneration] changes. Also refreshes the nid-keyed mirrors
+  /// [_isAnimatingByNid] / [_isExitingByNid] using sparse-tracking
+  /// cleanup — O(animating count) per rebuild, not O(nidCapacity).
   Set<TKey> _ensureAnimatingKeys() {
     final cached = _animatingKeysCache;
     if (cached != null && _animationGeneration == _animatingKeysCacheGen) {
       return cached;
     }
+    // Sparse clear of slots written by the previous rebuild. Bounded by
+    // the prior frame's animating count, not by nidCapacity.
+    for (final nid in _writtenAnimatingNids) {
+      if (nid < _isAnimatingByNid.length) {
+        _isAnimatingByNid[nid] = 0;
+      }
+    }
+    _writtenAnimatingNids.clear();
+    for (final nid in _writtenExitingNids) {
+      if (nid < _isExitingByNid.length) {
+        _isExitingByNid[nid] = 0;
+      }
+    }
+    _writtenExitingNids.clear();
+
     final set = <TKey>{};
+    // Use the mirror itself as a "visited" guard to avoid duplicate
+    // entries in `_writtenAnimatingNids` / `_writtenExitingNids` when
+    // the same nid appears in multiple sources (defensive — the
+    // existing controller invariants say a node lives in at most one
+    // source at a time, but the sparse-track lists must remain
+    // duplicate-free for the consistency assertion to be exact).
     if (_hasAnyStandalone) {
       for (final nid in _activeStandaloneNids) {
         set.add(_nids.keyOfUnchecked(nid));
+        if (_isAnimatingByNid[nid] == 0) {
+          _isAnimatingByNid[nid] = 1;
+          _writtenAnimatingNids.add(nid);
+        }
+        if (_standaloneByNid[nid]!.type == AnimationType.exiting &&
+            _isExitingByNid[nid] == 0) {
+          _isExitingByNid[nid] = 1;
+          _writtenExitingNids.add(nid);
+        }
       }
     }
     if (_operationGroups.isNotEmpty) {
       for (final g in _operationGroups.values) {
-        set.addAll(g.members.keys);
+        for (final key in g.members.keys) {
+          set.add(key);
+          final nid = _nids[key];
+          if (nid == null) continue;
+          if (_isAnimatingByNid[nid] == 0) {
+            _isAnimatingByNid[nid] = 1;
+            _writtenAnimatingNids.add(nid);
+          }
+          if (g.pendingRemoval.contains(key) &&
+              _isExitingByNid[nid] == 0) {
+            _isExitingByNid[nid] = 1;
+            _writtenExitingNids.add(nid);
+          }
+        }
       }
     }
     final bulk = _bulkAnimationGroup;
-    if (bulk != null && bulk.members.isNotEmpty) {
-      set.addAll(bulk.members);
+    if (bulk != null) {
+      // Mirrors the existing semantics: only bulk.members go into the
+      // animating set (not pendingRemoval — pendingRemoval ⊆ members for
+      // bulk groups, see expandAll / collapseAll invariants).
+      for (final key in bulk.members) {
+        set.add(key);
+        final nid = _nids[key];
+        if (nid == null) continue;
+        if (_isAnimatingByNid[nid] == 0) {
+          _isAnimatingByNid[nid] = 1;
+          _writtenAnimatingNids.add(nid);
+        }
+      }
+      for (final key in bulk.pendingRemoval) {
+        final nid = _nids[key];
+        if (nid == null) continue;
+        if (_isExitingByNid[nid] == 0) {
+          _isExitingByNid[nid] = 1;
+          _writtenExitingNids.add(nid);
+        }
+      }
     }
     _animatingKeysCache = set;
     _animatingKeysCacheGen = _animationGeneration;
     return set;
+  }
+
+  /// Hot-path equivalent of [isAnimating]: O(1) array read instead of a
+  /// HashMap-keyed Set lookup. Caller must guarantee [nid] is live and
+  /// within range.
+  bool isAnimatingNid(int nid) {
+    _ensureAnimatingKeys();
+    return _isAnimatingByNid[nid] != 0;
+  }
+
+  /// Hot-path equivalent of [isExiting].
+  bool isExitingNid(int nid) {
+    _ensureAnimatingKeys();
+    return _isExitingByNid[nid] != 0;
   }
 
   /// Builds a fresh synthetic entering state for [getAnimationState] to return
@@ -1095,7 +1293,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// length may exceed [visibleNodeCount] — only the first N entries
   /// are valid. The buffer itself is mutated in place by structural
   /// changes; callers must not retain the reference across mutations.
-  Int32List get debugOrderNidsView => _order.orderNids;
+  Int32List get orderNidsView => _order.orderNids;
+
+  /// Visible-order index for the live nid [nid], or
+  /// [VisibleOrderBuffer.kNotVisible] when [nid] is not currently in the
+  /// visible order. O(1) typed-data read; no [TKey] hash. Hot-path
+  /// equivalent of `_order.indexByNid[nid]`.
+  ///
+  /// Caller must guarantee [nid] is live and within range.
+  int visibleIndexOfNid(int nid) => _order.indexByNid[nid];
 
   /// Depth for [nid] (0 for roots). No [TKey] hash. [nid] must be live.
   int depthOfNid(int nid) => _store.depthByNid[nid];
@@ -1116,13 +1322,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   double getCurrentExtentNid(int nid) {
     final fullRaw = _fullExtentByNid[nid];
     final full = fullRaw < 0 ? defaultExtent : fullRaw;
-    // 1. Bulk
+    // 1. Bulk — nid-keyed mirror skips the keyOfUnchecked + Set.contains
+    // probe. Under the existing pendingRemoval ⊆ members invariant the
+    // mirror returns the same answer as `bulk.members.contains(key)`.
     final bulk = _bulkAnimationGroup;
-    if (bulk != null) {
-      final key = _nids.keyOfUnchecked(nid);
-      if (bulk.members.contains(key)) {
-        return full * bulk.value;
-      }
+    if (bulk != null && _isBulkMemberByNid[nid] != 0) {
+      return full * bulk.value;
     }
     // 2. Operation group
     final opKey = _opGroupKeyByNid[nid];
@@ -1379,6 +1584,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       generation: _bulkAnimationGeneration,
       members: group.members,
       pendingRemoval: group.pendingRemoval,
+      bulkMemberByNid: _isBulkMemberByNid,
     );
   }
 
@@ -1401,10 +1607,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _firstAnimatingIndexCacheVal <= _order.length) {
       return _firstAnimatingIndexCacheVal;
     }
+    // Force the mirror rebuild so `_writtenAnimatingNids` reflects the
+    // current generation. The discarded return value is intentional —
+    // we only need the side effect of populating the sparse-tracked list.
+    _ensureAnimatingKeys();
     int min = _order.length;
-    for (final k in _ensureAnimatingKeys()) {
-      final idx = _order.indexOf(k);
-      if (idx != VisibleOrderBuffer.kNotVisible && idx < min) min = idx;
+    final indexByNid = _order.indexByNid;
+    for (final nid in _writtenAnimatingNids) {
+      final idx = indexByNid[nid];
+      if (idx != VisibleOrderBuffer.kNotVisible && idx < min) {
+        min = idx;
+      }
     }
     _firstAnimatingIndexCacheSig = sig;
     _firstAnimatingIndexCacheVal = min;
@@ -3245,14 +3458,65 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         existingGroup.pendingRemoval.clear();
         _bumpAnimGen();
       }
-      // Restore each member's targetExtent to its full (natural) extent.
-      // A prior fresh collapse may have captured mid-flight extents below
-      // full (e.g., nodes taken from a bulk or standalone animation), so
-      // computeExtent at value=1 would stop at the captured value and
-      // snap to full on group disposal. Updating here ensures the
-      // reversal terminates at the correct natural size.
+      // Rebase each member's animation envelope so the visual position
+      // at the moment of reversal is preserved (no jump), then animate
+      // smoothly from there to the natural full extent over the
+      // configured duration.
+      //
+      // Without this rebase, simply resetting `targetExtent` to full
+      // while the controller's value is still mid-collapse leaves
+      // `lerp(0, full, currentValue)` producing a much larger extent
+      // at the same `currentValue` than the OLD envelope did. The row
+      // visually snaps to near-full the instant reversal starts —
+      // visible as the "child list appears fully expanded" regression.
+      // The worst case: a pre-existing op-group (e.g. an in-flight
+      // expand of a child) had captured a small `targetExtent`; the
+      // post-reversal lerp jumps straight up toward `full`.
+      //
+      // We capture each member's current extent under the old envelope,
+      // set startExtent to that value and targetExtent to a concrete
+      // full, then reset the controller's value to 0 and `forward()`.
+      // After the reset, `lerp(currentExtent, full, t)` runs smoothly
+      // from currentExtent at t=0 to full at t=1 over the full
+      // configured duration — no jump, no discontinuity.
+      //
+      // Reading note for "the duration feels fast on near-full
+      // members": this is geometric, not a duration bug. A member that
+      // was near-full when the collapse started (e.g. extent=45)
+      // animates over a small pixel range (45→48). The animation runs
+      // for the full configured duration, but 3 px of motion is
+      // imperceptible — that's the natural result of a late reversal.
+      // Visible motion scales with how far the collapse had progressed.
+      //
+      // Resetting the controller to value=0 needs a small dance:
+      // setting `value = 0` fires the `dismissed` status synchronously,
+      // and this group's status listener would dispose the controller
+      // on dismissal — before `forward()` finishes setting up. The
+      // listener has an identity guard
+      // (`identical(_operationGroups[key], group)`), so we briefly
+      // detach the group from `_operationGroups` around the value=0
+      // store, let the gated dismissed event fire harmlessly, then
+      // re-attach for the actual `forward()` call.
+      //
+      // `targetExtent` must be a concrete value (not the
+      // `_unknownExtent` sentinel — that sentinel triggers the
+      // proportional formula which ignores `startExtent` and would
+      // re-introduce the jump).
+      final preReversalCurvedValue = existingGroup.curvedValue;
       for (final entry in existingGroup.members.entries) {
-        entry.value.targetExtent = _fullExtentOf(entry.key) ?? _unknownExtent;
+        final full = _fullExtentOf(entry.key) ?? defaultExtent;
+        final currentExtent = entry.value.computeExtent(
+          preReversalCurvedValue,
+          full,
+        );
+        entry.value.startExtent = currentExtent;
+        entry.value.targetExtent = full;
+      }
+      _operationGroups.remove(key);
+      try {
+        existingGroup.controller.value = 0.0;
+      } finally {
+        _operationGroups[key] = existingGroup;
       }
       existingGroup.controller.forward();
 
@@ -3584,7 +3848,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           _bulkAnimationGroup!.pendingRemoval.isNotEmpty) {
         // Reverse the animation - nodes being removed will now expand
         // Clear pending removal since we're expanding now
-        _bulkAnimationGroup!.pendingRemoval.clear();
+        _clearBulkPending();
 
         // Reverse standalone exit animations smoothly
         for (final key in nodesToReverseExit) {
@@ -3596,7 +3860,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Add any new nodes to the group (skip if already in an operation group)
         for (final key in nodesToShow) {
           if (_order.contains(key) && !_hasOperationGroup(key)) {
-            _bulkAnimationGroup!.members.add(key);
+            _addBulkMember(key);
           }
         }
 
@@ -3618,7 +3882,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Add new nodes to the bulk group (skip if already in an operation group)
         for (final key in nodesToShow) {
           if (_order.contains(key) && !_hasOperationGroup(key)) {
-            _bulkAnimationGroup!.members.add(key);
+            _addBulkMember(key);
           }
         }
 
@@ -3736,7 +4000,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Mark all members for removal when animation completes at 0
         for (final key in _bulkAnimationGroup!.members) {
           if (!_isPendingDeletion(key)) {
-            _bulkAnimationGroup!.pendingRemoval.add(key);
+            _addBulkPending(key);
           }
         }
 
@@ -3767,8 +4031,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             _startStandaloneExitAnimation(key);
           } else {
             _removeAnimation(key);
-            _bulkAnimationGroup!.members.add(key);
-            _bulkAnimationGroup!.pendingRemoval.add(key);
+            _addBulkMember(key);
+            _addBulkPending(key);
           }
         }
 

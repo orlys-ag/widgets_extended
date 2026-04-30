@@ -59,8 +59,8 @@ extension _TreeControllerAnimationOps<TKey, TData>
     if (_bulkAnimationGroup?.members.contains(key) == true) {
       final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
       final extent = full * _bulkAnimationGroup!.value;
-      _bulkAnimationGroup!.members.remove(key);
-      _bulkAnimationGroup!.pendingRemoval.remove(key);
+      _removeBulkMember(key);
+      _removeBulkPending(key);
       _bumpBulkGen();
       return extent;
     }
@@ -180,8 +180,8 @@ extension _TreeControllerAnimationOps<TKey, TData>
         }
         final bulk = _bulkAnimationGroup;
         if (bulk != null) {
-          final removedMember = bulk.members.remove(nodeId);
-          final removedPending = bulk.pendingRemoval.remove(nodeId);
+          final removedMember = _removeBulkMember(nodeId);
+          final removedPending = _removeBulkPending(nodeId);
           if (removedMember || removedPending) {
             _bumpBulkGen();
           }
@@ -231,8 +231,8 @@ extension _TreeControllerAnimationOps<TKey, TData>
     // Also remove from bulk animation group
     final bulk = _bulkAnimationGroup;
     if (bulk != null) {
-      final removedMember = bulk.members.remove(key);
-      final removedPending = bulk.pendingRemoval.remove(key);
+      final removedMember = _removeBulkMember(key);
+      final removedPending = _removeBulkPending(key);
       if (removedMember || removedPending) {
         _bumpBulkGen();
       }
@@ -272,6 +272,22 @@ extension _TreeControllerAnimationOps<TKey, TData>
     // Set to null first to prevent callback interference
     _bulkAnimationGroup = null;
     if (group != null) {
+      // Zero mirror slots for keys leaving via this disposal. Bounded by
+      // group size, not nidCapacity. The walk reads from the local `group`
+      // reference whose Set contents are intact even after the field was
+      // nulled above.
+      for (final key in group.members) {
+        final nid = _nids[key];
+        if (nid != null && nid < _isBulkMemberByNid.length) {
+          _isBulkMemberByNid[nid] = 0;
+        }
+      }
+      for (final key in group.pendingRemoval) {
+        final nid = _nids[key];
+        if (nid != null && nid < _isBulkMemberByNid.length) {
+          _isBulkMemberByNid[nid] = 0;
+        }
+      }
       _bumpBulkGen();
     }
     group?.dispose();

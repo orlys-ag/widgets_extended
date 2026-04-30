@@ -2,9 +2,9 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/animation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
 import '_sticky_header_computer.dart';
@@ -57,6 +57,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _nodeOffsetsByNid = Float64List(0);
     _nodeExtentsByNid = Float64List(0);
     _inCacheRegionByNid = Uint8List(0);
+    _writtenCacheRegionNids.clear();
     _sticky.reset();
     // Bulk-only fast-path caches are visible-position-indexed; any
     // structure from the old controller is meaningless under the new one.
@@ -187,13 +188,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _bulkFullCumulative[0] = 0.0;
     // Read nids straight from the order buffer to skip the
     // [TKey]→nid hash inside this O(N)-per-frame loop. Membership
-    // checks still go through the snapshot (which holds Set refs).
-    final orderNids = controller.debugOrderNidsView;
+    // check goes through the snapshot's nid-keyed mirror (Uint8List read).
+    final orderNids = controller.orderNidsView;
     for (int i = 0; i < n; i++) {
       final nid = orderNids[i];
-      final key = visibleNodes[i];
       final full = controller.getEstimatedExtentNid(nid);
-      if (bulkData.containsMember(key)) {
+      if (bulkData.containsMemberNid(nid)) {
         sBulkFull += full;
       } else {
         // Non-bulk nodes are stable during bulk-only frames (gated by
@@ -215,9 +215,31 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   }
 
   /// Flags indexed by nid: non-zero iff the node lies in the current cache
-  /// region. Cleared via [Uint8List.fillRange] at the start of Pass 2 each
-  /// layout, then set for every cache-region member.
+  /// region. Cleared sparsely at the start of Pass 2 each layout (via
+  /// [_writtenCacheRegionNids]), then set for every cache-region member.
   Uint8List _inCacheRegionByNid = Uint8List(0);
+
+  /// Nids written into [_inCacheRegionByNid] last frame. Drives the sparse
+  /// clear at the start of each Pass 2 — zeroing only the slots actually
+  /// dirtied avoids an O(nidCapacity) memset on every layout.
+  ///
+  /// Mirrors the pattern used by `_writtenStickyNids` in
+  /// [StickyHeaderComputer]. The list is read+cleared at the start of
+  /// Pass 2 and re-populated as the admission loop sets each cache-region
+  /// flag.
+  final List<int> _writtenCacheRegionNids = <int>[];
+
+  /// Number of nids in [_writtenCacheRegionNids]. Exposed for tests that
+  /// verify the sparse-clear bound is `O(viewport)`, not `O(nidCapacity)`.
+  @visibleForTesting
+  int get debugWrittenCacheRegionNidCount => _writtenCacheRegionNids.length;
+
+  /// Iteration count of the post-sticky parentData refresh loop on the
+  /// last layout. Reset at the top of `performLayout`. Used by Phase 4's
+  /// regression test to verify the loop bound is `O(_children)`, not
+  /// `O(visibleNodes)`, without relying on flaky wall-time measurements.
+  @visibleForTesting
+  int debugLastParentDataRefreshIterationCount = 0;
 
   /// Grows all nid-indexed layout arrays to match the controller's current
   /// nid capacity. Doubles on each realloc so amortized growth is O(1)
@@ -367,7 +389,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final result = <TKey, double>{};
     double structural = 0.0;
     final visible = controller.visibleNodes;
-    final orderNids = controller.debugOrderNidsView;
+    final orderNids = controller.orderNidsView;
     for (int i = 0; i < visible.length; i++) {
       final nid = orderNids[i];
       final slide = controller.getSlideDeltaNid(nid);
@@ -409,7 +431,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       double lastLiveOffset = 0.0;
       double lastLiveExtent = 0.0;
       double structural = 0.0;
-      final orderNids = controller.debugOrderNidsView;
+      final orderNids = controller.orderNidsView;
       for (int i = 0; i < visible.length; i++) {
         final nid = orderNids[i];
         final key = visible[i];
@@ -439,7 +461,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
 
     // Fast path: no slides active, painted offset == structural offset.
-    final startIdx = _findFirstVisibleIndex(visible, scrollY);
+    final startIdx = _findFirstVisibleIndex(scrollY);
     for (int i = startIdx; i < visible.length; i++) {
       final key = visible[i];
       if (controller.isPendingDeletion(key)) continue;
@@ -587,10 +609,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// Recomputes [_nodeOffsetsByNid] from current [_nodeExtentsByNid] and
   /// returns the new total scroll extent. Call after Pass 2 when extents
   /// have been updated with actual measured values.
-  double _recomputeOffsets(List<TKey> visibleNodes) {
+  double _recomputeOffsets() {
     double offset = 0.0;
-    for (final nodeId in visibleNodes) {
-      final nid = _controller.nidOf(nodeId);
+    final orderNids = _controller.orderNidsView;
+    final n = _controller.visibleNodeCount;
+    for (int i = 0; i < n; i++) {
+      final nid = orderNids[i];
       _nodeOffsetsByNid[nid] = offset;
       offset += _nodeExtentsByNid[nid];
     }
@@ -602,13 +626,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// already correct — extents only affect the offsets of nodes that
   /// come AFTER them, so changes at index `k` leave indices `< k`
   /// untouched. Returns the new total scroll extent.
-  double _recomputeOffsetsFrom(List<TKey> visibleNodes, int fromIndex) {
-    if (visibleNodes.isEmpty) return 0.0;
-    if (fromIndex <= 0) return _recomputeOffsets(visibleNodes);
+  double _recomputeOffsetsFrom(int fromIndex) {
+    final n = _controller.visibleNodeCount;
+    if (n == 0) return 0.0;
+    if (fromIndex <= 0) return _recomputeOffsets();
 
-    double offset = _nodeOffsetsByNid[_controller.nidOf(visibleNodes[fromIndex])];
-    for (int i = fromIndex; i < visibleNodes.length; i++) {
-      final nid = _controller.nidOf(visibleNodes[i]);
+    final orderNids = _controller.orderNidsView;
+    double offset = _nodeOffsetsByNid[orderNids[fromIndex]];
+    for (int i = fromIndex; i < n; i++) {
+      final nid = orderNids[i];
       _nodeOffsetsByNid[nid] = offset;
       offset += _nodeExtentsByNid[nid];
     }
@@ -664,6 +690,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
   @override
   void performLayout() {
+    debugLastParentDataRefreshIterationCount = 0;
     final constraints = this.constraints;
     // This sliver's layout and paint code assume a vertical-forward axis.
     // Child constraints, offset math, sticky pinning and hit-testing all use
@@ -787,10 +814,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       _lastFrameUsedBulkCumulatives = false;
       totalScrollExtent = 0.0;
 
-      for (final nodeId in visibleNodes) {
-        final nid = _controller.nidOf(nodeId);
+      final orderNids = controller.orderNidsView;
+      final n = visibleNodes.length;
+      for (int i = 0; i < n; i++) {
+        final nid = orderNids[i];
         _nodeOffsetsByNid[nid] = totalScrollExtent;
-        final extent = controller.getCurrentExtent(nodeId);
+        final extent = controller.getCurrentExtentNid(nid);
         _nodeExtentsByNid[nid] = extent;
         totalScrollExtent += extent;
       }
@@ -811,14 +840,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // Nothing to recompute here.
         totalScrollExtent = _lastTotalScrollExtent;
       } else {
+        final orderNids = controller.orderNidsView;
         if (firstAnimIdx == 0) {
           totalScrollExtent = 0.0;
         } else {
-          final prevNid = _controller.nidOf(visibleNodes[firstAnimIdx - 1]);
+          final prevNid = orderNids[firstAnimIdx - 1];
           totalScrollExtent =
               _nodeOffsetsByNid[prevNid] + _nodeExtentsByNid[prevNid];
         }
-        final orderNids = controller.debugOrderNidsView;
         for (int i = firstAnimIdx; i < visibleNodes.length; i++) {
           final nid = orderNids[i];
           final newExtent = controller.getCurrentExtentNid(nid);
@@ -837,7 +866,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       totalScrollExtent = 0.0;
       bool foundAnimating = false;
 
-      final orderNids = controller.debugOrderNidsView;
+      final orderNids = controller.orderNidsView;
       for (int i = 0; i < visibleNodes.length; i++) {
         final nid = orderNids[i];
         final newExtent = controller.getCurrentExtentNid(nid);
@@ -862,9 +891,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Clear prior-layout cache-region flags in one memset-style pass, then
     // mark the slice [cacheStartIndex, cacheEndIndex) as this frame's members.
-    _inCacheRegionByNid.fillRange(0, _inCacheRegionByNid.length, 0);
+    // Sparse clear of last frame's writes. Iterate the nids we wrote
+    // last frame instead of memset'ing the whole nid-indexed array — the
+    // array's length tracks nidCapacity, which grows monotonically and
+    // dwarfs the actual cache-region size on a long-lived tree.
+    for (final nid in _writtenCacheRegionNids) {
+      if (nid < _inCacheRegionByNid.length) {
+        _inCacheRegionByNid[nid] = 0;
+      }
+    }
+    _writtenCacheRegionNids.clear();
     final cacheStartIndex =
-        _findFirstVisibleIndex(visibleNodes, effectiveCacheStart);
+        _findFirstVisibleIndex(effectiveCacheStart);
 
     // In bulk-only mode, break on the row's *steady-state* (full-space)
     // position rather than its animated position. At low bulkValue, animated
@@ -918,75 +956,78 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // row at [cacheStartIndex] — rows before the cache start are treated
     // as stable (the common case for animations on a parent visible in
     // the viewport).
-    double liveAccum = 0.0;
-    double postAccum = 0.0;
-    final double postOffsetOrigin = cacheStartIndex < visibleNodes.length
-        ? _nodeOffsetsByNid[_controller.nidOf(visibleNodes[cacheStartIndex])]
-        : 0.0;
-    double postOffsetCumul = 0.0;
-    final double budgetCap = remainingCacheExtent + slideOverreach;
-    for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
-      final nodeId = visibleNodes[i];
-      final nid = _controller.nidOf(nodeId);
-      if (_bulkCumulativesValid) {
-        // Under bulk-only fast path, pull from cumulatives and sync into the
-        // per-nid slots so downstream code (Pass 2, paint-extent, paint,
-        // hit-test) reads correct values without a branch per access.
-        final offset = _offsetAtVisibleIndex(i);
-        _nodeOffsetsByNid[nid] = offset;
-        _nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i + 1) - offset;
-        final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
-        if (fullOffset >= fullCacheEnd) break;
-        _inCacheRegionByNid[nid] = 1;
-        cacheEndIndex = i + 1;
-        continue;
+    {
+      double liveAccum = 0.0;
+      double postAccum = 0.0;
+      final orderNids = controller.orderNidsView;
+      final double postOffsetOrigin = cacheStartIndex < visibleNodes.length
+          ? _nodeOffsetsByNid[orderNids[cacheStartIndex]]
+          : 0.0;
+      double postOffsetCumul = 0.0;
+      final double budgetCap = remainingCacheExtent + slideOverreach;
+      for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
+        final nid = orderNids[i];
+        if (_bulkCumulativesValid) {
+          // Under bulk-only fast path, pull from cumulatives and sync into the
+          // per-nid slots so downstream code (Pass 2, paint-extent, paint,
+          // hit-test) reads correct values without a branch per access.
+          final offset = _offsetAtVisibleIndex(i);
+          _nodeOffsetsByNid[nid] = offset;
+          _nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i + 1) - offset;
+          final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
+          if (fullOffset >= fullCacheEnd) break;
+          _inCacheRegionByNid[nid] = 1;
+          _writtenCacheRegionNids.add(nid);
+          cacheEndIndex = i + 1;
+          continue;
+        }
+
+        final double liveOffset = _nodeOffsetsByNid[nid];
+        final double postOffset = postOffsetOrigin + postOffsetCumul;
+
+        final bool liveBudgetOk =
+            liveOffset < effectiveCacheEnd && liveAccum < budgetCap;
+        final bool postBudgetOk =
+            postOffset < effectiveCacheEnd && postAccum < budgetCap;
+
+        // Both views failed — offsets and accumulators only grow, so no
+        // future row can be admitted.
+        if (!liveBudgetOk && !postBudgetOk) {
+          break;
+        }
+
+        // [isAnimatingNid] and [isExitingNid] are O(1) (nid-keyed mirror).
+        // Exits must admit via the LIVE view only; they have no
+        // post-animation position and should not be pre-mounted just
+        // because the post view has budget.
+        final bool isAnimating = controller.isAnimatingNid(nid);
+        final bool isExit = isAnimating && controller.isExitingNid(nid);
+        final bool admit = liveBudgetOk || (!isExit && postBudgetOk);
+        if (admit) {
+          _inCacheRegionByNid[nid] = 1;
+          _writtenCacheRegionNids.add(nid);
+          cacheEndIndex = i + 1;
+        }
+
+        // Update accumulators regardless of admission — the budget is a
+        // cumulative quantity measured over every row the loop has
+        // considered, not just admitted ones. Future-row break decisions
+        // depend on these.
+        final double liveContribution;
+        final double postContribution;
+        if (isAnimating) {
+          final full = controller.getEstimatedExtentNid(nid);
+          liveContribution = full;
+          postContribution = isExit ? 0.0 : full;
+        } else {
+          final live = _nodeExtentsByNid[nid];
+          liveContribution = live;
+          postContribution = live;
+        }
+        liveAccum += liveContribution;
+        postAccum += postContribution;
+        postOffsetCumul += postContribution;
       }
-
-      final double liveOffset = _nodeOffsetsByNid[nid];
-      final double postOffset = postOffsetOrigin + postOffsetCumul;
-
-      final bool liveBudgetOk =
-          liveOffset < effectiveCacheEnd && liveAccum < budgetCap;
-      final bool postBudgetOk =
-          postOffset < effectiveCacheEnd && postAccum < budgetCap;
-
-      // Both views failed — offsets and accumulators only grow, so no
-      // future row can be admitted.
-      if (!liveBudgetOk && !postBudgetOk) {
-        break;
-      }
-
-      // [isAnimating] and [isExiting] are O(1) (cached). Using them here
-      // avoids the synthetic [AnimationState] allocation that
-      // [getAnimationState] did. Exits must admit via the LIVE view only;
-      // they have no post-animation position and should not be pre-mounted
-      // just because the post view has budget.
-      final bool isAnimating = controller.isAnimating(nodeId);
-      final bool isExit = isAnimating && controller.isExiting(nodeId);
-      final bool admit = liveBudgetOk || (!isExit && postBudgetOk);
-      if (admit) {
-        _inCacheRegionByNid[nid] = 1;
-        cacheEndIndex = i + 1;
-      }
-
-      // Update accumulators regardless of admission — the budget is a
-      // cumulative quantity measured over every row the loop has
-      // considered, not just admitted ones. Future-row break decisions
-      // depend on these.
-      final double liveContribution;
-      final double postContribution;
-      if (isAnimating) {
-        final full = controller.getEstimatedExtent(nodeId);
-        liveContribution = full;
-        postContribution = isExit ? 0.0 : full;
-      } else {
-        final live = _nodeExtentsByNid[nid];
-        liveContribution = live;
-        postContribution = live;
-      }
-      liveAccum += liveContribution;
-      postAccum += postContribution;
-      postOffsetCumul += postContribution;
     }
 
     // Create children for nodes in the cache region.
@@ -1050,7 +1091,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // tail so _recomputeOffsetsFrom can walk it, then fall back off
         // the fast path for this frame. The next frame will rebuild cumulatives
         // fresh via _rebuildBulkCumulatives.
-        final orderNids = controller.debugOrderNidsView;
+        final orderNids = controller.orderNidsView;
         for (int i = firstChangedIdx; i < visibleNodes.length; i++) {
           if (i >= cacheStartIndex && i < cacheEndIndex) continue;
           final nid = orderNids[i];
@@ -1059,18 +1100,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         _bulkCumulativesValid = false;
       }
 
-      totalScrollExtent = _recomputeOffsetsFrom(visibleNodes, firstChangedIdx);
+      totalScrollExtent = _recomputeOffsetsFrom(firstChangedIdx);
 
       // Only rewrite parentData.layoutOffset for cache-region nodes at or
       // after firstChangedIdx. Earlier cache-region nodes already had the
       // correct value written in the measurement loop above.
       final updateStart = math.max(cacheStartIndex, firstChangedIdx);
+      final orderNids = controller.orderNidsView;
       for (int i = updateStart; i < cacheEndIndex; i++) {
         final nodeId = visibleNodes[i];
         final child = getChildForNode(nodeId);
         if (child == null) continue;
         final parentData = child.parentData! as SliverTreeParentData;
-        parentData.layoutOffset = _nodeOffsetsByNid[_controller.nidOf(nodeId)];
+        parentData.layoutOffset = _nodeOffsetsByNid[orderNids[i]];
       }
     }
 
@@ -1153,7 +1195,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           }
         }
         if (stickyExtentsChanged) {
-          totalScrollExtent = _recomputeOffsets(visibleNodes);
+          totalScrollExtent = _recomputeOffsets();
           if (_maxStickyDepth > 0 && !hasAnimations) {
             _sticky.precomputeStableSubtreeBottoms(
               visibleNodes: visibleNodes,
@@ -1188,10 +1230,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // ────────────────────────────────────────────────────────────────────────
     double paintExtent = 0.0;
 
-    final startIndex = _findFirstVisibleIndex(visibleNodes, scrollOffset);
+    final startIndex = _findFirstVisibleIndex(scrollOffset);
+    final orderNids = controller.orderNidsView;
     for (int i = startIndex; i < visibleNodes.length; i++) {
-      final nodeId = visibleNodes[i];
-      final nid = _controller.nidOf(nodeId);
+      final nid = orderNids[i];
       final offset = _nodeOffsetsByNid[nid];
       final extent = _nodeExtentsByNid[nid];
       final endOfNode = offset + extent;
@@ -1265,18 +1307,44 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     //
     // Only runs during active animations; pure scrolling doesn't mutate
     // offsets so cached parentData is already correct.
+    //
+    // Iterate `_children.keys` directly: the loop body acts only on
+    // mounted boxes, so the previous `for (int i = 0; i < visibleNodes.length; i++)`
+    // walk did O(visibleNodes) work to update O(_children) entries. On a
+    // dense expandAll with 10⁵ visible nodes and a 50-row viewport this
+    // walked 10⁵ entries per frame for ~50 writes — now O(_children).
     if (hasAnimations && _children.isNotEmpty) {
-      for (int i = 0; i < visibleNodes.length; i++) {
-        if (i >= cacheStartIndex && i < cacheEndIndex) continue;
-        final nodeId = visibleNodes[i];
-        final child = getChildForNode(nodeId);
-        if (child == null) continue;
+      for (final nodeId in _children.keys) {
+        debugLastParentDataRefreshIterationCount++;
+        final child = _children[nodeId]!;
         final nid = _controller.nidOf(nodeId);
+        if (nid < 0) {
+          // Dead key — purge handled by stale-node eviction.
+          continue;
+        }
+        // Cache-region children already had their parentData written by
+        // the measurement loop. Skip them. Non-admitted-but-mounted
+        // children inside [cacheStartIndex, cacheEndIndex) have
+        // `_inCacheRegionByNid[nid] == 0` here and would also have been
+        // touched by the measurement loop via `_layoutNodeChild` — letting
+        // them through is a redundant (but correctness-safe) re-write of
+        // the same offset. Cost is one field assignment per such row;
+        // the case is rare (off-screen exits during a collapse).
+        if (nid < _inCacheRegionByNid.length &&
+            _inCacheRegionByNid[nid] != 0) {
+          continue;
+        }
+        final visIdx = _controller.visibleIndexOfNid(nid);
+        if (visIdx < 0) {
+          // Mounted but no longer in visible order — happens transiently
+          // during structure changes. Eviction sweeps it next.
+          continue;
+        }
         final double offset;
         if (_bulkCumulativesValid) {
           // Bulk-only fast path: per-nid offset slots are not kept fresh
           // for out-of-cache-region nids — derive from cumulatives.
-          offset = _offsetAtVisibleIndex(i);
+          offset = _offsetAtVisibleIndex(visIdx);
         } else {
           offset = _nodeOffsetsByNid[nid];
         }
@@ -1296,13 +1364,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   // PAINTING
   // ══════════════════════════════════════════════════════════════════════════
 
-  int _findFirstVisibleIndex(List<TKey> nodes, double scrollOffset) {
-    if (nodes.isEmpty) return 0;
+  int _findFirstVisibleIndex(double scrollOffset) {
+    final n = _controller.visibleNodeCount;
+    if (n == 0) return 0;
 
     int low = 0;
-    int high = nodes.length - 1;
+    int high = n - 1;
 
-    if (_bulkCumulativesValid && _bulkCumulativesCount == nodes.length) {
+    if (_bulkCumulativesValid && _bulkCumulativesCount == n) {
       // Bulk-only fast path: derive offset+extent at each probe from cumulatives
       // without touching per-nid arrays (which are only kept fresh for
       // cache-region nids in this mode).
@@ -1318,9 +1387,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       return low;
     }
 
+    final orderNids = _controller.orderNidsView;
     while (low < high) {
       final mid = (low + high) ~/ 2;
-      final nid = _controller.nidOf(nodes[mid]);
+      final nid = orderNids[mid];
       final offset = _nodeOffsetsByNid[nid];
       final extent = _nodeExtentsByNid[nid];
 
@@ -1340,6 +1410,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final scrollOffset = constraints.scrollOffset;
     final remainingPaintExtent = constraints.remainingPaintExtent;
     final visibleNodes = controller.visibleNodes;
+    final orderNids = controller.orderNidsView;
 
     // Widen the paint iteration start by the active FLIP-slide overreach
     // so rows structurally before the viewport but painting INTO it (via
@@ -1349,7 +1420,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // `performLayout` for why structural offsets alone aren't enough.
     final slideOverreach = controller.maxActiveSlideAbsDelta;
     final startIndex =
-        _findFirstVisibleIndex(visibleNodes, scrollOffset - slideOverreach);
+        _findFirstVisibleIndex(scrollOffset - slideOverreach);
 
     // Pass A: Paint non-sticky nodes. Rows with a non-zero slide delta are
     // deferred to a second sub-pass so they paint on top of static rows —
@@ -1360,12 +1431,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // top. Ties preserve natural iteration order.
     List<int>? slidingIndices;
     for (int i = startIndex; i < visibleNodes.length; i++) {
-      final nodeId = visibleNodes[i];
-      final nid = _controller.nidOf(nodeId);
+      final nid = orderNids[i];
       if (_sticky.isSticky(nid)) {
         continue;
       }
 
+      final nodeId = visibleNodes[i];
       final child = getChildForNode(nodeId);
       if (child == null) continue;
 
@@ -1382,7 +1453,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       _paintRow(
         context: context,
         offset: offset,
-        nodeId: nodeId,
+        nid: nid,
         child: child,
         slideDelta: 0.0,
         scrollOffset: scrollOffset,
@@ -1391,7 +1462,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
 
     if (slidingIndices != null) {
-      final orderNids = controller.debugOrderNidsView;
       slidingIndices.sort((a, b) {
         final da = controller.getSlideDeltaNid(orderNids[a]).abs();
         final db = controller.getSlideDeltaNid(orderNids[b]).abs();
@@ -1406,7 +1476,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         _paintRow(
           context: context,
           offset: offset,
-          nodeId: nodeId,
+          nid: orderNids[i],
           child: child,
           slideDelta: controller.getSlideDeltaNid(orderNids[i]),
           scrollOffset: scrollOffset,
@@ -1456,7 +1526,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   void _paintRow({
     required PaintingContext context,
     required Offset offset,
-    required TKey nodeId,
+    required int nid,
     required RenderBox child,
     required double slideDelta,
     required double scrollOffset,
@@ -1476,7 +1546,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final paintOffset = offset +
         Offset(parentData.indent, nodeOffset - scrollOffset + slideDelta);
 
-    if (controller.isAnimating(nodeId) && nodeExtent < child.size.height) {
+    if (controller.isAnimatingNid(nid) && nodeExtent < child.size.height) {
       final yOffset = -(child.size.height - nodeExtent);
       context.pushClipRect(
         needsCompositing,
@@ -1503,6 +1573,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   }) {
     final scrollOffset = constraints.scrollOffset;
     final visibleNodes = controller.visibleNodes;
+    final orderNids = controller.orderNidsView;
 
     // Phase 1: Test sticky headers first (they're visually on top).
     // Iterate shallowest first (index 0) = topmost = first hit priority.
@@ -1548,21 +1619,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final slideOverreach = controller.maxActiveSlideAbsDelta;
     final hitOffset = scrollOffset + mainAxisPosition;
     final startIndex =
-        _findFirstVisibleIndex(visibleNodes, hitOffset - slideOverreach);
+        _findFirstVisibleIndex(hitOffset - slideOverreach);
 
     for (int i = startIndex; i < visibleNodes.length; i++) {
-      final nodeId = visibleNodes[i];
-      final nid = _controller.nidOf(nodeId);
+      final nid = orderNids[i];
       if (_sticky.isSticky(nid)) {
         continue;
       }
 
+      final nodeId = visibleNodes[i];
       final child = getChildForNode(nodeId);
       if (child == null) continue;
 
       // Skip exiting nodes - they should not receive interactions
       // This prevents crashes when rapidly tapping delete buttons
-      if (controller.isExiting(nodeId)) continue;
+      if (controller.isExitingNid(nid)) continue;
 
       final parentData = child.parentData! as SliverTreeParentData;
       final nodeOffset = parentData.layoutOffset;
@@ -1587,7 +1658,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // same Y adjustment or taps on the visible slice would route to the
       // clipped-away top of the child box.
       final yAdjust =
-          (controller.isAnimating(nodeId) &&
+          (controller.isAnimatingNid(nid) &&
               nodeExtent < child.size.height)
           ? (child.size.height - nodeExtent)
           : 0.0;
@@ -1650,8 +1721,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // that resolve via applyPaintTransform (localToGlobal, layer composition,
     // showOnScreen, semantics) will be off by (height - extent) pixels.
     final yAdjust =
-        (nodeId != null &&
-            controller.isAnimating(nodeId as TKey) &&
+        (nid >= 0 &&
+            controller.isAnimatingNid(nid) &&
             parentData.visibleExtent < child.size.height)
         ? (child.size.height - parentData.visibleExtent)
         : 0.0;

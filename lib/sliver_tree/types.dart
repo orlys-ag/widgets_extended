@@ -1,6 +1,7 @@
 /// Core types for the sliver tree system.
 library;
 
+import 'dart:typed_data';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/animation.dart' show AnimationController, Curve, Curves;
@@ -328,8 +329,10 @@ class BulkAnimationData<TKey> {
     required this.memberCount,
     required Set<TKey>? members,
     required Set<TKey>? pendingRemoval,
+    required Uint8List? bulkMemberByNid,
   }) : _members = members,
-       _pendingRemoval = pendingRemoval;
+       _pendingRemoval = pendingRemoval,
+       _bulkMemberByNid = bulkMemberByNid;
 
   static const BulkAnimationData<Never> _inactiveSentinel =
       BulkAnimationData<Never>._(
@@ -339,6 +342,7 @@ class BulkAnimationData<TKey> {
         memberCount: 0,
         members: null,
         pendingRemoval: null,
+        bulkMemberByNid: null,
       );
 
   /// The "no bulk animation active" snapshot. Returns a const-shared
@@ -357,6 +361,7 @@ class BulkAnimationData<TKey> {
     required int generation,
     required Set<TKey> members,
     required Set<TKey> pendingRemoval,
+    required Uint8List bulkMemberByNid,
   }) {
     return BulkAnimationData<TKey>._(
       isValid: true,
@@ -371,6 +376,7 @@ class BulkAnimationData<TKey> {
       memberCount: members.length,
       members: members,
       pendingRemoval: pendingRemoval,
+      bulkMemberByNid: bulkMemberByNid,
     );
   }
 
@@ -396,6 +402,7 @@ class BulkAnimationData<TKey> {
 
   final Set<TKey>? _members;
   final Set<TKey>? _pendingRemoval;
+  final Uint8List? _bulkMemberByNid;
 
   /// Whether [key] is a member of the bulk group (in either the live
   /// member set or the pending-removal set). Always false on an invalid
@@ -405,6 +412,16 @@ class BulkAnimationData<TKey> {
     if (m != null && m.contains(key)) return true;
     final p = _pendingRemoval;
     return p != null && p.contains(key);
+  }
+
+  /// Nid-keyed equivalent of [containsMember]: O(1) array read instead of
+  /// HashMap probe. Always returns false on an invalid snapshot. Caller
+  /// must guarantee [nid] is live.
+  bool containsMemberNid(int nid) {
+    final mirror = _bulkMemberByNid;
+    if (mirror == null) return false;
+    if (nid < 0 || nid >= mirror.length) return false;
+    return mirror[nid] != 0;
   }
 }
 

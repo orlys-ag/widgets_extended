@@ -14,14 +14,14 @@ import 'dart:typed_data';
 import 'tree_controller.dart';
 import 'types.dart';
 
-/// Resolves a key to its visible-position index.
+/// Resolves a scroll offset to the first visible-position index whose
+/// row's bottom edge is past it.
 ///
 /// The render object uses a binary search over per-nid offsets, with a
 /// special-case fast path when the bulk-only cumulatives are valid. The
 /// computer accepts that resolver as a callback rather than reimplementing
 /// it, so the bulk-fast-path knowledge stays inside the render object.
-typedef FindFirstVisibleIndex<TKey> =
-    int Function(List<TKey> visibleNodes, double scrollOffset);
+typedef FindFirstVisibleIndex = int Function(double scrollOffset);
 
 /// Computes sticky headers and owns the scratch state required for the
 /// computation. The owning render object hands in the per-frame inputs
@@ -260,19 +260,22 @@ class StickyHeaderComputer<TKey, TData> {
     }
     _stablePrefix[0] = 0.0;
 
+    final orderNids = _controller.orderNidsView;
+
     // Pass A: depths + stable prefix sums.
     for (int i = 0; i < n; i++) {
-      final nodeId = visibleNodes[i];
-      final depth = _controller.getDepth(nodeId);
+      final nid = orderNids[i];
+      final depth = _controller.depthOfNid(nid);
       _depthScratch[i] = depth;
 
+      final nodeId = visibleNodes[i];
       final anim = _controller.getAnimationState(nodeId);
       final double stableExtent;
       if (anim != null && anim.type == AnimationType.entering) {
         // Use full extent so ancestor push-up doesn't bounce during expand.
-        stableExtent = _controller.getEstimatedExtent(nodeId);
+        stableExtent = _controller.getEstimatedExtentNid(nid);
       } else {
-        stableExtent = nodeExtentsByNid[_controller.nidOf(nodeId)];
+        stableExtent = nodeExtentsByNid[nid];
       }
       _stablePrefix[i + 1] = _stablePrefix[i] + stableExtent;
     }
@@ -297,7 +300,7 @@ class StickyHeaderComputer<TKey, TData> {
     // For each node i: bottom = (node's actual end) + (stable sum of
     // descendants).
     for (int i = 0; i < n; i++) {
-      final nid = _controller.nidOf(visibleNodes[i]);
+      final nid = orderNids[i];
       final actualEnd = nodeOffsetsByNid[nid] + nodeExtentsByNid[nid];
       final end = _subtreeEndIndex[i];
       final descendantStableSum =
@@ -337,7 +340,7 @@ class StickyHeaderComputer<TKey, TData> {
     required List<TKey> visibleNodes,
     required Float64List nodeOffsetsByNid,
     required Float64List nodeExtentsByNid,
-    required FindFirstVisibleIndex<TKey> findFirstVisibleIndex,
+    required FindFirstVisibleIndex findFirstVisibleIndex,
     required bool Function(
       TKey candidateId,
       double pinnedY,
@@ -353,7 +356,7 @@ class StickyHeaderComputer<TKey, TData> {
 
     for (int targetDepth = 0; targetDepth < _maxStickyDepth; targetDepth++) {
       final probeScrollY = scrollOffset + stackTop;
-      final probeIndex = findFirstVisibleIndex(visibleNodes, probeScrollY);
+      final probeIndex = findFirstVisibleIndex(probeScrollY);
       if (probeIndex >= visibleNodes.length) break;
 
       final nodeAtProbe = visibleNodes[probeIndex];
@@ -413,21 +416,23 @@ class StickyHeaderComputer<TKey, TData> {
     if (index < 0) return 0.0;
     final nodeDepth = _controller.getDepth(nodeId);
 
-    final nid = _controller.nidOf(nodeId);
+    final orderNids = _controller.orderNidsView;
+    final nid = orderNids[index];
     double stableOffset = nodeOffsetsByNid[nid];
     stableOffset += nodeExtentsByNid[nid];
     double bottom = stableOffset;
 
     for (int i = index + 1; i < visibleNodes.length; i++) {
-      final childId = visibleNodes[i];
-      if (_controller.getDepth(childId) <= nodeDepth) break;
+      final childNid = orderNids[i];
+      if (_controller.depthOfNid(childNid) <= nodeDepth) break;
 
+      final childId = visibleNodes[i];
       final animation = _controller.getAnimationState(childId);
       final double childExtent;
       if (animation != null && animation.type == AnimationType.entering) {
-        childExtent = _controller.getEstimatedExtent(childId);
+        childExtent = _controller.getEstimatedExtentNid(childNid);
       } else {
-        childExtent = nodeExtentsByNid[_controller.nidOf(childId)];
+        childExtent = nodeExtentsByNid[childNid];
       }
       final childEnd = stableOffset + childExtent;
       if (childEnd > bottom) bottom = childEnd;
@@ -444,7 +449,7 @@ class StickyHeaderComputer<TKey, TData> {
     required List<TKey> visibleNodes,
     required Float64List nodeOffsetsByNid,
     required Float64List nodeExtentsByNid,
-    required FindFirstVisibleIndex<TKey> findFirstVisibleIndex,
+    required FindFirstVisibleIndex findFirstVisibleIndex,
   }) {
     final result = <TKey>{};
     _forEachStickyCandidate(
@@ -473,7 +478,7 @@ class StickyHeaderComputer<TKey, TData> {
     required List<TKey> visibleNodes,
     required Float64List nodeOffsetsByNid,
     required Float64List nodeExtentsByNid,
-    required FindFirstVisibleIndex<TKey> findFirstVisibleIndex,
+    required FindFirstVisibleIndex findFirstVisibleIndex,
   }) {
     // Null out prior-layout sticky entries before recomputing. Iterate
     // [_writtenStickyNids] (the nids we wrote LAST frame) instead of

@@ -8,6 +8,7 @@
 ///   6. moveNode of a mid-exit subtree cancels the exit and re-anchors.
 library;
 
+import 'package:flutter/animation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -192,6 +193,181 @@ void main() {
         await tester.pump(const Duration(milliseconds: 16));
       }
       expect(controller.visibleNodes.toList(), equals(["p", "c1", "c2"]));
+    });
+
+    testWidgets(
+        "expand-after-mid-collapse animates smoothly from each member's "
+        "current extent up to full over the configured duration",
+        (tester) async {
+      // Repro for the "child list appears fully expanded" regression
+      // and the follow-up "duration speeds up" perception.
+      //
+      // Setup: P → C → c1, c2. C starts collapsed.
+      // 1. Expand C (animate). c1, c2 join C's op-group with
+      //    targetExtent=48 (full extent set via setFullExtent).
+      // 2. Mid-flight, collapse P. C, c1, c2 are captured into P's
+      //    collapse op-group with targetExtent = their captured
+      //    (mid-flight) extent.
+      // 3. Mid-collapse, expand P. Path 1 reverse-collapse runs.
+      //
+      // The original bug: Path 1 only reset targetExtent to full and
+      // left the controller mid-flight. The lerp produced an extent
+      // close to full almost immediately — "appears fully expanded".
+      //
+      // The fix: rebase each member's startExtent to its current visual
+      // extent, set targetExtent to its full extent, then reset the
+      // controller to value=0 and forward(). At t=0 the lerp returns
+      // currentExtent (no jump), and the animation plays smoothly up to
+      // full over the FULL configured duration. The visible motion
+      // range scales with how far the collapse had progressed — that is
+      // a geometric reality, not a duration bug.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 200),
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([const TreeNode(key: "p", data: "P")]);
+      controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
+      controller.setChildren("c", [
+        const TreeNode(key: "c1", data: "c1"),
+        const TreeNode(key: "c2", data: "c2"),
+      ]);
+      controller.expand(key: "p", animate: false);
+      controller.setFullExtent("c1", 48.0);
+      controller.setFullExtent("c2", 48.0);
+
+      // 1. Expand C (animated). c1, c2 enter via C's op-group.
+      controller.expand(key: "c", animate: true);
+      for (var i = 0; i < 2; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      final extentDuringInnerExpand = controller.getCurrentExtent("c1");
+      expect(extentDuringInnerExpand, lessThan(20.0),
+          reason: "Sanity: c1 should be small mid-inner-expand");
+
+      // 2. Collapse P mid-flight.
+      controller.collapse(key: "p", animate: true);
+      for (var i = 0; i < 2; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      // Capture c1's visual extent at the exact moment we trigger the
+      // reversal — Path 1 must preserve this value across the boundary
+      // (no jump up, no snap to 0).
+      final extentJustBeforeReversal = controller.getCurrentExtent("c1");
+
+      // 3. Expand P. Path 1 reverse-collapse: smooth rebase + value=0
+      // reset, so the next frame holds at currentExtent and then plays
+      // up to full over the FULL configured duration.
+      controller.expand(key: "p", animate: true);
+      await tester.pump(const Duration(milliseconds: 1));
+
+      // First frame after reversal: c1's extent must be effectively
+      // unchanged from the moment of reversal (smooth continuity, no
+      // jump up to near-full and no snap-down to 0).
+      final extentFirstFrame = controller.getCurrentExtent("c1");
+      expect(
+        extentFirstFrame,
+        closeTo(extentJustBeforeReversal, 1.5),
+        reason: "Path 1 smooth reversal must preserve the visual "
+            "position. Got $extentFirstFrame, expected ≈ "
+            "$extentJustBeforeReversal.",
+      );
+
+      // Animation must take the full configured duration. Pump a small
+      // fraction; c1 should NOT yet be at full and should be growing.
+      await tester.pump(const Duration(milliseconds: 80));
+      final extentMidExpand = controller.getCurrentExtent("c1");
+      expect(extentMidExpand, greaterThan(extentFirstFrame));
+      expect(extentMidExpand, lessThan(48.0),
+          reason: "BUG: animation completed too quickly. "
+              "At ~40% of duration, c1 should still be growing.");
+
+      // After full settling, c1 reaches full extent.
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(controller.getCurrentExtent("c1"), 48.0);
+      expect(controller.visibleNodes.toList(), equals(["p", "c", "c1", "c2"]));
+    });
+
+    testWidgets(
+        "Path 1 reversal of a mid-collapse animates over the FULL configured "
+        "duration, not just the remaining controller progress",
+        (tester) async {
+      // Without the controller-value-reset, `forward()` from a mid-flight
+      // reverse takes only `(1 - value) * duration` — e.g., 17% of
+      // duration if the collapse had reached 83%. The visual feels
+      // snappy because the small remaining range gets covered in a
+      // fraction of the configured time.
+      //
+      // With the fix, each member's startExtent is rebased to its
+      // current visual extent, targetExtent is reset to full, and the
+      // controller's value is reset to 0 before forward(), so the
+      // animation runs over the FULL configured duration with no jump
+      // at the boundary.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 400),
+        animationCurve: Curves.linear,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([const TreeNode(key: "p", data: "P")]);
+      controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
+      controller.expand(key: "p", animate: false);
+      controller.setFullExtent("c", 48.0);
+
+      // c is visible at full extent (no animation in flight).
+      expect(controller.getCurrentExtent("c"), 48);
+
+      // Collapse P. c shrinks from 48 toward 0 over 400ms with linear
+      // curve. After 200ms (50% of duration), c is at ≈24.
+      controller.collapse(key: "p", animate: true);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 200));
+      final extentMidCollapse = controller.getCurrentExtent("c");
+      expect(extentMidCollapse, lessThan(40.0));
+      expect(extentMidCollapse, greaterThan(8.0));
+
+      // Re-expand P at mid-collapse — Path 1 reversal.
+      controller.expand(key: "p", animate: true);
+
+      // First frame after reversal: c's extent must be effectively
+      // unchanged from extentMidCollapse — smooth continuity. The
+      // controller is reset to value=0 with start=currentExtent and
+      // target=full, so lerp(currentExtent, full, 0) = currentExtent.
+      await tester.pump(const Duration(milliseconds: 1));
+      final extentFirstFrame = controller.getCurrentExtent("c");
+      expect(
+        extentFirstFrame,
+        closeTo(extentMidCollapse, 1.5),
+        reason: "Path 1 smooth reversal must preserve the visual "
+            "position. Got extentFirstFrame=$extentFirstFrame, "
+            "expected ≈ $extentMidCollapse.",
+      );
+
+      // Pump 50% of the new full animation duration (200ms of 400ms).
+      // With linear curve and start=extentMidCollapse, target=48, this
+      // is lerp(extentMidCollapse, 48, 0.5) — about halfway between
+      // extentMidCollapse and 48.
+      await tester.pump(const Duration(milliseconds: 200));
+      final extentHalfway = controller.getCurrentExtent("c");
+      final expectedHalfway = (extentMidCollapse + 48.0) / 2.0;
+      expect(
+        extentHalfway,
+        closeTo(expectedHalfway, 2.0),
+        reason: "At 200ms of 400ms (linear), c should be halfway "
+            "between $extentMidCollapse and 48 (≈$expectedHalfway). "
+            "Got extentHalfway=$extentHalfway. A value near 48 would "
+            "mean the animation completed too quickly; a value near "
+            "extentMidCollapse would mean it hasn't progressed.",
+      );
+
+      // Pump remaining duration plus a small buffer; should now be at
+      // full extent.
+      await tester.pump(const Duration(milliseconds: 220));
+      expect(controller.getCurrentExtent("c"), closeTo(48, 0.5));
     });
   });
 
