@@ -1316,9 +1316,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   /// Current animated extent for the live [nid]. Hot-path equivalent of
-  /// [getCurrentExtent]; resolves the same bulk → operation-group →
-  /// standalone fallback chain but reads from per-nid arrays where
-  /// possible. Caller must guarantee [nid] is live and within range.
+  /// [getCurrentExtent]; resolves the chain bulk → operation-group →
+  /// standalone → fullExtent. Caller must guarantee [nid] is live and
+  /// within range.
   double getCurrentExtentNid(int nid) {
     final fullRaw = _fullExtentByNid[nid];
     final full = fullRaw < 0 ? defaultExtent : fullRaw;
@@ -1946,7 +1946,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
                 status == AnimationStatus.completed) {
               member.targetExtent = extent;
             }
-          } else if (oldExtent != extent) {
+          } else if (oldExtent != extent && !member.targetIsCaptured) {
+            // Update only when targetExtent is the natural full
+            // reference. Captured targets (set when this member was
+            // pulled in from a mid-flight standalone or other source)
+            // represent the visual extent at capture time, not the
+            // natural full size — overwriting them here would make a
+            // freshly-inserted row caught at progress=0 mid-enter
+            // suddenly read at the full natural size during the
+            // parent's collapse.
+            //
             // targetExtent is the "fully expanded" reference (value=1);
             // startExtent is always 0 (fully collapsed). Update targetExtent
             // regardless of direction — during reverse (collapsing), setting
@@ -3453,55 +3462,33 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Animated expand
     final existingGroup = _operationGroups[key];
     if (existingGroup != null) {
-      // Path 1: Reversing a collapse — group already exists
-      if (existingGroup.pendingRemoval.isNotEmpty) {
-        existingGroup.pendingRemoval.clear();
-        _bumpAnimGen();
-      }
-      // Rebase each member's animation envelope so the visual position
-      // at the moment of reversal is preserved (no jump), then animate
-      // smoothly from there to the natural full extent over the
-      // configured duration.
+      // Path 1: Reversing a collapse — group already exists.
       //
-      // Without this rebase, simply resetting `targetExtent` to full
-      // while the controller's value is still mid-collapse leaves
-      // `lerp(0, full, currentValue)` producing a much larger extent
-      // at the same `currentValue` than the OLD envelope did. The row
-      // visually snaps to near-full the instant reversal starts —
-      // visible as the "child list appears fully expanded" regression.
-      // The worst case: a pre-existing op-group (e.g. an in-flight
-      // expand of a child) had captured a small `targetExtent`; the
-      // post-reversal lerp jumps straight up toward `full`.
+      // The op-group's controller is the shared timing primitive;
+      // each member's NodeGroupExtent envelope (start/target) defines
+      // what it animates between. To reverse the collapse smoothly:
       //
-      // We capture each member's current extent under the old envelope,
-      // set startExtent to that value and targetExtent to a concrete
-      // full, then reset the controller's value to 0 and `forward()`.
-      // After the reset, `lerp(currentExtent, full, t)` runs smoothly
-      // from currentExtent at t=0 to full at t=1 over the full
-      // configured duration — no jump, no discontinuity.
+      //   1. Rebase each member: capture its current visual extent
+      //      (under the OLD envelope at the OLD curvedValue) and set
+      //      startExtent to that value, targetExtent to full. Reset
+      //      the controller to value=0 and forward(); the group
+      //      replays each row from `current → full` over the full
+      //      configured duration, no jump.
+      //   2. Clear pendingRemoval so the dismissed handler doesn't
+      //      yank rows.
       //
-      // Reading note for "the duration feels fast on near-full
-      // members": this is geometric, not a duration bug. A member that
-      // was near-full when the collapse started (e.g. extent=45)
-      // animates over a small pixel range (45→48). The animation runs
-      // for the full configured duration, but 3 px of motion is
-      // imperceptible — that's the natural result of a late reversal.
-      // Visible motion scales with how far the collapse had progressed.
-      //
-      // Resetting the controller to value=0 needs a small dance:
-      // setting `value = 0` fires the `dismissed` status synchronously,
-      // and this group's status listener would dispose the controller
-      // on dismissal — before `forward()` finishes setting up. The
-      // listener has an identity guard
+      // Resetting `controller.value = 0` fires the `dismissed` status
+      // synchronously, which the group's status listener would
+      // otherwise treat as a real collapse-complete and dispose the
+      // group. The listener has an identity guard
       // (`identical(_operationGroups[key], group)`), so we briefly
       // detach the group from `_operationGroups` around the value=0
       // store, let the gated dismissed event fire harmlessly, then
       // re-attach for the actual `forward()` call.
-      //
-      // `targetExtent` must be a concrete value (not the
-      // `_unknownExtent` sentinel — that sentinel triggers the
-      // proportional formula which ignores `startExtent` and would
-      // re-introduce the jump).
+      if (existingGroup.pendingRemoval.isNotEmpty) {
+        existingGroup.pendingRemoval.clear();
+        _bumpAnimGen();
+      }
       final preReversalCurvedValue = existingGroup.curvedValue;
       for (final entry in existingGroup.members.entries) {
         final full = _fullExtentOf(entry.key) ?? defaultExtent;
@@ -3569,6 +3556,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
+    // Path 2 expand: each newly-affected descendant joins the group as
+    // a member with a NodeGroupExtent envelope. Per-node animation
+    // records are NOT created on a fresh op — they only come into
+    // existence on CAPTURE (a prior op's mid-flight node being pulled
+    // into a new op). The op-group's controller is the shared timing
+    // primitive for non-captured members; private records, when they
+    // exist on captured members, carry the captured node's own clock.
     if (newNodeCount == 0) {
       // All nodes already visible (reversing collapse animation)
       for (final nodeId in nodesToShow) {
@@ -3637,6 +3631,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     controller.forward();
+    _ensureStandaloneTickerRunning();
     _notifyStructural(affectedKeys: <TKey>{key});
   }
 
@@ -3680,37 +3675,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (existingGroup != null) {
       // Path 1: Reversing an expand — group already exists.
       //
-      // This is the mirror of the expand Path-1 reversal block in
-      // [expand]. We rebase each member's animation envelope so the
-      // visual position at the moment of reversal is preserved (no
-      // jump), then animate smoothly down to fully-collapsed (extent
-      // = 0) over the full configured duration.
+      // Mirror of the expand Path-1 reversal block:
+      //   1. Rebase each member: capture its current visual extent
+      //      and animate from `current → 0` over the configured
+      //      duration. We do this by setting startExtent=0 and
+      //      targetExtent=currentExtent (so as the controller's
+      //      reverse takes value from 1 → 0, lerp(0, current, value)
+      //      runs from current → 0).
+      //   2. Add all members to pendingRemoval so the dismissed
+      //      handler removes them from `_order`.
+      //   3. Reset controller.value=1 with the detach/reattach trick
+      //      so the reverse plays over full duration with no jump.
       //
-      // Why an unconditional `startExtent = 0` is wrong here: the
-      // expand Path-1 branch leaves members with a non-zero
-      // startExtent (the rebased current extent) so its own boundary
-      // is jump-free. If we then reverse THAT into a collapse, simply
-      // forcing startExtent back to 0 makes `lerp(0, target,
-      // currentValue)` evaluate to a different extent than the
-      // pre-reversal lerp at the same controller value — visually a
-      // snap down. We instead rebase target to the current visual
-      // extent and reset the controller to value=1.0 so the reversal
-      // re-plays from `currentExtent → 0` smoothly.
-      //
-      // Convention reminder (see types.dart): startExtent corresponds
-      // to value=0 (collapsed), targetExtent corresponds to value=1
-      // (expanded). For a collapse, the controller plays in reverse
-      // from value=1 to value=0, so the row visually shrinks from
-      // target down to start. To collapse from `currentExtent` down
-      // to 0 we set start=0 and target=currentExtent.
-      //
-      // Resetting `controller.value = 1.0` fires the `completed`
-      // status listener synchronously, which would dispose this
-      // group on completion. The listener has an identity guard
-      // (`identical(_operationGroups[key], group)`), so we briefly
-      // detach the group around the value=1.0 store, let the gated
-      // completed event fire harmlessly, then re-attach for the
-      // actual `reverse()` call.
+      // Captured members' private records re-pause as their nodes
+      // re-enter pendingRemoval; their preserved progress is unchanged
+      // and they'll resume only on a subsequent re-expand.
       final preReversalCurvedValue = existingGroup.curvedValue;
       for (final entry in existingGroup.members.entries) {
         final full = _fullExtentOf(entry.key) ?? defaultExtent;
@@ -3762,6 +3741,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       final nge = NodeGroupExtent(
         startExtent: 0.0,
         targetExtent: capturedExtent ?? (_fullExtentOf(nodeId) ?? defaultExtent),
+        // When this member's target was set from a captured visual
+        // extent, freeze it: a later setFullExtent resize must not
+        // retroactively expand the row to its natural full size
+        // mid-collapse (the "children appear all at once at full"
+        // bug). When the target was the natural full reference (no
+        // capture), resize updates are still welcome.
+        targetIsCaptured: capturedExtent != null,
       );
       group.members[nodeId] = nge;
       group.pendingRemoval.add(nodeId);
@@ -3770,6 +3756,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     controller.reverse();
+    _ensureStandaloneTickerRunning();
     _notifyStructural(affectedKeys: <TKey>{key});
   }
 

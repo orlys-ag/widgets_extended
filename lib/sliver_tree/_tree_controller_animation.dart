@@ -32,6 +32,26 @@ double _computeAnimationSpeedMultiplier(
 /// high-level contract; this extension only exists so we can split the file.
 extension _TreeControllerAnimationOps<TKey, TData>
     on TreeController<TKey, TData> {
+  /// Computes the visible extent for a standalone [AnimationState],
+  /// matching the read path in [getCurrentExtentNid]. When the
+  /// state's `targetExtent` is unknown (the row hasn't been measured
+  /// yet), [AnimationState.currentExtent] holds `lerp(0, -1, t) = -t`
+  /// — a stale, negative value that bypasses the proportional
+  /// fallback. Capture sites must use this helper instead of reading
+  /// `state.currentExtent` directly, otherwise the captured value
+  /// becomes a negative number and corrupts a downstream op-group
+  /// member's envelope.
+  double _standaloneVisibleExtent(TKey key, AnimationState state) {
+    if (state.targetExtent != _unknownExtent) {
+      return state.currentExtent;
+    }
+    final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
+    final t = animationCurve.transform(state.progress.clamp(0.0, 1.0));
+    return state.type == AnimationType.entering
+        ? full * t
+        : full * (1.0 - t);
+  }
+
   /// Captures a node's current animated extent from whichever source it's in,
   /// removes it from that source, and returns the extent (or null if not animating).
   double? _captureAndRemoveFromGroups(TKey key) {
@@ -69,7 +89,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     final standalone = _clearStandalone(key);
     if (standalone != null) {
       _bumpAnimGen();
-      return standalone.currentExtent;
+      return _standaloneVisibleExtent(key, standalone);
     }
 
     return null;
@@ -358,6 +378,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // animation bookkeeping — the widget tree sees no change, so firing
       // notifyListeners here would force SliverTreeElement to rebuild every
       // mounted row for nothing.
+      //
       for (final nodeId in group.members.keys) {
         _clearOperationGroup(nodeId);
       }

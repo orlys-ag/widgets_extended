@@ -187,7 +187,11 @@ class AnimationGroup<TKey> {
 /// - Fresh expand: startExtent = 0, targetExtent = full extent
 /// - Nodes joining mid-animation: startExtent = 0, targetExtent = captured extent
 class NodeGroupExtent {
-  NodeGroupExtent({required this.startExtent, required this.targetExtent});
+  NodeGroupExtent({
+    required this.startExtent,
+    required this.targetExtent,
+    this.targetIsCaptured = false,
+  });
 
   /// Extent when the controller value is 0 (collapsed state).
   double startExtent;
@@ -195,6 +199,13 @@ class NodeGroupExtent {
   /// Extent when the controller value is 1 (expanded state).
   /// A value of -1.0 means unknown (will be resolved from measured size).
   double targetExtent;
+
+  /// Whether [targetExtent] was set from a captured visual extent
+  /// (true) versus a natural full reference (false). When true,
+  /// `setFullExtent` resize updates do NOT overwrite [targetExtent] —
+  /// the captured value is preserved as the maximum the animation
+  /// will reach.
+  bool targetIsCaptured;
 
   /// Computes the interpolated extent for the given curved value.
   ///

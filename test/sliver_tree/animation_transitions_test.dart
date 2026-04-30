@@ -292,20 +292,16 @@ void main() {
     });
 
     testWidgets(
-        "Path 1 reversal of a mid-collapse animates over the FULL configured "
-        "duration, not just the remaining controller progress",
+        "Path 1 reversal of a mid-collapse animates over the FULL "
+        "configured duration, not just the remaining controller progress",
         (tester) async {
-      // Without the controller-value-reset, `forward()` from a mid-flight
-      // reverse takes only `(1 - value) * duration` — e.g., 17% of
-      // duration if the collapse had reached 83%. The visual feels
-      // snappy because the small remaining range gets covered in a
-      // fraction of the configured time.
-      //
-      // With the fix, each member's startExtent is rebased to its
-      // current visual extent, targetExtent is reset to full, and the
-      // controller's value is reset to 0 before forward(), so the
-      // animation runs over the FULL configured duration with no jump
-      // at the boundary.
+      // For non-captured members of the reversing op-group, the
+      // shared op-group controller is the timing primitive. Path-1
+      // reversal rebases each member's envelope and resets the
+      // controller value, so the new direction (re-expand) plays for
+      // the FULL configured duration with no jump. Captured members
+      // (with private records) follow this group-driven extent until
+      // the group finishes, then resume their own preserved clock.
       final controller = TreeController<String, String>(
         vsync: tester,
         animationDuration: const Duration(milliseconds: 400),
@@ -334,16 +330,15 @@ void main() {
       controller.expand(key: "p", animate: true);
 
       // First frame after reversal: c's extent must be effectively
-      // unchanged from extentMidCollapse — smooth continuity. The
-      // controller is reset to value=0 with start=currentExtent and
-      // target=full, so lerp(currentExtent, full, 0) = currentExtent.
+      // unchanged from extentMidCollapse — smooth continuity from
+      // member rebase + controller value reset.
       await tester.pump(const Duration(milliseconds: 1));
       final extentFirstFrame = controller.getCurrentExtent("c");
       expect(
         extentFirstFrame,
         closeTo(extentMidCollapse, 1.5),
-        reason: "Path 1 smooth reversal must preserve the visual "
-            "position. Got extentFirstFrame=$extentFirstFrame, "
+        reason: "Path 1 reversal must preserve visual continuity. "
+            "Got extentFirstFrame=$extentFirstFrame, "
             "expected ≈ $extentMidCollapse.",
       );
 
@@ -359,9 +354,7 @@ void main() {
         closeTo(expectedHalfway, 2.0),
         reason: "At 200ms of 400ms (linear), c should be halfway "
             "between $extentMidCollapse and 48 (≈$expectedHalfway). "
-            "Got extentHalfway=$extentHalfway. A value near 48 would "
-            "mean the animation completed too quickly; a value near "
-            "extentMidCollapse would mean it hasn't progressed.",
+            "Got extentHalfway=$extentHalfway.",
       );
 
       // Pump remaining duration plus a small buffer; should now be at

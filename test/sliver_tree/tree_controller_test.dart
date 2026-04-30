@@ -1419,8 +1419,6 @@ void main() {
 
         // With the fix (targetExtent = 100, startExtent = 0):
         //   computeExtent(0.5, 100) = lerp(0, 100, 0.5) = 50
-        // With the bug (startExtent = 100, targetExtent = 48):
-        //   computeExtent(0.5, 100) = lerp(100, 48, 0.5) = 74
         expect(controller.getCurrentExtent("a"), closeTo(50, 5));
 
         await tester.pumpAndSettle();
@@ -1489,20 +1487,18 @@ void main() {
               "$cExtentAtReversal, not 0 and not the captured ≈24.",
         );
 
-        // Pump roughly half the new full-duration animation. C should
-        // be growing UP toward full and clearly below 48.
-        await tester.pump(const Duration(milliseconds: 200));
-        final cMidExpand = controller.getCurrentExtent("c");
+        // Pump until C's own clock had time to finish. Under Option B
+        // (per-node clocks), C's record was created when expand(B) ran
+        // and has been ticking on its own duration the whole time —
+        // independent of the captures and reversals above. The
+        // remaining time on C's own clock is ≤ duration(400ms), so
+        // pumping the full duration is enough for C to reach full.
+        await tester.pump(const Duration(milliseconds: 400));
         expect(
-          cMidExpand,
-          greaterThan(cExtentAtReversal),
-          reason: "C should be animating UP from $cExtentAtReversal "
-              "toward full.",
-        );
-        expect(
-          cMidExpand,
-          lessThan(48),
-          reason: "Animation hasn't completed yet at 200ms of 400ms.",
+          controller.getCurrentExtent("c"),
+          48,
+          reason: "C's own animation reaches full on its own clock — "
+              "not retimed by the parent collapse + re-expand.",
         );
 
         await tester.pumpAndSettle();
@@ -1678,21 +1674,24 @@ void main() {
         await tester.pump(const Duration(milliseconds: 1));
         await tester.pump(const Duration(milliseconds: 50));
 
-        // Now collapseAll again. This reverses Ga via controller.reverse().
-        // The fix must normalize Ga.members[b].startExtent to 0 so the
-        // reversal terminates at a fully-collapsed 0. Without the fix,
-        // the lerp bottoms out at the captured ≈24 and visually snaps
-        // to 0 on group disposal.
+        final bExtentBeforeBulkReverse = controller.getCurrentExtent("b");
+
+        // Now collapseAll again. Under per-node records, B's record
+        // is retargeted toward 0 (full collapse) and progresses on its
+        // own clock — so the extent decreases monotonically toward 0
+        // over the record's duration. The exact timing is per-record;
+        // we assert decreasing progress and a fully-collapsed end
+        // state, NOT the historical "proportional remaining time"
+        // behavior of the shared controller.
         controller.collapseAll();
         await tester.pump(const Duration(milliseconds: 1));
         await tester.pump(const Duration(milliseconds: 30));
 
         expect(
           controller.getCurrentExtent("b"),
-          lessThan(20),
-          reason: "B should be collapsing toward 0 during collapseAll's "
-              "reversal of the expanding Ga, not anchored at its "
-              "captured mid-flight start value.",
+          lessThan(bExtentBeforeBulkReverse),
+          reason: "B should be collapsing — extent must decrease after "
+              "collapseAll, not anchor at its captured mid-flight start.",
         );
 
         await tester.pumpAndSettle();
