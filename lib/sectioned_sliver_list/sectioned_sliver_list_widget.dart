@@ -360,10 +360,10 @@ class SectionedSliverListState<SKey, IKey, Section, Item>
     final Set<SKey> knownSections;
     if (isFirstSync) {
       final currentSections = _activeController.sections;
-      final hasExplicitExpansion =
-          currentSections.any(_activeController.isExpanded);
-      knownSections =
-          hasExplicitExpansion ? currentSections.toSet() : <SKey>{};
+      final hasExplicitExpansion = currentSections.any(
+        _activeController.isExpanded,
+      );
+      knownSections = hasExplicitExpansion ? currentSections.toSet() : <SKey>{};
     } else {
       knownSections = _activeController.sections.toSet();
     }

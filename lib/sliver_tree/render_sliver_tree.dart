@@ -178,7 +178,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   ) {
     final n = visibleNodes.length;
     if (_stableCumulative.length < n + 1) {
-      final newLen = math.max(n + 1, math.max(16, _stableCumulative.length * 2));
+      final newLen = math.max(
+        n + 1,
+        math.max(16, _stableCumulative.length * 2),
+      );
       _stableCumulative = Float64List(newLen);
       _bulkFullCumulative = Float64List(newLen);
     }
@@ -319,10 +322,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// the mutation would capture the already-new offsets and produce a
   /// zero-delta (no visible slide). A second call before consumption
   /// overwrites the pending baseline — the latest request wins.
-  void beginSlideBaseline({
-    required Duration duration,
-    required Curve curve,
-  }) {
+  void beginSlideBaseline({required Duration duration, required Curve curve}) {
     _pendingSlideBaseline = snapshotVisibleOffsets();
     _pendingSlideDuration = duration;
     _pendingSlideCurve = curve;
@@ -452,11 +452,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         final paintedOffset = structural + slide;
         if (!controller.isPendingDeletion(key)) {
           if (scrollY < paintedOffset + extent) {
-            return (
-              key: key,
-              paintedOffset: paintedOffset,
-              extent: extent,
-            );
+            return (key: key, paintedOffset: paintedOffset, extent: extent);
           }
           lastLiveKey = key;
           lastLiveOffset = paintedOffset;
@@ -663,18 +659,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// Uses a consistent width-tight, height-flexible constraint shape so
   /// rows can change height at the same width. Flutter's built-in
   /// `RenderBox.layout` short-circuit handles the unchanged case efficiently.
-  double? _layoutNodeChild(
-    TKey nodeId,
-    double crossAxisExtent,
-  ) {
+  double? _layoutNodeChild(TKey nodeId, double crossAxisExtent) {
     final child = getChildForNode(nodeId);
     if (child == null) return null;
 
     final indent = controller.getIndent(nodeId);
     final w = math.max(0.0, crossAxisExtent - indent);
     final childConstraints = BoxConstraints(
-      minWidth: w, maxWidth: w,
-      minHeight: 0.0, maxHeight: double.infinity,
+      minWidth: w,
+      maxWidth: w,
+      minHeight: 0.0,
+      maxHeight: double.infinity,
     );
 
     // Always call layout — the child's own early-exit handles the case
@@ -797,8 +792,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // single read of value/generation/membership. Per-key membership
     // queries inside _rebuildBulkCumulatives go through this snapshot too.
     final BulkAnimationData<TKey> bulkData = controller.bulkAnimationData();
-    final bool bulkOnly =
-        bulkData.isValid && !controller.hasOpGroupAnimations;
+    final bool bulkOnly = bulkData.isValid && !controller.hasOpGroupAnimations;
 
     if (bulkOnly) {
       // Fast path: bulk animation only. Every node's offset is a scalar
@@ -914,8 +908,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       }
     }
     _writtenCacheRegionNidsLen = 0;
-    final cacheStartIndex =
-        _findFirstVisibleIndex(effectiveCacheStart);
+    final cacheStartIndex = _findFirstVisibleIndex(effectiveCacheStart);
 
     // In bulk-only mode, break on the row's *steady-state* (full-space)
     // position rather than its animated position. At low bulkValue, animated
@@ -1070,9 +1063,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     for (int i = cacheStartIndex; i < cacheEndIndex; i++) {
       final nodeId = visibleNodes[i];
-      final actualAnimatedExtent = _layoutNodeChild(
-        nodeId, crossAxisExtent,
-      );
+      final actualAnimatedExtent = _layoutNodeChild(nodeId, crossAxisExtent);
       if (actualAnimatedExtent == null) continue;
 
       final nid = _controller.nidOf(nodeId);
@@ -1187,7 +1178,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         }
       }
       if (newStickyNodes.isNotEmpty) {
-        invokeLayoutCallback<SliverConstraints>((SliverConstraints constraints) {
+        invokeLayoutCallback<SliverConstraints>((
+          SliverConstraints constraints,
+        ) {
           for (final nodeId in newStickyNodes) {
             childManager?.createChild(nodeId);
           }
@@ -1224,7 +1217,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           final child = getChildForNode(nodeId);
           if (child == null) continue;
           final parentData = child.parentData! as SliverTreeParentData;
-          parentData.layoutOffset = _nodeOffsetsByNid[_controller.nidOf(nodeId)];
+          parentData.layoutOffset =
+              _nodeOffsetsByNid[_controller.nidOf(nodeId)];
         }
       }
 
@@ -1299,7 +1293,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // flag, the viewport skips its clip layer and the partial top row
       // spills above the sliver — visible at max scroll extent, where the
       // "content extends below" clause is false.
-      hasVisualOverflow: stickyInflationClamped ||
+      hasVisualOverflow:
+          stickyInflationClamped ||
           scrollOffset + paintExtent < totalScrollExtent ||
           scrollOffset > 0.0,
     );
@@ -1343,8 +1338,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // them through is a redundant (but correctness-safe) re-write of
         // the same offset. Cost is one field assignment per such row;
         // the case is rare (off-screen exits during a collapse).
-        if (nid < _inCacheRegionByNid.length &&
-            _inCacheRegionByNid[nid] != 0) {
+        if (nid < _inCacheRegionByNid.length && _inCacheRegionByNid[nid] != 0) {
           continue;
         }
         final visIdx = _controller.visibleIndexOfNid(nid);
@@ -1432,8 +1426,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // rows on the bottom edge are harmless. See the matching comment in
     // `performLayout` for why structural offsets alone aren't enough.
     final slideOverreach = controller.maxActiveSlideAbsDelta;
-    final startIndex =
-        _findFirstVisibleIndex(scrollOffset - slideOverreach);
+    final startIndex = _findFirstVisibleIndex(scrollOffset - slideOverreach);
 
     // Pass A: Paint non-sticky nodes. Rows with a non-zero slide delta are
     // deferred to a second sub-pass so they paint on top of static rows —
@@ -1556,7 +1549,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       return;
     }
 
-    final paintOffset = offset +
+    final paintOffset =
+        offset +
         Offset(parentData.indent, nodeOffset - scrollOffset + slideDelta);
 
     if (controller.isAnimatingNid(nid) && nodeExtent < child.size.height) {
@@ -1631,8 +1625,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // extra rows at the top is cheap.
     final slideOverreach = controller.maxActiveSlideAbsDelta;
     final hitOffset = scrollOffset + mainAxisPosition;
-    final startIndex =
-        _findFirstVisibleIndex(hitOffset - slideOverreach);
+    final startIndex = _findFirstVisibleIndex(hitOffset - slideOverreach);
 
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nid = orderNids[i];
@@ -1671,8 +1664,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // same Y adjustment or taps on the visible slice would route to the
       // clipped-away top of the child box.
       final yAdjust =
-          (controller.isAnimatingNid(nid) &&
-              nodeExtent < child.size.height)
+          (controller.isAnimatingNid(nid) && nodeExtent < child.size.height)
           ? (child.size.height - nodeExtent)
           : 0.0;
 
@@ -1691,10 +1683,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
             }) {
               return child.hitTest(
                 BoxHitTestResult.wrap(result),
-                position: Offset(
-                  crossAxisPosition,
-                  mainAxisPosition + yAdjust,
-                ),
+                position: Offset(crossAxisPosition, mainAxisPosition + yAdjust),
               );
             },
       );

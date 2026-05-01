@@ -47,9 +47,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     }
     final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
     final t = animationCurve.transform(state.progress.clamp(0.0, 1.0));
-    return state.type == AnimationType.entering
-        ? full * t
-        : full * (1.0 - t);
+    return state.type == AnimationType.entering ? full * t : full * (1.0 - t);
   }
 
   /// Captures a node's current animated extent from whichever source it's in,
@@ -741,8 +739,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
           // Only purge orphans that have no active exit animation.
           // Visible descendants with their own animation will finalize
           // themselves when their animation completes.
-          if (_isPendingDeletion(desc) &&
-              !_hasStandalone(desc)) {
+          if (_isPendingDeletion(desc) && !_hasStandalone(desc)) {
             _purgeNodeData(desc);
           }
         }

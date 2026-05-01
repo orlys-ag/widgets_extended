@@ -172,7 +172,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     if (newCapacity > _isPendingDeletionByNid.length) {
       final grown = Uint8List(newCapacity);
-      grown.setRange(0, _isPendingDeletionByNid.length, _isPendingDeletionByNid);
+      grown.setRange(
+        0,
+        _isPendingDeletionByNid.length,
+        _isPendingDeletionByNid,
+      );
       _isPendingDeletionByNid = grown;
     }
     if (newCapacity > _isAnimatingByNid.length) {
@@ -467,7 +471,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // [_purgeAndRemoveFromOrder]'s ancestor walk.
     final parentByNid = _store.parentByNid;
     int cur = startNid;
-    while (cur != _kNoParent && cur >= 0 && cur < _visibleSubtreeSizeByNid.length) {
+    while (cur != _kNoParent &&
+        cur >= 0 &&
+        cur < _visibleSubtreeSizeByNid.length) {
       // Refuse to mutate a freed slot. In debug, surface the violation;
       // in release, bail out — corrupting a freed slot causes downstream
       // visibility-cache bugs once the nid is recycled.
@@ -497,11 +503,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// iterative post-order). Used after bulk operations that rebuild
   /// the visible order in one shot.
   void _rebuildVisibleSubtreeSizes() {
-    _visibleSubtreeSizeByNid.fillRange(
-      0,
-      _visibleSubtreeSizeByNid.length,
-      0,
-    );
+    _visibleSubtreeSizeByNid.fillRange(0, _visibleSubtreeSizeByNid.length, 0);
     // Pre-order DFS to collect nids. Reverse pre-order is a valid
     // post-order for the purpose of summing children before parents.
     final preOrderNids = <int>[];
@@ -573,8 +575,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       for (int nid = 0; nid < _nids.length; nid++) {
         final key = _nids.keyOf(nid);
         if (key == null) continue;
-        int expected =
-            indexByNid[nid] == VisibleOrderBuffer.kNotVisible ? 0 : 1;
+        int expected = indexByNid[nid] == VisibleOrderBuffer.kNotVisible
+            ? 0
+            : 1;
         final children = _childListOf(key);
         if (children != null) {
           for (final child in children) {
@@ -1151,8 +1154,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             _isAnimatingByNid[nid] = 1;
             _writtenAnimatingNids.add(nid);
           }
-          if (g.pendingRemoval.contains(key) &&
-              _isExitingByNid[nid] == 0) {
+          if (g.pendingRemoval.contains(key) && _isExitingByNid[nid] == 0) {
             _isExitingByNid[nid] = 1;
             _writtenExitingNids.add(nid);
           }
@@ -3740,7 +3742,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       final capturedExtent = _captureAndRemoveFromGroups(nodeId);
       final nge = NodeGroupExtent(
         startExtent: 0.0,
-        targetExtent: capturedExtent ?? (_fullExtentOf(nodeId) ?? defaultExtent),
+        targetExtent:
+            capturedExtent ?? (_fullExtentOf(nodeId) ?? defaultExtent),
         // When this member's target was set from a captured visual
         // extent, freeze it: a later setFullExtent resize must not
         // retroactively expand the row to its natural full size
@@ -4126,8 +4129,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // to animate out smoothly.
         for (int i = children.length - 1; i >= 0; i--) {
           final childId = children[i];
-          if (_isPendingDeletion(childId) &&
-              _hasStandalone(childId)) {
+          if (_isPendingDeletion(childId) && _hasStandalone(childId)) {
             stack.add(childId);
           }
         }
