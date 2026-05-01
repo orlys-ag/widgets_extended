@@ -57,7 +57,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _nodeOffsetsByNid = Float64List(0);
     _nodeExtentsByNid = Float64List(0);
     _inCacheRegionByNid = Uint8List(0);
-    _writtenCacheRegionNids.clear();
+    _writtenCacheRegionNidsLen = 0;
     _sticky.reset();
     // Bulk-only fast-path caches are visible-position-indexed; any
     // structure from the old controller is meaningless under the new one.
@@ -224,15 +224,27 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// dirtied avoids an O(nidCapacity) memset on every layout.
   ///
   /// Mirrors the pattern used by `_writtenStickyNids` in
-  /// [StickyHeaderComputer]. The list is read+cleared at the start of
-  /// Pass 2 and re-populated as the admission loop sets each cache-region
-  /// flag.
-  final List<int> _writtenCacheRegionNids = <int>[];
+  /// [StickyHeaderComputer]. Backed by an [Int32List] with explicit length
+  /// tracking ([_writtenCacheRegionNidsLen]) so per-frame appends don't box
+  /// ints. Capacity is bounded by the cache region size (≈ viewport rows),
+  /// grown by doubling when exceeded.
+  Int32List _writtenCacheRegionNids = Int32List(64);
+  int _writtenCacheRegionNidsLen = 0;
 
   /// Number of nids in [_writtenCacheRegionNids]. Exposed for tests that
   /// verify the sparse-clear bound is `O(viewport)`, not `O(nidCapacity)`.
   @visibleForTesting
-  int get debugWrittenCacheRegionNidCount => _writtenCacheRegionNids.length;
+  int get debugWrittenCacheRegionNidCount => _writtenCacheRegionNidsLen;
+
+  /// Appends [nid] to [_writtenCacheRegionNids], doubling capacity when full.
+  void _writeCacheRegionNid(int nid) {
+    if (_writtenCacheRegionNidsLen == _writtenCacheRegionNids.length) {
+      final grown = Int32List(_writtenCacheRegionNids.length * 2);
+      grown.setRange(0, _writtenCacheRegionNidsLen, _writtenCacheRegionNids);
+      _writtenCacheRegionNids = grown;
+    }
+    _writtenCacheRegionNids[_writtenCacheRegionNidsLen++] = nid;
+  }
 
   /// Iteration count of the post-sticky parentData refresh loop on the
   /// last layout. Reset at the top of `performLayout`. Used by Phase 4's
@@ -895,12 +907,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // last frame instead of memset'ing the whole nid-indexed array — the
     // array's length tracks nidCapacity, which grows monotonically and
     // dwarfs the actual cache-region size on a long-lived tree.
-    for (final nid in _writtenCacheRegionNids) {
+    for (int i = 0; i < _writtenCacheRegionNidsLen; i++) {
+      final nid = _writtenCacheRegionNids[i];
       if (nid < _inCacheRegionByNid.length) {
         _inCacheRegionByNid[nid] = 0;
       }
     }
-    _writtenCacheRegionNids.clear();
+    _writtenCacheRegionNidsLen = 0;
     final cacheStartIndex =
         _findFirstVisibleIndex(effectiveCacheStart);
 
@@ -977,7 +990,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
           if (fullOffset >= fullCacheEnd) break;
           _inCacheRegionByNid[nid] = 1;
-          _writtenCacheRegionNids.add(nid);
+          _writeCacheRegionNid(nid);
           cacheEndIndex = i + 1;
           continue;
         }
@@ -1005,7 +1018,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         final bool admit = liveBudgetOk || (!isExit && postBudgetOk);
         if (admit) {
           _inCacheRegionByNid[nid] = 1;
-          _writtenCacheRegionNids.add(nid);
+          _writeCacheRegionNid(nid);
           cacheEndIndex = i + 1;
         }
 

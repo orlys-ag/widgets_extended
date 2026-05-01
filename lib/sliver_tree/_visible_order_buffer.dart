@@ -170,9 +170,9 @@ class VisibleOrderBuffer<TKey> {
   /// [nid] must be live.
   void insertNid(int index, int nid) {
     _ensureOrderCapacity(_len + 1);
-    for (int i = _len; i > index; i--) {
-      _orderNids[i] = _orderNids[i - 1];
-    }
+    // Int32List.setRange uses memmove semantics — overlap-safe even when
+    // source and destination are the same buffer.
+    _orderNids.setRange(index + 1, _len + 1, _orderNids, index);
     _orderNids[index] = nid;
     _len++;
     _onNidAdded?.call(nid);
@@ -202,9 +202,8 @@ class VisibleOrderBuffer<TKey> {
       return;
     }
     _ensureOrderCapacity(_len + n);
-    for (int i = _len - 1; i >= index; i--) {
-      _orderNids[i + n] = _orderNids[i];
-    }
+    // memmove: shift [index, _len) to [index + n, _len + n).
+    _orderNids.setRange(index + n, _len + n, _orderNids, index);
     for (int i = 0; i < n; i++) {
       final nid = _nids[keys[i]]!;
       _orderNids[index + i] = nid;
@@ -223,9 +222,8 @@ class VisibleOrderBuffer<TKey> {
   /// left by one.
   void removeAt(int index) {
     final removed = _orderNids[index];
-    for (int i = index; i < _len - 1; i++) {
-      _orderNids[i] = _orderNids[i + 1];
-    }
+    // memmove: shift [index + 1, _len) to [index, _len - 1).
+    _orderNids.setRange(index, _len - 1, _orderNids, index + 1);
     _len--;
     _onNidRemoved?.call(removed);
     _onMutated();
@@ -243,9 +241,8 @@ class VisibleOrderBuffer<TKey> {
         cb(_orderNids[i]);
       }
     }
-    for (int i = start; i < _len - n; i++) {
-      _orderNids[i] = _orderNids[i + n];
-    }
+    // memmove: shift [start + n, _len) to [start, _len - n).
+    _orderNids.setRange(start, _len - n, _orderNids, start + n);
     _len -= n;
     _onMutated();
   }

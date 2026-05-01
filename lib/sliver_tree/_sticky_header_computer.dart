@@ -83,17 +83,23 @@ class StickyHeaderComputer<TKey, TData> {
   /// without going through `nidOf(sticky.nodeId)` — a freed key would
   /// resolve to `noNid` and the slot would survive into the next frame,
   /// leaking stickiness onto whichever fresh key recycles that nid.
-  final List<int> _writtenStickyNids = <int>[];
+  ///
+  /// Backed by an [Int32List] with explicit length tracking
+  /// ([_writtenStickyNidsLen]) so per-frame appends don't box ints.
+  /// Capacity is bounded by [_maxStickyDepth] in practice.
+  Int32List _writtenStickyNids = Int32List(8);
+  int _writtenStickyNidsLen = 0;
 
   // ────────────────────────────────────────────────────────────────────────
   // PRECOMPUTE SCRATCH (rebuilt each layout, reused across frames)
   // ────────────────────────────────────────────────────────────────────────
 
-  List<int> _depthScratch = List<int>.empty();
-  List<double> _stablePrefix = List<double>.empty();
-  List<int> _subtreeEndIndex = List<int>.empty();
-  List<double> _subtreeBottomByIndex = List<double>.empty();
-  final List<int> _indexStack = <int>[];
+  Int32List _depthScratch = Int32List(0);
+  Float64List _stablePrefix = Float64List(0);
+  Int32List _subtreeEndIndex = Int32List(0);
+  Float64List _subtreeBottomByIndex = Float64List(0);
+  Int32List _indexStack = Int32List(0);
+  int _indexStackLen = 0;
   int _lastPrecomputedCount = 0;
 
   // ────────────────────────────────────────────────────────────────────────
@@ -124,7 +130,7 @@ class StickyHeaderComputer<TKey, TData> {
   void reset() {
     _stickyByNid = <StickyHeaderInfo<TKey>?>[];
     _stickyHeaders.clear();
-    _writtenStickyNids.clear();
+    _writtenStickyNidsLen = 0;
     dirty = true;
     _lastStickyScrollOffset = double.nan;
     _lastPrecomputedCount = 0;
@@ -156,15 +162,15 @@ class StickyHeaderComputer<TKey, TData> {
   void trimScratchArrays() {
     final n = _lastPrecomputedCount;
     if (n == 0) {
-      _depthScratch = List<int>.empty();
-      _stablePrefix = List<double>.empty();
-      _subtreeEndIndex = List<int>.empty();
-      _subtreeBottomByIndex = List<double>.empty();
+      _depthScratch = Int32List(0);
+      _stablePrefix = Float64List(0);
+      _subtreeEndIndex = Int32List(0);
+      _subtreeBottomByIndex = Float64List(0);
     } else {
-      _depthScratch = List<int>.filled(n, 0);
-      _stablePrefix = List<double>.filled(n + 1, 0.0);
-      _subtreeEndIndex = List<int>.filled(n, 0);
-      _subtreeBottomByIndex = List<double>.filled(n, 0.0);
+      _depthScratch = Int32List(n);
+      _stablePrefix = Float64List(n + 1);
+      _subtreeEndIndex = Int32List(n);
+      _subtreeBottomByIndex = Float64List(n);
     }
   }
 
@@ -172,15 +178,15 @@ class StickyHeaderComputer<TKey, TData> {
   /// tree size is known upfront to avoid incremental resizing.
   void resizeScratchArrays(int capacity) {
     if (capacity <= 0) {
-      _depthScratch = List<int>.empty();
-      _stablePrefix = List<double>.empty();
-      _subtreeEndIndex = List<int>.empty();
-      _subtreeBottomByIndex = List<double>.empty();
+      _depthScratch = Int32List(0);
+      _stablePrefix = Float64List(0);
+      _subtreeEndIndex = Int32List(0);
+      _subtreeBottomByIndex = Float64List(0);
     } else {
-      _depthScratch = List<int>.filled(capacity, 0);
-      _stablePrefix = List<double>.filled(capacity + 1, 0.0);
-      _subtreeEndIndex = List<int>.filled(capacity, 0);
-      _subtreeBottomByIndex = List<double>.filled(capacity, 0.0);
+      _depthScratch = Int32List(capacity);
+      _stablePrefix = Float64List(capacity + 1);
+      _subtreeEndIndex = Int32List(capacity);
+      _subtreeBottomByIndex = Float64List(capacity);
     }
   }
 
@@ -226,7 +232,15 @@ class StickyHeaderComputer<TKey, TData> {
       return false;
     });
     if (purgedNids.isNotEmpty) {
-      _writtenStickyNids.removeWhere(purgedNids.contains);
+      // In-place compaction over the typed-data scratch buffer.
+      int writeIdx = 0;
+      for (int readIdx = 0; readIdx < _writtenStickyNidsLen; readIdx++) {
+        final nid = _writtenStickyNids[readIdx];
+        if (!purgedNids.contains(nid)) {
+          _writtenStickyNids[writeIdx++] = nid;
+        }
+      }
+      _writtenStickyNidsLen = writeIdx;
     }
   }
 
@@ -253,10 +267,10 @@ class StickyHeaderComputer<TKey, TData> {
     if (n == 0) return;
 
     if (_depthScratch.length < n) {
-      _depthScratch = List<int>.filled(n, 0);
-      _subtreeEndIndex = List<int>.filled(n, 0);
-      _subtreeBottomByIndex = List<double>.filled(n, 0.0);
-      _stablePrefix = List<double>.filled(n + 1, 0.0);
+      _depthScratch = Int32List(n);
+      _subtreeEndIndex = Int32List(n);
+      _subtreeBottomByIndex = Float64List(n);
+      _stablePrefix = Float64List(n + 1);
     }
     _stablePrefix[0] = 0.0;
 
@@ -281,18 +295,22 @@ class StickyHeaderComputer<TKey, TData> {
     }
 
     // Pass B: subtree end index for each node using a monotonic depth stack.
-    _indexStack.clear();
+    // _indexStack is an Int32List + explicit length; bound is n entries.
+    if (_indexStack.length < n) {
+      _indexStack = Int32List(n);
+    }
+    _indexStackLen = 0;
     for (int i = 0; i < n; i++) {
       final depth = _depthScratch[i];
-      while (_indexStack.isNotEmpty &&
-          depth <= _depthScratch[_indexStack.last]) {
-        final j = _indexStack.removeLast();
+      while (_indexStackLen > 0 &&
+          depth <= _depthScratch[_indexStack[_indexStackLen - 1]]) {
+        final j = _indexStack[--_indexStackLen];
         _subtreeEndIndex[j] = i - 1;
       }
-      _indexStack.add(i);
+      _indexStack[_indexStackLen++] = i;
     }
-    while (_indexStack.isNotEmpty) {
-      final j = _indexStack.removeLast();
+    while (_indexStackLen > 0) {
+      final j = _indexStack[--_indexStackLen];
       _subtreeEndIndex[j] = n - 1;
     }
 
@@ -487,12 +505,13 @@ class StickyHeaderComputer<TKey, TData> {
     // stale entry to leak stickiness onto whichever fresh key recycles
     // the nid. The nid handle is stable until reallocation, so clearing
     // through it is correct even when the original occupant is gone.
-    for (final nid in _writtenStickyNids) {
+    for (int i = 0; i < _writtenStickyNidsLen; i++) {
+      final nid = _writtenStickyNids[i];
       if (nid >= 0 && nid < _stickyByNid.length) {
         _stickyByNid[nid] = null;
       }
     }
-    _writtenStickyNids.clear();
+    _writtenStickyNidsLen = 0;
     _stickyHeaders.clear();
 
     double? parentPinnedY;
@@ -521,7 +540,12 @@ class StickyHeaderComputer<TKey, TData> {
         _stickyHeaders.add(info);
         final nid = _controller.nidOf(candidateId);
         _stickyByNid[nid] = info;
-        _writtenStickyNids.add(nid);
+        if (_writtenStickyNidsLen == _writtenStickyNids.length) {
+          final grown = Int32List(_writtenStickyNids.length * 2);
+          grown.setRange(0, _writtenStickyNidsLen, _writtenStickyNids);
+          _writtenStickyNids = grown;
+        }
+        _writtenStickyNids[_writtenStickyNidsLen++] = nid;
 
         parentPinnedY = pinnedY;
         return true;
