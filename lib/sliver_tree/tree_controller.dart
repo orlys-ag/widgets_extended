@@ -10,6 +10,8 @@ import 'package:flutter/widgets.dart';
 
 import '_node_id_registry.dart';
 import '_node_store.dart';
+import '_scroll_orchestrator.dart';
+import '_slide_animation_engine.dart';
 import '_visible_order_buffer.dart';
 import 'types.dart';
 
@@ -208,13 +210,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       _standaloneByNid = grown;
     }
-    if (newCapacity > _slideByNid.length) {
-      final grown = List<SlideAnimation<TKey>?>.filled(newCapacity, null);
-      for (int i = 0; i < _slideByNid.length; i++) {
-        grown[i] = _slideByNid[i];
-      }
-      _slideByNid = grown;
-    }
+    _slide.resizeForCapacity(newCapacity);
     _order.resizeIndex(newCapacity);
   }
 
@@ -302,10 +298,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _standaloneByNid[nid] = null;
       _activeStandaloneNids.remove(nid);
     }
-    if (_slideByNid[nid] != null) {
-      _slideByNid[nid] = null;
-      _activeSlideNids.remove(nid);
-    }
+    _slide.clearForNid(nid);
     return nid;
   }
 
@@ -367,10 +360,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _standaloneByNid[nid] = null;
       _activeStandaloneNids.remove(nid);
     }
-    if (_slideByNid[nid] != null) {
-      _slideByNid[nid] = null;
-      _activeSlideNids.remove(nid);
-    }
+    _slide.clearForNid(nid);
   }
 
   /// Nullable lookup of the [TreeNode] record for [key].
@@ -436,7 +426,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [_visibleSubtreeSizeByNid].
   late final VisibleOrderBuffer<TKey> _order = VisibleOrderBuffer<TKey>(
     registry: _nids,
-    onOrderMutated: _invalidateFullOffsetPrefix,
+    onOrderMutated: () => _scroll.invalidatePrefix(),
     onNidAdded: _onNidVisibilityGained,
     onNidRemoved: _onNidVisibilityLost,
   );
@@ -869,79 +859,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return prev;
   }
 
-  /// Active FLIP slide animations, keyed by node. A node present here is
-  /// painted with a vertical translation equal to [SlideAnimation.currentDelta];
-  /// structural layout is unaffected (slide is paint-only).
-  ///
-  /// Populated by [animateSlideFromOffsets] and cleared by the slide tick
-  /// handler on completion. A node can simultaneously have a slide entry
-  /// and an enter/exit extent animation — the two channels compose at
-  /// paint.
-  ///
-  /// Reads / writes go through [_slideAt], [_setSlide], [_clearSlide],
-  /// [_clearAllSlides] so the [_activeSlideNids] working set stays in
-  /// sync — do NOT mutate this array directly.
-  List<SlideAnimation<TKey>?> _slideByNid = <SlideAnimation<TKey>?>[];
-
-  /// Live "set of nids that have a non-null _slideByNid slot." Drives
-  /// [_onSlideTick] iteration and [maxActiveSlideAbsDelta] scan.
-  final Set<int> _activeSlideNids = <int>{};
-
-  SlideAnimation<TKey>? _slideAt(TKey key) {
-    final nid = _nids[key];
-    return nid == null ? null : _slideByNid[nid];
-  }
-
-  void _setSlide(TKey key, SlideAnimation<TKey> slide) {
-    final nid = _nids[key]!;
-    final prev = _slideByNid[nid];
-    _slideByNid[nid] = slide;
-    if (prev == null) _activeSlideNids.add(nid);
-  }
-
-  SlideAnimation<TKey>? _clearSlide(TKey key) {
-    final nid = _nids[key];
-    if (nid == null) return null;
-    final prev = _slideByNid[nid];
-    if (prev == null) return null;
-    _slideByNid[nid] = null;
-    _activeSlideNids.remove(nid);
-    return prev;
-  }
-
-  /// Drops every active slide entry. O(active slides).
-  void _clearAllSlides() {
-    for (final nid in _activeSlideNids) {
-      _slideByNid[nid] = null;
-    }
-    _activeSlideNids.clear();
-  }
-
-  bool get _hasAnySlide => _activeSlideNids.isNotEmpty;
-
-  /// Lazy [Ticker] driving every entry in [_slideAnimations]. One shared
-  /// ticker is sufficient because all active slides share the same start
-  /// time (FLIP from the same mutation) and reset together.
-  ///
-  /// Why a raw [Ticker] and not an [AnimationController]: a ticker's
-  /// callbacks fire exclusively from the scheduler's transient-callbacks
-  /// phase (next vsync after [Ticker.start]). This means
-  /// [animateSlideFromOffsets] can be invoked from inside
-  /// [RenderObject.performLayout] — the listener chain reaches the sliver
-  /// element's `_onAnimationTick` only from the next vsync, when
-  /// `markNeedsLayout`/`markNeedsPaint` are legal.
-  ///
-  /// An [AnimationController], by contrast, fires listeners synchronously
-  /// from its `value=` setter (and from `reset()`/`forward(from:)`), so
-  /// starting it mid-layout would trip `_debugCanPerformMutations`.
-  ///
-  /// Disposed in [dispose]; stopped when [_slideAnimations] empties.
-  Ticker? _slideTicker;
-
-  /// Total duration of the current slide batch. All entries in
-  /// [_slideAnimations] share this duration — progress at a tick with
-  /// elapsed `e` is `e / _slideDuration`.
-  Duration _slideDuration = const Duration(milliseconds: 220);
+  /// Paint-only FLIP slide engine. Owns every piece of slide state plus
+  /// the shared [Ticker] driving progress. Hot-path getters (
+  /// [getSlideDelta], [getSlideDeltaNid], [hasActiveSlides],
+  /// [maxActiveSlideAbsDelta]) and the entry point
+  /// [animateSlideFromOffsets] delegate here. See [SlideAnimationEngine].
+  late final SlideAnimationEngine<TKey> _slide = SlideAnimationEngine<TKey>(
+    vsync: _vsync,
+    nids: _nids,
+    onTick: _notifyAnimationListeners,
+  );
 
   /// Listeners notified on every animation tick (layout-only updates).
   final List<VoidCallback> _animationListeners = [];
@@ -994,50 +921,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Scratch set reused to avoid per-frame allocation.
   final Set<TKey> _keysToRemoveScratch = {};
 
-  /// Lazy prefix sum of full (non-animated) extents over the current visible
-  /// order. When valid, `_fullOffsetPrefix[i]` is the sum of
-  /// `_fullExtents[k] ?? defaultExtent` for visible indices `0..i-1`, and
-  /// `_fullOffsetPrefix.length == _order.length + 1`.
-  ///
-  /// Invalidated by visible-order mutations and by [setFullExtent] when the
-  /// stored value actually changes. Rebuild is O(N) but amortized: the cache
-  /// survives animation frames because full extents don't change during
-  /// expand/collapse (only the animated extent does).
-  List<double>? _fullOffsetPrefix;
-  bool _fullOffsetPrefixDirty = true;
-
-  void _invalidateFullOffsetPrefix() {
-    _fullOffsetPrefixDirty = true;
-  }
-
-  /// Rebuilds [_fullOffsetPrefix] if dirty or stale. O(N) on rebuild, O(1)
-  /// when the cache is already valid.
-  void _ensureFullOffsetPrefix() {
-    final cached = _fullOffsetPrefix;
-    if (!_fullOffsetPrefixDirty &&
-        cached != null &&
-        cached.length == _order.length + 1) {
-      return;
-    }
-    final prefix = List<double>.filled(_order.length + 1, 0.0, growable: false);
-    double acc = 0.0;
-    final orderNids = _order.orderNids;
-    for (int i = 0; i < _order.length; i++) {
-      final ext = _fullExtentByNid[orderNids[i]];
-      acc += ext < 0 ? defaultExtent : ext;
-      prefix[i + 1] = acc;
-    }
-    _fullOffsetPrefix = prefix;
-    _fullOffsetPrefixDirty = false;
-  }
-
-  /// Returns the prefix-sum full-extent offset up to visible index [index]
-  /// (exclusive). Un-measured nodes contribute [defaultExtent]. O(1)
-  /// amortized via [_fullOffsetPrefix].
-  double _fullOffsetAt(int index) {
-    _ensureFullOffsetPrefix();
-    return _fullOffsetPrefix![index];
-  }
+  /// Scroll orchestrator. Owns the full-extent prefix-sum cache plus the
+  /// four scroll-API methods. See [ScrollOrchestrator].
+  late final ScrollOrchestrator<TKey, TData> _scroll =
+      ScrollOrchestrator<TKey, TData>(controller: this, vsync: _vsync);
 
   /// Monotonically increasing counter bumped on any mutation to
   /// animation-state membership (standalone animations, operation-group
@@ -1317,6 +1204,48 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return ext < 0 ? defaultExtent : ext;
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  // INTERNAL ACCESSORS (for in-package collaborators only)
+  // ════════════════════════════════════════════════════════════════════════
+  //
+  // Documented as internal-use-only via doc comments. The package layout
+  // (`lib/sliver_tree/...`) doesn't qualify for the `@internal` annotation,
+  // which expects elements in `lib/src/`. Used by `_scroll_orchestrator.dart`
+  // and the render layer to reach state that would otherwise require
+  // `part of` coupling.
+
+  /// Live, read-only view of every key currently animating across
+  /// standalone, operation-group, and bulk sources. Backed by the lazy
+  /// [_ensureAnimatingKeys] cache; **do NOT mutate** — same convention as
+  /// [orderNidsView]. Iteration is stable within one frame.
+  Set<TKey> get currentlyAnimatingKeys => _ensureAnimatingKeys();
+
+  /// The measured full extent for [key], or null if [key] has never been
+  /// laid out. Distinct from [getEstimatedExtent], which falls back to
+  /// [defaultExtent] for unmeasured nodes.
+  double? getMeasuredExtent(TKey key) => _fullExtentOf(key);
+
+  /// Captures an opaque token identifying the current operation group at
+  /// [operationKey], or null if no group is installed there. The token is
+  /// only valid as input to [isOperationGroupSame] — its concrete type is
+  /// not part of the public contract and may change.
+  Object? captureOperationGroupToken(TKey operationKey) =>
+      _operationGroups[operationKey];
+
+  /// Whether the operation group at [operationKey] is identity-equal to
+  /// the one captured by [captureOperationGroupToken]. False once the
+  /// group has been replaced (re-expand cycle) or removed (animation
+  /// settled). Pass `null` token to ask "was there ever one?" — always
+  /// false on null.
+  bool isOperationGroupSame(TKey operationKey, Object? token) =>
+      token != null && identical(_operationGroups[operationKey], token);
+
+  /// Forwards to [_notifyAnimationListeners] so the scroll orchestrator's
+  /// internal `AnimationController` (`scrollProgress`) can fire ticks
+  /// through the controller's listener channel without exposing
+  /// [_notifyAnimationListeners] publicly.
+  void notifyAnimationListenersForScroll() => _notifyAnimationListeners();
+
   /// Current animated extent for the live [nid]. Hot-path equivalent of
   /// [getCurrentExtent]; resolves the chain bulk → operation-group →
   /// standalone → fullExtent. Caller must guarantee [nid] is live and
@@ -1359,10 +1288,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// the node is not currently sliding. Hot-path equivalent of
   /// [getSlideDelta] — read every paint, hit-test, and transform call
   /// for visible rows, so saving the [TKey]→nid hash matters.
-  double getSlideDeltaNid(int nid) {
-    final slide = _slideByNid[nid];
-    return slide == null ? 0.0 : slide.currentDelta;
-  }
+  double getSlideDeltaNid(int nid) => _slide.deltaForNid(nid);
 
   /// Gets the horizontal indent for the given node.
   double getIndent(TKey key) {
@@ -1473,7 +1399,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// signal that [hasActiveAnimations] drives. The sliver element routes
   /// slide-only ticks to [RenderObject.markNeedsPaint] rather than
   /// [RenderObject.markNeedsLayout] based on this flag.
-  bool get hasActiveSlides => _hasAnySlide;
+  bool get hasActiveSlides => _slide.hasActive;
 
   /// Maximum |currentDelta| across every active slide entry, or 0.0 when
   /// no slides are active.
@@ -1491,27 +1417,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Shrinks toward 0.0 as the slide progresses (since entries'
   /// currentDelta lerps to 0), so the transient overbuild contracts with
   /// the animation.
-  double get maxActiveSlideAbsDelta {
-    if (!_hasAnySlide) return 0.0;
-    double m = 0.0;
-    for (final nid in _activeSlideNids) {
-      final d = _slideByNid[nid]!.currentDelta.abs();
-      if (d > m) m = d;
-    }
-    return m;
-  }
+  double get maxActiveSlideAbsDelta => _slide.maxAbsDelta;
 
   /// Current slide delta for [key] in scroll-space y, or 0.0 if the node is
   /// not currently sliding. Read by [RenderSliverTree.paint],
   /// [RenderSliverTree.applyPaintTransform], and the hit-test path on
   /// every frame (no caching — staleness-safe under tick-without-paint).
-  double getSlideDelta(TKey key) {
-    final slide = _slideAt(key);
-    if (slide == null) {
-      return 0.0;
-    }
-    return slide.currentDelta;
-  }
+  double getSlideDelta(TKey key) => _slide.deltaForKey(key);
 
   /// True when a bulk animation group is currently active and has members
   /// animating in either direction.
@@ -1791,143 +1703,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     Map<TKey, double> currentOffsets, {
     Duration duration = const Duration(milliseconds: 220),
     Curve curve = Curves.easeOutCubic,
-  }) {
-    if (animationDuration == Duration.zero || duration == Duration.zero) {
-      // No-animation mode: drop any in-flight slide and return. Callers that
-      // want the slide machinery to "settle" synchronously see
-      // hasActiveSlides == false immediately.
-      if (_hasAnySlide) {
-        _clearAllSlides();
-        _slideTicker?.stop();
-      }
-      return;
-    }
-
-    int installed = 0;
-    final touched = <int>{};
-    for (final entry in currentOffsets.entries) {
-      final key = entry.key;
-      final current = entry.value;
-      final prior = priorOffsets[key];
-      if (prior == null) continue;
-      final rawDelta = prior - current;
-      final existing = _slideAt(key);
-      if (existing == null) {
-        if (rawDelta == 0.0) continue;
-        _setSlide(
-          key,
-          SlideAnimation<TKey>(startDelta: rawDelta, curve: curve),
-        );
-        // The set was just populated for this key — capture it.
-        final nid = _nids[key];
-        if (nid != null) touched.add(nid);
-        installed++;
-      } else {
-        // Composition: the new prior/current describes the mutation that just
-        // happened, but the node was already sliding. Preserve the currently
-        // rendered visual position (existing.currentDelta + rawDelta gives
-        // "how far is the node from its new structural offset") as the new
-        // starting delta so the slide continues seamlessly.
-        final composed = existing.currentDelta + rawDelta;
-        if (composed == 0.0) {
-          _clearSlide(key);
-          continue;
-        }
-        existing.startDelta = composed;
-        existing.currentDelta = composed;
-        existing.progress = 0.0;
-        existing.curve = curve;
-        final nid = _nids[key];
-        if (nid != null) touched.add(nid);
-        installed++;
-      }
-    }
-
-    // Re-baseline every active slide that this call did NOT touch. The
-    // shared ticker is stop+start'd below so its elapsed time resets to
-    // zero; on the next tick, every entry's progress is recomputed as
-    // elapsed/duration. Without re-baselining, an un-touched slide would
-    // see progress snap from its mid-flight value back to ~0, which lerps
-    // currentDelta back to its ORIGINAL startDelta — a visible jump.
-    //
-    // Fix: capture the un-touched slide's CURRENT visual position into
-    // its startDelta and reset its progress to 0. The next tick now lerps
-    // from the just-frozen visual position toward 0, continuing smoothly.
-    // The total settle time for un-touched slides effectively extends to
-    // the new duration, but visual continuity is preserved (the jump is
-    // the worse of the two failure modes).
-    if (_activeSlideNids.length != touched.length) {
-      for (final nid in _activeSlideNids) {
-        if (touched.contains(nid)) continue;
-        final entry = _slideByNid[nid]!;
-        if (entry.currentDelta == 0.0) {
-          // Already settled — let the next tick mark complete and clear.
-          continue;
-        }
-        entry.startDelta = entry.currentDelta;
-        entry.progress = 0.0;
-        // Keep the un-touched entry's existing curve; the caller's curve
-        // applies only to slides this call introduced or composed.
-      }
-    }
-
-    if (!_hasAnySlide) {
-      _slideTicker?.stop();
-      return;
-    }
-    if (installed == 0) return;
-
-    // (Re)start the shared progress clock. Stop-then-start resets the
-    // ticker's elapsed time to zero so progress begins at 0 for every entry
-    // in this batch. [Ticker.start] does NOT fire callbacks synchronously —
-    // the first tick lands on the next vsync, so this is safe to call from
-    // inside [RenderObject.performLayout].
-    _slideDuration = duration;
-    final ticker = _slideTicker ??= _vsync.createTicker(_onSlideTick);
-    if (ticker.isActive) ticker.stop();
-    ticker.start();
-  }
-
-  /// Tick handler for slide animations. Elapsed time comes from the ticker
-  /// (reset to zero on each fresh batch via stop+start in
-  /// [animateSlideFromOffsets]). **Ordering matters** — see the inline
-  /// comments. Final zero-delta paint is guaranteed because:
-  ///
-  /// 1. Progress and [SlideAnimation.currentDelta] are updated for every
-  ///    entry; on completion, currentDelta is snapped to exact 0.0 so the
-  ///    final painted position matches structural layout pixel-exactly.
-  /// 2. The animation-listener channel fires **before** the map is cleared.
-  ///    [hasActiveSlides] is still true, so the sliver element's
-  ///    `_onAnimationTick` takes the slide branch and schedules
-  ///    `markNeedsPaint`. That paint reads `getSlideDelta(key) == 0.0`.
-  /// 3. Only after the paint has been scheduled do we clear the map and
-  ///    stop the ticker. No further tick will fire, so there is no "second
-  ///    paint needed" window.
-  void _onSlideTick(Duration elapsed) {
-    if (!_hasAnySlide) {
-      _slideTicker?.stop();
-      return;
-    }
-    final totalUs = _slideDuration.inMicroseconds;
-    final raw = totalUs <= 0 ? 1.0 : elapsed.inMicroseconds / totalUs;
-    final complete = raw >= 1.0 - 1e-9;
-
-    for (final nid in _activeSlideNids) {
-      final entry = _slideByNid[nid]!;
-      entry.progress = complete ? 1.0 : raw.clamp(0.0, 1.0);
-      final t = entry.curve.transform(entry.progress);
-      entry.currentDelta = complete
-          ? 0.0
-          : lerpDouble(entry.startDelta, 0.0, t)!;
-    }
-
-    _notifyAnimationListeners();
-
-    if (complete) {
-      _clearAllSlides();
-      _slideTicker?.stop();
-    }
-  }
+  }) => _slide.animateFromOffsets(
+    priorOffsets,
+    currentOffsets,
+    duration: duration,
+    curve: curve,
+    structuralAnimationsDisabled: animationDuration == Duration.zero,
+  );
 
   /// Stores the measured full extent for a node.
   ///
@@ -1968,7 +1750,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       _setFullExtentRaw(key, extent);
-      if (oldExtent != extent) _invalidateFullOffsetPrefix();
+      if (oldExtent != extent) _scroll.invalidatePrefix();
       return;
     }
 
@@ -1984,7 +1766,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return;
     }
     _setFullExtentRaw(key, extent);
-    _invalidateFullOffsetPrefix();
+    _scroll.invalidatePrefix();
     // If node is animating with unknown target, update the animation
     final animation = _standaloneAt(key);
     if (animation != null && animation.targetExtent == _unknownExtent) {
@@ -2036,59 +1818,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   double? scrollOffsetOf(
     TKey key, {
     double Function(TKey key)? extentEstimator,
-  }) {
-    final targetIndex = _order.indexOf(key);
-    if (targetIndex < 0) return null;
-    if (extentEstimator == null) {
-      // O(1) via cached prefix sum (rebuilt lazily when invalidated).
-      return _fullOffsetAt(targetIndex);
-    }
-    // Slow path: caller supplied an estimator for un-measured nodes. We can't
-    // use the cache because it falls back to [defaultExtent], which may
-    // disagree with the caller's estimator.
-    double offset = 0.0;
-    for (int i = 0; i < targetIndex; i++) {
-      final k = _nids.keyOfUnchecked(_order.orderNids[i]);
-      final measured = _fullExtentOf(k);
-      if (measured != null) {
-        offset += measured;
-      } else {
-        offset += extentEstimator(k);
-      }
-    }
-    return offset;
-  }
+  }) => _scroll.scrollOffsetOf(key, extentEstimator: extentEstimator);
 
   /// Returns the best-known full (non-animated) extent for [key]: the
   /// measured value if the node has ever been laid out, otherwise
   /// [extentEstimator] if supplied, otherwise [defaultExtent]. Matches the
   /// fallback chain used by [scrollOffsetOf].
-  double extentOf(TKey key, {double Function(TKey key)? extentEstimator}) {
-    final measured = _fullExtentOf(key);
-    if (measured != null) return measured;
-    if (extentEstimator != null) return extentEstimator(key);
-    return defaultExtent;
-  }
+  double extentOf(TKey key, {double Function(TKey key)? extentEstimator}) =>
+      _scroll.extentOf(key, extentEstimator: extentEstimator);
 
   /// Immediately expands every collapsed ancestor of [key] so that [key]
   /// becomes part of the visible order. Expansion is synchronous (no
   /// animation) so a subsequent [scrollOffsetOf] call sees the updated
   /// structure. Returns the number of ancestors that were expanded.
-  int ensureAncestorsExpanded(TKey key) {
-    final toExpand = <TKey>[];
-    TKey? current = _parentKeyOfKey(key);
-    while (current != null) {
-      if (!isExpanded(current)) toExpand.add(current);
-      current = _parentKeyOfKey(current);
-    }
-    if (toExpand.isEmpty) return 0;
-    // Expand root-first: each expansion operates on a list that already
-    // contains the parent being expanded against.
-    for (int i = toExpand.length - 1; i >= 0; i--) {
-      expand(key: toExpand[i], animate: false);
-    }
-    return toExpand.length;
-  }
+  int ensureAncestorsExpanded(TKey key) =>
+      _scroll.ensureAncestorsExpanded(key);
 
   /// Animates [scrollController] to reveal [key] in its attached viewport.
   ///
@@ -2133,258 +1877,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     AncestorExpansionMode ancestorExpansion = AncestorExpansionMode.immediate,
     double Function(TKey key)? extentEstimator,
     double sliverBaseOffset = 0.0,
-  }) async {
-    assert(
-      alignment >= 0.0 && alignment <= 1.0,
-      "alignment must be between 0.0 and 1.0",
-    );
-
-    if (!scrollController.hasClients) return false;
-
-    // Collect any ancestors that are currently collapsed.
-    final collapsedAncestors = <TKey>[];
-    {
-      TKey? current = _parentKeyOfKey(key);
-      while (current != null) {
-        if (!isExpanded(current)) collapsedAncestors.add(current);
-        current = _parentKeyOfKey(current);
-      }
-    }
-
-    // Animated concurrent expand+scroll. Falls back to the standard path
-    // when there's nothing to expand or when animations are disabled.
-    if (ancestorExpansion == AncestorExpansionMode.animated &&
-        collapsedAncestors.isNotEmpty &&
-        animationDuration != Duration.zero &&
-        duration != Duration.zero) {
-      return _animatedConcurrentScroll(
-        key: key,
-        ancestors: collapsedAncestors,
+  }) => _scroll.animateScrollToKey(
+        key,
         scrollController: scrollController,
         duration: duration,
         curve: curve,
         alignment: alignment,
+        ancestorExpansion: ancestorExpansion,
         extentEstimator: extentEstimator,
         sliverBaseOffset: sliverBaseOffset,
       );
-    }
-
-    if (ancestorExpansion == AncestorExpansionMode.none &&
-        collapsedAncestors.isNotEmpty) {
-      return false;
-    }
-
-    if (collapsedAncestors.isNotEmpty) {
-      ensureAncestorsExpanded(key);
-    }
-
-    final sliverOffset = scrollOffsetOf(key, extentEstimator: extentEstimator);
-    if (sliverOffset == null) return false;
-
-    final position = scrollController.position;
-    final viewportExtent = position.viewportDimension;
-    final rowExtent = extentOf(key, extentEstimator: extentEstimator);
-    final rawTarget =
-        sliverBaseOffset +
-        sliverOffset -
-        (viewportExtent - rowExtent) * alignment;
-    final clamped = rawTarget.clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-
-    if (duration == Duration.zero) {
-      position.jumpTo(clamped);
-    } else {
-      await position.animateTo(clamped, duration: duration, curve: curve);
-    }
-    return true;
-  }
-
-  /// Runs ancestor expansion concurrently with a scroll animation, with
-  /// each animation tick re-deriving the target from the current animated
-  /// offsets. Required because the rendered sliver's `scrollExtent` uses
-  /// animated extents — `position.maxScrollExtent` is undersized while
-  /// ancestors grow, so a one-shot `animateTo` would clamp short.
-  Future<bool> _animatedConcurrentScroll({
-    required TKey key,
-    required List<TKey> ancestors,
-    required ScrollController scrollController,
-    required Duration duration,
-    required Curve curve,
-    required double alignment,
-    required double Function(TKey key)? extentEstimator,
-    required double sliverBaseOffset,
-  }) async {
-    final position = scrollController.position;
-    final initialPixels = position.pixels;
-
-    // Dedicated progress animation for the scroll curve. Using an
-    // AnimationController (rather than scheduler timestamps or a
-    // wall-clock Stopwatch) gives three properties at once:
-    //
-    //   • Safe to create outside a frame. `Ticker._startTime` is set on
-    //     the first tick via `_startTime ??= timeStamp`, so calling this
-    //     from e.g. a button-press handler never trips the
-    //     `currentFrameTimeStamp != null` assertion.
-    //
-    //   • Correctly anchors t=0 to the first animation frame, not to the
-    //     last vsync before the call. Reading
-    //     `SchedulerBinding.currentSystemFrameTimeStamp` at call time
-    //     would capture whenever the last frame happened to render — if
-    //     the app was idle for hundreds of ms before the button tap, the
-    //     very first follower tick would see `elapsed >> duration`,
-    //     clamp progress to 1.0, and jumpTo the final offset in one
-    //     frame (visible as an instant snap with no animation).
-    //
-    //   • Drives the same Ticker pipeline as the expansion groups, so
-    //     FakeAsync widget tests advance all timelines together with
-    //     `tester.pump(duration)`.
-    final scrollProgress = AnimationController(
-      vsync: _vsync,
-      duration: duration,
-    );
-    scrollProgress.addListener(_notifyAnimationListeners);
-
-    // Root-first: each expansion runs against an already-visible parent.
-    for (int i = ancestors.length - 1; i >= 0; i--) {
-      expand(key: ancestors[i], animate: true);
-    }
-
-    // Snapshot the operation groups we just started. We wait on identity
-    // (not operationKey lookup) so a concurrent collapse + re-expand of
-    // the same ancestor — which would swap in a fresh group under the
-    // same key — does not mask our targets as already settled.
-    final startedGroups = <OperationGroup<TKey>>[];
-    for (final ancestor in ancestors) {
-      final group = _operationGroups[ancestor];
-      if (group != null) startedGroups.add(group);
-    }
-
-    scrollProgress.forward();
-
-    void follower() {
-      final targetIdx = _order.indexOf(key);
-      if (targetIdx < 0) return;
-      final tCurved = curve.transform(scrollProgress.value);
-
-      // Base offset from the cached full-extent prefix sum (O(1) amortized).
-      // Then correct for each animating node whose visible index precedes
-      // the target: swap its full extent for its current (animated) extent.
-      // The number of animating nodes is typically tiny compared to N.
-      double currentOffset = _fullOffsetAt(targetIdx);
-      void correct(TKey k) {
-        final idx = _order.indexOf(k);
-        if (idx < 0 || idx >= targetIdx) return;
-        final full = _fullExtentOf(k) ?? defaultExtent;
-        currentOffset += getCurrentExtent(k) - full;
-      }
-
-      for (final group in _operationGroups.values) {
-        for (final k in group.members.keys) {
-          correct(k);
-        }
-      }
-      final bulk = _bulkAnimationGroup;
-      if (bulk != null) {
-        for (final k in bulk.members) {
-          correct(k);
-        }
-      }
-      for (final nid in _activeStandaloneNids) {
-        correct(_nids.keyOfUnchecked(nid));
-      }
-
-      final rowExtent = getCurrentExtent(key);
-      final viewportExtent = position.viewportDimension;
-      final desired =
-          sliverBaseOffset +
-          currentOffset -
-          (viewportExtent - rowExtent) * alignment;
-      final desiredClamped = desired.clamp(
-        position.minScrollExtent,
-        position.maxScrollExtent,
-      );
-      final scroll = initialPixels + (desiredClamped - initialPixels) * tCurved;
-      position.jumpTo(
-        scroll.clamp(position.minScrollExtent, position.maxScrollExtent),
-      );
-    }
-
-    addAnimationListener(follower);
-
-    // Wait for two independent timelines to both complete:
-    //
-    //   1. The dedicated scroll progress controller ([scrollProgress]),
-    //      so the curve actually reaches 1.0 via the follower.
-    //   2. Every ancestor expansion's terminal V=1.0 tick. That tick fires
-    //      on the vsync AFTER the nominal duration (Flutter's
-    //      `_InterpolationSimulation.isDone` transitions true only once
-    //      `elapsed > duration`), and is observable externally by the
-    //      operation group's identity disappearing from [_operationGroups]
-    //      (the status listener removes + disposes it when completed).
-    //
-    // The previous implementation awaited `Future.delayed(totalMs)`, a
-    // wall-clock timer. Because the terminal tick lands ~1 frame after
-    // the nominal duration, the timer consistently removed the follower
-    // BEFORE the tick fired — the scroll froze at the next-to-last
-    // follower call (V < 1), and the post-loop jumpTo then snapped the
-    // residual distance in a single frame. Visible as an end-of-scroll
-    // hitch whose magnitude scales with the fanout of collapsed
-    // ancestors (more animating preceding nodes → larger residual).
-    //
-    // Yielding via `endOfFrame` keeps the ticker driving the follower
-    // between polls, so each ancestor's final V=1.0 tick runs through
-    // the follower while it is still registered.
-    while (true) {
-      if (!scrollController.hasClients) {
-        removeAnimationListener(follower);
-        scrollProgress.dispose();
-        return true;
-      }
-      final scrollDone =
-          scrollProgress.status == AnimationStatus.completed ||
-          scrollProgress.status == AnimationStatus.dismissed;
-      bool expansionDone = true;
-      for (final g in startedGroups) {
-        if (identical(_operationGroups[g.operationKey], g)) {
-          expansionDone = false;
-          break;
-        }
-      }
-      if (scrollDone && expansionDone) break;
-      await SchedulerBinding.instance.endOfFrame;
-    }
-
-    removeAnimationListener(follower);
-    scrollProgress.dispose();
-
-    if (!scrollController.hasClients) return true;
-
-    // Final precise snap. In the nominal case the follower already landed
-    // on the settled target (every captured group fired its V=1.0 tick
-    // through the follower before the loop exited), so this jump is a
-    // no-op. It still matters when a caller-provided [extentEstimator]
-    // disagrees with [defaultExtent] for unmeasured preceding nodes, or
-    // when an ancestor expansion was cancelled mid-flight (e.g. user
-    // collapse) and its group vanished before reaching V=1.
-    final finalOffset = scrollOffsetOf(key, extentEstimator: extentEstimator);
-    if (finalOffset == null) return true;
-    final finalPosition = scrollController.position;
-    final viewportExtent = finalPosition.viewportDimension;
-    final rowExtent = extentOf(key, extentEstimator: extentEstimator);
-    final finalTarget =
-        sliverBaseOffset +
-        finalOffset -
-        (viewportExtent - rowExtent) * alignment;
-    finalPosition.jumpTo(
-      finalTarget.clamp(
-        finalPosition.minScrollExtent,
-        finalPosition.maxScrollExtent,
-      ),
-    );
-    return true;
-  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ANIMATION LISTENERS
@@ -4164,6 +3666,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   @override
   void dispose() {
     _clear();
+    _slide.dispose();
     _animationListeners.clear();
     _nodeDataListeners.clear();
     _structuralListeners.clear();

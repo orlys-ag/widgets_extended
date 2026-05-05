@@ -7,6 +7,7 @@ import 'package:flutter/animation.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
+import '_layout_admission_policy.dart';
 import '_sticky_header_computer.dart';
 import 'sliver_tree_element.dart';
 import 'tree_controller.dart';
@@ -25,12 +26,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
        _sticky = StickyHeaderComputer<TKey, TData>(
          controller: controller,
          maxStickyDepth: maxStickyDepth,
-       );
+       ),
+       _admission = LayoutAdmissionPolicy<TKey, TData>(controller: controller);
 
   /// Sticky-header computation + cache. Owns every piece of state that
   /// exists solely to compute and cache sticky-header positions; see
   /// [StickyHeaderComputer].
   final StickyHeaderComputer<TKey, TData> _sticky;
+
+  /// Cache-region admission policy for the non-bulk path of Pass 2.
+  /// Stateless apart from a controller back-pointer; per-frame inputs are
+  /// passed in via parameters. See [LayoutAdmissionPolicy].
+  final LayoutAdmissionPolicy<TKey, TData> _admission;
 
   // ══════════════════════════════════════════════════════════════════════════
   // PROPERTIES
@@ -42,6 +49,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     if (_controller == value) return;
     _controller = value;
     _sticky.controller = value;
+    _admission.controller = value;
     // Stale per-node caches keyed by the old controller's keys would
     // produce wrong geometry on the next layout — especially if the new
     // controller's structureGeneration happens to match the cached value
@@ -215,6 +223,41 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// Caller is responsible for ensuring [_bulkCumulativesValid] is true.
   double _offsetAtVisibleIndex(int i) {
     return _stableCumulative[i] + _bulkValueCached * _bulkFullCumulative[i];
+  }
+
+  /// Admits cache-region members under the bulk-only fast path.
+  ///
+  /// Invoked from Pass 2 when [_bulkCumulativesValid] is true. Pulls per-row
+  /// offset/extent from the precomputed cumulatives and syncs them into the
+  /// per-nid slots so downstream code (Pass 2 measurement, paint extent,
+  /// paint, hit-test) reads correct values without a branch per access.
+  /// Anchors the admission band to full-space (`fullCacheEnd`) so low
+  /// `bulkValue` doesn't admit thousands of sub-pixel rows on frame 1 of
+  /// `expandAll`.
+  ///
+  /// Body is byte-equivalent to the pre-extraction `if (_bulkCumulativesValid)`
+  /// branch of the original Pass 2 loop, with the surrounding outer-loop
+  /// dispatch hoisted to the call site. Preserves the same per-row writes
+  /// and sparse-track buffer maintenance.
+  int _admitBulkFastPath({
+    required int cacheStartIndex,
+    required List<TKey> visibleNodes,
+    required double fullCacheEnd,
+  }) {
+    int cacheEndIndex = cacheStartIndex;
+    final orderNids = controller.orderNidsView;
+    for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
+      final nid = orderNids[i];
+      final offset = _offsetAtVisibleIndex(i);
+      _nodeOffsetsByNid[nid] = offset;
+      _nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i + 1) - offset;
+      final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
+      if (fullOffset >= fullCacheEnd) break;
+      _inCacheRegionByNid[nid] = 1;
+      _writeCacheRegionNid(nid);
+      cacheEndIndex = i + 1;
+    }
+    return cacheEndIndex;
   }
 
   /// Flags indexed by nid: non-zero iff the node lies in the current cache
@@ -926,114 +969,37 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       fullCacheEnd = 0.0;
     }
 
-    int cacheEndIndex = cacheStartIndex;
-    // Dual-view admission for the non-bulk (op-group) path.
+    // Dispatch the per-iteration `if (_bulkCumulativesValid)` branch out of
+    // the loop body — it's invariant across one loop run, so a single
+    // up-front decision replaces N per-iteration branches.
     //
-    // Two running accumulators track the cache budget in parallel:
+    // Bulk fast path: scalar offset = _stableCumulative[i] + value *
+    // _bulkFullCumulative[i]. Inline because the loop writes per-nid
+    // arrays the render object owns and reads cumulative arrays the
+    // render object owns.
     //
-    //   liveAccum  — per-row contribution using FULL extent for any animating
-    //                row (enter or exit). Preserves the original
-    //                "steady-state" accumulator's role of capping admission
-    //                at the pre-animation row count during enters (prevents
-    //                mass-mounting the entering subtree on frame 1 of an
-    //                expand).
-    //
-    //   postAccum  — per-row contribution using TARGET extent: full for
-    //                enters, 0 for exits, live for non-animating. Tracks
-    //                what the cumulative layout will look like AFTER the
-    //                animation settles.
-    //
-    // A row is admitted when it passes either view (with the constraint
-    // that exits can only be admitted via the LIVE view — a row that will
-    // be gone after the animation does not belong in the post-animation
-    // cache set). The loop stops iterating only when BOTH views agree no
-    // future row could be admitted.
-    //
-    // During a collapse of a many-child parent: exits beyond the live
-    // window fail the live check and — being exits — are excluded from
-    // the post view, so they are iterated past but not admitted. Once we
-    // reach the non-exit following rows, the post view admits them based
-    // on their post-animation positions, pre-mounting them before dismiss
-    // and eliminating the "flicker as they appear" pop. During an expand,
-    // the live-view cap still prevents mass-mounting the full entering
-    // subtree.
-    //
-    // Post-animation offset is tracked relative to the live offset of the
-    // row at [cacheStartIndex] — rows before the cache start are treated
-    // as stable (the common case for animations on a parent visible in
-    // the viewport).
-    {
-      double liveAccum = 0.0;
-      double postAccum = 0.0;
-      final orderNids = controller.orderNidsView;
-      final double postOffsetOrigin = cacheStartIndex < visibleNodes.length
-          ? _nodeOffsetsByNid[orderNids[cacheStartIndex]]
-          : 0.0;
-      double postOffsetCumul = 0.0;
-      final double budgetCap = remainingCacheExtent + slideOverreach;
-      for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
-        final nid = orderNids[i];
-        if (_bulkCumulativesValid) {
-          // Under bulk-only fast path, pull from cumulatives and sync into the
-          // per-nid slots so downstream code (Pass 2, paint-extent, paint,
-          // hit-test) reads correct values without a branch per access.
-          final offset = _offsetAtVisibleIndex(i);
-          _nodeOffsetsByNid[nid] = offset;
-          _nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i + 1) - offset;
-          final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
-          if (fullOffset >= fullCacheEnd) break;
-          _inCacheRegionByNid[nid] = 1;
-          _writeCacheRegionNid(nid);
-          cacheEndIndex = i + 1;
-          continue;
-        }
-
-        final double liveOffset = _nodeOffsetsByNid[nid];
-        final double postOffset = postOffsetOrigin + postOffsetCumul;
-
-        final bool liveBudgetOk =
-            liveOffset < effectiveCacheEnd && liveAccum < budgetCap;
-        final bool postBudgetOk =
-            postOffset < effectiveCacheEnd && postAccum < budgetCap;
-
-        // Both views failed — offsets and accumulators only grow, so no
-        // future row can be admitted.
-        if (!liveBudgetOk && !postBudgetOk) {
-          break;
-        }
-
-        // [isAnimatingNid] and [isExitingNid] are O(1) (nid-keyed mirror).
-        // Exits must admit via the LIVE view only; they have no
-        // post-animation position and should not be pre-mounted just
-        // because the post view has budget.
-        final bool isAnimating = controller.isAnimatingNid(nid);
-        final bool isExit = isAnimating && controller.isExitingNid(nid);
-        final bool admit = liveBudgetOk || (!isExit && postBudgetOk);
-        if (admit) {
-          _inCacheRegionByNid[nid] = 1;
-          _writeCacheRegionNid(nid);
-          cacheEndIndex = i + 1;
-        }
-
-        // Update accumulators regardless of admission — the budget is a
-        // cumulative quantity measured over every row the loop has
-        // considered, not just admitted ones. Future-row break decisions
-        // depend on these.
-        final double liveContribution;
-        final double postContribution;
-        if (isAnimating) {
-          final full = controller.getEstimatedExtentNid(nid);
-          liveContribution = full;
-          postContribution = isExit ? 0.0 : full;
-        } else {
-          final live = _nodeExtentsByNid[nid];
-          liveContribution = live;
-          postContribution = live;
-        }
-        liveAccum += liveContribution;
-        postAccum += postContribution;
-        postOffsetCumul += postContribution;
-      }
+    // Op-group path: dual-view (live/post) admission cap that pre-mounts
+    // post-animation visible rows during a collapse and caps mass-mounting
+    // during an expand. Lives in [LayoutAdmissionPolicy.admit].
+    final int cacheEndIndex;
+    if (_bulkCumulativesValid) {
+      cacheEndIndex = _admitBulkFastPath(
+        cacheStartIndex: cacheStartIndex,
+        visibleNodes: visibleNodes,
+        fullCacheEnd: fullCacheEnd,
+      );
+    } else {
+      cacheEndIndex = _admission.admit(
+        cacheStartIndex: cacheStartIndex,
+        visibleNodes: visibleNodes,
+        nodeOffsetsByNid: _nodeOffsetsByNid,
+        nodeExtentsByNid: _nodeExtentsByNid,
+        inCacheRegionByNid: _inCacheRegionByNid,
+        onCacheRegionAdmit: _writeCacheRegionNid,
+        effectiveCacheEnd: effectiveCacheEnd,
+        slideOverreach: slideOverreach,
+        remainingCacheExtent: remainingCacheExtent,
+      );
     }
 
     // Create children for nodes in the cache region.

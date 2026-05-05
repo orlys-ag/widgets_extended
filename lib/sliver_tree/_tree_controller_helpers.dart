@@ -17,10 +17,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       group.dispose();
     }
     _operationGroups.clear();
-    _slideTicker?.dispose();
-    _slideTicker = null;
-    _slideByNid = <SlideAnimation<TKey>?>[];
-    _activeSlideNids.clear();
+    _slide.clearAll();
     _store.clear();
     _visibleSubtreeSizeByNid = Int32List(0);
     _fullExtentByNid = Float64List(0);
@@ -134,27 +131,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
           "but only $standaloneCount nids carry a standalone slot",
         );
       }
-      // Slide working-set check.
-      int slideCount = 0;
-      for (int nid = 0; nid < _nids.length; nid++) {
-        if (_slideByNid[nid] != null) {
-          if (_nids.keyOf(nid) == null) {
-            throw StateError("_slideByNid[$nid] non-null for freed slot");
-          }
-          if (!_activeSlideNids.contains(nid)) {
-            throw StateError(
-              "_slideByNid[$nid] non-null but missing from _activeSlideNids",
-            );
-          }
-          slideCount++;
-        }
-      }
-      if (_activeSlideNids.length != slideCount) {
-        throw StateError(
-          "_activeSlideNids has ${_activeSlideNids.length} entries, "
-          "but only $slideCount nids carry a slide slot",
-        );
-      }
+      // Slide working-set check — delegated to the engine.
+      _slide.debugAssertConsistent();
       return true;
     }());
   }
@@ -347,7 +325,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   /// the caller).
   void _purgeNodeData(TKey key) {
     if (_clearFullExtent(key) != null) {
-      _invalidateFullOffsetPrefix();
+      _scroll.invalidatePrefix();
     }
     // Clean up standalone animation state
     if (_clearStandalone(key) != null) {

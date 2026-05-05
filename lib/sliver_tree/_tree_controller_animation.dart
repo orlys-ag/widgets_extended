@@ -183,7 +183,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       }
 
       _clearPendingDeletion(nodeId);
-      _clearSlide(nodeId);
+      _slide.cancelForKey(nodeId);
 
       final opGroupKey = _operationGroupOf(nodeId);
       if (opGroupKey != null && preservedOpKeys.contains(opGroupKey)) {

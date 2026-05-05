@@ -58,15 +58,15 @@ class _TreeNodeBuilderState<TKey, TData> extends State<TreeNodeBuilder<TKey, TDa
   void initState() {
     super.initState();
     _updateCachedValues();
-    widget.controller.addListener(_onControllerChanged);
+    widget.controller.addStructuralListener(_onStructuralChange);
   }
 
   @override
   void didUpdateWidget(TreeNodeBuilder<TKey, TData> oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_onControllerChanged);
-      widget.controller.addListener(_onControllerChanged);
+      oldWidget.controller.removeStructuralListener(_onStructuralChange);
+      widget.controller.addStructuralListener(_onStructuralChange);
       _updateCachedValues();
     } else if (oldWidget.nodeId != widget.nodeId) {
       _updateCachedValues();
@@ -75,7 +75,7 @@ class _TreeNodeBuilderState<TKey, TData> extends State<TreeNodeBuilder<TKey, TDa
 
   @override
   void dispose() {
-    widget.controller.removeListener(_onControllerChanged);
+    widget.controller.removeStructuralListener(_onStructuralChange);
     super.dispose();
   }
 
@@ -84,7 +84,10 @@ class _TreeNodeBuilderState<TKey, TData> extends State<TreeNodeBuilder<TKey, TDa
     _isExpanded = widget.controller.isExpanded(widget.nodeId);
   }
 
-  void _onControllerChanged() {
+  void _onStructuralChange(Set<TKey>? affectedKeys) {
+    if (affectedKeys != null && !affectedKeys.contains(widget.nodeId)) {
+      return;
+    }
     final hasChildren = widget.controller.hasChildren(widget.nodeId);
     final isExpanded = widget.controller.isExpanded(widget.nodeId);
     if (hasChildren != _hasChildren || isExpanded != _isExpanded) {
