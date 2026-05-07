@@ -469,7 +469,10 @@ class _VisibleNodesView<TKey, TData> extends ListBase<TKey> {
   final TreeController<TKey, TData> _controller;
 
   @override
-  int get length => _controller._order.length;
+  int get length {
+    _controller._ensureVisibleOrder();
+    return _controller._order.length;
+  }
 
   @override
   set length(int value) {
@@ -478,6 +481,7 @@ class _VisibleNodesView<TKey, TData> extends ListBase<TKey> {
 
   @override
   TKey operator [](int index) {
+    _controller._ensureVisibleOrder();
     if (index < 0 || index >= _controller._order.length) {
       throw RangeError.index(
         index,

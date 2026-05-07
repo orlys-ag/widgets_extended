@@ -13,6 +13,117 @@ import 'sliver_tree_element.dart';
 import 'tree_controller.dart';
 import 'types.dart';
 
+// ══════════════════════════════════════════════════════════════════════════
+// VIEWPORT SNAPSHOT + EDGE GHOST SUPPORT TYPES
+// ══════════════════════════════════════════════════════════════════════════
+
+/// Which side of the viewport an edge ghost is anchored to.
+///
+/// Replaces the old "frozen absolute edgeY" representation in
+/// [_phantomEdgeExits]. The actual painted Y is derived live from the
+/// current viewport via [_ViewportSnapshot.baseForEdge], so the ghost
+/// stays pinned to the live edge under concurrent scrolling.
+enum _ViewportEdge {
+  top,
+  bottom,
+}
+
+/// Immutable record of the slide-pipeline-relevant viewport state at a
+/// single moment in time: the scroll offset, the sliver's paint extent,
+/// and the current overhang setting. Owns every viewport-derived value
+/// the slide pipeline reads (top/bottom, overhang-adjusted edge bases),
+/// so capture-time vs current-time questions can be expressed in code
+/// instead of dropping into ad-hoc scroll-offset arithmetic.
+final class _ViewportSnapshot {
+  const _ViewportSnapshot({
+    required this.scrollOffset,
+    required this.paintExtent,
+    required this.overhangPx,
+  });
+
+  /// Top of the viewport in scroll-space.
+  final double scrollOffset;
+
+  /// Sliver paint extent (height of the visible viewport region this
+  /// sliver paints into). Used to derive the bottom edge and to scale
+  /// the slide overhang.
+  final double paintExtent;
+
+  /// Overhang region beyond the viewport edge used by edge-ghost paint
+  /// and slide-IN clamps. Captured here (not read live from the
+  /// controller) so a snapshot can be reused without picking up later
+  /// setting changes mid-batch.
+  final double overhangPx;
+
+  double get top => scrollOffset;
+  double get bottom => scrollOffset + paintExtent;
+
+  /// Any-pixel-overlap predicate. Use for paint culling, hit-test
+  /// admission, ghost re-evaluation, and re-promotion decisions where
+  /// the question is "does this row's bounding box intersect the
+  /// viewport rect at all."
+  bool intersects({
+    required double y,
+    required double extent,
+  }) {
+    if (extent <= 0.0) {
+      return y >= top && y < bottom;
+    }
+    return y < bottom && y + extent > top;
+  }
+
+  /// Midpoint-in-viewport predicate. Use for the slide-clamp branch
+  /// decision in `_applyClampAndInstallNewGhosts` (priorOn / targetOn),
+  /// where the question is "is the user perceiving this row as
+  /// on-screen." A row whose painted top is above viewportTop but whose
+  /// bottom edge intrudes by sub-pixel amounts is [intersects]==true
+  /// yet visually imperceptible — routing such a row through the
+  /// on-screen branch produces wrong slide trajectories.
+  bool midpointInside({
+    required double y,
+    required double extent,
+  }) {
+    if (extent <= 0.0) {
+      return y >= top && y < bottom;
+    }
+    final midY = y + extent / 2;
+    return midY >= top && midY < bottom;
+  }
+
+  /// Edge side a y-coordinate sits past relative to this viewport.
+  /// Top side iff `y < top`; otherwise bottom (the symmetric exclusive
+  /// convention from [intersects]).
+  _ViewportEdge edgeFor(double y) {
+    return y < top ? _ViewportEdge.top : _ViewportEdge.bottom;
+  }
+
+  /// Live scroll-space base Y for an edge anchor on this viewport. Top
+  /// edge = `top - overhangPx` (sits above the viewport by the overhang
+  /// region); bottom edge = `bottom + overhangPx`. An edge ghost's
+  /// painted Y in scroll-space is `baseForEdge(edge) + slideDelta`.
+  double baseForEdge(_ViewportEdge edge) {
+    return switch (edge) {
+      _ViewportEdge.top => top - overhangPx,
+      _ViewportEdge.bottom => bottom + overhangPx,
+    };
+  }
+}
+
+/// Pending FLIP slide baseline plus the viewport in which it was
+/// captured. Replaces the bare `Map<TKey, ({double y, double x})>?`
+/// pending-baseline field. The viewport is consulted at consume time
+/// to answer capture-time visibility questions independently of the
+/// (possibly different) consume-time viewport.
+final class _SlideBaseline<TKey> {
+  const _SlideBaseline({
+    required this.offsets,
+    required this.viewport,
+  });
+
+  final Map<TKey, ({double y, double x})> offsets;
+  final _ViewportSnapshot viewport;
+}
+
 /// Render object for displaying a tree structure as a sliver.
 ///
 /// Uses nodeId-based child storage for straightforward element management.
@@ -363,7 +474,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   // then slide back to old" flicker that a post-frame callback would produce.
   // ──────────────────────────────────────────────────────────────────────────
 
-  Map<TKey, ({double y, double x})>? _pendingSlideBaseline;
+  /// Pending FLIP slide baseline (offsets + capture viewport) plus the
+  /// duration/curve from the originating mutation. The viewport is
+  /// captured alongside the offset map so consume can answer
+  /// capture-time visibility questions independently of the (possibly
+  /// scrolled-since) consume-time viewport. See [_SlideBaseline].
+  _SlideBaseline<TKey>? _pendingSlideBaseline;
   Duration? _pendingSlideDuration;
   Curve? _pendingSlideCurve;
 
@@ -408,22 +524,26 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// toward the viewport edge instead of to the (invisible) structural
   /// position. The row is removed from standard paint/hit-test/transform
   /// paths and painted via a parallel ghost pass at
-  /// `entry.edgeY + slideDelta`.
+  /// `_edgeGhostBaseY(entry, currentViewport) + slideDelta`.
   ///
-  /// Each entry stores the captured edge_y (in scroll-space, frozen at
-  /// install time) plus the original install duration and curve so
-  /// scroll-induced re-promotion ([_checkGhostRepromotionOnScroll]) can
+  /// Each entry stores the *side* of the viewport the ghost is anchored
+  /// to (top or bottom) plus the original install duration and curve so
+  /// scroll-induced re-promotion ([_normalizeEdgeGhostsForViewport]) can
   /// install the re-promotion slide using the same animation parameters.
   ///
-  /// Concurrent scroll during the slide does NOT re-derive edge_y. The
-  /// row exits to the install-time edge regardless. If the row's true
-  /// structural comes back into the viewport mid-slide (user scrolled
-  /// toward it), the scroll-induced re-promotion check re-installs it as
-  /// a normal slide ending at structural — avoiding a snap at slide end.
+  /// The actual painted Y is derived live from the current viewport via
+  /// [_edgeGhostBaseY] / [_ViewportSnapshot.baseForEdge], so the ghost
+  /// stays pinned to the live edge under concurrent scrolling. If the
+  /// row's true structural comes back into the viewport mid-slide (user
+  /// scrolled toward it), [_normalizeEdgeGhostsForViewport] re-installs
+  /// it as a normal slide ending at structural — avoiding a snap at
+  /// slide end. If the row remains off-screen but switches sides
+  /// (top→bottom or vice versa), the helper updates the stored edge
+  /// side and composes a direction-flip slide.
   ///
   /// Pruned eagerly during the edge-ghost paint pass when the slide
   /// settles, lazily at the start of `_consumeSlideBaselineIfAny`.
-  Map<TKey, ({double edgeY, Duration duration, Curve curve})>?
+  Map<TKey, ({_ViewportEdge edge, Duration duration, Curve curve})>?
       _phantomEdgeExits;
 
   /// Last-observed `constraints.scrollOffset`, captured at the end of
@@ -480,7 +600,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     if (geometry == null) return;
     // First-wins.
     if (_pendingSlideBaseline != null) return;
-    _pendingSlideBaseline = snapshotVisibleOffsets();
+    _pendingSlideBaseline = _SlideBaseline<TKey>(
+      offsets: snapshotVisibleOffsets(),
+      viewport: _currentViewportSnapshot(),
+    );
     _pendingSlideDuration = duration;
     _pendingSlideCurve = curve;
   }
@@ -495,9 +618,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// tick — and with it the listener chain that reaches `markNeedsLayout`
   /// / `markNeedsPaint` on this sliver — lands on the next vsync, outside
   /// layout.
-  void _consumeSlideBaselineIfAny() {
-    final baseline = _pendingSlideBaseline;
-    if (baseline == null) return;
+  void _consumeSlideBaselineIfAny({
+    required _ViewportSnapshot currentViewport,
+  }) {
+    final pending = _pendingSlideBaseline;
+    if (pending == null) return;
+    final baseline = pending.offsets;
+    final captureViewport = pending.viewport;
     final duration = _pendingSlideDuration!;
     final curve = _pendingSlideCurve!;
     _pendingSlideBaseline = null;
@@ -533,18 +660,53 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // has settled or whose key has been freed.
     _pruneSettledEdgeGhosts();
 
-    final scrollOffset = constraints.scrollOffset;
-    final paintExtent = constraints.viewportMainAxisExtent;
-    final viewportTop = scrollOffset;
-    final viewportBottom = scrollOffset + paintExtent;
-    final overhangPx = paintExtent * controller.slideClampOverhangViewports;
+    // Rewrite ghost entries in baseline to use the CURRENT viewport's
+    // edge base. This is the prerequisite that makes §7.2's
+    // "snapshot uses live base" rule compose correctly under scroll
+    // change. See plan §9.1 for the full derivation. Without this
+    // rewrite, a stays-same edge ghost whose viewport scrolled by Δ
+    // between staging and consume would feed `rawDeltaY = -Δ` into the
+    // engine — visibly drifting the slide instead of leaving it alone.
+    //
+    // Direction-flip and re-promotion paths (§7.4, §7.5) still produce
+    // non-zero deltas because they explicitly write DIFFERENT edge
+    // bases for prior vs current.
+    final ghostsForRewrite = _phantomEdgeExits;
+    if (ghostsForRewrite != null) {
+      for (final ghostEntry in ghostsForRewrite.entries) {
+        final ghostKey = ghostEntry.key;
+        if (!baseline.containsKey(ghostKey)) continue;
+        final ghostNid = controller.nidOf(ghostKey);
+        if (ghostNid < 0) continue;
+        final ghostSlideY = controller.getSlideDeltaNid(ghostNid);
+        final ghostSlideX = controller.getSlideDeltaXNid(ghostNid);
+        final ghostIndent = controller.getIndent(ghostKey);
+        baseline[ghostKey] = (
+          y: _edgeGhostBaseY(ghostEntry.value, currentViewport) + ghostSlideY,
+          x: ghostIndent + ghostSlideX,
+        );
+      }
+    }
+
+    // Per plan §6: capture-time visibility checks use captureViewport,
+    // current-time checks use currentViewport. New edge anchors created
+    // in this consume use currentViewport. All viewport math is routed
+    // through the snapshot's helper methods rather than ad-hoc
+    // top/bottom/overhang scalars.
 
     // Augment baseline with phantom priors for keys that were hidden at
     // moveNode time but became visible after mutation. The controller
     // staged a key→anchor relationship for each such key during
     // moveNode(animate: true); resolve them to scroll-space positions
-    // here using the just-staged baseline (anchor's painted position)
-    // or the viewport edge (anchor off-screen).
+    // here using the just-staged baseline (anchor's painted position
+    // at STAGING time) or the staging-time viewport edge (anchor was
+    // off-screen at staging).
+    //
+    // Per plan §6: this is a CAPTURE-TIME question — "where was the
+    // anchor at staging?" — so the visibility check and the edge
+    // fallback both use `captureViewport`, not `currentViewport`.
+    // anchorPos.y comes from `pending.offsets`, which was captured
+    // against captureViewport at staging.
     final relationships = controller.takePendingPhantomAnchors();
     if (relationships != null && relationships.isNotEmpty) {
       for (final entry in relationships.entries) {
@@ -558,11 +720,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         if (!current.containsKey(key)) continue;
         final anchorPos = baseline[anchorKey];
         if (anchorPos == null) continue;
-        final anchorOnScreen = _rowIntersectsViewport(
+        final anchorOnScreen = captureViewport.intersects(
           y: anchorPos.y,
           extent: _currentExtentOfKey(anchorKey),
-          viewportTop: viewportTop,
-          viewportBottom: viewportBottom,
         );
         // Add the ghost row's own in-flight slideDelta to the injected
         // baseline so engine composition gives the right painted-at-t=0
@@ -579,20 +739,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         if (anchorOnScreen) {
           // Anchor visible: phantom prior = anchor's painted position
           // (anchorPos already includes anchor's slideDelta via the
-          // snapshot) plus the ghost row's own slideDelta. Clip during
-          // paint so the anchor occludes the emerging row's overlap.
+          // staging snapshot) plus the ghost row's own slideDelta.
+          // Clip during paint so the anchor occludes the emerging row's
+          // overlap.
           baseline[key] = (
             y: anchorPos.y + ghostSlideY,
             x: anchorPos.x + ghostSlideX,
           );
           (_phantomClipAnchors ??= <TKey, TKey>{})[key] = anchorKey;
         } else {
-          // Anchor scrolled off-screen: fall back to the viewport edge
-          // (with overhang) nearest the anchor's structural location.
-          // No clip — the row enters from a region nobody can paint into.
-          final edgeY = anchorPos.y < viewportTop
-              ? viewportTop - overhangPx
-              : viewportBottom + overhangPx;
+          // Anchor was off-screen at staging: fall back to the
+          // staging-time viewport edge nearest the anchor's structural
+          // location. No clip — the row enters from a region nobody
+          // could paint into at staging.
+          final edge = captureViewport.edgeFor(anchorPos.y);
+          final edgeY = captureViewport.baseForEdge(edge);
           baseline[key] = (
             y: edgeY + ghostSlideY,
             x: anchorPos.x + ghostSlideX,
@@ -619,14 +780,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // visible at staging time. Can't slide a row with no prior.
         if (!baseline.containsKey(key)) continue;
         // Anchor must be in current (it's the new visible parent — must
-        // be in visibleNodes post-mutation).
+        // be in visibleNodes post-mutation). The visibility question is
+        // CURRENT-TIME ("is the anchor visible NOW"), so use
+        // currentViewport.
         final anchorCurrent = current[anchorKey];
         if (anchorCurrent == null) continue;
-        final anchorOnScreen = _rowIntersectsViewport(
+        final anchorOnScreen = currentViewport.intersects(
           y: anchorCurrent.y,
           extent: _currentExtentOfKey(anchorKey),
-          viewportTop: viewportTop,
-          viewportBottom: viewportBottom,
         );
         // Add the ghost row's own in-flight slideDelta — see entry-phantom
         // block above for the rationale.
@@ -650,12 +811,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           // occludes it as it slides in.
           (_phantomClipAnchors ??= <TKey, TKey>{})[key] = anchorKey;
         } else {
-          // Anchor off-screen: ghost slides toward the viewport edge
-          // (with overhang) nearest the anchor's structural position.
-          // No clip — the ghost simply slides off-screen and disappears.
-          final edgeY = anchorCurrent.y < viewportTop
-              ? viewportTop - overhangPx
-              : viewportBottom + overhangPx;
+          // Anchor off-screen at consume: ghost slides toward the
+          // current viewport edge (with overhang) nearest the anchor's
+          // structural position. No clip — the ghost simply slides
+          // off-screen and disappears.
+          final edge = currentViewport.edgeFor(anchorCurrent.y);
+          final edgeY = currentViewport.baseForEdge(edge);
           current[key] = (
             y: edgeY + ghostSlideY,
             x: anchorCurrent.x + ghostSlideX,
@@ -693,11 +854,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (cursor == null) continue;
       final anchorCurrent = current[cursor];
       if (anchorCurrent == null) continue;
-      final anchorOnScreen = _rowIntersectsViewport(
+      // Current-time visibility check — fallback runs at consume time
+      // and asks whether the new anchor is visible NOW.
+      final anchorOnScreen = currentViewport.intersects(
         y: anchorCurrent.y,
         extent: _currentExtentOfKey(cursor),
-        viewportTop: viewportTop,
-        viewportBottom: viewportBottom,
       );
       // Add the ghost row's own in-flight slideDelta — same rationale as
       // controller-staged exit-phantom block above.
@@ -716,9 +877,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         (_phantomExitGhosts ??= <TKey, TKey>{})[key] = cursor;
         (_phantomClipAnchors ??= <TKey, TKey>{})[key] = cursor;
       } else {
-        final edgeY = anchorCurrent.y < viewportTop
-            ? viewportTop - overhangPx
-            : viewportBottom + overhangPx;
+        final edge = currentViewport.edgeFor(anchorCurrent.y);
+        final edgeY = currentViewport.baseForEdge(edge);
         current[key] = (
           y: edgeY + ghostSlideY,
           x: anchorCurrent.x + ghostSlideX,
@@ -749,15 +909,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Steps 4-6: re-evaluate active edge ghosts (re-promote / direction
     // flip / stays-same), apply slide-IN clamp + new ghost installs for
-    // non-ghost keys, then remove ghost-stays-same-edge_y from the batch
+    // non-ghost keys, then remove ghost-stays-same-edge from the batch
     // so the engine doesn't re-baseline them.
     final ghostKeysTouchedThisCycle = <TKey>{};
     _reEvaluateGhostStatus(
       baseline: baseline,
       current: current,
-      viewportTop: viewportTop,
-      viewportBottom: viewportBottom,
-      overhangPx: overhangPx,
+      viewport: currentViewport,
       duration: duration,
       curve: curve,
       ghostKeysTouchedThisCycle: ghostKeysTouchedThisCycle,
@@ -765,9 +923,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _applyClampAndInstallNewGhosts(
       baseline: baseline,
       current: current,
-      viewportTop: viewportTop,
-      viewportBottom: viewportBottom,
-      overhangPx: overhangPx,
+      viewport: currentViewport,
       duration: duration,
       curve: curve,
       ghostKeysTouchedThisCycle: ghostKeysTouchedThisCycle,
@@ -884,7 +1040,67 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     return nid >= 0 ? controller.getCurrentExtentNid(nid) : 0.0;
   }
 
-  bool _rowIntersectsViewport({
+  /// Builds a [_ViewportSnapshot] describing the layout's current
+  /// viewport state. Reads `constraints.scrollOffset`, the sliver's
+  /// `viewportMainAxisExtent`, and the controller's live overhang
+  /// setting. Cheap to call and intended to be used at every entry to
+  /// the slide pipeline so capture-time vs current-time questions are
+  /// expressed against an explicit viewport rather than scattered
+  /// scroll-offset arithmetic.
+  ///
+  /// Caller must guarantee [constraints] is set (i.e. `performLayout`
+  /// has begun, OR a layout has previously completed and `geometry`
+  /// is non-null). External entry points (`beginSlideBaseline`) check
+  /// `geometry != null` before calling.
+  _ViewportSnapshot _currentViewportSnapshot() {
+    final paintExtent = constraints.viewportMainAxisExtent;
+    return _ViewportSnapshot(
+      scrollOffset: constraints.scrollOffset,
+      paintExtent: paintExtent,
+      overhangPx: paintExtent * controller.slideClampOverhangViewports,
+    );
+  }
+
+  /// Live scroll-space base Y for an edge-ghost entry against the
+  /// supplied viewport. Single source of truth for the conversion
+  /// between an [_phantomEdgeExits] entry and the position the row's
+  /// paint base should sit at right now. Replaces every former direct
+  /// read of `entry.edgeY` (which was a frozen absolute, stale under
+  /// scroll change).
+  double _edgeGhostBaseY(
+    ({_ViewportEdge edge, Duration duration, Curve curve}) entry,
+    _ViewportSnapshot viewport,
+  ) {
+    return viewport.baseForEdge(entry.edge);
+  }
+
+  /// Stricter on-screen predicate used by the slide-clamp branch decision
+  /// in [_applyClampAndInstallNewGhosts]. Returns true iff the row's
+  /// midpoint sits inside `[viewportTop, viewportBottom)`.
+  ///
+  /// Distinct from [_ViewportSnapshot.intersects]' any-pixel-overlap rule
+  /// because the clamp is asking a user-perception question — "is this
+  /// row meaningfully on screen?" — not a paint-culling one. A row whose
+  /// top is above `viewportTop` but whose bottom edge intrudes by a
+  /// fraction of a pixel is `intersects == true` yet visually
+  /// imperceptible. Treating it as on-screen there would route the row
+  /// into the wrong clamp branch:
+  ///
+  ///   * For a slide-IN composition (`!priorOn && targetOn`), priorOn
+  ///     would flip to true, the baseline-clamp branch would not fire,
+  ///     and painted at t=0 would land off-viewport (or just inside by
+  ///     ε px) instead of being clamped to viewport+epsilon.
+  ///   * For a cross-viewport slide (`!priorOn && !targetOn` composition
+  ///     when both painted-prior and target are off-screen), priorOn
+  ///     would flip to true and the engine would install an edge ghost
+  ///     truncating the trajectory at the bottom edge instead of
+  ///     composing the full painted→target slide.
+  ///
+  /// Midpoint is the cheapest threshold that captures "majority visible";
+  /// any row whose midpoint is in the viewport has at least extent/2 px
+  /// visible, which is the smallest amount the user typically perceives
+  /// as a row presence rather than a thin sliver.
+  bool _rowMidpointInViewport({
     required double y,
     required double extent,
     required double viewportTop,
@@ -893,7 +1109,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     if (extent <= 0.0) {
       return y >= viewportTop && y < viewportBottom;
     }
-    return y < viewportBottom && y + extent > viewportTop;
+    final midY = y + extent / 2;
+    return midY >= viewportTop && midY < viewportBottom;
   }
 
   /// Step 3b: drop `_phantomEdgeExits` entries that became
@@ -916,18 +1133,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   ///   form so the engine composes the slide back to a normal slide
   ///   ending at the visible position.
   /// - **Direction flip** (still off-screen but the OPPOSITE side from
-  ///   the captured edge): update the `_phantomEdgeExits` entry's edge_y
-  ///   (preserving original duration/curve) and override `current[key]`
-  ///   with the new edge form.
-  /// - **Stays-same-edge_y**: don't touch — the existing slide already
+  ///   the captured edge): update the `_phantomEdgeExits` entry's edge
+  ///   side (preserving original duration/curve) and override
+  ///   `current[key]` with the new live edge base.
+  /// - **Stays-same-edge**: don't touch — the existing slide already
   ///   targets the right edge. NOT added to `ghostKeysTouchedThisCycle`
   ///   so Step 6 will remove it from the batch.
   void _reEvaluateGhostStatus({
     required Map<TKey, ({double y, double x})> baseline,
     required Map<TKey, ({double y, double x})> current,
-    required double viewportTop,
-    required double viewportBottom,
-    required double overhangPx,
+    required _ViewportSnapshot viewport,
     required Duration duration,
     required Curve curve,
     required Set<TKey> ghostKeysTouchedThisCycle,
@@ -942,11 +1157,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final slideY = controller.getSlideDeltaNid(nid);
       final slideX = controller.getSlideDeltaXNid(nid);
       final indent = controller.getIndent(key);
-      if (_rowIntersectsViewport(
+      if (viewport.intersects(
         y: trueStructuralY,
         extent: controller.getCurrentExtentNid(nid),
-        viewportTop: viewportTop,
-        viewportBottom: viewportBottom,
       )) {
         // Re-promote.
         current[key] = (
@@ -956,21 +1169,31 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         exits.remove(key);
         ghostKeysTouchedThisCycle.add(key);
       } else {
-        final newEdgeY = trueStructuralY < viewportTop
-            ? viewportTop - overhangPx
-            : viewportBottom + overhangPx;
-        if (newEdgeY != exits[key]!.edgeY) {
-          // Direction flip — update entry, keep original duration/curve.
-          final original = exits[key]!;
+        final newEdge = viewport.edgeFor(trueStructuralY);
+        final entry = exits[key]!;
+        if (newEdge != entry.edge) {
+          // Direction flip. Update the entry; keep original duration/curve.
+          // Per plan §7.4: the consume-time baseline rewrite has already
+          // set baseline[key] = oldBaseY + slideY (using the OLD edge).
+          // Override current[key] with the NEW edge base so the engine
+          // composes oldBaseY → newBaseY into a fresh slide. The new
+          // currentDelta retains the old painted position (oldBaseY +
+          // existing.currentDelta) at t=0 and animates toward newBaseY.
           exits[key] = (
-            edgeY: newEdgeY,
-            duration: original.duration,
-            curve: original.curve,
+            edge: newEdge,
+            duration: entry.duration,
+            curve: entry.curve,
           );
-          current[key] = (y: newEdgeY + slideY, x: indent + slideX);
+          current[key] = (
+            y: viewport.baseForEdge(newEdge) + slideY,
+            x: indent + slideX,
+          );
           ghostKeysTouchedThisCycle.add(key);
         }
-        // else: stays-same-edge_y — do NOT add to touched set.
+        // else: stays-same-edge — do NOT add to touched set. Step 6
+        // will remove from batch; the consume-time baseline rewrite +
+        // snapshotVisibleOffsets()'s live-base ghost rule means
+        // baseline.y == current.y, engine sees no delta, slide untouched.
       }
     }
     if (exits.isEmpty) _phantomEdgeExits = null;
@@ -981,13 +1204,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   void _applyClampAndInstallNewGhosts({
     required Map<TKey, ({double y, double x})> baseline,
     required Map<TKey, ({double y, double x})> current,
-    required double viewportTop,
-    required double viewportBottom,
-    required double overhangPx,
+    required _ViewportSnapshot viewport,
     required Duration duration,
     required Curve curve,
     required Set<TKey> ghostKeysTouchedThisCycle,
   }) {
+    final viewportTop = viewport.top;
+    final viewportBottom = viewport.bottom;
+    final overhangPx = viewport.overhangPx;
     // Iterate keys that have BOTH a baseline and current entry.
     final keysToProcess = <TKey>[];
     for (final key in baseline.keys) {
@@ -1025,13 +1249,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // pulling it past an edge is misclassified as off-screen and kept
       // invisible as an edge ghost until the slide settles.
       final targetY = curr.y - slideY;
-      final priorOn = _rowIntersectsViewport(
+      // Use midpoint-in-viewport (not any-pixel-overlap) for the clamp
+      // branch decision: a row whose painted top is above viewportTop
+      // but whose bottom edge intrudes into the viewport by sub-pixel
+      // amounts is visually imperceptible to the user, and treating it
+      // as on-screen routes it into the wrong branch (edge-ghost
+      // truncation for slide-out trajectories, or skipped composition
+      // clamp for slide-in compositions). See [_rowMidpointInViewport].
+      final priorOn = _rowMidpointInViewport(
         y: prior.y,
         extent: rowExtent,
         viewportTop: viewportTop,
         viewportBottom: viewportBottom,
       );
-      final targetOn = _rowIntersectsViewport(
+      final targetOn = _rowMidpointInViewport(
         y: targetY,
         extent: rowExtent,
         viewportTop: viewportTop,
@@ -1115,16 +1346,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         continue;
       }
       // priorOn && !targetOn: install new edge ghost.
-      final edgeY = targetY < viewportTop
-          ? viewportTop - overhangPx
-          : viewportBottom + overhangPx;
+      final edge = viewport.edgeFor(targetY);
+      final edgeY = viewport.baseForEdge(edge);
       // Corner: row was visible exactly at the edge already → no
       // animation needed; structural ≈ edge.
       if (baseline[key]!.y == edgeY) continue;
       final indent = controller.getIndent(key);
       current[key] = (y: edgeY + slideY, x: indent + slideX);
       (_phantomEdgeExits ??= {})[key] = (
-        edgeY: edgeY,
+        edge: edge,
         duration: duration,
         curve: curve,
       );
@@ -1151,22 +1381,42 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
   }
 
-  /// Hook invoked from `performLayout` when `constraints.scrollOffset`
-  /// changes between layouts and edge ghosts are active. For each ghost
-  /// whose true structural is now in the viewport (user scrolled toward
-  /// the destination), install a re-promotion slide using the original
-  /// install duration/curve so the row settles at structural without a
-  /// visible snap.
+  /// Normalizes [_phantomEdgeExits] for the supplied [viewport]. Replaces
+  /// the older `_checkGhostRepromotionOnScroll` and folds in direction-
+  /// flip and stays-same handling so a single helper covers every
+  /// scroll-induced edge-ghost adjustment.
   ///
-  /// Re-promotions are grouped by (duration, curve) so each
-  /// `animateSlideFromOffsets` call uses the matching install
-  /// parameters. Composition with the existing engine slide preserves
-  /// visual continuity per the §2 derivation.
-  void _checkGhostRepromotionOnScroll(double scrollOffset) {
+  /// For each active edge ghost:
+  ///   1. If its true structural Y now intersects [viewport], remove
+  ///      the ghost from the map. When [installStandaloneSlides] is
+  ///      true the helper also installs a re-promotion slide from the
+  ///      live edge base to structural Y; when false, the helper just
+  ///      normalizes bookkeeping and leaves slide installation to the
+  ///      caller (the consume path that owns the single batch).
+  ///   2. Else, recompute the side via [viewport.edgeFor]. If the side
+  ///      changed (direction flip), update the stored side. When
+  ///      [installStandaloneSlides] is true, install a fresh slide
+  ///      from old-edge live base to new-edge live base so the row
+  ///      visibly sweeps across the viewport edge.
+  ///   3. Else (stays-same edge), do nothing — the ghost is already
+  ///      anchored to the right side, and live-base lookup means the
+  ///      paint pass automatically tracks the new viewport.
+  ///
+  /// Per plan §5.3: when a pending mutation baseline exists, this
+  /// helper runs with `installStandaloneSlides: false` so the upcoming
+  /// consume owns the single animation batch for the layout. When no
+  /// pending baseline exists, this helper installs slides itself.
+  ///
+  /// Re-promotions / direction-flips are grouped by (duration, curve)
+  /// so each `animateSlideFromOffsets` call uses the matching original
+  /// install parameters. Composition with the existing engine slide
+  /// preserves visual continuity.
+  void _normalizeEdgeGhostsForViewport({
+    required _ViewportSnapshot viewport,
+    required bool installStandaloneSlides,
+  }) {
     final exits = _phantomEdgeExits;
     if (exits == null) return;
-    final viewportTop = scrollOffset;
-    final viewportBottom = scrollOffset + constraints.viewportMainAxisExtent;
     final keys = exits.keys.toList();
     final groups = <
       (Duration duration, Curve curve),
@@ -1180,34 +1430,71 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (trueStructuralY < 0) continue;
       final nid = controller.nidOf(key);
       if (nid < 0) continue;
-      if (!_rowIntersectsViewport(
-        y: trueStructuralY,
-        extent: controller.getCurrentExtentNid(nid),
-        viewportTop: viewportTop,
-        viewportBottom: viewportBottom,
-      )) {
-        continue;
-      }
       final entry = exits[key]!;
       final slideY = controller.getSlideDeltaNid(nid);
       final slideX = controller.getSlideDeltaXNid(nid);
       final indent = controller.getIndent(key);
-      final groupKey = (entry.duration, entry.curve);
-      final group = groups.putIfAbsent(
-        groupKey,
-        () => (
-          baseline: <TKey, ({double y, double x})>{},
-          current: <TKey, ({double y, double x})>{},
-        ),
+      final structIntersects = viewport.intersects(
+        y: trueStructuralY,
+        extent: controller.getCurrentExtentNid(nid),
       );
-      group.baseline[key] = (y: entry.edgeY + slideY, x: indent + slideX);
-      group.current[key] = (
-        y: trueStructuralY + slideY,
-        x: indent + slideX,
-      );
-      exits.remove(key);
+      if (structIntersects) {
+        // Re-promote: structural is back in viewport. Drop the ghost.
+        if (installStandaloneSlides) {
+          final groupKey = (entry.duration, entry.curve);
+          final group = groups.putIfAbsent(
+            groupKey,
+            () => (
+              baseline: <TKey, ({double y, double x})>{},
+              current: <TKey, ({double y, double x})>{},
+            ),
+          );
+          group.baseline[key] = (
+            y: _edgeGhostBaseY(entry, viewport) + slideY,
+            x: indent + slideX,
+          );
+          group.current[key] = (
+            y: trueStructuralY + slideY,
+            x: indent + slideX,
+          );
+        }
+        exits.remove(key);
+        continue;
+      }
+      // Still off-screen. Did the side change?
+      final newEdge = viewport.edgeFor(trueStructuralY);
+      if (newEdge != entry.edge) {
+        // Direction flip. Update the stored side; when standalone,
+        // install a slide that composes oldBaseY → newBaseY so the
+        // row visibly transits between edges.
+        if (installStandaloneSlides) {
+          final groupKey = (entry.duration, entry.curve);
+          final group = groups.putIfAbsent(
+            groupKey,
+            () => (
+              baseline: <TKey, ({double y, double x})>{},
+              current: <TKey, ({double y, double x})>{},
+            ),
+          );
+          final oldBaseY = viewport.baseForEdge(entry.edge);
+          final newBaseY = viewport.baseForEdge(newEdge);
+          group.baseline[key] = (y: oldBaseY + slideY, x: indent + slideX);
+          group.current[key] = (y: newBaseY + slideY, x: indent + slideX);
+        }
+        exits[key] = (
+          edge: newEdge,
+          duration: entry.duration,
+          curve: entry.curve,
+        );
+        continue;
+      }
+      // Stays-same edge. Nothing to update — paint, hit-test, snapshot
+      // all read live base from the entry's stored side, so they pick
+      // up the new viewport automatically.
     }
     if (exits.isEmpty) _phantomEdgeExits = null;
+
+    if (!installStandaloneSlides) return;
     for (final entry in groups.entries) {
       controller.animateSlideFromOffsets(
         entry.value.baseline,
@@ -1215,17 +1502,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         duration: entry.key.$1,
         curve: entry.key.$2,
       );
-      // Mark the re-promoted slides with the preserve-progress flag.
-      // Without this, the next consume cycle whose batch doesn't touch
-      // these keys will hit the engine's re-baseline branch
-      // (`_slide_animation_engine.dart` ~290-294): `startDelta =
-      // currentDelta`, `progress = 0`, `slideStartElapsed = now`. The
-      // slide's clock restarts, and the effective remaining motion
-      // (already-shrunk `currentDelta`) is dragged out over another
-      // full `slideDuration`. Under cascaded mutations the re-baseline
-      // fires every batch — the slide makes essentially zero net per-
-      // tick progress, so the user perceives "no animation" even
-      // though the row eventually lands at its correct structural Y.
+      // Mark the re-promoted / direction-flipped slides with the
+      // preserve-progress flag. Without this, the next consume cycle
+      // whose batch doesn't touch these keys will hit the engine's
+      // re-baseline branch (`_slide_animation_engine.dart` ~290-294):
+      // `startDelta = currentDelta`, `progress = 0`,
+      // `slideStartElapsed = now`. The slide's clock restarts, and
+      // the effective remaining motion (already-shrunk `currentDelta`)
+      // is dragged out over another full `slideDuration`. Under
+      // cascaded mutations the re-baseline fires every batch — the
+      // slide makes essentially zero net per-tick progress.
       //
       // Composition (called inside `animateSlideFromOffsets` above)
       // resets `preserveProgressOnRebatch = false`, and the re-
@@ -1346,23 +1632,30 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final visible = controller.visibleNodes;
     final orderNids = controller.orderNidsView;
     final edgeExits = _phantomEdgeExits;
+    // Build the viewport snapshot lazily — only needed if there are
+    // active edge ghosts. Plan §7.2: ghost rows paint at the LIVE
+    // viewport edge, so snapshot must derive their painted Y from the
+    // current viewport, not a frozen capture.
+    final _ViewportSnapshot? viewportForGhosts =
+        edgeExits != null ? _currentViewportSnapshot() : null;
     for (int i = 0; i < visible.length; i++) {
       final nid = orderNids[i];
       final key = visible[i];
       final slideY = hasSlides ? controller.getSlideDeltaNid(nid) : 0.0;
       final slideX = hasXSlides ? controller.getSlideDeltaXNid(nid) : 0.0;
       final indent = controller.getIndent(key);
-      // Edge-ghost rows paint at `edgeY + slideDelta`, not at
+      // Edge-ghost rows paint at `_edgeGhostBaseY + slideDelta`, not at
       // `structural + slideDelta`. Override to keep snapshot consistent
       // with what the edge-ghost paint pass actually paints — required
       // for composition correctness when a ghost row gets re-mutated
-      // mid-slide (snapshot returns ghost-painted; engine composes
-      // correctly across paint-base changes per the §2 derivation in
-      // docs/plans/slide-viewport-clamp-v2.3.2.md).
+      // mid-slide.
       if (edgeExits != null) {
         final entry = edgeExits[key];
         if (entry != null) {
-          result[key] = (y: entry.edgeY + slideY, x: indent + slideX);
+          result[key] = (
+            y: _edgeGhostBaseY(entry, viewportForGhosts!) + slideY,
+            x: indent + slideX,
+          );
           structural += controller.getCurrentExtentNid(nid);
           continue;
         }
@@ -1445,17 +1738,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       double structural = 0.0;
       final orderNids = controller.orderNidsView;
       final edgeExits = _phantomEdgeExits;
+      // Lazy: only build viewport snapshot if there are ghosts to
+      // resolve. Edge ghosts paint at the LIVE viewport edge.
+      final _ViewportSnapshot? viewportForGhosts =
+          edgeExits != null ? _currentViewportSnapshot() : null;
       for (int i = 0; i < visible.length; i++) {
         final nid = orderNids[i];
         final key = visible[i];
         final extent = controller.getCurrentExtentNid(nid);
         final slide = controller.getSlideDeltaNid(nid);
-        // Edge-ghost rows paint at `entry.edgeY + slide`, not at
+        // Edge-ghost rows paint at `_edgeGhostBaseY + slide`, not at
         // `structural + slide`. Substitute so drag-target lookup lands
         // on the correct ghost row.
         final edgeEntry = edgeExits?[key];
         final paintedOffset = edgeEntry != null
-            ? edgeEntry.edgeY + slide
+            ? _edgeGhostBaseY(edgeEntry, viewportForGhosts!) + slide
             : structural + slide;
         if (!controller.isPendingDeletion(key)) {
           if (scrollY < paintedOffset + extent) {
@@ -1757,29 +2054,40 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final cacheStart = scrollOffset + cacheOrigin;
     final cacheEnd = cacheStart + remainingCacheExtent;
 
-    // If a caller (TreeReorderController.endDrag) staged a FLIP slide
-    // baseline before the structural mutation that triggered this layout,
-    // install the slide NOW — before Pass 2's build-range decision, so
-    // `maxActiveSlideAbsDelta` reflects the just-installed deltas and Pass
-    // 2 builds rows sliding INTO the viewport from outside the structural
-    // cache region. `snapshotVisibleOffsets()` walks `visibleNodes` with
-    // `getCurrentExtent`, which is independent of Pass 1's per-nid offset
-    // array, so calling it before Pass 1 is safe.
-    _consumeSlideBaselineIfAny();
-
-    // Scroll-induced edge-ghost re-promotion: if scrollOffset changed
-    // since the last layout AND there are active edge ghosts, re-check
-    // whether any ghost's true structural is now in the viewport (user
-    // scrolled toward the destination). Re-promote those to normal
-    // slides ending at the visible position, avoiding a snap at slide
-    // settlement.
-    final currentScroll = constraints.scrollOffset;
-    if (!_lastObservedScrollOffset.isNaN
-        && currentScroll != _lastObservedScrollOffset
-        && _phantomEdgeExits != null
-        && _phantomEdgeExits!.isNotEmpty) {
-      _checkGhostRepromotionOnScroll(currentScroll);
+    // Slide-pipeline ordering (per plan §5):
+    //
+    //   1. Build the current viewport snapshot.
+    //   2. If scroll changed since last layout and edge ghosts exist,
+    //      normalize the ghost map for the current viewport — handle
+    //      re-promotions, direction flips, and stays-same. When a
+    //      pending mutation baseline exists, normalization runs WITHOUT
+    //      installing standalone slides so the upcoming consume owns
+    //      the single animation batch for this layout (avoids two
+    //      independent `animateSlideFromOffsets` calls in the same
+    //      frame). When no pending baseline exists, normalization
+    //      installs slides directly.
+    //   3. Consume the pending mutation baseline. After step 2 the
+    //      ghost map already reflects the current viewport, so consume
+    //      composes against fresh state instead of the stale frozen
+    //      `edgeY` the previous implementation carried.
+    //   4. Update `_lastObservedScrollOffset` to the new scroll.
+    //
+    // `snapshotVisibleOffsets()` walks `visibleNodes` with
+    // `getCurrentExtent`, which is independent of Pass 1's per-nid
+    // offset array, so all three steps are safe before Pass 1.
+    final currentViewport = _currentViewportSnapshot();
+    final currentScroll = currentViewport.scrollOffset;
+    final scrollChanged = !_lastObservedScrollOffset.isNaN
+        && currentScroll != _lastObservedScrollOffset;
+    final hasEdgeGhosts =
+        _phantomEdgeExits != null && _phantomEdgeExits!.isNotEmpty;
+    if (scrollChanged && hasEdgeGhosts) {
+      _normalizeEdgeGhostsForViewport(
+        viewport: currentViewport,
+        installStandaloneSlides: _pendingSlideBaseline == null,
+      );
     }
+    _consumeSlideBaselineIfAny(currentViewport: currentViewport);
     _lastObservedScrollOffset = currentScroll;
 
     // FLIP-slide overreach (Option A): during a slide, a row's painted y
@@ -2623,19 +2931,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       }
     }
 
-    // Pass A.6: Paint edge-anchor exit ghosts (synthetic-edge-y ghosts
-    // for long slide-OUTs). These rows ARE in visibleNodes but skipped
-    // by the standard paint pass — their painted position is
-    // `entry.edgeY + slideDelta` (edge_y in scroll-space, captured at
-    // install time). As the slide settles, the row converges on the
-    // viewport edge and is then lazily pruned (no visible cut because
-    // the row's structural position is far off-screen).
+    // Pass A.6: Paint edge-anchor exit ghosts (live-edge-anchored
+    // ghosts for long slide-OUTs). These rows ARE in visibleNodes but
+    // skipped by the standard paint pass — their painted position is
+    // `_edgeGhostBaseY(entry, currentViewport) + slideDelta` in
+    // scroll-space, recomputed against the live viewport so the ghost
+    // stays pinned to the live edge under concurrent scrolling. As the
+    // slide settles, the row converges on the viewport edge and is
+    // then lazily pruned (no visible cut because the row's structural
+    // position is far off-screen).
     final edgeGhosts = _phantomEdgeExits;
     if (edgeGhosts != null && edgeGhosts.isNotEmpty) {
       // Idle-state shortcut.
       if (!hasSlides) {
         _phantomEdgeExits = null;
       } else {
+        final viewport = _currentViewportSnapshot();
         final edgeKeys = edgeGhosts.keys.toList();
         for (final ghostKey in edgeKeys) {
           final entry = edgeGhosts[ghostKey];
@@ -2663,9 +2974,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           final ghostChild = getChildForNode(ghostKey);
           if (ghostChild == null) continue;
           final indent = controller.getIndent(ghostKey);
-          // Ghost paints at `edge_y + slideDelta` in scroll-space.
-          // Convert to local paint coords by subtracting scrollOffset.
-          final paintedY = entry.edgeY - scrollOffset + ghostSlide;
+          // Ghost paints at `liveBaseY + slideDelta` in scroll-space,
+          // converted to local paint coords by subtracting scrollOffset.
+          final paintedY =
+              _edgeGhostBaseY(entry, viewport) - scrollOffset + ghostSlide;
           final paintedX = indent + ghostSlideX;
           // Skip if entirely outside the paint region.
           if (paintedY >= remainingPaintExtent) continue;
@@ -2920,6 +3232,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Hoist per-axis slide-activity checks (idle-state fast path).
     final hasSlides = controller.hasActiveSlides;
     final hasXSlides = hasSlides && controller.hasActiveXSlides;
+    // Lazy viewport: only built if a ghost row is encountered.
+    _ViewportSnapshot? hitViewport;
 
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nid = orderNids[i];
@@ -2936,11 +3250,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (controller.isExitingNid(nid)) continue;
 
       final parentData = child.parentData! as SliverTreeParentData;
-      // Edge-ghost rows paint at `entry.edgeY + slideDelta` (NOT at
-      // structural + slideDelta). Substitute edge_y for the structural
-      // offset so hit-tests land on the painted (ghost) position.
+      // Edge-ghost rows paint at `_edgeGhostBaseY + slideDelta` (NOT at
+      // structural + slideDelta). Substitute the live edge base for
+      // the structural offset so hit-tests land on the painted (ghost)
+      // position. Lazy: build the snapshot once, only if any ghost is
+      // actually encountered.
       final edgeEntry = _phantomEdgeExits?[nodeId];
-      final nodeOffset = edgeEntry?.edgeY ?? parentData.layoutOffset;
+      final double nodeOffset;
+      if (edgeEntry != null) {
+        hitViewport ??= _currentViewportSnapshot();
+        nodeOffset = _edgeGhostBaseY(edgeEntry, hitViewport);
+      } else {
+        nodeOffset = parentData.layoutOffset;
+      }
       final nodeExtent = parentData.visibleExtent;
 
       // Shift the hit coordinate by the node's current slide delta so a
@@ -3046,17 +3368,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         (hasXSlides && nid >= 0) ? controller.getSlideDeltaXNid(nid) : 0.0;
 
     final scrollOffset = constraints.scrollOffset;
-    // Edge-ghost rows paint at `entry.edgeY + slideDelta`, not at
-    // `parentData.layoutOffset + slideDelta`. Substitute the edge so
-    // framework code (`localToGlobal`, semantics, focus traversal) sees
-    // the row at its actual painted position. Settled-check: if the
-    // slide is settled but lazy-prune hasn't run, fall back to the
-    // structural offset so post-settlement queries report the row's
-    // real (off-screen) position.
+    // Edge-ghost rows paint at `_edgeGhostBaseY + slideDelta`, not at
+    // `parentData.layoutOffset + slideDelta`. Substitute the live edge
+    // base so framework code (`localToGlobal`, semantics, focus
+    // traversal) sees the row at its actual painted position. The live
+    // base re-anchors to the current viewport edge under concurrent
+    // scrolling. Settled-check: if the slide is settled but lazy-prune
+    // hasn't run, fall back to the structural offset so post-settlement
+    // queries report the row's real (off-screen) position.
     final edgeEntry = nodeId == null ? null : _phantomEdgeExits?[nodeId];
     final useGhost = edgeEntry != null
         && (slideDelta != 0.0 || slideDeltaX != 0.0);
-    final base = useGhost ? edgeEntry.edgeY : parentData.layoutOffset;
+    final base = useGhost
+        ? _edgeGhostBaseY(edgeEntry, _currentViewportSnapshot())
+        : parentData.layoutOffset;
     transform.translateByDouble(
       parentData.indent + slideDeltaX,
       base - scrollOffset - yAdjust + slideDelta,

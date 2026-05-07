@@ -1023,6 +1023,22 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// if other in-batch calls carried specific keys.
   bool _batchAffectedStructuralUnknown = false;
 
+  /// Set when a mutation inside [runBatch] would have triggered a full
+  /// [_rebuildVisibleOrder] call. Inside a batch, mutations call
+  /// [_markVisibleOrderDirty] instead of rebuilding directly: K reparents
+  /// in one batch then collapse to ONE rebuild at outermost batch exit
+  /// instead of K full DFS+post-order passes. Outside a batch, the
+  /// helper rebuilds immediately so external behavior is unchanged.
+  ///
+  /// While the flag is true, [_order] reflects the structural state at
+  /// batch entry, not the live mutated state. In-batch readers that
+  /// depend on visible-order membership (e.g. [moveNode]'s phantom-anchor
+  /// decisions) must consult a structural predicate that's correct
+  /// regardless of [_order] freshness — see [_isStructurallyVisible].
+  /// Public visible-order accessors call [_ensureVisibleOrder] first to
+  /// flush the deferred rebuild on demand.
+  bool _visibleOrderDirty = false;
+
   /// Default extent for nodes that haven't been measured yet.
   static const double defaultExtent = 48.0;
 
@@ -1228,7 +1244,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   late final List<TKey> visibleNodes = _VisibleNodesView<TKey, TData>(this);
 
   /// Number of visible nodes.
-  int get visibleNodeCount => _order.length;
+  int get visibleNodeCount {
+    _ensureVisibleOrder();
+    return _order.length;
+  }
 
   int get rootCount => _roots.length;
 
@@ -1289,7 +1308,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Returns the nid of the visible node at [visibleIndex]. No [TKey] hash
   /// occurs. Panics (unchecked read) if [visibleIndex] is out of range.
-  int visibleNidAt(int visibleIndex) => _order.orderNids[visibleIndex];
+  int visibleNidAt(int visibleIndex) {
+    _ensureVisibleOrder();
+    return _order.orderNids[visibleIndex];
+  }
 
   /// Read-only view over the visible-order nid buffer for hot-path
   /// consumers that walk all visible positions and want to skip the
@@ -1297,7 +1319,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// length may exceed [visibleNodeCount] — only the first N entries
   /// are valid. The buffer itself is mutated in place by structural
   /// changes; callers must not retain the reference across mutations.
-  Int32List get orderNidsView => _order.orderNids;
+  Int32List get orderNidsView {
+    _ensureVisibleOrder();
+    return _order.orderNids;
+  }
 
   /// Visible-order index for the live nid [nid], or
   /// [VisibleOrderBuffer.kNotVisible] when [nid] is not currently in the
@@ -1305,7 +1330,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// equivalent of `_order.indexByNid[nid]`.
   ///
   /// Caller must guarantee [nid] is live and within range.
-  int visibleIndexOfNid(int nid) => _order.indexByNid[nid];
+  int visibleIndexOfNid(int nid) {
+    _ensureVisibleOrder();
+    return _order.indexByNid[nid];
+  }
 
   /// Depth for [nid] (0 for roots). No [TKey] hash. [nid] must be live.
   int depthOfNid(int nid) => _store.depthByNid[nid];
@@ -1447,7 +1475,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// O(1) via the visible-order buffer's nid-indexed reverse lookup.
   /// Useful for the render object to distinguish "truly hidden" from
   /// "ghost-rendered after a visible→hidden reparent."
-  bool isVisible(TKey key) => _order.contains(key);
+  bool isVisible(TKey key) {
+    _ensureVisibleOrder();
+    return _order.contains(key);
+  }
 
   /// Whether the given node has children.
   bool hasChildren(TKey key) {
@@ -1950,6 +1981,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Gets the index of a node in the visible order, or -1 if not visible.
   int getVisibleIndex(TKey key) {
+    _ensureVisibleOrder();
     return _order.indexOf(key);
   }
 
@@ -2160,6 +2192,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     } finally {
       _batchDepth--;
       if (_batchDepth == 0) {
+        // Flush any deferred visible-order rebuild BEFORE notifications
+        // fire — listeners reading visibleNodes/orderNidsView in their
+        // callback must see the post-batch state. Cheap when no
+        // mutation flagged dirtiness (single bool check).
+        _ensureVisibleOrder();
         final didStructural = _batchDidRequestStructural;
         final dirtyData = _batchDirtyDataNodes;
         final structuralAffected = _batchAffectedStructuralUnknown
@@ -2337,8 +2374,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _adoptKey(node.key);
       _store.setData(node.key, node);
       if (preservePendingSubtreeState) {
-        _rebuildVisibleOrder();
-        _structureGeneration++;
+        _markVisibleOrderDirty();
         // Cancelling a pending deletion restores the node (and possibly
         // descendants) to the tree. Downstream builder-output effects span
         // the restored subtree plus any ancestor whose hasChildren state
@@ -2354,8 +2390,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // Yanking them here would visually jump following rows upward by
       // the descendant's current extent in a single frame.
       _setExpandedKey(node.key, false);
-      _rebuildVisibleOrder();
-      _structureGeneration++;
+      _markVisibleOrderDirty();
       _notifyStructural();
       return;
     }
@@ -2386,8 +2421,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _roots.removeAt(currentRootIndex);
         final clamped = desiredIndex.clamp(0, _roots.length);
         _roots.insert(clamped, node.key);
-        _rebuildVisibleOrder();
-        _structureGeneration++;
+        _markVisibleOrderDirty();
       }
       // Data payload for node.key was just overwritten — rebuild its row.
       _notifyStructural(affectedKeys: <TKey>{node.key});
@@ -2636,8 +2670,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _adoptKey(node.key);
       _store.setData(node.key, node);
       if (preservePendingSubtreeState) {
-        _rebuildVisibleOrder();
-        _structureGeneration++;
+        _markVisibleOrderDirty();
         // See insertRoot's matching branch: cancelling a pending deletion
         // may restore a subtree and flip ancestor hasChildren state — fall
         // back to a full refresh.
@@ -2651,8 +2684,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // Yanking them here would visually jump following rows upward by
       // the descendant's current extent in a single frame.
       _setExpandedKey(node.key, false);
-      _rebuildVisibleOrder();
-      _structureGeneration++;
+      _markVisibleOrderDirty();
       _notifyStructural();
       return;
     }
@@ -2682,8 +2714,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         siblings.removeAt(currentIndex);
         final clamped = desiredIndex.clamp(0, siblings.length);
         siblings.insert(clamped, node.key);
-        _rebuildVisibleOrder();
-        _structureGeneration++;
+        _markVisibleOrderDirty();
       }
       // Data payload for node.key was just overwritten — rebuild its row.
       _notifyStructural(affectedKeys: <TKey>{node.key});
@@ -2852,8 +2883,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       ..clear()
       ..addAll(orderedKeys)
       ..addAll(pendingRoots);
-    _rebuildVisibleOrder();
-    _structureGeneration++;
+    _markVisibleOrderDirty();
     // Pure reorder: positions change but no row's builder output does
     // (nodeBuilder signature takes (context, key, depth) — no index). The
     // sliver's layout repositions elements in place.
@@ -2910,8 +2940,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
     if (needsVisibleRebuild) {
-      _rebuildVisibleOrder();
-      _structureGeneration++;
+      _markVisibleOrderDirty();
     }
     // See reorderRoots: pure reorder — no builder output changes.
     _notifyStructural(affectedKeys: const {});
@@ -3005,8 +3034,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (oldParent == newParentKey && index == null) return;
 
     // Capture pre-mutation visibility so we can decide entry vs exit
-    // phantom paths after _rebuildVisibleOrder runs.
-    final wasVisible = animate && _order.contains(key);
+    // phantom paths after the visible-order rebuild runs.
+    //
+    // Use the structural predicate ([_ancestorsExpandedFast]) instead of
+    // [_order.contains] because, inside [runBatch] with deferred rebuilds,
+    // [_order] still reflects state at batch entry — any prior in-batch
+    // mutation that changed this key's visibility hasn't been flushed yet.
+    // The structural predicate reads parent-chain expansion which is
+    // eagerly maintained on every [_setParentKey] / [_setExpandedKey],
+    // so it's correct regardless of [_order] freshness. The predicate
+    // also gives the desired user-facing answer for the rare "key is in
+    // [_order] only because it has an active animation under a collapsed
+    // ancestor" case — the user sees a collapsed parent, no row visible,
+    // so an entry-phantom path is the right choice.
+    final wasVisible = animate && _isStructurallyVisible(key);
 
     // First-wins staging fan-out. Every attached sliver render object's
     // beginSlideBaseline is invoked. Inside runBatch (or for adjacent
@@ -3033,7 +3074,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // emerging row visually slides "out from behind" its old parent.
       if (!wasVisible) {
         TKey? cursor = _parentKeyOfKey(key);
-        while (cursor != null && !_order.contains(cursor)) {
+        while (cursor != null && !_isStructurallyVisible(cursor)) {
           cursor = _parentKeyOfKey(cursor);
         }
         if (cursor != null) {
@@ -3101,8 +3142,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final newDepth = newParentKey != null ? (_depthOfKey(newParentKey)) + 1 : 0;
     _refreshSubtreeDepths(key, newDepth);
 
-    _rebuildVisibleOrder();
-    _structureGeneration++;
+    _markVisibleOrderDirty();
 
     // Exit-phantom for visible → hidden reparenting:
     // Symmetric to the entry-phantom block above. If the moved subtree
@@ -3118,9 +3158,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // slide DESTINATION, retain a ghost render box, and paint the
     // sliding row clipped to "outside the anchor" so it visually
     // disappears INTO the new parent.
-    if (animate && wasVisible && !_order.contains(key)) {
+    if (animate && wasVisible && !_isStructurallyVisible(key)) {
       TKey? cursor = newParentKey;
-      while (cursor != null && !_order.contains(cursor)) {
+      while (cursor != null && !_isStructurallyVisible(cursor)) {
         cursor = _parentKeyOfKey(cursor);
       }
       if (cursor != null) {
@@ -3630,8 +3670,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     _rebuildAllAncestorsExpanded();
     // Rebuild visible order from scratch (more efficient for bulk operations)
-    _rebuildVisibleOrder();
-    _structureGeneration++;
+    _markVisibleOrderDirty();
     // Start animations for newly visible nodes and reverse exiting animations
     if (animate) {
       // Reverse collapsing operation groups
@@ -3885,6 +3924,61 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// O(N·depth), which degenerates to O(N²) on deep trees.
   void _rebuildVisibleOrder() {
     _runWithSubtreeSizeUpdatesSuppressed(_rebuildVisibleOrderImpl);
+  }
+
+  /// Shared body for the immediate-mode helper and the deferred-flush
+  /// helper: rebuild the visible order and bump the structure generation
+  /// in a single coherent step. Stays out-of-line so [_markVisibleOrderDirty]
+  /// and [_ensureVisibleOrder] don't carry the literal pair.
+  void _rebuildVisibleOrderAndBump() {
+    _rebuildVisibleOrder();
+    ++_structureGeneration;
+  }
+
+  /// Equivalent of `_rebuildVisibleOrder(); _structureGeneration++;` for
+  /// internal mutators, but defers the rebuild when called inside
+  /// [runBatch]. Outside a batch, behavior matches the inlined pair so
+  /// existing single-mutation paths are unchanged.
+  ///
+  /// Inside a batch, only the dirty flag is set; the actual rebuild
+  /// happens once at outermost batch exit (or on the first public
+  /// visible-order read via [_ensureVisibleOrder]). The structure
+  /// generation is bumped at flush time so external observers, which
+  /// are themselves notified at batch exit, see a single coherent bump.
+  void _markVisibleOrderDirty() {
+    if (_batchDepth > 0) {
+      _visibleOrderDirty = true;
+    } else {
+      _rebuildVisibleOrderAndBump();
+    }
+  }
+
+  /// Materializes any deferred [_rebuildVisibleOrder] and clears the
+  /// dirty flag. Cheap when not dirty (single bool check). Called from
+  /// [runBatch]'s exit path before listeners fire, and from public
+  /// visible-order accessors so external reads always see fresh state.
+  void _ensureVisibleOrder() {
+    if (_visibleOrderDirty) {
+      _visibleOrderDirty = false;
+      _rebuildVisibleOrderAndBump();
+    }
+  }
+
+  /// Whether [key] would currently be in the visible order based purely
+  /// on its parent chain's expansion state. Independent of [_order]
+  /// freshness, so safe to call from inside a batch where the deferred
+  /// rebuild hasn't run yet.
+  ///
+  /// Backed by [_ancestorsExpandedFast] (O(1), eagerly maintained by
+  /// [_setParentKey] / [_setExpandedKey] through the node store). Does
+  /// NOT reflect the "pending-deletion ancestor with active descendant
+  /// animation" carve-out that [_rebuildVisibleOrderImpl] applies — but
+  /// that case is irrelevant for [moveNode] (its `_cancelAnimationStateForSubtree`
+  /// step already strips pending-deletion state from the moved subtree
+  /// before any post-mutation visibility check fires).
+  bool _isStructurallyVisible(TKey key) {
+    if (!_hasKey(key)) return false;
+    return _ancestorsExpandedFast(key);
   }
 
   void _rebuildVisibleOrderImpl() {
