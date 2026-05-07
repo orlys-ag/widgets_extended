@@ -31,8 +31,8 @@ void main() {
 
     // Install a 200ms slide on `a` with startDelta=100.
     controller.animateSlideFromOffsets(
-      const {"a": 100.0},
-      const {"a": 0.0},
+      const {"a": (y: 100.0, x: 0.0)},
+      const {"a": (y: 0.0, x: 0.0)},
       duration: const Duration(milliseconds: 200),
       curve: Curves.linear,
     );
@@ -62,8 +62,8 @@ void main() {
     // next tick `a`'s progress is recomputed from ~0, jumping currentDelta
     // back to startDelta=100.
     controller.animateSlideFromOffsets(
-      const {"b": 80.0},
-      const {"b": 0.0},
+      const {"b": (y: 80.0, x: 0.0)},
+      const {"b": (y: 0.0, x: 0.0)},
       duration: const Duration(milliseconds: 200),
       curve: Curves.linear,
     );

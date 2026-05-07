@@ -22,9 +22,22 @@
 /// fires listeners synchronously from its `value=` setter, so starting it
 /// mid-layout would trip `_debugCanPerformMutations`.
 ///
+/// Per-slide timing: each [SlideAnimation] tracks its own
+/// `slideStartElapsed` (the [Ticker.elapsed] value at install /
+/// composition / re-baseline) and `slideDuration`. The shared ticker
+/// runs continuously while any slide is active and is NOT reset
+/// per-batch — per-slide progress in `_onSlideTick` derives from
+/// `(elapsed - entry.slideStartElapsed) / entry.slideDuration`. This
+/// allows multiple concurrent slides with different durations to
+/// progress at their own rates, and lets slides marked
+/// [SlideAnimation.preserveProgressOnRebatch] continue uninterrupted
+/// across un-touching batches (used by the render layer for active
+/// edge-ghost and exit-phantom slides).
+///
 /// Not exported from the package barrel; used only by [TreeController].
 library;
 
+import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/scheduler.dart';
@@ -53,16 +66,50 @@ class SlideAnimationEngine<TKey> {
   List<SlideAnimation<TKey>?> _slideByNid = <SlideAnimation<TKey>?>[];
 
   /// Live "set of nids that have a non-null _slideByNid slot."
+  ///
+  /// Used by `_onSlideTick`, `maxAbsDelta`, the re-baseline branch, and
+  /// `_clearAllSlidesInternal` for iteration. For typical slide counts
+  /// (5-50) the hash-set iteration is fast and the storage is bounded
+  /// by the active count rather than nidCapacity. Per-row "is sliding?"
+  /// checks are answered by reading `_slideByNid[nid]` directly (also
+  /// O(1) and yields the value, not just presence) — no separate
+  /// contains structure is needed.
   final Set<int> _activeSlideNids = <int>{};
 
+  /// Count of active slide entries whose `startDeltaX != 0` — i.e. entries
+  /// that will animate horizontally. Maintained incrementally by every
+  /// install / compose / clear path so the render layer can skip per-row
+  /// X-axis processing when this is 0 (the overwhelmingly common case
+  /// since X deltas only arise from depth-changing reparents).
+  ///
+  /// Invariant: equals the number of entries in `_slideByNid` whose
+  /// `startDeltaX != 0`. `currentDeltaX` lerps toward 0 during the slide
+  /// but never crosses through 0, so `startDeltaX != 0` is a stable
+  /// "this entry has X work" signal for the slide's lifetime.
+  int _xActiveCount = 0;
+
   Ticker? _ticker;
-  Duration _slideDuration = const Duration(milliseconds: 220);
+
+  /// Last [Duration] passed to [_onSlideTick]. Updated on every tick so
+  /// install/composition/re-baseline paths can read the most recent
+  /// ticker elapsed value when capturing per-slide `slideStartElapsed`
+  /// (the [Ticker] class does not expose `elapsed` between callbacks,
+  /// so we mirror it manually).
+  ///
+  /// Reset to [Duration.zero] when the ticker is created or restarted
+  /// after a fully-settled period — see [animateFromOffsets].
+  Duration _lastTickElapsed = Duration.zero;
 
   // ──────────────────────────────────────────────────────────────────────
   // PUBLIC READ API (consumed by render layer via controller delegators)
   // ──────────────────────────────────────────────────────────────────────
 
   bool get hasActive => _activeSlideNids.isNotEmpty;
+
+  /// Whether any active slide entry is animating horizontally
+  /// (startDeltaX != 0). Lets render-layer hot paths skip per-row
+  /// X-delta reads when no X-axis work is in flight.
+  bool get hasActiveX => _xActiveCount > 0;
 
   /// Maximum |currentDelta| across every active slide entry, or 0.0 when
   /// no slides are active.
@@ -92,6 +139,22 @@ class SlideAnimationEngine<TKey> {
     return slide == null ? 0.0 : slide.currentDelta;
   }
 
+  /// X-axis (cross-axis indent) slide delta for the live [nid], or 0.0 if
+  /// not currently sliding. Caller must guarantee [nid] is within range.
+  double deltaXForNid(int nid) {
+    final slide = _slideByNid[nid];
+    return slide == null ? 0.0 : slide.currentDeltaX;
+  }
+
+  /// X-axis slide delta for [key], or 0.0 if not currently sliding (or
+  /// not registered).
+  double deltaXForKey(TKey key) {
+    final nid = _nids[key];
+    if (nid == null || nid >= _slideByNid.length) return 0.0;
+    final slide = _slideByNid[nid];
+    return slide == null ? 0.0 : slide.currentDeltaX;
+  }
+
   // ──────────────────────────────────────────────────────────────────────
   // ANIMATE
   // ──────────────────────────────────────────────────────────────────────
@@ -106,11 +169,12 @@ class SlideAnimationEngine<TKey> {
   /// [duration] is zero. Both gates exist in the original code and are
   /// preserved bit-for-bit.
   void animateFromOffsets(
-    Map<TKey, double> priorOffsets,
-    Map<TKey, double> currentOffsets, {
+    Map<TKey, ({double y, double x})> priorOffsets,
+    Map<TKey, ({double y, double x})> currentOffsets, {
     required Duration duration,
     required Curve curve,
     required bool structuralAnimationsDisabled,
+    double maxSlideDistance = double.infinity,
   }) {
     if (structuralAnimationsDisabled || duration == Duration.zero) {
       // No-animation mode: drop any in-flight slide and return.
@@ -121,6 +185,16 @@ class SlideAnimationEngine<TKey> {
       return;
     }
 
+    // If the ticker isn't currently running, reset our mirror of its
+    // elapsed value to 0 BEFORE the install loop reads it. The ticker's
+    // internal elapsed restarts from 0 on the next [Ticker.start] call,
+    // and we want new slides installed in this batch to capture
+    // `slideStartElapsed = 0` so the first post-install tick computes
+    // progress as `vsync_delta / duration` (not negative).
+    if (_ticker == null || !_ticker!.isActive) {
+      _lastTickElapsed = Duration.zero;
+    }
+
     int installed = 0;
     final touched = <int>{};
     for (final entry in currentOffsets.entries) {
@@ -128,27 +202,132 @@ class SlideAnimationEngine<TKey> {
       final current = entry.value;
       final prior = priorOffsets[key];
       if (prior == null) continue;
-      final rawDelta = prior - current;
+      final rawDeltaY = prior.y - current.y;
+      final rawDeltaX = prior.x - current.x;
       final existing = _slideAt(key);
+
+      // Distance gate: applied to the COMPOSED Y delta. When existing is
+      // null, composedY == rawDeltaY (subset of the same check). On
+      // exceed: drop any in-flight entry, install nothing, row paints at
+      // new structural position. The visual jump is bounded by
+      // |existing.currentDelta| which was itself ≤ maxSlideDistance.
+      final composedY = (existing?.currentDelta ?? 0.0) + rawDeltaY;
+      if (composedY.abs() > maxSlideDistance) {
+        if (existing != null) {
+          _clearSlide(key);
+          // Removing a touched entry mid-iteration is fine — touched is
+          // populated only on install/compose.
+        }
+        continue;
+      }
+
       if (existing == null) {
-        if (rawDelta == 0.0) continue;
-        _setSlide(
-          key,
-          SlideAnimation<TKey>(startDelta: rawDelta, curve: curve),
+        if (rawDeltaY == 0.0 && rawDeltaX == 0.0) continue;
+        final slide = SlideAnimation<TKey>(
+          startDelta: rawDeltaY,
+          startDeltaX: rawDeltaX,
+          curve: curve,
         );
+        slide.slideStartElapsed = _lastTickElapsed;
+        slide.slideDuration = duration;
+        _setSlide(key, slide);
+        if (rawDeltaX != 0.0) _xActiveCount++;
         final nid = _nids[key];
         if (nid != null) touched.add(nid);
         installed++;
       } else {
         // Composition: preserve currently rendered visual position as the
         // new starting delta so the slide continues seamlessly.
-        final composed = existing.currentDelta + rawDelta;
-        if (composed == 0.0) {
-          _clearSlide(key);
+        final composedX = existing.currentDeltaX + rawDeltaX;
+        if (composedY == 0.0 && composedX == 0.0) {
+          _clearSlide(key); // handles _xActiveCount decrement internally
           continue;
         }
-        existing.startDelta = composed;
-        existing.currentDelta = composed;
+        // No-op composition: this batch reports the row's painted
+        // position is the same in both baseline and current snapshots
+        // (rawDeltaY == 0 && rawDeltaX == 0), so the slide's existing
+        // trajectory is still valid — animating from `currentDelta`
+        // toward 0 reaches the same structural target either way.
+        // Skipping the reset here avoids the failure mode the user
+        // reported under rapid tapping of `Reparent ALL` / `Move N`:
+        //
+        //   * Tap N installs slide for row R. `currentDelta` = X.
+        //   * Tap N+1 includes R in its batch but doesn't shift R
+        //     structurally (some other rows are reordered around R but
+        //     R's own position is unchanged). `rawDeltaY` = 0.
+        //   * Pre-fix composition: `startDelta = currentDelta`,
+        //     `progress = 0`, `slideStartElapsed = now`. The clock
+        //     restarts; the slide is animated again from `currentDelta`
+        //     to 0 over a fresh `slideDuration`.
+        //   * Per rapid tap, `currentDelta` shrinks (it had been
+        //     ticking) and the clock is reset again. Per-tick motion
+        //     becomes sub-pixel within a few iterations, so the user
+        //     observes "the slide isn't playing" — the row ends up at
+        //     its correct structural target only when tapping stops
+        //     and the slide can finally run for one full duration
+        //     uninterrupted.
+        //
+        // Treat this entry as "un-touched" by this batch: it stays in
+        // `_activeSlideNids`, so the un-touched re-baseline branch
+        // below is the only authority over its clock — and that branch
+        // honors `preserveProgressOnRebatch`, so a slide that already
+        // had the flag set (via consume's step 8 / `_syncPreserveProgressFlags`
+        // / re-promotion-on-scroll) will continue ticking on its
+        // original install clock. `installed` is not incremented here
+        // because no new install/composition happened.
+        if (rawDeltaY == 0.0 && rawDeltaX == 0.0) {
+          continue;
+        }
+        // Update X-active count based on transition between had-X and
+        // has-X states. existing.startDeltaX reflects the entry's
+        // current "has X work" status (lerp doesn't cross zero).
+        final hadX = existing.startDeltaX != 0.0;
+        final newHasX = composedX != 0.0;
+        if (hadX && !newHasX) {
+          _xActiveCount--;
+        } else if (!hadX && newHasX) {
+          _xActiveCount++;
+        }
+        existing.startDelta = composedY;
+        existing.currentDelta = composedY;
+        existing.startDeltaX = composedX;
+        existing.currentDeltaX = composedX;
+        existing.slideStartElapsed = _lastTickElapsed;
+        // Adapt the slide's effective duration so per-frame motion is
+        // visually perceptible. Under rapid cascaded `moveNode(animate:
+        // true)` (e.g. the example app's `Reparent ALL` button tapped
+        // quickly), each tap re-composes a row's slide with a new
+        // `composedY = currentDelta + rawDeltaY`. When the existing
+        // slide's `currentDelta` and the batch's `rawDeltaY` partially
+        // cancel — common under random reparenting — `composedY` can
+        // shrink relative to the original `rawDeltaY`. With the user-
+        // set `slideDuration` applied unchanged, the per-frame motion
+        // (`composedY / ticks_per_duration`) becomes sub-pixel and the
+        // user perceives "the row didn't animate", even though the
+        // engine has an active slide and the row eventually settles at
+        // its correct structural position.
+        //
+        // Clamp the duration so per-tick motion is at least ~1 px.
+        // This means small composedY → faster settle (the row "snaps"
+        // quickly to its target with a brief but visible animation);
+        // large composedY → user-set duration unchanged (smooth slide
+        // over the full duration). No visual jump: `composedY` is still
+        // the slide's start delta. Only the time over which it's
+        // animated is shortened.
+        //
+        // The 16667 µs / px ratio assumes 60Hz; on higher-refresh
+        // displays this slightly over-shortens (per-tick is bigger
+        // than 1 px on a 120Hz device). Acceptable — it errs on the
+        // side of more-visible motion.
+        existing.slideDuration = _adaptDurationToVisibleMotion(
+          duration,
+          composedY: composedY,
+          composedX: composedX,
+        );
+        // Composition creates a fresh slide semantically; reset the
+        // preserve flag. Render layer re-marks via syncPreserveProgressFlags
+        // for slides that are still ghosts after the batch.
+        existing.preserveProgressOnRebatch = false;
         existing.progress = 0.0;
         existing.curve = curve;
         final nid = _nids[key];
@@ -160,17 +339,26 @@ class SlideAnimationEngine<TKey> {
     // Re-baseline every active slide that this call did NOT touch — without
     // this, an un-touched slide's progress would snap to ~0 and lerp
     // currentDelta back to its ORIGINAL startDelta (visible jump).
+    //
+    // Slides marked [SlideAnimation.preserveProgressOnRebatch] (set by
+    // the render layer for active edge-ghost and exit-phantom slides) are
+    // skipped — their progress continues uninterrupted across batches so
+    // that concurrent mutations (e.g. autoscroll commits) don't reset
+    // ghost slides that should be settling smoothly.
     if (_activeSlideNids.length != touched.length) {
       for (final nid in _activeSlideNids) {
         if (touched.contains(nid)) continue;
         final entry = _slideByNid[nid]!;
-        if (entry.currentDelta == 0.0) {
+        if (entry.currentDelta == 0.0 && entry.currentDeltaX == 0.0) {
           // Already settled — let the next tick mark complete and clear.
           continue;
         }
+        if (entry.preserveProgressOnRebatch) continue;
         entry.startDelta = entry.currentDelta;
+        entry.startDeltaX = entry.currentDeltaX;
+        entry.slideStartElapsed = _lastTickElapsed;
         entry.progress = 0.0;
-        // Keep the un-touched entry's existing curve.
+        // Keep the un-touched entry's existing curve and slideDuration.
       }
     }
 
@@ -180,51 +368,75 @@ class SlideAnimationEngine<TKey> {
     }
     if (installed == 0) return;
 
-    // (Re)start the shared progress clock. Stop-then-start resets the
-    // ticker's elapsed time to zero so progress begins at 0 for every
-    // entry in this batch. [Ticker.start] does NOT fire callbacks
-    // synchronously — the first tick lands on the next vsync, so this is
-    // safe to call from inside [RenderObject.performLayout].
-    _slideDuration = duration;
+    // Ticker runs continuously while any slide is active; per-slide
+    // progress derives from `(elapsed - slide.slideStartElapsed)
+    // / slide.slideDuration`. Starting an already-active ticker is a
+    // no-op. Per the class docstring: [Ticker.start] does NOT fire
+    // callbacks synchronously, so this is safe inside
+    // [RenderObject.performLayout]. `_lastTickElapsed` was already reset
+    // above for fresh-ticker batches.
     final ticker = _ticker ??= _vsync.createTicker(_onSlideTick);
-    if (ticker.isActive) ticker.stop();
-    ticker.start();
+    if (!ticker.isActive) ticker.start();
   }
 
-  /// Tick handler. Ordering matters — see comments. Final zero-delta
-  /// paint is guaranteed because:
+  /// Tick handler. Per-slide progress: each entry's progress is derived
+  /// from `(elapsed - entry.slideStartElapsed) / entry.slideDuration`, so
+  /// slides installed in different batches with different durations
+  /// progress at their own rates.
   ///
-  /// 1. Progress and [SlideAnimation.currentDelta] are updated for every
-  ///    entry; on completion, currentDelta is snapped to exactly 0.0 so
-  ///    the final painted position matches structural layout pixel-exactly.
-  /// 2. The animation-listener channel ([_onTick]) fires **before** the
-  ///    map is cleared. [hasActive] is still true, so the sliver element's
-  ///    `_onAnimationTick` takes the slide branch and schedules
-  ///    `markNeedsPaint`. That paint reads `deltaForNid(nid) == 0.0`.
-  /// 3. Only after the paint has been scheduled do we clear the map and
-  ///    stop the ticker. No further tick will fire.
+  /// Final zero-delta paint is guaranteed by the same contract as before:
+  ///
+  /// 1. `entry.currentDelta` is set to exactly 0.0 on completion so the
+  ///    post-tick paint matches structural layout pixel-exactly.
+  /// 2. `_onTick` (the animation listener channel) fires BEFORE any
+  ///    completed entries are removed from `_slideByNid`. The sliver
+  ///    element's `_onAnimationTick` schedules `markNeedsPaint`, and
+  ///    that paint reads `deltaForNid(nid) == 0.0`.
+  /// 3. Per-slide cleanup runs AFTER `_onTick`. Reference-safe — only
+  ///    clears the slot if it still holds the same entry that completed
+  ///    (an `_onTick` listener may have re-installed a new slide on the
+  ///    same nid via composition).
   void _onSlideTick(Duration elapsed) {
+    _lastTickElapsed = elapsed;
     if (!hasActive) {
       _ticker?.stop();
       return;
     }
-    final totalUs = _slideDuration.inMicroseconds;
-    final raw = totalUs <= 0 ? 1.0 : elapsed.inMicroseconds / totalUs;
-    final complete = raw >= 1.0 - 1e-9;
-
+    final completedEntries = <(int, SlideAnimation<TKey>)>[];
+    bool anyStillActive = false;
     for (final nid in _activeSlideNids) {
       final entry = _slideByNid[nid]!;
+      final perSlideMicros =
+          elapsed.inMicroseconds - entry.slideStartElapsed.inMicroseconds;
+      final totalUs = entry.slideDuration.inMicroseconds;
+      final raw = totalUs <= 0 ? 1.0 : perSlideMicros / totalUs;
+      final complete = raw >= 1.0 - 1e-9;
       entry.progress = complete ? 1.0 : raw.clamp(0.0, 1.0);
       final t = entry.curve.transform(entry.progress);
-      entry.currentDelta = complete
-          ? 0.0
-          : lerpDouble(entry.startDelta, 0.0, t)!;
+      if (complete) {
+        entry.currentDelta = 0.0;
+        entry.currentDeltaX = 0.0;
+        completedEntries.add((nid, entry));
+      } else {
+        entry.currentDelta = lerpDouble(entry.startDelta, 0.0, t)!;
+        entry.currentDeltaX = lerpDouble(entry.startDeltaX, 0.0, t)!;
+        anyStillActive = true;
+      }
     }
 
     _onTick();
 
-    if (complete) {
-      _clearAllSlidesInternal();
+    // Reference-safe cleanup AFTER paint scheduling. Only clear the slot
+    // if it still holds the entry that completed — an `_onTick` listener
+    // may have re-installed a new slide on the same nid.
+    for (final (nid, originalEntry) in completedEntries) {
+      if (_slideByNid[nid] != originalEntry) continue;
+      if (originalEntry.startDeltaX != 0.0) _xActiveCount--;
+      _slideByNid[nid] = null;
+      _activeSlideNids.remove(nid);
+    }
+
+    if (!anyStillActive && _activeSlideNids.isEmpty) {
       _ticker?.stop();
     }
   }
@@ -250,7 +462,9 @@ class SlideAnimationEngine<TKey> {
   /// possible during initialization races).
   void clearForNid(int nid) {
     if (nid < 0 || nid >= _slideByNid.length) return;
-    if (_slideByNid[nid] != null) {
+    final prev = _slideByNid[nid];
+    if (prev != null) {
+      if (prev.startDeltaX != 0.0) _xActiveCount--;
       _slideByNid[nid] = null;
       _activeSlideNids.remove(nid);
     }
@@ -262,6 +476,21 @@ class SlideAnimationEngine<TKey> {
     _clearSlide(key);
   }
 
+  /// Sets [SlideAnimation.preserveProgressOnRebatch] = true on the slide
+  /// entry for [key]. Tolerant of unregistered keys and inactive slides
+  /// (no-op).
+  ///
+  /// Set-only-true semantics — the engine implicitly clears the flag when
+  /// the slide entry is destroyed (settles, cancelled, or replaced via
+  /// composition). The render layer should never need to clear explicitly.
+  void markPreserveProgress(TKey key) {
+    final nid = _nids[key];
+    if (nid == null || nid >= _slideByNid.length) return;
+    final entry = _slideByNid[nid];
+    if (entry == null) return;
+    entry.preserveProgressOnRebatch = true;
+  }
+
   /// Resets every slide-related field back to its initial state and
   /// disposes the ticker. Called from `TreeController._clear` (and
   /// indirectly from `dispose`). The next [animateFromOffsets] call
@@ -271,6 +500,7 @@ class SlideAnimationEngine<TKey> {
     _ticker = null;
     _slideByNid = <SlideAnimation<TKey>?>[];
     _activeSlideNids.clear();
+    _xActiveCount = 0;
   }
 
   /// Idempotent after [clearAll]. Implemented as a thin wrapper so the
@@ -302,9 +532,44 @@ class SlideAnimationEngine<TKey> {
     if (nid == null || nid >= _slideByNid.length) return null;
     final prev = _slideByNid[nid];
     if (prev == null) return null;
+    if (prev.startDeltaX != 0.0) _xActiveCount--;
     _slideByNid[nid] = null;
     _activeSlideNids.remove(nid);
     return prev;
+  }
+
+  /// Returns a duration ≤ [requested] for which a slide animating from
+  /// `composedY` (or `composedX`) toward 0 keeps per-frame motion at
+  /// least ~[_minPxPerTick] logical pixels at 60 Hz. Floor of one tick
+  /// (16.67 ms) so the slide is never instantaneous. See the call site
+  /// in the composition path for full rationale.
+  ///
+  /// 1 px / tick (60 px/sec) is technically visible but borderline on
+  /// opaque rectangular widgets (text, colored rows) — Flutter's
+  /// rasterizer renders the pixel grid one frame at a time, and a 1 px
+  /// step alternating between two adjacent pixel rows reads as faint
+  /// flicker rather than smooth motion. 2 px / tick (120 px/sec) is
+  /// reliably perceptible as movement.
+  static const int _microsPerTickAt60Hz = 16667;
+  static const int _minDurationMicros = _microsPerTickAt60Hz;
+  static const double _minPxPerTick = 2.0;
+
+  static Duration _adaptDurationToVisibleMotion(
+    Duration requested, {
+    required double composedY,
+    required double composedX,
+  }) {
+    final maxAbsDelta = math.max(composedY.abs(), composedX.abs());
+    if (maxAbsDelta <= 0.0) return requested;
+    final maxMicrosForVisiblePerTick =
+        (maxAbsDelta / _minPxPerTick * _microsPerTickAt60Hz).round();
+    final clamped = math.min(
+      requested.inMicroseconds,
+      maxMicrosForVisiblePerTick,
+    );
+    return Duration(
+      microseconds: math.max(_minDurationMicros, clamped),
+    );
   }
 
   void _clearAllSlidesInternal() {
@@ -312,6 +577,7 @@ class SlideAnimationEngine<TKey> {
       _slideByNid[nid] = null;
     }
     _activeSlideNids.clear();
+    _xActiveCount = 0;
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -323,8 +589,10 @@ class SlideAnimationEngine<TKey> {
   /// release builds skip it.
   void debugAssertConsistent() {
     int slideCount = 0;
+    int xCount = 0;
     for (int nid = 0; nid < _slideByNid.length; nid++) {
-      if (_slideByNid[nid] != null) {
+      final entry = _slideByNid[nid];
+      if (entry != null) {
         if (_nids.keyOf(nid) == null) {
           throw StateError("_slideByNid[$nid] non-null for freed slot");
         }
@@ -334,12 +602,19 @@ class SlideAnimationEngine<TKey> {
           );
         }
         slideCount++;
+        if (entry.startDeltaX != 0.0) xCount++;
       }
     }
     if (_activeSlideNids.length != slideCount) {
       throw StateError(
         "_activeSlideNids has ${_activeSlideNids.length} entries, "
         "but only $slideCount nids carry a slide slot",
+      );
+    }
+    if (_xActiveCount != xCount) {
+      throw StateError(
+        "_xActiveCount=$_xActiveCount but $xCount entries have non-zero "
+        "startDeltaX",
       );
     }
   }

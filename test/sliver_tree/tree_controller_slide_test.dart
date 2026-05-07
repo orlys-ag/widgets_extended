@@ -34,8 +34,8 @@ void main() {
 
       // Simulate that "a" moved up by 50 (prior was at y=50, now at y=0).
       controller.animateSlideFromOffsets(
-        {"a": 50.0, "b": 0.0},
-        {"a": 0.0, "b": 50.0},
+        {"a": (y: 50.0, x: 0.0), "b": (y: 0.0, x: 0.0)},
+        {"a": (y: 0.0, x: 0.0), "b": (y: 50.0, x: 0.0)},
         duration: const Duration(milliseconds: 100),
         curve: Curves.linear,
       );
@@ -70,8 +70,8 @@ void main() {
       controller.setRoots([TreeNode(key: "a", data: "A")]);
 
       controller.animateSlideFromOffsets(
-        {"a": 50.0},
-        {"a": 50.0},
+        {"a": (y: 50.0, x: 0.0)},
+        {"a": (y: 50.0, x: 0.0)},
         duration: const Duration(milliseconds: 100),
       );
       expect(controller.hasActiveSlides, false);
@@ -101,8 +101,8 @@ void main() {
       controller.setRoots([TreeNode(key: "a", data: "A")]);
 
       controller.animateSlideFromOffsets(
-        {"a": 100.0},
-        {"a": 0.0},
+        {"a": (y: 100.0, x: 0.0)},
+        {"a": (y: 0.0, x: 0.0)},
       );
       // animationDuration is zero → immediate no-op.
       expect(controller.hasActiveSlides, false);
@@ -122,8 +122,8 @@ void main() {
 
       controller.setRoots([TreeNode(key: "a", data: "A")]);
       controller.animateSlideFromOffsets(
-        {"a": 100.0},
-        {"a": 0.0},
+        {"a": (y: 100.0, x: 0.0)},
+        {"a": (y: 0.0, x: 0.0)},
         duration: const Duration(milliseconds: 200),
         curve: Curves.linear,
       );
@@ -137,8 +137,8 @@ void main() {
       // be at 0" — prior=30, current=0 → rawDelta=30. Composition:
       // existing.currentDelta (≈50) + 30 = ≈80.
       controller.animateSlideFromOffsets(
-        {"a": 30.0},
-        {"a": 0.0},
+        {"a": (y: 30.0, x: 0.0)},
+        {"a": (y: 0.0, x: 0.0)},
         duration: const Duration(milliseconds: 200),
         curve: Curves.linear,
       );
@@ -178,8 +178,8 @@ void main() {
       expect(controller.hasActiveSlides, false);
 
       controller.animateSlideFromOffsets(
-        {"b": 200.0},
-        {"b": 100.0},
+        {"b": (y: 200.0, x: 0.0)},
+        {"b": (y: 100.0, x: 0.0)},
         duration: const Duration(milliseconds: 100),
         curve: Curves.linear,
       );
@@ -218,8 +218,8 @@ void main() {
       });
 
       controller.animateSlideFromOffsets(
-        {"a": 60.0},
-        {"a": 0.0},
+        {"a": (y: 60.0, x: 0.0)},
+        {"a": (y: 0.0, x: 0.0)},
         duration: const Duration(milliseconds: 60),
         curve: Curves.linear,
       );

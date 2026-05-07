@@ -63,7 +63,11 @@ class LayoutAdmissionPolicy<TKey, TData> {
         ? nodeOffsetsByNid[orderNids[cacheStartIndex]]
         : 0.0;
     double postOffsetCumul = 0.0;
-    final double budgetCap = remainingCacheExtent + slideOverreach;
+    // The admission walk starts at `cacheStart - slideOverreach` and may
+    // continue through `cacheEnd + slideOverreach`. Rows from both widened
+    // sides consume accumulator budget, so the cap must cover the full
+    // widened interval, not just one extra side.
+    final double budgetCap = remainingCacheExtent + slideOverreach * 2.0;
     for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
       final nid = orderNids[i];
 

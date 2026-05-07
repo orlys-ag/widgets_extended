@@ -2,11 +2,11 @@
 /// section/item payloads doesn't trigger spurious `updateNode` calls
 /// at the tree-controller level.
 ///
-/// The internal `SectionPayload` / `ItemPayload` wrappers don't override
-/// `==`, so `TreeNode.==` (which compares `data` via `==`) falls back to
-/// identity for two wrapper instances around the SAME user payload.
-/// `TreeSyncController` then thinks the data changed on every sync and
-/// fires `updateNode` for every retained row.
+/// The internal `SectionPayload` / `ItemPayload` wrappers override `==`
+/// to compare by wrapped value (not wrapper identity). Without that,
+/// `TreeNode.==` (which compares `data` via `==`) would always report
+/// data as changed on every sync, and `TreeSyncController` would fire
+/// `updateNode` for every retained row.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -15,87 +15,64 @@ import 'package:widgets_extended/widgets_extended.dart';
 void main() {
   testWidgets("setSections with identical payloads does not fire "
       "spurious node-data notifications", (tester) async {
-    final controller =
-        SectionedListController<String, String, String, String>(
+    final controller = SectionedListController<String, String, String>(
       vsync: tester,
+      sectionKeyOf: (s) => s,
+      itemKeyOf: (i) => i,
       animationDuration: Duration.zero,
     );
     addTearDown(controller.dispose);
 
-    // Initial sync.
-    controller.setSections([
-      SectionInput<String, String, String, String>(
-        key: "s1",
-        section: "Section 1",
-        items: const [
-          ItemInput(key: "i1", item: "Item 1"),
-          ItemInput(key: "i2", item: "Item 2"),
-        ],
-      ),
-    ]);
+    controller.setSections(
+      ["s1"],
+      itemsOf: (_) => const ["i1", "i2"],
+    );
 
-    int dataChangeCount = 0;
-    controller.treeController.addNodeDataListener((_) => dataChangeCount++);
+    final fires = <String>[];
+    controller.addSectionPayloadListener(fires.add);
+    controller.addItemPayloadListener(fires.add);
 
-    // Re-sync with IDENTICAL payloads (new SectionInput / ItemInput
-    // instances wrapping the same String values).
-    controller.setSections([
-      SectionInput<String, String, String, String>(
-        key: "s1",
-        section: "Section 1",
-        items: const [
-          ItemInput(key: "i1", item: "Item 1"),
-          ItemInput(key: "i2", item: "Item 2"),
-        ],
-      ),
-    ]);
+    // Re-sync with IDENTICAL payloads.
+    controller.setSections(
+      ["s1"],
+      itemsOf: (_) => const ["i1", "i2"],
+    );
 
     expect(
-      dataChangeCount,
-      0,
-      reason:
-          "setSections with identical payloads fired $dataChangeCount "
-          "node-data notifications. SectionPayload/ItemPayload wrappers "
-          "compare by identity by default, so two wrappers around the "
-          "same user value look unequal — TreeSyncController then fires "
-          "updateNode for every retained row, refreshing every header "
-          "and item even when nothing actually changed.",
+      fires,
+      isEmpty,
+      reason: "setSections with identical payloads fired ${fires.length} "
+          "node-data notifications. SectionPayload/ItemPayload must "
+          "compare wrapped values (not wrapper identity) so retained "
+          "rows aren't refreshed on every sync.",
     );
   });
 
   testWidgets("setItems with identical payloads does not fire spurious "
       "node-data notifications", (tester) async {
-    final controller =
-        SectionedListController<String, String, String, String>(
+    final controller = SectionedListController<String, String, String>(
       vsync: tester,
+      sectionKeyOf: (s) => s,
+      itemKeyOf: (i) => i,
       animationDuration: Duration.zero,
     );
     addTearDown(controller.dispose);
 
-    controller.setSections([
-      SectionInput<String, String, String, String>(
-        key: "s1",
-        section: "Section 1",
-        items: const [
-          ItemInput(key: "i1", item: "Item 1"),
-          ItemInput(key: "i2", item: "Item 2"),
-        ],
-      ),
-    ]);
+    controller.setSections(
+      ["s1"],
+      itemsOf: (_) => const ["i1", "i2"],
+    );
 
-    int dataChangeCount = 0;
-    controller.treeController.addNodeDataListener((_) => dataChangeCount++);
+    final fires = <String>[];
+    controller.addItemPayloadListener(fires.add);
 
-    controller.setItems("s1", const [
-      ItemInput(key: "i1", item: "Item 1"),
-      ItemInput(key: "i2", item: "Item 2"),
-    ]);
+    controller.setItems("s1", const ["i1", "i2"]);
 
     expect(
-      dataChangeCount,
-      0,
-      reason: "setItems with identical payloads fired $dataChangeCount "
-          "node-data notifications.",
+      fires,
+      isEmpty,
+      reason: "setItems with identical payloads fired ${fires.length} "
+          "notifications.",
     );
   });
 }

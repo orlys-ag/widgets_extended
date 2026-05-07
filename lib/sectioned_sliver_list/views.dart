@@ -7,7 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'sectioned_list_controller.dart';
 
 /// Rich view of a visible section header passed to a header builder.
-class SectionView<SKey, IKey, Section, Item> {
+class SectionView<K extends Object, Section, Item> {
   const SectionView({
     required this.key,
     required this.section,
@@ -18,7 +18,7 @@ class SectionView<SKey, IKey, Section, Item> {
   });
 
   /// Unique identifier for this section.
-  final SKey key;
+  final K key;
 
   /// User payload for the section header.
   final Section section;
@@ -32,11 +32,16 @@ class SectionView<SKey, IKey, Section, Item> {
 
   /// Whether the user can toggle this section's expansion. `false`
   /// when the parent widget was created with `collapsible: false`.
+  ///
+  /// Advisory only — the [expand] / [collapse] / [toggle] shortcuts on
+  /// this view always pass through to the controller regardless of this
+  /// flag. Use it to decide whether to render a chevron, not to gate
+  /// state mutations.
   final bool isCollapsible;
 
   /// The controller backing this view, available as an escape hatch.
   /// Convenience methods on this view delegate to the controller.
-  final SectionedListController<SKey, IKey, Section, Item> controller;
+  final SectionedListController<K, Section, Item> controller;
 
   /// Expands this section.
   void expand({bool animate = true}) {
@@ -53,6 +58,23 @@ class SectionView<SKey, IKey, Section, Item> {
     controller.toggleSection(key, animate: animate);
   }
 
+  /// Replaces this section's payload. Asserts that the section still
+  /// exists.
+  void update(Section section) {
+    controller.updateSection(key, section);
+  }
+
+  /// Removes this section (and all its items).
+  void remove({bool animate = true}) {
+    controller.removeSection(key, animate: animate);
+  }
+
+  /// Adds [item] under this section. Forwards to
+  /// [SectionedListController.addItem].
+  void addItem(Item item, {int? index, bool animate = true}) {
+    controller.addItem(item, toSection: key, index: index, animate: animate);
+  }
+
   /// Selectively rebuilds [builder] when this section's state changes:
   ///   - expand/collapse
   ///   - section payload (via `controller.updateSection`)
@@ -63,12 +85,12 @@ class SectionView<SKey, IKey, Section, Item> {
   Widget watch({
     required Widget Function(
       BuildContext context,
-      SectionView<SKey, IKey, Section, Item> view,
+      SectionView<K, Section, Item> view,
     )
     builder,
     Key? widgetKey,
   }) {
-    return _SectionViewListener<SKey, IKey, Section, Item>(
+    return _SectionViewListener<K, Section, Item>(
       key: widgetKey,
       controller: controller,
       sectionKey: key,
@@ -79,7 +101,7 @@ class SectionView<SKey, IKey, Section, Item> {
 }
 
 /// Rich view of a visible item passed to an item builder.
-class ItemView<SKey, IKey, Section, Item> {
+class ItemView<K extends Object, Section, Item> {
   const ItemView({
     required this.key,
     required this.item,
@@ -90,22 +112,58 @@ class ItemView<SKey, IKey, Section, Item> {
   });
 
   /// Unique identifier for this item.
-  final IKey key;
+  final K key;
 
   /// User payload.
   final Item item;
 
   /// Identifier of the section this item belongs to.
-  final SKey sectionKey;
+  final K sectionKey;
 
   /// Section payload, resolved for convenience.
   final Section section;
 
-  /// Position among siblings in the section, 0-based.
+  /// Position among siblings in the section, 0-based, in live-list
+  /// space (skipping pending-deletion siblings).
   final int indexInSection;
 
   /// The controller backing this view.
-  final SectionedListController<SKey, IKey, Section, Item> controller;
+  final SectionedListController<K, Section, Item> controller;
+
+  /// Replaces this item's payload. Asserts that the item still exists.
+  void update(Item item) {
+    controller.updateItem(key, item);
+  }
+
+  /// Removes this item.
+  void remove({bool animate = true}) {
+    controller.removeItem(key, animate: animate);
+  }
+
+  /// Moves this item to [section] and/or [index].
+  ///
+  /// Dispatches to the controller as follows:
+  ///
+  ///   • `section != null, index != null`
+  ///       → [SectionedListController.moveItem] with both args
+  ///   • `section != null, index == null`
+  ///       → [SectionedListController.moveItem] (appends to section)
+  ///   • `section == null, index != null`
+  ///       → [SectionedListController.moveItemInSection]
+  ///   • `section == null, index == null`
+  ///       → no-op
+  ///
+  /// No `animate` parameter: the underlying [TreeController.moveNode] /
+  /// [TreeController.reorderChildren] are repositioning ops — nothing
+  /// animates. Matches the controller-level signatures.
+  void moveTo({K? section, int? index}) {
+    if (section != null) {
+      controller.moveItem(key, toSection: section, index: index);
+    } else if (index != null) {
+      controller.moveItemInSection(key, index);
+    }
+    // both null → no-op.
+  }
 
   /// Selectively rebuilds [builder] when this item's payload changes
   /// via `controller.updateItem`. Does NOT trigger on indexInSection
@@ -115,12 +173,12 @@ class ItemView<SKey, IKey, Section, Item> {
   Widget watch({
     required Widget Function(
       BuildContext context,
-      ItemView<SKey, IKey, Section, Item> view,
+      ItemView<K, Section, Item> view,
     )
     builder,
     Key? widgetKey,
   }) {
-    return _ItemViewListener<SKey, IKey, Section, Item>(
+    return _ItemViewListener<K, Section, Item>(
       key: widgetKey,
       controller: controller,
       itemKey: key,
@@ -130,7 +188,13 @@ class ItemView<SKey, IKey, Section, Item> {
   }
 }
 
-class _SectionViewListener<SKey, IKey, Section, Item> extends StatefulWidget {
+/// Listener widget for [SectionView.watch]. Subscribes to the
+/// controller's structural channel for expand/collapse + item-count
+/// changes, and to the typed section-payload channel for payload
+/// updates. Filters by [sectionKey] so only the watched section
+/// triggers a rebuild.
+class _SectionViewListener<K extends Object, Section, Item>
+    extends StatefulWidget {
   const _SectionViewListener({
     required this.controller,
     required this.sectionKey,
@@ -139,23 +203,23 @@ class _SectionViewListener<SKey, IKey, Section, Item> extends StatefulWidget {
     super.key,
   });
 
-  final SectionedListController<SKey, IKey, Section, Item> controller;
-  final SKey sectionKey;
+  final SectionedListController<K, Section, Item> controller;
+  final K sectionKey;
   final bool isCollapsible;
   final Widget Function(
     BuildContext context,
-    SectionView<SKey, IKey, Section, Item> view,
+    SectionView<K, Section, Item> view,
   )
   builder;
 
   @override
-  State<_SectionViewListener<SKey, IKey, Section, Item>> createState() {
-    return _SectionViewListenerState<SKey, IKey, Section, Item>();
+  State<_SectionViewListener<K, Section, Item>> createState() {
+    return _SectionViewListenerState<K, Section, Item>();
   }
 }
 
-class _SectionViewListenerState<SKey, IKey, Section, Item>
-    extends State<_SectionViewListener<SKey, IKey, Section, Item>> {
+class _SectionViewListenerState<K extends Object, Section, Item>
+    extends State<_SectionViewListener<K, Section, Item>> {
   late bool _isExpanded;
   late int _itemCount;
 
@@ -170,12 +234,10 @@ class _SectionViewListenerState<SKey, IKey, Section, Item>
     }
   }
 
-  void _onPayload(Object? key) {
-    // The underlying controller fires this with the wrapped SecKey, but
-    // we cannot inspect it without exposing the internal types. Trigger
-    // a rebuild on any payload notification — over-rebuilding is
-    // acceptable here because the per-section header is cheap and
-    // payload notifications are rare.
+  void _onSectionPayload(K key) {
+    if (key != widget.sectionKey) {
+      return;
+    }
     if (mounted) {
       setState(() {});
     }
@@ -190,22 +252,20 @@ class _SectionViewListenerState<SKey, IKey, Section, Item>
   void initState() {
     super.initState();
     _resnapshot();
-    widget.controller.treeController.addListener(_onStructural);
-    widget.controller.treeController.addNodeDataListener(_onPayload);
+    widget.controller.addListener(_onStructural);
+    widget.controller.addSectionPayloadListener(_onSectionPayload);
   }
 
   @override
   void didUpdateWidget(
-    _SectionViewListener<SKey, IKey, Section, Item> oldWidget,
+    _SectionViewListener<K, Section, Item> oldWidget,
   ) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.treeController
-        ..removeListener(_onStructural)
-        ..removeNodeDataListener(_onPayload);
-      widget.controller.treeController
-        ..addListener(_onStructural)
-        ..addNodeDataListener(_onPayload);
+      oldWidget.controller.removeListener(_onStructural);
+      oldWidget.controller.removeSectionPayloadListener(_onSectionPayload);
+      widget.controller.addListener(_onStructural);
+      widget.controller.addSectionPayloadListener(_onSectionPayload);
       _resnapshot();
     } else if (oldWidget.sectionKey != widget.sectionKey) {
       _resnapshot();
@@ -214,9 +274,8 @@ class _SectionViewListenerState<SKey, IKey, Section, Item>
 
   @override
   void dispose() {
-    widget.controller.treeController
-      ..removeListener(_onStructural)
-      ..removeNodeDataListener(_onPayload);
+    widget.controller.removeListener(_onStructural);
+    widget.controller.removeSectionPayloadListener(_onSectionPayload);
     super.dispose();
   }
 
@@ -226,7 +285,7 @@ class _SectionViewListenerState<SKey, IKey, Section, Item>
     if (section == null) {
       return const SizedBox.shrink();
     }
-    final view = SectionView<SKey, IKey, Section, Item>(
+    final view = SectionView<K, Section, Item>(
       key: widget.sectionKey,
       section: section,
       itemCount: _itemCount,
@@ -238,7 +297,10 @@ class _SectionViewListenerState<SKey, IKey, Section, Item>
   }
 }
 
-class _ItemViewListener<SKey, IKey, Section, Item> extends StatefulWidget {
+/// Listener widget for [ItemView.watch]. Subscribes only to the typed
+/// item-payload channel and filters by [itemKey].
+class _ItemViewListener<K extends Object, Section, Item>
+    extends StatefulWidget {
   const _ItemViewListener({
     required this.controller,
     required this.itemKey,
@@ -247,27 +309,27 @@ class _ItemViewListener<SKey, IKey, Section, Item> extends StatefulWidget {
     super.key,
   });
 
-  final SectionedListController<SKey, IKey, Section, Item> controller;
-  final IKey itemKey;
-  final SKey sectionKey;
+  final SectionedListController<K, Section, Item> controller;
+  final K itemKey;
+  final K sectionKey;
   final Widget Function(
     BuildContext context,
-    ItemView<SKey, IKey, Section, Item> view,
+    ItemView<K, Section, Item> view,
   )
   builder;
 
   @override
-  State<_ItemViewListener<SKey, IKey, Section, Item>> createState() {
-    return _ItemViewListenerState<SKey, IKey, Section, Item>();
+  State<_ItemViewListener<K, Section, Item>> createState() {
+    return _ItemViewListenerState<K, Section, Item>();
   }
 }
 
-class _ItemViewListenerState<SKey, IKey, Section, Item>
-    extends State<_ItemViewListener<SKey, IKey, Section, Item>> {
-  void _onPayload(Object? key) {
-    // Same conservative rule as _SectionViewListener: rebuild on any
-    // payload notification. The wrapped SecKey identity is private and
-    // we cannot filter on it from outside.
+class _ItemViewListenerState<K extends Object, Section, Item>
+    extends State<_ItemViewListener<K, Section, Item>> {
+  void _onItemPayload(K key) {
+    if (key != widget.itemKey) {
+      return;
+    }
     if (mounted) {
       setState(() {});
     }
@@ -276,21 +338,21 @@ class _ItemViewListenerState<SKey, IKey, Section, Item>
   @override
   void initState() {
     super.initState();
-    widget.controller.treeController.addNodeDataListener(_onPayload);
+    widget.controller.addItemPayloadListener(_onItemPayload);
   }
 
   @override
-  void didUpdateWidget(_ItemViewListener<SKey, IKey, Section, Item> oldWidget) {
+  void didUpdateWidget(_ItemViewListener<K, Section, Item> oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.treeController.removeNodeDataListener(_onPayload);
-      widget.controller.treeController.addNodeDataListener(_onPayload);
+      oldWidget.controller.removeItemPayloadListener(_onItemPayload);
+      widget.controller.addItemPayloadListener(_onItemPayload);
     }
   }
 
   @override
   void dispose() {
-    widget.controller.treeController.removeNodeDataListener(_onPayload);
+    widget.controller.removeItemPayloadListener(_onItemPayload);
     super.dispose();
   }
 
@@ -302,14 +364,9 @@ class _ItemViewListenerState<SKey, IKey, Section, Item>
       return const SizedBox.shrink();
     }
     // Use the controller's LIVE-list index (mirrors what _buildItem
-    // passes to the outer itemBuilder). The previous
-    // `itemsOf(sectionKey).indexOf(itemKey)` returned the FULL-list
-    // index — including pending-deletion siblings — so the inner
-    // builder disagreed with the outer about a row's position whenever
-    // a sibling was mid-exit. It also avoids the per-build O(N)
-    // allocation of the items list.
+    // passes to the outer itemBuilder).
     final indexInSection = widget.controller.indexOfItem(widget.itemKey);
-    final view = ItemView<SKey, IKey, Section, Item>(
+    final view = ItemView<K, Section, Item>(
       key: widget.itemKey,
       item: item,
       sectionKey: widget.sectionKey,

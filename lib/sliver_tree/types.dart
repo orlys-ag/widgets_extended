@@ -116,8 +116,10 @@ class SlideAnimation<TKey> {
   SlideAnimation({
     required this.startDelta,
     required this.curve,
+    this.startDeltaX = 0.0,
     this.progress = 0.0,
-  }) : currentDelta = startDelta;
+  }) : currentDelta = startDelta,
+       currentDeltaX = startDeltaX;
 
   /// Initial scroll-space delta: old painted offset minus new structural
   /// offset. Positive means the node appears above its final position at
@@ -134,6 +136,37 @@ class SlideAnimation<TKey> {
   /// The interpolated current delta, applied at paint time as a vertical
   /// translation. Snapped to exactly 0.0 at completion.
   double currentDelta;
+
+  /// X-axis (cross-axis indent) start delta. Computed as
+  /// `oldIndent - newIndent`. Zero when the slide has no horizontal
+  /// component (the reorder-only case — same parent, same depth).
+  double startDeltaX;
+
+  /// Interpolated current X delta, applied at paint time as a horizontal
+  /// translation. Snapped to exactly 0.0 at completion alongside
+  /// [currentDelta].
+  double currentDeltaX;
+
+  /// Wall-clock-equivalent ([Ticker.elapsed]) value at this slide's
+  /// progress=0 establishment (initial install, composition reset, or
+  /// re-baseline). Per-slide progress in `_onSlideTick` is computed as
+  /// `(ticker.elapsed - slideStartElapsed) / slideDuration` so each slide
+  /// progresses at its own rate independent of when other slides start.
+  Duration slideStartElapsed = Duration.zero;
+
+  /// Duration of this specific slide. Set on install/composition. Per-slide
+  /// rather than shared so multi-batch installs with different durations
+  /// animate at their own rates.
+  Duration slideDuration = const Duration(milliseconds: 220);
+
+  /// When true, the engine's un-touched re-baseline branch in
+  /// `animateFromOffsets` skips this slide. Set by the render layer for
+  /// active edge-ghost and exit-phantom slides via
+  /// [TreeController.markSlidePreserveProgress] so concurrent batches
+  /// (e.g. autoscroll commits) don't restart the ghost's progress clock.
+  /// Cleared implicitly when the slide entry is replaced (composition
+  /// creates a fresh entry with default false) or destroyed.
+  bool preserveProgressOnRebatch = false;
 
   /// Whether this animation has completed.
   bool get isComplete => progress >= 1.0;

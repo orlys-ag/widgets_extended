@@ -167,7 +167,10 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// stack-overflow. Children pushed in reverse so pops preserve the
   /// left-to-right visit order the two recursive closures used to
   /// produce.
-  void _cancelAnimationStateForSubtree(TKey key) {
+  void _cancelAnimationStateForSubtree(
+    TKey key, {
+    bool cancelSlides = true,
+  }) {
     final preservedOpKeys = <TKey>{};
     final stack = <TKey>[key];
     while (stack.isNotEmpty) {
@@ -183,7 +186,19 @@ extension _TreeControllerAnimationOps<TKey, TData>
       }
 
       _clearPendingDeletion(nodeId);
-      _slide.cancelForKey(nodeId);
+      // Slide cancellation is conditional — when the caller is
+      // `moveNode(animate: true)`, the staged baseline already captured
+      // the row's mid-flight painted position (structural + currentDelta),
+      // and the next consume will COMPOSE the existing slide toward the
+      // new destination. Cancelling here would force the consume's
+      // post-mutation snapshot to read `slideY = 0`, masking the in-
+      // flight state from `_applyClampAndInstallNewGhosts` — its both-
+      // off-screen guard would then suppress what should have been a
+      // composition install, and the row would jump structurally with
+      // no visible animation.
+      if (cancelSlides) {
+        _slide.cancelForKey(nodeId);
+      }
 
       final opGroupKey = _operationGroupOf(nodeId);
       if (opGroupKey != null && preservedOpKeys.contains(opGroupKey)) {

@@ -443,6 +443,11 @@ void main() {
         // overreach fix, the build range is widened by |max slideDelta|,
         // the child is mounted, and its RenderBox can be located via
         // find.byKey.
+        // The render layer no longer applies a distance gate (the
+        // `maxSlideDistanceViewports` field was removed in v2.3.2). Long
+        // slide-OUTs install via the synthetic-anchor edge-ghost
+        // mechanism instead. r0's slide-OUT here exercises the overreach
+        // / retention path naturally.
         final tree = TreeController<String, int>(
           vsync: tester,
           animationDuration: const Duration(milliseconds: 800),

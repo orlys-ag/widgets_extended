@@ -1,3 +1,9 @@
+## 0.0.16
+
+- `SectionedSliverList` public surface trimmed and restructured. Same underlying
+engine; new ergonomics.
+- Added animations to `moveTo`.
+
 ## 0.0.15
 
 - Fix root node ordering regression caused by switching from recursive to

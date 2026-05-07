@@ -95,6 +95,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// partial animated value instead of the final settled extent.
   bool _priorTickHadAnimations = false;
 
+
   // ══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
   // ══════════════════════════════════════════════════════════════════════════
@@ -341,16 +342,27 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Schedules eviction of mounted children that are outside the cache
   /// region and not needed as sticky headers.
   ///
-  /// Skipped while animations are active so exiting rows keep their
-  /// element until the animation settles. The [_staleEvictionScheduled]
-  /// flag dedupes across layout passes — continuous scroll fires
-  /// `didFinishLayout` every frame, but we only want one post-frame
-  /// eviction sweep per frame. The [_children] walk happens inside the
-  /// post-frame callback (not in the hot layout path) so per-layout cost
-  /// stays O(1).
+  /// Skipped while animations OR FLIP slides are active so exiting rows
+  /// keep their element until the animation settles. Including slides
+  /// in the gate is defensive: under rapid cascaded `moveNode(animate:
+  /// true)` batches, a row's slide-engine entry can settle and clear
+  /// (delta=0) on one frame; on the same post-frame, this eviction
+  /// callback would otherwise race a follow-up batch's pending mutation
+  /// and evict a row whose new slide hasn't installed yet — leaving a
+  /// "row missing in viewport until next layout" gap that only resolves
+  /// on a subsequent scroll-triggered re-layout. With the slide gate,
+  /// eviction is paused for the entire cascade and runs once after all
+  /// slides have settled.
+  ///
+  /// The [_staleEvictionScheduled] flag dedupes across layout passes —
+  /// continuous scroll fires `didFinishLayout` every frame, but we only
+  /// want one post-frame eviction sweep per frame. The [_children] walk
+  /// happens inside the post-frame callback (not in the hot layout
+  /// path) so per-layout cost stays O(1).
   void _scheduleStaleEviction() {
     if (_staleEvictionScheduled) return;
     if (widget.controller.hasActiveAnimations) return;
+    if (widget.controller.hasActiveSlides) return;
     _staleEvictionScheduled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -358,8 +370,10 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       if (!mounted || _inLayout) return;
       // An animation may have started between scheduling and firing —
       // e.g. the user expanded a node in the same frame. Bail out so we
-      // don't evict a row that's about to begin its enter/exit animation.
+      // don't evict a row that's about to begin its enter/exit animation
+      // OR its FLIP slide.
       if (widget.controller.hasActiveAnimations) return;
+      if (widget.controller.hasActiveSlides) return;
 
       final render = renderObject;
       final staleNodes = <TKey>[];

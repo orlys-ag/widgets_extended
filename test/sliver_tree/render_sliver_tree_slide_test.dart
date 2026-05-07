@@ -96,8 +96,8 @@ void main() {
         // That means the node starts painted at structural + 40 = 40 below
         // its layout offset, then lerps to 0.
         controller.animateSlideFromOffsets(
-          {"a": 40.0},
-          {"a": 0.0},
+          {"a": (y: 40.0, x: 0.0)},
+          {"a": (y: 0.0, x: 0.0)},
           duration: const Duration(milliseconds: 200),
           curve: Curves.linear,
         );
@@ -147,8 +147,8 @@ void main() {
       await tester.pumpAndSettle();
 
       controller.animateSlideFromOffsets(
-        {"a": 30.0},
-        {"a": 0.0},
+        {"a": (y: 30.0, x: 0.0)},
+        {"a": (y: 0.0, x: 0.0)},
         duration: const Duration(milliseconds: 200),
         curve: Curves.linear,
       );

@@ -18,6 +18,25 @@ import 'types.dart';
 part '_tree_controller_animation.dart';
 part '_tree_controller_helpers.dart';
 
+/// Callback registered by every [RenderSliverTree] attached to a
+/// [TreeController].
+///
+/// Invoked from [TreeController.moveNode] (and any future animated mutation)
+/// to ask the render object to snapshot current painted offsets BEFORE the
+/// mutation so the next `performLayout` can install a FLIP slide from
+/// baseline → post-mutation.
+///
+/// Returning `true` means "the host is participating in this slide cycle" —
+/// either it staged a fresh baseline now, or a prior call this frame already
+/// staged one and the host is honoring the first-wins policy. Returning
+/// `false` indicates the host cannot participate at all (not yet laid out,
+/// detached, etc.).
+///
+/// **Internal contract** — this typedef is part of the sliver-render-object
+/// staging protocol. External callers should not implement or depend on it.
+typedef TreeRenderHost =
+    bool Function({required Duration duration, required Curve curve});
+
 /// Controller for a [SliverTree] widget.
 ///
 /// Manages:
@@ -870,6 +889,102 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     onTick: _notifyAnimationListeners,
   );
 
+  // Private field — already invisible across files.
+  final Set<TreeRenderHost> _renderHosts = <TreeRenderHost>{};
+
+  /// Phantom-anchor relationships staged by `moveNode(animate: true)` for
+  /// keys whose moved subtree was hidden at mutation time (because the old
+  /// parent or an ancestor was collapsed). Each entry maps a soon-to-be-
+  /// visible key to the OLD visible ancestor whose painted position should
+  /// be used as the slide's "prior" anchor.
+  ///
+  /// Drained by `RenderSliverTree._consumeSlideBaselineIfAny` via
+  /// [takePendingPhantomAnchors] when the next layout consumes the staged
+  /// baseline. Cleared after consumption — never persists across slide
+  /// cycles.
+  Map<TKey, TKey>? _pendingPhantomAnchors;
+
+  /// Returns and clears the staged phantom-anchor relationships. Called by
+  /// the render object during baseline consumption. Returns null when no
+  /// relationships were staged (the common case — only animated reparents
+  /// of hidden subtrees produce entries).
+  ///
+  /// **Internal contract** — sliver-render-object-specific.
+  Map<TKey, TKey>? takePendingPhantomAnchors() {
+    final result = _pendingPhantomAnchors;
+    _pendingPhantomAnchors = null;
+    return result;
+  }
+
+  /// Exit-phantom relationships staged by `moveNode(animate: true)` for
+  /// keys whose moved subtree was visible BEFORE mutation but became
+  /// hidden AFTER (because the new parent or an ancestor is collapsed).
+  /// Each entry maps a soon-to-be-hidden key to the NEW visible ancestor
+  /// (typically the new collapsed parent's row) whose painted position
+  /// should be used as the slide's destination anchor — the row visually
+  /// slides into the new parent's row and disappears behind it.
+  ///
+  /// Symmetric to [_pendingPhantomAnchors] (the entry case). Drained by
+  /// the render object during baseline consumption.
+  Map<TKey, TKey>? _pendingExitPhantomAnchors;
+
+  /// Returns and clears the staged exit-phantom relationships. Companion
+  /// to [takePendingPhantomAnchors] for the visible-to-hidden case.
+  ///
+  /// **Internal contract** — sliver-render-object-specific.
+  Map<TKey, TKey>? takePendingExitPhantomAnchors() {
+    final result = _pendingExitPhantomAnchors;
+    _pendingExitPhantomAnchors = null;
+    return result;
+  }
+
+  /// Padding past the viewport edge (in viewport-heights) used as the
+  /// start position (slide-IN) or end position (slide-OUT edge ghost) for
+  /// FLIP slides whose prior or current is off-screen. A small overhang
+  /// gives the row visible motion *into* / *out of* the viewport rather
+  /// than appearing/disappearing exactly at the edge.
+  ///
+  /// Defaults to 0.1 (10% of viewport extent). Set to 0 to clamp exactly
+  /// at the viewport edge; set higher to extend the start/end further off
+  /// screen (lengthening the visible portion of the slide-in entrance).
+  ///
+  /// Live setting; changes take effect on the next slide install.
+  double slideClampOverhangViewports = 0.1;
+
+  /// Registers a render host. Called by `RenderSliverTree.attach`. Idempotent.
+  ///
+  /// **Internal contract** — the staging protocol is sliver-render-object-
+  /// specific; external callers will get inconsistent results.
+  void registerRenderHost(TreeRenderHost host) {
+    _renderHosts.add(host);
+  }
+
+  /// Unregisters a render host. Called by `RenderSliverTree.detach`. Tolerant
+  /// of a host that was never registered (no-op).
+  ///
+  /// **Internal contract** — see [registerRenderHost].
+  void unregisterRenderHost(TreeRenderHost host) {
+    _renderHosts.remove(host);
+  }
+
+  /// Fans out a baseline-capture request to every attached render host.
+  /// Returns true if at least one host is participating in this slide cycle —
+  /// either it freshly staged a baseline, or a prior pending baseline (from
+  /// an earlier same-frame call) is being honored under first-wins. Returns
+  /// false only when no host could participate at all (no hosts attached, or
+  /// all hosts unmounted).
+  bool _stageSlideBaselineOnHosts({
+    required Duration duration,
+    required Curve curve,
+  }) {
+    if (_renderHosts.isEmpty) return false;
+    bool any = false;
+    for (final host in _renderHosts) {
+      if (host(duration: duration, curve: curve)) any = true;
+    }
+    return any;
+  }
+
   /// Listeners notified on every animation tick (layout-only updates).
   final List<VoidCallback> _animationListeners = [];
 
@@ -1290,6 +1405,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// for visible rows, so saving the [TKey]→nid hash matters.
   double getSlideDeltaNid(int nid) => _slide.deltaForNid(nid);
 
+  /// X-axis (cross-axis indent) slide delta for the live [nid], or 0.0
+  /// when the node is not currently sliding. Hot-path equivalent of
+  /// [getSlideDeltaX] — read on every paint, hit-test, and transform
+  /// call for visible rows during a depth-changing reparent.
+  double getSlideDeltaXNid(int nid) => _slide.deltaXForNid(nid);
+
+  /// X-axis (cross-axis indent) slide delta for [key], or 0.0 when the
+  /// node is not currently sliding (or not registered).
+  double getSlideDeltaX(TKey key) => _slide.deltaXForKey(key);
+
+  /// Internal-use-only: marks the slide entry for [key] to bypass the
+  /// engine's "un-touched re-baseline" branch on subsequent batch
+  /// installs.
+  ///
+  /// Set-only-true semantics — the engine implicitly clears the flag
+  /// when the slide entry is destroyed (settles, cancelled, or replaced
+  /// via composition). The render layer should never need to clear the
+  /// flag explicitly.
+  ///
+  /// Used by the render layer for active edge-ghost and exit-phantom
+  /// slides so concurrent mutations (e.g. autoscroll commits) don't
+  /// restart the ghost's progress clock. Tolerant of unregistered keys
+  /// and inactive slides (no-op).
+  void markSlidePreserveProgress(TKey key) =>
+      _slide.markPreserveProgress(key);
+
   /// Gets the horizontal indent for the given node.
   double getIndent(TKey key) {
     return getDepth(key) * indentWidth;
@@ -1299,6 +1440,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   bool isExpanded(TKey key) {
     return _isExpandedKey(key);
   }
+
+  /// Whether [key] is currently in the flattened visible order — i.e.
+  /// every ancestor (if any) is expanded AND the node itself exists.
+  ///
+  /// O(1) via the visible-order buffer's nid-indexed reverse lookup.
+  /// Useful for the render object to distinguish "truly hidden" from
+  /// "ghost-rendered after a visible→hidden reparent."
+  bool isVisible(TKey key) => _order.contains(key);
 
   /// Whether the given node has children.
   bool hasChildren(TKey key) {
@@ -1400,6 +1549,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// slide-only ticks to [RenderObject.markNeedsPaint] rather than
   /// [RenderObject.markNeedsLayout] based on this flag.
   bool get hasActiveSlides => _slide.hasActive;
+
+  /// Whether any in-flight slide has a non-zero X-axis component
+  /// (depth-changing reparent). Hot-path render code uses this to skip
+  /// per-row X-delta reads when no X-axis work is in flight — the common
+  /// case, since most reorders are same-depth.
+  bool get hasActiveXSlides => _slide.hasActiveX;
 
   /// Maximum |currentDelta| across every active slide entry, or 0.0 when
   /// no slides are active.
@@ -1699,15 +1854,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// out. The per-entry `currentDelta` is seeded to `startDelta`, so the
   /// paint pass of the same frame reads the pre-mutation position.
   void animateSlideFromOffsets(
-    Map<TKey, double> priorOffsets,
-    Map<TKey, double> currentOffsets, {
+    Map<TKey, ({double y, double x})> priorOffsets,
+    Map<TKey, ({double y, double x})> currentOffsets, {
     Duration duration = const Duration(milliseconds: 220),
     Curve curve = Curves.easeOutCubic,
+    double maxSlideDistance = double.infinity,
   }) => _slide.animateFromOffsets(
     priorOffsets,
     currentOffsets,
     duration: duration,
     curve: curve,
+    maxSlideDistance: maxSlideDistance,
     structuralAnimationsDisabled: animationDuration == Duration.zero,
   );
 
@@ -2769,9 +2926,37 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// The node's subtree (children, expansion state, and measured extents) is
   /// preserved. Any in-flight enter/exit animations on the moved subtree are
   /// cancelled so a mid-exit node isn't purged at its new location when the
-  /// animation finalizes — callers that need animation on the new position
-  /// should trigger it explicitly after the move.
-  void moveNode(TKey key, TKey? newParentKey, {int? index}) {
+  /// animation finalizes.
+  ///
+  /// When [animate] is true, every visible row whose painted position changes
+  /// as a result of the move (the moved subtree itself plus any siblings
+  /// that shift to make room) gets a FLIP slide that lerps from its
+  /// pre-move painted position to its post-move structural position over
+  /// [slideDuration] using [slideCurve]. The slide is paint-only — layout
+  /// settles immediately at the new structural positions.
+  ///
+  /// **Same-frame composition:** multiple animated `moveNode` calls in the
+  /// same synchronous block (or inside the same [runBatch]) coalesce under
+  /// a first-wins baseline policy — the first call's pre-mutation snapshot
+  /// covers every visible row, and subsequent calls' deltas are computed
+  /// relative to that single baseline. The first call's [slideDuration]
+  /// and [slideCurve] win for the cohesive transition. If the batch
+  /// contains both `animate: true` and `animate: false` mutations, **all**
+  /// mutations effectively animate (the baseline captures everything; any
+  /// row whose final position differs from its baseline gets a slide).
+  ///
+  /// Has no effect when no [SliverTree] is mounted on this controller, or
+  /// when the controller's [animationDuration] is `Duration.zero` (the
+  /// engine no-ops in that case to honor the global animation-disabled
+  /// setting).
+  void moveNode(
+    TKey key,
+    TKey? newParentKey, {
+    int? index,
+    bool animate = false,
+    Duration slideDuration = const Duration(milliseconds: 220),
+    Curve slideCurve = Curves.easeOutCubic,
+  }) {
     assert(_hasKey(key), 'Node $key not found');
     assert(
       newParentKey == null || _hasKey(newParentKey),
@@ -2810,7 +2995,58 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // If already under the target parent and no explicit position was
     // requested, nothing to do. With an explicit [index], fall through so the
     // node is repositioned among its existing siblings.
+    //
+    // CRITICAL: this no-op return MUST precede the animate staging below.
+    // Otherwise an animated no-op call would stage a baseline (via
+    // _stageSlideBaselineOnHosts → beginSlideBaseline) that triggers no
+    // layout (no _notifyStructural fires for a no-op), leaving the
+    // _pendingSlideBaseline stuck and blocking all subsequent stages
+    // under first-wins until something else triggers a layout.
     if (oldParent == newParentKey && index == null) return;
+
+    // Capture pre-mutation visibility so we can decide entry vs exit
+    // phantom paths after _rebuildVisibleOrder runs.
+    final wasVisible = animate && _order.contains(key);
+
+    // First-wins staging fan-out. Every attached sliver render object's
+    // beginSlideBaseline is invoked. Inside runBatch (or for adjacent
+    // same-frame moveNode calls), the first such call wins; subsequent
+    // calls no-op at the host level. The single staged baseline is
+    // consumed by the next layout post-mutation.
+    if (animate) {
+      _stageSlideBaselineOnHosts(
+        duration: slideDuration,
+        curve: slideCurve,
+      );
+
+      // Phantom-anchor for collapsed → visible reparenting:
+      // If the moved subtree's root is currently NOT in the visible order
+      // (because the old parent or an ancestor is collapsed), the staged
+      // baseline contains no entry for it — animateFromOffsets would skip
+      // installing a slide and the row would pop instantly into its new
+      // visible position. Walk up the OLD parent chain to find the
+      // deepest visible ancestor (the row the user actually sees with
+      // the chevron) and record it as the phantom anchor for every node
+      // in the moved subtree. The render object resolves these to
+      // painted positions during baseline consumption — anchor's painted
+      // position when it's on-screen, viewport edge otherwise — so the
+      // emerging row visually slides "out from behind" its old parent.
+      if (!wasVisible) {
+        TKey? cursor = _parentKeyOfKey(key);
+        while (cursor != null && !_order.contains(cursor)) {
+          cursor = _parentKeyOfKey(cursor);
+        }
+        if (cursor != null) {
+          _pendingPhantomAnchors ??= <TKey, TKey>{};
+          // Apply the same anchor to the entire moved subtree — children
+          // inherit the parent's anchor since they were all hidden inside
+          // the same collapsed ancestor.
+          for (final k in _flattenSubtree(key, includeRoot: true)) {
+            _pendingPhantomAnchors![k] = cursor;
+          }
+        }
+      }
+    }
 
     // Snapshot state needed to compute precise affected-keys after the move.
     final oldDepth = _depthOfKey(key);
@@ -2822,7 +3058,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // position. Without this, a node caught mid-exit-animation would still
     // be purged by _finalizeAnimation after the move, destroying the subtree
     // under its new parent.
-    _cancelAnimationStateForSubtree(key);
+    //
+    // For the animate=true path we keep any in-flight FLIP slide entries
+    // alive: the staged baseline above captured each row's mid-flight
+    // painted position (structural + currentDelta), and the next consume's
+    // composition path requires reading the still-live slideY in the
+    // post-mutation snapshot to recognize the row as having an active
+    // slide and avoid the both-off-screen suppression guard inside
+    // `_applyClampAndInstallNewGhosts`. Composition correctly absorbs the
+    // structural shift into the new currentDelta — no double-counting.
+    _cancelAnimationStateForSubtree(key, cancelSlides: !animate);
 
     // Remove from old parent's child list (or roots).
     if (oldParent != null) {
@@ -2858,6 +3103,40 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _rebuildVisibleOrder();
     _structureGeneration++;
+
+    // Exit-phantom for visible → hidden reparenting:
+    // Symmetric to the entry-phantom block above. If the moved subtree
+    // was visible BEFORE mutation but is hidden AFTER (because the new
+    // parent or an ancestor is collapsed), the staged baseline has the
+    // moved row at its OLD position but the post-mutation snapshot has
+    // no entry for it (it's not in visibleNodes). animateFromOffsets
+    // would skip installing a slide and the row would pop out of
+    // existence. Walk the NEW parent chain to find the deepest visible
+    // ancestor (typically the new collapsed parent's row); record it
+    // as the exit anchor for every node in the moved subtree. The
+    // render object will inject the anchor's painted position as the
+    // slide DESTINATION, retain a ghost render box, and paint the
+    // sliding row clipped to "outside the anchor" so it visually
+    // disappears INTO the new parent.
+    if (animate && wasVisible && !_order.contains(key)) {
+      TKey? cursor = newParentKey;
+      while (cursor != null && !_order.contains(cursor)) {
+        cursor = _parentKeyOfKey(cursor);
+      }
+      if (cursor != null) {
+        _pendingExitPhantomAnchors ??= <TKey, TKey>{};
+        // Every node that was in the visible OLD subtree shares the same
+        // exit anchor. Use the OLD-subtree flatten by enumerating from
+        // baseline keys is impractical here; instead, flatten the now-
+        // structural subtree (children list still intact post-move) —
+        // the moved subtree's expanded structure is preserved through
+        // moveNode, so the same set of nodes was visible before and is
+        // hidden after.
+        for (final k in _flattenSubtree(key, includeRoot: true)) {
+          _pendingExitPhantomAnchors![k] = cursor;
+        }
+      }
+    }
 
     final affected = <TKey>{};
     // If the moved subtree's depth changed, every row in it must rebuild
@@ -3670,6 +3949,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _animationListeners.clear();
     _nodeDataListeners.clear();
     _structuralListeners.clear();
+    _renderHosts.clear();
+    _pendingPhantomAnchors = null;
+    _pendingExitPhantomAnchors = null;
     super.dispose();
   }
 }

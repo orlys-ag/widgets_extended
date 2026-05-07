@@ -5,25 +5,25 @@
 /// Not exported from the package barrel.
 ///
 /// The wrappers are necessary because `SectionedSliverList` allows the
-/// section-key type and the item-key type to be the same (e.g., both
-/// `String`). Without the wrappers, `_SectionKey("a")` and
+/// section-key type and the item-key type to share a single user-facing
+/// type parameter [K]. Without the wrappers, `_SectionKey("a")` and
 /// `_ItemKey("a")` would collide as map keys in the underlying tree's
 /// node registry. The wrappers also let the node payload be either a
 /// section or an item without forcing the user to write a sealed union.
 library;
 
-sealed class SecKey<SKey, IKey> {
+sealed class SecKey<K> {
   const SecKey();
 }
 
-final class SectionKey<SKey, IKey> extends SecKey<SKey, IKey> {
+final class SectionKey<K> extends SecKey<K> {
   const SectionKey(this.value);
 
-  final SKey value;
+  final K value;
 
   @override
   bool operator ==(Object other) {
-    return other is SectionKey<SKey, IKey> && other.value == value;
+    return other is SectionKey<K> && other.value == value;
   }
 
   @override
@@ -37,14 +37,14 @@ final class SectionKey<SKey, IKey> extends SecKey<SKey, IKey> {
   }
 }
 
-final class ItemKey<SKey, IKey> extends SecKey<SKey, IKey> {
+final class ItemKey<K> extends SecKey<K> {
   const ItemKey(this.value);
 
-  final IKey value;
+  final K value;
 
   @override
   bool operator ==(Object other) {
-    return other is ItemKey<SKey, IKey> && other.value == value;
+    return other is ItemKey<K> && other.value == value;
   }
 
   @override
