@@ -1,3 +1,7 @@
+## 0.0.17
+
+- Use animated `moveTo` in `SyncedSliverTree`.
+
 ## 0.0.16
 
 - `SectionedSliverList` public surface trimmed and restructured. Same underlying

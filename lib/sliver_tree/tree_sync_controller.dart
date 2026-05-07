@@ -190,7 +190,14 @@ class TreeSyncController<TKey, TData> {
           );
         } else {
           _controller.updateNode(node);
-          _controller.moveNode(node.key, null, index: targetIndex);
+          _controller.moveNode(
+            node.key,
+            null,
+            index: targetIndex,
+            animate: animate,
+            slideDuration: _controller.animationDuration,
+            slideCurve: _controller.animationCurve,
+          );
         }
         if (oldParent != null) {
           _currentChildren[oldParent]?.remove(node.key);
@@ -423,7 +430,14 @@ class TreeSyncController<TKey, TData> {
           );
         } else {
           _controller.updateNode(node);
-          _controller.moveNode(node.key, parentKey, index: targetIndex);
+          _controller.moveNode(
+            node.key,
+            parentKey,
+            index: targetIndex,
+            animate: animate,
+            slideDuration: _controller.animationDuration,
+            slideCurve: _controller.animationCurve,
+          );
         }
         if (oldParent != null && oldParent != parentKey) {
           _currentChildren[oldParent]?.remove(node.key);
