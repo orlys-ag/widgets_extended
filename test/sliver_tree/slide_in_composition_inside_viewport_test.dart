@@ -27,6 +27,8 @@
 /// fully visible from the first frame.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -113,15 +115,13 @@ void main() {
         expect(
           paintedAfterTap1 < viewportTop,
           isTrue,
-          reason: "after tap-1's brief tick, painted Y ($paintedAfterTap1) "
-              "must still be above viewport top ($viewportTop) — this is "
-              "the precondition that makes tap-2's snapshot priorOn=false "
-              "and exercises the composition clamp.",
+          reason: "after tap-1's brief tick, the row's painted top edge "
+              "($paintedAfterTap1) must still be above viewport top "
+              "($viewportTop) — i.e., most of the row is above the "
+              "viewport with only a few pixels intruding at the top.",
         );
 
         // Tap 2: re-move r0 to a DIFFERENT in-viewport position.
-        // Composition path with hasInFlightSlide=true and !priorOn &&
-        // currOn — the bug branch.
         controller.moveNode(
           "r0",
           null,
@@ -132,17 +132,40 @@ void main() {
         );
         await tester.pump();
 
-        // Post-fix invariant: painted at t=0 of the new slide must be
-        // INSIDE the viewport. With the pre-fix code, painted would
-        // equal the snapshot baseline (off-viewport, e.g. ≈1950).
+        // User-visible invariant: tap-2 must NOT pop the row off-screen.
+        // What "off-screen pop" looks like in engine terms depends on
+        // which slide-clamp branch the meaningfully-visible predicate
+        // selects:
+        //
+        //   * Prior is meaningfully visible (≥ 4 px overlap with the
+        //     viewport, the typical state after tap-1's brief tick):
+        //     priorOn=true → composition does NOT clamp baseline. The
+        //     row's painted Y at t=0 of tap-2 ≈ prior painted Y, so the
+        //     visible portion (a few px at the top edge) is preserved
+        //     from frame to frame. No clamp jump, smooth continuation.
+        //
+        //   * Prior is below the threshold (deeper above the viewport,
+        //     e.g. when tap-1's tick advanced less): priorOn=false → the
+        //     composition clamp moves baseline to viewportTop + epsilon
+        //     and painted at t=0 lands strictly inside the viewport.
+        //
+        // Either way, the row remains MEANINGFULLY VISIBLE at t=0
+        // (≥ 4 px in viewport). The pre-fix bug — painted lingering at
+        // baseline ≈1950 (0 px visible) for a substantial fraction of
+        // the slide — is excluded by both branches.
         final paintedAfterTap2 = 2300.0 + controller.getSlideDelta("r0");
+        final visibleTopAfterTap2 = math.max(paintedAfterTap2, viewportTop);
+        final visibleBottomAfterTap2 =
+            math.min(paintedAfterTap2 + _kRowHeight, viewportBottom);
+        final visiblePxAfterTap2 =
+            visibleBottomAfterTap2 - visibleTopAfterTap2;
         expect(
-          paintedAfterTap2,
-          inInclusiveRange(viewportTop, viewportBottom),
-          reason: "post-fix: tap-2 composition must clamp baseline so "
-              "painted at t=0 is inside [$viewportTop, $viewportBottom]. "
-              "Got painted=$paintedAfterTap2 "
-              "(slideDelta=${controller.getSlideDelta('r0')}).",
+          visiblePxAfterTap2,
+          greaterThanOrEqualTo(4.0),
+          reason: "tap-2 must keep the row meaningfully visible at t=0 "
+              "(≥ 4 px in viewport [$viewportTop, $viewportBottom]). "
+              "Got painted=$paintedAfterTap2, visible=$visiblePxAfterTap2 "
+              "px (slideDelta=${controller.getSlideDelta('r0')}).",
         );
 
         // The render box must remain mounted throughout (no eviction).

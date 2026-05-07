@@ -28,6 +28,32 @@ enum _ViewportEdge {
   bottom,
 }
 
+/// Minimum number of visible pixels a row must show inside the viewport
+/// for the slide pipeline to consider it "on-screen" when classifying
+/// slide-clamp branches and edge-ghost re-promotion.
+///
+/// Absolute (not a fraction of extent) so the threshold doesn't grow
+/// with row height — a 200 px row that's 30 px visible at the bottom
+/// edge is just as perceptible to the user as a 40 px row that's 30 px
+/// visible.
+///
+/// Set to the smallest value that's safely above the `epsilon = 0.5`
+/// clamp used in [RenderSliverTree._applyClampAndInstallNewGhosts]:
+/// without that margin, a row whose baseline was just clamped to "just
+/// inside the viewport edge" (visiblePx == epsilon == 0.5) would tip
+/// the predicate based on floating-point noise alone. 1.0 leaves a 2×
+/// margin and still rejects the genuine sub-pixel ε intersections that
+/// the predicate exists to filter (a row whose bottom edge intrudes by
+/// 0.001 px is `intersects == true` but visually imperceptible).
+///
+/// Erring small biases the slide pipeline toward "smooth continuation"
+/// over "clamp into viewport" for marginally-visible rows: any row the
+/// user is already seeing — even faintly — animates from its current
+/// painted position rather than jumping to a fully-visible baseline.
+///
+/// See [_ViewportSnapshot.meaningfullyVisible].
+const double _kMinMeaningfulVisiblePx = 1.0;
+
 /// Immutable record of the slide-pipeline-relevant viewport state at a
 /// single moment in time: the scroll offset, the sliver's paint extent,
 /// and the current overhang setting. Owns every viewport-derived value
@@ -72,22 +98,46 @@ final class _ViewportSnapshot {
     return y < bottom && y + extent > top;
   }
 
-  /// Midpoint-in-viewport predicate. Use for the slide-clamp branch
-  /// decision in `_applyClampAndInstallNewGhosts` (priorOn / targetOn),
-  /// where the question is "is the user perceiving this row as
-  /// on-screen." A row whose painted top is above viewportTop but whose
-  /// bottom edge intrudes by sub-pixel amounts is [intersects]==true
-  /// yet visually imperceptible — routing such a row through the
-  /// on-screen branch produces wrong slide trajectories.
-  bool midpointInside({
+  /// "Meaningfully visible" predicate. Used for slide-pipeline branch
+  /// decisions: the clamp's priorOn / targetOn classification in
+  /// [RenderSliverTree._applyClampAndInstallNewGhosts] and edge-ghost
+  /// re-promotion in [RenderSliverTree._reEvaluateGhostStatus] /
+  /// [RenderSliverTree._normalizeEdgeGhostsForViewport]. The question
+  /// being answered is "does the user perceive this row as on-screen?"
+  ///
+  /// Neither [intersects] nor a midpoint-in-viewport heuristic answers
+  /// it correctly:
+  ///
+  ///   * [intersects] is too generous — a sub-pixel sliver counts as
+  ///     on-screen, which routes a slide-IN composition into the
+  ///     on-screen branch (priorOn flips true), the baseline-clamp
+  ///     does not fire, and painted at t=0 lands off-viewport.
+  ///   * Midpoint-in-viewport is too strict — the threshold scales
+  ///     with extent (a 200 px row needs 100 px visible), so a row
+  ///     that's 10–40 px visible at the top or bottom edge is
+  ///     classified off-screen, falls into !priorOn && !targetOn, and
+  ///     (when no in-flight slide exists) gets its slide entry
+  ///     suppressed. The row pops into structural place instead of
+  ///     animating — visible only on edges, where partial visibility
+  ///     is most common.
+  ///
+  /// Resolution: require a small ABSOLUTE-pixel overlap, capped by
+  /// `extent * 0.5` so very-small rows (smaller than the threshold)
+  /// only need to be majority visible. See [_kMinMeaningfulVisiblePx].
+  bool meaningfullyVisible({
     required double y,
     required double extent,
   }) {
     if (extent <= 0.0) {
       return y >= top && y < bottom;
     }
-    final midY = y + extent / 2;
-    return midY >= top && midY < bottom;
+    final visibleTop = math.max(y, top);
+    final visibleBottom = math.min(y + extent, bottom);
+    final visiblePx = visibleBottom - visibleTop;
+    if (visiblePx <= 0.0) {
+      return false;
+    }
+    return visiblePx >= math.min(_kMinMeaningfulVisiblePx, extent * 0.5);
   }
 
   /// Edge side a y-coordinate sits past relative to this viewport.
@@ -1074,45 +1124,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     return viewport.baseForEdge(entry.edge);
   }
 
-  /// Stricter on-screen predicate used by the slide-clamp branch decision
-  /// in [_applyClampAndInstallNewGhosts]. Returns true iff the row's
-  /// midpoint sits inside `[viewportTop, viewportBottom)`.
-  ///
-  /// Distinct from [_ViewportSnapshot.intersects]' any-pixel-overlap rule
-  /// because the clamp is asking a user-perception question — "is this
-  /// row meaningfully on screen?" — not a paint-culling one. A row whose
-  /// top is above `viewportTop` but whose bottom edge intrudes by a
-  /// fraction of a pixel is `intersects == true` yet visually
-  /// imperceptible. Treating it as on-screen there would route the row
-  /// into the wrong clamp branch:
-  ///
-  ///   * For a slide-IN composition (`!priorOn && targetOn`), priorOn
-  ///     would flip to true, the baseline-clamp branch would not fire,
-  ///     and painted at t=0 would land off-viewport (or just inside by
-  ///     ε px) instead of being clamped to viewport+epsilon.
-  ///   * For a cross-viewport slide (`!priorOn && !targetOn` composition
-  ///     when both painted-prior and target are off-screen), priorOn
-  ///     would flip to true and the engine would install an edge ghost
-  ///     truncating the trajectory at the bottom edge instead of
-  ///     composing the full painted→target slide.
-  ///
-  /// Midpoint is the cheapest threshold that captures "majority visible";
-  /// any row whose midpoint is in the viewport has at least extent/2 px
-  /// visible, which is the smallest amount the user typically perceives
-  /// as a row presence rather than a thin sliver.
-  bool _rowMidpointInViewport({
-    required double y,
-    required double extent,
-    required double viewportTop,
-    required double viewportBottom,
-  }) {
-    if (extent <= 0.0) {
-      return y >= viewportTop && y < viewportBottom;
-    }
-    final midY = y + extent / 2;
-    return midY >= viewportTop && midY < viewportBottom;
-  }
-
   /// Step 3b: drop `_phantomEdgeExits` entries that became
   /// `_phantomExitGhosts` this cycle (an edge-ghost row was reparented
   /// under a hidden parent — the exit-phantom mechanism takes over).
@@ -1157,7 +1168,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final slideY = controller.getSlideDeltaNid(nid);
       final slideX = controller.getSlideDeltaXNid(nid);
       final indent = controller.getIndent(key);
-      if (viewport.intersects(
+      // Re-promotion uses [_ViewportSnapshot.meaningfullyVisible] (not
+      // bounding-box [intersects]) so it agrees with the clamp branch
+      // decision in [_applyClampAndInstallNewGhosts]. With [intersects],
+      // a row with sub-pixel overlap could re-promote here and then be
+      // reclassified off-screen by the clamp's `priorOn`/`targetOn`,
+      // producing an edge-only flicker as the row bounced between
+      // promoted and ghost states across cycles.
+      if (viewport.meaningfullyVisible(
         y: trueStructuralY,
         extent: controller.getCurrentExtentNid(nid),
       )) {
@@ -1249,24 +1267,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // pulling it past an edge is misclassified as off-screen and kept
       // invisible as an edge ghost until the slide settles.
       final targetY = curr.y - slideY;
-      // Use midpoint-in-viewport (not any-pixel-overlap) for the clamp
-      // branch decision: a row whose painted top is above viewportTop
-      // but whose bottom edge intrudes into the viewport by sub-pixel
-      // amounts is visually imperceptible to the user, and treating it
-      // as on-screen routes it into the wrong branch (edge-ghost
-      // truncation for slide-out trajectories, or skipped composition
-      // clamp for slide-in compositions). See [_rowMidpointInViewport].
-      final priorOn = _rowMidpointInViewport(
+      // Use [_ViewportSnapshot.meaningfullyVisible] (an absolute-pixel
+      // overlap threshold) for the clamp branch decision. Bounding-box
+      // intersection routes ε-overlapping rows through the on-screen
+      // branch (skipping the slide-IN baseline clamp), and a midpoint
+      // heuristic routes partially-visible edge rows through the
+      // off-screen branch (suppressing slides for rows the user can
+      // clearly see). See [_ViewportSnapshot.meaningfullyVisible].
+      final priorOn = viewport.meaningfullyVisible(
         y: prior.y,
         extent: rowExtent,
-        viewportTop: viewportTop,
-        viewportBottom: viewportBottom,
       );
-      final targetOn = _rowMidpointInViewport(
+      final targetOn = viewport.meaningfullyVisible(
         y: targetY,
         extent: rowExtent,
-        viewportTop: viewportTop,
-        viewportBottom: viewportBottom,
       );
       if (priorOn && targetOn) continue; // animate real delta
       if (!priorOn && !targetOn) {
@@ -1434,11 +1448,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final slideY = controller.getSlideDeltaNid(nid);
       final slideX = controller.getSlideDeltaXNid(nid);
       final indent = controller.getIndent(key);
-      final structIntersects = viewport.intersects(
+      // See [_reEvaluateGhostStatus] for why this uses
+      // [_ViewportSnapshot.meaningfullyVisible] instead of [intersects]:
+      // promotion threshold must match the clamp's branch decision
+      // threshold or the row can flicker between the two states.
+      final structVisible = viewport.meaningfullyVisible(
         y: trueStructuralY,
         extent: controller.getCurrentExtentNid(nid),
       );
-      if (structIntersects) {
+      if (structVisible) {
         // Re-promote: structural is back in viewport. Drop the ghost.
         if (installStandaloneSlides) {
           final groupKey = (entry.duration, entry.curve);
