@@ -9,31 +9,17 @@ part of "tree_controller.dart";
 /// file-size reasons; the logical owner is still [TreeController].
 extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   void _clear() {
-    _standaloneTicker?.stop();
-    _standaloneTicker?.dispose();
-    _standaloneTicker = null;
-    _disposeBulkAnimationGroup();
-    for (final group in _operationGroups.values) {
-      group.dispose();
-    }
-    _operationGroups.clear();
-    _slide.clearAll();
+    // Plan A: AnimationCoordinator owns every animation source, the
+    // shared per-nid arrays (full-extent, pending-deletion, union
+    // mirrors), the standalone ticker, and the listener channel. Its
+    // clear() aggregates each sub-coordinator's clear() plus resets
+    // coordinator-owned state.
+    _anim.clear();
     _store.clear();
-    _visibleSubtreeSizeByNid = Int32List(0);
-    _fullExtentByNid = Float64List(0);
-    _isPendingDeletionByNid = Uint8List(0);
-    _isAnimatingByNid = Uint8List(0);
-    _isExitingByNid = Uint8List(0);
-    _isBulkMemberByNid = Uint8List(0);
-    _writtenAnimatingNids.clear();
-    _writtenExitingNids.clear();
-    _opGroupKeyByNid = <TKey?>[];
-    _standaloneByNid = <AnimationState?>[];
-    _activeStandaloneNids.clear();
-    _pendingDeletionCount = 0;
-    _roots.clear();
+    // Plan B: _order.reset() also clears the visible-subtree-size cache
+    // and the roots list.
     _order.reset();
-    _bumpAnimGen();
+    _keysToRemoveScratch.clear();
   }
 
   void _rebuildVisibleIndex() {
@@ -89,49 +75,10 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   ///    surviving past [_releaseNid]).
   void _assertAnimationStateConsistency() {
     assert(() {
-      // Counter check.
-      int pdCount = 0;
-      for (int nid = 0; nid < _nids.length; nid++) {
-        if (_isPendingDeletionByNid[nid] != 0) {
-          if (_nids.keyOf(nid) == null) {
-            throw StateError(
-              "_isPendingDeletionByNid[$nid] = 1 for freed slot",
-            );
-          }
-          pdCount++;
-        }
-      }
-      if (pdCount != _pendingDeletionCount) {
-        throw StateError(
-          "_pendingDeletionCount = $_pendingDeletionCount, "
-          "but counted $pdCount slots set",
-        );
-      }
-      // Standalone working-set check.
-      int standaloneCount = 0;
-      for (int nid = 0; nid < _nids.length; nid++) {
-        if (_standaloneByNid[nid] != null) {
-          if (_nids.keyOf(nid) == null) {
-            throw StateError(
-              "_standaloneByNid[$nid] non-null for freed slot",
-            );
-          }
-          if (!_activeStandaloneNids.contains(nid)) {
-            throw StateError(
-              "_standaloneByNid[$nid] non-null but missing from "
-              "_activeStandaloneNids",
-            );
-          }
-          standaloneCount++;
-        }
-      }
-      if (_activeStandaloneNids.length != standaloneCount) {
-        throw StateError(
-          "_activeStandaloneNids has ${_activeStandaloneNids.length} entries, "
-          "but only $standaloneCount nids carry a standalone slot",
-        );
-      }
-      // Slide working-set check — delegated to the engine.
+      // Plan A: AnimationCoordinator owns the union of consistency checks
+      // across all four animation sources (standalone, op groups, bulk,
+      // slide) plus the coordinator-level pending-deletion-counter check.
+      _anim.debugAssertConsistent();
       _slide.debugAssertConsistent();
       return true;
     }());
@@ -334,7 +281,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     // Clean up operation group membership
     final opGroupKey = _clearOperationGroup(key);
     if (opGroupKey != null) {
-      final group = _operationGroups[opGroupKey];
+      final group = _opGroupAt(opGroupKey);
       if (group != null) {
         final removedMember = group.members.remove(key) != null;
         final removedPending = group.pendingRemoval.remove(key);
@@ -344,21 +291,14 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       }
     }
     // If [key] IS an operation key (the node that triggered an expand/collapse),
-    // tear down the whole group. Without this, the entry lives on in
-    // [_operationGroups] orphaned — a later insert+expand with the same key
+    // tear down the whole group. Without this, the entry lives on in the
+    // op-group registry orphaned — a later insert+expand with the same key
     // would reuse the stale group via the Path 1 branch in [expand]/[collapse].
-    final orphanGroup = _operationGroups.remove(key);
-    if (orphanGroup != null) {
-      for (final memberKey in orphanGroup.members.keys) {
-        if (_operationGroupOf(memberKey) == key) {
-          _clearOperationGroup(memberKey);
-        }
-      }
+    if (_anim.opGroups.removeGroup(key)) {
       _bumpAnimGen();
-      orphanGroup.dispose();
     }
     // Clean up bulk animation group membership
-    final bulk = _bulkAnimationGroup;
+    final bulk = _activeBulkGroup;
     if (bulk != null) {
       final removedMember = _removeBulkMember(key);
       final removedPending = _removeBulkPending(key);
@@ -407,8 +347,10 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     }
 
     // Step 1: cache decrement (first surviving ancestor walk). Must run
-    // before unlink/purge because _bumpVisibleSubtreeSizeFromSelf reads
-    // _parentByNid, and _purgeNodeData → _releaseNid clears it.
+    // before unlink/purge because the bump walk reads _parentByNid, and
+    // _purgeNodeData → _releaseNid clears it. Uses the explicit
+    // bumpFromSelf API so Step 3's compaction can suppress the inlined
+    // callbacks without double-decrementing.
     for (final key in nodesToRemove) {
       final nid = _nids[key];
       if (nid == null) {
@@ -427,7 +369,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
         ancestorNid = parentByNid[ancestorNid];
       }
       if (ancestorNid != TreeController._kNoParent && ancestorNid >= 0) {
-        _bumpVisibleSubtreeSizeFromSelf(ancestorNid, -1);
+        _order.bumpFromSelf(ancestorNid, -1);
       }
     }
 
@@ -448,7 +390,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     // removeWhereKeyIn's null-key check). Suppress per-nid callbacks
     // because the cache was already decremented in Step 1.
     if (compactOrder) {
-      _runWithSubtreeSizeUpdatesSuppressed(() {
+      _order.runWithSubtreeSizeUpdatesSuppressed(() {
         _removeFromVisibleOrder(keysSet);
       });
     }

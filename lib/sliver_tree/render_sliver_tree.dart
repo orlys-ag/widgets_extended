@@ -8,171 +8,18 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
 import '_layout_admission_policy.dart';
+import '_slide_composer.dart';
 import '_sticky_header_computer.dart';
+import '_viewport_snapshot.dart';
 import 'sliver_tree_element.dart';
 import 'tree_controller.dart';
 import 'types.dart';
 
-// ══════════════════════════════════════════════════════════════════════════
-// VIEWPORT SNAPSHOT + EDGE GHOST SUPPORT TYPES
-// ══════════════════════════════════════════════════════════════════════════
-
-/// Which side of the viewport an edge ghost is anchored to.
-///
-/// Replaces the old "frozen absolute edgeY" representation in
-/// [_phantomEdgeExits]. The actual painted Y is derived live from the
-/// current viewport via [_ViewportSnapshot.baseForEdge], so the ghost
-/// stays pinned to the live edge under concurrent scrolling.
-enum _ViewportEdge {
-  top,
-  bottom,
-}
-
-/// Minimum number of visible pixels a row must show inside the viewport
-/// for the slide pipeline to consider it "on-screen" when classifying
-/// slide-clamp branches and edge-ghost re-promotion.
-///
-/// Absolute (not a fraction of extent) so the threshold doesn't grow
-/// with row height — a 200 px row that's 30 px visible at the bottom
-/// edge is just as perceptible to the user as a 40 px row that's 30 px
-/// visible.
-///
-/// Set to the smallest value that's safely above the `epsilon = 0.5`
-/// clamp used in [RenderSliverTree._applyClampAndInstallNewGhosts]:
-/// without that margin, a row whose baseline was just clamped to "just
-/// inside the viewport edge" (visiblePx == epsilon == 0.5) would tip
-/// the predicate based on floating-point noise alone. 1.0 leaves a 2×
-/// margin and still rejects the genuine sub-pixel ε intersections that
-/// the predicate exists to filter (a row whose bottom edge intrudes by
-/// 0.001 px is `intersects == true` but visually imperceptible).
-///
-/// Erring small biases the slide pipeline toward "smooth continuation"
-/// over "clamp into viewport" for marginally-visible rows: any row the
-/// user is already seeing — even faintly — animates from its current
-/// painted position rather than jumping to a fully-visible baseline.
-///
-/// See [_ViewportSnapshot.meaningfullyVisible].
-const double _kMinMeaningfulVisiblePx = 1.0;
-
-/// Immutable record of the slide-pipeline-relevant viewport state at a
-/// single moment in time: the scroll offset, the sliver's paint extent,
-/// and the current overhang setting. Owns every viewport-derived value
-/// the slide pipeline reads (top/bottom, overhang-adjusted edge bases),
-/// so capture-time vs current-time questions can be expressed in code
-/// instead of dropping into ad-hoc scroll-offset arithmetic.
-final class _ViewportSnapshot {
-  const _ViewportSnapshot({
-    required this.scrollOffset,
-    required this.paintExtent,
-    required this.overhangPx,
-  });
-
-  /// Top of the viewport in scroll-space.
-  final double scrollOffset;
-
-  /// Sliver paint extent (height of the visible viewport region this
-  /// sliver paints into). Used to derive the bottom edge and to scale
-  /// the slide overhang.
-  final double paintExtent;
-
-  /// Overhang region beyond the viewport edge used by edge-ghost paint
-  /// and slide-IN clamps. Captured here (not read live from the
-  /// controller) so a snapshot can be reused without picking up later
-  /// setting changes mid-batch.
-  final double overhangPx;
-
-  double get top => scrollOffset;
-  double get bottom => scrollOffset + paintExtent;
-
-  /// Any-pixel-overlap predicate. Use for paint culling, hit-test
-  /// admission, ghost re-evaluation, and re-promotion decisions where
-  /// the question is "does this row's bounding box intersect the
-  /// viewport rect at all."
-  bool intersects({
-    required double y,
-    required double extent,
-  }) {
-    if (extent <= 0.0) {
-      return y >= top && y < bottom;
-    }
-    return y < bottom && y + extent > top;
-  }
-
-  /// "Meaningfully visible" predicate. Used for slide-pipeline branch
-  /// decisions: the clamp's priorOn / targetOn classification in
-  /// [RenderSliverTree._applyClampAndInstallNewGhosts] and edge-ghost
-  /// re-promotion in [RenderSliverTree._reEvaluateGhostStatus] /
-  /// [RenderSliverTree._normalizeEdgeGhostsForViewport]. The question
-  /// being answered is "does the user perceive this row as on-screen?"
-  ///
-  /// Neither [intersects] nor a midpoint-in-viewport heuristic answers
-  /// it correctly:
-  ///
-  ///   * [intersects] is too generous — a sub-pixel sliver counts as
-  ///     on-screen, which routes a slide-IN composition into the
-  ///     on-screen branch (priorOn flips true), the baseline-clamp
-  ///     does not fire, and painted at t=0 lands off-viewport.
-  ///   * Midpoint-in-viewport is too strict — the threshold scales
-  ///     with extent (a 200 px row needs 100 px visible), so a row
-  ///     that's 10–40 px visible at the top or bottom edge is
-  ///     classified off-screen, falls into !priorOn && !targetOn, and
-  ///     (when no in-flight slide exists) gets its slide entry
-  ///     suppressed. The row pops into structural place instead of
-  ///     animating — visible only on edges, where partial visibility
-  ///     is most common.
-  ///
-  /// Resolution: require a small ABSOLUTE-pixel overlap, capped by
-  /// `extent * 0.5` so very-small rows (smaller than the threshold)
-  /// only need to be majority visible. See [_kMinMeaningfulVisiblePx].
-  bool meaningfullyVisible({
-    required double y,
-    required double extent,
-  }) {
-    if (extent <= 0.0) {
-      return y >= top && y < bottom;
-    }
-    final visibleTop = math.max(y, top);
-    final visibleBottom = math.min(y + extent, bottom);
-    final visiblePx = visibleBottom - visibleTop;
-    if (visiblePx <= 0.0) {
-      return false;
-    }
-    return visiblePx >= math.min(_kMinMeaningfulVisiblePx, extent * 0.5);
-  }
-
-  /// Edge side a y-coordinate sits past relative to this viewport.
-  /// Top side iff `y < top`; otherwise bottom (the symmetric exclusive
-  /// convention from [intersects]).
-  _ViewportEdge edgeFor(double y) {
-    return y < top ? _ViewportEdge.top : _ViewportEdge.bottom;
-  }
-
-  /// Live scroll-space base Y for an edge anchor on this viewport. Top
-  /// edge = `top - overhangPx` (sits above the viewport by the overhang
-  /// region); bottom edge = `bottom + overhangPx`. An edge ghost's
-  /// painted Y in scroll-space is `baseForEdge(edge) + slideDelta`.
-  double baseForEdge(_ViewportEdge edge) {
-    return switch (edge) {
-      _ViewportEdge.top => top - overhangPx,
-      _ViewportEdge.bottom => bottom + overhangPx,
-    };
-  }
-}
-
-/// Pending FLIP slide baseline plus the viewport in which it was
-/// captured. Replaces the bare `Map<TKey, ({double y, double x})>?`
-/// pending-baseline field. The viewport is consulted at consume time
-/// to answer capture-time visibility questions independently of the
-/// (possibly different) consume-time viewport.
-final class _SlideBaseline<TKey> {
-  const _SlideBaseline({
-    required this.offsets,
-    required this.viewport,
-  });
-
-  final Map<TKey, ({double y, double x})> offsets;
-  final _ViewportSnapshot viewport;
-}
+// `ViewportSnapshot` / `ViewportEdge` live in `_viewport_snapshot.dart`.
+// Pending FLIP baselines and active edge ghosts are owned by
+// `SlideComposer` (composed sub-objects `SlideBaselineSlot` and
+// `GhostRegistry`) — see `_slide_composer.dart`. The render object
+// here is purely the orchestrator.
 
 /// Render object for displaying a tree structure as a sliver.
 ///
@@ -188,7 +35,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
          controller: controller,
          maxStickyDepth: maxStickyDepth,
        ),
-       _admission = LayoutAdmissionPolicy<TKey, TData>(controller: controller);
+       _admission = LayoutAdmissionPolicy<TKey, TData>(controller: controller),
+       _composer = SlideComposer<TKey, TData>(controller: controller);
 
   /// Sticky-header computation + cache. Owns every piece of state that
   /// exists solely to compute and cache sticky-header positions; see
@@ -216,9 +64,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // every key (silent no-op) at best, or — if the two controllers share
     // key identities (e.g. string keys reused) — produce wrong deltas at
     // worst.
-    _pendingSlideBaseline = null;
-    _pendingSlideDuration = null;
-    _pendingSlideCurve = null;
+    _composer.reset();
+    _composer.rebindController(value);
     _sticky.controller = value;
     _admission.controller = value;
     // Stale per-node caches keyed by the old controller's keys would
@@ -524,14 +371,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   // then slide back to old" flicker that a post-frame callback would produce.
   // ──────────────────────────────────────────────────────────────────────────
 
-  /// Pending FLIP slide baseline (offsets + capture viewport) plus the
-  /// duration/curve from the originating mutation. The viewport is
-  /// captured alongside the offset map so consume can answer
-  /// capture-time visibility questions independently of the (possibly
-  /// scrolled-since) consume-time viewport. See [_SlideBaseline].
-  _SlideBaseline<TKey>? _pendingSlideBaseline;
-  Duration? _pendingSlideDuration;
-  Curve? _pendingSlideCurve;
+  /// Slide-pipeline composer: owns the pending FLIP baseline slot and
+  /// the active edge-ghost registry. Render holds the facade and reads
+  /// ghost paint bases through it via [GhostBaseResolver]. See
+  /// `_slide_composer.dart`.
+  final SlideComposer<TKey, TData> _composer;
 
   /// Tracks rows whose slide was installed from a phantom anchor (a
   /// previously-hidden node now reparented into a visible position) AND
@@ -569,32 +413,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// ghost's slide has settled (currentDelta == 0 AND currentDeltaX == 0).
   Map<TKey, TKey>? _phantomExitGhosts;
 
-  /// Synthetic-anchor exit ghosts: rows whose new structural position is
-  /// off-screen (slide-OUT distance exceeds viewport) and that animate out
-  /// toward the viewport edge instead of to the (invisible) structural
-  /// position. The row is removed from standard paint/hit-test/transform
-  /// paths and painted via a parallel ghost pass at
-  /// `_edgeGhostBaseY(entry, currentViewport) + slideDelta`.
-  ///
-  /// Each entry stores the *side* of the viewport the ghost is anchored
-  /// to (top or bottom) plus the original install duration and curve so
-  /// scroll-induced re-promotion ([_normalizeEdgeGhostsForViewport]) can
-  /// install the re-promotion slide using the same animation parameters.
-  ///
-  /// The actual painted Y is derived live from the current viewport via
-  /// [_edgeGhostBaseY] / [_ViewportSnapshot.baseForEdge], so the ghost
-  /// stays pinned to the live edge under concurrent scrolling. If the
-  /// row's true structural comes back into the viewport mid-slide (user
-  /// scrolled toward it), [_normalizeEdgeGhostsForViewport] re-installs
-  /// it as a normal slide ending at structural — avoiding a snap at
-  /// slide end. If the row remains off-screen but switches sides
-  /// (top→bottom or vice versa), the helper updates the stored edge
-  /// side and composes a direction-flip slide.
-  ///
-  /// Pruned eagerly during the edge-ghost paint pass when the slide
-  /// settles, lazily at the start of `_consumeSlideBaselineIfAny`.
-  Map<TKey, ({_ViewportEdge edge, Duration duration, Curve curve})>?
-      _phantomEdgeExits;
+  // Edge-ghost storage and lifecycle now live in `_composer.ghosts`
+  // (`GhostRegistry`). Render-side reads go through `_composer.baseFor`
+  // or `_composer.ghosts.entryFor` / `_composer.hasGhosts`; writes go
+  // through the registry's lifecycle methods called from the consume
+  // path and the pre-Pass-1 scroll-changed branch.
 
   /// Last-observed `constraints.scrollOffset`, captured at the end of
   /// every `performLayout`. Used by [_checkGhostRepromotionOnScroll] to
@@ -648,14 +471,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // those extents fall through to defaultExtent and the snapshot is
     // fictitious. Silently no-op rather than stage a garbage baseline.
     if (geometry == null) return;
-    // First-wins.
-    if (_pendingSlideBaseline != null) return;
-    _pendingSlideBaseline = _SlideBaseline<TKey>(
+    // First-wins is enforced by SlideBaselineSlot.stage's bool return.
+    // We ignore the result here — both branches are no-ops on this side.
+    _composer.baselineSlot.stage(
       offsets: snapshotVisibleOffsets(),
       viewport: _currentViewportSnapshot(),
+      duration: duration,
+      curve: curve,
     );
-    _pendingSlideDuration = duration;
-    _pendingSlideCurve = curve;
   }
 
   /// Consumes a pending baseline (if any) by snapshotting post-mutation
@@ -669,17 +492,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// / `markNeedsPaint` on this sliver — lands on the next vsync, outside
   /// layout.
   void _consumeSlideBaselineIfAny({
-    required _ViewportSnapshot currentViewport,
+    required ViewportSnapshot currentViewport,
   }) {
-    final pending = _pendingSlideBaseline;
+    final pending = _composer.baselineSlot.consume();
     if (pending == null) return;
     final baseline = pending.offsets;
     final captureViewport = pending.viewport;
-    final duration = _pendingSlideDuration!;
-    final curve = _pendingSlideCurve!;
-    _pendingSlideBaseline = null;
-    _pendingSlideDuration = null;
-    _pendingSlideCurve = null;
+    final duration = pending.duration;
+    final curve = pending.curve;
     final current = snapshotVisibleOffsets();
 
     // CRITICAL: do NOT clear _phantomClipAnchors or _phantomExitGhosts
@@ -708,7 +528,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     // Mirror the lazy-prune for edge ghosts: remove entries whose slide
     // has settled or whose key has been freed.
-    _pruneSettledEdgeGhosts();
+    _composer.ghosts.pruneSettled();
 
     // Rewrite ghost entries in baseline to use the CURRENT viewport's
     // edge base. This is the prerequisite that makes §7.2's
@@ -721,18 +541,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Direction-flip and re-promotion paths (§7.4, §7.5) still produce
     // non-zero deltas because they explicitly write DIFFERENT edge
     // bases for prior vs current.
-    final ghostsForRewrite = _phantomEdgeExits;
-    if (ghostsForRewrite != null) {
-      for (final ghostEntry in ghostsForRewrite.entries) {
-        final ghostKey = ghostEntry.key;
+    if (_composer.hasGhosts) {
+      for (final ghostKey in _composer.ghosts.activeKeys.toList()) {
         if (!baseline.containsKey(ghostKey)) continue;
+        final ghostBase = _composer.baseFor(ghostKey, currentViewport);
+        if (ghostBase == null) continue;
         final ghostNid = controller.nidOf(ghostKey);
         if (ghostNid < 0) continue;
         final ghostSlideY = controller.getSlideDeltaNid(ghostNid);
         final ghostSlideX = controller.getSlideDeltaXNid(ghostNid);
         final ghostIndent = controller.getIndent(ghostKey);
         baseline[ghostKey] = (
-          y: _edgeGhostBaseY(ghostEntry.value, currentViewport) + ghostSlideY,
+          y: ghostBase + ghostSlideY,
           x: ghostIndent + ghostSlideX,
         );
       }
@@ -955,14 +775,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Drop the edge-ghost entry — the exit-phantom mechanism takes over
     // paint and composition. No preserve-flag clear needed (set-only
     // semantics; engine resets via composition path).
-    _dropEdgeExitsForKeysThatBecameAnchorGhosts();
+    final exitGhostKeys = _phantomExitGhosts?.keys;
+    if (exitGhostKeys != null) {
+      _composer.ghosts.dropForKeysThatBecameAnchorGhosts(exitGhostKeys);
+    }
 
     // Steps 4-6: re-evaluate active edge ghosts (re-promote / direction
     // flip / stays-same), apply slide-IN clamp + new ghost installs for
     // non-ghost keys, then remove ghost-stays-same-edge from the batch
     // so the engine doesn't re-baseline them.
     final ghostKeysTouchedThisCycle = <TKey>{};
-    _reEvaluateGhostStatus(
+    _composer.ghosts.reEvaluateGhostStatus(
       baseline: baseline,
       current: current,
       viewport: currentViewport,
@@ -970,7 +793,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       curve: curve,
       ghostKeysTouchedThisCycle: ghostKeysTouchedThisCycle,
     );
-    _applyClampAndInstallNewGhosts(
+    _composer.ghosts.applyClampAndInstallNewGhosts(
       baseline: baseline,
       current: current,
       viewport: currentViewport,
@@ -978,7 +801,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       curve: curve,
       ghostKeysTouchedThisCycle: ghostKeysTouchedThisCycle,
     );
-    _removeGhostStaysFromBatch(baseline, current, ghostKeysTouchedThisCycle);
+    _composer.ghosts.removeStaysFromBatch(
+      baseline: baseline,
+      current: current,
+      ghostKeysTouchedThisCycle: ghostKeysTouchedThisCycle,
+    );
 
     // Snapshot the keys that the engine batch is about to touch — we
     // need this for Step 8 below (mark all of them with preserve so
@@ -1000,17 +827,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       curve: curve,
     );
 
-    // Step 7b: re-prune `_phantomEdgeExits` after the engine call.
+    // Step 7b: re-prune the edge-ghost registry after the engine call.
     //
     // The engine's composition path (`_slide_animation_engine.dart`,
     // composition branch with `composedY == 0.0 && composedX == 0.0`)
     // CLEARS the slide entry without notifying the render layer. If
-    // this row was kept in `_phantomEdgeExits` by `_reEvaluateGhostStatus`'s
+    // this row was kept in the ghost registry by `reEvaluateGhostStatus`'s
     // direction-flip branch (or by stays-same), the entry survives the
     // engine clear. The next paint then takes a broken path:
     //
     //   * Standard pass A skips the row because
-    //     `_phantomEdgeExits.containsKey(nodeId)` is true.
+    //     the ghost registry has an entry for `nodeId`.
     //   * Edge-ghost paint pass A.6 sees `getSlideDeltaNid == 0` and
     //     prunes the entry instead of painting (lazy-prune of settled
     //     ghosts).
@@ -1020,10 +847,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // that only resolves on the NEXT layout (e.g. a scroll), where the
     // map no longer has the entry and standard paint runs normally.
     //
-    // The repeated `_pruneSettledEdgeGhosts()` here drops any entry the
-    // engine just cleared, so standard paint A can render the row at
-    // its (already-up-to-date by Pass 2 measurement) `parentData.layoutOffset`.
-    _pruneSettledEdgeGhosts();
+    // The repeated prune here drops any entry the engine just cleared,
+    // so standard paint A can render the row at its (already-up-to-date
+    // by Pass 2 measurement) `parentData.layoutOffset`.
+    _composer.ghosts.pruneSettled();
 
     // Step 8: mark preserve-progress flag for EVERY slide installed/
     // composed by this consume — edge ghosts, anchor-based exit ghosts,
@@ -1046,51 +873,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Step 9: clean up if engine has no slides remaining (Duration.zero
     // short-circuit, all installs were no-ops, etc.).
     if (!controller.hasActiveSlides) {
-      _phantomEdgeExits = null;
+      _composer.ghosts.clearAll();
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // EDGE-GHOST HELPERS (synthetic-anchor exit ghosts for long slide-OUTs)
-  // See docs/plans/slide-viewport-clamp-v2.3.2.md for the design.
-  // ──────────────────────────────────────────────────────────────────────────
-
-  /// Lazy-prune `_phantomEdgeExits` entries whose slide has settled or
-  /// whose key has been freed. Mirrors the `_phantomClipAnchors` prune
-  /// pattern at the top of `_consumeSlideBaselineIfAny`.
-  void _pruneSettledEdgeGhosts() {
-    final exits = _phantomEdgeExits;
-    if (exits == null) return;
-    exits.removeWhere((key, _) {
-      final nid = _controller.nidOf(key);
-      if (nid < 0) return true;
-      return _controller.getSlideDeltaNid(nid) == 0.0 &&
-          _controller.getSlideDeltaXNid(nid) == 0.0;
-    });
-    if (exits.isEmpty) _phantomEdgeExits = null;
-  }
-
-  /// Computes the row's true structural Y (no slideDelta), or -1 if the
-  /// row is not in `visibleNodes`. O(N_visible). Called only for edge-
-  /// ghost keys during re-promotion checks; total cost is bounded by
-  /// (N_ghosts × N_visible) per consume which is tiny in practice.
-  double _computeTrueStructuralAt(TKey key) {
-    final visible = controller.visibleNodes;
-    final orderNids = controller.orderNidsView;
-    double structural = 0.0;
-    for (int i = 0; i < visible.length; i++) {
-      if (visible[i] == key) return structural;
-      structural += controller.getCurrentExtentNid(orderNids[i]);
-    }
-    return -1.0;
-  }
+  // Edge-ghost lifecycle (prune, re-evaluate, re-promote, direction-
+  // flip, install, normalize) lives in `GhostRegistry`
+  // (`_ghost_registry.dart`). Render calls into `_composer.ghosts.X`
+  // from the consume path and the pre-Pass-1 scroll-changed branch.
 
   double _currentExtentOfKey(TKey key) {
     final nid = controller.nidOf(key);
     return nid >= 0 ? controller.getCurrentExtentNid(nid) : 0.0;
   }
 
-  /// Builds a [_ViewportSnapshot] describing the layout's current
+  /// Builds a [ViewportSnapshot] describing the layout's current
   /// viewport state. Reads `constraints.scrollOffset`, the sliver's
   /// `viewportMainAxisExtent`, and the controller's live overhang
   /// setting. Cheap to call and intended to be used at every entry to
@@ -1102,457 +899,26 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// has begun, OR a layout has previously completed and `geometry`
   /// is non-null). External entry points (`beginSlideBaseline`) check
   /// `geometry != null` before calling.
-  _ViewportSnapshot _currentViewportSnapshot() {
+  ViewportSnapshot _currentViewportSnapshot() {
     final paintExtent = constraints.viewportMainAxisExtent;
-    return _ViewportSnapshot(
+    return ViewportSnapshot(
       scrollOffset: constraints.scrollOffset,
       paintExtent: paintExtent,
       overhangPx: paintExtent * controller.slideClampOverhangViewports,
     );
   }
 
-  /// Live scroll-space base Y for an edge-ghost entry against the
-  /// supplied viewport. Single source of truth for the conversion
-  /// between an [_phantomEdgeExits] entry and the position the row's
-  /// paint base should sit at right now. Replaces every former direct
-  /// read of `entry.edgeY` (which was a frozen absolute, stale under
-  /// scroll change).
-  double _edgeGhostBaseY(
-    ({_ViewportEdge edge, Duration duration, Curve curve}) entry,
-    _ViewportSnapshot viewport,
-  ) {
-    return viewport.baseForEdge(entry.edge);
-  }
-
-  /// Step 3b: drop `_phantomEdgeExits` entries that became
-  /// `_phantomExitGhosts` this cycle (an edge-ghost row was reparented
-  /// under a hidden parent — the exit-phantom mechanism takes over).
-  void _dropEdgeExitsForKeysThatBecameAnchorGhosts() {
-    final exits = _phantomEdgeExits;
-    final anchors = _phantomExitGhosts;
-    if (exits == null || anchors == null) return;
-    for (final key in anchors.keys) {
-      exits.remove(key);
-    }
-    if (exits.isEmpty) _phantomEdgeExits = null;
-  }
-
-  /// Step 4: re-evaluate every active edge ghost. Three outcomes per row:
-  ///
-  /// - **Re-promote** (true structural now in viewport): remove from
-  ///   `_phantomEdgeExits`, override `current[key]` to structural-based
-  ///   form so the engine composes the slide back to a normal slide
-  ///   ending at the visible position.
-  /// - **Direction flip** (still off-screen but the OPPOSITE side from
-  ///   the captured edge): update the `_phantomEdgeExits` entry's edge
-  ///   side (preserving original duration/curve) and override
-  ///   `current[key]` with the new live edge base.
-  /// - **Stays-same-edge**: don't touch — the existing slide already
-  ///   targets the right edge. NOT added to `ghostKeysTouchedThisCycle`
-  ///   so Step 6 will remove it from the batch.
-  void _reEvaluateGhostStatus({
-    required Map<TKey, ({double y, double x})> baseline,
-    required Map<TKey, ({double y, double x})> current,
-    required _ViewportSnapshot viewport,
-    required Duration duration,
-    required Curve curve,
-    required Set<TKey> ghostKeysTouchedThisCycle,
-  }) {
-    final exits = _phantomEdgeExits;
-    if (exits == null) return;
-    for (final key in exits.keys.toList()) {
-      final trueStructuralY = _computeTrueStructuralAt(key);
-      if (trueStructuralY < 0) continue; // row left visibleNodes
-      final nid = controller.nidOf(key);
-      if (nid < 0) continue;
-      final slideY = controller.getSlideDeltaNid(nid);
-      final slideX = controller.getSlideDeltaXNid(nid);
-      final indent = controller.getIndent(key);
-      // Re-promotion uses [_ViewportSnapshot.meaningfullyVisible] (not
-      // bounding-box [intersects]) so it agrees with the clamp branch
-      // decision in [_applyClampAndInstallNewGhosts]. With [intersects],
-      // a row with sub-pixel overlap could re-promote here and then be
-      // reclassified off-screen by the clamp's `priorOn`/`targetOn`,
-      // producing an edge-only flicker as the row bounced between
-      // promoted and ghost states across cycles.
-      if (viewport.meaningfullyVisible(
-        y: trueStructuralY,
-        extent: controller.getCurrentExtentNid(nid),
-      )) {
-        // Re-promote.
-        current[key] = (
-          y: trueStructuralY + slideY,
-          x: indent + slideX,
-        );
-        exits.remove(key);
-        ghostKeysTouchedThisCycle.add(key);
-      } else {
-        final newEdge = viewport.edgeFor(trueStructuralY);
-        final entry = exits[key]!;
-        if (newEdge != entry.edge) {
-          // Direction flip. Update the entry; keep original duration/curve.
-          // Per plan §7.4: the consume-time baseline rewrite has already
-          // set baseline[key] = oldBaseY + slideY (using the OLD edge).
-          // Override current[key] with the NEW edge base so the engine
-          // composes oldBaseY → newBaseY into a fresh slide. The new
-          // currentDelta retains the old painted position (oldBaseY +
-          // existing.currentDelta) at t=0 and animates toward newBaseY.
-          exits[key] = (
-            edge: newEdge,
-            duration: entry.duration,
-            curve: entry.curve,
-          );
-          current[key] = (
-            y: viewport.baseForEdge(newEdge) + slideY,
-            x: indent + slideX,
-          );
-          ghostKeysTouchedThisCycle.add(key);
-        }
-        // else: stays-same-edge — do NOT add to touched set. Step 6
-        // will remove from batch; the consume-time baseline rewrite +
-        // snapshotVisibleOffsets()'s live-base ghost rule means
-        // baseline.y == current.y, engine sees no delta, slide untouched.
-      }
-    }
-    if (exits.isEmpty) _phantomEdgeExits = null;
-  }
-
-  /// Step 5: clamp slide-IN starts and install new edge ghosts for
-  /// slide-OUT cases. Skips keys already handled by Step 4.
-  void _applyClampAndInstallNewGhosts({
-    required Map<TKey, ({double y, double x})> baseline,
-    required Map<TKey, ({double y, double x})> current,
-    required _ViewportSnapshot viewport,
-    required Duration duration,
-    required Curve curve,
-    required Set<TKey> ghostKeysTouchedThisCycle,
-  }) {
-    final viewportTop = viewport.top;
-    final viewportBottom = viewport.bottom;
-    final overhangPx = viewport.overhangPx;
-    // Iterate keys that have BOTH a baseline and current entry.
-    final keysToProcess = <TKey>[];
-    for (final key in baseline.keys) {
-      if (current.containsKey(key)) keysToProcess.add(key);
-    }
-    final exits = _phantomEdgeExits;
-    for (final key in keysToProcess) {
-      // Skip direction-flipped / stays-same ghosts — these are still in
-      // `exits` and `_reEvaluateGhostStatus` set up their composition
-      // already (baseline = ghost-painted from snapshot; current =
-      // edge_y + slideY). Re-running the clamp would interfere.
-      if (exits != null && exits.containsKey(key)) continue;
-      // Re-promoted ghosts (`ghostKeysTouchedThisCycle`) are NOT skipped
-      // here. Their snapshot baseline is `edge_y + slideY` from the
-      // ghost-aware snapshot — when the slide has advanced enough that
-      // `edge_y + slideY` lies past the viewport edge, the row was
-      // painted off-viewport at staging time. The clamp below
-      // (`!priorOn && targetOn`) brings the new slide's painted at t=0
-      // back into the viewport. The historical concern about a "double-
-      // clamp visible JUMP" only applies if the row was painted INSIDE
-      // the viewport — captured by the `priorOn=true` short-circuit two
-      // lines below, which leaves baseline untouched.
-      final prior = baseline[key]!;
-      final curr = current[key]!;
-      final nid = controller.nidOf(key);
-      final slideY = nid >= 0 ? controller.getSlideDeltaNid(nid) : 0.0;
-      final slideX = nid >= 0 ? controller.getSlideDeltaXNid(nid) : 0.0;
-      final hasInFlightSlide = slideY != 0.0 || slideX != 0.0;
-      final rowExtent = nid >= 0 ? controller.getCurrentExtentNid(nid) : 0.0;
-
-      // `curr` includes the existing slide delta so the engine can
-      // compose from the currently painted position. Viewport admission
-      // decisions need the destination paint base instead. Otherwise a
-      // row retargeted into the viewport while its old slide is still
-      // pulling it past an edge is misclassified as off-screen and kept
-      // invisible as an edge ghost until the slide settles.
-      final targetY = curr.y - slideY;
-      // Use [_ViewportSnapshot.meaningfullyVisible] (an absolute-pixel
-      // overlap threshold) for the clamp branch decision. Bounding-box
-      // intersection routes ε-overlapping rows through the on-screen
-      // branch (skipping the slide-IN baseline clamp), and a midpoint
-      // heuristic routes partially-visible edge rows through the
-      // off-screen branch (suppressing slides for rows the user can
-      // clearly see). See [_ViewportSnapshot.meaningfullyVisible].
-      final priorOn = viewport.meaningfullyVisible(
-        y: prior.y,
-        extent: rowExtent,
-      );
-      final targetOn = viewport.meaningfullyVisible(
-        y: targetY,
-        extent: rowExtent,
-      );
-      if (priorOn && targetOn) continue; // animate real delta
-      if (!priorOn && !targetOn) {
-        // Both off-screen. Two sub-cases:
-        //
-        // (a) Row has no in-flight engine slide — invisible mutation,
-        //     suppress to keep maxActiveSlideAbsDelta clean.
-        // (b) Row has an in-flight slide (composition case) — must NOT
-        //     suppress. The engine's existing slide is targeting an OLD
-        //     destination; if we suppress, the slide settles at the
-        //     wrong painted position and the row visibly SNAPS to its
-        //     new structural at slide end. Pass through to engine so
-        //     composition redirects toward the new destination.
-        if (!hasInFlightSlide) {
-          baseline.remove(key);
-          current.remove(key);
-        }
-        // else: leave (baseline, current) as-is — engine composes the
-        // existing slide toward the new (off-screen) destination. The
-        // row paints at structural+slideDelta in scroll-space; if both
-        // are off-screen, the row is invisible throughout the slide,
-        // and at settle painted == structural (correct).
-        continue;
-      }
-      if (!priorOn && targetOn) {
-        // SLIDE-IN. Two distinct cases:
-        //
-        // (a) Initial install (no existing engine slide): clamp baseline
-        //     to viewport edge ± overhang. Bounds the slide delta and
-        //     gives the user a visible "row enters from edge" animation
-        //     instead of the row appearing somewhere off-screen and
-        //     never visibly transitioning into place.
-        //
-        // (b) Composition (existing slide active — typically because a
-        //     PRIOR mutation installed a slide on this row that's still
-        //     in flight, AND the current mutation re-targets it to an
-        //     in-viewport destination): clamp baseline to JUST INSIDE the
-        //     viewport edge so painted at t=0 of the new slide is
-        //     visible. Without this bound, `baseline.y` from the
-        //     ghost-aware snapshot can sit past the viewport edge — for
-        //     example baseline=429 past a viewport bottom of 390 — and
-        //     engine composition then sets the new currentDelta such
-        //     that painted at t=0 = baseline.y (off-viewport). Under
-        //     cascaded `Reparent ALL` taps each composition repeats the
-        //     pattern; the row stays invisible for an accumulating
-        //     fraction of each slide. The user observed this as "ghost
-        //     rows disappearing during rapid reparent".
-        //
-        //     Note: composition CANNOT use the same `edge_y ± overhang`
-        //     clamp as initial install. `edge_y` sits PAST the viewport
-        //     by `overhangPx`; for `prior.y` in the overhang region
-        //     (between viewport edge and edge_y, common because the
-        //     prior install clamped to edge_y and the row hasn't ticked
-        //     far yet), clamping to edge_y would push painted FURTHER
-        //     off-viewport — the opposite of what we want. The "tiny-
-        //     delta needs enlargement" rationale that justifies the
-        //     overhang in initial installs doesn't apply to composition:
-        //     `composedY = currentDelta + rawDeltaY` already inherits
-        //     the in-flight slide's energy, so the new slide is
-        //     guaranteed to have perceptible motion.
-        if (!hasInFlightSlide) {
-          final edgeY = prior.y < viewportTop
-              ? viewportTop - overhangPx
-              : viewportBottom + overhangPx;
-          baseline[key] = (y: edgeY, x: prior.x);
-        } else {
-          // `epsilon` keeps painted strictly INSIDE the viewport so
-          // `_paintRow`'s past-bottom early-return (`>= viewportBottom`)
-          // doesn't skip the t=0 paint. For above-top entries, we add
-          // epsilon (>= viewportTop is in viewport).
-          const epsilon = 0.5;
-          final clampedY = prior.y < viewportTop
-              ? viewportTop + epsilon
-              : viewportBottom - epsilon;
-          baseline[key] = (y: clampedY, x: prior.x);
-        }
-        continue;
-      }
-      // priorOn && !targetOn: install new edge ghost.
-      final edge = viewport.edgeFor(targetY);
-      final edgeY = viewport.baseForEdge(edge);
-      // Corner: row was visible exactly at the edge already → no
-      // animation needed; structural ≈ edge.
-      if (baseline[key]!.y == edgeY) continue;
-      final indent = controller.getIndent(key);
-      current[key] = (y: edgeY + slideY, x: indent + slideX);
-      (_phantomEdgeExits ??= {})[key] = (
-        edge: edge,
-        duration: duration,
-        curve: curve,
-      );
-      ghostKeysTouchedThisCycle.add(key);
-    }
-  }
-
-  /// Step 6: remove ghost-stays-same-edge_y entries from the engine
-  /// batch so the engine doesn't re-baseline them. The existing engine
-  /// slide already targets the correct edge — leaving it un-touched lets
-  /// it continue uninterrupted (combined with the preserve-progress
-  /// flag set in Step 8).
-  void _removeGhostStaysFromBatch(
-    Map<TKey, ({double y, double x})> baseline,
-    Map<TKey, ({double y, double x})> current,
-    Set<TKey> ghostKeysTouchedThisCycle,
-  ) {
-    final exits = _phantomEdgeExits;
-    if (exits == null) return;
-    for (final key in exits.keys) {
-      if (ghostKeysTouchedThisCycle.contains(key)) continue;
-      baseline.remove(key);
-      current.remove(key);
-    }
-  }
-
-  /// Normalizes [_phantomEdgeExits] for the supplied [viewport]. Replaces
-  /// the older `_checkGhostRepromotionOnScroll` and folds in direction-
-  /// flip and stays-same handling so a single helper covers every
-  /// scroll-induced edge-ghost adjustment.
-  ///
-  /// For each active edge ghost:
-  ///   1. If its true structural Y now intersects [viewport], remove
-  ///      the ghost from the map. When [installStandaloneSlides] is
-  ///      true the helper also installs a re-promotion slide from the
-  ///      live edge base to structural Y; when false, the helper just
-  ///      normalizes bookkeeping and leaves slide installation to the
-  ///      caller (the consume path that owns the single batch).
-  ///   2. Else, recompute the side via [viewport.edgeFor]. If the side
-  ///      changed (direction flip), update the stored side. When
-  ///      [installStandaloneSlides] is true, install a fresh slide
-  ///      from old-edge live base to new-edge live base so the row
-  ///      visibly sweeps across the viewport edge.
-  ///   3. Else (stays-same edge), do nothing — the ghost is already
-  ///      anchored to the right side, and live-base lookup means the
-  ///      paint pass automatically tracks the new viewport.
-  ///
-  /// Per plan §5.3: when a pending mutation baseline exists, this
-  /// helper runs with `installStandaloneSlides: false` so the upcoming
-  /// consume owns the single animation batch for the layout. When no
-  /// pending baseline exists, this helper installs slides itself.
-  ///
-  /// Re-promotions / direction-flips are grouped by (duration, curve)
-  /// so each `animateSlideFromOffsets` call uses the matching original
-  /// install parameters. Composition with the existing engine slide
-  /// preserves visual continuity.
-  void _normalizeEdgeGhostsForViewport({
-    required _ViewportSnapshot viewport,
-    required bool installStandaloneSlides,
-  }) {
-    final exits = _phantomEdgeExits;
-    if (exits == null) return;
-    final keys = exits.keys.toList();
-    final groups = <
-      (Duration duration, Curve curve),
-      ({
-        Map<TKey, ({double y, double x})> baseline,
-        Map<TKey, ({double y, double x})> current,
-      })
-    >{};
-    for (final key in keys) {
-      final trueStructuralY = _computeTrueStructuralAt(key);
-      if (trueStructuralY < 0) continue;
-      final nid = controller.nidOf(key);
-      if (nid < 0) continue;
-      final entry = exits[key]!;
-      final slideY = controller.getSlideDeltaNid(nid);
-      final slideX = controller.getSlideDeltaXNid(nid);
-      final indent = controller.getIndent(key);
-      // See [_reEvaluateGhostStatus] for why this uses
-      // [_ViewportSnapshot.meaningfullyVisible] instead of [intersects]:
-      // promotion threshold must match the clamp's branch decision
-      // threshold or the row can flicker between the two states.
-      final structVisible = viewport.meaningfullyVisible(
-        y: trueStructuralY,
-        extent: controller.getCurrentExtentNid(nid),
-      );
-      if (structVisible) {
-        // Re-promote: structural is back in viewport. Drop the ghost.
-        if (installStandaloneSlides) {
-          final groupKey = (entry.duration, entry.curve);
-          final group = groups.putIfAbsent(
-            groupKey,
-            () => (
-              baseline: <TKey, ({double y, double x})>{},
-              current: <TKey, ({double y, double x})>{},
-            ),
-          );
-          group.baseline[key] = (
-            y: _edgeGhostBaseY(entry, viewport) + slideY,
-            x: indent + slideX,
-          );
-          group.current[key] = (
-            y: trueStructuralY + slideY,
-            x: indent + slideX,
-          );
-        }
-        exits.remove(key);
-        continue;
-      }
-      // Still off-screen. Did the side change?
-      final newEdge = viewport.edgeFor(trueStructuralY);
-      if (newEdge != entry.edge) {
-        // Direction flip. Update the stored side; when standalone,
-        // install a slide that composes oldBaseY → newBaseY so the
-        // row visibly transits between edges.
-        if (installStandaloneSlides) {
-          final groupKey = (entry.duration, entry.curve);
-          final group = groups.putIfAbsent(
-            groupKey,
-            () => (
-              baseline: <TKey, ({double y, double x})>{},
-              current: <TKey, ({double y, double x})>{},
-            ),
-          );
-          final oldBaseY = viewport.baseForEdge(entry.edge);
-          final newBaseY = viewport.baseForEdge(newEdge);
-          group.baseline[key] = (y: oldBaseY + slideY, x: indent + slideX);
-          group.current[key] = (y: newBaseY + slideY, x: indent + slideX);
-        }
-        exits[key] = (
-          edge: newEdge,
-          duration: entry.duration,
-          curve: entry.curve,
-        );
-        continue;
-      }
-      // Stays-same edge. Nothing to update — paint, hit-test, snapshot
-      // all read live base from the entry's stored side, so they pick
-      // up the new viewport automatically.
-    }
-    if (exits.isEmpty) _phantomEdgeExits = null;
-
-    if (!installStandaloneSlides) return;
-    for (final entry in groups.entries) {
-      controller.animateSlideFromOffsets(
-        entry.value.baseline,
-        entry.value.current,
-        duration: entry.key.$1,
-        curve: entry.key.$2,
-      );
-      // Mark the re-promoted / direction-flipped slides with the
-      // preserve-progress flag. Without this, the next consume cycle
-      // whose batch doesn't touch these keys will hit the engine's
-      // re-baseline branch (`_slide_animation_engine.dart` ~290-294):
-      // `startDelta = currentDelta`, `progress = 0`,
-      // `slideStartElapsed = now`. The slide's clock restarts, and
-      // the effective remaining motion (already-shrunk `currentDelta`)
-      // is dragged out over another full `slideDuration`. Under
-      // cascaded mutations the re-baseline fires every batch — the
-      // slide makes essentially zero net per-tick progress.
-      //
-      // Composition (called inside `animateSlideFromOffsets` above)
-      // resets `preserveProgressOnRebatch = false`, and the re-
-      // promoted keys are no longer in `_phantomEdgeExits` (removed at
-      // `exits.remove(key)` above), so `_syncPreserveProgressFlags`
-      // doesn't catch them. We re-set the flag explicitly here.
-      for (final key in entry.value.current.keys) {
-        controller.markSlidePreserveProgress(key);
-      }
-    }
-  }
+  // Edge-ghost prune, install, re-evaluate, re-promote, direction-flip,
+  // batch removal, viewport normalization, and live-base resolution all
+  // live in `GhostRegistry` (see `_ghost_registry.dart`). Render-side
+  // calls go through `_composer.ghosts.*` and `_composer.baseFor`.
 
   /// Step 8: ensure preserve-progress flag set for all active edge
   /// ghosts AND existing exit-phantom anchor ghosts. Set-only-true —
   /// the engine clears the flag implicitly when the slide entry is
   /// destroyed (settles, cancelled, replaced via composition).
   void _syncPreserveProgressFlags() {
-    final exits = _phantomEdgeExits;
-    if (exits != null) {
-      for (final key in exits.keys) {
-        controller.markSlidePreserveProgress(key);
-      }
-    }
+    _composer.ghosts.syncPreserveProgressFlags();
     final anchors = _phantomExitGhosts;
     if (anchors != null) {
       for (final key in anchors.keys) {
@@ -1588,8 +954,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // still in the tree) but may sit outside the cache region; without
     // explicit retention here, layout admission would evict the child
     // and the ghost paint pass would have nothing to paint.
-    final edgeGhosts = _phantomEdgeExits;
-    if (edgeGhosts != null && edgeGhosts.containsKey(id)) return true;
+    if (_composer.ghosts.entryFor(id) != null) return true;
     final nid = _controller.nidOf(id);
     if (nid < 0) return false;
     if (nid < _inCacheRegionByNid.length && _inCacheRegionByNid[nid] != 0) {
@@ -1649,29 +1014,29 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     double structural = 0.0;
     final visible = controller.visibleNodes;
     final orderNids = controller.orderNidsView;
-    final edgeExits = _phantomEdgeExits;
+    final hasEdgeGhosts = _composer.hasGhosts;
     // Build the viewport snapshot lazily — only needed if there are
-    // active edge ghosts. Plan §7.2: ghost rows paint at the LIVE
-    // viewport edge, so snapshot must derive their painted Y from the
-    // current viewport, not a frozen capture.
-    final _ViewportSnapshot? viewportForGhosts =
-        edgeExits != null ? _currentViewportSnapshot() : null;
+    // active edge ghosts. Ghost rows paint at the LIVE viewport edge,
+    // so snapshot must derive their painted Y from the current viewport,
+    // not a frozen capture.
+    final ViewportSnapshot? viewportForGhosts =
+        hasEdgeGhosts ? _currentViewportSnapshot() : null;
     for (int i = 0; i < visible.length; i++) {
       final nid = orderNids[i];
       final key = visible[i];
       final slideY = hasSlides ? controller.getSlideDeltaNid(nid) : 0.0;
       final slideX = hasXSlides ? controller.getSlideDeltaXNid(nid) : 0.0;
       final indent = controller.getIndent(key);
-      // Edge-ghost rows paint at `_edgeGhostBaseY + slideDelta`, not at
+      // Edge-ghost rows paint at `liveBaseY + slideDelta`, not at
       // `structural + slideDelta`. Override to keep snapshot consistent
       // with what the edge-ghost paint pass actually paints — required
       // for composition correctness when a ghost row gets re-mutated
       // mid-slide.
-      if (edgeExits != null) {
-        final entry = edgeExits[key];
+      if (hasEdgeGhosts) {
+        final entry = _composer.ghosts.entryFor(key);
         if (entry != null) {
           result[key] = (
-            y: _edgeGhostBaseY(entry, viewportForGhosts!) + slideY,
+            y: viewportForGhosts!.baseForEdge(entry.edge) + slideY,
             x: indent + slideX,
           );
           structural += controller.getCurrentExtentNid(nid);
@@ -1755,23 +1120,24 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       double lastLiveExtent = 0.0;
       double structural = 0.0;
       final orderNids = controller.orderNidsView;
-      final edgeExits = _phantomEdgeExits;
+      final hasEdgeGhosts = _composer.hasGhosts;
       // Lazy: only build viewport snapshot if there are ghosts to
       // resolve. Edge ghosts paint at the LIVE viewport edge.
-      final _ViewportSnapshot? viewportForGhosts =
-          edgeExits != null ? _currentViewportSnapshot() : null;
+      final ViewportSnapshot? viewportForGhosts =
+          hasEdgeGhosts ? _currentViewportSnapshot() : null;
       for (int i = 0; i < visible.length; i++) {
         final nid = orderNids[i];
         final key = visible[i];
         final extent = controller.getCurrentExtentNid(nid);
         final slide = controller.getSlideDeltaNid(nid);
-        // Edge-ghost rows paint at `_edgeGhostBaseY + slide`, not at
+        // Edge-ghost rows paint at `liveBaseY + slide`, not at
         // `structural + slide`. Substitute so drag-target lookup lands
         // on the correct ghost row.
-        final edgeEntry = edgeExits?[key];
-        final paintedOffset = edgeEntry != null
-            ? _edgeGhostBaseY(edgeEntry, viewportForGhosts!) + slide
-            : structural + slide;
+        final ghostBase = hasEdgeGhosts
+            ? _composer.baseFor(key, viewportForGhosts!)
+            : null;
+        final paintedOffset =
+            ghostBase != null ? ghostBase + slide : structural + slide;
         if (!controller.isPendingDeletion(key)) {
           if (scrollY < paintedOffset + extent) {
             return (key: key, paintedOffset: paintedOffset, extent: extent);
@@ -1877,9 +1243,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // A pending FLIP baseline that was never consumed (widget unmounted
     // between mutation and next frame) would leak the offset map and
     // trip stale-state assertions on re-attach. Drop it eagerly.
-    _pendingSlideBaseline = null;
-    _pendingSlideDuration = null;
-    _pendingSlideCurve = null;
+    _composer.baselineSlot.reset();
     super.detach();
     for (final child in _children.values) {
       child.detach();
@@ -2097,12 +1461,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final currentScroll = currentViewport.scrollOffset;
     final scrollChanged = !_lastObservedScrollOffset.isNaN
         && currentScroll != _lastObservedScrollOffset;
-    final hasEdgeGhosts =
-        _phantomEdgeExits != null && _phantomEdgeExits!.isNotEmpty;
-    if (scrollChanged && hasEdgeGhosts) {
-      _normalizeEdgeGhostsForViewport(
+    if (scrollChanged && _composer.hasGhosts) {
+      _composer.ghosts.normalizeForViewport(
         viewport: currentViewport,
-        installStandaloneSlides: _pendingSlideBaseline == null,
+        installStandaloneSlides: !_composer.isBaselineStaged,
       );
     }
     _consumeSlideBaselineIfAny(currentViewport: currentViewport);
@@ -2775,7 +2137,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Among sliding rows, sort by ascending |delta| so the row that moved
     // the most (typically the just-dropped row) paints last and lands on
     // top. Ties preserve natural iteration order.
-    final edgeExits = _phantomEdgeExits;
+    final hasEdgeGhosts = _composer.hasGhosts;
     List<int>? slidingIndices;
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nid = orderNids[i];
@@ -2800,15 +2162,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // double-paint at the wrong (structural) position. BUT only when
       // the engine still has a live slide entry for this nid; if the
       // engine cleared the slide via composition (composedY/X both 0)
-      // while the `_phantomEdgeExits` map entry survived (e.g.
+      // while the ghost registry entry survived (e.g.
       // direction-flip kept the entry, then composition zeroed the
       // delta), the edge-ghost paint pass will prune the entry without
       // painting. Skipping standard paint here would leave the row
       // invisible until the next layout's prune. Instead, only skip
       // when there's actually a delta to render via the edge-ghost
       // pass; otherwise fall through to standard paint at structural+0.
-      if (edgeExits != null
-          && edgeExits.containsKey(nodeId)
+      if (hasEdgeGhosts
+          && _composer.ghosts.entryFor(nodeId) != null
           && (slideDelta != 0.0 || slideDeltaX != 0.0)) {
         continue;
       }
@@ -2952,26 +2314,25 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Pass A.6: Paint edge-anchor exit ghosts (live-edge-anchored
     // ghosts for long slide-OUTs). These rows ARE in visibleNodes but
     // skipped by the standard paint pass — their painted position is
-    // `_edgeGhostBaseY(entry, currentViewport) + slideDelta` in
+    // `_composer.baseFor(key, currentViewport) + slideDelta` in
     // scroll-space, recomputed against the live viewport so the ghost
     // stays pinned to the live edge under concurrent scrolling. As the
     // slide settles, the row converges on the viewport edge and is
     // then lazily pruned (no visible cut because the row's structural
     // position is far off-screen).
-    final edgeGhosts = _phantomEdgeExits;
-    if (edgeGhosts != null && edgeGhosts.isNotEmpty) {
+    if (_composer.hasGhosts) {
       // Idle-state shortcut.
       if (!hasSlides) {
-        _phantomEdgeExits = null;
+        _composer.ghosts.clearAll();
       } else {
         final viewport = _currentViewportSnapshot();
-        final edgeKeys = edgeGhosts.keys.toList();
+        final edgeKeys = _composer.ghosts.activeKeys.toList();
         for (final ghostKey in edgeKeys) {
-          final entry = edgeGhosts[ghostKey];
+          final entry = _composer.ghosts.entryFor(ghostKey);
           if (entry == null) continue;
           final ghostNid = controller.nidOf(ghostKey);
           if (ghostNid < 0) {
-            edgeGhosts.remove(ghostKey);
+            _composer.ghosts.removeKey(ghostKey);
             continue;
           }
           // Defensive: if a ghost row is also a sticky header, let the
@@ -2986,7 +2347,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           // Eager prune on settle — avoids one-frame lingering at edge
           // between settle and next consume's lazy-prune.
           if (ghostSlide == 0.0 && ghostSlideX == 0.0) {
-            edgeGhosts.remove(ghostKey);
+            _composer.ghosts.removeKey(ghostKey);
             continue;
           }
           final ghostChild = getChildForNode(ghostKey);
@@ -2995,14 +2356,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           // Ghost paints at `liveBaseY + slideDelta` in scroll-space,
           // converted to local paint coords by subtracting scrollOffset.
           final paintedY =
-              _edgeGhostBaseY(entry, viewport) - scrollOffset + ghostSlide;
+              viewport.baseForEdge(entry.edge) - scrollOffset + ghostSlide;
           final paintedX = indent + ghostSlideX;
           // Skip if entirely outside the paint region.
           if (paintedY >= remainingPaintExtent) continue;
           if (paintedY + ghostChild.size.height <= 0) continue;
           context.paintChild(ghostChild, offset + Offset(paintedX, paintedY));
         }
-        if (edgeGhosts.isEmpty) _phantomEdgeExits = null;
       }
     }
 
@@ -3251,7 +2611,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final hasSlides = controller.hasActiveSlides;
     final hasXSlides = hasSlides && controller.hasActiveXSlides;
     // Lazy viewport: only built if a ghost row is encountered.
-    _ViewportSnapshot? hitViewport;
+    ViewportSnapshot? hitViewport;
 
     for (int i = startIndex; i < visibleNodes.length; i++) {
       final nid = orderNids[i];
@@ -3268,16 +2628,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (controller.isExitingNid(nid)) continue;
 
       final parentData = child.parentData! as SliverTreeParentData;
-      // Edge-ghost rows paint at `_edgeGhostBaseY + slideDelta` (NOT at
+      // Edge-ghost rows paint at `composer.baseFor + slideDelta` (NOT at
       // structural + slideDelta). Substitute the live edge base for
       // the structural offset so hit-tests land on the painted (ghost)
       // position. Lazy: build the snapshot once, only if any ghost is
       // actually encountered.
-      final edgeEntry = _phantomEdgeExits?[nodeId];
       final double nodeOffset;
-      if (edgeEntry != null) {
+      if (_composer.ghosts.entryFor(nodeId) != null) {
         hitViewport ??= _currentViewportSnapshot();
-        nodeOffset = _edgeGhostBaseY(edgeEntry, hitViewport);
+        nodeOffset = _composer.baseFor(nodeId, hitViewport) ?? parentData.layoutOffset;
       } else {
         nodeOffset = parentData.layoutOffset;
       }
@@ -3386,7 +2745,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         (hasXSlides && nid >= 0) ? controller.getSlideDeltaXNid(nid) : 0.0;
 
     final scrollOffset = constraints.scrollOffset;
-    // Edge-ghost rows paint at `_edgeGhostBaseY + slideDelta`, not at
+    // Edge-ghost rows paint at `composer.baseFor + slideDelta`, not at
     // `parentData.layoutOffset + slideDelta`. Substitute the live edge
     // base so framework code (`localToGlobal`, semantics, focus
     // traversal) sees the row at its actual painted position. The live
@@ -3394,11 +2753,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // scrolling. Settled-check: if the slide is settled but lazy-prune
     // hasn't run, fall back to the structural offset so post-settlement
     // queries report the row's real (off-screen) position.
-    final edgeEntry = nodeId == null ? null : _phantomEdgeExits?[nodeId];
+    final typedNodeId = nodeId as TKey?;
+    final edgeEntry =
+        typedNodeId == null ? null : _composer.ghosts.entryFor(typedNodeId);
     final useGhost = edgeEntry != null
         && (slideDelta != 0.0 || slideDeltaX != 0.0);
     final base = useGhost
-        ? _edgeGhostBaseY(edgeEntry, _currentViewportSnapshot())
+        ? _currentViewportSnapshot().baseForEdge(edgeEntry.edge)
         : parentData.layoutOffset;
     transform.translateByDouble(
       parentData.indent + slideDeltaX,

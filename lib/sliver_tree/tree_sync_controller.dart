@@ -94,6 +94,15 @@ class TreeSyncController<TKey, TData> {
   /// was previously expanded (and [preserveExpansion] is true), it is
   /// automatically expanded after its children are set.
   ///
+  /// **Reparent through removed root.** A descendant of a root that is
+  /// being removed in this sync, but that appears elsewhere in the desired
+  /// tree (under a different parent), is animated (slid) into its new
+  /// position rather than purged with the old root. This is implemented
+  /// by deferring root removal until after the recursive children sync
+  /// has had a chance to call [TreeController.moveNode] for every cross-
+  /// parent reparent. The old root then exits as a clean separate animation
+  /// on the (now-empty or non-desired-residue) subtree it had left.
+  ///
   /// Set [animate] to false to suppress animations (useful for initial setup).
   void syncRoots(
     List<TreeNode<TKey, TData>> desired, {
@@ -126,26 +135,21 @@ class TreeSyncController<TKey, TData> {
       _collectDesiredDescendants(desired, childrenOf);
     }
 
-    // 1. Remove roots no longer desired.
-    //    When childrenOf is provided, skip removal of roots that appear
+    // 1. Compute which roots are no longer desired, but DEFER their actual
+    //    removal until after the recursive children sync (step 5). Reason:
+    //    when a child reparents from a soon-to-be-removed root into a
+    //    surviving root in the same sync, `moveNode` in step 5 needs to
+    //    see the old root still alive so it can resolve `getParent(child)`
+    //    and stage a clean FLIP slide. Removing the old root first marks
+    //    the entire subtree pending-deletion, which leaves the child's
+    //    slide composing against an ancestor-driven exit animation — the
+    //    bug fixed by this ordering.
+    //
+    //    When childrenOf is provided, the `desiredDescendants.contains(key)`
+    //    check below in step 2' also skips removal of roots that appear
     //    anywhere in the desired tree — they are being reparented, not
-    //    deleted. If a reparented root were treated as a deletion, its
-    //    subtree would enter _pendingDeletion; a later moveNode would
-    //    succeed but _finalizeAnimation would eventually purge the subtree.
+    //    deleted.
     final toRemove = currentSet.difference(desiredSet);
-    for (final key in toRemove) {
-      if (desiredDescendants != null && desiredDescendants.contains(key)) {
-        continue;
-      }
-      // Skip if already removed or moved by an earlier operation.
-      if (_controller.getNodeData(key) == null ||
-          _controller.getParent(key) != null) {
-        continue;
-      }
-      _rememberExpansion(key);
-      _controller.remove(key: key, animate: animate);
-      _clearChildrenTracking(key);
-    }
 
     // 2. Build the post-removal list plus a Fenwick tree keyed by desired
     //    position, seeded with 1s at retained keys' desired positions. The
@@ -177,18 +181,24 @@ class TreeSyncController<TKey, TData> {
 
       if (_controller.getNodeData(node.key) != null) {
         final oldParent = _controller.getParent(node.key);
-        // A node that is desired again while its exit animation is still
-        // in flight is a re-insert, not a generic move, even if it is
-        // coming back under a different parent or as a root.
-        final preservePendingSubtreeState = _controller.isExiting(node.key);
-        if (preservePendingSubtreeState || oldParent == null) {
+        if (oldParent == null) {
+          // Already a root: insertRoot handles relocation and, when the
+          // node is mid-exit, cancels the deletion and reverses the
+          // standalone exit into an enter. preservePendingSubtreeState is
+          // ignored when the node is not pending-deletion, so passing it
+          // unconditionally is safe and keeps the re-add path symmetric.
           _controller.insertRoot(
             node,
             index: targetIndex,
             animate: animate,
-            preservePendingSubtreeState: preservePendingSubtreeState,
+            preservePendingSubtreeState: true,
           );
         } else {
+          // Reparenting child → root. moveNode now composes a smooth
+          // extent reversal with the FLIP slide for any pending-deletion
+          // members of the moved subtree (Phase B / `_revertSubtreeFrom-
+          // PendingDeletion`), so this path is correct even when the
+          // moved node is mid-exit.
           _controller.updateNode(node);
           _controller.moveNode(
             node.key,
@@ -198,8 +208,6 @@ class TreeSyncController<TKey, TData> {
             slideDuration: _controller.animationDuration,
             slideCurve: _controller.animationCurve,
           );
-        }
-        if (oldParent != null) {
           _currentChildren[oldParent]?.remove(node.key);
         }
       } else {
@@ -238,18 +246,72 @@ class TreeSyncController<TKey, TData> {
     //    syncChildren uses it to defer removal of nodes desired under a
     //    different parent.
     //
-    //    This must run BEFORE reorderRoots: a former root being reparented
-    //    into another root's subtree is still a live root at this point, and
-    //    reorderRoots asserts that orderedKeys matches the current live roots
-    //    exactly. The reparenting moveNode happens inside this recursive pass.
+    //    This must run BEFORE step 2' (root removal) and BEFORE reorderRoots:
+    //    a former root being reparented into another root's subtree is still
+    //    a live root at this point, and reorderRoots asserts that orderedKeys
+    //    matches the current live roots exactly. The reparenting moveNode
+    //    happens inside this recursive pass. By keeping the old roots alive
+    //    until after this pass, moveNode can resolve getParent(child) cleanly
+    //    and stage a FLIP slide against a stable baseline — the fix for the
+    //    "reparent through removed root" bug.
     if (childrenOf != null) {
       _deferExpansionRestore = true;
       try {
-        _syncChildrenRecursive(desired, childrenOf, toAdd, animate);
+        _syncChildrenRecursive(desired, childrenOf, animate);
       } finally {
         _deferExpansionRestore = false;
         _globallyDesiredChildren = null;
       }
+    }
+
+    // 2'. Now actually remove the orphan roots. Their desired descendants
+    //     have been reparented out by step 5; whatever non-desired descendants
+    //     remain under each toRemove root are correctly purged with it.
+    //
+    //     Read the captured local `desiredDescendants` here, NOT the
+    //     `_globallyDesiredChildren` field — the field is set to null in the
+    //     finally block above before this loop runs.
+    assert(() {
+      if (desiredDescendants != null) {
+        for (final key in toRemove) {
+          // Skip roots that are themselves being reparented: their entire
+          // subtree rides along with the moveNode call in step 3 or step 5,
+          // so it's expected that their tracked descendants are still in
+          // desiredDescendants — that's how moveNode found them.
+          if (desiredDescendants.contains(key)) continue;
+          final tracked = _currentChildren[key] ?? const [];
+          for (final childKey in tracked) {
+            assert(
+              !desiredDescendants.contains(childKey),
+              "Descendant $childKey of soon-to-be-removed $key was not "
+                  "reparented out before root removal. Step 5 should have "
+                  "moved it via moveNode.",
+            );
+          }
+        }
+      }
+      return true;
+    }());
+    for (final key in toRemove) {
+      if (desiredDescendants != null && desiredDescendants.contains(key)) {
+        // Skip: this root is being reparented (its key appears as a
+        // descendant in the desired tree). The reparent was handled in
+        // step 3 (former-child-to-root) or step 5 (cross-parent move).
+        continue;
+      }
+      // Skip if already removed or moved by an earlier operation.
+      if (_controller.getNodeData(key) == null ||
+          _controller.getParent(key) != null) {
+        continue;
+      }
+      // _rememberExpansion walks the controller's current subtree under
+      // `key`. By this point any reparented descendants have been pulled
+      // out via moveNode at step 5, so their expansion is preserved
+      // natively by the controller (not via memory). What remains under
+      // `key` are non-desired descendants that are about to be purged.
+      _rememberExpansion(key);
+      _controller.remove(key: key, animate: animate);
+      _clearChildrenTracking(key);
     }
 
     // 6. Reorder all live roots to match desired order if needed.
@@ -310,6 +372,13 @@ class TreeSyncController<TKey, TData> {
   /// [syncChildren] directly for a single parent, nodes absent from
   /// [desired] are removed immediately; use [syncMultipleChildren] when
   /// reparenting across parents.
+  ///
+  /// **Reparent through removed root:** when invoked from [syncRoots] and
+  /// a child is reparented out of a root that is itself being removed in
+  /// the same sync, the source root's removal is deferred until after this
+  /// reparent completes. This lets [TreeController.moveNode] resolve the
+  /// child's old parent cleanly and stage a FLIP slide against a stable
+  /// baseline instead of fighting an ancestor-driven exit animation.
   ///
   /// Set [animate] to false to suppress animations.
   void syncChildren(
@@ -416,19 +485,24 @@ class TreeSyncController<TKey, TData> {
         // present under oldParent, skip the moveNode, and diverge from the
         // controller's actual state.
         final oldParent = _controller.getParent(node.key);
-        // A node that is desired again while its exit animation is still
-        // in flight is a re-insert, not a generic move, even if it is
-        // being restored under a different parent.
-        final preservePendingSubtreeState = _controller.isExiting(node.key);
-        if (preservePendingSubtreeState || oldParent == parentKey) {
+        if (oldParent == parentKey) {
+          // Same parent: insert handles relocation and, when the node is
+          // mid-exit, cancels the deletion. preservePendingSubtreeState
+          // is ignored when the node is not pending-deletion, so passing
+          // it unconditionally is safe.
           _controller.insert(
             parentKey: parentKey,
             node: node,
             index: targetIndex,
             animate: animate,
-            preservePendingSubtreeState: preservePendingSubtreeState,
+            preservePendingSubtreeState: true,
           );
         } else {
+          // Reparenting across parents. moveNode now composes a smooth
+          // extent reversal with the FLIP slide for any pending-deletion
+          // members of the moved subtree (Phase B / `_revertSubtreeFrom-
+          // PendingDeletion`), so this path is correct even when the
+          // moved node is mid-exit.
           _controller.updateNode(node);
           _controller.moveNode(
             node.key,
@@ -438,9 +512,9 @@ class TreeSyncController<TKey, TData> {
             slideDuration: _controller.animationDuration,
             slideCurve: _controller.animationCurve,
           );
-        }
-        if (oldParent != null && oldParent != parentKey) {
-          _currentChildren[oldParent]?.remove(node.key);
+          if (oldParent != null) {
+            _currentChildren[oldParent]?.remove(node.key);
+          }
         }
       } else {
         _controller.insert(
@@ -648,10 +722,20 @@ class TreeSyncController<TKey, TData> {
   /// restore phase walks `restoreOrder` in reverse — the order keys are
   /// pushed in is top-down (parent before children); reversing yields
   /// the bottom-up order the recursive version produced.
+  ///
+  /// The [animate] flag is passed through unconditionally to each
+  /// [syncChildren] call. A previous version suppressed animation
+  /// (`animate: false`) when the parent was in the newly-added set,
+  /// which was intended to avoid double-animation when a brand-new
+  /// subtree appeared. That suppression also disabled the FLIP slide
+  /// on cross-parent reparented children whose new parent happened to
+  /// be newly added — the "Failure B" bug fixed here. Letting fresh
+  /// children of a fresh parent animate alongside the parent's enter
+  /// produces cohesive subtree growth, which is an acceptable (and
+  /// arguably preferable) visual.
   void _syncChildrenRecursive(
     List<TreeNode<TKey, TData>> nodes,
     List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
-    Set<TKey> newlyAdded,
     bool animate,
   ) {
     final stack = <TreeNode<TKey, TData>>[];
@@ -662,11 +746,7 @@ class TreeSyncController<TKey, TData> {
     while (stack.isNotEmpty) {
       final node = stack.removeLast();
       final children = childrenOf(node.key);
-      syncChildren(
-        node.key,
-        children,
-        animate: newlyAdded.contains(node.key) ? false : animate,
-      );
+      syncChildren(node.key, children, animate: animate);
       // Defer restore to after all descendants are synced (bottom-up).
       for (final child in children) {
         restoreOrder.add(child.key);

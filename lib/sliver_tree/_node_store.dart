@@ -19,6 +19,20 @@ import 'types.dart';
 /// nid is never queried through [NodeStore.nids].
 const int kNoParentNid = -1;
 
+/// Signature for the [NodeStore.onParentChanged] observer.
+///
+/// Fired by [NodeStore.setParent] **after** the parent write and the
+/// `_ancestorsExpandedByNid` cache propagation. Both [oldParent] and
+/// [newParent] are nid values; either may be [kNoParentNid] (root).
+///
+/// Fires unconditionally — including the no-op `oldParent == newParent`
+/// case. Subscribers are responsible for short-circuiting no-ops.
+typedef ParentChangedCallback = void Function(
+  int nid,
+  int oldParent,
+  int newParent,
+);
+
 /// Dense ECS-style storage for the tree's structural state.
 ///
 /// Hands out stable integer "nids" (via the embedded [NodeIdRegistry]) and
@@ -36,9 +50,16 @@ class NodeStore<TKey, TData> {
   /// Optional callback fired when [_ensureDenseCapacity] reallocates the
   /// per-nid arrays. The argument is the new capacity, in slots. The
   /// controller uses this to grow its own per-nid arrays
-  /// ([_visibleSubtreeSizeByNid], the order buffer's reverse index) in
+  /// (the order buffer's reverse index, animation-state mirrors, etc.) in
   /// lockstep.
   final void Function(int newCapacity)? onCapacityGrew;
+
+  /// Optional observer fired by [setParent] after the parent write.
+  /// Mutable so the owner can wire it up after construction (avoiding
+  /// late-final initialization cycles when the subscriber's late field
+  /// references this store). See [ParentChangedCallback] for invocation
+  /// semantics.
+  ParentChangedCallback? onParentChanged;
 
   /// Bidirectional key↔nid registry with free-list recycling.
   final NodeIdRegistry<TKey> nids = NodeIdRegistry<TKey>();
@@ -246,11 +267,16 @@ class NodeStore<TKey, TData> {
   /// the cached [_ancestorsExpandedByNid] bit for [key], propagating the
   /// change through [key]'s subtree.
   ///
-  /// Does **not** maintain the visibility-subtree-size cache (that lives on
-  /// the controller) — callers that need that bookkeeping must capture the
-  /// old parent first via [parentNidOf] and adjust externally before calling.
+  /// After the parent write and the ancestors-expanded propagation, fires
+  /// [onParentChanged] with `(nid, oldParent, newParent)` for any subscriber
+  /// (e.g. the visible-subtree-size cache in the order buffer). Callers no
+  /// longer need to do the cache shift externally — subscribe to the
+  /// callback instead. Note: fires unconditionally, including when
+  /// `oldParent == newParent` — subscribers are responsible for
+  /// short-circuiting no-ops.
   void setParent(TKey key, TKey? parent) {
     final nid = nids[key]!;
+    final oldParentNid = _parentByNid[nid];
     final newParentNid = parent == null ? kNoParentNid : nids[parent]!;
     _parentByNid[nid] = newParentNid;
     final newAe = _computeAncestorsExpandedNid(nid);
@@ -259,6 +285,7 @@ class NodeStore<TKey, TData> {
       final childAe = (newAe != 0 && _expandedByNid[nid] != 0) ? 1 : 0;
       _propagateAncestorsExpandedToDescendants(key, childAe);
     }
+    onParentChanged?.call(nid, oldParentNid, newParentNid);
   }
 
   /// Child key list for [key], or null when [key] has no list allocated yet

@@ -1924,6 +1924,50 @@ void main() {
         expect(controller.hasActiveAnimations, isFalse);
       },
     );
+
+    testWidgets(
+      "expandAll inside runBatch still registers bulk-animated members",
+      (tester) async {
+        // Regression: expandAll's bulk-member registration loops gate on
+        // `_order.contains(key)`. Inside runBatch, `_markVisibleOrderDirty`
+        // defers the rebuild — `_order` stays pre-mutation and every
+        // newly-visible child fails the contains check, so the bulk
+        // group runs empty and children appear at full extent in one
+        // frame. The fix forces `_ensureVisibleOrder()` after
+        // `_markVisibleOrderDirty()` inside expandAll itself.
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 100),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([TreeNode(key: "r", data: "R")]);
+        controller.setChildren("r", [
+          TreeNode(key: "c1", data: "C1"),
+          TreeNode(key: "c2", data: "C2"),
+        ]);
+
+        expect(controller.hasActiveAnimations, isFalse);
+        controller.runBatch(() {
+          controller.expandAll();
+        });
+        // The two children should be mid-animation (extent < full) inside
+        // the bulk group. hasActiveAnimations being true is the proxy:
+        // it requires either standalone, op-group, or non-empty bulk
+        // group activity. Without the fix, the bulk group is empty and
+        // this assertion fails.
+        expect(
+          controller.hasActiveAnimations,
+          isTrue,
+          reason: "bulk group should hold the newly-visible children even "
+              "when expandAll runs inside an outer runBatch",
+        );
+
+        await tester.pumpAndSettle();
+        expect(controller.hasActiveAnimations, isFalse);
+        expect(controller.isExpanded("r"), isTrue);
+      },
+    );
   });
 
   group("setChildren on pending-deletion parent", () {

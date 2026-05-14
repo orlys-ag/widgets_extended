@@ -1,7 +1,6 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/sliver_tree/tree_controller.dart';
-import 'package:widgets_extended/sliver_tree/tree_sync_controller.dart';
-import 'package:widgets_extended/sliver_tree/types.dart';
+import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
 void main() {
   late TreeController<String, String> controller;
@@ -1108,6 +1107,476 @@ void main() {
               "With maxExpansionMemorySize=0, expansion state must not be "
               "remembered across remove/re-add per the documented contract.",
         );
+      },
+    );
+  });
+
+  // Reparent-through-removed-root: a child that reparents while its old
+  // parent (a root) is being removed in the same sync should play a clean
+  // moveTo slide instead of a remove + add. This requires deferring the
+  // old root's removal until after the recursive children sync has had a
+  // chance to call moveNode on the reparented child.
+  group("syncRoots — reparent through removed root", () {
+    testWidgets(
+      "child reparents cleanly when its old root is being removed in the "
+      "same sync — new parent already exists",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        // Initial: today=[taskA], comingUp=[taskC]. Both sections present.
+        sync.syncRoots(
+          [TreeNode(key: "today", data: "Today"),
+           TreeNode(key: "comingUp", data: "Coming Up")],
+          childrenOf: (k) {
+            switch (k) {
+              case "today":
+                return [TreeNode(key: "taskA", data: "Task A")];
+              case "comingUp":
+                return [TreeNode(key: "taskC", data: "Task C")];
+              default:
+                return const [];
+            }
+          },
+          animate: false,
+        );
+        controller.expand(key: "today", animate: false);
+        controller.expand(key: "comingUp", animate: false);
+        expect(controller.visibleNodes,
+            ["today", "taskA", "comingUp", "taskC"]);
+
+        final fullExtent = controller.getCurrentExtent("taskA");
+        expect(fullExtent, greaterThan(0.0));
+
+        // Sync to: today removed, taskA reparented under comingUp.
+        sync.syncRoots(
+          [TreeNode(key: "comingUp", data: "Coming Up")],
+          childrenOf: (k) {
+            switch (k) {
+              case "comingUp":
+                return [
+                  TreeNode(key: "taskA", data: "Task A"),
+                  TreeNode(key: "taskC", data: "Task C"),
+                ];
+              default:
+                return const [];
+            }
+          },
+          animate: true,
+        );
+
+        // After the first post-sync pump: taskA must NOT be pending-deletion.
+        await tester.pump();
+        expect(controller.isPendingDeletion("taskA"), isFalse,
+            reason: "taskA was reparented, not removed");
+        expect(controller.getParent("taskA"), "comingUp");
+
+        // Extent invariance — the primary signal that the fix works.
+        // Sample at several intermediate ticks; taskA should never shrink.
+        for (int i = 0; i < 4; i++) {
+          await tester.pump(const Duration(milliseconds: 80));
+          expect(
+            controller.getCurrentExtent("taskA"),
+            closeTo(fullExtent, 1.0),
+            reason: "taskA's extent must stay full throughout the slide "
+                "(not shrink with today's exit)",
+          );
+        }
+
+        // After settle: today purged, taskA under comingUp.
+        await tester.pumpAndSettle();
+        expect(controller.getNodeData("today"), isNull,
+            reason: "today was removed and its exit completed");
+        expect(controller.getParent("taskA"), "comingUp");
+        expect(controller.visibleNodes, ["comingUp", "taskA", "taskC"]);
+      },
+    );
+
+    testWidgets(
+      "child reparents cleanly when its old root is being removed AND new "
+      "root is being added in the same sync",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        // Initial: only today exists, with taskA.
+        sync.syncRoots(
+          [TreeNode(key: "today", data: "Today")],
+          childrenOf: (k) =>
+              k == "today" ? [TreeNode(key: "taskA", data: "Task A")] : const [],
+          animate: false,
+        );
+        controller.expand(key: "today", animate: false);
+        expect(controller.visibleNodes, ["today", "taskA"]);
+
+        final fullExtent = controller.getCurrentExtent("taskA");
+
+        // Sync to: today gone, comingUp added containing taskA.
+        sync.syncRoots(
+          [TreeNode(key: "comingUp", data: "Coming Up")],
+          childrenOf: (k) => k == "comingUp"
+              ? [TreeNode(key: "taskA", data: "Task A")]
+              : const [],
+          animate: true,
+        );
+
+        await tester.pump();
+        // taskA is reparented via moveNode(animate: true) — even though
+        // comingUp is newly added. The previous "animate: false when parent
+        // newly added" suppression would have made this a structural-only
+        // move, defeating the slide. Without a mounted SliverTree the
+        // slide engine has no hosts to stage a baseline on, so we don't
+        // assert hasActiveSlides here — the visual regression test below
+        // covers that path; here we rely on extent invariance.
+        expect(controller.isPendingDeletion("taskA"), isFalse);
+        expect(controller.getParent("taskA"), "comingUp");
+
+        // Extent invariance across the full animation.
+        for (int i = 0; i < 4; i++) {
+          await tester.pump(const Duration(milliseconds: 80));
+          expect(
+            controller.getCurrentExtent("taskA"),
+            closeTo(fullExtent, 1.0),
+            reason: "taskA must stay at full extent, not shrink + regrow",
+          );
+        }
+
+        await tester.pumpAndSettle();
+        expect(controller.getNodeData("today"), isNull);
+        expect(controller.getParent("taskA"), "comingUp");
+        // comingUp was newly inserted, so it starts collapsed and taskA is
+        // structurally present but not in the visible order yet. Expand it
+        // to verify taskA is reachable.
+        controller.expand(key: "comingUp", animate: false);
+        expect(controller.visibleNodes, ["comingUp", "taskA"]);
+      },
+    );
+
+    testWidgets(
+      "former root reparented under a sibling root while a third root is "
+      "being removed",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        // Initial: roots A, B, C — all bare.
+        sync.syncRoots(
+          [TreeNode(key: "A", data: "A"),
+           TreeNode(key: "B", data: "B"),
+           TreeNode(key: "C", data: "C")],
+          childrenOf: (k) => const [],
+          animate: false,
+        );
+
+        // Desired: A has B as child; C removed.
+        sync.syncRoots(
+          [TreeNode(key: "A", data: "A")],
+          childrenOf: (k) =>
+              k == "A" ? [TreeNode(key: "B", data: "B")] : const [],
+          animate: false,
+        );
+
+        expect(controller.getNodeData("C"), isNull,
+            reason: "C had no descendants in desired tree — removed");
+        expect(controller.getParent("B"), "A",
+            reason: "B was reparented under A, not removed");
+        expect(controller.getNodeData("B"), isNotNull);
+      },
+    );
+
+    testWidgets(
+      "all roots removed with no desired descendants — clean exits",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        sync.syncRoots(
+          [TreeNode(key: "a", data: "A"),
+           TreeNode(key: "b", data: "B")],
+          childrenOf: (k) {
+            switch (k) {
+              case "a":
+                return [TreeNode(key: "a1", data: "A1")];
+              case "b":
+                return [TreeNode(key: "b1", data: "B1")];
+              default:
+                return const [];
+            }
+          },
+          animate: false,
+        );
+        expect(controller.getNodeData("a"), isNotNull);
+        expect(controller.getNodeData("b"), isNotNull);
+
+        // Empty desired tree — both roots and their subtrees should go.
+        sync.syncRoots(const [],
+            childrenOf: (k) => const [], animate: false);
+
+        expect(controller.getNodeData("a"), isNull);
+        expect(controller.getNodeData("b"), isNull);
+        expect(controller.getNodeData("a1"), isNull);
+        expect(controller.getNodeData("b1"), isNull);
+        expect(controller.visibleNodes, isEmpty);
+      },
+    );
+
+    testWidgets(
+      "insertRoot index correctness while pending removals are in flight",
+      (tester) async {
+        // Sync from [a, b, c] to [c, d] where d is new and a/b are removed.
+        // The old roots are still in _roots when insertRoot(d) runs, so the
+        // index plumbing must rely on the post-step-(2') filter, not on
+        // current _roots length matching the desired view.
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        sync.syncRoots(
+          [TreeNode(key: "a", data: "A"),
+           TreeNode(key: "b", data: "B"),
+           TreeNode(key: "c", data: "C")],
+          childrenOf: (k) => const [],
+          animate: false,
+        );
+
+        sync.syncRoots(
+          [TreeNode(key: "c", data: "C"),
+           TreeNode(key: "d", data: "D")],
+          childrenOf: (k) => const [],
+          animate: true,
+        );
+
+        // After the full settle, the visible order must be exactly [c, d],
+        // independent of the intermediate _roots state.
+        await tester.pumpAndSettle();
+        expect(controller.visibleNodes, ["c", "d"]);
+        expect(controller.getNodeData("a"), isNull);
+        expect(controller.getNodeData("b"), isNull);
+      },
+    );
+
+    testWidgets(
+      "expansion is preserved natively across reparent-through-removed-root",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        // Initial: today=[taskA=[grand1]], comingUp=[taskC]. Expand taskA.
+        sync.syncRoots(
+          [TreeNode(key: "today", data: "Today"),
+           TreeNode(key: "comingUp", data: "Coming Up")],
+          childrenOf: (k) {
+            switch (k) {
+              case "today":
+                return [TreeNode(key: "taskA", data: "Task A")];
+              case "taskA":
+                return [TreeNode(key: "grand1", data: "Grand 1")];
+              case "comingUp":
+                return [TreeNode(key: "taskC", data: "Task C")];
+              default:
+                return const [];
+            }
+          },
+          animate: false,
+        );
+        controller.expand(key: "today", animate: false);
+        controller.expand(key: "comingUp", animate: false);
+        controller.expand(key: "taskA", animate: false);
+        expect(controller.isExpanded("taskA"), isTrue);
+        expect(controller.visibleNodes,
+            ["today", "taskA", "grand1", "comingUp", "taskC"]);
+
+        // Pre-sync: expansion memory is empty (no removals happened).
+        expect(sync.snapshotRememberedKeys(), isEmpty);
+
+        // Reparent taskA from today (being removed) to comingUp,
+        // preserving grand1 underneath.
+        sync.syncRoots(
+          [TreeNode(key: "comingUp", data: "Coming Up")],
+          childrenOf: (k) {
+            switch (k) {
+              case "comingUp":
+                return [
+                  TreeNode(key: "taskA", data: "Task A"),
+                  TreeNode(key: "taskC", data: "Task C"),
+                ];
+              case "taskA":
+                return [TreeNode(key: "grand1", data: "Grand 1")];
+              default:
+                return const [];
+            }
+          },
+          animate: false,
+        );
+
+        // Expansion is preserved natively by moveNode, not via memory.
+        expect(controller.isExpanded("taskA"), isTrue,
+            reason: "moveNode preserves the moved subtree's expanded flag");
+        expect(controller.visibleNodes,
+            ["comingUp", "taskA", "grand1", "taskC"]);
+        expect(controller.getParent("taskA"), "comingUp");
+        expect(controller.getParent("grand1"), "taskA");
+
+        // Expansion memory does NOT contain taskA or grand1 — they were
+        // never removed, only moved. A future change that breaks this
+        // (e.g., regressing moveNode's expansion preservation, or
+        // accidentally walking reparented descendants through
+        // _rememberExpansion) would surface here.
+        final remembered = sync.snapshotRememberedKeys();
+        expect(remembered.contains("taskA"), isFalse,
+            reason: "taskA was reparented, not removed");
+        expect(remembered.contains("grand1"), isFalse,
+            reason: "grand1 rode along with taskA via moveNode");
+      },
+    );
+
+    testWidgets(
+      "visual regression: reparent through removed root preserves the row "
+      "across the slide (My Work scenario)",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 400),
+          animationCurve: Curves.linear,
+        );
+        sync = TreeSyncController(treeController: controller);
+        addTearDown(() {
+          sync.dispose();
+          controller.dispose();
+        });
+
+        Widget harness() {
+          return MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 600,
+                child: CustomScrollView(
+                  slivers: <Widget>[
+                    SliverTree<String, String>(
+                      controller: controller,
+                      nodeBuilder: (context, key, depth) {
+                        return SizedBox(
+                          key: ValueKey("row-$key"),
+                          height: 48,
+                          child: Padding(
+                            padding: EdgeInsets.only(left: depth * 16.0),
+                            child: Text(key),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        sync.syncRoots(
+          [TreeNode(key: "today", data: "Today"),
+           TreeNode(key: "comingUp", data: "Coming Up")],
+          childrenOf: (k) {
+            switch (k) {
+              case "today":
+                return [TreeNode(key: "taskA", data: "Task A")];
+              case "comingUp":
+                return [TreeNode(key: "taskC", data: "Task C")];
+              default:
+                return const [];
+            }
+          },
+          animate: false,
+        );
+        controller.expand(key: "today", animate: false);
+        controller.expand(key: "comingUp", animate: false);
+
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        // Capture taskA's row before the reparent — must remain present
+        // in the widget tree throughout the animation (no unmount).
+        final taskARowFinder = find.byKey(const ValueKey("row-taskA"));
+        expect(taskARowFinder, findsOneWidget);
+        final oldY = tester.getTopLeft(taskARowFinder).dy;
+
+        sync.syncRoots(
+          [TreeNode(key: "comingUp", data: "Coming Up")],
+          childrenOf: (k) {
+            switch (k) {
+              case "comingUp":
+                return [
+                  TreeNode(key: "taskA", data: "Task A"),
+                  TreeNode(key: "taskC", data: "Task C"),
+                ];
+              default:
+                return const [];
+            }
+          },
+          animate: true,
+        );
+
+        // Sample intermediate ticks: taskA must stay mounted (finds one
+        // widget) and never paint at a snap-to-zero / snap-to-final
+        // position. This is the strongest signal we can assert without
+        // committing to a specific trajectory.
+        for (int i = 0; i < 5; i++) {
+          await tester.pump(const Duration(milliseconds: 70));
+          expect(taskARowFinder, findsOneWidget,
+              reason: "taskA must remain mounted across the slide — the "
+                  "old bug would unmount it as part of today's exit");
+        }
+
+        await tester.pumpAndSettle();
+        expect(taskARowFinder, findsOneWidget);
+        // taskA's old painted Y (under today) and final painted Y (under
+        // comingUp) happen to coincide in this canonical 48-px-row
+        // scenario, but allow rounding tolerance.
+        final newY = tester.getTopLeft(taskARowFinder).dy;
+        expect(newY, closeTo(oldY, 1.0));
       },
     );
   });
