@@ -1,15 +1,7 @@
 ## 0.0.18
 
-- `SyncedSliverTree` / `TreeSyncController`: a child that reparents while
-  its old parent is simultaneously removed now plays a clean moveTo slide
-  instead of a remove + add. Fixes the "section emptied" / "section newly
-  appearing" cases for sectioned views.
-- Minor visual change: when a brand-new subtree (parent + fresh children
-  in the same sync) appears, the children now animate their enter
-  alongside the parent's enter (cohesive subtree growth) instead of
-  snapping to full extent. Consumers wanting the old "parent grows,
-  children snap" behavior should split the change into two syncs (insert
-  the parent first, then its children) or pass `animate: false`.
+- `SyncedSliverTree` / `TreeSyncController`: fix reparent animation skip when
+parent is deleted.
 
 ## 0.0.17
 
