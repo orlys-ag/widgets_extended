@@ -32,8 +32,8 @@ void main() {
 
       // All-set mirror — includes 'c' which is pending-deletion. This is
       // a less-common pattern in v2 (live-by-default), but valid via
-      // allSectionKeys.
-      final mirroredKeys = c.allSectionKeys;
+      // sectionKeys(includeExiting: true).
+      final mirroredKeys = c.sectionKeys(includeExiting: true);
       expect(mirroredKeys.length, equals(5));
 
       // The call that previously threw inside reorderRoots.

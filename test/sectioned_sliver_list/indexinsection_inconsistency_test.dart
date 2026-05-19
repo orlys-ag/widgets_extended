@@ -4,7 +4,7 @@
 /// Both must use LIVE-list space (skipping pending-deletion siblings).
 /// The outer index comes from `treeController.getIndexInParent(key)` and
 /// the inner index comes from `controller.indexOfItem(key)` — both
-/// resolve to the same underlying primitive in v2.
+/// resolve to the same underlying primitive.
 library;
 
 import 'package:flutter/widgets.dart';
@@ -15,32 +15,25 @@ void main() {
   testWidgets("indexInSection agrees between outer itemBuilder and "
       "view.watch when a pending-deletion sibling sits between live items",
       (tester) async {
-    final controller = SectionedListController<String, String, String>(
-      vsync: tester,
-      sectionKeyOf: (s) => s,
-      itemKeyOf: (i) => i,
-      animationDuration: const Duration(milliseconds: 200),
-    );
-    addTearDown(controller.dispose);
-
     final outerIndices = <String, int>{};
     final innerIndices = <String, int>{};
-
-    controller.setSections(
-      ["s"],
-      itemsOf: (_) => const ["a", "b", "c"],
-    );
-    controller.expandSection("s", animate: false);
+    late SectionedListController<String, String, String> controller;
 
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
         child: CustomScrollView(
           slivers: [
-            SectionedSliverList<String, String, String>.controlled(
-              controller: controller,
-              headerBuilder: (_, view) =>
-                  SizedBox(height: 30, child: Text("H:${view.key}")),
+            SectionedSliverList<String, String, String>(
+              sections: const ["s"],
+              itemsOf: (_) => const ["a", "b", "c"],
+              sectionKeyOf: (s) => s,
+              itemKeyOf: (i) => i,
+              animationDuration: const Duration(milliseconds: 200),
+              headerBuilder: (_, view) {
+                controller = view.controller;
+                return SizedBox(height: 30, child: Text("H:${view.key}"));
+              },
               itemBuilder: (_, view) {
                 outerIndices[view.key] = view.indexInSection;
                 return view.watch(
@@ -74,8 +67,11 @@ void main() {
     controller.updateItem("c", "c");
     await tester.pump();
 
-    // 'b' is still in the all-set during exit animation.
-    expect(controller.allItemKeysOf("s"), contains("b"));
+    // 'b' is still present with includeExiting:true during exit.
+    expect(
+      controller.itemKeysOf("s", includeExiting: true),
+      contains("b"),
+    );
     // ...but live-set excludes it.
     expect(controller.itemKeysOf("s"), equals(["a", "c"]));
 

@@ -2,17 +2,18 @@
 ///
 /// Models a strict 2-level structure (sections containing items, items
 /// have no children) with separate types and builders for each level,
-/// animated insert/remove/reparent, sticky headers, and an optional
-/// external controller.
+/// animated insert/remove/reparent, and sticky headers.
 ///
 /// Type parameters: `<K extends Object, Section, Item>`. Section and
 /// item key domains share a single user-facing parameter `K` and are
 /// kept disjoint internally via the wrapper types in `_internal_keys.dart`.
 ///
-/// Three constructors with non-overlapping responsibilities:
+/// Two constructors, each with a single source of truth:
 ///
-/// - default — pull-model declarative form. Widget owns an internal
-///   controller. The prop is authoritative on every rebuild:
+/// - default — pull-model declarative form. The widget owns an internal
+///   controller and the `sections` / `itemsOf` props are authoritative:
+///   every rebuild re-runs the diff against them and animates the
+///   transition.
 ///   ```dart
 ///   SectionedSliverList<String, Folder, File>(
 ///     sections: folders,
@@ -24,27 +25,22 @@
 ///   )
 ///   ```
 ///
-/// - `.fromMap` — `Map<Section, List<Item>>` form. Map iteration order
-///   is render order:
-///   ```dart
-///   SectionedSliverList.fromMap(
-///     sections: files.groupListsBy((f) => f.folder),
-///     sectionKeyOf: (folder) => folder.id,
-///     itemKeyOf: (file) => file.id,
-///     headerBuilder: ..., itemBuilder: ...,
-///   )
-///   ```
-///
-/// - `.controlled` — external-controller form. The controller IS the
-///   source of truth. No `sections`/`itemsOf` props, no expansion config,
-///   no animation params, no `itemIndent` — set those on the controller.
-///   Use this when imperative drift must survive parent rebuilds:
+/// - `.controlled` — push-model imperative form. A caller-owned
+///   [SectionedListController] is the authoritative state; the widget
+///   only renders it and never diffs. Use this when the list itself
+///   owns its state and is mutated imperatively.
 ///   ```dart
 ///   SectionedSliverList.controlled(
 ///     controller: myController,
 ///     headerBuilder: ..., itemBuilder: ...,
 ///   )
 ///   ```
+///
+/// Internally this is a thin dispatcher: the declarative form layers a
+/// prop-diffing [State] on top of the controlled renderer, so neither
+/// path carries mode branching. Switching constructors at the same slot
+/// is handled by the framework — the two impls have distinct types, so
+/// Flutter tears one down and mounts the other.
 library;
 
 import 'package:flutter/widgets.dart';
@@ -62,17 +58,12 @@ typedef SectionHeaderBuilder<K extends Object, Section, Item> =
 typedef SectionItemBuilder<K extends Object, Section, Item> =
     Widget Function(BuildContext context, ItemView<K, Section, Item> view);
 
-/// Internal mode discriminator. The mode is fixed at construction time;
-/// `didUpdateWidget` asserts that it does not change across rebuilds.
-enum _Mode { iterable, map, controlled }
-
+/// A header + items sliver. See the library docs for the two forms.
 class SectionedSliverList<K extends Object, Section, Item>
-    extends StatefulWidget {
-  /// Pull-model declarative form. Widget owns an internal controller.
-  /// The `sections` / `itemsOf` props are authoritative on every
-  /// rebuild — imperative drift between rebuilds (`controller.addItem`
-  /// via [SectionedSliverListState.controller]) survives until the next
-  /// rebuild that changes the prop, at which point the diff re-runs.
+    extends StatelessWidget {
+  /// Pull-model declarative form. The widget owns an internal
+  /// controller, and the `sections` / `itemsOf` props are
+  /// authoritative: every rebuild re-runs the diff against them.
   const SectionedSliverList({
     required Iterable<Section> sections,
     required Iterable<Item> Function(Section section) itemsOf,
@@ -82,56 +73,33 @@ class SectionedSliverList<K extends Object, Section, Item>
     required this.itemBuilder,
     this.collapsible = true,
     this.stickyHeaders = true,
-    this.hideEmptySections = false,
-    this.initiallyExpanded = true,
-    this.initialSectionExpansion,
-    this.preserveExpansion = true,
-    this.animationDuration = const Duration(milliseconds: 300),
-    this.animationCurve = Curves.easeInOut,
-    this.itemIndent = 0.0,
+    bool hideEmptySections = false,
+    bool initiallyExpanded = true,
+    bool? Function(K key, Section section)? initialSectionExpansion,
+    bool preserveExpansion = true,
+    Duration animationDuration = const Duration(milliseconds: 300),
+    Curve animationCurve = Curves.easeInOut,
+    double itemIndent = 0.0,
     super.key,
-  }) : _mode = _Mode.iterable,
+  }) : _controller = null,
        _sections = sections,
        _itemsOf = itemsOf,
        _sectionKeyOf = sectionKeyOf,
        _itemKeyOf = itemKeyOf,
-       _mapSections = null,
-       _externalController = null;
+       _hideEmptySections = hideEmptySections,
+       _initiallyExpanded = initiallyExpanded,
+       _initialSectionExpansion = initialSectionExpansion,
+       _preserveExpansion = preserveExpansion,
+       _animationDuration = animationDuration,
+       _animationCurve = animationCurve,
+       _itemIndent = itemIndent;
 
-  /// `Map<Section, List<Item>>` form. Map iteration order = render
-  /// order. Two map entries with the same `sectionKeyOf` result assert
-  /// in debug; release falls back to last-iterated payload.
-  const SectionedSliverList.fromMap({
-    required Map<Section, List<Item>> sections,
-    required K Function(Section section) sectionKeyOf,
-    required K Function(Item item) itemKeyOf,
-    required this.headerBuilder,
-    required this.itemBuilder,
-    this.collapsible = true,
-    this.stickyHeaders = true,
-    this.hideEmptySections = false,
-    this.initiallyExpanded = true,
-    this.initialSectionExpansion,
-    this.preserveExpansion = true,
-    this.animationDuration = const Duration(milliseconds: 300),
-    this.animationCurve = Curves.easeInOut,
-    this.itemIndent = 0.0,
-    super.key,
-  }) : _mode = _Mode.map,
-       _sections = null,
-       _itemsOf = null,
-       _sectionKeyOf = sectionKeyOf,
-       _itemKeyOf = itemKeyOf,
-       _mapSections = sections,
-       _externalController = null;
-
-  /// External-controller form. The controller IS the source of truth.
-  /// No `sections`/`itemsOf` props, no expansion config, no animation
-  /// params, no `itemIndent` — set them on the controller.
+  /// Push-model imperative form. The caller-owned [controller] is the
+  /// authoritative state; the widget only renders it and never diffs.
   ///
-  /// Use this when imperative drift must survive parent rebuilds, or
-  /// when an outer state-management layer owns the section/item state
-  /// directly.
+  /// Animation, indent and expansion config live on the controller —
+  /// there are no props for them here. `collapsible` is advisory: it
+  /// sets `SectionView.isCollapsible` but never alters expansion state.
   const SectionedSliverList.controlled({
     required SectionedListController<K, Section, Item> controller,
     required this.headerBuilder,
@@ -139,39 +107,18 @@ class SectionedSliverList<K extends Object, Section, Item>
     this.collapsible = true,
     this.stickyHeaders = true,
     super.key,
-  }) : _mode = _Mode.controlled,
+  }) : _controller = controller,
        _sections = null,
        _itemsOf = null,
        _sectionKeyOf = null,
        _itemKeyOf = null,
-       _mapSections = null,
-       _externalController = controller,
-       hideEmptySections = false,
-       initiallyExpanded = true,
-       initialSectionExpansion = null,
-       preserveExpansion = true,
-       animationDuration = const Duration(milliseconds: 300),
-       animationCurve = Curves.easeInOut,
-       itemIndent = 0.0;
-
-  // ──────────────────────────────────────────────────────────────────
-  // Mode-private storage. Each named constructor sets _mode and the
-  // matching fields; the others are null. The State dispatches on
-  // _mode and reads only the fields that mode populates.
-  // ──────────────────────────────────────────────────────────────────
-
-  final _Mode _mode;
-  final Iterable<Section>? _sections;
-  final Iterable<Item> Function(Section section)? _itemsOf;
-  final Map<Section, List<Item>>? _mapSections;
-  final K Function(Section section)? _sectionKeyOf;
-  final K Function(Item item)? _itemKeyOf;
-  final SectionedListController<K, Section, Item>? _externalController;
-
-  // ──────────────────────────────────────────────────────────────────
-  // Public fields (shared across modes — but with mode-specific
-  // semantics for some, see docstrings).
-  // ──────────────────────────────────────────────────────────────────
+       _hideEmptySections = null,
+       _initiallyExpanded = null,
+       _initialSectionExpansion = null,
+       _preserveExpansion = null,
+       _animationDuration = null,
+       _animationCurve = null,
+       _itemIndent = null;
 
   /// Builds the header for each section.
   final SectionHeaderBuilder<K, Section, Item> headerBuilder;
@@ -181,160 +128,155 @@ class SectionedSliverList<K extends Object, Section, Item>
 
   /// Whether sections can be expanded/collapsed.
   ///
-  /// In `default`/`.fromMap` modes, `false` force-expands all sections
-  /// after every sync. In `.controlled` mode, `false` is purely advisory:
-  /// it sets `SectionView.isCollapsible` to `false` so headers can hide
-  /// their toggle UI; the controller's expansion state remains
-  /// authoritative.
+  /// In the declarative form, `false` force-expands every section after
+  /// each sync. In `.controlled`, `false` is advisory only — it sets
+  /// `SectionView.isCollapsible` but never alters the controller's
+  /// expansion state. Either way it lets headers hide their toggle UI.
   final bool collapsible;
 
   /// Whether section headers stick to the top while their items scroll.
   /// Maps to the underlying `SliverTree.maxStickyDepth`.
   final bool stickyHeaders;
 
-  /// When true, sections with zero items are filtered out of the
-  /// declarative input before the diff runs. Default/`.fromMap` only.
-  final bool hideEmptySections;
+  // Controlled-form storage. Non-null iff this is a `.controlled` widget.
+  final SectionedListController<K, Section, Item>? _controller;
 
-  /// Default initial-expansion state for newly synced sections, used
-  /// when [initialSectionExpansion] is null or returns null for the
-  /// section. Default/`.fromMap` only.
-  final bool initiallyExpanded;
-
-  /// Per-section initial expansion override. Default/`.fromMap` only.
-  final bool? Function(K key, Section section)? initialSectionExpansion;
-
-  /// When true, the underlying tree remembers expansion state across
-  /// remove/re-add cycles. Default/`.fromMap` only — set on the
-  /// controller in `.controlled` mode.
-  final bool preserveExpansion;
-
-  /// Animation duration for expand/collapse and add/remove.
-  /// Default/`.fromMap` only — set on the controller in `.controlled`.
-  final Duration animationDuration;
-
-  /// Animation curve. Default/`.fromMap` only — set on the controller
-  /// in `.controlled`.
-  final Curve animationCurve;
-
-  /// Visual indent for items under headers, in logical pixels.
-  /// Default/`.fromMap` only — set on the controller in `.controlled`.
-  final double itemIndent;
+  // Declarative-form storage. All non-null iff `_controller` is null.
+  final Iterable<Section>? _sections;
+  final Iterable<Item> Function(Section section)? _itemsOf;
+  final K Function(Section section)? _sectionKeyOf;
+  final K Function(Item item)? _itemKeyOf;
+  final bool? _hideEmptySections;
+  final bool? _initiallyExpanded;
+  final bool? Function(K key, Section section)? _initialSectionExpansion;
+  final bool? _preserveExpansion;
+  final Duration? _animationDuration;
+  final Curve? _animationCurve;
+  final double? _itemIndent;
 
   @override
-  State<SectionedSliverList<K, Section, Item>> createState() {
-    return SectionedSliverListState<K, Section, Item>();
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    if (controller != null) {
+      return _ControlledSectionedSliver<K, Section, Item>(
+        controller: controller,
+        collapsible: collapsible,
+        stickyHeaders: stickyHeaders,
+        headerBuilder: headerBuilder,
+        itemBuilder: itemBuilder,
+      );
+    }
+    return _DeclarativeSectionedSliver<K, Section, Item>(
+      sections: _sections!,
+      itemsOf: _itemsOf!,
+      sectionKeyOf: _sectionKeyOf!,
+      itemKeyOf: _itemKeyOf!,
+      collapsible: collapsible,
+      stickyHeaders: stickyHeaders,
+      hideEmptySections: _hideEmptySections!,
+      initiallyExpanded: _initiallyExpanded!,
+      initialSectionExpansion: _initialSectionExpansion,
+      preserveExpansion: _preserveExpansion!,
+      animationDuration: _animationDuration!,
+      animationCurve: _animationCurve!,
+      itemIndent: _itemIndent!,
+      headerBuilder: headerBuilder,
+      itemBuilder: itemBuilder,
+    );
   }
 }
 
-class SectionedSliverListState<K extends Object, Section, Item>
-    extends State<SectionedSliverList<K, Section, Item>>
-    with TickerProviderStateMixin {
-  SectionedListController<K, Section, Item>? _internalController;
-  late SectionedListController<K, Section, Item> _activeController;
-  bool _hasSyncedOnce = false;
+/// Declarative impl: owns a [SectionedListController], diffs the
+/// `sections` / `itemsOf` props into it on every rebuild, then delegates
+/// rendering to [_ControlledSectionedSliver].
+class _DeclarativeSectionedSliver<K extends Object, Section, Item>
+    extends StatefulWidget {
+  const _DeclarativeSectionedSliver({
+    required this.sections,
+    required this.itemsOf,
+    required this.sectionKeyOf,
+    required this.itemKeyOf,
+    required this.collapsible,
+    required this.stickyHeaders,
+    required this.hideEmptySections,
+    required this.initiallyExpanded,
+    required this.initialSectionExpansion,
+    required this.preserveExpansion,
+    required this.animationDuration,
+    required this.animationCurve,
+    required this.itemIndent,
+    required this.headerBuilder,
+    required this.itemBuilder,
+  });
 
-  /// The active controller — internal for default/`fromMap`, external
-  /// for `.controlled`. Stable for the widget's lifetime unless the
-  /// `controller:` argument to `.controlled` is reassigned across
-  /// rebuilds.
-  SectionedListController<K, Section, Item> get controller {
-    return _activeController;
+  final Iterable<Section> sections;
+  final Iterable<Item> Function(Section section) itemsOf;
+  final K Function(Section section) sectionKeyOf;
+  final K Function(Item item) itemKeyOf;
+  final bool collapsible;
+  final bool stickyHeaders;
+  final bool hideEmptySections;
+  final bool initiallyExpanded;
+  final bool? Function(K key, Section section)? initialSectionExpansion;
+  final bool preserveExpansion;
+  final Duration animationDuration;
+  final Curve animationCurve;
+  final double itemIndent;
+  final SectionHeaderBuilder<K, Section, Item> headerBuilder;
+  final SectionItemBuilder<K, Section, Item> itemBuilder;
+
+  @override
+  State<_DeclarativeSectionedSliver<K, Section, Item>> createState() {
+    return _DeclarativeSectionedSliverState<K, Section, Item>();
   }
+}
+
+class _DeclarativeSectionedSliverState<K extends Object, Section, Item>
+    extends State<_DeclarativeSectionedSliver<K, Section, Item>>
+    with TickerProviderStateMixin {
+  late final SectionedListController<K, Section, Item> _controller;
+  bool _hasSyncedOnce = false;
 
   @override
   void initState() {
     super.initState();
-    _adoptController();
+    _controller = SectionedListController<K, Section, Item>(
+      vsync: this,
+      sectionKeyOf: widget.sectionKeyOf,
+      itemKeyOf: widget.itemKeyOf,
+      animationDuration: widget.animationDuration,
+      animationCurve: widget.animationCurve,
+      itemIndent: widget.itemIndent,
+      preserveExpansion: widget.preserveExpansion,
+    );
     _sync(animate: false);
     _hasSyncedOnce = true;
   }
 
   @override
-  void didUpdateWidget(SectionedSliverList<K, Section, Item> oldWidget) {
+  void didUpdateWidget(_DeclarativeSectionedSliver<K, Section, Item> oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    assert(
-      oldWidget._mode == widget._mode,
-      "SectionedSliverList: mode transition across rebuild is not "
-      "supported (was ${oldWidget._mode}, now ${widget._mode}). To "
-      "switch between default/.fromMap/.controlled, change the widget's "
-      "Key so Flutter tears down the old Element and mounts a new one.",
-    );
-
-    final externalSwap =
-        oldWidget._externalController != widget._externalController;
-    if (externalSwap) {
-      _activeController.debugUnbindWidget();
-      if (_internalController != null) {
-        _internalController!.dispose();
-        _internalController = null;
-      }
-      _adoptController();
-      // Treat as a fresh mount against the new controller — reset the
-      // first-sync flag so initial-expansion config (in iterable/map
-      // modes) re-applies against the new controller's state.
-      _hasSyncedOnce = false;
-      _sync(animate: true);
-      _hasSyncedOnce = true;
-      return;
+    // Propagate animation / indent / preserveExpansion params.
+    if (oldWidget.animationDuration != widget.animationDuration) {
+      _controller.animationDuration = widget.animationDuration;
     }
-
-    if (widget._mode != _Mode.controlled) {
-      // Internally owned: propagate animation/indent/preserveExpansion
-      // params on rebuild.
-      if (oldWidget.animationDuration != widget.animationDuration) {
-        _activeController.animationDuration = widget.animationDuration;
-      }
-      if (oldWidget.animationCurve != widget.animationCurve) {
-        _activeController.animationCurve = widget.animationCurve;
-      }
-      if (oldWidget.itemIndent != widget.itemIndent) {
-        _activeController.itemIndent = widget.itemIndent;
-      }
-      if (oldWidget.preserveExpansion != widget.preserveExpansion) {
-        _activeController.preserveExpansion = widget.preserveExpansion;
-      }
+    if (oldWidget.animationCurve != widget.animationCurve) {
+      _controller.animationCurve = widget.animationCurve;
+    }
+    if (oldWidget.itemIndent != widget.itemIndent) {
+      _controller.itemIndent = widget.itemIndent;
+    }
+    if (oldWidget.preserveExpansion != widget.preserveExpansion) {
+      _controller.preserveExpansion = widget.preserveExpansion;
     }
 
     _sync(animate: true);
   }
 
-  void _adoptController() {
-    switch (widget._mode) {
-      case _Mode.iterable:
-      case _Mode.map:
-        _internalController = SectionedListController<K, Section, Item>(
-          vsync: this,
-          sectionKeyOf: widget._sectionKeyOf!,
-          itemKeyOf: widget._itemKeyOf!,
-          animationDuration: widget.animationDuration,
-          animationCurve: widget.animationCurve,
-          itemIndent: widget.itemIndent,
-          preserveExpansion: widget.preserveExpansion,
-        );
-        _activeController = _internalController!;
-      case _Mode.controlled:
-        _activeController = widget._externalController!;
-    }
-    _activeController.debugBindWidget();
-  }
-
   void _sync({required bool animate}) {
-    switch (widget._mode) {
-      case _Mode.iterable:
-        _syncIterable(animate: animate);
-      case _Mode.map:
-        _syncMap(animate: animate);
-      case _Mode.controlled:
-        // Controller is authoritative — no prop to diff against.
-        break;
-    }
-  }
-
-  void _syncIterable({required bool animate}) {
-    final sections = widget._sections!;
-    final itemsOf = widget._itemsOf!;
+    final sections = widget.sections;
+    final itemsOf = widget.itemsOf;
     final filteredSections = widget.hideEmptySections
         ? <Section>[
             for (final s in sections)
@@ -344,77 +286,26 @@ class SectionedSliverListState<K extends Object, Section, Item>
     _runSync(filteredSections, itemsOf, animate: animate);
   }
 
-  void _syncMap({required bool animate}) {
-    final mapSections = widget._mapSections!;
-    final keyOf = widget._sectionKeyOf!;
-    // Detect duplicate section keys (two map entries that map to the
-    // same sectionKeyOf result). Asserts in debug; release falls back
-    // to the last-iterated payload by overwriting earlier hits.
-    assert(() {
-      final seen = <K>{};
-      for (final entry in mapSections.entries) {
-        final k = keyOf(entry.key);
-        if (!seen.add(k)) {
-          throw FlutterError(
-            "SectionedSliverList.fromMap: two map entries produced the "
-            "same section key '$k'. Section payload equality must be "
-            "aligned with sectionKeyOf (use Equatable, freezed, or "
-            "override ==/hashCode), or use the default constructor with "
-            "explicit (Section, items) shape.",
-          );
-        }
-      }
-      return true;
-    }());
-
-    final dedup = <K, Section>{};
-    for (final entry in mapSections.entries) {
-      dedup[keyOf(entry.key)] = entry.key;
-    }
-    final orderedSections = <Section>[];
-    final itemsBySection = <K, List<Item>>{};
-    for (final entry in mapSections.entries) {
-      final k = keyOf(entry.key);
-      if (dedup[k] != entry.key) {
-        // Earlier duplicate; release-mode skips so the last wins.
-        continue;
-      }
-      orderedSections.add(entry.key);
-      itemsBySection[k] = entry.value;
-    }
-    final filtered = widget.hideEmptySections
-        ? <Section>[
-            for (final s in orderedSections)
-              if ((itemsBySection[keyOf(s)] ?? const []).isNotEmpty) s,
-          ]
-        : orderedSections;
-    Iterable<Item> resolveItems(Section s) {
-      return itemsBySection[keyOf(s)] ?? const [];
-    }
-
-    _runSync(filtered, resolveItems, animate: animate);
-  }
-
   void _runSync(
     Iterable<Section> sections,
     Iterable<Item> Function(Section) itemsOf, {
     required bool animate,
   }) {
-    final keyOf = widget._sectionKeyOf!;
+    final keyOf = widget.sectionKeyOf;
     // Snapshot which sections existed before the sync. On first sync
-    // the internally-owned controller is always empty (created in
-    // _adoptController and not mutated until here), so `knownSections`
-    // is `{}` and `initiallyExpanded` / `initialSectionExpansion`
-    // applies to every section. On subsequent syncs, only sections
-    // genuinely new in this sync (absent from the pre-sync snapshot)
-    // get the initial-expansion treatment — existing sections keep
-    // whatever expansion state the user has set since.
+    // the internal controller is always empty (created in initState and
+    // not mutated until here), so `knownSections` is `{}` and
+    // `initiallyExpanded` / `initialSectionExpansion` applies to every
+    // section. On subsequent syncs, only sections genuinely new in this
+    // sync (absent from the pre-sync snapshot) get the initial-expansion
+    // treatment — existing sections keep whatever expansion state the
+    // user has set since.
     final knownSections = _hasSyncedOnce
-        ? _activeController.sectionKeys.toSet()
+        ? _controller.sectionKeys().toSet()
         : <K>{};
 
     final desiredList = sections.toList(growable: false);
-    _activeController.setSections(
+    _controller.setSections(
       desiredList,
       itemsOf: itemsOf,
       animate: animate,
@@ -430,7 +321,7 @@ class SectionedSliverListState<K extends Object, Section, Item>
     } else {
       // Non-collapsible: keep everything expanded regardless of the
       // initial-expansion config.
-      _activeController.expandAll(animate: animate);
+      _controller.expandAll(animate: animate);
     }
   }
 
@@ -440,20 +331,20 @@ class SectionedSliverListState<K extends Object, Section, Item>
     K Function(Section) keyOf, {
     required bool animate,
   }) {
-    _activeController.runBatch(() {
+    _controller.runBatch(() {
       for (final section in desired) {
         final k = keyOf(section);
         if (knownSections.contains(k)) {
           continue;
         }
-        if (!_activeController.hasSection(k)) {
+        if (!_controller.hasSection(k)) {
           continue;
         }
         final shouldExpand = _resolveInitialExpansion(k, section);
-        if (shouldExpand && !_activeController.isExpanded(k)) {
-          _activeController.expandSection(k, animate: animate);
-        } else if (!shouldExpand && _activeController.isExpanded(k)) {
-          _activeController.collapseSection(k, animate: animate);
+        if (shouldExpand && !_controller.isExpanded(k)) {
+          _controller.expandSection(k, animate: animate);
+        } else if (!shouldExpand && _controller.isExpanded(k)) {
+          _controller.collapseSection(k, animate: animate);
         }
       }
     });
@@ -469,45 +360,70 @@ class SectionedSliverListState<K extends Object, Section, Item>
 
   @override
   void dispose() {
-    _activeController.debugUnbindWidget();
-    if (_internalController != null) {
-      _internalController!.dispose();
-      _internalController = null;
-    }
+    _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final treeController = _activeController.treeController;
-    // The SliverTree element wires up controller listeners and per-key
-    // child caches; swapping controllers in place is fragile, so we
-    // give it a key tied to the controller identity. When the user
-    // swaps the external controller across rebuilds, this key changes,
-    // which forces Flutter to tear down the old SliverTree element and
-    // build a fresh one against the new controller.
+    // Once the props are diffed into the controller, rendering is
+    // identical to the controlled form — delegate to it.
+    return _ControlledSectionedSliver<K, Section, Item>(
+      controller: _controller,
+      collapsible: widget.collapsible,
+      stickyHeaders: widget.stickyHeaders,
+      headerBuilder: widget.headerBuilder,
+      itemBuilder: widget.itemBuilder,
+    );
+  }
+}
+
+/// Controlled impl, and the shared renderer for both forms: turns a
+/// [SectionedListController] into a [SliverTree], mapping section/item
+/// nodes to [SectionView] / [ItemView] for the builders.
+class _ControlledSectionedSliver<K extends Object, Section, Item>
+    extends StatelessWidget {
+  const _ControlledSectionedSliver({
+    required this.controller,
+    required this.collapsible,
+    required this.stickyHeaders,
+    required this.headerBuilder,
+    required this.itemBuilder,
+  });
+
+  final SectionedListController<K, Section, Item> controller;
+  final bool collapsible;
+  final bool stickyHeaders;
+  final SectionHeaderBuilder<K, Section, Item> headerBuilder;
+  final SectionItemBuilder<K, Section, Item> itemBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    final treeController = controller.treeController;
+    // Key on controller identity so a controller swap (in `.controlled`
+    // usage) tears down the old SliverTree element and its per-key child
+    // caches rather than rewiring them in place.
     return SliverTree<SecKey<K>, SecPayload<Section, Item>>(
       key: ObjectKey(treeController),
       controller: treeController,
-      maxStickyDepth: widget.stickyHeaders ? 1 : 0,
+      maxStickyDepth: stickyHeaders ? 1 : 0,
       nodeBuilder: (ctx, key, depth) {
         final node = treeController.getNodeData(key);
         if (node == null) {
           return const SizedBox.shrink();
         }
         return switch (node.data) {
-          SectionPayload<Section, Item>(value: final section) =>
-            widget.headerBuilder(
-              ctx,
-              SectionView<K, Section, Item>(
-                key: (key as SectionKey<K>).value,
-                section: section,
-                itemCount: treeController.getChildCount(key),
-                isExpanded: treeController.isExpanded(key),
-                isCollapsible: widget.collapsible,
-                controller: _activeController,
-              ),
+          SectionPayload<Section, Item>(value: final section) => headerBuilder(
+            ctx,
+            SectionView<K, Section, Item>(
+              key: (key as SectionKey<K>).value,
+              section: section,
+              itemCount: treeController.getChildCount(key),
+              isExpanded: treeController.isExpanded(key),
+              isCollapsible: collapsible,
+              controller: controller,
             ),
+          ),
           ItemPayload<Section, Item>(value: final item) => _buildItem(
             ctx,
             key as ItemKey<K>,
@@ -519,7 +435,7 @@ class SectionedSliverListState<K extends Object, Section, Item>
   }
 
   Widget _buildItem(BuildContext ctx, ItemKey<K> key, Item item) {
-    final treeController = _activeController.treeController;
+    final treeController = controller.treeController;
     final parent = treeController.getParent(key);
     if (parent is! SectionKey<K>) {
       return const SizedBox.shrink();
@@ -532,7 +448,7 @@ class SectionedSliverListState<K extends Object, Section, Item>
     final section =
         (sectionPayload.data as SectionPayload<Section, Item>).value;
     final indexInSection = treeController.getIndexInParent(key);
-    return widget.itemBuilder(
+    return itemBuilder(
       ctx,
       ItemView<K, Section, Item>(
         key: key.value,
@@ -540,7 +456,7 @@ class SectionedSliverListState<K extends Object, Section, Item>
         sectionKey: parent.value,
         section: section,
         indexInSection: indexInSection,
-        controller: _activeController,
+        controller: controller,
       ),
     );
   }

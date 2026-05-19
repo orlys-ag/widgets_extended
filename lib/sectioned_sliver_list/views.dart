@@ -140,29 +140,19 @@ class ItemView<K extends Object, Section, Item> {
     controller.removeItem(key, animate: animate);
   }
 
-  /// Moves this item to [section] and/or [index].
+  /// Moves this item to [section] and/or [index]. Forwards directly to
+  /// [SectionedListController.moveItem]:
   ///
-  /// Dispatches to the controller as follows:
+  ///   • [section] non-null → reparents under that section (at [index],
+  ///     or appended when [index] is null)
+  ///   • [section] null, [index] non-null → reorders within the current
+  ///     section
+  ///   • both null → no-op
   ///
-  ///   • `section != null, index != null`
-  ///       → [SectionedListController.moveItem] with both args
-  ///   • `section != null, index == null`
-  ///       → [SectionedListController.moveItem] (appends to section)
-  ///   • `section == null, index != null`
-  ///       → [SectionedListController.moveItemInSection]
-  ///   • `section == null, index == null`
-  ///       → no-op
-  ///
-  /// No `animate` parameter: the underlying [TreeController.moveNode] /
-  /// [TreeController.reorderChildren] are repositioning ops — nothing
-  /// animates. Matches the controller-level signatures.
+  /// No `animate` parameter: the underlying repositioning ops do not
+  /// animate.
   void moveTo({K? section, int? index}) {
-    if (section != null) {
-      controller.moveItem(key, toSection: section, index: index);
-    } else if (index != null) {
-      controller.moveItemInSection(key, index);
-    }
-    // both null → no-op.
+    controller.moveItem(key, toSection: section, index: index);
   }
 
   /// Selectively rebuilds [builder] when this item's payload changes

@@ -47,7 +47,7 @@ void main() {
     expect(controller.hasSection("b"), isFalse,
         reason: "After remove + live-mirror sync + animation, 'b' should "
             "be purged.");
-    expect(controller.sectionKeys, equals(["a"]));
+    expect(controller.sectionKeys(), equals(["a"]));
   });
 
   testWidgets("declarative re-include via addSection cancels a pending "

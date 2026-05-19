@@ -129,7 +129,26 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
         maxIdx = idx;
       }
     }
-    if (maxIdx >= 0 && maxIdx - minIdx + 1 == visibleCount) {
+    // Take the contiguous fast path only when EVERY key in the batch is
+    // still present in the visible order. A batch that mixes already-purged
+    // keys with live ones is routine: `_finalizeAnimation`'s deletion branch
+    // (and the op-group dismissed handler's category-1 path) calls
+    // `_purgeNodeData` — which releases the nid and clears the reverse-index
+    // slot — but deliberately leaves the entry in `_orderNids`, deferring the
+    // compaction to this call. The contiguous path removes an index range and
+    // can only locate keys via the reverse index; a purged key's slot is no
+    // longer locatable, so a range removal silently leaves its stale
+    // `_orderNids` entry behind as a zombie. Once that zombie's nid is later
+    // recycled, the duplicate slot drives unmatched `bumpFromSelf` decrements
+    // and the visible-subtree-size cache eventually underflows. Whenever the
+    // deletion branch ran, the purged key itself is in this batch and reports
+    // `kNotVisible` here, so `visibleCount < keys.length` reliably detects the
+    // condition. Routing such batches through the non-contiguous branch lets
+    // `removeWhereKeyIn`'s full scan sweep every zombie (including orphan
+    // descendants purged inside `_finalizeAnimation` that never reach this
+    // batch) via its `keyOf(nid) == null` check.
+    final allKeysPresent = visibleCount == keys.length;
+    if (allKeysPresent && maxIdx >= 0 && maxIdx - minIdx + 1 == visibleCount) {
       // Contiguous: clear the index first, then remove from the array.
       for (int i = minIdx; i <= maxIdx; i++) {
         _order.indexByNid[_order.orderNids[i]] = VisibleOrderBuffer.kNotVisible;

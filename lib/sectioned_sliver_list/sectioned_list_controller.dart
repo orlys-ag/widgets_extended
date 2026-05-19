@@ -13,24 +13,22 @@ import '../sliver_tree/tree_sync_controller.dart';
 import '../sliver_tree/types.dart';
 import '_internal_keys.dart';
 
-/// Controller for a [SectionedSliverList].
+/// The imperative engine behind a [SectionedSliverList].
 ///
 /// Owns the imperative API (`addItem`, `moveItem`, `setItems`,
-/// `expandSection`, ...). When supplied to a `SectionedSliverList`
-/// constructed via the `.controlled` named constructor, the widget
-/// binds to it and renders whatever state the controller currently
-/// holds. The widget never reads section/item data from props in that
-/// mode — the controller IS the source of truth.
+/// `expandSection`, ...) and translates section/item-shaped operations
+/// into the underlying 2-level tree.
 ///
-/// In `default` / `.fromMap` mode the widget creates and disposes its
-/// own internal controller; the user never sees one.
+/// In the declarative `SectionedSliverList`, the widget creates and
+/// disposes one of these internally; a reference is surfaced to the
+/// header/item builders via [SectionView.controller] /
+/// [ItemView.controller]. There the `sections` / `itemsOf` props stay
+/// authoritative — imperative mutations are reverted by the next
+/// rebuild that re-runs the diff.
 ///
-/// Lifetime: external controllers must be disposed by their owner.
-/// Internally-created controllers are disposed by the widget.
-///
-/// A controller is designed to drive exactly one mounted widget at a
-/// time. Mounting two widgets against the same controller asserts in
-/// debug.
+/// In `SectionedSliverList.controlled`, the caller constructs, owns and
+/// disposes the controller, and it is the sole source of truth: no
+/// diffing, nothing to revert against.
 ///
 /// `SectionedListController` implements [Listenable]: [addListener] /
 /// [removeListener] forward to the underlying [TreeController] and fire
@@ -87,11 +85,11 @@ class SectionedListController<K extends Object, Section, Item>
   final List<void Function(K sectionKey)> _sectionPayloadListeners = [];
   final List<void Function(K itemKey)> _itemPayloadListeners = [];
 
-  int _bindingCount = 0;
   bool _disposed = false;
 
   // ──────────────────────────────────────────────────────────────────
-  // Internal hooks (used by SectionedSliverListState; not for end users)
+  // Internal hooks (used by the SectionedSliverList State; not for end
+  // users)
   // ──────────────────────────────────────────────────────────────────
 
   /// Underlying tree controller. Exposed for the widget's render layer
@@ -101,40 +99,6 @@ class SectionedListController<K extends Object, Section, Item>
   /// invariants this controller enforces.
   TreeController<SecKey<K>, SecPayload<Section, Item>> get treeController {
     return _tree;
-  }
-
-  /// Marks this controller as bound to a widget. Asserts that no other
-  /// widget is currently bound. Called by `SectionedSliverListState`
-  /// during `initState` and after a controller swap.
-  ///
-  /// The assert runs *before* the increment so a failed bind leaves
-  /// internal state unchanged. In release builds the assert is stripped
-  /// and the increment proceeds regardless — release-mode misuse will
-  /// merely over-count, not corrupt the underlying tree.
-  ///
-  /// This is a documented part of the public surface: a
-  /// `SectionedListController` may drive at most one mounted
-  /// `SectionedSliverList.controlled` widget at a time.
-  void debugBindWidget() {
-    assert(
-      _bindingCount < 1,
-      "SectionedListController is already bound to another "
-      "SectionedSliverList. A controller may drive only one widget at "
-      "a time.",
-    );
-    _bindingCount++;
-  }
-
-  /// Releases the binding established by [debugBindWidget]. Called by
-  /// `SectionedSliverListState` during `dispose` and before a controller
-  /// swap.
-  void debugUnbindWidget() {
-    assert(
-      _bindingCount > 0,
-      "SectionedListController binding count would go negative. "
-      "debugUnbindWidget called more times than debugBindWidget.",
-    );
-    _bindingCount--;
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -373,7 +337,7 @@ class SectionedListController<K extends Object, Section, Item>
     // The previous full-list form would build a proposed order
     // including pending-deletion siblings and trip the validation when
     // a sibling section was mid-exit-animation.
-    final order = sectionKeys..remove(sectionKey);
+    final order = sectionKeys()..remove(sectionKey);
     final clamped = toIndex.clamp(0, order.length);
     order.insert(clamped, sectionKey);
     reorderSections(order);
@@ -422,16 +386,47 @@ class SectionedListController<K extends Object, Section, Item>
     );
   }
 
-  /// Reparents [itemKey] under [toSection]. When [index] is null, the
-  /// item is appended to [toSection]'s children.
+  /// Repositions [itemKey], either across sections or within its own.
   ///
-  /// No `animate` parameter: the underlying [TreeController.moveNode]
-  /// is a repositioning op, not an insert/remove; nothing animates.
-  void moveItem(K itemKey, {required K toSection, int? index}) {
+  ///   • [toSection] non-null → reparents the item under that section.
+  ///     With [index] it lands at that position; without, it is
+  ///     appended.
+  ///   • [toSection] null, [index] non-null → reorders the item within
+  ///     its current section to [index].
+  ///   • both null → no-op.
+  ///
+  /// No `animate` parameter: the underlying [TreeController.moveNode] /
+  /// [TreeController.reorderChildren] are repositioning ops, not
+  /// insert/remove; nothing animates.
+  void moveItem(K itemKey, {K? toSection, int? index}) {
     _checkNotDisposed();
     _requireItem(itemKey, "moveItem");
-    _requireSection(toSection, "moveItem(toSection)");
-    _tree.moveNode(ItemKey<K>(itemKey), SectionKey<K>(toSection), index: index);
+    if (toSection != null) {
+      _requireSection(toSection, "moveItem(toSection)");
+      _tree.moveNode(
+        ItemKey<K>(itemKey),
+        SectionKey<K>(toSection),
+        index: index,
+      );
+      return;
+    }
+    if (index == null) {
+      // Neither a reparent target nor a reorder index — nothing to do.
+      return;
+    }
+    if (_tree.isPendingDeletion(ItemKey<K>(itemKey))) {
+      _throwMissing("moveItem", "item $itemKey is being removed");
+    }
+    final parentKey = sectionOf(itemKey);
+    if (parentKey == null) {
+      _throwMissing("moveItem", "item $itemKey has no parent section");
+    }
+    // Use the LIVE list — `reorderItems` → `_tree.reorderChildren`
+    // validates against the live child set (excludes pending-deletion).
+    final siblings = itemKeysOf(parentKey)..remove(itemKey);
+    final clamped = index.clamp(0, siblings.length);
+    siblings.insert(clamped, itemKey);
+    reorderItems(parentKey, siblings);
   }
 
   void reorderItems(K sectionKey, List<K> orderedKeys) {
@@ -440,24 +435,6 @@ class SectionedListController<K extends Object, Section, Item>
     _tree.reorderChildren(SectionKey<K>(sectionKey), <SecKey<K>>[
       for (final k in orderedKeys) ItemKey<K>(k),
     ]);
-  }
-
-  void moveItemInSection(K itemKey, int toIndex) {
-    _checkNotDisposed();
-    _requireItem(itemKey, "moveItemInSection");
-    if (_tree.isPendingDeletion(ItemKey<K>(itemKey))) {
-      _throwMissing("moveItemInSection", "item $itemKey is being removed");
-    }
-    final parentKey = sectionOf(itemKey);
-    if (parentKey == null) {
-      _throwMissing("moveItemInSection", "item $itemKey has no parent section");
-    }
-    // Use the LIVE list — `reorderItems` → `_tree.reorderChildren`
-    // validates against the live child set (excludes pending-deletion).
-    final siblings = itemKeysOf(parentKey)..remove(itemKey);
-    final clamped = toIndex.clamp(0, siblings.length);
-    siblings.insert(clamped, itemKey);
-    reorderItems(parentKey, siblings);
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -495,8 +472,10 @@ class SectionedListController<K extends Object, Section, Item>
   // ──────────────────────────────────────────────────────────────────
   // Public API — queries
   //
-  // Default queries return LIVE entries (excluding pending-deletion).
-  // The `all*` variants include pending-deletion as escape hatches.
+  // Queries return LIVE entries (excluding nodes mid-exit-animation) by
+  // default. Pass `includeExiting: true` to also include
+  // pending-deletion nodes — an escape hatch for callers that need to
+  // introspect mid-animation state.
   // ──────────────────────────────────────────────────────────────────
 
   bool hasSection(K sectionKey) {
@@ -550,14 +529,15 @@ class SectionedListController<K extends Object, Section, Item>
     return (parent as SectionKey<K>).value;
   }
 
-  /// Section payloads in render order, EXCLUDING sections currently
-  /// mid-exit-animation. This is the input shape `reorderSections`
-  /// implicitly expects (via the keys returned by [sectionKeys]).
-  List<Section> get sections {
+  /// Section payloads in render order. Excludes sections currently
+  /// mid-exit-animation unless [includeExiting] is true. The live form
+  /// is the input shape `reorderSections` implicitly expects (via the
+  /// keys returned by [sectionKeys]).
+  List<Section> sections({bool includeExiting = false}) {
     _checkNotDisposed();
-    final live = _tree.liveRootKeys;
+    final keys = includeExiting ? _tree.rootKeys : _tree.liveRootKeys;
     final out = <Section>[];
-    for (final k in live) {
+    for (final k in keys) {
       if (!_assertIsSection(k)) {
         continue;
       }
@@ -573,52 +553,25 @@ class SectionedListController<K extends Object, Section, Item>
     return out;
   }
 
-  /// Section keys in render order, EXCLUDING pending-deletion.
-  List<K> get sectionKeys {
+  /// Section keys in render order. Excludes pending-deletion sections
+  /// unless [includeExiting] is true.
+  List<K> sectionKeys({bool includeExiting = false}) {
     _checkNotDisposed();
+    final keys = includeExiting ? _tree.rootKeys : _tree.liveRootKeys;
     return <K>[
-      for (final k in _tree.liveRootKeys)
+      for (final k in keys)
         if (_assertIsSection(k)) (k as SectionKey<K>).value,
     ];
   }
 
-  /// All section payloads in render order, INCLUDING those currently
-  /// mid-exit-animation. Escape hatch for callers that need to
-  /// introspect mid-animation state.
-  List<Section> get allSections {
+  /// Item payloads under [sectionKey] in render order. Excludes
+  /// pending-deletion items unless [includeExiting] is true. Returns
+  /// `[]` for unknown sections.
+  List<Item> itemsOf(K sectionKey, {bool includeExiting = false}) {
     _checkNotDisposed();
-    final raw = _tree.rootKeys;
-    final out = <Section>[];
-    for (final k in raw) {
-      if (!_assertIsSection(k)) {
-        continue;
-      }
-      final node = _tree.getNodeData(k);
-      if (node == null) {
-        continue;
-      }
-      final data = node.data;
-      if (data is SectionPayload<Section, Item>) {
-        out.add(data.value);
-      }
-    }
-    return out;
-  }
-
-  /// All section keys in render order, INCLUDING pending-deletion.
-  List<K> get allSectionKeys {
-    _checkNotDisposed();
-    return <K>[
-      for (final k in _tree.rootKeys)
-        if (_assertIsSection(k)) (k as SectionKey<K>).value,
-    ];
-  }
-
-  /// Item payloads under [sectionKey] in render order, EXCLUDING
-  /// pending-deletion. Returns `[]` for unknown sections.
-  List<Item> itemsOf(K sectionKey) {
-    _checkNotDisposed();
-    final children = _tree.getLiveChildren(SectionKey<K>(sectionKey));
+    final children = includeExiting
+        ? _tree.getChildren(SectionKey<K>(sectionKey))
+        : _tree.getLiveChildren(SectionKey<K>(sectionKey));
     if (children.isEmpty) {
       return const [];
     }
@@ -639,50 +592,13 @@ class SectionedListController<K extends Object, Section, Item>
     return out;
   }
 
-  /// Item keys under [sectionKey] in render order, EXCLUDING
-  /// pending-deletion.
-  List<K> itemKeysOf(K sectionKey) {
+  /// Item keys under [sectionKey] in render order. Excludes
+  /// pending-deletion items unless [includeExiting] is true.
+  List<K> itemKeysOf(K sectionKey, {bool includeExiting = false}) {
     _checkNotDisposed();
-    final children = _tree.getLiveChildren(SectionKey<K>(sectionKey));
-    if (children.isEmpty) {
-      return const [];
-    }
-    return <K>[
-      for (final k in children)
-        if (_assertIsItem(k)) (k as ItemKey<K>).value,
-    ];
-  }
-
-  /// All item payloads under [sectionKey] in render order, INCLUDING
-  /// pending-deletion.
-  List<Item> allItemsOf(K sectionKey) {
-    _checkNotDisposed();
-    final children = _tree.getChildren(SectionKey<K>(sectionKey));
-    if (children.isEmpty) {
-      return const [];
-    }
-    final out = <Item>[];
-    for (final k in children) {
-      if (!_assertIsItem(k)) {
-        continue;
-      }
-      final node = _tree.getNodeData(k);
-      if (node == null) {
-        continue;
-      }
-      final data = node.data;
-      if (data is ItemPayload<Section, Item>) {
-        out.add(data.value);
-      }
-    }
-    return out;
-  }
-
-  /// All item keys under [sectionKey] in render order, INCLUDING
-  /// pending-deletion.
-  List<K> allItemKeysOf(K sectionKey) {
-    _checkNotDisposed();
-    final children = _tree.getChildren(SectionKey<K>(sectionKey));
+    final children = includeExiting
+        ? _tree.getChildren(SectionKey<K>(sectionKey))
+        : _tree.getLiveChildren(SectionKey<K>(sectionKey));
     if (children.isEmpty) {
       return const [];
     }

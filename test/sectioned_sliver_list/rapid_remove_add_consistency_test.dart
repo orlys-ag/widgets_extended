@@ -7,27 +7,23 @@ import 'package:widgets_extended/widgets_extended.dart';
 void main() {
   testWidgets("remove + insert + remove during exit animations stays "
       "consistent", (tester) async {
-    final controller = SectionedListController<String, String, String>(
-      vsync: tester,
-      sectionKeyOf: (s) => s,
-      itemKeyOf: (i) => i,
-      animationDuration: const Duration(milliseconds: 300),
-      animationCurve: Curves.easeInOut,
-    );
-    addTearDown(controller.dispose);
-
-    controller.addSection(
-      "a",
-      items: [for (var i = 0; i < 6; i++) "a_$i"],
-    );
+    late SectionedListController<String, String, String> controller;
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: CustomScrollView(slivers: [
-            SectionedSliverList<String, String, String>.controlled(
-              controller: controller,
-              headerBuilder: (ctx, v) => Text(v.section),
+            SectionedSliverList<String, String, String>(
+              sections: const ["a"],
+              itemsOf: (_) => [for (var i = 0; i < 6; i++) "a_$i"],
+              sectionKeyOf: (s) => s,
+              itemKeyOf: (i) => i,
+              animationDuration: const Duration(milliseconds: 300),
+              animationCurve: Curves.easeInOut,
+              headerBuilder: (ctx, v) {
+                controller = v.controller;
+                return Text(v.section);
+              },
               itemBuilder: (ctx, v) => Text(v.item),
             ),
           ]),

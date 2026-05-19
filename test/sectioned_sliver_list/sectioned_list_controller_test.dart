@@ -31,8 +31,8 @@ void main() {
         itemsOf: (s) => byKey[s] ?? const [],
       );
 
-      expect(controller.sectionKeys, equals(["a", "b"]));
-      expect(controller.sections, equals(["a", "b"]));
+      expect(controller.sectionKeys(), equals(["a", "b"]));
+      expect(controller.sections(), equals(["a", "b"]));
       expect(controller.itemKeysOf("a"), equals(["a1", "a2"]));
       expect(controller.itemsOf("a"), equals(["a1", "a2"]));
       expect(controller.itemsOf("b"), equals(["b1"]));
@@ -55,7 +55,7 @@ void main() {
       controller.setSections(["a", "c"], itemsOf: (_) => const []);
       controller.addSection("b", index: 1);
 
-      expect(controller.sectionKeys, equals(["a", "b", "c"]));
+      expect(controller.sectionKeys(), equals(["a", "b", "c"]));
     });
 
     testWidgets("addSection with items populates children", (tester) async {
@@ -64,7 +64,7 @@ void main() {
 
       controller.addSection("a", items: ["a1", "a2"]);
 
-      expect(controller.sectionKeys, equals(["a"]));
+      expect(controller.sectionKeys(), equals(["a"]));
       expect(controller.itemKeysOf("a"), equals(["a1", "a2"]));
     });
 
@@ -113,16 +113,16 @@ void main() {
       );
 
       controller.reorderSections(["d", "c", "b", "a"]);
-      expect(controller.sectionKeys, equals(["d", "c", "b", "a"]));
+      expect(controller.sectionKeys(), equals(["d", "c", "b", "a"]));
 
       controller.moveSection("a", 0);
-      expect(controller.sectionKeys, equals(["a", "d", "c", "b"]));
+      expect(controller.sectionKeys(), equals(["a", "d", "c", "b"]));
 
       controller.moveSection("a", 99); // clamps
-      expect(controller.sectionKeys, equals(["d", "c", "b", "a"]));
+      expect(controller.sectionKeys(), equals(["d", "c", "b", "a"]));
     });
 
-    testWidgets("reorderItems / moveItemInSection", (tester) async {
+    testWidgets("reorderItems / moveItem (in-section)", (tester) async {
       final controller = _make(tester);
       addTearDown(controller.dispose);
 
@@ -134,7 +134,7 @@ void main() {
       controller.reorderItems("a", ["3", "2", "1"]);
       expect(controller.itemKeysOf("a"), equals(["3", "2", "1"]));
 
-      controller.moveItemInSection("1", 0);
+      controller.moveItem("1", index: 0);
       expect(controller.itemKeysOf("a"), equals(["1", "3", "2"]));
     });
 
@@ -193,7 +193,7 @@ void main() {
         throwsA(isA<AssertionError>()),
       );
       expect(
-        () => controller.moveItemInSection("nope", 0),
+        () => controller.moveItem("nope", index: 0),
         throwsA(isA<AssertionError>()),
       );
       expect(
@@ -260,20 +260,6 @@ void main() {
       expect(controller.getItem("x"), equals("x"));
       expect(controller.itemKeysOf("x"), equals(["x"]));
       expect(controller.sectionOf("x"), equals("x"));
-    });
-
-    testWidgets("debugBindWidget asserts on second binding", (tester) async {
-      final controller = _make(tester);
-      addTearDown(controller.dispose);
-
-      controller.debugBindWidget();
-      expect(
-        () => controller.debugBindWidget(),
-        throwsA(isA<AssertionError>()),
-      );
-      controller.debugUnbindWidget();
-      expect(() => controller.debugBindWidget(), returnsNormally);
-      controller.debugUnbindWidget();
     });
 
     testWidgets(
@@ -407,12 +393,18 @@ void main() {
         controller.removeSection("b", animate: true);
 
         // Mid-animation: pending entries excluded from default queries.
-        expect(controller.sectionKeys, equals(["a", "c"]));
+        expect(controller.sectionKeys(), equals(["a", "c"]));
         expect(controller.itemKeysOf("a"), equals(["a1", "a3"]));
 
-        // all* variants include pending-deletion.
-        expect(controller.allSectionKeys, equals(["a", "b", "c"]));
-        expect(controller.allItemKeysOf("a"), equals(["a1", "a2", "a3"]));
+        // includeExiting:true includes pending-deletion.
+        expect(
+          controller.sectionKeys(includeExiting: true),
+          equals(["a", "b", "c"]),
+        );
+        expect(
+          controller.itemKeysOf("a", includeExiting: true),
+          equals(["a1", "a2", "a3"]),
+        );
 
         await tester.pumpAndSettle();
       },

@@ -3,9 +3,5 @@ library;
 
 export 'sectioned_list_controller.dart' show SectionedListController;
 export 'sectioned_sliver_list_widget.dart'
-    show
-        SectionHeaderBuilder,
-        SectionItemBuilder,
-        SectionedSliverList,
-        SectionedSliverListState;
+    show SectionHeaderBuilder, SectionItemBuilder, SectionedSliverList;
 export 'views.dart' show ItemView, SectionView;

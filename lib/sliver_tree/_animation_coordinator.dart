@@ -766,15 +766,20 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     if (bulk.isMemberNid(nid) && bulk.group != null) {
       return full * bulk.group!.value;
     }
-    // 2. Op group
-    final opKey = opGroups.groupKeyOf(_nids.keyOfUnchecked(nid));
-    if (opKey != null) {
-      final group = opGroups.groupAt(opKey);
-      if (group != null) {
-        final key = _nids.keyOfUnchecked(nid);
-        final member = group.members[key];
-        if (member != null) {
-          return member.computeExtent(group.curvedValue, full);
+    // 2. Op group. Guard on `isNotEmpty` so the common no-op-group frame
+    // skips the `keyOfUnchecked` + `groupKeyOf` probe (including a TKey
+    // hash) entirely. `key` is resolved once and reused for both the
+    // membership probe and the member lookup.
+    if (opGroups.isNotEmpty) {
+      final key = _nids.keyOfUnchecked(nid);
+      final opKey = opGroups.groupKeyOf(key);
+      if (opKey != null) {
+        final group = opGroups.groupAt(opKey);
+        if (group != null) {
+          final member = group.members[key];
+          if (member != null) {
+            return member.computeExtent(group.curvedValue, full);
+          }
         }
       }
     }

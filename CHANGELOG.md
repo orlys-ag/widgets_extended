@@ -1,3 +1,8 @@
+## 0.0.19
+
+- Fix orphaned animation entry staying during quick filtering.
+- Minor optimizations
+
 ## 0.0.18
 
 - `SyncedSliverTree` / `TreeSyncController`: fix reparent animation skip when

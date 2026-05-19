@@ -1,5 +1,5 @@
-/// Verifies that `moveItemInSection` and `moveSection` work when a
-/// sibling is mid-pending-deletion.
+/// Verifies that `moveItem` and `moveSection` work when a sibling is
+/// mid-pending-deletion.
 ///
 /// The implementations build their proposed reorder list from the LIVE
 /// query (`itemKeysOf` / `sectionKeys`), which excludes pending-deletion.
@@ -11,8 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
-  testWidgets("moveItemInSection works with a pending-deletion sibling "
-      "in the same section", (tester) async {
+  testWidgets("moveItem (in-section) works with a pending-deletion "
+      "sibling in the same section", (tester) async {
     final controller = SectionedListController<String, String, String>(
       vsync: tester,
       sectionKeyOf: (s) => s,
@@ -30,16 +30,19 @@ void main() {
     controller.removeItem("b", animate: true);
     await tester.pump(const Duration(milliseconds: 80));
 
-    // 'b' is still in allItemKeysOf during exit, but excluded from
-    // itemKeysOf (live).
-    expect(controller.allItemKeysOf("s"), contains("b"));
+    // 'b' is still present with includeExiting:true during exit, but
+    // excluded from the live itemKeysOf.
+    expect(
+      controller.itemKeysOf("s", includeExiting: true),
+      contains("b"),
+    );
     expect(controller.itemKeysOf("s"), isNot(contains("b")));
 
     expect(
-      () => controller.moveItemInSection("c", 0),
+      () => controller.moveItem("c", index: 0),
       returnsNormally,
-      reason: "moveItemInSection must filter pending-deletion siblings out "
-          "of the proposed order — itemKeysOf is live-by-default.",
+      reason: "moveItem must filter pending-deletion siblings out of the "
+          "proposed order — itemKeysOf is live-by-default.",
     );
 
     await tester.pumpAndSettle();
@@ -63,8 +66,8 @@ void main() {
     controller.removeSection("b", animate: true);
     await tester.pump(const Duration(milliseconds: 80));
 
-    expect(controller.allSectionKeys, contains("b"));
-    expect(controller.sectionKeys, isNot(contains("b")));
+    expect(controller.sectionKeys(includeExiting: true), contains("b"));
+    expect(controller.sectionKeys(), isNot(contains("b")));
 
     expect(
       () => controller.moveSection("c", 0),
