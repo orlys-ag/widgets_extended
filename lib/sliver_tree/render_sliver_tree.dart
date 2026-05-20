@@ -333,9 +333,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   }
 
   /// Iteration count of the post-sticky parentData refresh loop on the
-  /// last layout. Reset at the top of `performLayout`. Used by Phase 4's
-  /// regression test to verify the loop bound is `O(_children)`, not
-  /// `O(visibleNodes)`, without relying on flaky wall-time measurements.
+  /// last layout. Reset at the top of `performLayout`. The loop iterates
+  /// `_children.keys` exactly once, so this counter is bounded by
+  /// `_children.length` — verified by
+  /// `test/sliver_tree/parent_data_refresh_iteration_test.dart` (R124).
+  /// Diagnostic only; no runtime invariant is enforced by this field.
   @visibleForTesting
   int debugLastParentDataRefreshIterationCount = 0;
 
@@ -352,6 +354,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   int get debugComposerGhostCount =>
       // ignore: invalid_use_of_visible_for_testing_member
       _composer.debugGhostEntryCount;
+
+  /// Number of mounted child RenderBoxes in `_children`. Used by
+  /// `parent_data_refresh_iteration_test.dart` to assert
+  /// [debugLastParentDataRefreshIterationCount] stays bounded by this
+  /// count (R124).
+  @visibleForTesting
+  int get debugChildCount => _children.length;
 
   /// Grows all nid-indexed layout arrays to match the controller's current
   /// nid capacity. Doubles on each realloc so amortized growth is O(1)

@@ -1408,8 +1408,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// at most one structural notification when the outermost [runBatch]
   /// exits. Nested [runBatch] calls coalesce into the outermost one.
   ///
-  /// Animation tick notifications ([addAnimationListener]) are not affected
-  /// and continue to fire in real time.
+  /// Per-channel batching contract:
+  ///   - **Structural** ([addStructuralListener] / [notifyListeners]):
+  ///     deferred. Fires once on batch exit with the union of affected
+  ///     keys.
+  ///   - **Node-data** ([addNodeDataListener]): deferred. Fires once per
+  ///     dirty key on batch exit, after structural. A key that was both
+  ///     structurally and data-mutated triggers both notifications.
+  ///   - **Animation tick** ([addAnimationListener]): NOT deferred. These
+  ///     fire on the next animation vsync frame (their natural schedule)
+  ///     and are unaffected by batching either way.
   ///
   /// The notification fires even if [body] throws, so listeners always see
   /// the post-batch state. Exceptions propagate after the notification.

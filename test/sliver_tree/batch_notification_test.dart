@@ -182,6 +182,63 @@ void main() {
         expect(notifyCount, 1);
       },
     );
+
+    testWidgets("node-data listeners are deferred to batch exit (C093)", (
+      tester,
+    ) async {
+      // runBatch's docstring documents that node-data notifications
+      // ([addNodeDataListener]) are deferred to batch exit (after the
+      // structural notification). This test pins that contract.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([const TreeNode(key: "a", data: "A")]);
+
+      int structuralCount = 0;
+      final nodeDataFires = <String>[];
+      controller.addListener(() => structuralCount++);
+      controller.addNodeDataListener(nodeDataFires.add);
+
+      final preStructural = structuralCount;
+      final preData = nodeDataFires.length;
+
+      // Mid-batch: capture observations to prove notifications haven't
+      // fired yet.
+      int structuralMidBatch = -1;
+      int dataMidBatch = -1;
+      controller.runBatch(() {
+        controller.updateNode(const TreeNode(key: "a", data: "A2"));
+        controller.updateNode(const TreeNode(key: "a", data: "A3"));
+        structuralMidBatch = structuralCount;
+        dataMidBatch = nodeDataFires.length;
+      });
+
+      // Both channels must NOT have fired during the batch body.
+      expect(
+        structuralMidBatch,
+        preStructural,
+        reason: "structural notification must defer to batch exit",
+      );
+      expect(
+        dataMidBatch,
+        preData,
+        reason: "node-data notification must defer to batch exit",
+      );
+
+      // After batch exit: node-data listener fired once for "a"
+      // (coalesced from the two updateNode calls). updateNode is a
+      // data-only mutation so structural channel may or may not fire
+      // (implementation detail), but the node-data channel must fire
+      // for the affected key.
+      expect(
+        nodeDataFires,
+        ["a"],
+        reason: "node-data listener fires once per dirty key on batch exit",
+      );
+    });
   });
 
   group("TreeSyncController batching", () {
