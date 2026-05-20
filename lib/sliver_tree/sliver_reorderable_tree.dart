@@ -310,11 +310,8 @@ class _ReorderableRowState<TKey, TData>
   void _endDrag() {
     if (!_isDraggingThisRow) return;
     _isDraggingThisRow = false;
-    final future = widget.state.widget.reorderController.endDrag();
+    widget.state.widget.reorderController.endDrag();
     widget.state._onDragEnd();
-    // endDrag is async (waits one post-frame for the FLIP "after" snapshot);
-    // we release the opacity immediately so the slide runs visibly.
-    unawaited(future);
   }
 
   void _cancelDrag() {
@@ -414,9 +411,3 @@ class _DropIndicatorState<TKey, TData>
   }
 }
 
-// Lightweight fire-and-forget for the async endDrag future.
-void unawaited(Future<void> future) {
-  // Intentionally empty; matches the naming of dart:async's unawaited
-  // without requiring that import.
-  future.ignore();
-}
