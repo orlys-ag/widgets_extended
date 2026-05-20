@@ -497,6 +497,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _anim.opGroups.groups;
   bool get _hasAnyOpGroup => _anim.opGroups.isNotEmpty;
 
+  /// Reusable snapshot buffer used by [expandAll] and [collapseAll] when
+  /// they iterate [_opGroupEntries] and call `forward()`/`reverse()` inside
+  /// the loop. The status listener registered by the operation-group
+  /// registry calls `removeGroup` on terminal status, which mutates the
+  /// underlying `_groups` map. If a group's controller is already at a
+  /// terminal value (1.0 / 0.0) when `forward()`/`reverse()` is invoked,
+  /// the SDK fires the status callback synchronously, mutating the map
+  /// mid-iteration and throwing `ConcurrentModificationError`. The buffer
+  /// is shared because the two callers run sequentially on the same
+  /// controller instance.
+  final List<MapEntry<TKey, OperationGroup<TKey>>> _opGroupSnapshot =
+      <MapEntry<TKey, OperationGroup<TKey>>>[];
+
   // Private field — already invisible across files.
   final Set<TreeRenderHost> _renderHosts = <TreeRenderHost>{};
 
@@ -2884,9 +2897,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _ensureVisibleOrder();
     // Start animations for newly visible nodes and reverse exiting animations
     if (animate) {
-      // Reverse collapsing operation groups
+      // Reverse collapsing operation groups. Snapshot before iterating: a
+      // group's controller already at upperBound would fire `completed`
+      // synchronously inside `forward()`, removing itself from `_groups`
+      // mid-iteration. See [_opGroupSnapshot] docs.
       bool opGroupReversed = false;
-      for (final entry in _opGroupEntries) {
+      _opGroupSnapshot
+        ..clear()
+        ..addAll(_opGroupEntries);
+      for (final entry in _opGroupSnapshot) {
         final group = entry.value;
         if (group.pendingRemoval.isNotEmpty) {
           group.pendingRemoval.clear();
@@ -2901,6 +2920,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           group.controller.forward();
         }
       }
+      _opGroupSnapshot.clear();
       if (opGroupReversed) _bumpAnimGen();
 
       // Check if there's a collapsing bulk animation we can reverse
@@ -3034,9 +3054,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _collapseAllInRegistry(maxDepth);
     _structureGeneration++;
     if (animate) {
-      // Reverse expanding operation groups
+      // Reverse expanding operation groups. Snapshot before iterating: a
+      // group's controller already at lowerBound would fire `dismissed`
+      // synchronously inside `reverse()`, removing itself from `_groups`
+      // mid-iteration. See [_opGroupSnapshot] docs.
       bool opGroupReversed = false;
-      for (final entry in _opGroupEntries) {
+      _opGroupSnapshot
+        ..clear()
+        ..addAll(_opGroupEntries);
+      for (final entry in _opGroupSnapshot) {
         final group = entry.value;
         if (group.pendingRemoval.isEmpty) {
           // Group is expanding — reverse it
@@ -3054,6 +3080,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           group.controller.reverse();
         }
       }
+      _opGroupSnapshot.clear();
       if (opGroupReversed) _bumpAnimGen();
 
       // Check if there's an expanding bulk animation we can reverse
