@@ -1392,15 +1392,32 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // plain (x = indent, y = layoutOffset) coordinates with no axis mapping.
     // Running in any other axis/growth/reverse configuration silently renders
     // incorrectly, so fail loudly in debug builds.
+    final bool axisOk = constraints.axis == Axis.vertical &&
+        constraints.axisDirection == AxisDirection.down &&
+        constraints.growthDirection == GrowthDirection.forward;
+    if (!axisOk) {
+      // Release-safe degraded behavior: report zero geometry rather than
+      // miscompute against vertical-down assumptions. Mirrors the empty-tree
+      // pattern just below: didStartLayout before setting geometry,
+      // didFinishLayout after.
+      //
+      // The fallback runs BEFORE the assert so that even in debug builds
+      // (where the assert throws and the framework catches it) downstream
+      // layout/semantics/paint see valid zero geometry instead of a null
+      // SliverGeometry. Without this ordering, the framework cascades to
+      // multiple downstream null-check errors trying to walk an unlaid sliver.
+      childManager?.didStartLayout();
+      geometry = SliverGeometry.zero;
+      childManager?.didFinishLayout();
+    }
     assert(
-      constraints.axis == Axis.vertical &&
-          constraints.axisDirection == AxisDirection.down &&
-          constraints.growthDirection == GrowthDirection.forward,
+      axisOk,
       "SliverTree currently supports only vertical, forward-growing axes "
       "(Axis.vertical, AxisDirection.down, GrowthDirection.forward). Got "
       "axis=${constraints.axis}, axisDirection=${constraints.axisDirection}, "
       "growthDirection=${constraints.growthDirection}.",
     );
+    if (!axisOk) return;
     childManager?.didStartLayout();
 
     final visibleNodes = controller.visibleNodes;
