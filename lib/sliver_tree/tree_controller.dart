@@ -1609,6 +1609,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
       _adoptKey(node.key);
       _store.setData(node.key, node);
+      // C022: fire the node-data channel so subscribers via
+      // [addNodeDataListener] see the data update. The structural
+      // notification below covers a different channel (full refresh)
+      // that some callers don't subscribe to.
+      _notifyNodeDataChanged(node.key);
       if (preservePendingSubtreeState) {
         _markVisibleOrderDirty();
         // Cancelling a pending deletion restores the node (and possibly
@@ -1638,6 +1643,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
       _store.setData(node.key, node);
+      // C022: fire node-data channel for the data update.
+      _notifyNodeDataChanged(node.key);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != null) {
         // Different parent — delegate to moveNode.
@@ -1905,6 +1912,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
       _adoptKey(node.key);
       _store.setData(node.key, node);
+      // C022: same as insertRoot's matching branch — fire node-data
+      // channel so listeners subscribed via [addNodeDataListener] see
+      // the data update.
+      _notifyNodeDataChanged(node.key);
       if (preservePendingSubtreeState) {
         _markVisibleOrderDirty();
         // See insertRoot's matching branch: cancelling a pending deletion
@@ -1931,6 +1942,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
       _store.setData(node.key, node);
+      // C022: fire node-data channel for the data update.
+      _notifyNodeDataChanged(node.key);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != parentKey) {
         // Different parent — delegate to moveNode.

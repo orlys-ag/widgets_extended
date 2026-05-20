@@ -239,6 +239,96 @@ void main() {
         reason: "node-data listener fires once per dirty key on batch exit",
       );
     });
+
+    testWidgets(
+      "insertRoot updating data on a pending-deletion node fires "
+      "node-data listener (C022)",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: const Duration(milliseconds: 100),
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([const TreeNode(key: "X", data: "A")]);
+
+        final dataFires = <String>[];
+        controller.addNodeDataListener(dataFires.add);
+
+        // Start removal (puts X in pending-deletion).
+        controller.remove(key: "X");
+        // Cancel deletion via insertRoot with new data.
+        controller.insertRoot(const TreeNode(key: "X", data: "B"));
+
+        expect(
+          dataFires,
+          ["X"],
+          reason: "node-data listener must fire when insertRoot updates "
+              "a pending-deletion node",
+        );
+
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      "insertRoot on already-present node fires node-data listener (C022)",
+      (tester) async {
+        // Existing-node update branch (not pending deletion). Data
+        // payload changes — node-data listener must fire.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([const TreeNode(key: "X", data: "A")]);
+
+        final dataFires = <String>[];
+        controller.addNodeDataListener(dataFires.add);
+
+        controller.insertRoot(const TreeNode(key: "X", data: "B"));
+
+        expect(
+          dataFires,
+          ["X"],
+          reason: "node-data listener must fire when insertRoot updates "
+              "an existing root node's data",
+        );
+      },
+    );
+
+    testWidgets(
+      "insert on already-present node fires node-data listener (C022)",
+      (tester) async {
+        // Same as above but for the insert() method (not insertRoot).
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.setRoots([const TreeNode(key: "parent", data: "P")]);
+        controller.setChildren("parent", [
+          const TreeNode(key: "child", data: "A"),
+        ]);
+
+        final dataFires = <String>[];
+        controller.addNodeDataListener(dataFires.add);
+
+        controller.insert(
+          parentKey: "parent",
+          node: const TreeNode(key: "child", data: "B"),
+        );
+
+        expect(
+          dataFires,
+          ["child"],
+          reason: "node-data listener must fire when insert updates "
+              "an existing child's data",
+        );
+      },
+    );
   });
 
   group("TreeSyncController batching", () {
