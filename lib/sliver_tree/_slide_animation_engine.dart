@@ -410,6 +410,11 @@ class SlideAnimationEngine<TKey> {
           elapsed.inMicroseconds - entry.slideStartElapsed.inMicroseconds;
       final totalUs = entry.slideDuration.inMicroseconds;
       final raw = totalUs <= 0 ? 1.0 : perSlideMicros / totalUs;
+      // 1e-9 epsilon (A046): absorbs floating-point drift from the
+      // microsecond division so a slide that should settle exactly at
+      // duration boundary doesn't linger one extra tick at progress
+      // ≈ 0.999999999. Trades off ≤ 1 sub-frame of early settle for
+      // deterministic completion. Imperceptible at 60 Hz.
       final complete = raw >= 1.0 - 1e-9;
       entry.progress = complete ? 1.0 : raw.clamp(0.0, 1.0);
       final t = entry.curve.transform(entry.progress);

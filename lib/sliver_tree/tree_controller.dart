@@ -2258,8 +2258,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     final oldParent = _parentKeyOfKey(key);
     // If already under the target parent and no explicit position was
-    // requested, nothing to do. With an explicit [index], fall through so the
-    // node is repositioned among its existing siblings.
+    // requested, nothing to do. With an explicit [index] that matches the
+    // node's current position under the same parent, also a no-op —
+    // avoid wasted baseline staging + structural notification + slide
+    // composition for a mutation that produces zero visual change (C031).
     //
     // CRITICAL: this no-op return MUST precede the animate staging below.
     // Otherwise an animated no-op call would stage a baseline (via
@@ -2267,7 +2269,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // layout (no _notifyStructural fires for a no-op), leaving the
     // _pendingSlideBaseline stuck and blocking all subsequent stages
     // under first-wins until something else triggers a layout.
-    if (oldParent == newParentKey && index == null) return;
+    if (oldParent == newParentKey) {
+      if (index == null) return;
+      // Compare against the LIVE index (excluding pending-deletion
+      // siblings). getIndexInParent returns -1 only when the key is
+      // unknown or pending-deletion — neither applies here, so the
+      // value is the current live index.
+      if (index == getIndexInParent(key)) return;
+    }
 
     // Capture pre-mutation visibility so we can decide entry vs exit
     // phantom paths after the visible-order rebuild runs.

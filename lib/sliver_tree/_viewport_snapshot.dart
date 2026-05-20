@@ -138,6 +138,13 @@ final class ViewportSnapshot {
   /// Edge side a y-coordinate sits past relative to this viewport.
   /// Top side iff `y < top`; otherwise bottom (the symmetric exclusive
   /// convention from [intersects]).
+  ///
+  /// Boundary tie-break (A074): a coordinate exactly at `top` resolves to
+  /// the bottom edge. This matches the [intersects] convention where the
+  /// top boundary is exclusive (`y < top` is off-screen above). Reachable
+  /// only in the exact-pixel-alignment case; choosing one side
+  /// deterministically avoids per-frame flip when scroll lands at exactly
+  /// `top`.
   ViewportEdge edgeFor(double y) {
     return y < top ? ViewportEdge.top : ViewportEdge.bottom;
   }

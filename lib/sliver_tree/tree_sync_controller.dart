@@ -26,6 +26,8 @@
 /// ```
 library;
 
+import 'package:flutter/foundation.dart';
+
 import 'tree_controller.dart';
 import 'types.dart';
 
@@ -593,6 +595,12 @@ class TreeSyncController<TKey, TData> {
   /// different parent, allowing [TreeController.moveNode] to preserve
   /// subtree state.
   ///
+  /// The same child key MUST NOT appear under two different parents in
+  /// [desiredByParent]. If it does, the second `syncChildren` call would
+  /// reparent the key from the first parent's tree, producing last-write-
+  /// wins semantics (S014). Debug builds assert against this; release
+  /// builds silently apply last-write-wins.
+  ///
   /// Set [animate] to false to suppress animations.
   void syncMultipleChildren(
     Map<TKey, List<TreeNode<TKey, TData>>> desiredByParent, {
@@ -601,6 +609,26 @@ class TreeSyncController<TKey, TData> {
     _controller.runBatch(() {
       _globallyDesiredChildren = <TKey>{};
       try {
+        // Build the union of all desired keys AND detect cross-parent
+        // duplicates in debug mode. The duplicate-key check costs one
+        // extra Set lookup per child but only runs under `assert(...)`.
+        assert(() {
+          final seenKeys = <TKey>{};
+          for (final entry in desiredByParent.entries) {
+            for (final c in entry.value) {
+              if (!seenKeys.add(c.key)) {
+                throw FlutterError(
+                  "syncMultipleChildren: child key ${c.key} appears under "
+                  "more than one parent in desiredByParent. The same key "
+                  "cannot be a child of two parents; the second "
+                  "syncChildren call would reparent it (last-write-wins). "
+                  "Deduplicate the input map before calling.",
+                );
+              }
+            }
+          }
+          return true;
+        }());
         for (final children in desiredByParent.values) {
           for (final c in children) {
             _globallyDesiredChildren!.add(c.key);
