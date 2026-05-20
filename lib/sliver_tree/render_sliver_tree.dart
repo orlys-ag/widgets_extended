@@ -65,6 +65,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // key identities (e.g. string keys reused) — produce wrong deltas at
     // worst.
     _composer.reset();
+    // Phantom-exit ghost maps are also keyed by old-controller TKey.
+    // String-key reuse across controllers (a common app pattern) would
+    // otherwise feed garbage entries to the new controller's layout.
+    _phantomExitGhosts = null;
+    _phantomClipAnchors = null;
     _composer.rebindController(value);
     _sticky.controller = value;
     _admission.controller = value;
@@ -316,6 +321,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// `O(visibleNodes)`, without relying on flaky wall-time measurements.
   @visibleForTesting
   int debugLastParentDataRefreshIterationCount = 0;
+
+  /// Number of live entries in `_phantomExitGhosts`. Exposed for tests
+  /// that verify phantom-exit cleanup (paint purity, controller swap,
+  /// per-layout pruning). Zero when the map is null.
+  @visibleForTesting
+  int get debugPhantomExitGhostCount =>
+      _phantomExitGhosts == null ? 0 : _phantomExitGhosts!.length;
 
   /// Grows all nid-indexed layout arrays to match the controller's current
   /// nid capacity. Doubles on each realloc so amortized growth is O(1)
@@ -1240,10 +1252,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   @override
   void detach() {
     _controller.unregisterRenderHost(_hostCallback);
-    // A pending FLIP baseline that was never consumed (widget unmounted
-    // between mutation and next frame) would leak the offset map and
-    // trip stale-state assertions on re-attach. Drop it eagerly.
-    _composer.baselineSlot.reset();
+    // A pending FLIP baseline AND any registered ghosts may carry stale
+    // state across the detach/re-attach gap (e.g. ghost entries against
+    // freed nids). `_composer.reset()` drops both maps. Practical impact
+    // is muted because the next `_consumeSlideBaselineIfAny` would also
+    // run `pruneSettled`, but this defense-in-depth catches the race
+    // where a structural mutation happens while detached.
+    _composer.reset();
     super.detach();
     for (final child in _children.values) {
       child.detach();
