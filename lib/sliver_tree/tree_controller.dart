@@ -1721,6 +1721,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return idx == VisibleOrderBuffer.kNotVisible ? _order.length : idx;
   }
 
+  /// Fast-path equality check for [setChildren]. Returns true iff the
+  /// new list exactly matches the existing child list — same keys in
+  /// the same order, same data values, and no pending-deletion children
+  /// (which would otherwise force the slow path's resurrection logic).
+  ///
+  /// Used to short-circuit no-op `setChildren` calls so reactive sync
+  /// code doesn't destroy in-flight animation state on identical input
+  /// (C026).
+  bool _isExactKeyAndDataMatch(
+    List<TKey> oldKeys,
+    List<TreeNode<TKey, TData>> newNodes,
+  ) {
+    if (oldKeys.length != newNodes.length) return false;
+    for (int i = 0; i < oldKeys.length; i++) {
+      final oldKey = oldKeys[i];
+      final newNode = newNodes[i];
+      if (oldKey != newNode.key) return false;
+      // Conservative: any pending-deletion child forces the slow path
+      // so the existing purge-and-resurrect behavior is preserved.
+      if (_isPendingDeletion(oldKey)) return false;
+      final oldData = _dataOf(oldKey)?.data;
+      if (oldData != newNode.data) return false;
+    }
+    return true;
+  }
+
   /// Adds children to a node.
   ///
   /// The children are added but not visible until the parent is expanded.
@@ -1760,8 +1786,24 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
-    // Purge old children and their descendants before overwriting.
+    // C026 fast path: if the new list exactly matches the existing child
+    // list — same keys in order, same data values, no pending-deletion
+    // children — this is a structural no-op. Without this short-circuit,
+    // the purge-and-re-adopt loop below destroys any in-flight animation
+    // state on these children (the purge calls _purgeNodeData which
+    // clears standalone/op-group/bulk membership) for zero visual change.
+    // Reactive sync code that re-sends an identical child list (e.g.
+    // setState-driven rebuild) would visibly reset mid-flight expand
+    // animations without this guard. Pending-deletion children force the
+    // slow path so the existing purge-resurrects-and-overwrites behavior
+    // is preserved unchanged.
     final oldChildren = _childListOf(parentKey);
+    if (oldChildren != null &&
+        _isExactKeyAndDataMatch(oldChildren, children)) {
+      return;
+    }
+
+    // Purge old children and their descendants before overwriting.
     if (oldChildren != null && oldChildren.isNotEmpty) {
       final allOldKeys = <TKey>[];
       for (final oldChildKey in oldChildren) {
