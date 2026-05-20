@@ -15,6 +15,7 @@
 library;
 
 import 'package:flutter/animation.dart' show Curve;
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '_viewport_snapshot.dart';
 import 'tree_controller.dart';
@@ -85,6 +86,12 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
 
   @override
   bool get hasGhosts => _entries != null && _entries!.isNotEmpty;
+
+  /// Number of live entries. Exposed for tests that verify ghost
+  /// lifecycle (paint purity, per-layout pruning, etc.). Zero when the
+  /// backing map is null.
+  @visibleForTesting
+  int get debugEntryCount => _entries == null ? 0 : _entries!.length;
 
   @override
   GhostEntry? entryFor(TKey key) => _entries?[key];

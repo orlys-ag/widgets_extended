@@ -329,6 +329,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   int get debugPhantomExitGhostCount =>
       _phantomExitGhosts == null ? 0 : _phantomExitGhosts!.length;
 
+  /// Number of live entries in the slide composer's ghost registry.
+  /// Forwarded for tests that verify ghost-registry pruning behavior.
+  @visibleForTesting
+  int get debugComposerGhostCount =>
+      // ignore: invalid_use_of_visible_for_testing_member
+      _composer.debugGhostEntryCount;
+
   /// Grows all nid-indexed layout arrays to match the controller's current
   /// nid capacity. Doubles on each realloc so amortized growth is O(1)
   /// per node insertion.
@@ -1444,6 +1451,24 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       return;
     }
 
+    // Step 0a (R018) — Prune freed/settled entries from `_phantomExitGhosts`
+    // every layout. Runs unconditionally (not just when slides are idle)
+    // so dead entries don't accumulate during active slide cycles. Paint
+    // passes below can iterate these maps read-only because of this prune.
+    _pruneSettledPhantomExitGhosts();
+
+    // Step 0b (R019) — Same for the composer ghost registry. `pruneSettled`
+    // handles both freed-key (nid < 0) and settled (both deltas == 0)
+    // entries. When all slides have settled, we additionally drop
+    // everything via `clearAll` so the map shrinks back to empty.
+    if (_composer.hasGhosts) {
+      if (!controller.hasActiveSlides) {
+        _composer.ghosts.clearAll();
+      } else {
+        _composer.ghosts.pruneSettled();
+      }
+    }
+
     _ensureLayoutCapacity();
 
     // Detect structure changes
@@ -2272,50 +2297,41 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // (driven by _phantomClipAnchors) handles the "occluded by
     // parent" effect.
     final ghosts = _phantomExitGhosts;
-    if (ghosts != null && ghosts.isNotEmpty) {
-      // Idle-state shortcut: if no slides are active, every ghost in
-      // the map is settled (no slide entry exists for any of them).
-      // Drop the whole map and skip the loop.
-      if (!hasSlides) {
-        for (final ghostKey in ghosts.keys) {
-          _phantomClipAnchors?.remove(ghostKey);
+    // Layout's Step 0a (_pruneSettledPhantomExitGhosts) handles cleanup;
+    // paint stays read-only. When slides are idle, the map is empty by
+    // the next layout's Step 0a, so we don't need to clear it here.
+    if (ghosts != null && ghosts.isNotEmpty && hasSlides) {
+      // Snapshot keys to avoid concurrent-modification when nested
+      // controller reads in the loop touch state.
+      final ghostKeys = ghosts.keys.toList();
+      for (final ghostKey in ghostKeys) {
+        final anchorKey = ghosts[ghostKey];
+        if (anchorKey == null) continue;
+        final ghostNid = controller.nidOf(ghostKey);
+        if (ghostNid < 0) {
+          // Freed key — Step 0a reaps on next layout.
+          continue;
         }
-        _phantomExitGhosts = null;
-      } else {
-        // Snapshot keys to avoid concurrent-modification when we lazily
-        // evict settled ghosts mid-iteration.
-        final ghostKeys = ghosts.keys.toList();
-        for (final ghostKey in ghostKeys) {
-          final anchorKey = ghosts[ghostKey];
-          if (anchorKey == null) continue;
-          final ghostNid = controller.nidOf(ghostKey);
-          if (ghostNid < 0) {
-            ghosts.remove(ghostKey);
-            continue;
-          }
-          final ghostSlide = controller.getSlideDeltaNid(ghostNid);
-          final ghostSlideX =
-              hasXSlides ? controller.getSlideDeltaXNid(ghostNid) : 0.0;
-          // Slide settled — drop the ghost. The next stale-eviction pass
-          // will release the render box.
-          if (ghostSlide == 0.0 && ghostSlideX == 0.0) {
-            ghosts.remove(ghostKey);
-            _phantomClipAnchors?.remove(ghostKey);
-            continue;
-          }
-          final ghostChild = getChildForNode(ghostKey);
-          if (ghostChild == null) continue;
-          final anchorChild = getChildForNode(anchorKey);
-          if (anchorChild == null) continue;
-          final anchorParentData = anchorChild.parentData;
-          if (anchorParentData is! SliverTreeParentData) continue;
-          final anchorNid = controller.nidOf(anchorKey);
-          final anchorSlide = anchorNid >= 0
-              ? controller.getSlideDeltaNid(anchorNid)
-              : 0.0;
-          final anchorSlideX = (hasXSlides && anchorNid >= 0)
-              ? controller.getSlideDeltaXNid(anchorNid)
-              : 0.0;
+        final ghostSlide = controller.getSlideDeltaNid(ghostNid);
+        final ghostSlideX =
+            hasXSlides ? controller.getSlideDeltaXNid(ghostNid) : 0.0;
+        if (ghostSlide == 0.0 && ghostSlideX == 0.0) {
+          // Settled — Step 0a reaps on next layout.
+          continue;
+        }
+        final ghostChild = getChildForNode(ghostKey);
+        if (ghostChild == null) continue;
+        final anchorChild = getChildForNode(anchorKey);
+        if (anchorChild == null) continue;
+        final anchorParentData = anchorChild.parentData;
+        if (anchorParentData is! SliverTreeParentData) continue;
+        final anchorNid = controller.nidOf(anchorKey);
+        final anchorSlide = anchorNid >= 0
+            ? controller.getSlideDeltaNid(anchorNid)
+            : 0.0;
+        final anchorSlideX = (hasXSlides && anchorNid >= 0)
+            ? controller.getSlideDeltaXNid(anchorNid)
+            : 0.0;
         // Ghost's painted position = anchor's painted position + ghost's
         // own slide delta. As the ghost's slide settles to 0, the ghost
         // converges on the anchor's row.
@@ -2346,7 +2362,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         } else {
           context.paintChild(ghostChild, paintOffset);
         }
-        }
       }
     }
 
@@ -2359,49 +2374,43 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // slide settles, the row converges on the viewport edge and is
     // then lazily pruned (no visible cut because the row's structural
     // position is far off-screen).
-    if (_composer.hasGhosts) {
-      // Idle-state shortcut.
-      if (!hasSlides) {
-        _composer.ghosts.clearAll();
-      } else {
-        final viewport = _currentViewportSnapshot();
-        final edgeKeys = _composer.ghosts.activeKeys.toList();
-        for (final ghostKey in edgeKeys) {
-          final entry = _composer.ghosts.entryFor(ghostKey);
-          if (entry == null) continue;
-          final ghostNid = controller.nidOf(ghostKey);
-          if (ghostNid < 0) {
-            _composer.ghosts.removeKey(ghostKey);
-            continue;
-          }
-          // Defensive: if a ghost row is also a sticky header, let the
-          // sticky pass handle it (paints at pinned structural y). Edge
-          // ghost behaviour is lost for this row, but no double-paint.
-          // Sticky + slide-OUT-to-far-off-screen is uncommon.
-          if (_sticky.isSticky(ghostNid)) continue;
-          final ghostSlide = controller.getSlideDeltaNid(ghostNid);
-          final ghostSlideX = hasXSlides
-              ? controller.getSlideDeltaXNid(ghostNid)
-              : 0.0;
-          // Eager prune on settle — avoids one-frame lingering at edge
-          // between settle and next consume's lazy-prune.
-          if (ghostSlide == 0.0 && ghostSlideX == 0.0) {
-            _composer.ghosts.removeKey(ghostKey);
-            continue;
-          }
-          final ghostChild = getChildForNode(ghostKey);
-          if (ghostChild == null) continue;
-          final indent = controller.getIndent(ghostKey);
-          // Ghost paints at `liveBaseY + slideDelta` in scroll-space,
-          // converted to local paint coords by subtracting scrollOffset.
-          final paintedY =
-              viewport.baseForEdge(entry.edge) - scrollOffset + ghostSlide;
-          final paintedX = indent + ghostSlideX;
-          // Skip if entirely outside the paint region.
-          if (paintedY >= remainingPaintExtent) continue;
-          if (paintedY + ghostChild.size.height <= 0) continue;
-          context.paintChild(ghostChild, offset + Offset(paintedX, paintedY));
+    // Layout's Step 0b (`_composer.ghosts.pruneSettled` / `clearAll` when
+    // idle) handles cleanup; paint stays read-only.
+    if (_composer.hasGhosts && hasSlides) {
+      final viewport = _currentViewportSnapshot();
+      final edgeKeys = _composer.ghosts.activeKeys.toList();
+      for (final ghostKey in edgeKeys) {
+        final entry = _composer.ghosts.entryFor(ghostKey);
+        if (entry == null) continue;
+        final ghostNid = controller.nidOf(ghostKey);
+        if (ghostNid < 0) {
+          // Freed key — Step 0b reaps on next layout.
+          continue;
         }
+        // Defensive: if a ghost row is also a sticky header, let the
+        // sticky pass handle it (paints at pinned structural y). Edge
+        // ghost behaviour is lost for this row, but no double-paint.
+        // Sticky + slide-OUT-to-far-off-screen is uncommon.
+        if (_sticky.isSticky(ghostNid)) continue;
+        final ghostSlide = controller.getSlideDeltaNid(ghostNid);
+        final ghostSlideX =
+            hasXSlides ? controller.getSlideDeltaXNid(ghostNid) : 0.0;
+        if (ghostSlide == 0.0 && ghostSlideX == 0.0) {
+          // Settled — Step 0b reaps on next layout.
+          continue;
+        }
+        final ghostChild = getChildForNode(ghostKey);
+        if (ghostChild == null) continue;
+        final indent = controller.getIndent(ghostKey);
+        // Ghost paints at `liveBaseY + slideDelta` in scroll-space,
+        // converted to local paint coords by subtracting scrollOffset.
+        final paintedY =
+            viewport.baseForEdge(entry.edge) - scrollOffset + ghostSlide;
+        final paintedX = indent + ghostSlideX;
+        // Skip if entirely outside the paint region.
+        if (paintedY >= remainingPaintExtent) continue;
+        if (paintedY + ghostChild.size.height <= 0) continue;
+        context.paintChild(ghostChild, offset + Offset(paintedX, paintedY));
       }
     }
 
@@ -2517,6 +2526,41 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   }
 
   /// Computes the clip rect for a phantom-anchored sliding row, or null
+  /// Drops entries from `_phantomExitGhosts` whose key has been freed
+  /// (`nid < 0`) or whose slide has settled (both axis deltas == 0).
+  /// Paired `_phantomClipAnchors` entries are dropped in lockstep so
+  /// the two maps don't diverge.
+  ///
+  /// Called from the start of `performLayout` every frame so dead
+  /// entries can't accumulate while other slides are still in flight.
+  /// Paint passes can iterate these maps read-only after this runs.
+  void _pruneSettledPhantomExitGhosts() {
+    final ghosts = _phantomExitGhosts;
+    if (ghosts == null || ghosts.isEmpty) return;
+    // Snapshot keys to avoid concurrent-modification during removal.
+    final keys = ghosts.keys.toList();
+    for (final ghostKey in keys) {
+      final nid = controller.nidOf(ghostKey);
+      if (nid < 0) {
+        ghosts.remove(ghostKey);
+        _phantomClipAnchors?.remove(ghostKey);
+        continue;
+      }
+      final dy = controller.getSlideDeltaNid(nid);
+      final dx = controller.getSlideDeltaXNid(nid);
+      if (dy == 0.0 && dx == 0.0) {
+        ghosts.remove(ghostKey);
+        _phantomClipAnchors?.remove(ghostKey);
+      }
+    }
+    if (ghosts.isEmpty) {
+      _phantomExitGhosts = null;
+    }
+    if (_phantomClipAnchors != null && _phantomClipAnchors!.isEmpty) {
+      _phantomClipAnchors = null;
+    }
+  }
+
   /// if no clip is needed (no phantom anchor recorded for this row, or
   /// the anchor isn't currently mounted).
   ///
