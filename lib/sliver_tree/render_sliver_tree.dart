@@ -1910,8 +1910,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (stickyBottom > paintExtent) paintExtent = stickyBottom;
     }
 
-    // Ensure paintExtent is non-negative and within bounds
-    paintExtent = paintExtent.clamp(0.0, remainingPaintExtent);
+    // Bound by both the viewport's remaining paint budget AND the sliver's own
+    // maxPaintExtent (= totalScrollExtent below). Sticky inflation above can
+    // push paintExtent above totalScrollExtent for a short tree with a tall
+    // header; without this second cap, `SliverGeometry.debugAssertIsValid`
+    // fails on `paintExtent <= maxPaintExtent`.
+    paintExtent = paintExtent.clamp(
+      0.0,
+      math.min(remainingPaintExtent, totalScrollExtent),
+    );
 
     geometry = SliverGeometry(
       scrollExtent: totalScrollExtent,
