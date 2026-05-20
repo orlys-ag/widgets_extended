@@ -96,6 +96,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     _bulkCumulativesCount = 0;
     _lastBulkAnimationGeneration = -1;
     _lastFrameUsedBulkCumulatives = false;
+    // The out-of-layout findRowAtPaintedY scratch is keyed by the old
+    // controller's structureGeneration; invalidate so a post-swap
+    // pointer poll re-materializes against the new controller.
+    _findFirstScratchCumulative = null;
+    _findFirstScratchGen = -1;
+    _findFirstScratchCount = 0;
     // Do NOT clear `_children`: it is keyed by user TKey, not by the
     // controller's internal nid space, so a key shared between the old
     // and new controller (e.g. the user keeps the same node identity
@@ -195,6 +201,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// force a full Pass 1 walk on the frame we exit fast path, because
   /// during the fast path only cache-region nid slots are fresh.
   bool _lastFrameUsedBulkCumulatives = false;
+
+  /// One-shot cumulative offset buffer used by `_findFirstVisibleIndex`
+  /// when called outside layout after a bulk-only frame, where
+  /// `_nodeOffsetsByNid` is fresh only for the cache region. Cached
+  /// across calls keyed by `(structureGeneration, !hasActiveAnimations)`:
+  /// while animations are in flight, extents tick every frame but
+  /// `structureGeneration` doesn't, so the cache must be re-materialized
+  /// each call instead of trusting an animation-frame snapshot.
+  Float64List? _findFirstScratchCumulative;
+  int _findFirstScratchGen = -1;
+  int _findFirstScratchCount = 0;
 
   /// Rebuilds [_stableCumulative] and [_bulkFullCumulative] from the current visible
   /// order and bulk group membership. O(N) but amortized across many
@@ -1266,6 +1283,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // run `pruneSettled`, but this defense-in-depth catches the race
     // where a structural mutation happens while detached.
     _composer.reset();
+    // Out-of-layout scratch can hold extents against the now-stale
+    // controller state; drop it so re-attach materializes fresh.
+    _findFirstScratchCumulative = null;
+    _findFirstScratchGen = -1;
+    _findFirstScratchCount = 0;
     super.detach();
     for (final child in _children.values) {
       child.detach();
@@ -2136,10 +2158,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     int low = 0;
     int high = n - 1;
 
+    // Fast path: bulk cumulatives match the current visible count.
     if (_bulkCumulativesValid && _bulkCumulativesCount == n) {
-      // Bulk-only fast path: derive offset+extent at each probe from cumulatives
-      // without touching per-nid arrays (which are only kept fresh for
-      // cache-region nids in this mode).
       while (low < high) {
         final mid = (low + high) ~/ 2;
         final offsetEnd = _offsetAtVisibleIndex(mid + 1);
@@ -2152,6 +2172,57 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       return low;
     }
 
+    // R013 slow path after exiting bulk: per-nid arrays are fresh only
+    // for cache-region nids. Out-of-layout callers (TreeReorderController
+    // via findRowAtPaintedY) read this race. Materialize a one-shot
+    // cumulative; cache by structureGeneration ONLY when no animation
+    // is in flight — getCurrentExtentNid ticks every animation frame
+    // for bulk members and the structureGeneration alone does not
+    // capture that change.
+    if (_lastFrameUsedBulkCumulatives) {
+      final gen = _controller.structureGeneration;
+      final canCache = !_controller.hasActiveAnimations;
+      final cumulativeFresh = canCache &&
+          _findFirstScratchGen == gen &&
+          _findFirstScratchCount == n &&
+          _findFirstScratchCumulative != null &&
+          _findFirstScratchCumulative!.length >= n + 1;
+      if (!cumulativeFresh) {
+        if (_findFirstScratchCumulative == null ||
+            _findFirstScratchCumulative!.length < n + 1) {
+          _findFirstScratchCumulative = Float64List(n + 1);
+        }
+        final cum = _findFirstScratchCumulative!;
+        final orderNids = _controller.orderNidsView;
+        double acc = 0.0;
+        cum[0] = 0.0;
+        for (int i = 0; i < n; i++) {
+          acc += _controller.getCurrentExtentNid(orderNids[i]);
+          cum[i + 1] = acc;
+        }
+        if (canCache) {
+          _findFirstScratchGen = gen;
+          _findFirstScratchCount = n;
+        } else {
+          // Don't mark valid — next call (likely still mid-animation)
+          // must re-materialize against the new extents.
+          _findFirstScratchGen = -1;
+          _findFirstScratchCount = 0;
+        }
+      }
+      final cum = _findFirstScratchCumulative!;
+      while (low < high) {
+        final mid = (low + high) ~/ 2;
+        if (cum[mid + 1] <= scrollOffset) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      return low;
+    }
+
+    // Last frame was non-bulk: per-nid arrays were fully populated.
     final orderNids = _controller.orderNidsView;
     while (low < high) {
       final mid = (low + high) ~/ 2;
