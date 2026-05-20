@@ -17,7 +17,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
-import 'package:widgets_extended/sliver_tree/render_sliver_tree.dart';
 
 const _rowHeight = 40.0;
 const _viewportHeight = 200.0;
