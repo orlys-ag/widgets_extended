@@ -1,7 +1,12 @@
+## 0.0.20
+
+- Minor clean-ups.
+- Minor bug fixes.
+
 ## 0.0.19
 
 - Fix orphaned animation entry staying during quick filtering.
-- Minor optimizations
+- Minor optimizations.
 
 ## 0.0.18
 
