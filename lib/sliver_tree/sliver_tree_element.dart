@@ -95,6 +95,14 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// partial animated value instead of the final settled extent.
   bool _priorTickHadAnimations = false;
 
+  /// Mirror of [_priorTickHadAnimations] for slides. Used so the
+  /// settle tick of a slide-only animation still triggers a relayout —
+  /// the render object's Step 0a / 0b ghost-cleanup runs only inside
+  /// `performLayout`, and without a final layout pass after settle,
+  /// settled ghost entries would linger until the next unrelated
+  /// layout (scroll, structural mutation, etc.).
+  bool _priorTickHadSlides = false;
+
 
   // ══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
@@ -243,19 +251,28 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// previous tick saw active animations, the current tick is the settle
   /// tick and must relayout even though the flag is now false.
   ///
-  /// The completion tick of a slide fires **before** the controller clears
-  /// its entries, so `hasActiveSlides` is still true and the paint branch
-  /// schedules a final paint at `currentDelta == 0.0`. After that there's
-  /// no further tick; the clear-and-stop is a no-visual-change operation.
+  /// The completion tick of a slide fires while `hasActiveSlides` is
+  /// still true; the controller then clears its slide entries silently
+  /// (no further tick). To guarantee that ghost-cleanup (Step 0a / 0b
+  /// in the render object's performLayout) runs after every slide,
+  /// slide ticks now trigger a layout pass — not just paint. The
+  /// previous "paint-only" optimization is no longer valid because
+  /// the cleanup of `_phantomExitGhosts` and `_composer.ghosts` moved
+  /// from paint into layout.
+  ///
+  /// We also keep [_priorTickHadSlides] as a settle-detector: if the
+  /// last tick saw slides and the current does not, ensure one final
+  /// layout pass runs so per-layout pruning's `clearAll`-when-idle
+  /// branch fires.
   void _onAnimationTick() {
     final c = widget.controller;
     final active = c.hasActiveAnimations;
-    if (active || _priorTickHadAnimations) {
+    final hasSlides = c.hasActiveSlides;
+    if (active || _priorTickHadAnimations || hasSlides || _priorTickHadSlides) {
       renderObject.markNeedsLayout();
-    } else if (c.hasActiveSlides) {
-      renderObject.markNeedsPaint();
     }
     _priorTickHadAnimations = active;
+    _priorTickHadSlides = hasSlides;
   }
 
   /// Called when a single node's data changed (via [TreeController.updateNode])

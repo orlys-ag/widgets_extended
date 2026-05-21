@@ -255,7 +255,7 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// same frame then renders rows at their prior painted position and
   /// slides them toward their new structural position smoothly — no
   /// one-frame "jump to new position, then slide back" flicker.
-  Future<void> endDrag() async {
+  void endDrag() {
     final session = _session;
     if (session == null) return;
     final target = session.currentTarget;

@@ -274,6 +274,18 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   /// explicitly clear the union mirrors `_isAnimatingByNid` /
   /// `_isExitingByNid` — they're rebuilt from scratch on the next
   /// `ensureAnimatingKeys()` via the sparse-tracking lists.
+  ///
+  /// **Generation invariant (C095):** this method does NOT bump
+  /// `_animationGeneration`. Callers that read animation-gen-keyed caches
+  /// (e.g. render-layer prefix-sum caches gated on `animationGeneration`)
+  /// must ensure a bump happens before any such read between this call
+  /// and the next mutation. The animation-finalization path
+  /// (`_finalizeAnimation` in `_tree_controller_animation.dart`) already
+  /// bumps the generation before invoking transitively-clearing helpers,
+  /// so animation-driven cleanup is covered. The unpaired call sites are
+  /// `_adoptKey` and `_releaseNid` in `tree_controller.dart`; both are
+  /// lifecycle-only and run in contexts where cache-gated readers are
+  /// not reachable before the next structural mutation.
   void clearForNid(int nid) {
     standalone.clearForNid(nid);
     opGroups.clearForNid(nid);

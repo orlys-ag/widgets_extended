@@ -124,9 +124,37 @@ class _SliverReorderableTreeState<TKey, TData>
   TKey? _draggedKey;
 
   @override
+  void initState() {
+    super.initState();
+    widget.reorderController.addListener(_onControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(SliverReorderableTree<TKey, TData> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.reorderController, widget.reorderController)) {
+      oldWidget.reorderController.removeListener(_onControllerChanged);
+      widget.reorderController.addListener(_onControllerChanged);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.reorderController.removeListener(_onControllerChanged);
     _removeIndicator();
     super.dispose();
+  }
+
+  /// Syncs local drag UI (dimmed row + drop indicator) with the
+  /// controller's session state. The gesture handlers normally drive
+  /// `_onDragEnd` directly, but app code can also call
+  /// `reorderController.cancelDrag()` externally — without this
+  /// subscription, the local UI would stay in its dragged state
+  /// indefinitely (S059).
+  void _onControllerChanged() {
+    if (_draggedKey != null && !widget.reorderController.isDragging) {
+      _onDragEnd();
+    }
   }
 
   void _removeIndicator() {
@@ -310,11 +338,8 @@ class _ReorderableRowState<TKey, TData>
   void _endDrag() {
     if (!_isDraggingThisRow) return;
     _isDraggingThisRow = false;
-    final future = widget.state.widget.reorderController.endDrag();
+    widget.state.widget.reorderController.endDrag();
     widget.state._onDragEnd();
-    // endDrag is async (waits one post-frame for the FLIP "after" snapshot);
-    // we release the opacity immediately so the slide runs visibly.
-    unawaited(future);
   }
 
   void _cancelDrag() {
@@ -414,9 +439,3 @@ class _DropIndicatorState<TKey, TData>
   }
 }
 
-// Lightweight fire-and-forget for the async endDrag future.
-void unawaited(Future<void> future) {
-  // Intentionally empty; matches the naming of dart:async's unawaited
-  // without requiring that import.
-  future.ignore();
-}

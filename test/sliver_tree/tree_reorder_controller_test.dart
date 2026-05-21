@@ -374,10 +374,7 @@ void main() {
       expect(reorder.currentTarget?.targetKey, "c");
       expect(reorder.currentTarget?.parentKey, null);
 
-      // endDrag awaits _afterNextFrame; we must pump to let that callback fire.
-      final future = reorder.endDrag();
-      await tester.pump();
-      await future;
+      reorder.endDrag();
       await tester.pumpAndSettle();
 
       expect(controller.visibleNodes, ["b", "c", "a"]);
@@ -421,9 +418,7 @@ void main() {
       expect(reorder.currentTarget?.zone, TreeDropZone.into);
       expect(reorder.currentTarget?.parentKey, "b");
 
-      final future = reorder.endDrag();
-      await tester.pump();
-      await future;
+      reorder.endDrag();
       await tester.pumpAndSettle();
 
       // a1 should now be a child of b (not a).

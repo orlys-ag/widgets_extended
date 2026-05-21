@@ -497,6 +497,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _anim.opGroups.groups;
   bool get _hasAnyOpGroup => _anim.opGroups.isNotEmpty;
 
+  /// Reusable snapshot buffer used by [expandAll] and [collapseAll] when
+  /// they iterate [_opGroupEntries] and call `forward()`/`reverse()` inside
+  /// the loop. The status listener registered by the operation-group
+  /// registry calls `removeGroup` on terminal status, which mutates the
+  /// underlying `_groups` map. If a group's controller is already at a
+  /// terminal value (1.0 / 0.0) when `forward()`/`reverse()` is invoked,
+  /// the SDK fires the status callback synchronously, mutating the map
+  /// mid-iteration and throwing `ConcurrentModificationError`. The buffer
+  /// is shared because the two callers run sequentially on the same
+  /// controller instance.
+  final List<MapEntry<TKey, OperationGroup<TKey>>> _opGroupSnapshot =
+      <MapEntry<TKey, OperationGroup<TKey>>>[];
+
   // Private field — already invisible across files.
   final Set<TreeRenderHost> _renderHosts = <TreeRenderHost>{};
 
@@ -1395,8 +1408,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// at most one structural notification when the outermost [runBatch]
   /// exits. Nested [runBatch] calls coalesce into the outermost one.
   ///
-  /// Animation tick notifications ([addAnimationListener]) are not affected
-  /// and continue to fire in real time.
+  /// Per-channel batching contract:
+  ///   - **Structural** ([addStructuralListener] / [notifyListeners]):
+  ///     deferred. Fires once on batch exit with the union of affected
+  ///     keys.
+  ///   - **Node-data** ([addNodeDataListener]): deferred. Fires once per
+  ///     dirty key on batch exit, after structural. A key that was both
+  ///     structurally and data-mutated triggers both notifications.
+  ///   - **Animation tick** ([addAnimationListener]): NOT deferred. These
+  ///     fire on the next animation vsync frame (their natural schedule)
+  ///     and are unaffected by batching either way.
   ///
   /// The notification fires even if [body] throws, so listeners always see
   /// the post-batch state. Exceptions propagate after the notification.
@@ -1588,6 +1609,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
       _adoptKey(node.key);
       _store.setData(node.key, node);
+      // C022: fire the node-data channel so subscribers via
+      // [addNodeDataListener] see the data update. The structural
+      // notification below covers a different channel (full refresh)
+      // that some callers don't subscribe to.
+      _notifyNodeDataChanged(node.key);
       if (preservePendingSubtreeState) {
         _markVisibleOrderDirty();
         // Cancelling a pending deletion restores the node (and possibly
@@ -1617,6 +1643,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
       _store.setData(node.key, node);
+      // C022: fire node-data channel for the data update.
+      _notifyNodeDataChanged(node.key);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != null) {
         // Different parent — delegate to moveNode.
@@ -1693,6 +1721,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return idx == VisibleOrderBuffer.kNotVisible ? _order.length : idx;
   }
 
+  /// Fast-path equality check for [setChildren]. Returns true iff the
+  /// new list exactly matches the existing child list — same keys in
+  /// the same order, same data values, and no pending-deletion children
+  /// (which would otherwise force the slow path's resurrection logic).
+  ///
+  /// Used to short-circuit no-op `setChildren` calls so reactive sync
+  /// code doesn't destroy in-flight animation state on identical input
+  /// (C026).
+  bool _isExactKeyAndDataMatch(
+    List<TKey> oldKeys,
+    List<TreeNode<TKey, TData>> newNodes,
+  ) {
+    if (oldKeys.length != newNodes.length) return false;
+    for (int i = 0; i < oldKeys.length; i++) {
+      final oldKey = oldKeys[i];
+      final newNode = newNodes[i];
+      if (oldKey != newNode.key) return false;
+      // Conservative: any pending-deletion child forces the slow path
+      // so the existing purge-and-resurrect behavior is preserved.
+      if (_isPendingDeletion(oldKey)) return false;
+      final oldData = _dataOf(oldKey)?.data;
+      if (oldData != newNode.data) return false;
+    }
+    return true;
+  }
+
   /// Adds children to a node.
   ///
   /// The children are added but not visible until the parent is expanded.
@@ -1732,8 +1786,24 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
-    // Purge old children and their descendants before overwriting.
+    // C026 fast path: if the new list exactly matches the existing child
+    // list — same keys in order, same data values, no pending-deletion
+    // children — this is a structural no-op. Without this short-circuit,
+    // the purge-and-re-adopt loop below destroys any in-flight animation
+    // state on these children (the purge calls _purgeNodeData which
+    // clears standalone/op-group/bulk membership) for zero visual change.
+    // Reactive sync code that re-sends an identical child list (e.g.
+    // setState-driven rebuild) would visibly reset mid-flight expand
+    // animations without this guard. Pending-deletion children force the
+    // slow path so the existing purge-resurrects-and-overwrites behavior
+    // is preserved unchanged.
     final oldChildren = _childListOf(parentKey);
+    if (oldChildren != null &&
+        _isExactKeyAndDataMatch(oldChildren, children)) {
+      return;
+    }
+
+    // Purge old children and their descendants before overwriting.
     if (oldChildren != null && oldChildren.isNotEmpty) {
       final allOldKeys = <TKey>[];
       for (final oldChildKey in oldChildren) {
@@ -1884,6 +1954,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
       _adoptKey(node.key);
       _store.setData(node.key, node);
+      // C022: same as insertRoot's matching branch — fire node-data
+      // channel so listeners subscribed via [addNodeDataListener] see
+      // the data update.
+      _notifyNodeDataChanged(node.key);
       if (preservePendingSubtreeState) {
         _markVisibleOrderDirty();
         // See insertRoot's matching branch: cancelling a pending deletion
@@ -1910,6 +1984,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
       _store.setData(node.key, node);
+      // C022: fire node-data channel for the data update.
+      _notifyNodeDataChanged(node.key);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != parentKey) {
         // Different parent — delegate to moveNode.
@@ -2237,8 +2313,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     final oldParent = _parentKeyOfKey(key);
     // If already under the target parent and no explicit position was
-    // requested, nothing to do. With an explicit [index], fall through so the
-    // node is repositioned among its existing siblings.
+    // requested, nothing to do. With an explicit [index] that matches the
+    // node's current position under the same parent, also a no-op —
+    // avoid wasted baseline staging + structural notification + slide
+    // composition for a mutation that produces zero visual change (C031).
     //
     // CRITICAL: this no-op return MUST precede the animate staging below.
     // Otherwise an animated no-op call would stage a baseline (via
@@ -2246,7 +2324,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // layout (no _notifyStructural fires for a no-op), leaving the
     // _pendingSlideBaseline stuck and blocking all subsequent stages
     // under first-wins until something else triggers a layout.
-    if (oldParent == newParentKey && index == null) return;
+    if (oldParent == newParentKey) {
+      if (index == null) return;
+      // Compare against the LIVE index (excluding pending-deletion
+      // siblings). getIndexInParent returns -1 only when the key is
+      // unknown or pending-deletion — neither applies here, so the
+      // value is the current live index.
+      if (index == getIndexInParent(key)) return;
+    }
 
     // Capture pre-mutation visibility so we can decide entry vs exit
     // phantom paths after the visible-order rebuild runs.
@@ -2884,9 +2969,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _ensureVisibleOrder();
     // Start animations for newly visible nodes and reverse exiting animations
     if (animate) {
-      // Reverse collapsing operation groups
+      // Reverse collapsing operation groups. Snapshot before iterating: a
+      // group's controller already at upperBound would fire `completed`
+      // synchronously inside `forward()`, removing itself from `_groups`
+      // mid-iteration. See [_opGroupSnapshot] docs.
       bool opGroupReversed = false;
-      for (final entry in _opGroupEntries) {
+      _opGroupSnapshot
+        ..clear()
+        ..addAll(_opGroupEntries);
+      for (final entry in _opGroupSnapshot) {
         final group = entry.value;
         if (group.pendingRemoval.isNotEmpty) {
           group.pendingRemoval.clear();
@@ -2901,6 +2992,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           group.controller.forward();
         }
       }
+      _opGroupSnapshot.clear();
       if (opGroupReversed) _bumpAnimGen();
 
       // Check if there's a collapsing bulk animation we can reverse
@@ -3034,9 +3126,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _collapseAllInRegistry(maxDepth);
     _structureGeneration++;
     if (animate) {
-      // Reverse expanding operation groups
+      // Reverse expanding operation groups. Snapshot before iterating: a
+      // group's controller already at lowerBound would fire `dismissed`
+      // synchronously inside `reverse()`, removing itself from `_groups`
+      // mid-iteration. See [_opGroupSnapshot] docs.
       bool opGroupReversed = false;
-      for (final entry in _opGroupEntries) {
+      _opGroupSnapshot
+        ..clear()
+        ..addAll(_opGroupEntries);
+      for (final entry in _opGroupSnapshot) {
         final group = entry.value;
         if (group.pendingRemoval.isEmpty) {
           // Group is expanding — reverse it
@@ -3054,6 +3152,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           group.controller.reverse();
         }
       }
+      _opGroupSnapshot.clear();
       if (opGroupReversed) _bumpAnimGen();
 
       // Check if there's an expanding bulk animation we can reverse

@@ -13,6 +13,7 @@
 library;
 
 import 'package:flutter/animation.dart' show Curve;
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '_ghost_registry.dart';
 import '_slide_baseline_slot.dart';
@@ -71,6 +72,13 @@ class SlideComposer<TKey, TData> implements GhostBaseResolver<TKey> {
 
   @override
   bool get hasGhosts => ghosts.hasGhosts;
+
+  /// Number of live ghost entries. Forwards to the registry's debug
+  /// accessor for symmetry with the render object's count exposures.
+  @visibleForTesting
+  int get debugGhostEntryCount =>
+      // ignore: invalid_use_of_visible_for_testing_member
+      ghosts.debugEntryCount;
 
   @override
   ({ViewportEdge edge, Duration duration, Curve curve})? entryFor(TKey key) =>
