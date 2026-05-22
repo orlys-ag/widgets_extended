@@ -163,10 +163,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Structural-component store. Owns the nid registry plus every dense
   /// per-nid array describing tree structure. See [NodeStore].
-  late final NodeStore<TKey, TData> _store = NodeStore<TKey, TData>(
-    onCapacityGrew: _onStoreCapacityGrew,
-  )..onParentChanged = (nid, oldParent, newParent) =>
-      _order.handleParentChanged(nid, oldParent, newParent);
+  late final NodeStore<TKey, TData> _store =
+      NodeStore<TKey, TData>(onCapacityGrew: _onStoreCapacityGrew)
+        ..onParentChanged = (nid, oldParent, newParent) =>
+            _order.handleParentChanged(nid, oldParent, newParent);
 
   /// Convenience alias preserved so existing code that referenced `_nids`
   /// directly continues to compile. Forwards to [NodeStore.nids].
@@ -203,8 +203,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (!result.isNew) {
       return nid;
     }
-    _order.clearForNid(nid);   // Plan B: visible-subtree-size + reverse index
-    _anim.clearForNid(nid);    // Plan A: every animation source + shared per-nid state
+    _order.clearForNid(nid); // Plan B: visible-subtree-size + reverse index
+    _anim.clearForNid(
+      nid,
+    ); // Plan A: every animation source + shared per-nid state
     return nid;
   }
 
@@ -232,8 +234,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void _releaseNid(TKey key) {
     final nid = _store.release(key);
     if (nid == null) return;
-    _order.clearForNid(nid);   // Plan B
-    _anim.clearForNid(nid);    // Plan A
+    _order.clearForNid(nid); // Plan B
+    _anim.clearForNid(nid); // Plan A
   }
 
   /// Nullable lookup of the [TreeNode] record for [key].
@@ -470,8 +472,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // Capture / cancel / multi-source remove
   double? _captureAndRemoveFromGroups(TKey key) =>
       _anim.captureAndRemoveFromGroups(key);
-  AnimationState? _removeAnimation(TKey key) =>
-      _anim.removeFromAllSources(key);
+  AnimationState? _removeAnimation(TKey key) => _anim.removeFromAllSources(key);
 
   // Listener channel
   void _notifyAnimationListeners() => _anim.notifyListeners();
@@ -886,8 +887,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// slides so concurrent mutations (e.g. autoscroll commits) don't
   /// restart the ghost's progress clock. Tolerant of unregistered keys
   /// and inactive slides (no-op).
-  void markSlidePreserveProgress(TKey key) =>
-      _slide.markPreserveProgress(key);
+  void markSlidePreserveProgress(TKey key) => _slide.markPreserveProgress(key);
 
   /// Gets the horizontal indent for the given node.
   double getIndent(TKey key) {
@@ -1090,8 +1090,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (!hasActiveAnimations) return _order.length;
     // Cache key combines animation generation with structure generation:
     // the result depends on which keys are animating AND their visible indices.
-    final sig =
-        _anim.animationGeneration ^ (_structureGeneration * 2654435761);
+    final sig = _anim.animationGeneration ^ (_structureGeneration * 2654435761);
     if (sig == _firstAnimatingIndexCacheSig &&
         _firstAnimatingIndexCacheVal <= _order.length) {
       return _firstAnimatingIndexCacheVal;
@@ -1259,8 +1258,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// becomes part of the visible order. Expansion is synchronous (no
   /// animation) so a subsequent [scrollOffsetOf] call sees the updated
   /// structure. Returns the number of ancestors that were expanded.
-  int ensureAncestorsExpanded(TKey key) =>
-      _scroll.ensureAncestorsExpanded(key);
+  int ensureAncestorsExpanded(TKey key) => _scroll.ensureAncestorsExpanded(key);
 
   /// Animates [scrollController] to reveal [key] in its attached viewport.
   ///
@@ -1306,15 +1304,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     double Function(TKey key)? extentEstimator,
     double sliverBaseOffset = 0.0,
   }) => _scroll.animateScrollToKey(
-        key,
-        scrollController: scrollController,
-        duration: duration,
-        curve: curve,
-        alignment: alignment,
-        ancestorExpansion: ancestorExpansion,
-        extentEstimator: extentEstimator,
-        sliverBaseOffset: sliverBaseOffset,
-      );
+    key,
+    scrollController: scrollController,
+    duration: duration,
+    curve: curve,
+    alignment: alignment,
+    ancestorExpansion: ancestorExpansion,
+    extentEstimator: extentEstimator,
+    sliverBaseOffset: sliverBaseOffset,
+  );
 
   // ══════════════════════════════════════════════════════════════════════════
   // ANIMATION LISTENERS — forwarded to AnimationCoordinator (Plan A)
@@ -1574,6 +1572,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     bool preservePendingSubtreeState = false,
   }) {
     if (animationDuration == Duration.zero) animate = false;
+    // See [insert] for the rationale: flush any deferred visible-order
+    // rebuild from a prior in-batch mutator so the positional reads
+    // below (`_calculateRootInsertIndex`, `_order.length`) operate on
+    // fresh state instead of corrupting the buffer.
+    _ensureVisibleOrder();
     // If the node is pending deletion, cancel the deletion
     if (_isPendingDeletion(node.key)) {
       // If the node was pending deletion under a non-null parent, detach
@@ -1798,8 +1801,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // slow path so the existing purge-resurrects-and-overwrites behavior
     // is preserved unchanged.
     final oldChildren = _childListOf(parentKey);
-    if (oldChildren != null &&
-        _isExactKeyAndDataMatch(oldChildren, children)) {
+    if (oldChildren != null && _isExactKeyAndDataMatch(oldChildren, children)) {
       return;
     }
 
@@ -1906,6 +1908,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }) {
     if (animationDuration == Duration.zero) animate = false;
     assert(_hasKey(parentKey), "Parent node $parentKey not found");
+    // Flush any pending visible-order rebuild from a prior in-batch mutator
+    // (moveNode, reorderRoots, reorderChildren, cancelDeletion, …). Without
+    // this, the `_order.indexOf(parentKey)` / `_order.subtreeSizeOf(parentNid)`
+    // reads further down would return stale values and yield an insertIndex
+    // past `_order.length`, crashing `VisibleOrderBuffer.insertNid` with a
+    // RangeError on its setRange shift. Must run BEFORE the mutations below
+    // (`_adoptKey`, `siblings.add`, etc.) so the rebuild sees pre-mutation
+    // child lists and doesn't try to incorporate the new node twice.
+    _ensureVisibleOrder();
     assert(
       !_isPendingDeletion(parentKey),
       "Cannot insert under $parentKey while it is animating out "
@@ -2057,8 +2068,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           // 1 for the parent itself and adding 1 for "position after"
           // yields parentVisibleIndex + subtreeSize directly.
           final parentNid = _nids[parentKey]!;
-          insertIndex =
-              parentVisibleIndex + _order.subtreeSizeOf(parentNid);
+          insertIndex = parentVisibleIndex + _order.subtreeSizeOf(parentNid);
         }
         _order.insertKey(insertIndex, node.key);
         _updateIndicesFrom(insertIndex);
@@ -2273,7 +2283,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     TKey key,
     TKey? newParentKey, {
     int? index,
-    bool animate = false,
+    bool animate = true,
     Duration slideDuration = const Duration(milliseconds: 220),
     Curve slideCurve = Curves.easeOutCubic,
   }) {
@@ -2355,10 +2365,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // calls no-op at the host level. The single staged baseline is
     // consumed by the next layout post-mutation.
     if (animate) {
-      _stageSlideBaselineOnHosts(
-        duration: slideDuration,
-        curve: slideCurve,
-      );
+      _stageSlideBaselineOnHosts(duration: slideDuration, curve: slideCurve);
 
       // Phantom-anchor for collapsed → visible reparenting:
       // If the moved subtree's root is currently NOT in the visible order
@@ -2560,6 +2567,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (isExiting(key)) {
       return;
     }
+    // See [insert] for the rationale: flush any deferred visible-order
+    // rebuild so `_order.indexOf(key)` below reads fresh state.
+    _ensureVisibleOrder();
     // If ancestors are collapsed, just record the expansion state.
     // The node is not visible, so there is nothing to animate or
     // insert into the visible order. When ancestors are later expanded,
@@ -2663,7 +2673,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // OperationGroup internally and wires the tick + status callbacks).
     final nodesToShow = _flattenSubtree(key, includeRoot: false);
     final group = _anim.opGroups.install(key, animationCurve);
-    _bumpAnimGen();   // matches today's `_installOperationGroup` body
+    _bumpAnimGen(); // matches today's `_installOperationGroup` body
 
     // Fast path check: count new vs existing nodes
     int newNodeCount = 0;
@@ -2765,6 +2775,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (!_hasKey(key) || !_isExpandedKey(key)) {
       return;
     }
+    // See [insert] for the rationale: flush any deferred visible-order
+    // rebuild so the descendant / index lookups below operate on fresh
+    // state.
+    _ensureVisibleOrder();
     _setExpandedKey(key, false);
     // Find all visible descendants (includes nodes currently entering)
     final descendants = _getVisibleDescendants(key);
@@ -2847,7 +2861,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       animationCurve,
       initialValue: 1.0,
     );
-    _bumpAnimGen();   // matches today's `_installOperationGroup` body
+    _bumpAnimGen(); // matches today's `_installOperationGroup` body
 
     for (final nodeId in descendants) {
       if (_isPendingDeletion(nodeId)) continue;
@@ -3023,7 +3037,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Create fresh group via the BulkAnimator (auto-disposes any
         // prior). All listener wiring happens inside createGroup.
         _anim.bulk.createGroup(animationDuration, animationCurve);
-        _bumpBulkGen();   // matches today's `_createBulkAnimationGroup` body
+        _bumpBulkGen(); // matches today's `_createBulkAnimationGroup` body
 
         // Reverse standalone exit animations smoothly
         for (final key in nodesToReverseExit) {
@@ -3362,7 +3376,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // _store reference past dispose. No-op if the wiring never fired.
     _store.onParentChanged = null;
     _clear();
-    _anim.dispose();   // Plan A: disposes sub-coordinators + slide engine
+    _anim.dispose(); // Plan A: disposes sub-coordinators + slide engine
     _nodeDataListeners.clear();
     _structuralListeners.clear();
     _renderHosts.clear();

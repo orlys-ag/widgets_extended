@@ -395,10 +395,26 @@ class SectionedListController<K extends Object, Section, Item>
   ///     its current section to [index].
   ///   • both null → no-op.
   ///
-  /// No `animate` parameter: the underlying [TreeController.moveNode] /
-  /// [TreeController.reorderChildren] are repositioning ops, not
-  /// insert/remove; nothing animates.
-  void moveItem(K itemKey, {K? toSection, int? index}) {
+  /// When [animate] is true (the default), a cross-section reparent runs
+  /// a paint-only FLIP slide on the moved row from its old painted
+  /// position to its new one, using [slideDuration] / [slideCurve].
+  /// Both default to the controller's [animationDuration] /
+  /// [animationCurve] so the slide stays in sync with the inserts /
+  /// removes / expands / collapses that may compose with it inside the
+  /// same [runBatch].
+  ///
+  /// In-section reorders are pure repositioning ops that never animate
+  /// regardless of [animate] — neighbouring rows shift in place, the
+  /// underlying [TreeController.reorderChildren] does not produce
+  /// per-row enter/exit animations.
+  void moveItem(
+    K itemKey, {
+    K? toSection,
+    int? index,
+    bool animate = true,
+    Duration? slideDuration,
+    Curve? slideCurve,
+  }) {
     _checkNotDisposed();
     _requireItem(itemKey, "moveItem");
     if (toSection != null) {
@@ -407,6 +423,9 @@ class SectionedListController<K extends Object, Section, Item>
         ItemKey<K>(itemKey),
         SectionKey<K>(toSection),
         index: index,
+        animate: animate,
+        slideDuration: slideDuration ?? _tree.animationDuration,
+        slideCurve: slideCurve ?? _tree.animationCurve,
       );
       return;
     }
