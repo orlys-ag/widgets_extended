@@ -1,3 +1,7 @@
+## 0.0.21
+
+- Minor bug fixes.
+
 ## 0.0.20
 
 - Minor clean-ups.

@@ -1650,8 +1650,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _notifyNodeDataChanged(node.key);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != null) {
-        // Different parent — delegate to moveNode.
-        moveNode(node.key, null, index: index);
+        // Different parent — delegate to moveNode. Forward the caller's
+        // `animate` so insertRoot(animate: false) doesn't silently slide
+        // (now that moveNode itself defaults to animate: true).
+        moveNode(node.key, null, index: index, animate: animate);
         return;
       }
       final currentRootIndex = _roots.indexOf(node.key);
@@ -1999,8 +2001,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _notifyNodeDataChanged(node.key);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != parentKey) {
-        // Different parent — delegate to moveNode.
-        moveNode(node.key, parentKey, index: index);
+        // Different parent — delegate to moveNode. Forward the caller's
+        // `animate` so insert(animate: false) doesn't silently slide
+        // (now that moveNode itself defaults to animate: true).
+        moveNode(node.key, parentKey, index: index, animate: animate);
         return;
       }
       final siblings = _childListOrCreate(parentKey);

@@ -207,11 +207,45 @@ extension _TreeControllerAnimationOps<TKey, TData>
           }
         }
       } else if (!defer) {
-        // External-source cleanup: removes from standalone, external op
-        // group (detaching the member), and bulk. Op group disposal, if
-        // the external group becomes empty, is handled inside
-        // _removeAnimation via _disposeOperationGroupIfEmpty.
-        _removeAnimation(nodeId);
+        // External-source cleanup. Detach from external op-groups and
+        // bulk because those timelines are anchored to a structurally
+        // distinct operation (the moved subtree must not stay coupled
+        // to a timing it no longer participates in). Standalone enter
+        // state, however, is per-row: it drives extent inside the row's
+        // own visible-order slot, has no positional anchor, and would
+        // simply continue growing the row at its new slot if preserved.
+        // Killing it on the animated path makes a mid-enter row "snap"
+        // to full extent at its destination — visible as the row
+        // appearing without any growth animation. Mirrors the
+        // pending-deletion `defer` path: preserve type-entering state,
+        // clear external sources.
+        final activeStandalone =
+            !cancelSlides ? _standaloneAt(nodeId) : null;
+        final preserveEntering = activeStandalone != null &&
+            activeStandalone.type == AnimationType.entering;
+        if (preserveEntering) {
+          final opGroupKey = _operationGroupOf(nodeId);
+          if (opGroupKey != null) {
+            final group = _opGroupAt(opGroupKey);
+            if (group != null) {
+              group.members.remove(nodeId);
+              group.pendingRemoval.remove(nodeId);
+              _disposeOperationGroupIfEmpty(opGroupKey, group);
+            }
+            _clearOperationGroup(nodeId);
+            _bumpAnimGen();
+          }
+          final bulk = _activeBulkGroup;
+          if (bulk != null) {
+            final removedMember = _removeBulkMember(nodeId);
+            final removedPending = _removeBulkPending(nodeId);
+            if (removedMember || removedPending) {
+              _bumpBulkGen();
+            }
+          }
+        } else {
+          _removeAnimation(nodeId);
+        }
       }
 
       final children = _childListOf(nodeId);

@@ -79,7 +79,7 @@ void main() {
       expect(controller.getSlideDelta("a"), 0.0);
     });
 
-    testWidgets("animate: false (default) installs no slide", (tester) async {
+    testWidgets("explicit animate: false installs no slide", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
         animationDuration: const Duration(milliseconds: 200),
@@ -94,12 +94,36 @@ void main() {
       await tester.pumpWidget(_buildHarness(controller));
       await tester.pumpAndSettle();
 
-      controller.moveNode("a", null, index: 1);
+      controller.moveNode("a", null, index: 1, animate: false);
       await tester.pump();
 
       expect(controller.hasActiveSlides, false,
           reason: "animate: false must not stage a baseline");
       expect(controller.getSlideDelta("a"), 0.0);
+    });
+
+    testWidgets("default (no animate arg) installs a slide", (tester) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: const Duration(milliseconds: 200),
+        animationCurve: Curves.linear,
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([
+        const TreeNode(key: "a", data: "A"),
+        const TreeNode(key: "b", data: "B"),
+      ]);
+      await tester.pumpWidget(_buildHarness(controller));
+      await tester.pumpAndSettle();
+
+      // No explicit `animate` — defaults to true, must install a slide.
+      controller.moveNode("a", null, index: 1);
+      await tester.pump();
+
+      expect(controller.hasActiveSlides, true,
+          reason: "default animate: true must stage a baseline");
+      await tester.pumpAndSettle();
     });
   });
 
