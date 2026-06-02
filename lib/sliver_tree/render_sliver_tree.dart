@@ -683,6 +683,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // the ghost render box past visible-order purge, and paint the ghost
     // in a separate pass clipped so it visually disappears into the
     // anchor's row.
+    // Bug 1 fix: resolve the exit-anchor slide DESTINATION against the
+    // SETTLED snapshot (full-extent prefix-sum) rather than the
+    // current/animated snapshot. When the source section empties to an
+    // *entering* placeholder (extent 0 → full), the current-extent prefix-sum
+    // under-counts the anchor's y and the exit slide degenerates to ~0; the
+    // settled snapshot gives the anchor's post-settle y so the row slides the
+    // full FLIP distance. Computed once and shared by the controller-staged
+    // exit-phantom block below and the render-side vanish fallback. Only the
+    // on-screen-anchor branches consult it; off-screen branches still slide
+    // toward the live viewport edge (settled vs current extent does not change
+    // which viewport edge an off-screen anchor maps to).
+    final settled = snapshotSettledVisibleOffsets();
     final exitRels = controller.takePendingExitPhantomAnchors();
     if (exitRels != null && exitRels.isNotEmpty) {
       for (final entry in exitRels.entries) {
@@ -714,11 +726,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
             ? controller.getSlideDeltaXNid(ghostNid)
             : 0.0;
         if (anchorOnScreen) {
-          // Inject destination = anchor's painted position (anchorCurrent
-          // includes anchor's slide) + ghost row's own slideDelta. Slide
-          // engine composes correctly across paint-base changes.
+          // Inject destination = anchor's SETTLED painted position + ghost
+          // row's own slideDelta. The settled y is where the anchor lands
+          // once in-flight extent animations (e.g. an entering placeholder
+          // above it) complete — the correct FLIP "after". Fall back to the
+          // current/animated y if the anchor is somehow absent from the
+          // settled walk (defensive; should not happen for a visible anchor).
+          // Indent (x) is already settled in `anchorCurrent`, so keep it.
+          final settledAnchorY = settled[anchorKey]?.y ?? anchorCurrent.y;
           current[key] = (
-            y: anchorCurrent.y + ghostSlideY,
+            y: settledAnchorY + ghostSlideY,
             x: anchorCurrent.x + ghostSlideX,
           );
           (_phantomExitGhosts ??= <TKey, TKey>{})[key] = anchorKey;
@@ -785,8 +802,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           ? controller.getSlideDeltaXNid(ghostNid)
           : 0.0;
       if (anchorOnScreen) {
+        // Bug 1 fix (render-side fallback half): same settled-destination
+        // substitution as the controller-staged exit-phantom block above —
+        // slide toward the anchor's settled y, not its current/animated y.
+        final settledCursorY = settled[cursor]?.y ?? anchorCurrent.y;
         current[key] = (
-          y: anchorCurrent.y + ghostSlideY,
+          y: settledCursorY + ghostSlideY,
           x: anchorCurrent.x + ghostSlideX,
         );
         (_phantomExitGhosts ??= <TKey, TKey>{})[key] = cursor;
@@ -1128,6 +1149,48 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           x: anchorPos.x + ghostSlideX,
         );
       }
+    }
+    return result;
+  }
+
+  /// Internal contract — exit-anchor destination resolution only.
+  ///
+  /// Returns the **settled** ("FLIP after") y/x for every currently visible
+  /// row: the prefix-sum of each row's FULL extent
+  /// ([TreeController.getEstimatedExtentNid]) rather than its current/animated
+  /// extent ([TreeController.getCurrentExtentNid]). Unlike
+  /// [snapshotVisibleOffsets] this is NOT a painted position — it deliberately
+  /// OMITS slide deltas and edge-ghost overrides, because its only consumer is
+  /// the exit-phantom destination injection in [_consumeSlideBaselineIfAny],
+  /// which needs the position the anchor *will* land at once all in-flight
+  /// extent animations settle.
+  ///
+  /// Why full extents: when a sibling row above the anchor is mid-enter (e.g.
+  /// an empty-state placeholder growing extent `0 → full`), the current-extent
+  /// prefix-sum under-counts the anchor's destination, collapsing the exit
+  /// slide distance to `~0`. The settled prefix-sum is stable against that
+  /// transient and yields the correct FLIP "after" target.
+  ///
+  /// Walks [TreeController.visibleNodes] / [TreeController.orderNidsView] in
+  /// the same index-aligned order as [snapshotVisibleOffsets] (including
+  /// pending-deletion rows, which contribute their full extent), so the two
+  /// snapshots stay key-consistent. Does NOT augment with exit-ghost rows —
+  /// the anchor we read is always a visible row by construction of the
+  /// exit-phantom path. Pure read; writes nothing. O(N_visible).
+  Map<TKey, ({double y, double x})> snapshotSettledVisibleOffsets() {
+    assert(
+      geometry != null,
+      "snapshotSettledVisibleOffsets called before first layout",
+    );
+    final result = <TKey, ({double y, double x})>{};
+    double structural = 0.0;
+    final visible = controller.visibleNodes;
+    final orderNids = controller.orderNidsView;
+    for (int i = 0; i < visible.length; i++) {
+      final nid = orderNids[i];
+      final key = visible[i];
+      result[key] = (y: structural, x: controller.getIndent(key));
+      structural += controller.getEstimatedExtentNid(nid);
     }
     return result;
   }

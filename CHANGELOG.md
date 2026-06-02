@@ -1,3 +1,7 @@
+## 0.0.22
+
+- Fix re-parent into collapsed section.
+
 ## 0.0.21
 
 - Minor bug fixes.

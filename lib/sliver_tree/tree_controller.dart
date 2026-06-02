@@ -607,6 +607,41 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return any;
   }
 
+  /// Whether [key] currently has a live (non-zero) FLIP slide delta — which,
+  /// per the exit-phantom Bug-1 fix, is also true for any in-flight exit-ghost
+  /// (its delta is non-zero for the whole settled traversal). Used to gate the
+  /// Bug-2 base-change staging so idle expand/collapse stays free of staging
+  /// overhead. No need to peek the render layer's `_phantomExitGhosts`: a live
+  /// exit-ghost always carries a non-zero slide delta here.
+  bool _hasLiveSlideOrExitGhost(TKey key) => getSlideDelta(key) != 0.0;
+
+  /// Bug 2: stage a slide baseline (first-wins) when a row whose structural
+  /// base is about to change currently has a live slide/ghost. Called from
+  /// [expand]/[collapse] BEFORE the structural mutation so the captured
+  /// painted positions are the FLIP "before". The next [performLayout] consume
+  /// composes `newDelta = currentPaintedPosition − newStructuralOffset` through
+  /// the engine's existing composition path, preserving painted position
+  /// across the base change (no teleport, no extra layout pass).
+  ///
+  /// The live-slide gate is load-bearing: staging unconditionally would
+  /// install a FLIP slide for every descendant on every expand/collapse and
+  /// double-animate against the op-group extent envelope. Only rows already
+  /// mid-slide get rebased.
+  void _stageSlideBaselineForBaseChange(Iterable<TKey> rows) {
+    var anyLive = false;
+    for (final row in rows) {
+      if (_hasLiveSlideOrExitGhost(row)) {
+        anyLive = true;
+        break;
+      }
+    }
+    if (!anyLive) return;
+    _stageSlideBaselineOnHosts(
+      duration: animationDuration,
+      curve: animationCurve,
+    );
+  }
+
   // Animation tick listeners moved to AnimationCoordinator (Plan A).
   // Forwarders for addAnimationListener / removeAnimationListener are
   // in the ANIMATION LISTENERS section below.
@@ -2574,6 +2609,23 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // See [insert] for the rationale: flush any deferred visible-order
     // rebuild so `_order.indexOf(key)` below reads fresh state.
     _ensureVisibleOrder();
+    // Bug 2: if any descendant about to (re)enter visible order currently has
+    // a live exit-slide/ghost, stage a slide baseline FIRST (first-wins),
+    // capturing each row's pre-expand painted position. Must precede
+    // `_setExpandedKey`/op-group install so the baseline is the FLIP "before";
+    // the downstream `_notifyStructural` consume composes the rebase against
+    // the row's NEW structural offset, preserving painted position across the
+    // base change. The live-slide gate inside the helper makes idle expands a
+    // no-op.
+    //
+    // Use the FULL structural descendant set ([getDescendants]) rather than an
+    // expansion-gated flatten: at this point [key] is still collapsed
+    // (`_setExpandedKey(key, true)` runs below), so an expansion-gated walk of
+    // [key] would return empty and miss the very exit-ghost row whose base is
+    // about to change. [getDescendants] walks the structural subtree
+    // regardless of expansion state, so the moved exit-ghost (a structural
+    // child of [key]) is included.
+    _stageSlideBaselineForBaseChange(getDescendants(key));
     // If ancestors are collapsed, just record the expansion state.
     // The node is not visible, so there is nothing to animate or
     // insert into the visible order. When ancestors are later expanded,
@@ -2783,6 +2835,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // rebuild so the descendant / index lookups below operate on fresh
     // state.
     _ensureVisibleOrder();
+    // Bug 2 (symmetric): if any visible descendant about to LEAVE visible
+    // order currently has a live entry-slide/ghost, stage a slide baseline
+    // FIRST (first-wins), capturing pre-collapse painted positions. Computed
+    // from the still-current visible order BEFORE `_setExpandedKey` flips the
+    // node, so the descendants are still visible here. Mirrors the expand
+    // path; the live-slide gate keeps idle collapses a no-op.
+    _stageSlideBaselineForBaseChange(_getVisibleDescendants(key));
     _setExpandedKey(key, false);
     // Find all visible descendants (includes nodes currently entering)
     final descendants = _getVisibleDescendants(key);
