@@ -1,10 +1,14 @@
+## 0.0.24
+
+- Fix reparenting between a non-collapsed and a collapsed node.
+
 ## 0.0.23
 
 - Fix occlusion / z-order of a tall card reparented into a collapsed section.
 
 ## 0.0.22
 
-- Fix re-parent into collapsed section.
+- Fix reparenting into collapsed section.
 
 ## 0.0.21
 
