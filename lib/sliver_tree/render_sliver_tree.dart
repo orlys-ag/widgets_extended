@@ -88,6 +88,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // otherwise feed garbage entries to the new controller's layout.
     _phantomExitGhosts = null;
     _phantomExitSlidUp = null;
+    _phantomExitEdge = null;
     _phantomClipAnchors = null;
     _composer.rebindController(value);
     _sticky.controller = value;
@@ -493,6 +494,28 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// full-reset paths so it never outlives its ghost.
   Map<TKey, bool>? _phantomExitSlidUp;
 
+  /// Persisted [ViewportEdge] per EXIT phantom ghost whose destination
+  /// anchor was OFF-SCREEN at consume (beyond the render cache, so its
+  /// header RenderBox is unmounted). The ghost slides toward this viewport
+  /// edge and disappears off-screen — there is no on-screen band to clip
+  /// against, so these ghosts register NO [_phantomClipAnchors] entry.
+  ///
+  /// Written ONCE at consume (single-writer, alongside [_phantomExitGhosts])
+  /// in the two OFF-SCREEN consume branches only, and read at paint by the
+  /// Pass A.5 EDGE-FALLBACK branch (fired when `getChildForNode(anchorKey)
+  /// == null`), which paints the ghost at `baseForEdge(edge) - scrollOffset
+  /// + ghostSlide` using the ghost's own retained RenderBox — the same model
+  /// as Pass A.6 (live-edge-anchored slide-OUTs). The ENUM (not an absolute
+  /// edgeY) is persisted so the paint site recomputes the live edge under
+  /// concurrent scroll, agreeing with the consume destination at the same
+  /// scroll (I-AGREE / no t=0 jump). A ghost key is in EXACTLY ONE of
+  /// [_phantomExitEdge] (off-screen, edge-painted, unclipped) or
+  /// [_phantomClipAnchors] (on-screen, anchor-painted, clipped) — I-MUTEX.
+  /// Reaped with the ghost in [_pruneSettledPhantomExitGhosts] and on the
+  /// empty-when-lazy-pruned and full-reset paths so it never outlives its
+  /// ghost.
+  Map<TKey, ViewportEdge>? _phantomExitEdge;
+
   /// Debug-only, paint-time-only capture of each EXIT phantom ghost's
   /// painted geometry, for the Defect-1 (far-overhang occlusion) test
   /// oracle. Records, per ghost key:
@@ -841,6 +864,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
             x: anchorCurrent.x + ghostSlideX,
           );
           (_phantomExitGhosts ??= <TKey, TKey>{})[key] = anchorKey;
+          // Persist the consume-time edge (single-writer) so the Pass A.5
+          // EDGE-FALLBACK can paint the ghost at the LIVE edge when the
+          // off-screen anchor is unmounted. No clip anchor here — the ghost
+          // has no on-screen band (I-MUTEX).
+          (_phantomExitEdge ??= <TKey, ViewportEdge>{})[key] = edge;
         }
       }
     }
@@ -924,6 +952,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           x: anchorCurrent.x + ghostSlideX,
         );
         (_phantomExitGhosts ??= <TKey, TKey>{})[key] = cursor;
+        // Persist the consume-time edge (single-writer) for the Pass A.5
+        // EDGE-FALLBACK — same rationale as the controller-staged branch.
+        (_phantomExitEdge ??= <TKey, ViewportEdge>{})[key] = edge;
       }
     }
 
@@ -937,12 +968,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     if (ghostMap != null) {
       ghostMap.removeWhere((key, _) {
         final reVisible = controller.isVisible(key);
-        if (reVisible) _phantomExitSlidUp?.remove(key);
+        if (reVisible) {
+          _phantomExitSlidUp?.remove(key);
+          _phantomExitEdge?.remove(key);
+        }
         return reVisible;
       });
       if (ghostMap.isEmpty) {
         _phantomExitGhosts = null;
         _phantomExitSlidUp = null;
+        _phantomExitEdge = null;
       }
     }
 
@@ -2572,34 +2607,83 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         final ghostSlide = controller.getSlideDeltaNid(ghostNid);
         final ghostSlideX =
             hasXSlides ? controller.getSlideDeltaXNid(ghostNid) : 0.0;
-        if (ghostSlide == 0.0 && ghostSlideX == 0.0) {
+        // An ADJACENT exit-ghost has ZERO own-slide (its baseline already
+        // equals the settled destination-header position) yet is NOT done:
+        // it must keep painting (stationary, getting progressively occluded)
+        // while its anchor — the destination header — slides UP to absorb it.
+        // So "settled" requires BOTH the ghost AND its anchor to be at rest.
+        // (Edge ghosts: their off-screen anchor carries slide 0, so this is
+        // byte-equivalent to the old ghost-only test for them.)
+        final anchorNidForGate = controller.nidOf(anchorKey);
+        final anchorSlideForGate = anchorNidForGate >= 0
+            ? controller.getSlideDeltaNid(anchorNidForGate)
+            : 0.0;
+        if (ghostSlide == 0.0 &&
+            ghostSlideX == 0.0 &&
+            anchorSlideForGate == 0.0) {
           // Settled — Step 0a reaps on next layout.
           continue;
         }
         final ghostChild = getChildForNode(ghostKey);
         if (ghostChild == null) continue;
         final anchorChild = getChildForNode(anchorKey);
-        if (anchorChild == null) continue;
+        if (anchorChild == null) {
+          // Anchor unmounted (off-screen, beyond cache). If this ghost was
+          // staged as an EDGE exit (off-screen-anchor consume branch),
+          // paint it at the LIVE viewport edge using the GHOST's own
+          // retained RenderBox — the same model as Pass A.6 — so it slides
+          // off-screen instead of vanishing (the snap). No clip: there is
+          // no on-screen band to clip to (I-MUTEX: edge ghosts register no
+          // _phantomClipAnchors entry).
+          final edge = _phantomExitEdge?[ghostKey];
+          if (edge == null) continue; // truly orphaned anchor: skip as before
+          final viewport = _currentViewportSnapshot();
+          final paintedY =
+              viewport.baseForEdge(edge) - scrollOffset + ghostSlide;
+          final paintedX = controller.getIndent(ghostKey) + ghostSlideX;
+          // Skip if entirely outside the paint region.
+          if (paintedY >= remainingPaintExtent) continue;
+          if (paintedY + ghostChild.size.height <= 0) continue;
+          context.paintChild(ghostChild, offset + Offset(paintedX, paintedY));
+          continue; // edge ghost painted; skip the anchor-relative tail
+        }
         final anchorParentData = anchorChild.parentData;
         if (anchorParentData is! SliverTreeParentData) continue;
         final anchorNid = controller.nidOf(anchorKey);
         final anchorSlideX = (hasXSlides && anchorNid >= 0)
             ? controller.getSlideDeltaXNid(anchorNid)
             : 0.0;
-        // Ghost's painted position = anchor's PAINTED band top + ghost's
-        // own slide delta. The painted band is read at paint time (sticky
-        // `pinnedY` when pinned — fresh because computeStickyHeaders
-        // already ran this frame — else structural), so the ghost
-        // converges on the header WHERE IT APPEARS on screen (Defect 1+2,
-        // Invariant 5). Falls back to the structural value when the band
-        // can't be resolved.
+        // Ghost's painted position converges on the anchor's SETTLED top:
+        // sticky `pinnedY` when pinned (fresh — computeStickyHeaders already
+        // ran this frame), else the structural `layoutOffset` WITHOUT the
+        // anchor's own slide delta.
+        //
+        // Using the SETTLED top (not the live, sliding band) is load-bearing.
+        // The destination header itself FLIP-slides when the SOURCE section
+        // shrinks — e.g. unfavoriting compacts the favorites list, so the
+        // "My Workspaces" header slides UP into the vacated row. Reading the
+        // live band here (`_anchorPaintedBounds`, which adds that anchorSlide)
+        // DOUBLE-COUNTS the destination's motion: the ghost would converge on
+        // the live band and jump by the anchor's slide at t=0. That error is
+        // masked for a FAR ghost (large own-slide swamps it) but FATAL for an
+        // ADJACENT ghost whose own FLIP delta is zero — its baseline already
+        // equals the settled header position, so it would pin to the live band
+        // top and the EXIT down-clip (`visible = [0, bandTop]`) would clip it
+        // to nothing every frame → the "vanishes in place" bug.
+        //
+        // The EXIT clip below STILL reads the LIVE band so the rising header
+        // occludes the (now stationary) ghost correctly as it absorbs it.
+        // Defect 1+2 / Invariant 5 are preserved: the pinned branch is
+        // byte-identical to `_anchorPaintedBounds`'s pinned branch.
+        // LIVE band (with the anchor's own slide) — drives the EXIT clip and
+        // the Defect-1 debug-capture oracle, so occlusion tracks the header's
+        // on-screen position. NOT used for the ghost's convergence top.
         final anchorBand = _anchorPaintedBounds(anchorKey);
-        final anchorPaintedTop = anchorBand?.top ??
-            (anchorParentData.layoutOffset -
-                scrollOffset +
-                (anchorNid >= 0
-                    ? controller.getSlideDeltaNid(anchorNid)
-                    : 0.0));
+        final anchorPinnedInfo =
+            anchorNid >= 0 ? _sticky.infoForNid(anchorNid) : null;
+        final double anchorPaintedTop = anchorPinnedInfo != null
+            ? anchorPinnedInfo.pinnedY
+            : anchorParentData.layoutOffset - scrollOffset;
         // Subtract the SAME direction-aware tuck the consume destination
         // applied (I-AGREE / the TRAP). The persisted `_phantomExitSlidUp`
         // flag reproduces the consume-time direction here (paint has no
@@ -2891,14 +2975,26 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         ghosts.remove(ghostKey);
         _phantomClipAnchors?.remove(ghostKey);
         _phantomExitSlidUp?.remove(ghostKey);
+        _phantomExitEdge?.remove(ghostKey);
         continue;
       }
       final dy = controller.getSlideDeltaNid(nid);
       final dx = controller.getSlideDeltaXNid(nid);
-      if (dy == 0.0 && dx == 0.0) {
+      // Keep an ADJACENT (zero own-slide) exit-ghost alive while its anchor —
+      // the destination header — is still sliding up to absorb it. Reaping on
+      // the ghost's own delta alone would drop it on the first layout (its
+      // delta is 0 from the start) → the vanish. "Settled" = ghost AND anchor
+      // both at rest. Edge ghosts: off-screen anchor slide is 0, so this is
+      // byte-equivalent to the old ghost-only test for them.
+      final anchorKey = ghosts[ghostKey];
+      final anchorNid = anchorKey != null ? controller.nidOf(anchorKey) : -1;
+      final anchorDy =
+          anchorNid >= 0 ? controller.getSlideDeltaNid(anchorNid) : 0.0;
+      if (dy == 0.0 && dx == 0.0 && anchorDy == 0.0) {
         ghosts.remove(ghostKey);
         _phantomClipAnchors?.remove(ghostKey);
         _phantomExitSlidUp?.remove(ghostKey);
+        _phantomExitEdge?.remove(ghostKey);
       }
     }
     if (ghosts.isEmpty) {
@@ -2909,6 +3005,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
     if (_phantomExitSlidUp != null && _phantomExitSlidUp!.isEmpty) {
       _phantomExitSlidUp = null;
+    }
+    if (_phantomExitEdge != null && _phantomExitEdge!.isEmpty) {
+      _phantomExitEdge = null;
     }
   }
 
