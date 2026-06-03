@@ -21,6 +21,24 @@ import 'types.dart';
 // `GhostRegistry`) — see `_slide_composer.dart`. The render object
 // here is purely the orchestrator.
 
+/// Role of a phantom-anchored sliding row, selecting how
+/// [RenderSliverTree._resolvePhantomAnchorBounds] computes its clip.
+///
+/// The clip helper is a chokepoint with two callers whose intent is
+/// OPPOSITE, so the rule must branch on the role:
+///
+/// - [entry]: a previously-hidden node reparented INTO view that must
+///   EMERGE past its anchor. The legacy half-plane clip applies (the
+///   anchor occludes the START of the trajectory; as the row slides
+///   away the half-plane reveals progressively more of it). There is NO
+///   header repaint over this row, so the band/far-overhang rule MUST
+///   NOT reach it.
+/// - [exit]: a row purged from `visibleNodes` sliding INTO a collapsed
+///   header to DISAPPEAR. The destination band is repainted on top by
+///   Pass A.7 / Pass B, so the clip bounds the FAR overhang of a tall
+///   card past the destination header's PAINTED band.
+enum PhantomClipRole { entry, exit }
+
 /// Render object for displaying a tree structure as a sliver.
 ///
 /// Uses nodeId-based child storage for straightforward element management.
@@ -69,6 +87,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // String-key reuse across controllers (a common app pattern) would
     // otherwise feed garbage entries to the new controller's layout.
     _phantomExitGhosts = null;
+    _phantomExitSlidUp = null;
     _phantomClipAnchors = null;
     _composer.rebindController(value);
     _sticky.controller = value;
@@ -458,6 +477,45 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// ghost's slide has settled (currentDelta == 0 AND currentDeltaX == 0).
   Map<TKey, TKey>? _phantomExitGhosts;
 
+  /// Direction flag per EXIT phantom ghost: `true` when the ghost slides
+  /// UPWARD (toward a SMALLER y / from below) into its destination header
+  /// — i.e. the body-side approach where a card TALLER than its collapsed
+  /// destination header needs an extra "tuck" so its BOTTOM reaches the
+  /// header band BOTTOM and no residual sliver pops on the last sliding
+  /// frame. `false` for the DOWNWARD approach (no tuck).
+  ///
+  /// Written ONCE at consume (single-writer, alongside [_phantomExitGhosts])
+  /// from `slidUp = settledAnchorY < baseline.y`, and read at paint by BOTH
+  /// the Pass A.5 ghost anchor and the EXIT clip so the paint pass (which
+  /// has no baseline) reproduces the consume-time direction decision
+  /// exactly (I-DIR / I-AGREE). Reaped with the ghost in
+  /// [_pruneSettledPhantomExitGhosts] and on the empty-when-lazy-pruned and
+  /// full-reset paths so it never outlives its ghost.
+  Map<TKey, bool>? _phantomExitSlidUp;
+
+  /// Debug-only, paint-time-only capture of each EXIT phantom ghost's
+  /// painted geometry, for the Defect-1 (far-overhang occlusion) test
+  /// oracle. Records, per ghost key:
+  ///  - `ghostRect`: the ghost's painted rect (sliver-local, NOT offset
+  ///    by the paint `offset`, so a test can compare it directly against
+  ///    `anchorBand`).
+  ///  - `clipRect`: the EXIT clip rect the render pushed this frame
+  ///    (sliver-local), or null when no clip was applied.
+  ///  - `anchorBand`: the destination header's PAINTED band this frame.
+  ///
+  /// LIFETIME CONTRACT (Invariant 8): cleared at the top of every
+  /// `paint()` and written ONLY for a ghost that is ACTIVELY SLIDING this
+  /// frame (Pass A.5 `continue`s a settled ghost before the write). It is
+  /// therefore EMPTY on any frame with no sliding ghost — including the
+  /// settle frame, after `_pruneSettledPhantomExitGhosts` reaps the
+  /// ghost. A test MUST `containsKey`-guard every read and MUST NOT
+  /// non-null-deref a key on the settle frame (it would throw). Never
+  /// read by production code; cannot perturb layout, distance, or
+  /// hit-testing.
+  @visibleForTesting
+  final Map<TKey, ({Rect ghostRect, Rect? clipRect, Rect anchorBand})>
+      debugLastPhantomGhostPaint = {};
+
   // Edge-ghost storage and lifecycle now live in `_composer.ghosts`
   // (`GhostRegistry`). Render-side reads go through `_composer.baseFor`
   // or `_composer.ghosts.entryFor` / `_composer.hasGhosts`; writes go
@@ -733,12 +791,41 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           // current/animated y if the anchor is somehow absent from the
           // settled walk (defensive; should not happen for a visible anchor).
           // Indent (x) is already settled in `anchorCurrent`, so keep it.
+          //
+          // STRUCTURAL-ONLY (load-bearing): this consume-time destination
+          // MUST NOT read `_sticky.infoForNid` / `pinnedY`. The sticky set
+          // is recomputed by `computeStickyHeaders` ~300 lines later in
+          // `paint()`, so `_sticky` is STALE (prior frame's value, or null
+          // on the FIRST reparent frame — exactly when the destination set
+          // just changed). Injecting a pinned y here would either corrupt
+          // the slide DISTANCE (Goal 5 / Case A/B `-48`) or read garbage.
+          // The sticky-pinned convergence is applied at PAINT time via
+          // `_anchorPaintedBounds` (Pass A.5 ghost paint + EXIT clip +
+          // Pass A.7), never here. See Data Flow step 3 / Invariant 2.
           final settledAnchorY = settled[anchorKey]?.y ?? anchorCurrent.y;
+          // Direction-aware tuck (I-DIR / I-AGREE / the TRAP). The card
+          // slides toward a SMALLER y (from below) ⇒ UPWARD / body-side
+          // approach ⇒ a card TALLER than the collapsed destination header
+          // gets an extra `tuck` so its BOTTOM reaches the band BOTTOM (no
+          // last-frame pop). `baseline[key]` is non-null here: the loop
+          // `continue`s above if `!baseline.containsKey(key)`. The same
+          // `_exitTuckFor` magnitude is subtracted at the Pass A.5 paint
+          // anchor so the two convergence sites cannot diverge (no t=0
+          // jump). DOWNWARD / equal-height ⇒ tuck 0 ⇒ distance unchanged.
+          final slidUp = settledAnchorY < baseline[key]!.y;
+          final tuck = _exitTuckFor(
+            ghostNid: ghostNid,
+            anchorKey: anchorKey,
+            slidUp: slidUp,
+          );
           current[key] = (
-            y: settledAnchorY + ghostSlideY,
+            y: settledAnchorY - tuck + ghostSlideY,
             x: anchorCurrent.x + ghostSlideX,
           );
           (_phantomExitGhosts ??= <TKey, TKey>{})[key] = anchorKey;
+          // Persist the direction decision (single-writer) so the paint
+          // pass — which has no baseline — reproduces it exactly.
+          (_phantomExitSlidUp ??= <TKey, bool>{})[key] = slidUp;
           // Ghost also needs the direction-aware clip so the anchor
           // occludes it as it slides in.
           (_phantomClipAnchors ??= <TKey, TKey>{})[key] = anchorKey;
@@ -805,12 +892,29 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // Bug 1 fix (render-side fallback half): same settled-destination
         // substitution as the controller-staged exit-phantom block above —
         // slide toward the anchor's settled y, not its current/animated y.
+        //
+        // STRUCTURAL-ONLY (same contract as the controller-staged branch
+        // above): do NOT read `_sticky` here — it is stale at consume time
+        // (before `computeStickyHeaders`). Sticky-pinned convergence is a
+        // PAINT-time re-base via `_anchorPaintedBounds`.
         final settledCursorY = settled[cursor]?.y ?? anchorCurrent.y;
+        // Direction-aware tuck — same shared helper / same I-AGREE
+        // discipline as the controller-staged branch above, here using
+        // `cursor` (the deepest visible new ancestor) as the anchor.
+        // `baseline[key]` is guaranteed present: the loop walks
+        // `baseline.keys`.
+        final slidUp = settledCursorY < baseline[key]!.y;
+        final tuck = _exitTuckFor(
+          ghostNid: ghostNid,
+          anchorKey: cursor,
+          slidUp: slidUp,
+        );
         current[key] = (
-          y: settledCursorY + ghostSlideY,
+          y: settledCursorY - tuck + ghostSlideY,
           x: anchorCurrent.x + ghostSlideX,
         );
         (_phantomExitGhosts ??= <TKey, TKey>{})[key] = cursor;
+        (_phantomExitSlidUp ??= <TKey, bool>{})[key] = slidUp;
         (_phantomClipAnchors ??= <TKey, TKey>{})[key] = cursor;
       } else {
         final edge = currentViewport.edgeFor(anchorCurrent.y);
@@ -831,8 +935,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // re-move slide installs from the right starting point.
     final ghostMap = _phantomExitGhosts;
     if (ghostMap != null) {
-      ghostMap.removeWhere((key, _) => controller.isVisible(key));
-      if (ghostMap.isEmpty) _phantomExitGhosts = null;
+      ghostMap.removeWhere((key, _) {
+        final reVisible = controller.isVisible(key);
+        if (reVisible) _phantomExitSlidUp?.remove(key);
+        return reVisible;
+      });
+      if (ghostMap.isEmpty) {
+        _phantomExitGhosts = null;
+        _phantomExitSlidUp = null;
+      }
     }
 
     // Step 3b: a row that was an edge ghost in the previous cycle has
@@ -2313,6 +2424,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
   @override
   void paint(PaintingContext context, Offset offset) {
+    // Debug capture is paint-time-scoped: cleared each frame, rewritten
+    // by Pass A.5 only for actively-sliding ghosts (Invariant 8/10).
+    debugLastPhantomGhostPaint.clear();
     if (geometry == null || geometry!.paintExtent == 0) return;
 
     final scrollOffset = constraints.scrollOffset;
@@ -2469,32 +2583,75 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         final anchorParentData = anchorChild.parentData;
         if (anchorParentData is! SliverTreeParentData) continue;
         final anchorNid = controller.nidOf(anchorKey);
-        final anchorSlide = anchorNid >= 0
-            ? controller.getSlideDeltaNid(anchorNid)
-            : 0.0;
         final anchorSlideX = (hasXSlides && anchorNid >= 0)
             ? controller.getSlideDeltaXNid(anchorNid)
             : 0.0;
-        // Ghost's painted position = anchor's painted position + ghost's
-        // own slide delta. As the ghost's slide settles to 0, the ghost
-        // converges on the anchor's row.
-        final paintedY =
-            anchorParentData.layoutOffset - scrollOffset + anchorSlide +
-            ghostSlide;
+        // Ghost's painted position = anchor's PAINTED band top + ghost's
+        // own slide delta. The painted band is read at paint time (sticky
+        // `pinnedY` when pinned — fresh because computeStickyHeaders
+        // already ran this frame — else structural), so the ghost
+        // converges on the header WHERE IT APPEARS on screen (Defect 1+2,
+        // Invariant 5). Falls back to the structural value when the band
+        // can't be resolved.
+        final anchorBand = _anchorPaintedBounds(anchorKey);
+        final anchorPaintedTop = anchorBand?.top ??
+            (anchorParentData.layoutOffset -
+                scrollOffset +
+                (anchorNid >= 0
+                    ? controller.getSlideDeltaNid(anchorNid)
+                    : 0.0));
+        // Subtract the SAME direction-aware tuck the consume destination
+        // applied (I-AGREE / the TRAP). The persisted `_phantomExitSlidUp`
+        // flag reproduces the consume-time direction here (paint has no
+        // baseline). Because consume injected `current.y = settledAnchorY −
+        // tuck + ghostSlideY`, the initial `ghostSlide` (= baseline.y −
+        // current.y) and this paint anchor (`anchorPaintedTop − tuck`)
+        // compose so `paintedY == baseline.y` at t=0 (no jump) and converge
+        // to `bandTop − tuck` at settle (card bottom == bandBottom).
+        final slidUp = _phantomExitSlidUp?[ghostKey] ?? false;
+        final tuck = _exitTuckFor(
+          ghostNid: ghostNid,
+          anchorKey: anchorKey,
+          slidUp: slidUp,
+        );
+        final paintedY = anchorPaintedTop - tuck + ghostSlide;
         final paintedX =
             anchorParentData.indent + anchorSlideX + ghostSlideX;
         // Skip if entirely outside the paint region.
         if (paintedY >= remainingPaintExtent) continue;
         if (paintedY + ghostChild.size.height <= 0) continue;
-        // Apply the same clip mechanism as the entry-phantom case so
-        // the anchor visually occludes the ghost as it slides in.
+        // Apply the EXIT clip so the ghost is bounded to the destination
+        // header's painted band on its trailing side (far overhang
+        // killed; band occluded by the header repaint in Pass A.7/B).
         final clipRect = _resolvePhantomAnchorBounds(
           nid: ghostNid,
           paintedY: paintedY,
           offset: offset,
           remainingPaintExtent: remainingPaintExtent,
+          role: PhantomClipRole.exit,
         );
         final paintOffset = offset + Offset(paintedX, paintedY);
+        // Debug capture for the Defect-1 oracle (sliding-ghost-only;
+        // sliver-local, NOT offset by `offset`). Reached ONLY for a
+        // sliding ghost (the settled-`continue` above precedes this), so
+        // the map stays empty at settle by construction (Invariant 8).
+        if (anchorBand != null) {
+          debugLastPhantomGhostPaint[ghostKey] = (
+            ghostRect: Rect.fromLTWH(
+              paintedX,
+              paintedY,
+              ghostChild.size.width,
+              ghostChild.size.height,
+            ),
+            clipRect: clipRect,
+            anchorBand: Rect.fromLTWH(
+              0,
+              anchorBand.top,
+              constraints.crossAxisExtent,
+              anchorBand.height,
+            ),
+          );
+        }
         if (clipRect != null) {
           context.pushClipRect(
             needsCompositing,
@@ -2554,6 +2711,48 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         if (paintedY >= remainingPaintExtent) continue;
         if (paintedY + ghostChild.size.height <= 0) continue;
         context.paintChild(ghostChild, offset + Offset(paintedX, paintedY));
+      }
+    }
+
+    // Pass A.7: Header-occludes-ghost (Defect 2). Repaint each NON-sticky
+    // EXIT-ghost destination/crossed header clipped to its painted band,
+    // so it lands ON TOP of the ghost painted in Pass A.5. This closes the
+    // gaps where no Pass-B repaint re-asserts the header (`maxStickyDepth:
+    // 0`, or a header dropped from sticky because it's animating / has no
+    // children). Sticky anchors are skipped — Pass B repaints them
+    // deepest-first below. A header is repainted by EXACTLY ONE of {Pass
+    // A.7 (non-sticky), Pass B (sticky)} per frame (Invariant 6).
+    //
+    // Iterate `_phantomExitGhosts.values` ONLY (deduped) — NOT
+    // `_phantomClipAnchors.values`, which also holds ENTRY-phantom anchors
+    // that must NOT be repainted on top of an emerging entry row.
+    if (_phantomExitGhosts != null &&
+        _phantomExitGhosts!.isNotEmpty &&
+        hasSlides) {
+      final seenAnchors = <TKey>{};
+      for (final anchorKey in _phantomExitGhosts!.values) {
+        if (!seenAnchors.add(anchorKey)) continue; // dedupe shared anchors
+        final anchorNid = controller.nidOf(anchorKey);
+        if (anchorNid < 0) continue; // freed key
+        if (_sticky.isSticky(anchorNid)) continue; // Pass B owns it
+        if (controller.isExiting(anchorKey)) continue; // animating out
+        final anchorChild = _children[anchorKey];
+        if (anchorChild == null) continue; // not mounted in-flow
+        final anchorParentData = anchorChild.parentData;
+        if (anchorParentData is! SliverTreeParentData) continue;
+        final band = _anchorPaintedBounds(anchorKey);
+        if (band == null) continue;
+        // Skip if the band is fully outside the paint region.
+        if (band.top >= remainingPaintExtent) continue;
+        if (band.top + band.height <= 0) continue;
+        final paintOffset =
+            offset + Offset(anchorParentData.indent, band.top);
+        context.pushClipRect(
+          needsCompositing,
+          paintOffset,
+          Rect.fromLTWH(0, 0, anchorChild.size.width, band.height),
+          (ctx, off) => ctx.paintChild(anchorChild, off),
+        );
       }
     }
 
@@ -2634,6 +2833,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       paintedY: nodeOffset - scrollOffset + slideDelta,
       offset: offset,
       remainingPaintExtent: remainingPaintExtent,
+      // In-flow entry phantom (collapsed→visible row emerging past its
+      // anchor): legacy half-plane clip. The band/far-overhang rule is
+      // EXIT-only (Invariant 9 / regression guard).
+      role: PhantomClipRole.entry,
     );
 
     final paintChild = (PaintingContext ctx, Offset off) {
@@ -2687,6 +2890,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (nid < 0) {
         ghosts.remove(ghostKey);
         _phantomClipAnchors?.remove(ghostKey);
+        _phantomExitSlidUp?.remove(ghostKey);
         continue;
       }
       final dy = controller.getSlideDeltaNid(nid);
@@ -2694,6 +2898,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       if (dy == 0.0 && dx == 0.0) {
         ghosts.remove(ghostKey);
         _phantomClipAnchors?.remove(ghostKey);
+        _phantomExitSlidUp?.remove(ghostKey);
       }
     }
     if (ghosts.isEmpty) {
@@ -2702,6 +2907,92 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     if (_phantomClipAnchors != null && _phantomClipAnchors!.isEmpty) {
       _phantomClipAnchors = null;
     }
+    if (_phantomExitSlidUp != null && _phantomExitSlidUp!.isEmpty) {
+      _phantomExitSlidUp = null;
+    }
+  }
+
+  /// The direction-aware EXIT convergence "tuck" (a non-negative scalar
+  /// MAGNITUDE) for a phantom ghost sliding into its destination header.
+  ///
+  /// For the UPWARD / body-side approach (`slidUp == true`) of a card
+  /// TALLER than its collapsed destination header, returns
+  /// `max(0, ghostExtent − headerExtent)` so the EXIT ghost's convergence
+  /// target is pushed an extra `tuck` px further up — its BOTTOM reaches
+  /// the header band BOTTOM (full convergence, no last-frame pop). For the
+  /// DOWNWARD approach (`slidUp == false`) or equal-height geometry the
+  /// tuck is exactly 0 (I-EQUAL), so the slide distance and convergence
+  /// target are byte-for-byte unchanged.
+  ///
+  /// This is the SINGLE shared helper called by BOTH the consume-time
+  /// destination injection AND the Pass A.5 paint anchor so the two
+  /// convergence sites cannot diverge (I-AGREE / the TRAP — a t=0 jump if
+  /// only one site applies it).
+  ///
+  /// Pure: reads only settled extents via [TreeController.getEstimatedExtentNid]
+  /// (NOT the animated `getCurrentExtentNid`, which is 0 mid-enter — the
+  /// two-extent rule) and performs NO `_sticky` read and NO layout, so it
+  /// is safe to call from BOTH `_consumeSlideBaselineIfAny` (where `_sticky`
+  /// is stale) and `paint()`.
+  double _exitTuckFor({
+    required int ghostNid,
+    required TKey anchorKey,
+    required bool slidUp,
+  }) {
+    if (!slidUp) return 0.0;
+    final anchorNid = _controller.nidOf(anchorKey);
+    if (ghostNid < 0 || anchorNid < 0) return 0.0;
+    final ghostExtent = _controller.getEstimatedExtentNid(ghostNid);
+    final headerExtent = _controller.getEstimatedExtentNid(anchorNid);
+    final tuck = ghostExtent - headerExtent;
+    return tuck > 0 ? tuck : 0.0;
+  }
+
+  /// The anchor header's PAINTED band (top + height) in sliver-local
+  /// coordinates, or null when the anchor isn't mounted.
+  ///
+  /// When the anchor is currently sticky-pinned (its nid resolves to a
+  /// fresh [StickyHeaderInfo] this frame), returns the pinned band
+  /// (`info.pinnedY` / `info.extent`) — exactly where Pass B paints the
+  /// header — so an EXIT ghost converges on / is clipped against the
+  /// header WHERE IT ACTUALLY APPEARS on screen under scroll. Otherwise
+  /// returns the structural band (`layoutOffset − scrollOffset +
+  /// anchorSlide` / child height).
+  ///
+  /// CONTRACT:
+  ///  - Coordinates are sliver-local (scrollOffset already subtracted).
+  ///  - ONLY safe to call from `paint()` — the sticky set is recomputed
+  ///    each frame by `computeStickyHeaders` (~line 2012 of `paint`),
+  ///    STRICTLY BEFORE the paint passes. It MUST NOT be called from
+  ///    `_consumeSlideBaselineIfAny` (the consume runs ~300 lines
+  ///    earlier, before the recompute, so `_sticky` is stale/null there).
+  ///  - Consumed ONLY by the EXIT role (Pass A.5 ghost paint, the EXIT
+  ///    clip band, and Pass A.7 header repaint). The ENTRY role keeps the
+  ///    structural read in `_resolvePhantomAnchorBounds` and does NOT
+  ///    call this.
+  ({double top, double height})? _anchorPaintedBounds(TKey anchorKey) {
+    final anchorChild = _children[anchorKey];
+    if (anchorChild == null) return null;
+    final anchorParentData = anchorChild.parentData;
+    if (anchorParentData is! SliverTreeParentData) return null;
+
+    final anchorNid = _controller.nidOf(anchorKey);
+    // Sticky-pinned destination (fresh this frame): use the painted band.
+    if (anchorNid >= 0) {
+      final info = _sticky.infoForNid(anchorNid);
+      if (info != null) {
+        return (top: info.pinnedY, height: info.extent);
+      }
+    }
+    // Structural band: layoutOffset − scrollOffset + anchorSlide.
+    final scrollOffset = constraints.scrollOffset;
+    final anchorSlide = anchorNid >= 0
+        ? _controller.getSlideDeltaNid(anchorNid)
+        : 0.0;
+    return (
+      top: anchorParentData.layoutOffset - scrollOffset + anchorSlide,
+      height: anchorChild.size.height,
+    );
   }
 
   /// if no clip is needed (no phantom anchor recorded for this row, or
@@ -2717,6 +3008,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     required double paintedY,
     required Offset offset,
     required double remainingPaintExtent,
+    required PhantomClipRole role,
   }) {
     final clipAnchors = _phantomClipAnchors;
     if (clipAnchors == null || clipAnchors.isEmpty) return null;
@@ -2726,6 +3018,53 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     final anchorKey = clipAnchors[key];
     if (anchorKey == null) return null;
 
+    final width = constraints.crossAxisExtent;
+
+    if (role == PhantomClipRole.exit) {
+      // EXIT role (Defect 1): a row purged from `visibleNodes` sliding
+      // INTO a collapsed header to DISAPPEAR. Clip the ghost on its
+      // TRAILING half-plane but bounded so NOTHING is visible on the FAR
+      // side past the destination header's PAINTED band — kills the
+      // far overhang of a tall card. The band itself is occluded by the
+      // header repaint (Pass A.7 / Pass B). No minimum-visible floor.
+      //
+      // The painted band is read at PAINT time (sticky `pinnedY` when
+      // pinned, else structural) via `_anchorPaintedBounds`, so this
+      // tracks the header's on-screen position every frame.
+      final band = _anchorPaintedBounds(anchorKey);
+      if (band == null) return null;
+      final bandTop = band.top;
+      final bandBottom = band.top + band.height;
+      // Select the trailing side from the PERSISTED direction flag, NOT
+      // the instantaneous `paintedY` vs `bandTop` comparison (I-DIR). With
+      // the upward tuck, the converged `paintedY` (= bandTop − tuck) drops
+      // BELOW `bandTop`, which would flip the legacy instantaneous test to
+      // the downward branch mid-slide and re-expose the trailing-below
+      // region (the one-frame pop). The persisted flag is stable across
+      // that crossover. The `?? (paintedY > bandTop)` fallback preserves
+      // today's behavior for any ghost without a `_phantomExitSlidUp`
+      // entry (defensive).
+      final slidUp = _phantomExitSlidUp?[key] ?? (paintedY > bandTop);
+      if (slidUp) {
+        // Ghost came from below, sliding UP into the header. Visible =
+        // [bandBottom, remainingPaintExtent] ALWAYS — clipping away
+        // everything above bandBottom kills both the far overhang above
+        // bandTop AND, once tucked, collapses the trailing region to empty.
+        if (remainingPaintExtent <= bandBottom) return Rect.zero;
+        return Rect.fromLTRB(0, bandBottom, width, remainingPaintExtent);
+      } else {
+        // Ghost came from above, sliding DOWN into the header. Visible =
+        // [0, bandTop] (unchanged downward behavior).
+        if (bandTop <= 0) return Rect.zero;
+        return Rect.fromLTRB(0, 0, width, bandTop);
+      }
+    }
+
+    // ── ENTRY role: verbatim legacy half-plane (regression guard,
+    //    Invariant 9). A previously-hidden node reparented INTO view that
+    //    must EMERGE past its anchor. Does NOT call `_anchorPaintedBounds`
+    //    and does NOT apply the band/far-overhang rule. Keep byte-
+    //    equivalent to the pre-rework code.
     final anchorChild = _children[anchorKey];
     if (anchorChild == null) return null;
     final anchorParentData = anchorChild.parentData;
@@ -2749,14 +3088,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // painted is on the destination side of anchor → clip to that side.
     // The anchor occludes the row's start of trajectory.
     //
-    // For EXIT (row sliding FROM old position TO anchor): painted starts
-    // at old position and moves toward anchor. Throughout, painted is
-    // on the old-position side of anchor → clip to that side. The anchor
-    // occludes the row's end of trajectory.
-    //
-    // Both reduce to: visible region = the half-plane on the side where
-    // painted Y currently sits relative to anchor's Y range.
-    final width = constraints.crossAxisExtent;
+    // Visible region = the half-plane on the side where painted Y
+    // currently sits relative to anchor's Y range.
     if (paintedY > anchorPaintedY) {
       // Painted below anchor → visible region = y >= anchor.bottom.
       final clipTop = anchorPaintedY + anchorHeight;
