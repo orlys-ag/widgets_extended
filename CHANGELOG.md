@@ -1,9 +1,6 @@
 ## 0.0.25
 
-- Animate same-parent reorders in `SyncedSliverTree`. `TreeController.reorderChildren` /
-  `reorderRoots` gain an `animate` flag (default `true`, matching `moveNode`) that stages
-  the FLIP slide baseline, so a sibling reorder slides instead of snapping. Drag-and-drop
-  commits keep the snap (`animate: false`) to avoid double-animating.
+- Animate same-parent reorders in `SyncedSliverTree`.
 
 ## 0.0.24
 
