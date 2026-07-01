@@ -291,11 +291,14 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
       liveSiblings.insert(insertAt, session.draggedKey);
 
       if (target.parentKey == null) {
-        treeController.reorderRoots(liveSiblings);
+        // Drag commit: the reorderable widget owns the drop animation, so keep
+        // the structural commit a snap to avoid double-animating the item.
+        treeController.reorderRoots(liveSiblings, animate: false);
       } else {
         treeController.reorderChildren(
           target.parentKey as TKey,
           liveSiblings,
+          animate: false,
         );
       }
     } else {

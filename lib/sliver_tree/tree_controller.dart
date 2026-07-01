@@ -2196,7 +2196,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [orderedKeys] must contain exactly the current live (non-pending-deletion)
   /// root keys. Expansion state, animation state, and measured extents are
   /// preserved. Pending-deletion roots are appended after the live roots.
-  void reorderRoots(List<TKey> orderedKeys) {
+  void reorderRoots(List<TKey> orderedKeys, {bool animate = true}) {
     final pendingRoots = <TKey>[];
     final liveRootSet = <TKey>{};
     for (final k in _roots) {
@@ -2219,6 +2219,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
     }
 
+    // Stage the FLIP slide baseline BEFORE mutating so shifted roots slide to
+    // their new positions (roots are depth-0 and the _markVisibleOrderDirty
+    // below always fires, so the next layout consumes the baseline).
+    if (animate && animationDuration != Duration.zero) {
+      _stageSlideBaselineOnHosts(
+        duration: animationDuration,
+        curve: animationCurve,
+      );
+    }
     _roots
       ..clear()
       ..addAll(orderedKeys)
@@ -2235,7 +2244,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [orderedKeys] must contain exactly the current live (non-pending-deletion)
   /// children of [parentKey]. Expansion state, animation state, and measured
   /// extents are preserved.
-  void reorderChildren(TKey parentKey, List<TKey> orderedKeys) {
+  void reorderChildren(TKey parentKey, List<TKey> orderedKeys,
+      {bool animate = true}) {
     if (!_hasKey(parentKey)) {
       throw ArgumentError.value(parentKey, "parentKey", "not found");
     }
@@ -2262,9 +2272,23 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
     }
 
-    _setChildList(parentKey, [...orderedKeys, ...pendingChildren]);
-    bool needsVisibleRebuild =
+    // Stage the FLIP slide baseline BEFORE mutating, but only when the children
+    // are strictly visible (parent + ancestors expanded). The
+    // _markVisibleOrderDirty below fires for the same `visible` case, so the next
+    // layout consumes the baseline and slides shifted rows. Gating on `visible`
+    // avoids a pointless slide for a collapsed reorder and never strands an
+    // unconsumed baseline.
+    final visible =
         _isExpandedKey(parentKey) && _ancestorsExpandedFast(parentKey);
+    if (animate && visible && animationDuration != Duration.zero) {
+      _stageSlideBaselineOnHosts(
+        duration: animationDuration,
+        curve: animationCurve,
+      );
+    }
+
+    _setChildList(parentKey, [...orderedKeys, ...pendingChildren]);
+    bool needsVisibleRebuild = visible;
     if (!needsVisibleRebuild) {
       // Even if the parent is not expanded, children may still be present
       // in _visibleOrder because they are mid-animation (collapse in

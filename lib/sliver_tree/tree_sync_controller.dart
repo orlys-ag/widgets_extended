@@ -338,7 +338,7 @@ class TreeSyncController<TKey, TData> {
         if (!_controller.isExiting(k)) k,
     ];
     if (!_listEquals(liveRoots, liveDesiredKeys)) {
-      _controller.reorderRoots(liveDesiredKeys);
+      _controller.reorderRoots(liveDesiredKeys, animate: animate);
     }
 
     // 7. Restore expansion state for newly inserted roots after their
@@ -569,7 +569,7 @@ class TreeSyncController<TKey, TData> {
         if (!_controller.isExiting(k)) k,
     ];
     if (!_listEquals(liveRemaining, liveDesiredKeys)) {
-      _controller.reorderChildren(parentKey, liveDesiredKeys);
+      _controller.reorderChildren(parentKey, liveDesiredKeys, animate: animate);
     }
 
     // 6. Update tracking state.
