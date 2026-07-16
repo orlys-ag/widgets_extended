@@ -100,16 +100,19 @@ void main() {
         reason: "Y is mid-exit-slide — currentDelta is still negative");
     expect(midGhostDelta, greaterThan(-48.0),
         reason: "Y has progressed toward 0 from -48");
-    // Y's CURRENT painted position = B.painted + Y.slideDelta.
-    // B is ALSO sliding (its row shifted from y=144 to y=96 as Y left,
-    // so B.startDelta = +48, currentDelta = +38.4 mid-flight).
-    // B.painted = 96 (structural) + 38.4 (slide) = 134.4.
-    // Y.painted = 134.4 + (-38.4) = 96.
+    // Y's CURRENT painted position (Pass A.5 paint truth) =
+    // B.SETTLED top + Y.slideDelta. The ghost converges on the anchor's
+    // settled position (96), NOT the live sliding band (96 + B.slide):
+    // reading the live band would double-count the destination's own
+    // motion (see the settled-top commentary in the render object's
+    // shared `_exitGhostPaintedBaseScrollSpace`). B's own slide only
+    // drives the EXIT clip, not the ghost's convergence top.
+    // Y.painted = 96 + (-38.4) = 57.6.
     final bMidSlide = controller.getSlideDelta("B");
     expect(bMidSlide, greaterThan(0.0),
         reason: "B was structurally at y=144, shifted to y=96, so its "
             "slide delta is positive (currently +38.4 ≈)");
-    final yPaintedBeforeRemove = 96.0 + bMidSlide + midGhostDelta;
+    final yPaintedBeforeRemove = 96.0 + midGhostDelta;
 
     // SECOND move (mid-ghost): Y → C (visible, expanded).
     //   After mutation: order [A, Y2, B, C, Y, c1]. Y at structural y=192.

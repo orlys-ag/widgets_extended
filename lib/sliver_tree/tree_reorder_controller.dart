@@ -70,8 +70,12 @@ class TreeDropTarget<TKey> {
   /// Depth of the dragged node **after** the move, for indicator indent.
   final int depth;
 
-  /// Scroll-space y where the indicator line should be drawn. Subtract
-  /// the scrollable's `position.pixels` to convert to viewport-local.
+  /// **Viewport scroll-space** y where the indicator line should be drawn:
+  /// distance from the top of the viewport's total scroll extent, including
+  /// any slivers that precede the tree. Subtract the scrollable's
+  /// `position.pixels` to convert to viewport-local. (Sliver-local row
+  /// offsets — the space `RenderSliverTree.findRowAtPaintedY` speaks —
+  /// differ from this by the tree sliver's `precedingScrollExtent`.)
   final double indicatorScrollY;
 
   /// Horizontal inset for the indicator line, computed from [depth] and
@@ -222,6 +226,12 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
       indentPerDepth: indentPerDepth,
       pointerGlobal: pointerGlobal,
     );
+    // Pin the dragged row against stale eviction for the session's
+    // lifetime: the drag gesture lives on the row's own GestureDetector,
+    // so autoscrolling it out of the cache region would otherwise evict
+    // the row, its end/cancel callbacks would never fire, and the session
+    // (plus the autoscroll ticker) would run forever.
+    renderObject.pinNode(key);
     _recomputeDropTarget();
     // Drag session just started; currentTarget may have become non-null.
     notifyListeners();
@@ -258,8 +268,36 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   void endDrag() {
     final session = _session;
     if (session == null) return;
+
+    // Re-resolve against CURRENT tree state, then validate, BEFORE staging
+    // the FLIP baseline. The last pointer-move's target may be stale: with
+    // server-driven updates the dragged node or the target parent can have
+    // become pending-deletion (or been purged) since. Committing a stale
+    // target would throw out of a GestureDetector callback with the
+    // session permanently stuck, and a baseline staged before validation
+    // would be consumed by nobody — first-wins staging then blocks every
+    // subsequent slide stage until an unrelated layout flushes it.
+    _recomputeDropTarget();
     final target = session.currentTarget;
+    final dragged = session.draggedKey;
+    final bool valid;
     if (target == null) {
+      valid = false;
+    } else if (treeController.getNodeData(dragged) == null ||
+        treeController.isPendingDeletion(dragged)) {
+      valid = false;
+    } else {
+      final parentKey = target.parentKey;
+      if (parentKey == null) {
+        valid = true;
+      } else {
+        valid = treeController.getNodeData(parentKey) != null &&
+            !treeController.isPendingDeletion(parentKey) &&
+            parentKey != dragged &&
+            !_isStrictDescendantOf(parentKey, dragged);
+      }
+    }
+    if (!valid) {
       cancelDrag();
       return;
     }
@@ -276,50 +314,59 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
       curve: slideCurve,
     );
 
-    final currentParent = treeController.getParent(session.draggedKey);
-    final sameParent = currentParent == target.parentKey;
+    try {
+      final currentParent = treeController.getParent(dragged);
+      final sameParent = currentParent == target!.parentKey;
 
-    if (sameParent) {
-      // Build the live final sibling list — reorderChildren/reorderRoots
-      // reject lists containing pending-deletion entries and re-append them
-      // internally after validating the live ordering.
-      final liveSiblings = target.parentKey == null
-          ? treeController.liveRootKeys
-          : treeController.getLiveChildren(target.parentKey as TKey);
-      liveSiblings.remove(session.draggedKey);
-      final insertAt = target.indexInFinalList.clamp(0, liveSiblings.length);
-      liveSiblings.insert(insertAt, session.draggedKey);
+      if (sameParent) {
+        // Build the live final sibling list — reorderChildren/reorderRoots
+        // reject lists containing pending-deletion entries and re-append them
+        // internally after validating the live ordering.
+        final liveSiblings = target.parentKey == null
+            ? treeController.liveRootKeys
+            : treeController.getLiveChildren(target.parentKey as TKey);
+        liveSiblings.remove(dragged);
+        final insertAt = target.indexInFinalList.clamp(0, liveSiblings.length);
+        liveSiblings.insert(insertAt, dragged);
 
-      if (target.parentKey == null) {
-        // Drag commit: the reorderable widget owns the drop animation, so keep
-        // the structural commit a snap to avoid double-animating the item.
-        treeController.reorderRoots(liveSiblings, animate: false);
+        if (target.parentKey == null) {
+          // Drag commit: the reorderable widget owns the drop animation, so
+          // keep the structural commit a snap to avoid double-animating the
+          // item.
+          treeController.reorderRoots(liveSiblings, animate: false);
+        } else {
+          treeController.reorderChildren(
+            target.parentKey as TKey,
+            liveSiblings,
+            animate: false,
+          );
+        }
       } else {
-        treeController.reorderChildren(
-          target.parentKey as TKey,
-          liveSiblings,
-          animate: false,
+        // Cross-parent: moveNode's `index` is the position in the new
+        // parent's final child list — exactly indexInFinalList.
+        treeController.moveNode(
+          dragged,
+          target.parentKey,
+          index: target.indexInFinalList,
         );
       }
-    } else {
-      // Cross-parent: moveNode's `index` is the position in the new parent's
-      // final child list — exactly indexInFinalList.
-      treeController.moveNode(
-        session.draggedKey,
-        target.parentKey,
-        index: target.indexInFinalList,
-      );
+    } finally {
+      // The re-resolve + validation above makes the commit's throwing
+      // paths unreachable, so an exception here is a genuine invariant
+      // violation — let it propagate, but never leave the session stuck.
+      session.renderObject.unpinNode(dragged);
+      _session = null;
+      notifyListeners();
     }
-
-    _session = null;
-    notifyListeners();
   }
 
   /// Aborts the current drag without mutating the tree.
   void cancelDrag() {
     _autoScrollTicker.stop();
     _lastAutoScrollTick = null;
-    if (_session == null) return;
+    final session = _session;
+    if (session == null) return;
+    session.renderObject.unpinNode(session.draggedKey);
     _session = null;
     notifyListeners();
   }
@@ -328,6 +375,11 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// `dispose`.
   @override
   void dispose() {
+    final session = _session;
+    if (session != null) {
+      session.renderObject.unpinNode(session.draggedKey);
+      _session = null;
+    }
     _autoScrollTicker.dispose();
     super.dispose();
   }
@@ -350,15 +402,36 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
         a.indicatorIndent == b.indicatorIndent;
   }
 
-  /// Converts a global pointer offset to scroll-space y (distance from the
-  /// start of the sliver's scroll extent).
-  double _pointerToScrollSpaceY(
+  /// Converts a global pointer offset to **sliver-local** y — distance from
+  /// the start of THIS tree sliver's scroll extent, the space
+  /// [RenderSliverTree.findRowAtPaintedY] consumes (first tree row at 0).
+  ///
+  /// Viewport scroll space and sliver-local space differ by the tree
+  /// sliver's `constraints.precedingScrollExtent` whenever any sliver
+  /// precedes the tree in the CustomScrollView; without the subtraction the
+  /// resolved drop target lands `precedingScrollExtent` px below the
+  /// hovered row.
+  double _pointerToSliverLocalY(
     Offset globalPointer,
-    ScrollableState scrollable,
+    _DragSession<TKey> session,
   ) {
-    final viewport = scrollable.context.findRenderObject() as RenderBox;
+    final viewport =
+        session.scrollable.context.findRenderObject() as RenderBox;
     final viewportLocal = viewport.globalToLocal(globalPointer);
-    return scrollable.position.pixels + viewportLocal.dy;
+    final scrollSpaceY =
+        session.scrollable.position.pixels + viewportLocal.dy;
+    return scrollSpaceY - _precedingScrollExtent(session);
+  }
+
+  /// The tree sliver's `precedingScrollExtent`, or 0 when it has not been
+  /// laid out yet (its `constraints` are only readable after layout; the
+  /// sliver is laid out for the whole lifetime of a drag session).
+  double _precedingScrollExtent(_DragSession<TKey> session) {
+    final renderObject = session.renderObject;
+    if (renderObject.geometry == null) {
+      return 0.0;
+    }
+    return renderObject.constraints.precedingScrollExtent;
   }
 
   /// Finds the live row the pointer sits over via
@@ -368,9 +441,9 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   void _recomputeDropTarget() {
     final session = _session;
     if (session == null) return;
-    final scrollPointerY = _pointerToScrollSpaceY(
+    final scrollPointerY = _pointerToSliverLocalY(
       session.pointerGlobal,
-      session.scrollable,
+      session,
     );
 
     final hovered = session.renderObject.findRowAtPaintedY(scrollPointerY);
@@ -419,6 +492,12 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
 
     // Translate (targetKey, zone) to (parentKey, rawIndex). All sibling
     // indices are computed in live-list space, matching the reorder APIs.
+    //
+    // [targetOffset] is sliver-local (from findRowAtPaintedY);
+    // [TreeDropTarget.indicatorScrollY] is documented as VIEWPORT scroll
+    // space (its consumer subtracts `position.pixels`), so add the tree
+    // sliver's precedingScrollExtent when constructing the target.
+    final preceding = _precedingScrollExtent(session);
     TKey? parentKey;
     int rawIndex;
     int depth;
@@ -428,19 +507,34 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
         parentKey = treeController.getParent(targetKey);
         rawIndex = treeController.getIndexInParent(targetKey);
         depth = treeController.getDepth(targetKey);
-        indicatorScrollY = targetOffset;
+        indicatorScrollY = targetOffset + preceding;
         break;
       case TreeDropZone.below:
-        parentKey = treeController.getParent(targetKey);
-        rawIndex = treeController.getIndexInParent(targetKey) + 1;
-        depth = treeController.getDepth(targetKey);
-        indicatorScrollY = targetOffset + targetExtent;
+        // Below an EXPANDED target with visible children, "next sibling
+        // of target" sits after the whole visible subtree — potentially
+        // many rows lower than the indicator line drawn directly under
+        // the target row (which is visually the FIRST CHILD's slot).
+        // Resolve as first-child (identical to `into`) so indicator and
+        // commit agree by construction — conventional tree-DnD
+        // semantics. Collapsed/leaf targets keep next-sibling semantics.
+        if (targetAllowsChildren &&
+            treeController.isExpanded(targetKey) &&
+            treeController.getLiveChildren(targetKey).isNotEmpty) {
+          parentKey = targetKey;
+          rawIndex = 0;
+          depth = treeController.getDepth(targetKey) + 1;
+        } else {
+          parentKey = treeController.getParent(targetKey);
+          rawIndex = treeController.getIndexInParent(targetKey) + 1;
+          depth = treeController.getDepth(targetKey);
+        }
+        indicatorScrollY = targetOffset + targetExtent + preceding;
         break;
       case TreeDropZone.into:
         parentKey = targetKey;
         rawIndex = 0;
         depth = treeController.getDepth(targetKey) + 1;
-        indicatorScrollY = targetOffset + targetExtent;
+        indicatorScrollY = targetOffset + targetExtent + preceding;
         break;
     }
 

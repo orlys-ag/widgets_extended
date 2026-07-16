@@ -21,31 +21,12 @@ import 'types.dart';
 /// `_tree_controller_animation.dart` part file.
 const double _kUnknownExtent = -1.0;
 
-/// Computes the speed multiplier for proportional timing on cross-source
-/// transitions. When a node transitions between animation sources, the
-/// remaining animation distance may be less than the full extent; this
-/// multiplier ensures the animation completes in proportional wall-clock
-/// time. Mirrors `_computeAnimationSpeedMultiplier` in the original part
-/// file.
-double computeStandaloneSpeedMultiplier(
-  double currentExtent,
-  double fullExtent,
-) {
-  if (fullExtent <= 0) {
-    return 1.0;
-  }
-  final fraction = currentExtent / fullExtent;
-  if (fraction <= 0 || fraction >= 1.0) {
-    return 1.0;
-  }
-  return (1.0 / fraction).clamp(1.0, 10.0);
-}
-
-/// Default extent fallback used when the full extent is unmeasured.
-/// Mirrors `TreeController.defaultExtent`. Hard-coded here to avoid a
-/// dependency on `tree_controller.dart`; callers must pass the same value
-/// via [StandaloneAnimator.fullExtentGetter] for consistency.
-const double _kDefaultExtent = 48.0;
+// Audit 6.1: the dead `computeStandaloneSpeedMultiplier` copy was
+// deleted (zero callers; the live implementation is
+// `_computeAnimationSpeedMultiplier` in `_tree_controller_animation.dart`),
+// and the hard-coded `_kDefaultExtent` mirror of
+// `TreeController.defaultExtent` was replaced by constructor injection —
+// see [StandaloneAnimator.defaultExtent].
 
 class StandaloneAnimator<TKey> {
   StandaloneAnimator({
@@ -55,12 +36,14 @@ class StandaloneAnimator<TKey> {
     required Curve Function() animationCurveGetter,
     required Duration Function() animationDurationGetter,
     required double? Function(int nid) fullExtentGetter,
+    required double defaultExtent,
   }) : _vsync = vsync,
        _nids = nids,
        _onTick = onTick,
        _animationCurveGetter = animationCurveGetter,
        _animationDurationGetter = animationDurationGetter,
-       _fullExtentGetter = fullExtentGetter;
+       _fullExtentGetter = fullExtentGetter,
+       _defaultExtent = defaultExtent;
 
   final TickerProvider _vsync;
   final NodeIdRegistry<TKey> _nids;
@@ -68,6 +51,10 @@ class StandaloneAnimator<TKey> {
   final Curve Function() _animationCurveGetter;
   final Duration Function() _animationDurationGetter;
   final double? Function(int nid) _fullExtentGetter;
+
+  /// Fallback extent for unmeasured rows, injected from
+  /// `TreeController.defaultExtent` via the coordinator (audit 6.1).
+  final double _defaultExtent;
 
   /// Per-nid animation slot. Null when the node is not animating via the
   /// standalone source. Reads / writes go through [at] / [set] / [clear]
@@ -177,7 +164,7 @@ class StandaloneAnimator<TKey> {
     }
     final nid = _nids[key];
     final full = (nid != null ? _fullExtentGetter(nid) : null)
-        ?? _kDefaultExtent;
+        ?? _defaultExtent;
     final t = _animationCurveGetter()
         .transform(state.progress.clamp(0.0, 1.0));
     return state.type == AnimationType.entering ? full * t : full * (1.0 - t);
@@ -206,7 +193,8 @@ class StandaloneAnimator<TKey> {
   }
 
   /// Internal ticker callback. Per-tick steps:
-  /// 1. Stop early if nothing to animate or animationDuration is zero.
+  /// 1. Stop early if nothing to animate; snap everything to completion
+  ///    if animationDuration is zero.
   /// 2. Compute dt and advance every active state's progress + extent.
   /// 3. Collect newly-completed keys and forward them to the controller's
   ///    [onTick] callback (which drives `_finalizeAnimation` and fires
@@ -218,7 +206,29 @@ class StandaloneAnimator<TKey> {
     }
     final duration = _animationDurationGetter();
     if (duration.inMicroseconds == 0) {
-      _ticker?.stop();
+      // Zero duration means "animations complete instantly" — the same
+      // convention every mutator applies on entry (`if (animationDuration
+      // == Duration.zero) animate = false`). Snap every active state to
+      // completion and route the full set through the completion handler
+      // (purge, order removal, structural notification). Stop-and-abandon
+      // here would strand rows at partial extent, leak pending-deletion
+      // nodes forever (this finalize path is the only purge path for
+      // standalone exits), and pin hasActiveAnimations true permanently.
+      final snapCurve = _animationCurveGetter();
+      _completedScratch.clear();
+      for (final nid in _activeNids) {
+        final state = _byNid[nid]!;
+        state.progress = 1.0;
+        state.updateExtent(snapCurve);
+        _completedScratch.add(_nids.keyOfUnchecked(nid));
+      }
+      _onTick(_completedScratch);
+      // The handler may have started fresh states (e.g. revert paths);
+      // only stop when nothing is left — otherwise the next tick snaps
+      // the newcomers too.
+      if (_activeNids.isEmpty) {
+        _ticker?.stop();
+      }
       return;
     }
 

@@ -20,6 +20,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
+/// Resolves the [SliverTreeParentData] for the row containing [renderBox].
+/// The keyed row widget may be wrapped (e.g. the sliver's default per-row
+/// RepaintBoundary), so walk up to the sliver's DIRECT child — the render
+/// object that actually carries the tree's parent data.
+SliverTreeParentData _treeParentDataOf(RenderBox renderBox) {
+  RenderObject? ro = renderBox;
+  while (ro != null && ro.parentData is! SliverTreeParentData) {
+    ro = ro.parent;
+  }
+  expect(ro, isNotNull,
+      reason: "no ancestor with SliverTreeParentData found for $renderBox");
+  return ro!.parentData! as SliverTreeParentData;
+}
+
 void main() {
   group("capture / collapse / re-expand visual regressions", () {
     testWidgets(
@@ -597,7 +611,7 @@ void main() {
       if (c1Element.evaluate().isNotEmpty) {
         final renderBox =
             c1Element.evaluate().single.renderObject as RenderBox;
-        final pd = renderBox.parentData! as SliverTreeParentData;
+        final pd = _treeParentDataOf(renderBox);
         expect(
           pd.visibleExtent,
           lessThan(2.0),
@@ -834,7 +848,7 @@ void main() {
         }
         final renderBox =
             element.evaluate().single.renderObject as RenderBox;
-        final pd = renderBox.parentData! as SliverTreeParentData;
+        final pd = _treeParentDataOf(renderBox);
         expect(
           pd.visibleExtent,
           greaterThan(0.0),
@@ -851,7 +865,7 @@ void main() {
         if (element.evaluate().isEmpty) continue;
         final renderBox =
             element.evaluate().single.renderObject as RenderBox;
-        final pd = renderBox.parentData! as SliverTreeParentData;
+        final pd = _treeParentDataOf(renderBox);
         expect(
           pd.layoutOffset,
           greaterThan(prevOffset),
@@ -935,7 +949,7 @@ void main() {
         if (element.evaluate().isEmpty) continue;
         final renderBox =
             element.evaluate().single.renderObject as RenderBox;
-        final pd = renderBox.parentData! as SliverTreeParentData;
+        final pd = _treeParentDataOf(renderBox);
         if (pd.visibleExtent > peakExtent) peakExtent = pd.visibleExtent;
         // Once we've climbed past 80% of full, we're past the
         // re-expand's peak; further frames must not drop below the
@@ -961,7 +975,7 @@ void main() {
         if (element.evaluate().isEmpty) continue;
         final renderBox =
             element.evaluate().single.renderObject as RenderBox;
-        final pd = renderBox.parentData! as SliverTreeParentData;
+        final pd = _treeParentDataOf(renderBox);
         expect(
           pd.layoutOffset,
           greaterThanOrEqualTo(prevOffset + prevExtent - 0.01),
@@ -979,7 +993,7 @@ void main() {
         if (element.evaluate().isEmpty) continue;
         final renderBox =
             element.evaluate().single.renderObject as RenderBox;
-        final pd = renderBox.parentData! as SliverTreeParentData;
+        final pd = _treeParentDataOf(renderBox);
         expect(
           pd.visibleExtent,
           48.0,

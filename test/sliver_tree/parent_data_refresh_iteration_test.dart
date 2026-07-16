@@ -76,6 +76,74 @@ void main() {
   );
 
   testWidgets(
+    "pure-scroll frame with all mounted children in-cache builds NO "
+    "structural cumulative (audit 5.1)",
+    (tester) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      final scrollController = ScrollController();
+      addTearDown(scrollController.dispose);
+
+      // Large flat tree so a scroll frame has plenty of below-viewport
+      // rows: the refresh loop must not pay an O(N_visible) cumulative
+      // build (with allocation) to service zero off-cache children.
+      controller.setRoots([
+        for (int i = 0; i < 500; i++) TreeNode(key: "r$i", data: "R$i"),
+      ]);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 600,
+              child: CustomScrollView(
+                controller: scrollController,
+                slivers: [
+                  SliverTree<String, String>(
+                    controller: controller,
+                    nodeBuilder: (_, key, depth) =>
+                        SizedBox(height: 48, child: Text(key)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final sliver = tester.renderObject<RenderSliverTree<String, String>>(
+          find.byType(SliverTree<String, String>));
+
+      // Jump deep, then give the post-frame eviction sweep a frame to
+      // release the rows mounted at the old position (they are
+      // legitimately off-cache during the jump frame itself).
+      scrollController.jumpTo(2000.0);
+      await tester.pump();
+      await tester.pump();
+
+      // Pure scroll, small step (no row crosses out of the cache
+      // region): every mounted child is still in-cache, so the refresh
+      // loop must not build the O(N_visible) structural cumulative.
+      scrollController.jumpTo(2010.0);
+      await tester.pump();
+
+      expect(
+        sliver.debugLastParentDataCumulativeBuilds,
+        0,
+        reason: "a pure-scroll frame with every mounted child in-cache "
+            "must not rebuild the O(N_visible) structural cumulative — "
+            "the dominant steady-state cost for large trees",
+      );
+      expect(controller.hasActiveAnimations, isFalse,
+          reason: "sanity: this is a pure-scroll frame");
+    },
+  );
+
+  testWidgets(
     "bound holds under structural churn (insert + collapse + expand)",
     (tester) async {
       final controller = TreeController<String, String>(

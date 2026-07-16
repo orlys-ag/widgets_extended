@@ -61,6 +61,7 @@ class SliverTree<TKey, TData> extends RenderObjectWidget {
     required this.controller,
     required this.nodeBuilder,
     this.maxStickyDepth = 0,
+    this.addRepaintBoundaries = true,
     super.key,
   });
 
@@ -87,6 +88,16 @@ class SliverTree<TKey, TData> extends RenderObjectWidget {
   /// - `2` = roots + their direct children (depths 0–1) stick
   /// - etc.
   final int maxStickyDepth;
+
+  /// Whether to wrap each row in a [RepaintBoundary].
+  ///
+  /// Defaults to true, matching [ListView]/[SliverList] convention: rows
+  /// are translated as whole units during scrolling and slide animations,
+  /// so boundaries let the raster cache reuse each row's display list
+  /// instead of re-recording every visible row on every repaint frame.
+  /// Set to false for rows so trivial that the boundary's layer overhead
+  /// outweighs the caching win.
+  final bool addRepaintBoundaries;
 
   @override
   SliverTreeElement<TKey, TData> createElement() =>

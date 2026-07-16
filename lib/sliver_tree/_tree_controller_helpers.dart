@@ -32,22 +32,34 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   /// Call after inserting (single or bulk) into the visible order.
   void _updateIndicesFrom(int startIndex) {
     _order.reindexFrom(startIndex);
-    _assertIndexConsistency();
+    _assertIndexConsistency(fromIndex: startIndex);
   }
 
   /// Updates indices after removing items that were at [removeIndex].
   /// Removed keys must already have had their reverse-index slot cleared.
   void _updateIndicesAfterRemove(int removeIndex) {
     _order.reindexFrom(removeIndex);
-    _assertIndexConsistency();
+    _assertIndexConsistency(fromIndex: removeIndex);
   }
 
   /// Debug assertion to verify index consistency.
-  void _assertIndexConsistency() {
+  ///
+  /// By default (audit 5.11) only an O(changed-range) order/reverse-index
+  /// agreement check runs for the span the caller just touched — the full
+  /// sweep (whole order walk + full nid-table walks + every animation
+  /// mirror) made N sequential inserts O(N²) in debug and taxed the whole
+  /// widget-test suite on every mutation. The full sweep stays available
+  /// behind [TreeController.debugFullConsistencyChecks], enabled by the
+  /// fuzz/purge suites that exist to exercise it.
+  void _assertIndexConsistency({int fromIndex = 0}) {
     assert(() {
-      _order.debugAssertConsistent();
-      _assertNidRegistryConsistency();
-      _assertAnimationStateConsistency();
+      if (TreeController.debugFullConsistencyChecks) {
+        _order.debugAssertConsistent();
+        _assertNidRegistryConsistency();
+        _assertAnimationStateConsistency();
+      } else {
+        _order.debugAssertSpanIndexed(fromIndex);
+      }
       return true;
     }());
   }
@@ -149,19 +161,15 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     // batch) via its `keyOf(nid) == null` check.
     final allKeysPresent = visibleCount == keys.length;
     if (allKeysPresent && maxIdx >= 0 && maxIdx - minIdx + 1 == visibleCount) {
-      // Contiguous: clear the index first, then remove from the array.
-      for (int i = minIdx; i <= maxIdx; i++) {
-        _order.indexByNid[_order.orderNids[i]] = VisibleOrderBuffer.kNotVisible;
-      }
-      _order.removeRange(minIdx, maxIdx + 1);
-      _updateIndicesAfterRemove(minIdx);
+      // Contiguous: the buffer owns the clear-index + range-remove +
+      // reindex protocol (audit 6.2).
+      _order.removeContiguousRange(minIdx, maxIdx + 1);
+      _assertIndexConsistency(fromIndex: minIdx);
     } else {
-      // Non-contiguous: remove from index, then list, then full rebuild
-      for (final key in keys) {
-        _order.clearIndexOf(key);
-      }
-      _order.removeWhereKeyIn(keys);
-      _rebuildVisibleIndex();
+      // Non-contiguous: the buffer owns the zombie-sweep compaction +
+      // full reindex protocol (audit 6.2).
+      _order.purgeCompact(keys);
+      _assertIndexConsistency();
     }
   }
 
@@ -365,6 +373,40 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       return;
     }
 
+    // Contiguity capture (audit 5.4). Step 2's purge releases the nids
+    // and clears their reverse-index slots, so by Step 3 every key
+    // reports kNotVisible and only the O(N + nidCapacity) sweep
+    // (`removeWhereKeyIn` + `resetIndexAll`) can compact. Capture the
+    // visible indices NOW: when every key in the batch holds a visible
+    // slot and those slots are contiguous — the dominant case, since an
+    // expanded subtree is contiguous in the visible order by
+    // construction — Step 3 can range-remove in O(range + suffix)
+    // instead. Batches with hidden members (collapsed descendants,
+    // possibly holding animation-carved order entries) or gaps keep the
+    // safe sweep.
+    int minIdx = 0;
+    int maxIdx = -1;
+    bool contiguous = false;
+    if (compactOrder) {
+      int visibleCount = 0;
+      int keyCount = 0;
+      minIdx = _order.length;
+      for (final key in keysSet) {
+        keyCount++;
+        final idx = _order.indexOf(key);
+        if (idx == VisibleOrderBuffer.kNotVisible) {
+          continue;
+        }
+        visibleCount++;
+        if (idx < minIdx) minIdx = idx;
+        if (idx > maxIdx) maxIdx = idx;
+      }
+      contiguous =
+          visibleCount == keyCount &&
+          maxIdx >= 0 &&
+          maxIdx - minIdx + 1 == visibleCount;
+    }
+
     // Step 1: cache decrement (first surviving ancestor walk). Must run
     // before unlink/purge because the bump walk reads _parentByNid, and
     // _purgeNodeData → _releaseNid clears it. Uses the explicit
@@ -404,14 +446,26 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       _purgeNodeData(key);
     }
 
-    // Step 3: order compaction. _removeFromVisibleOrder handles released
-    // nids correctly (its non-contiguous path sweeps zombies via
-    // removeWhereKeyIn's null-key check). Suppress per-nid callbacks
-    // because the cache was already decremented in Step 1.
+    // Step 3: order compaction. Suppress per-nid callbacks because the
+    // cache was already decremented in Step 1.
     if (compactOrder) {
-      _order.runWithSubtreeSizeUpdatesSuppressed(() {
-        _removeFromVisibleOrder(keysSet);
-      });
+      if (contiguous) {
+        // Range fast path (audit 5.4): the purge above already cleared
+        // each released nid's reverse-index slot (the buffer method's
+        // own clears are harmless re-writes), so this is O(range +
+        // suffix) — no full sweep, no O(nidCapacity) reverse-index reset.
+        _order.runWithSubtreeSizeUpdatesSuppressed(() {
+          _order.removeContiguousRange(minIdx, maxIdx + 1);
+        });
+        _assertIndexConsistency(fromIndex: minIdx);
+      } else {
+        // _removeFromVisibleOrder handles released nids correctly (its
+        // non-contiguous path sweeps zombies via removeWhereKeyIn's
+        // null-key check).
+        _order.runWithSubtreeSizeUpdatesSuppressed(() {
+          _removeFromVisibleOrder(keysSet);
+        });
+      }
     }
   }
 

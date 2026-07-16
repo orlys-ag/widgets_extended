@@ -21,6 +21,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
+  // These suites exist to exercise the cross-structure invariants -
+  // run the full consistency sweep after every mutation (audit 5.11).
+  TreeController.debugFullConsistencyChecks = true;
   testWidgets("removing a subtree with multiple visible descendants keeps "
       "_visibleSubtreeSizeByNid consistent across exit-animation finalize",
       (tester) async {

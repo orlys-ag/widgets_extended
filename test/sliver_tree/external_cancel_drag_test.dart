@@ -126,6 +126,67 @@ void main() {
   );
 
   testWidgets(
+    "a released first gesture must not commit a DIFFERENT drag session "
+    "started after an external cancel",
+    (tester) async {
+      final h = await _mount(tester);
+
+      // Finger 1 long-press-drags row "a".
+      final rowACenter = tester.getCenter(find.byKey(const ValueKey("row-a")));
+      final gesture = await tester.startGesture(rowACenter);
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      await gesture.moveBy(const Offset(0, 10));
+      await tester.pump();
+      expect(h.reorder.draggedKey, "a");
+
+      // External cancel — clears the controller session, but the ROW's
+      // local _isDraggingThisRow flag is untouched.
+      h.reorder.cancelDrag();
+      await tester.pump();
+      expect(h.reorder.isDragging, isFalse);
+
+      // A second session starts (e.g. a second finger long-pressed row
+      // "b"). Hover row "c" so the session resolves a real drop target.
+      final render = tester.renderObject<RenderSliverTree<String, String>>(
+        find.byType(SliverTree<String, String>),
+      );
+      final scrollable = tester.state<ScrollableState>(
+        find.byType(Scrollable),
+      );
+      h.reorder.startDrag(
+        key: "b",
+        renderObject: render,
+        scrollable: scrollable,
+        indentPerDepth: 24.0,
+        pointerGlobal:
+            tester.getCenter(find.byKey(const ValueKey("row-c"))),
+      );
+      expect(h.reorder.draggedKey, "b");
+      expect(h.reorder.currentTarget, isNotNull,
+          reason: "setup: session 2 must have a live drop target so a "
+              "stale forwarded endDrag would visibly commit it");
+      final orderBefore = List.of(h.tree.visibleNodes);
+
+      // Finger 1 releases. Row "a"'s _endDrag must verify ownership
+      // (draggedKey == its key) and NOT forward endDrag — otherwise it
+      // commits SESSION 2's target and tears down its indicator.
+      await gesture.up();
+      await tester.pump();
+
+      expect(h.reorder.isDragging, isTrue,
+          reason: "session 2 must survive the release of the stale "
+              "first gesture");
+      expect(h.reorder.draggedKey, "b");
+      expect(h.tree.visibleNodes, orderBefore,
+          reason: "session 2's target must not be committed by the "
+              "unrelated released gesture");
+
+      h.reorder.cancelDrag();
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
     "controller swap moves listener to the new controller",
     (tester) async {
       // Sanity test for the didUpdateWidget swap path.

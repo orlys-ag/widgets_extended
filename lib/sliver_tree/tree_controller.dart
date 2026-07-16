@@ -79,12 +79,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Duration for expand/collapse animations.
   ///
-  /// Mutable at runtime. Setting a new value propagates to every in-flight
-  /// [AnimationController] (operation groups and the bulk group) so their
-  /// remaining progress plays at the new rate. The per-node standalone
-  /// ticker re-reads this on every tick, so its animations adjust on the
-  /// next frame. Newly started animations pick up the new duration at
-  /// construction time.
+  /// Mutable at runtime. The new value is written onto every in-flight
+  /// [AnimationController] (operation groups and the bulk group), but a
+  /// running simulation is **not** re-timed — the controller reads
+  /// `duration` at the next `forward()`/`reverse()`, so in-flight groups
+  /// finish at their old rate and the new duration applies from the next
+  /// start. The per-node standalone ticker re-reads this on every tick,
+  /// so its animations adjust rate on the next frame; setting
+  /// [Duration.zero] makes all in-flight standalone animations complete
+  /// (finalize) on the next tick. Newly started animations pick up the
+  /// new duration at construction time.
   Duration get animationDuration => _animationDuration;
   set animationDuration(Duration value) {
     if (value == _animationDuration) {
@@ -319,6 +323,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// the four `purge_*` tests, etc.). After Plan B the assertion lives
   /// inside [VisibleOrderBuffer.debugAssertSubtreeSizeConsistent].
   @visibleForTesting
+  /// Number of full reverse-index resets (O(nidCapacity) memsets) the
+  /// order buffer has performed. Perf oracle for the contiguous-removal
+  /// fast path: incremental mutations must not trigger one.
+  @visibleForTesting
+  int get debugOrderResetIndexAllCount => _order.debugResetIndexAllCount;
+
+  /// Opt-in: run the FULL cross-structure consistency sweep (whole order
+  /// walk, nid-table walks, every animation mirror) after every
+  /// incremental order mutation in debug builds. Off by default — the
+  /// sweep makes N sequential inserts O(N²) in debug (audit 5.11); the
+  /// default is an O(changed-range) order/reverse-index agreement check.
+  /// The fuzz/purge suites (which exist to exercise the invariants)
+  /// enable this.
+  static bool debugFullConsistencyChecks = false;
+
   void debugAssertVisibleSubtreeSizeConsistency() =>
       _order.debugAssertSubtreeSizeConsistent();
 
@@ -364,6 +383,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     onOperationGroupStatus: _onOperationGroupStatusChange,
     onBulkAnimationStatus: _onBulkAnimationComplete,
     onStandaloneTickComplete: _onStandaloneTickComplete,
+    // Single-source of the unmeasured-row fallback (audit 6.1) — the
+    // animator layers can't import this class, so the constant is
+    // injected instead of mirrored.
+    defaultExtent: defaultExtent,
   );
 
   /// Public read-only accessor for the animation subsystem. Render-layer
@@ -708,9 +731,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   int get structureGeneration => _structureGeneration;
 
   /// Scroll orchestrator. Owns the full-extent prefix-sum cache plus the
+  /// Whether [_scroll]'s lazy initializer has run. Lets [dispose] tear
+  /// down an in-flight animated scroll without instantiating the
+  /// orchestrator just to dispose it.
+  bool _scrollCreated = false;
+
   /// four scroll-API methods. See [ScrollOrchestrator].
-  late final ScrollOrchestrator<TKey, TData> _scroll =
-      ScrollOrchestrator<TKey, TData>(controller: this, vsync: _vsync);
+  late final ScrollOrchestrator<TKey, TData> _scroll = () {
+    _scrollCreated = true;
+    return ScrollOrchestrator<TKey, TData>(controller: this, vsync: _vsync);
+  }();
 
   /// Cached result of [computeFirstAnimatingVisibleIndex]. Depends on both
   /// animation state and the visible order, so the cache key combines
@@ -847,10 +877,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [getEstimatedExtent] that avoids the [TKey]→nid hash. Caller must
   /// guarantee [nid] is live and within range.
   double getEstimatedExtentNid(int nid) {
-    // Read directly from the coordinator's full-extent cache — the key
-    // → nid hash is already done by the caller.
-    final key = _nids.keyOfUnchecked(nid);
-    return _anim.fullExtentOf(key) ?? defaultExtent;
+    // Direct nid-indexed read — the store is nid-keyed, so no key
+    // resolution (and no string hash) is involved at all.
+    return _anim.fullExtentOfNid(nid) ?? defaultExtent;
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -1302,8 +1331,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// - [AncestorExpansionMode.none]: ancestors are not expanded. If any
   ///   ancestor of [key] is collapsed, returns false without scrolling.
   /// - [AncestorExpansionMode.immediate] (default): ancestors are expanded
-  ///   synchronously (no animation) before the scroll begins, so layout is
-  ///   already settled when [scrollController] starts moving.
+  ///   synchronously (no animation) before the scroll begins. When this
+  ///   actually expanded something, the method waits one frame before
+  ///   computing the target so the enlarged sliver lays out first —
+  ///   otherwise the scroll would clamp against the pre-expansion
+  ///   `maxScrollExtent` and stop short of the target row.
   /// - [AncestorExpansionMode.animated]: ancestors animate open while the
   ///   scroll runs concurrently. Each animation tick the scroll target is
   ///   re-derived from the current animated offsets so it stays glued to
@@ -1600,6 +1632,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// If [animate] is true, the node will animate in.
   /// If the node is currently pending deletion (animating out from a previous
   /// remove), the deletion is cancelled and the node animates back in.
+  ///
+  /// [index] is the position among **live** root siblings — exiting
+  /// (pending-deletion) roots are skipped, matching [liveRootKeys] /
+  /// [getIndexInParent] and the input space of [reorderRoots].
   void insertRoot(
     TreeNode<TKey, TData> node, {
     int? index,
@@ -1622,8 +1658,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (oldParent != null) {
         _childListOf(oldParent)?.remove(node.key);
         _setParentKey(node.key, null);
-        final effectiveIndex =
-            index ?? (comparator != null ? _sortedIndex(_roots, node) : null);
+        // Explicit index is live-space; the comparator path already
+        // returns a full-space position.
+        final effectiveIndex = index != null
+            ? _liveIndexToFullInsertIndex(_roots, index)
+            : (comparator != null ? _sortedIndex(_roots, node) : null);
         if (effectiveIndex != null && effectiveIndex < _roots.length) {
           _roots.insert(effectiveIndex, node.key);
         } else {
@@ -1632,12 +1671,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _refreshSubtreeDepths(node.key, 0);
       } else if (index != null) {
         // Already a root — honor an explicitly requested index by
-        // relocating within _roots.
+        // relocating within _roots. The index is live-space; convert
+        // after the removal so the conversion sees the list the insert
+        // will apply to.
         final current = _roots.indexOf(node.key);
         if (current != -1) {
           _roots.removeAt(current);
-          final clamped = index.clamp(0, _roots.length);
-          _roots.insert(clamped, node.key);
+          final fullIndex = _liveIndexToFullInsertIndex(_roots, index);
+          _roots.insert(fullIndex, node.key);
         }
       }
       _cancelDeletion(
@@ -1692,22 +1733,43 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         return;
       }
       final currentRootIndex = _roots.indexOf(node.key);
-      final desiredIndex =
-          index ?? (comparator != null ? _sortedIndex(_roots, node) : null);
-      final wantsRelocate =
-          desiredIndex != null &&
-          desiredIndex != currentRootIndex &&
-          // Appending is a no-op if already at the end.
-          !(currentRootIndex == _roots.length - 1 &&
-              desiredIndex >= _roots.length);
+      // Explicit index is live-space (compare live-vs-live and convert at
+      // the insert); the comparator path stays full-space end to end.
+      final int? sortedDesired = index == null && comparator != null
+          ? _sortedIndex(_roots, node)
+          : null;
+      final bool wantsRelocate;
+      if (index != null) {
+        final currentLiveIndex = getIndexInParent(node.key);
+        final liveCount = _liveCountOf(_roots);
+        wantsRelocate =
+            index != currentLiveIndex &&
+            // Appending is a no-op if already live-last.
+            !(currentLiveIndex == liveCount - 1 && index >= liveCount);
+      } else if (sortedDesired != null) {
+        wantsRelocate =
+            sortedDesired != currentRootIndex &&
+            // Appending is a no-op if already at the end.
+            !(currentRootIndex == _roots.length - 1 &&
+                sortedDesired >= _roots.length);
+      } else {
+        wantsRelocate = false;
+      }
       if (wantsRelocate) {
         _roots.removeAt(currentRootIndex);
-        final clamped = desiredIndex.clamp(0, _roots.length);
-        _roots.insert(clamped, node.key);
+        final insertAt = index != null
+            ? _liveIndexToFullInsertIndex(_roots, index)
+            : sortedDesired!.clamp(0, _roots.length);
+        _roots.insert(insertAt, node.key);
         _markVisibleOrderDirty();
+        // Relocation changes row positions (and the payload was
+        // overwritten) — structural refresh, which subsumes the data
+        // channel's row refresh.
+        _notifyStructural(affectedKeys: <TKey>{node.key});
       }
-      // Data payload for node.key was just overwritten — rebuild its row.
-      _notifyStructural(affectedKeys: <TKey>{node.key});
+      // Data-only update: the node-data channel above already refreshed
+      // the row — matching updateNode's contract. Firing a structural
+      // notification too refreshed the same row twice (audit 6.6).
       return;
     }
 
@@ -1719,9 +1781,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _setDepthKey(node.key, 0);
     _setExpandedKey(node.key, false);
 
-    // Add to roots list
-    final effectiveIndex =
-        index ?? (comparator != null ? _sortedIndex(_roots, node) : null);
+    // Add to roots list. Explicit index is live-space; the comparator
+    // path already returns a full-space position.
+    final effectiveIndex = index != null
+        ? _liveIndexToFullInsertIndex(_roots, index)
+        : (comparator != null ? _sortedIndex(_roots, node) : null);
     // Compute visible insert position BEFORE modifying _roots, since
     // _calculateRootInsertIndex reads _roots[effectiveIndex].
     final visibleInsertIndex =
@@ -1761,6 +1825,57 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return idx == VisibleOrderBuffer.kNotVisible ? _order.length : idx;
   }
 
+  /// Full-list insertion position such that, after insertion, the node sits
+  /// at [liveIndex] among live (non-pending-deletion) entries.
+  ///
+  /// This is the write-boundary conversion for the package's single public
+  /// index space: every `index` parameter on [insertRoot], [insert], and
+  /// [moveNode] is live-space (matching [getIndexInParent],
+  /// [getLiveChildren], [liveRootKeys], and the reorder APIs), while the
+  /// underlying sibling lists still contain pending-deletion (exiting)
+  /// entries.
+  ///
+  /// Returns the full-list index of the live entry currently at live
+  /// position [liveIndex] — the insert lands directly above that live
+  /// sibling, so intervening exiting rows stay above the new node (matching
+  /// drop-indicator semantics) — or `fullList.length` when [liveIndex] is
+  /// at or past the live count. O(1) when no pending deletions exist;
+  /// O(list) otherwise.
+  int _liveIndexToFullInsertIndex(List<TKey> fullList, int liveIndex) {
+    if (_anim.pendingDeletionCount == 0) {
+      return liveIndex.clamp(0, fullList.length);
+    }
+    if (liveIndex < 0) {
+      liveIndex = 0;
+    }
+    int live = 0;
+    for (int i = 0; i < fullList.length; i++) {
+      if (_isPendingDeletion(fullList[i])) {
+        continue;
+      }
+      if (live == liveIndex) {
+        return i;
+      }
+      live++;
+    }
+    return fullList.length;
+  }
+
+  /// Number of live (non-pending-deletion) entries in [fullList]. O(1)
+  /// when no pending deletions exist anywhere; O(list) otherwise.
+  int _liveCountOf(List<TKey> fullList) {
+    if (_anim.pendingDeletionCount == 0) {
+      return fullList.length;
+    }
+    int count = 0;
+    for (final k in fullList) {
+      if (!_isPendingDeletion(k)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   /// Fast-path equality check for [setChildren]. Returns true iff the
   /// new list exactly matches the existing child list — same keys in
   /// the same order, same data values, and no pending-deletion children
@@ -1794,12 +1909,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// descendants are purged from all data structures first.
   void setChildren(TKey parentKey, List<TreeNode<TKey, TData>> children) {
     assert(_hasKey(parentKey), 'Parent node $parentKey not found');
-    assert(
-      !_isPendingDeletion(parentKey),
-      'Cannot setChildren on $parentKey while it is animating out '
-      '(pending deletion). The parent will be purged when its exit animation '
-      'completes, leaving the new children orphaned.',
-    );
+    // Runtime check (not just an assert) so release builds also reject
+    // this rather than silently corrupting state: children set under a
+    // mid-exit parent survive the parent's purge with dangling parent
+    // nids and leak their registry entries. Mirrors moveNode's policy.
+    if (_isPendingDeletion(parentKey)) {
+      throw StateError(
+        "Cannot setChildren on $parentKey while it is animating out "
+        "(pending deletion). The parent will be purged when its exit "
+        "animation completes, leaving the new children orphaned.",
+      );
+    }
     final seen = <TKey>{};
     for (final child in children) {
       if (!seen.add(child.key)) {
@@ -1936,6 +2056,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Inserts a new node as a child of the given parent.
   ///
   /// If [animate] is true, the node will animate in.
+  ///
+  /// [index] is the position among **live** siblings — exiting
+  /// (pending-deletion) siblings are skipped, matching [getLiveChildren] /
+  /// [getIndexInParent] and the input space of [reorderChildren].
+  ///
+  /// Throws a [StateError] if [parentKey] is pending deletion (animating
+  /// out): the parent will be purged when its exit animation completes,
+  /// which would leave the new child orphaned.
   void insert({
     required TKey parentKey,
     required TreeNode<TKey, TData> node,
@@ -1954,12 +2082,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // (`_adoptKey`, `siblings.add`, etc.) so the rebuild sees pre-mutation
     // child lists and doesn't try to incorporate the new node twice.
     _ensureVisibleOrder();
-    assert(
-      !_isPendingDeletion(parentKey),
-      "Cannot insert under $parentKey while it is animating out "
-      "(pending deletion). The parent will be purged when its exit animation "
-      "completes, leaving the new child orphaned.",
-    );
+    // Runtime check (not just an assert) so release builds also reject
+    // this rather than silently corrupting state: a child inserted under
+    // a mid-exit parent survives the parent's purge with a dangling
+    // parent nid and leaks its registry entry. Mirrors moveNode's policy.
+    if (_isPendingDeletion(parentKey)) {
+      throw StateError(
+        "Cannot insert under $parentKey while it is animating out "
+        "(pending deletion). The parent will be purged when its exit "
+        "animation completes, leaving the new child orphaned.",
+      );
+    }
     // If the node is pending deletion, cancel the deletion
     if (_isPendingDeletion(node.key)) {
       // If the pending-deletion node lives under a different parent (or is
@@ -1975,8 +2108,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
         _setParentKey(node.key, parentKey);
         final siblings = _childListOrCreate(parentKey);
-        final effectiveIndex =
-            index ?? (comparator != null ? _sortedIndex(siblings, node) : null);
+        // Explicit index is live-space; the comparator path already
+        // returns a full-space position.
+        final effectiveIndex = index != null
+            ? _liveIndexToFullInsertIndex(siblings, index)
+            : (comparator != null ? _sortedIndex(siblings, node) : null);
         if (effectiveIndex != null && effectiveIndex < siblings.length) {
           siblings.insert(effectiveIndex, node.key);
         } else {
@@ -1986,13 +2122,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _refreshSubtreeDepths(node.key, parentDepth + 1);
       } else if (index != null) {
         // Same parent — honor an explicitly requested index by relocating
-        // within the sibling list.
+        // within the sibling list. The index is live-space; convert after
+        // the removal so the conversion sees the list the insert will
+        // apply to.
         final siblings = _childListOrCreate(parentKey);
         final current = siblings.indexOf(node.key);
         if (current != -1) {
           siblings.removeAt(current);
-          final clamped = index.clamp(0, siblings.length);
-          siblings.insert(clamped, node.key);
+          final fullIndex = _liveIndexToFullInsertIndex(siblings, index);
+          siblings.insert(fullIndex, node.key);
         }
       }
       _cancelDeletion(
@@ -2044,21 +2182,42 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       final siblings = _childListOrCreate(parentKey);
       final currentIndex = siblings.indexOf(node.key);
-      final desiredIndex =
-          index ?? (comparator != null ? _sortedIndex(siblings, node) : null);
-      final wantsRelocate =
-          desiredIndex != null &&
-          desiredIndex != currentIndex &&
-          !(currentIndex == siblings.length - 1 &&
-              desiredIndex >= siblings.length);
+      // Explicit index is live-space (compare live-vs-live and convert at
+      // the insert); the comparator path stays full-space end to end.
+      final int? sortedDesired = index == null && comparator != null
+          ? _sortedIndex(siblings, node)
+          : null;
+      final bool wantsRelocate;
+      if (index != null) {
+        final currentLiveIndex = getIndexInParent(node.key);
+        final liveCount = _liveCountOf(siblings);
+        wantsRelocate =
+            index != currentLiveIndex &&
+            // Appending is a no-op if already live-last.
+            !(currentLiveIndex == liveCount - 1 && index >= liveCount);
+      } else if (sortedDesired != null) {
+        wantsRelocate =
+            sortedDesired != currentIndex &&
+            !(currentIndex == siblings.length - 1 &&
+                sortedDesired >= siblings.length);
+      } else {
+        wantsRelocate = false;
+      }
       if (wantsRelocate) {
         siblings.removeAt(currentIndex);
-        final clamped = desiredIndex.clamp(0, siblings.length);
-        siblings.insert(clamped, node.key);
+        final insertAt = index != null
+            ? _liveIndexToFullInsertIndex(siblings, index)
+            : sortedDesired!.clamp(0, siblings.length);
+        siblings.insert(insertAt, node.key);
         _markVisibleOrderDirty();
+        // Relocation changes row positions (and the payload was
+        // overwritten) — structural refresh, which subsumes the data
+        // channel's row refresh.
+        _notifyStructural(affectedKeys: <TKey>{node.key});
       }
-      // Data payload for node.key was just overwritten — rebuild its row.
-      _notifyStructural(affectedKeys: <TKey>{node.key});
+      // Data-only update: the node-data channel above already refreshed
+      // the row — matching updateNode's contract. Firing a structural
+      // notification too refreshed the same row twice (audit 6.6).
       return;
     }
     final parentDepth = _depthOfKey(parentKey);
@@ -2069,11 +2228,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _setChildList(node.key, []);
     _setDepthKey(node.key, parentDepth + 1);
     _setExpandedKey(node.key, false);
-    // Add to parent's children
+    // Add to parent's children. Explicit index is live-space; the
+    // comparator path already returns a full-space position.
     final siblings = _childListOrCreate(parentKey);
     final parentHadChildren = siblings.isNotEmpty;
-    final effectiveIndex =
-        index ?? (comparator != null ? _sortedIndex(siblings, node) : null);
+    final effectiveIndex = index != null
+        ? _liveIndexToFullInsertIndex(siblings, index)
+        : (comparator != null ? _sortedIndex(siblings, node) : null);
     if (effectiveIndex != null && effectiveIndex < siblings.length) {
       siblings.insert(effectiveIndex, node.key);
     } else {
@@ -2314,7 +2475,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// If [newParentKey] is null, the node becomes a root. If [index] is
   /// provided, the node is inserted at that position among its new siblings;
-  /// otherwise it is appended.
+  /// otherwise it is appended. [index] is the position among **live**
+  /// siblings — exiting (pending-deletion) siblings are skipped, matching
+  /// [getIndexInParent] / [getLiveChildren] and the space
+  /// `TreeReorderController` computes drop indices in.
   ///
   /// The node's subtree (children, expansion state, and measured extents) is
   /// preserved. Any in-flight enter/exit animations on the moved subtree are
@@ -2361,11 +2525,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       throw StateError("Cannot move $key onto itself");
     }
     // Reparenting under a descendant would form a cycle; check at runtime
-    // (release builds skip the assert below).
-    if (newParentKey != null && _getDescendants(key).contains(newParentKey)) {
-      throw StateError(
-        "Cannot move $key under its own descendant $newParentKey",
-      );
+    // (release builds skip the assert below). O(depth) ancestor walk from
+    // the new parent — materializing every descendant
+    // (`_getDescendants(key).contains(...)`) cost O(subtree) time and
+    // allocation per move.
+    if (newParentKey != null) {
+      TKey? cycleCursor = newParentKey;
+      while (cycleCursor != null) {
+        if (cycleCursor == key) {
+          throw StateError(
+            "Cannot move $key under its own descendant $newParentKey",
+          );
+        }
+        cycleCursor = _parentKeyOfKey(cycleCursor);
+      }
     }
     // Reparenting under a pending-deletion node would orphan the moved
     // subtree when the new parent's exit animation finalizes:
@@ -2422,13 +2595,35 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // so an entry-phantom path is the right choice.
     final wasVisible = animate && _isStructurallyVisible(key);
 
+    // Lazily computed, shared expansion-gated flatten of the moved
+    // subtree (audit 5.5). The phantom-anchor, exit-anchor, and
+    // affected-keys consumers below all need the identical set — the
+    // subtree's INTERNAL structure (children lists, expansion flags) is
+    // invariant across the move; only key's parent pointer and the
+    // subtree's depths change — so one walk serves whichever of the
+    // three fire instead of up to three full walks per move.
+    List<TKey>? movedSubtreeScratch;
+    List<TKey> movedSubtree() {
+      return movedSubtreeScratch ??= _flattenSubtree(key, includeRoot: true);
+    }
+
     // First-wins staging fan-out. Every attached sliver render object's
     // beginSlideBaseline is invoked. Inside runBatch (or for adjacent
     // same-frame moveNode calls), the first such call wins; subsequent
     // calls no-op at the host level. The single staged baseline is
     // consumed by the next layout post-mutation.
+    //
+    // The participation result gates the phantom-anchor staging below
+    // (and the exit-anchor staging further down): with no participating
+    // host, nothing ever drains the anchor maps, and a LATER animated
+    // mutation's consume would apply anchors recorded for this
+    // long-finished move to the wrong slide cycle.
+    bool hostParticipating = false;
     if (animate) {
-      _stageSlideBaselineOnHosts(duration: slideDuration, curve: slideCurve);
+      hostParticipating = _stageSlideBaselineOnHosts(
+        duration: slideDuration,
+        curve: slideCurve,
+      );
 
       // Phantom-anchor for collapsed → visible reparenting:
       // If the moved subtree's root is currently NOT in the visible order
@@ -2442,7 +2637,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // painted positions during baseline consumption — anchor's painted
       // position when it's on-screen, viewport edge otherwise — so the
       // emerging row visually slides "out from behind" its old parent.
-      if (!wasVisible) {
+      if (!wasVisible && hostParticipating) {
         TKey? cursor = _parentKeyOfKey(key);
         while (cursor != null && !_isStructurallyVisible(cursor)) {
           cursor = _parentKeyOfKey(cursor);
@@ -2452,7 +2647,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           // Apply the same anchor to the entire moved subtree — children
           // inherit the parent's anchor since they were all hidden inside
           // the same collapsed ancestor.
-          for (final k in _flattenSubtree(key, includeRoot: true)) {
+          for (final k in movedSubtree()) {
             _pendingPhantomAnchors![k] = cursor;
           }
         }
@@ -2487,21 +2682,25 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _roots.remove(key);
     }
 
-    // Insert into new parent's child list (or roots).
+    // Insert into new parent's child list (or roots). Explicit index is
+    // live-space (matching the live-space no-op guard above); the
+    // comparator path already returns a full-space position.
     _setParentKey(key, newParentKey);
     final node = _dataOf(key)!;
     if (newParentKey != null) {
       final siblings = _childListOrCreate(newParentKey);
-      final effectiveIndex =
-          index ?? (comparator != null ? _sortedIndex(siblings, node) : null);
+      final effectiveIndex = index != null
+          ? _liveIndexToFullInsertIndex(siblings, index)
+          : (comparator != null ? _sortedIndex(siblings, node) : null);
       if (effectiveIndex != null && effectiveIndex < siblings.length) {
         siblings.insert(effectiveIndex, key);
       } else {
         siblings.add(key);
       }
     } else {
-      final effectiveIndex =
-          index ?? (comparator != null ? _sortedIndex(_roots, node) : null);
+      final effectiveIndex = index != null
+          ? _liveIndexToFullInsertIndex(_roots, index)
+          : (comparator != null ? _sortedIndex(_roots, node) : null);
       if (effectiveIndex != null && effectiveIndex < _roots.length) {
         _roots.insert(effectiveIndex, key);
       } else {
@@ -2544,7 +2743,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // slide DESTINATION, retain a ghost render box, and paint the
     // sliding row clipped to "outside the anchor" so it visually
     // disappears INTO the new parent.
-    if (animate && wasVisible && !_isStructurallyVisible(key)) {
+    if (animate &&
+        hostParticipating &&
+        wasVisible &&
+        !_isStructurallyVisible(key)) {
       TKey? cursor = newParentKey;
       while (cursor != null && !_isStructurallyVisible(cursor)) {
         cursor = _parentKeyOfKey(cursor);
@@ -2558,7 +2760,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // the moved subtree's expanded structure is preserved through
         // moveNode, so the same set of nodes was visible before and is
         // hidden after.
-        for (final k in _flattenSubtree(key, includeRoot: true)) {
+        for (final k in movedSubtree()) {
           _pendingExitPhantomAnchors![k] = cursor;
         }
       }
@@ -2567,10 +2769,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final affected = <TKey>{};
     // If the moved subtree's depth changed, every row in it must rebuild
     // — nodeBuilder receives `depth` as an argument and indentation scales
-    // with it. Use _flattenSubtree so we enumerate the currently-expanded
-    // rows (the only ones that can be mounted).
+    // with it. The shared flatten enumerates the currently-expanded rows
+    // (the only ones that can be mounted).
     if (newDepth != oldDepth) {
-      affected.addAll(_flattenSubtree(key, includeRoot: true));
+      affected.addAll(movedSubtree());
     }
     // Old parent may have just lost its last child (hasChildren true → false).
     if (oldParent != null) {
@@ -2832,16 +3034,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       if (insertOffset > 0) {
-        for (int i = minInsertIndex; i < _order.length; i++) {
-          _order.setIndexByNid(_order.orderNids[i], i);
-        }
-        _assertIndexConsistency();
+        // The former inline loop was exactly a suffix reindex (audit 6.2).
+        _updateIndicesFrom(minInsertIndex);
       }
     }
 
     _structureGeneration++;
     group.controller.forward();
-    _anim.standalone.ensureRunning();
+    // Path 2 creates no standalone states of its own — only keep the
+    // standalone ticker alive when states from other sources exist
+    // (audit 5.6: an ungated start costs one wasted start/stop frame
+    // per operation).
+    if (_anim.standalone.hasAny) {
+      _anim.standalone.ensureRunning();
+    }
     _notifyStructural(affectedKeys: <TKey>{key});
   }
 
@@ -2966,7 +3172,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     group.controller.reverse();
-    _anim.standalone.ensureRunning();
+    // See the matching gate in the expand path (audit 5.6).
+    if (_anim.standalone.hasAny) {
+      _anim.standalone.ensureRunning();
+    }
     _notifyStructural(affectedKeys: <TKey>{key});
   }
 
@@ -2984,10 +3193,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Uses batch operations for better performance with large trees.
   void expandAll({bool animate = true, int? maxDepth}) {
     if (animationDuration == Duration.zero) animate = false;
+    // Flush any pending visible-order rebuild from a prior in-batch mutator
+    // (moveNode, reorderRoots, reorderChildren, cancelDeletion, …). The
+    // collection loop below classifies children via `_order.contains`;
+    // inside a [runBatch] the order still reflects state at batch entry,
+    // so a child whose visibility was changed by an earlier in-batch
+    // mutation would be misclassified — omitted from nodesToShow (pops in
+    // at full extent, never joins the bulk group). Same pattern as
+    // [insert] / [expand] / [collapse].
+    _ensureVisibleOrder();
     // Collect all nodes to expand, nodes to show, and nodes currently exiting
     final nodesToExpand = <TKey>[];
     final nodesToShow = <TKey>[];
     final nodesToReverseExit = <TKey>[];
+    // Scratch for the expansion-gated flatten harvest below.
+    final flattenScratch = <TKey>[];
 
     // Iterative DFS. Depth is recomputed per-visit via [_depthOfKey]
     // (matching the original recursive implementation) so we do not
@@ -3013,7 +3233,27 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         nodesToExpand.add(key);
         for (final childId in children) {
           if (!_order.contains(childId)) {
-            nodesToShow.add(childId);
+            // Harvest the child plus everything reachable through
+            // already-expanded interior nodes: a hidden node B whose own
+            // expansion flag stayed true through an ancestor collapse
+            // becomes visible together with its children when [key]
+            // expands. The DFS below only harvests at nodes it flips
+            // (already-expanded children are never re-pushed as
+            // nodesToExpand, and depth-limited nodes are not descended
+            // into), so without this flatten those revealed descendants
+            // would render at full extent from frame one while everything
+            // around them animates — expand(key:) on the identical
+            // structure animates the whole revealed subtree.
+            flattenScratch.clear();
+            _flattenSubtreeInto(childId, flattenScratch, includeRoot: true);
+            for (final k in flattenScratch) {
+              // Preserve the child-level invariants: skip nodes already
+              // in the order (e.g. still animating an exit under this
+              // collapsed ancestor) and pending-deletion nodes.
+              if (!_order.contains(k) && !_isPendingDeletion(k)) {
+                nodesToShow.add(k);
+              }
+            }
           }
         }
       }
@@ -3120,6 +3360,35 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Reverse the controller direction
         _activeBulkGroup!.controller.forward();
         _bumpBulkGen();
+      } else if (_activeBulkGroup != null &&
+          _activeBulkGroup!.members.isNotEmpty) {
+        // Continuation: a bulk expand is already mid-flight (members
+        // present, nothing pending removal). Keep the group — existing
+        // members continue from their current extent. Creating a fresh
+        // group here would dispose the in-flight one and pop every
+        // half-expanded member to full extent in a single frame.
+        //
+        // Genuinely NEW nodes must NOT join the mid-flight group (they
+        // would pop from 0 to `full * currentValue` on join); route them
+        // through standalone enter animations instead — the same policy
+        // the reverse branch applies to nodesToReverseExit.
+        for (final key in nodesToReverseExit) {
+          if (!_hasOperationGroup(key)) {
+            _startStandaloneEnterAnimation(key);
+          }
+        }
+        for (final key in nodesToShow) {
+          if (_order.contains(key) &&
+              !_hasOperationGroup(key) &&
+              !_activeBulkGroup!.members.contains(key)) {
+            final st = _standaloneAt(key);
+            if (st != null && st.type == AnimationType.entering) {
+              continue;
+            }
+            _startStandaloneEnterAnimation(key);
+          }
+        }
+        _bumpBulkGen();
       } else {
         // Create fresh group via the BulkAnimator (auto-disposes any
         // prior). All listener wiring happens inside createGroup.
@@ -3161,6 +3430,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Uses batch operations for better performance with large trees.
   void collapseAll({bool animate = true, int? maxDepth}) {
     if (animationDuration == Duration.zero) animate = false;
+    // Flush any pending visible-order rebuild from a prior in-batch mutator.
+    // `_getVisibleDescendants` below reads `_order.contains`; inside a
+    // [runBatch] the order still reflects state at batch entry, so a node
+    // made visible by an earlier in-batch mutation would be missed —
+    // never joining the bulk group and popping out in one frame. Same
+    // pattern as [insert] / [expand] / [collapse].
+    _ensureVisibleOrder();
     // Collect all expanded nodes and their visible descendants
     final nodesToCollapse = <TKey>[];
     final nodesToHide = <TKey>[];
@@ -3278,6 +3554,31 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
         // Reverse the controller direction
         _activeBulkGroup!.controller.reverse();
+        _bumpBulkGen();
+      } else if (_activeBulkGroup != null &&
+          _activeBulkGroup!.pendingRemoval.isNotEmpty) {
+        // Continuation: a bulk collapse is already mid-flight. Keep the
+        // group — existing members continue from their current extent.
+        // Creating a fresh group at value 1.0 here (e.g. on a double-tap
+        // of a "collapse all" button) would dispose the in-flight one and
+        // snap every half-collapsed row back to full extent for a frame.
+        //
+        // Genuinely NEW nodes must NOT join the mid-flight group (they
+        // would jump straight to `full * currentValue`); route them
+        // through standalone exit animations instead.
+        for (final key in nodesToHide) {
+          if (_isPendingDeletion(key)) continue;
+          if (_hasOperationGroup(key)) continue;
+          if (_activeBulkGroup!.members.contains(key) ||
+              _activeBulkGroup!.pendingRemoval.contains(key)) {
+            continue;
+          }
+          final st = _standaloneAt(key);
+          if (st != null && st.type == AnimationType.exiting) {
+            continue;
+          }
+          _startStandaloneExitAnimation(key);
+        }
         _bumpBulkGen();
       } else {
         // Create fresh group via the BulkAnimator with value=1.0 (collapse
@@ -3458,6 +3759,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   @override
   void dispose() {
+    // Cancel any in-flight animated scroll (its completion loop would
+    // otherwise keep pumping frames and hold an active Ticker through the
+    // vsync State's dispose). Guarded so a never-used orchestrator isn't
+    // instantiated just to be disposed.
+    if (_scrollCreated) {
+      _scroll.dispose();
+    }
     // Break the closure → _order reference wired in _store's initializer
     // cascade so the GC graph is clean even if something holds a stale
     // _store reference past dispose. No-op if the wiring never fired.

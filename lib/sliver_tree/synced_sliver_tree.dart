@@ -510,6 +510,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     this.animationCurve = Curves.easeInOut,
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
+    this.addRepaintBoundaries = true,
     super.key,
   }) : _mode = _SyncedSliverTreeMode.tree,
        _tree = tree,
@@ -534,6 +535,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     this.animationCurve = Curves.easeInOut,
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
+    this.addRepaintBoundaries = true,
     super.key,
   }) : _mode = _SyncedSliverTreeMode.nodes,
        _tree = null,
@@ -558,6 +560,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     this.animationCurve = Curves.easeInOut,
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
+    this.addRepaintBoundaries = true,
     super.key,
   }) : _mode = _SyncedSliverTreeMode.hierarchy,
        _tree = null,
@@ -582,6 +585,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     this.animationCurve = Curves.easeInOut,
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
+    this.addRepaintBoundaries = true,
     super.key,
   }) : _mode = _SyncedSliverTreeMode.flat,
        _tree = null,
@@ -604,6 +608,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     this.animationCurve = Curves.easeInOut,
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
+    this.addRepaintBoundaries = true,
     super.key,
   }) : _mode = _SyncedSliverTreeMode.snapshot,
        _tree = null,
@@ -649,6 +654,10 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   ///
   /// 0 means no sticky headers. 1 means root nodes stick, etc.
   final int maxStickyDepth;
+
+  /// Whether to wrap each row in a [RepaintBoundary]. Forwarded to
+  /// [SliverTree.addRepaintBoundaries].
+  final bool addRepaintBoundaries;
 
   @override
   State<SyncedSliverTree<TKey, TItem>> createState() =>
@@ -702,9 +711,47 @@ class _SyncedSliverTreeState<TKey, TItem>
         preserveExpansion: widget.preserveExpansion,
       );
       _syncController.initializeTracking();
+      // The fresh sync controller must diff once regardless of input
+      // identity.
+      _sync(animate: true);
+      return;
+    }
+
+    // Identity fast path (audit 2.5): callers routinely rebuild an
+    // ancestor every frame while passing the SAME collection instance —
+    // re-running the full diff (deep map copies, snapshot validation,
+    // full-tree desired walk, per-parent Fenwick) is O(N) UI-thread work
+    // per frame for zero change. Standard Flutter convention applies
+    // (same as ListView.children): mutating the same collection instance
+    // in place requires passing a new instance to be picked up.
+    // Duration/curve/indent propagation above stays unconditional.
+    if (_modeInputsIdentical(oldWidget)) {
+      return;
     }
 
     _sync(animate: true);
+  }
+
+  /// Whether every mode input of [oldWidget] is `identical` to this
+  /// widget's — per mode, the collection/function references that feed
+  /// the diff.
+  bool _modeInputsIdentical(SyncedSliverTree<TKey, TItem> oldWidget) {
+    return switch (widget._mode) {
+      _SyncedSliverTreeMode.tree => identical(oldWidget._tree, widget._tree),
+      _SyncedSliverTreeMode.nodes =>
+        identical(oldWidget._nodeRoots, widget._nodeRoots) &&
+            identical(oldWidget._nodeChildrenOf, widget._nodeChildrenOf),
+      _SyncedSliverTreeMode.hierarchy =>
+        identical(oldWidget._hierarchyRoots, widget._hierarchyRoots) &&
+            identical(oldWidget._keyOf, widget._keyOf) &&
+            identical(oldWidget._childrenOf, widget._childrenOf),
+      _SyncedSliverTreeMode.flat =>
+        identical(oldWidget._flatItems, widget._flatItems) &&
+            identical(oldWidget._keyOf, widget._keyOf) &&
+            identical(oldWidget._parentOf, widget._parentOf),
+      _SyncedSliverTreeMode.snapshot =>
+        identical(oldWidget._snapshot, widget._snapshot),
+    };
   }
 
   void _sync({required bool animate}) {
@@ -909,6 +956,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     return SliverTree<TKey, TItem>(
       controller: _treeController,
       maxStickyDepth: widget.maxStickyDepth,
+      addRepaintBoundaries: widget.addRepaintBoundaries,
       nodeBuilder: (context, key, depth) {
         final nodeData = _treeController.getNodeData(key);
         if (nodeData == null) {

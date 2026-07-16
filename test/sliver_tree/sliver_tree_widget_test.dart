@@ -1370,14 +1370,23 @@ void main() {
 
       expect(controller.getVisibleIndex("k2a"), -1);
 
-      final ok = await controller.animateScrollToKey(
-        "k2a",
-        scrollController: scrollController,
-        duration: Duration.zero,
-        extentEstimator: estimator50,
-      );
-      expect(ok, true);
+      // When ancestors were actually expanded, the immediate path waits
+      // one frame before reading the position (so the enlarged sliver
+      // lays out and maxScrollExtent is post-expansion) — pump while the
+      // future is in flight instead of awaiting synchronously.
+      bool? ok;
+      controller
+          .animateScrollToKey(
+            "k2a",
+            scrollController: scrollController,
+            duration: Duration.zero,
+            extentEstimator: estimator50,
+          )
+          .then((v) => ok = v);
       await tester.pump();
+      await tester.pump();
+
+      expect(ok, true);
 
       expect(controller.isExpanded("k2"), true);
       expect(controller.getVisibleIndex("k2a"), greaterThanOrEqualTo(0));

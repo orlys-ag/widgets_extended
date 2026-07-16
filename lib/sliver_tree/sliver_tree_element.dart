@@ -251,25 +251,36 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// previous tick saw active animations, the current tick is the settle
   /// tick and must relayout even though the flag is now false.
   ///
-  /// The completion tick of a slide fires while `hasActiveSlides` is
-  /// still true; the controller then clears its slide entries silently
-  /// (no further tick). To guarantee that ghost-cleanup (Step 0a / 0b
-  /// in the render object's performLayout) runs after every slide,
-  /// slide ticks now trigger a layout pass — not just paint. The
-  /// previous "paint-only" optimization is no longer valid because
-  /// the cleanup of `_phantomExitGhosts` and `_composer.ghosts` moved
-  /// from paint into layout.
+  /// Slide-only ticks are routed to [RenderObject.markNeedsPaint]
+  /// (audit 5.7): slides are paint-only by contract — the build window is
+  /// computed at the install layout with overreach = max |delta| and only
+  /// shrinks thereafter, so no new rows need building mid-slide, and
+  /// scrolling during a slide triggers layout through the viewport
+  /// anyway. A full relayout per slide tick amplified the per-frame
+  /// layout costs on every FLIP reorder.
   ///
-  /// We also keep [_priorTickHadSlides] as a settle-detector: if the
-  /// last tick saw slides and the current does not, ensure one final
-  /// layout pass runs so per-layout pruning's `clearAll`-when-idle
-  /// branch fires.
+  /// Layout IS marked on the slide settle transition
+  /// (`_priorTickHadSlides && !hasSlides`): that one pass runs the ghost
+  /// cleanup (Step 0a / 0b in the render object's performLayout,
+  /// including the `clearAll`-when-idle branch). The slide engine makes
+  /// the transition observable by firing one extra notify AFTER its
+  /// settle-frame cleanup (the pre-cleanup notify still carries
+  /// `hasActiveSlides == true` per the zero-delta-paint contract).
   void _onAnimationTick() {
     final c = widget.controller;
     final active = c.hasActiveAnimations;
     final hasSlides = c.hasActiveSlides;
-    if (active || _priorTickHadAnimations || hasSlides || _priorTickHadSlides) {
+    if (active || _priorTickHadAnimations) {
+      // Extent animations (enter/exit/bulk/op-group) change structural
+      // layout; _priorTickHadAnimations covers their settle tick, which
+      // fires after the controller cleared its state.
       renderObject.markNeedsLayout();
+    } else if (_priorTickHadSlides && !hasSlides) {
+      // Slide settle transition — one final layout for ghost cleanup.
+      renderObject.markNeedsLayout();
+    } else if (hasSlides) {
+      // Pure slide tick — paint-only.
+      renderObject.markNeedsPaint();
     }
     _priorTickHadAnimations = active;
     _priorTickHadSlides = hasSlides;
@@ -449,7 +460,10 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
         return;
       }
       final depth = widget.controller.getDepth(nodeId);
-      final childWidget = widget.nodeBuilder(this, nodeId, depth);
+      Widget childWidget = widget.nodeBuilder(this, nodeId, depth);
+      if (widget.addRepaintBoundaries) {
+        childWidget = RepaintBoundary(child: childWidget);
+      }
       final element = updateChild(existing, childWidget, nodeId);
       if (element != null) {
         _children[nodeId] = element;

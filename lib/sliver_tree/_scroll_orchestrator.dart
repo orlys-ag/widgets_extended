@@ -25,6 +25,20 @@ class ScrollOrchestrator<TKey, TData> {
   final TreeController<TKey, TData> _controller;
   final TickerProvider _vsync;
 
+  /// Set by [dispose]. Checked by the in-flight async paths so a scroll
+  /// running when the controller is disposed cancels instead of pumping
+  /// frames forever (offstage trees mute the ticker, so the completion
+  /// loop's exit conditions can otherwise never fire).
+  bool _disposed = false;
+
+  /// The in-flight [_animatedConcurrentScroll] resources, held so
+  /// [dispose] can tear them down SYNCHRONOUSLY. Waiting for the loop's
+  /// next iteration is not enough: `TreeController.dispose()` typically
+  /// runs inside the vsync State's own dispose, and an active Ticker at
+  /// that point trips the framework's active-Ticker assert.
+  AnimationController? _activeScrollProgress;
+  VoidCallback? _activeFollower;
+
   // ──────────────────────────────────────────────────────────────────────
   // PREFIX-SUM CACHE
   // ──────────────────────────────────────────────────────────────────────
@@ -193,7 +207,22 @@ class ScrollOrchestrator<TKey, TData> {
     }
 
     if (collapsedAncestors.isNotEmpty) {
-      ensureAncestorsExpanded(key);
+      final expandedCount = ensureAncestorsExpanded(key);
+      if (expandedCount > 0) {
+        // The synchronous expansion enlarged the scrollable content, but
+        // `position.maxScrollExtent` still reflects the last laid-out
+        // geometry — clamping against it would stop the scroll at the
+        // stale max, leaving the target row below the viewport. Wait one
+        // frame (scheduling one if none is pending) so the enlarged
+        // sliver lays out before reading the position. Mirrors the
+        // animated-concurrent path's endOfFrame wait + final snap.
+        final scheduler = SchedulerBinding.instance;
+        if (!scheduler.hasScheduledFrame) {
+          scheduler.scheduleFrame();
+        }
+        await scheduler.endOfFrame;
+        if (_disposed || !scrollController.hasClients) return false;
+      }
     }
 
     final sliverOffset = scrollOffsetOf(key, extentEstimator: extentEstimator);
@@ -305,34 +334,50 @@ class ScrollOrchestrator<TKey, TData> {
     }
 
     _controller.addAnimationListener(follower);
+    _activeScrollProgress = scrollProgress;
+    _activeFollower = follower;
 
     // Wait for both timelines to complete:
     //   1. The dedicated [scrollProgress] (so the curve reaches 1.0).
     //   2. Every ancestor expansion's terminal V=1.0 tick (observable
     //      externally as the operation group's identity disappearing
     //      from the controller's _operationGroups map).
-    while (true) {
-      if (!scrollController.hasClients) {
+    //
+    // The try/finally makes the listener removal + controller disposal
+    // structural: every exit path (normal completion, lost clients,
+    // cancellation, or an unexpected throw) releases both. When [dispose]
+    // cancelled us it already tore both down synchronously — skip the
+    // double-dispose.
+    try {
+      while (true) {
+        if (_disposed) {
+          // Cancelled: exit without the final snap.
+          return false;
+        }
+        if (!scrollController.hasClients) {
+          return true;
+        }
+        final scrollDone =
+            scrollProgress.status == AnimationStatus.completed ||
+            scrollProgress.status == AnimationStatus.dismissed;
+        bool expansionDone = true;
+        for (final (opKey, token) in startedTokens) {
+          if (_controller.isOperationGroupSame(opKey, token)) {
+            expansionDone = false;
+            break;
+          }
+        }
+        if (scrollDone && expansionDone) break;
+        await SchedulerBinding.instance.endOfFrame;
+      }
+    } finally {
+      if (!_disposed) {
         _controller.removeAnimationListener(follower);
         scrollProgress.dispose();
-        return true;
       }
-      final scrollDone =
-          scrollProgress.status == AnimationStatus.completed ||
-          scrollProgress.status == AnimationStatus.dismissed;
-      bool expansionDone = true;
-      for (final (opKey, token) in startedTokens) {
-        if (_controller.isOperationGroupSame(opKey, token)) {
-          expansionDone = false;
-          break;
-        }
-      }
-      if (scrollDone && expansionDone) break;
-      await SchedulerBinding.instance.endOfFrame;
+      _activeScrollProgress = null;
+      _activeFollower = null;
     }
-
-    _controller.removeAnimationListener(follower);
-    scrollProgress.dispose();
 
     if (!scrollController.hasClients) return true;
 
@@ -356,10 +401,21 @@ class ScrollOrchestrator<TKey, TData> {
     return true;
   }
 
-  /// No-op forward-compat hook. Today the orchestrator owns no disposable
-  /// resources (the AnimationController inside `_animatedConcurrentScroll`
-  /// is a method-local that disposes itself when the loop completes).
+  /// Cancels any in-flight [_animatedConcurrentScroll] (synchronously
+  /// removing its follower listener and disposing its progress
+  /// controller — the vsync State typically disposes right after the
+  /// owning [TreeController], so teardown cannot wait for the loop's
+  /// next iteration) and releases the prefix cache. Wired from
+  /// [TreeController.dispose].
   void dispose() {
+    _disposed = true;
+    final follower = _activeFollower;
+    if (follower != null) {
+      _controller.removeAnimationListener(follower);
+      _activeFollower = null;
+    }
+    _activeScrollProgress?.dispose();
+    _activeScrollProgress = null;
     _fullOffsetPrefix = null;
     _fullOffsetPrefixDirty = true;
   }

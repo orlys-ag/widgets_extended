@@ -1972,7 +1972,7 @@ void main() {
 
   group("setChildren on pending-deletion parent", () {
     testWidgets(
-      "asserts to prevent orphaned state",
+      "throws to prevent orphaned state",
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
@@ -1990,10 +1990,11 @@ void main() {
 
         // Attaching children to a pending-deletion parent would leak state
         // once the parent's exit animation finalizes and purges only
-        // pending-deletion descendants. Assertion prevents it.
+        // pending-deletion descendants. Runtime StateError (present in
+        // release builds too) prevents it.
         expect(
           () => controller.setChildren("a", [TreeNode(key: "x", data: "X")]),
-          throwsA(isA<AssertionError>()),
+          throwsA(isA<StateError>()),
         );
 
         await tester.pumpAndSettle();

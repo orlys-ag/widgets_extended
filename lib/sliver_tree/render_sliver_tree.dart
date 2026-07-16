@@ -39,6 +39,39 @@ import 'types.dart';
 ///   card past the destination header's PAINTED band.
 enum PhantomClipRole { entry, exit }
 
+/// Consolidated per-ghost exit-phantom state (audit 6.3).
+///
+/// - [anchor]: the visible destination row the ghost converges on (or,
+///   for edge ghosts, the off-screen ancestor whose direction picked the
+///   edge).
+/// - [slidUp]: consume-time direction decision (`settledAnchorY <
+///   baseline.y`) driving the direction-aware tuck and EXIT clip side.
+/// - [edge]: live viewport edge for ghosts whose anchor was off-screen at
+///   consume (painted at the edge, unclipped).
+/// - [clipped]: whether the ghost carries the direction-aware EXIT clip
+///   against its on-screen anchor's painted band.
+///
+/// `edge != null` XOR [clipped] — a ghost is either edge-painted and
+/// unclipped, or anchor-painted and clipped (I-MUTEX, enforced
+/// structurally here instead of by cross-map convention).
+class _ExitGhost<TKey> {
+  _ExitGhost({
+    required this.anchor,
+    this.slidUp = false,
+    this.edge,
+    this.clipped = false,
+  }) : assert(
+         (edge != null) ^ clipped,
+         "I-MUTEX: an exit ghost is either edge-painted (edge != null, "
+         "unclipped) or anchor-painted (clipped, no edge)",
+       );
+
+  final TKey anchor;
+  final bool slidUp;
+  final ViewportEdge? edge;
+  final bool clipped;
+}
+
 /// Render object for displaying a tree structure as a sliver.
 ///
 /// Uses nodeId-based child storage for straightforward element management.
@@ -54,7 +87,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
          maxStickyDepth: maxStickyDepth,
        ),
        _admission = LayoutAdmissionPolicy<TKey, TData>(controller: controller),
-       _composer = SlideComposer<TKey, TData>(controller: controller);
+       _composer = SlideComposer<TKey, TData>(controller: controller) {
+    // O(1) structural-offset resolver for the ghost registry (audit 5.8):
+    // its call sites run inside layout, where the per-frame offsets for
+    // the relevant rows are fresh (bulk-aware via _structuralOffsetAt).
+    // Controller-agnostic closure — survives controller swaps.
+    _composer.ghosts.structuralYOf = _structuralOffsetAt;
+  }
 
   /// Sticky-header computation + cache. Owns every piece of state that
   /// exists solely to compute and cache sticky-header positions; see
@@ -83,12 +122,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // key identities (e.g. string keys reused) — produce wrong deltas at
     // worst.
     _composer.reset();
-    // Phantom-exit ghost maps are also keyed by old-controller TKey.
+    // Phantom-exit ghost state is also keyed by old-controller TKey.
     // String-key reuse across controllers (a common app pattern) would
     // otherwise feed garbage entries to the new controller's layout.
     _phantomExitGhosts = null;
-    _phantomExitSlidUp = null;
-    _phantomExitEdge = null;
     _phantomClipAnchors = null;
     _composer.rebindController(value);
     _sticky.controller = value;
@@ -285,6 +322,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     return _stableCumulative[i] + _bulkValueCached * _bulkFullCumulative[i];
   }
 
+  /// Structural offset of visible index [i] (with `nid == orderNids[i]`),
+  /// readable on ANY frame: under the bulk-only fast path the per-nid
+  /// offset slots are stale for off-cache nids, so derive from the
+  /// position-indexed cumulatives instead. Used by the bounded paint /
+  /// hit-test iteration (audit 5.2), which needs a monotonic offset for
+  /// its break condition.
+  double _structuralOffsetAt(int i, int nid) {
+    return _bulkCumulativesValid
+        ? _offsetAtVisibleIndex(i)
+        : _nodeOffsetsByNid[nid];
+  }
+
   /// Admits cache-region members under the bulk-only fast path.
   ///
   /// Invoked from Pass 2 when [_bulkCumulativesValid] is true. Pulls per-row
@@ -360,6 +409,32 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// Diagnostic only; no runtime invariant is enforced by this field.
   @visibleForTesting
   int debugLastParentDataRefreshIterationCount = 0;
+
+  /// Number of O(N_visible) structural-cumulative builds performed by the
+  /// off-cache parentData refresh during the last layout. Zero on the
+  /// common scroll frame (every mounted child in-cache); at most one per
+  /// layout otherwise. Reset alongside
+  /// [debugLastParentDataRefreshIterationCount].
+  int debugLastParentDataCumulativeBuilds = 0;
+
+  /// Main-loop iterations of the last paint's Pass A. Bounded by the
+  /// viewport-intersecting index range (± slide overreach), NOT by the
+  /// total visible count — below-viewport rows must not pay a per-frame
+  /// sticky check + hash probe each.
+  int debugLastPaintIterationCount = 0;
+
+  /// Phase-2 loop iterations of the last [hitTestChildren] call. Same
+  /// bound as [debugLastPaintIterationCount], per pointer event.
+  int debugLastHitTestIterationCount = 0;
+
+  /// In-flow loop iterations of the last [visitChildrenForSemantics]
+  /// call. Bounded by the mounted-children count, not the visible count.
+  int debugLastSemanticsIterationCount = 0;
+
+  /// Lifetime count of [performLayout] invocations. Perf oracle for the
+  /// slide-only paint routing (audit 5.7): a pure FLIP slide must lay out
+  /// only on its install and settle frames.
+  int debugPerformLayoutCount = 0;
 
   /// Number of live entries in `_phantomExitGhosts`. Exposed for tests
   /// that verify phantom-exit cleanup (paint purity, controller swap,
@@ -458,63 +533,40 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   /// (currentDelta == 0) is effectively a no-op (clip excludes nothing
   /// because the row no longer overlaps the anchor) so lazy cleanup
   /// is safe.
+  ///
+  /// ENTRY-phantom entries only (audit 6.3): a re-promoted exit ghost's
+  /// clip MIGRATES into this map when Step 0a drops its ghost record
+  /// (the emerging row keeps its clip until its slide settles); exit
+  /// ghosts otherwise carry their clip inside [_phantomExitGhosts]'
+  /// consolidated records.
   Map<TKey, TKey>? _phantomClipAnchors;
 
+  /// Consolidated exit-ghost state (audit 6.3) — one [_ExitGhost] record
+  /// per hidden ghost row replaces the four parallel maps
+  /// (`_phantomExitGhosts` / `_phantomExitSlidUp` / `_phantomExitEdge` /
+  /// the exit half of `_phantomClipAnchors`) that had to be mutated in
+  /// lockstep at six-plus sites. `edge != null` XOR `clipped` encodes
+  /// I-MUTEX structurally (asserted in the record's constructor).
+  ///
   /// Tracks rows that were visible at staging time but are now hidden
   /// (reparented under a collapsed parent). Each such "ghost" row needs:
-  ///   1. Its render box retained past the visible-order purge ([isNodeRetained]).
-  ///   2. A separate paint pass — the standard pass iterates visibleNodes
-  ///      which excludes ghosts.
-  ///   3. A direction-aware clip (same mechanism as entry-phantom
-  ///      [_phantomClipAnchors]) so the row visually disappears INTO
-  ///      the collapsed parent's row.
+  ///   1. Its render box retained past the visible-order purge
+  ///      ([isNodeRetained]).
+  ///   2. A separate paint pass (Pass A.5) — the standard pass iterates
+  ///      visibleNodes, which excludes ghosts. An anchor-clipped ghost
+  ///      paints at the anchor's settled top (minus the direction-aware
+  ///      tuck) + its own slide delta; an edge ghost paints at the LIVE
+  ///      viewport edge (Pass A.6's model).
+  ///   3. For on-screen anchors, a direction-aware EXIT clip
+  ///      ([_ExitGhost.clipped]) so the row visually disappears INTO the
+  ///      destination header; edge ghosts have no on-screen band to clip
+  ///      against.
   ///
-  /// Maps ghost key → exit anchor key. The ghost is painted at
-  /// `anchor.paintedY + ghost.slideDelta` — as the slide settles, the
-  /// ghost converges on the anchor's position and the clip fully
-  /// occludes it.
-  ///
-  /// Entries are removed lazily during the ghost paint pass when the
-  /// ghost's slide has settled (currentDelta == 0 AND currentDeltaX == 0).
-  Map<TKey, TKey>? _phantomExitGhosts;
-
-  /// Direction flag per EXIT phantom ghost: `true` when the ghost slides
-  /// UPWARD (toward a SMALLER y / from below) into its destination header
-  /// — i.e. the body-side approach where a card TALLER than its collapsed
-  /// destination header needs an extra "tuck" so its BOTTOM reaches the
-  /// header band BOTTOM and no residual sliver pops on the last sliding
-  /// frame. `false` for the DOWNWARD approach (no tuck).
-  ///
-  /// Written ONCE at consume (single-writer, alongside [_phantomExitGhosts])
-  /// from `slidUp = settledAnchorY < baseline.y`, and read at paint by BOTH
-  /// the Pass A.5 ghost anchor and the EXIT clip so the paint pass (which
-  /// has no baseline) reproduces the consume-time direction decision
-  /// exactly (I-DIR / I-AGREE). Reaped with the ghost in
-  /// [_pruneSettledPhantomExitGhosts] and on the empty-when-lazy-pruned and
-  /// full-reset paths so it never outlives its ghost.
-  Map<TKey, bool>? _phantomExitSlidUp;
-
-  /// Persisted [ViewportEdge] per EXIT phantom ghost whose destination
-  /// anchor was OFF-SCREEN at consume (beyond the render cache, so its
-  /// header RenderBox is unmounted). The ghost slides toward this viewport
-  /// edge and disappears off-screen — there is no on-screen band to clip
-  /// against, so these ghosts register NO [_phantomClipAnchors] entry.
-  ///
-  /// Written ONCE at consume (single-writer, alongside [_phantomExitGhosts])
-  /// in the two OFF-SCREEN consume branches only, and read at paint by the
-  /// Pass A.5 EDGE-FALLBACK branch (fired when `getChildForNode(anchorKey)
-  /// == null`), which paints the ghost at `baseForEdge(edge) - scrollOffset
-  /// + ghostSlide` using the ghost's own retained RenderBox — the same model
-  /// as Pass A.6 (live-edge-anchored slide-OUTs). The ENUM (not an absolute
-  /// edgeY) is persisted so the paint site recomputes the live edge under
-  /// concurrent scroll, agreeing with the consume destination at the same
-  /// scroll (I-AGREE / no t=0 jump). A ghost key is in EXACTLY ONE of
-  /// [_phantomExitEdge] (off-screen, edge-painted, unclipped) or
-  /// [_phantomClipAnchors] (on-screen, anchor-painted, clipped) — I-MUTEX.
-  /// Reaped with the ghost in [_pruneSettledPhantomExitGhosts] and on the
-  /// empty-when-lazy-pruned and full-reset paths so it never outlives its
-  /// ghost.
-  Map<TKey, ViewportEdge>? _phantomExitEdge;
+  /// Written ONCE at consume (single-writer), reaped by Step 0a
+  /// ([_pruneSettledPhantomExitGhosts]) under the dual settle criterion
+  /// (ghost AND anchor at rest), on key free, and on re-promotion to
+  /// visibility.
+  Map<TKey, _ExitGhost<TKey>>? _phantomExitGhosts;
 
   /// Debug-only, paint-time-only capture of each EXIT phantom ghost's
   /// painted geometry, for the Defect-1 (far-overhang occlusion) test
@@ -644,6 +696,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Instead, lazy-prune entries whose slides have settled
     // (currentDelta == 0 AND currentDeltaX == 0). New phantom processing
     // below will overwrite any entry whose key is touched this cycle.
+    //
+    // Only ENTRY-phantom entries live here (audit 6.3): exit ghosts carry
+    // their clip inside their consolidated [_ExitGhost] record, whose
+    // lifecycle Step 0a owns under the dual settle criterion — the 4.3
+    // adjacent-ghost hazard (own-slide pruning stripping a still-absorbing
+    // ghost's EXIT clip) is structurally impossible now. The own-slide
+    // criterion below is correct for entry phantoms.
     _phantomClipAnchors?.removeWhere((key, _) {
       final nid = _controller.nidOf(key);
       if (nid < 0) return true; // key gone entirely
@@ -845,30 +904,32 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
             y: settledAnchorY - tuck + ghostSlideY,
             x: anchorCurrent.x + ghostSlideX,
           );
-          (_phantomExitGhosts ??= <TKey, TKey>{})[key] = anchorKey;
-          // Persist the direction decision (single-writer) so the paint
-          // pass — which has no baseline — reproduces it exactly.
-          (_phantomExitSlidUp ??= <TKey, bool>{})[key] = slidUp;
-          // Ghost also needs the direction-aware clip so the anchor
-          // occludes it as it slides in.
-          (_phantomClipAnchors ??= <TKey, TKey>{})[key] = anchorKey;
+          // Single consolidated record: anchor + persisted direction
+          // decision (so the paint pass — which has no baseline —
+          // reproduces it exactly) + the direction-aware EXIT clip flag
+          // so the anchor occludes the ghost as it slides in.
+          (_phantomExitGhosts ??= <TKey, _ExitGhost<TKey>>{})[key] =
+              _ExitGhost<TKey>(
+                anchor: anchorKey,
+                slidUp: slidUp,
+                clipped: true,
+              );
         } else {
           // Anchor off-screen at consume: ghost slides toward the
           // current viewport edge (with overhang) nearest the anchor's
           // structural position. No clip — the ghost simply slides
-          // off-screen and disappears.
+          // off-screen and disappears. The consume-time EDGE enum is
+          // persisted (single-writer) so the Pass A.5 EDGE-FALLBACK can
+          // paint the ghost at the LIVE edge when the off-screen anchor
+          // is unmounted.
           final edge = currentViewport.edgeFor(anchorCurrent.y);
           final edgeY = currentViewport.baseForEdge(edge);
           current[key] = (
             y: edgeY + ghostSlideY,
             x: anchorCurrent.x + ghostSlideX,
           );
-          (_phantomExitGhosts ??= <TKey, TKey>{})[key] = anchorKey;
-          // Persist the consume-time edge (single-writer) so the Pass A.5
-          // EDGE-FALLBACK can paint the ghost at the LIVE edge when the
-          // off-screen anchor is unmounted. No clip anchor here — the ghost
-          // has no on-screen band (I-MUTEX).
-          (_phantomExitEdge ??= <TKey, ViewportEdge>{})[key] = edge;
+          (_phantomExitGhosts ??= <TKey, _ExitGhost<TKey>>{})[key] =
+              _ExitGhost<TKey>(anchor: anchorKey, edge: edge);
         }
       }
     }
@@ -941,9 +1002,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           y: settledCursorY - tuck + ghostSlideY,
           x: anchorCurrent.x + ghostSlideX,
         );
-        (_phantomExitGhosts ??= <TKey, TKey>{})[key] = cursor;
-        (_phantomExitSlidUp ??= <TKey, bool>{})[key] = slidUp;
-        (_phantomClipAnchors ??= <TKey, TKey>{})[key] = cursor;
+        (_phantomExitGhosts ??= <TKey, _ExitGhost<TKey>>{})[key] =
+            _ExitGhost<TKey>(anchor: cursor, slidUp: slidUp, clipped: true);
       } else {
         final edge = currentViewport.edgeFor(anchorCurrent.y);
         final edgeY = currentViewport.baseForEdge(edge);
@@ -951,35 +1011,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           y: edgeY + ghostSlideY,
           x: anchorCurrent.x + ghostSlideX,
         );
-        (_phantomExitGhosts ??= <TKey, TKey>{})[key] = cursor;
-        // Persist the consume-time edge (single-writer) for the Pass A.5
+        // Consume-time edge persisted (single-writer) for the Pass A.5
         // EDGE-FALLBACK — same rationale as the controller-staged branch.
-        (_phantomExitEdge ??= <TKey, ViewportEdge>{})[key] = edge;
+        (_phantomExitGhosts ??= <TKey, _ExitGhost<TKey>>{})[key] =
+            _ExitGhost<TKey>(anchor: cursor, edge: edge);
       }
     }
 
-    // Lazy-prune ghosts that became visible again. A ghost re-moved
-    // back to a visible parent now sits in current (visibleNodes),
-    // gets a normal slide via the standard path, and must NOT also
-    // paint via the ghost pass (would render twice). The augmented
-    // baseline already captured the ghost's painted position so the
-    // re-move slide installs from the right starting point.
-    final ghostMap = _phantomExitGhosts;
-    if (ghostMap != null) {
-      ghostMap.removeWhere((key, _) {
-        final reVisible = controller.isVisible(key);
-        if (reVisible) {
-          _phantomExitSlidUp?.remove(key);
-          _phantomExitEdge?.remove(key);
-        }
-        return reVisible;
-      });
-      if (ghostMap.isEmpty) {
-        _phantomExitGhosts = null;
-        _phantomExitSlidUp = null;
-        _phantomExitEdge = null;
-      }
-    }
+    // Ghosts that became visible again are pruned by Step 0a
+    // (_pruneSettledPhantomExitGhosts) at the start of EVERY layout —
+    // including this one, which ran before this consume — so no
+    // re-visible entries can exist here: this cycle's injection loop
+    // above only adds entries for keys that are hidden post-mutation.
+    // (The prune used to live here too, but that left non-staging
+    // mutations — which never consume — painting re-promoted ghosts
+    // twice; Step 0a is the single owner now.)
 
     // Step 3b: a row that was an edge ghost in the previous cycle has
     // now become an exit-phantom (anchor-based) ghost via the phantom
@@ -1150,11 +1196,33 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   void resizeScratchArrays(int capacity) =>
       _sticky.resizeScratchArrays(capacity);
 
+  /// Nodes explicitly pinned against stale eviction, regardless of cache
+  /// region or animation state. Deliberately generic (not "the dragged
+  /// key"): the render object stays ignorant of drag semantics and the
+  /// set is reusable for any future retention need. Currently pinned by
+  /// [TreeReorderController] for the lifetime of a drag session — the drag
+  /// gesture lives on the dragged row's own GestureDetector, so evicting
+  /// that row would orphan the session (its end/cancel callbacks could
+  /// never fire).
+  final Set<TKey> _pinnedNodes = <TKey>{};
+
+  /// Pins [id] against stale eviction until [unpinNode]. Idempotent.
+  void pinNode(TKey id) {
+    _pinnedNodes.add(id);
+  }
+
+  /// Removes the eviction pin for [id]. Idempotent.
+  void unpinNode(TKey id) {
+    _pinnedNodes.remove(id);
+  }
+
   /// Whether the given node is retained by the current layout — i.e. it is
-  /// in the cache region, a sticky header, or a phantom-exit ghost
-  /// mid-slide. Used by the element to decide whether an off-screen child
-  /// can be evicted. O(1) (Map containsKey + Set lookup), no allocation.
+  /// explicitly pinned, in the cache region, a sticky header, or a
+  /// phantom-exit ghost mid-slide. Used by the element to decide whether
+  /// an off-screen child can be evicted. O(1) (Map containsKey + Set
+  /// lookup), no allocation.
   bool isNodeRetained(TKey id) {
+    if (_pinnedNodes.contains(id)) return true;
     // Phantom-exit ghosts: retain past visible-order purge so their
     // slide can finish. Removed from _phantomExitGhosts when their
     // slide settles, after which the next stale eviction will release
@@ -1266,9 +1334,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // baseline misses the ghost entirely and the new slide installs
     // from a wrong starting point, producing a visible snap.
     //
-    // Painted position of a ghost = anchor's painted position + ghost's
-    // own slideDelta. anchor's painted position is already in `result`
-    // (anchor is in visibleNodes by definition of the exit-phantom path).
+    // Painted position of a ghost = the SHARED Pass A.5 base
+    // ([_exitGhostPaintedBaseScrollSpace]: settled anchor top minus the
+    // direction-aware tuck, or the live viewport edge for edge-anchored
+    // ghosts) + the ghost's own slideDelta. Using the anchor's LIVE
+    // painted position here instead would disagree with what Pass A.5
+    // actually paints by `anchorSlideDelta + tuck` — a visible snap of
+    // exactly that many pixels on re-move.
     final ghosts = _phantomExitGhosts;
     if (ghosts != null) {
       // Reuse the same hoist as the visible loop. Settled-but-unpruned
@@ -1281,22 +1353,87 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // consume's lazy-prune will drop the stale ghost entry; until
         // then, prefer the structural entry over the ghost-derived one.
         if (result.containsKey(ghostKey)) continue;
-        final anchorKey = entry.value;
-        final anchorPos = result[anchorKey];
-        if (anchorPos == null) continue; // anchor itself disappeared
+        final base = _exitGhostPaintedBaseScrollSpace(
+          ghostKey: ghostKey,
+          ghost: entry.value,
+        );
+        if (base == null) continue; // unpaintable this frame
         final ghostNid = controller.nidOf(ghostKey);
-        if (ghostNid < 0) continue;
         final ghostSlideY =
             hasSlides ? controller.getSlideDeltaNid(ghostNid) : 0.0;
         final ghostSlideX =
             hasXSlides ? controller.getSlideDeltaXNid(ghostNid) : 0.0;
         result[ghostKey] = (
-          y: anchorPos.y + ghostSlideY,
-          x: anchorPos.x + ghostSlideX,
+          y: base.y + ghostSlideY,
+          x: base.x + ghostSlideX,
         );
       }
     }
     return result;
+  }
+
+  /// Scroll-space base position (y BEFORE adding the ghost's own slide
+  /// delta, x BEFORE adding the ghost's own X slide delta) that Pass A.5
+  /// paints exit ghost [ghostKey] at. Single source of truth for the
+  /// paint pass AND for [snapshotVisibleOffsets]'s ghost augmentation: a
+  /// ghost re-moved mid-slide stages its next baseline from the snapshot,
+  /// so any disagreement between the two formulas becomes a visible t=0
+  /// snap of exactly that many pixels.
+  ///
+  /// Two branches, mirroring Pass A.5's structure:
+  /// - Anchor mounted: the anchor's **settled** top (sticky `pinnedY` +
+  ///   scrollOffset when pinned, else `layoutOffset` WITHOUT the anchor's
+  ///   own slide — see the settled-top commentary in Pass A.5) minus the
+  ///   direction-aware tuck; x is the anchor's live painted indent.
+  /// - Anchor unmounted with a registered [_phantomExitEdge]: the LIVE
+  ///   viewport edge base (mirroring the paint fallback); x is the
+  ///   ghost's own indent.
+  ///
+  /// Returns null when the ghost cannot be painted this frame (freed key,
+  /// truly orphaned anchor) — callers skip the entry.
+  ({double y, double x})? _exitGhostPaintedBaseScrollSpace({
+    required TKey ghostKey,
+    required _ExitGhost<TKey> ghost,
+    ViewportSnapshot? viewport,
+  }) {
+    final ghostNid = controller.nidOf(ghostKey);
+    if (ghostNid < 0) return null;
+    final anchorKey = ghost.anchor;
+    final anchorChild = getChildForNode(anchorKey);
+    if (anchorChild == null) {
+      final edge = ghost.edge;
+      if (edge == null) return null;
+      // Callers iterating many ghosts pass a hoisted [viewport] so this
+      // branch does not construct a snapshot per ghost (audit 5.9).
+      return (
+        y: (viewport ?? _currentViewportSnapshot()).baseForEdge(edge),
+        x: controller.getIndent(ghostKey),
+      );
+    }
+    final anchorParentData = anchorChild.parentData;
+    if (anchorParentData is! SliverTreeParentData) return null;
+    final anchorNid = controller.nidOf(anchorKey);
+    final anchorPinnedInfo = anchorNid >= 0
+        ? _sticky.infoForNid(anchorNid)
+        : null;
+    // pinnedY is paint-space (viewport-relative); convert back to
+    // scroll-space so both consumers can subtract their own frame's
+    // scrollOffset (paint) or use the value directly (snapshot).
+    final double settledTopScrollSpace = anchorPinnedInfo != null
+        ? anchorPinnedInfo.pinnedY + constraints.scrollOffset
+        : anchorParentData.layoutOffset;
+    final tuck = _exitTuckFor(
+      ghostNid: ghostNid,
+      anchorKey: anchorKey,
+      slidUp: ghost.slidUp,
+    );
+    final anchorSlideX = (controller.hasActiveXSlides && anchorNid >= 0)
+        ? controller.getSlideDeltaXNid(anchorNid)
+        : 0.0;
+    return (
+      y: settledTopScrollSpace - tuck,
+      x: anchorParentData.indent + anchorSlideX,
+    );
   }
 
   /// Internal contract — exit-anchor destination resolution only.
@@ -1501,6 +1638,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // run `pruneSettled`, but this defense-in-depth catches the race
     // where a structural mutation happens while detached.
     _composer.reset();
+    // Phantom-exit ghost records and entry-phantom clips are the same
+    // staleness class the composer reset defends against — drop them
+    // alongside it (audit 6.3: detach used to leave them populated).
+    _phantomExitGhosts = null;
+    _phantomClipAnchors = null;
     // Out-of-layout scratch can hold extents against the now-stale
     // controller state; drop it so re-attach materializes fresh.
     _findFirstScratchCumulative = null;
@@ -1530,14 +1672,28 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       visitor(child);
     }
     // Then in-flow visible nodes, skipping any already emitted as sticky.
-    for (final nodeId in controller.visibleNodes) {
+    // Iterate the MOUNTED set (bounded by the cache region plus retained
+    // rows) instead of the full visible order — the old walk paid an
+    // O(N_visible) sweep per semantics pass to visit O(mounted) children
+    // (audit 5.2). Sort by visible index so screen readers still get
+    // top-to-bottom visual order.
+    debugLastSemanticsIterationCount = 0;
+    final inFlow = <(int, RenderBox)>[];
+    for (final entry in _children.entries) {
+      debugLastSemanticsIterationCount++;
+      final nodeId = entry.key;
       final nid = _controller.nidOf(nodeId);
+      if (nid < 0) continue;
       if (_sticky.isSticky(nid)) continue;
-      final child = getChildForNode(nodeId);
-      if (child == null) continue;
       if (controller.getNodeData(nodeId) == null) continue;
       if (controller.isExiting(nodeId)) continue;
-      visitor(child);
+      final idx = _controller.visibleIndexOfNid(nid);
+      if (idx < 0) continue;
+      inFlow.add((idx, entry.value));
+    }
+    inFlow.sort((a, b) => a.$1.compareTo(b.$1));
+    for (final e in inFlow) {
+      visitor(e.$2);
     }
   }
 
@@ -1563,6 +1719,62 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   // hands off scroll inputs and per-nid offset/extent arrays each layout;
   // paint, hit-test, and transform read [_sticky.headers] /
   // [_sticky.infoForNid] for the per-frame results.
+
+  /// Grow-only scratch buffer for [_buildParentDataRefreshCumulative] so
+  /// off-cache refresh frames reuse one allocation instead of allocating
+  /// a fresh Float64List(N+1) per frame.
+  Float64List _parentDataRefreshScratch = Float64List(0);
+
+  /// Builds the fresh structural cumulative the off-cache parentData
+  /// refresh indexes into (prefix sums of current animated extents over
+  /// the visible order). O(N_visible); called at most once per layout,
+  /// and only on frames where an off-cache, live, visible child is
+  /// actually mounted.
+  Float64List _buildParentDataRefreshCumulative(int visibleCount) {
+    debugLastParentDataCumulativeBuilds++;
+    if (_parentDataRefreshScratch.length < visibleCount + 1) {
+      _parentDataRefreshScratch = Float64List(
+        math.max(visibleCount + 1, math.max(16, _parentDataRefreshScratch.length * 2)),
+      );
+    }
+    final cum = _parentDataRefreshScratch;
+    final orderNids = controller.orderNidsView;
+    double acc = 0.0;
+    for (int i = 0; i < visibleCount; i++) {
+      cum[i] = acc;
+      acc += controller.getCurrentExtentNid(orderNids[i]);
+    }
+    cum[visibleCount] = acc;
+    return cum;
+  }
+
+  /// Bulk fast-path escape hatch shared by Pass 2's extent-change handler
+  /// and the sticky force-create path. Under [_bulkCumulativesValid] the
+  /// per-nid extent slots are fresh ONLY for cache-region nids — any
+  /// full-order offset recompute must first materialize the stale slots
+  /// (from [fromIndex] onward, skipping the cache region whose slots are
+  /// already fresh) from the controller's current animated extents, then
+  /// drop the fast path for this frame. The next frame rebuilds the
+  /// cumulatives fresh via [_rebuildBulkCumulatives].
+  ///
+  /// Nodes measured earlier this frame are safe to overwrite:
+  /// [_layoutNodeChild] stores measurements through
+  /// `controller.setFullExtent`, so `getCurrentExtentNid` already returns
+  /// the measured value for them.
+  void _materializeBulkStaleExtents({
+    required int fromIndex,
+    required int cacheStartIndex,
+    required int cacheEndIndex,
+    required int visibleCount,
+  }) {
+    final orderNids = controller.orderNidsView;
+    for (int i = fromIndex; i < visibleCount; i++) {
+      if (i >= cacheStartIndex && i < cacheEndIndex) continue;
+      final nid = orderNids[i];
+      _nodeExtentsByNid[nid] = controller.getCurrentExtentNid(nid);
+    }
+    _bulkCumulativesValid = false;
+  }
 
   /// Recomputes [_nodeOffsetsByNid] from current [_nodeExtentsByNid] and
   /// returns the new total scroll extent. Call after Pass 2 when extents
@@ -1647,7 +1859,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
   @override
   void performLayout() {
+    debugPerformLayoutCount++;
     debugLastParentDataRefreshIterationCount = 0;
+    debugLastParentDataCumulativeBuilds = 0;
     final constraints = this.constraints;
     // This sliver's layout and paint code assume a vertical-forward axis.
     // Child constraints, offset math, sticky pinning and hit-testing all use
@@ -1684,6 +1898,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
 
     final visibleNodes = controller.visibleNodes;
     if (visibleNodes.isEmpty) {
+      // An animated mutation may have staged a FLIP baseline and then
+      // emptied the tree in the same frame. Discard it here — under
+      // first-wins staging a stranded baseline would block every later
+      // beginSlideBaseline, and when the tree repopulates the stale
+      // pre-empty offsets would be consumed as the FLIP "before" of an
+      // unrelated mutation (wrong one-frame deltas). Ghost/phantom
+      // state is likewise keyed against rows that no longer exist —
+      // mirror the controller-swap reset. Scroll bookkeeping restarts
+      // fresh with the repopulated tree.
+      _composer.reset();
+      _phantomExitGhosts = null;
+      _phantomClipAnchors = null;
+      _lastObservedScrollOffset = double.nan;
       _structureChanged = true;
       _lastVisibleNodeCount = 0;
       geometry = SliverGeometry.zero;
@@ -2026,15 +2253,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // cumulatives are now inconsistent with truth for positions beyond
         // firstChangedIdx. Materialize per-nid extents for the affected
         // tail so _recomputeOffsetsFrom can walk it, then fall back off
-        // the fast path for this frame. The next frame will rebuild cumulatives
-        // fresh via _rebuildBulkCumulatives.
-        final orderNids = controller.orderNidsView;
-        for (int i = firstChangedIdx; i < visibleNodes.length; i++) {
-          if (i >= cacheStartIndex && i < cacheEndIndex) continue;
-          final nid = orderNids[i];
-          _nodeExtentsByNid[nid] = controller.getCurrentExtentNid(nid);
-        }
-        _bulkCumulativesValid = false;
+        // the fast path for this frame.
+        _materializeBulkStaleExtents(
+          fromIndex: firstChangedIdx,
+          cacheStartIndex: cacheStartIndex,
+          cacheEndIndex: cacheEndIndex,
+          visibleCount: visibleNodes.length,
+        );
       }
 
       totalScrollExtent = _recomputeOffsetsFrom(firstChangedIdx);
@@ -2134,6 +2359,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           }
         }
         if (stickyExtentsChanged) {
+          if (_bulkCumulativesValid) {
+            // Mirror Pass 2's extent-change handler: the full recompute
+            // below walks EVERY visible nid, but under the bulk fast path
+            // only cache-region slots are fresh — materialize the rest
+            // first or the recompute overwrites correct offsets and this
+            // frame's geometry.scrollExtent with stale-extent garbage.
+            _materializeBulkStaleExtents(
+              fromIndex: 0,
+              cacheStartIndex: cacheStartIndex,
+              cacheEndIndex: cacheEndIndex,
+              visibleCount: visibleNodes.length,
+            );
+          }
           totalScrollExtent = _recomputeOffsets();
           if (_maxStickyDepth > 0 && !hasAnimations) {
             _sticky.precomputeStableSubtreeBottoms(
@@ -2221,7 +2459,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       scrollExtent: totalScrollExtent,
       paintExtent: paintExtent,
       maxPaintExtent: totalScrollExtent,
-      cacheExtent: math.min(remainingCacheExtent, totalScrollExtent),
+      // Protocol: the cache-region portion THIS sliver consumes —
+      // accounts for where the cache region starts relative to the
+      // sliver, unlike min(remainingCacheExtent, totalScrollExtent),
+      // which over-reports once the sliver is scrolled past the cache
+      // origin and starves every subsequent sliver's cache budget.
+      cacheExtent: calculateCacheOffset(
+        constraints,
+        from: 0.0,
+        to: totalScrollExtent,
+      ),
       // Overflow means: our painted region would exceed the portion of the
       // scroll extent visible within our own paintExtent. Comparing against
       // remainingPaintExtent (which includes space occupied by later slivers)
@@ -2296,18 +2543,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Compute a fresh structural cumulative on-demand by walking
     // `visibleNodes` once into a local Float64List, then index into it.
     if (_children.isNotEmpty) {
+      // Built LAZILY on the first off-cache, live, visible child the loop
+      // actually encounters. On the common scroll frame every mounted
+      // child is in-cache, so the O(N_visible) accumulation (formerly an
+      // unconditional Float64List(N+1) allocation + N extent-chain
+      // resolutions per scrolled frame — the dominant steady-state cost
+      // for large trees) does zero extra work.
       Float64List? freshCumulative;
-      if (!_bulkCumulativesValid) {
-        // O(N_visible) one-time accumulation for the loop below.
-        final vlen = visibleNodes.length;
-        freshCumulative = Float64List(vlen + 1);
-        double acc = 0.0;
-        for (int i = 0; i < vlen; i++) {
-          freshCumulative[i] = acc;
-          acc += controller.getCurrentExtentNid(orderNids[i]);
-        }
-        freshCumulative[vlen] = acc;
-      }
       for (final nodeId in _children.keys) {
         debugLastParentDataRefreshIterationCount++;
         final child = _children[nodeId]!;
@@ -2340,8 +2582,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           offset = _offsetAtVisibleIndex(visIdx);
         } else {
           // Non-bulk: `_nodeOffsetsByNid` is stale for off-cache rows.
-          // Use the freshly-computed cumulative.
-          offset = freshCumulative![visIdx];
+          // Build (once) and use the fresh structural cumulative.
+          freshCumulative ??= _buildParentDataRefreshCumulative(
+            visibleNodes.length,
+          );
+          offset = freshCumulative[visIdx];
         }
         final parentData = child.parentData! as SliverTreeParentData;
         parentData.layoutOffset = offset;
@@ -2461,7 +2706,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   void paint(PaintingContext context, Offset offset) {
     // Debug capture is paint-time-scoped: cleared each frame, rewritten
     // by Pass A.5 only for actively-sliding ghosts (Invariant 8/10).
-    debugLastPhantomGhostPaint.clear();
+    // Assert-guarded so release builds skip the map churn entirely
+    // (audit 5.9 — @visibleForTesting alone does not strip it).
+    assert(() {
+      debugLastPhantomGhostPaint.clear();
+      return true;
+    }());
     if (geometry == null || geometry!.paintExtent == 0) return;
 
     final scrollOffset = constraints.scrollOffset;
@@ -2494,9 +2744,24 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // the most (typically the just-dropped row) paints last and lands on
     // top. Ties preserve natural iteration order.
     final hasEdgeGhosts = _composer.hasGhosts;
+    // Bounded iteration end (audit 5.2), symmetric to the widened start:
+    // structural offsets are monotonic in visible order and painted y
+    // differs from structural by at most `slideOverreach`, so nothing at
+    // or past this offset can paint inside the viewport — break instead
+    // of paying a sticky check + hash probe for every below-viewport row.
+    // Composer edge-ghost rows paint at the live viewport edge regardless
+    // of structural position, but Pass A already skips them (Pass A.6
+    // iterates the small ghost registry), so the break cannot drop one.
+    // Sticky headers likewise paint from their own pass.
+    final paintBound = scrollOffset + remainingPaintExtent + slideOverreach;
     List<int>? slidingIndices;
+    debugLastPaintIterationCount = 0;
     for (int i = startIndex; i < visibleNodes.length; i++) {
+      debugLastPaintIterationCount++;
       final nid = orderNids[i];
+      if (_structuralOffsetAt(i, nid) > paintBound) {
+        break;
+      }
       if (_sticky.isSticky(nid)) {
         continue;
       }
@@ -2593,12 +2858,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // paint stays read-only. When slides are idle, the map is empty by
     // the next layout's Step 0a, so we don't need to clear it here.
     if (ghosts != null && ghosts.isNotEmpty && hasSlides) {
-      // Snapshot keys to avoid concurrent-modification when nested
-      // controller reads in the loop touch state.
-      final ghostKeys = ghosts.keys.toList();
-      for (final ghostKey in ghostKeys) {
-        final anchorKey = ghosts[ghostKey];
-        if (anchorKey == null) continue;
+      // Hoisted once for the whole pass (audit 5.9) — edge-anchored
+      // ghosts resolve their base against it.
+      final a5Viewport = _currentViewportSnapshot();
+      // Read-only pass: Step 0a owns all mutation of the ghost maps (at
+      // layout time), so iterating the map directly is safe — no per-
+      // paint key-list allocation (audit 5.9).
+      for (final ghostEntry in ghosts.entries) {
+        final ghostKey = ghostEntry.key;
+        final ghost = ghostEntry.value;
+        final anchorKey = ghost.anchor;
         final ghostNid = controller.nidOf(ghostKey);
         if (ghostNid < 0) {
           // Freed key — Step 0a reaps on next layout.
@@ -2626,87 +2895,41 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         }
         final ghostChild = getChildForNode(ghostKey);
         if (ghostChild == null) continue;
-        final anchorChild = getChildForNode(anchorKey);
-        if (anchorChild == null) {
-          // Anchor unmounted (off-screen, beyond cache). If this ghost was
-          // staged as an EDGE exit (off-screen-anchor consume branch),
-          // paint it at the LIVE viewport edge using the GHOST's own
-          // retained RenderBox — the same model as Pass A.6 — so it slides
-          // off-screen instead of vanishing (the snap). No clip: there is
-          // no on-screen band to clip to (I-MUTEX: edge ghosts register no
-          // _phantomClipAnchors entry).
-          final edge = _phantomExitEdge?[ghostKey];
-          if (edge == null) continue; // truly orphaned anchor: skip as before
-          final viewport = _currentViewportSnapshot();
-          final paintedY =
-              viewport.baseForEdge(edge) - scrollOffset + ghostSlide;
-          final paintedX = controller.getIndent(ghostKey) + ghostSlideX;
-          // Skip if entirely outside the paint region.
-          if (paintedY >= remainingPaintExtent) continue;
-          if (paintedY + ghostChild.size.height <= 0) continue;
-          context.paintChild(ghostChild, offset + Offset(paintedX, paintedY));
-          continue; // edge ghost painted; skip the anchor-relative tail
-        }
-        final anchorParentData = anchorChild.parentData;
-        if (anchorParentData is! SliverTreeParentData) continue;
-        final anchorNid = controller.nidOf(anchorKey);
-        final anchorSlideX = (hasXSlides && anchorNid >= 0)
-            ? controller.getSlideDeltaXNid(anchorNid)
-            : 0.0;
-        // Ghost's painted position converges on the anchor's SETTLED top:
-        // sticky `pinnedY` when pinned (fresh — computeStickyHeaders already
-        // ran this frame), else the structural `layoutOffset` WITHOUT the
-        // anchor's own slide delta.
-        //
-        // Using the SETTLED top (not the live, sliding band) is load-bearing.
-        // The destination header itself FLIP-slides when the SOURCE section
-        // shrinks — e.g. unfavoriting compacts the favorites list, so the
-        // "My Workspaces" header slides UP into the vacated row. Reading the
-        // live band here (`_anchorPaintedBounds`, which adds that anchorSlide)
-        // DOUBLE-COUNTS the destination's motion: the ghost would converge on
-        // the live band and jump by the anchor's slide at t=0. That error is
-        // masked for a FAR ghost (large own-slide swamps it) but FATAL for an
-        // ADJACENT ghost whose own FLIP delta is zero — its baseline already
-        // equals the settled header position, so it would pin to the live band
-        // top and the EXIT down-clip (`visible = [0, bandTop]`) would clip it
-        // to nothing every frame → the "vanishes in place" bug.
-        //
-        // The EXIT clip below STILL reads the LIVE band so the rising header
-        // occludes the (now stationary) ghost correctly as it absorbs it.
-        // Defect 1+2 / Invariant 5 are preserved: the pinned branch is
-        // byte-identical to `_anchorPaintedBounds`'s pinned branch.
-        // LIVE band (with the anchor's own slide) — drives the EXIT clip and
-        // the Defect-1 debug-capture oracle, so occlusion tracks the header's
-        // on-screen position. NOT used for the ghost's convergence top.
-        final anchorBand = _anchorPaintedBounds(anchorKey);
-        final anchorPinnedInfo =
-            anchorNid >= 0 ? _sticky.infoForNid(anchorNid) : null;
-        final double anchorPaintedTop = anchorPinnedInfo != null
-            ? anchorPinnedInfo.pinnedY
-            : anchorParentData.layoutOffset - scrollOffset;
-        // Subtract the SAME direction-aware tuck the consume destination
-        // applied (I-AGREE / the TRAP). The persisted `_phantomExitSlidUp`
-        // flag reproduces the consume-time direction here (paint has no
-        // baseline). Because consume injected `current.y = settledAnchorY −
-        // tuck + ghostSlideY`, the initial `ghostSlide` (= baseline.y −
-        // current.y) and this paint anchor (`anchorPaintedTop − tuck`)
-        // compose so `paintedY == baseline.y` at t=0 (no jump) and converge
-        // to `bandTop − tuck` at settle (card bottom == bandBottom).
-        final slidUp = _phantomExitSlidUp?[ghostKey] ?? false;
-        final tuck = _exitTuckFor(
-          ghostNid: ghostNid,
-          anchorKey: anchorKey,
-          slidUp: slidUp,
+        // Shared base — SINGLE SOURCE OF TRUTH with the snapshot
+        // augmentation in [snapshotVisibleOffsets] (see
+        // [_exitGhostPaintedBaseScrollSpace] for both branches'
+        // derivations, including why the anchor's SETTLED top — not the
+        // live sliding band — is load-bearing for adjacent ghosts, and
+        // the direction-aware tuck that composes with the consume-time
+        // destination so `paintedY == baseline.y` at t=0).
+        final base = _exitGhostPaintedBaseScrollSpace(
+          ghostKey: ghostKey,
+          ghost: ghost,
+          viewport: a5Viewport,
         );
-        final paintedY = anchorPaintedTop - tuck + ghostSlide;
-        final paintedX =
-            anchorParentData.indent + anchorSlideX + ghostSlideX;
+        if (base == null) continue; // truly orphaned anchor: skip as before
+        final paintedY = base.y - scrollOffset + ghostSlide;
+        final paintedX = base.x + ghostSlideX;
         // Skip if entirely outside the paint region.
         if (paintedY >= remainingPaintExtent) continue;
         if (paintedY + ghostChild.size.height <= 0) continue;
+        final anchorChild = getChildForNode(anchorKey);
+        if (anchorChild == null) {
+          // Anchor unmounted (off-screen, beyond cache): the base above
+          // resolved to the LIVE viewport edge (Pass A.6's model) so the
+          // ghost slides off-screen instead of vanishing. No clip: there
+          // is no on-screen band to clip to (I-MUTEX: edge ghosts
+          // register no _phantomClipAnchors entry).
+          context.paintChild(ghostChild, offset + Offset(paintedX, paintedY));
+          continue; // edge ghost painted; skip the anchor-relative tail
+        }
         // Apply the EXIT clip so the ghost is bounded to the destination
         // header's painted band on its trailing side (far overhang
         // killed; band occluded by the header repaint in Pass A.7/B).
+        // The clip reads the LIVE band (with the anchor's own slide) so
+        // occlusion tracks the header's on-screen position — NOT used
+        // for the ghost's convergence top (that's the settled top inside
+        // the shared base).
         final clipRect = _resolvePhantomAnchorBounds(
           nid: ghostNid,
           paintedY: paintedY,
@@ -2719,23 +2942,30 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
         // sliver-local, NOT offset by `offset`). Reached ONLY for a
         // sliding ghost (the settled-`continue` above precedes this), so
         // the map stays empty at settle by construction (Invariant 8).
-        if (anchorBand != null) {
-          debugLastPhantomGhostPaint[ghostKey] = (
-            ghostRect: Rect.fromLTWH(
-              paintedX,
-              paintedY,
-              ghostChild.size.width,
-              ghostChild.size.height,
-            ),
-            clipRect: clipRect,
-            anchorBand: Rect.fromLTWH(
-              0,
-              anchorBand.top,
-              constraints.crossAxisExtent,
-              anchorBand.height,
-            ),
-          );
-        }
+        // Assert-guarded so release builds skip both the LIVE-band read
+        // and the record allocation per sliding ghost per frame
+        // (audit 5.9).
+        assert(() {
+          final anchorBand = _anchorPaintedBounds(anchorKey);
+          if (anchorBand != null) {
+            debugLastPhantomGhostPaint[ghostKey] = (
+              ghostRect: Rect.fromLTWH(
+                paintedX,
+                paintedY,
+                ghostChild.size.width,
+                ghostChild.size.height,
+              ),
+              clipRect: clipRect,
+              anchorBand: Rect.fromLTWH(
+                0,
+                anchorBand.top,
+                constraints.crossAxisExtent,
+                anchorBand.height,
+              ),
+            );
+          }
+          return true;
+        }());
         if (clipRect != null) {
           context.pushClipRect(
             needsCompositing,
@@ -2762,8 +2992,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // idle) handles cleanup; paint stays read-only.
     if (_composer.hasGhosts && hasSlides) {
       final viewport = _currentViewportSnapshot();
-      final edgeKeys = _composer.ghosts.activeKeys.toList();
-      for (final ghostKey in edgeKeys) {
+      // Read-only pass — Step 0b owns registry mutation (layout time), so
+      // no per-paint key-list snapshot is needed (audit 5.9).
+      for (final ghostKey in _composer.ghosts.activeKeys) {
         final entry = _composer.ghosts.entryFor(ghostKey);
         if (entry == null) continue;
         final ghostNid = controller.nidOf(ghostKey);
@@ -2807,14 +3038,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // deepest-first below. A header is repainted by EXACTLY ONE of {Pass
     // A.7 (non-sticky), Pass B (sticky)} per frame (Invariant 6).
     //
-    // Iterate `_phantomExitGhosts.values` ONLY (deduped) — NOT
-    // `_phantomClipAnchors.values`, which also holds ENTRY-phantom anchors
+    // Iterate the EXIT-ghost records' anchors ONLY (deduped) — NOT
+    // `_phantomClipAnchors.values`, which holds ENTRY-phantom anchors
     // that must NOT be repainted on top of an emerging entry row.
     if (_phantomExitGhosts != null &&
         _phantomExitGhosts!.isNotEmpty &&
         hasSlides) {
       final seenAnchors = <TKey>{};
-      for (final anchorKey in _phantomExitGhosts!.values) {
+      for (final ghost in _phantomExitGhosts!.values) {
+        final anchorKey = ghost.anchor;
         if (!seenAnchors.add(anchorKey)) continue; // dedupe shared anchors
         final anchorNid = controller.nidOf(anchorKey);
         if (anchorNid < 0) continue; // freed key
@@ -2955,28 +3187,36 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     }
   }
 
-  /// Computes the clip rect for a phantom-anchored sliding row, or null
-  /// Drops entries from `_phantomExitGhosts` whose key has been freed
-  /// (`nid < 0`) or whose slide has settled (both axis deltas == 0).
-  /// Paired `_phantomClipAnchors` entries are dropped in lockstep so
-  /// the two maps don't diverge.
+  /// Drops [_ExitGhost] records whose key has been freed (`nid < 0`),
+  /// was re-promoted to visibility, or whose slide has settled (dual
+  /// criterion: ghost AND anchor both at rest).
   ///
   /// Called from the start of `performLayout` every frame so dead
   /// entries can't accumulate while other slides are still in flight.
-  /// Paint passes can iterate these maps read-only after this runs.
+  /// Paint passes can iterate the map read-only after this runs.
   void _pruneSettledPhantomExitGhosts() {
     final ghosts = _phantomExitGhosts;
     if (ghosts == null || ghosts.isEmpty) return;
-    // Snapshot keys to avoid concurrent-modification during removal.
-    final keys = ghosts.keys.toList();
-    for (final ghostKey in keys) {
+    ghosts.removeWhere((ghostKey, ghost) {
       final nid = controller.nidOf(ghostKey);
       if (nid < 0) {
-        ghosts.remove(ghostKey);
-        _phantomClipAnchors?.remove(ghostKey);
-        _phantomExitSlidUp?.remove(ghostKey);
-        _phantomExitEdge?.remove(ghostKey);
-        continue;
+        return true;
+      }
+      // Ghost re-promoted to visibility: any visibility-changing mutation
+      // (not just baseline-staging ones — e.g. a non-animated expand of
+      // the destination parent revealing an ADJACENT ghost whose own
+      // slide delta is zero) puts the key back in visibleNodes, where
+      // Pass A paints it structurally. Drop the record so Pass A.5 does
+      // not paint the same RenderBox a second time — but MIGRATE the
+      // EXIT clip into [_phantomClipAnchors] first: the re-promoted row
+      // keeps emerging from behind its old anchor until its slide
+      // settles, at which point the consume-time clip prune's own-slide
+      // criterion reaps it (the entry-role semantics the clip map owns).
+      if (controller.isVisible(ghostKey)) {
+        if (ghost.clipped) {
+          (_phantomClipAnchors ??= <TKey, TKey>{})[ghostKey] = ghost.anchor;
+        }
+        return true;
       }
       final dy = controller.getSlideDeltaNid(nid);
       final dx = controller.getSlideDeltaXNid(nid);
@@ -2986,28 +3226,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // delta is 0 from the start) → the vanish. "Settled" = ghost AND anchor
       // both at rest. Edge ghosts: off-screen anchor slide is 0, so this is
       // byte-equivalent to the old ghost-only test for them.
-      final anchorKey = ghosts[ghostKey];
-      final anchorNid = anchorKey != null ? controller.nidOf(anchorKey) : -1;
+      final anchorNid = controller.nidOf(ghost.anchor);
       final anchorDy =
           anchorNid >= 0 ? controller.getSlideDeltaNid(anchorNid) : 0.0;
-      if (dy == 0.0 && dx == 0.0 && anchorDy == 0.0) {
-        ghosts.remove(ghostKey);
-        _phantomClipAnchors?.remove(ghostKey);
-        _phantomExitSlidUp?.remove(ghostKey);
-        _phantomExitEdge?.remove(ghostKey);
-      }
-    }
+      return dy == 0.0 && dx == 0.0 && anchorDy == 0.0;
+    });
     if (ghosts.isEmpty) {
       _phantomExitGhosts = null;
     }
     if (_phantomClipAnchors != null && _phantomClipAnchors!.isEmpty) {
       _phantomClipAnchors = null;
-    }
-    if (_phantomExitSlidUp != null && _phantomExitSlidUp!.isEmpty) {
-      _phantomExitSlidUp = null;
-    }
-    if (_phantomExitEdge != null && _phantomExitEdge!.isEmpty) {
-      _phantomExitEdge = null;
     }
   }
 
@@ -3109,13 +3337,23 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     required double remainingPaintExtent,
     required PhantomClipRole role,
   }) {
-    final clipAnchors = _phantomClipAnchors;
-    if (clipAnchors == null || clipAnchors.isEmpty) return null;
-
     final key = _controller.keyOfNid(nid);
     if (key == null) return null;
-    final anchorKey = clipAnchors[key];
-    if (anchorKey == null) return null;
+
+    // Anchor resolution is per-role (audit 6.3): EXIT clips live inside
+    // the consolidated [_ExitGhost] record; ENTRY clips live in
+    // [_phantomClipAnchors].
+    final TKey anchorKey;
+    _ExitGhost<TKey>? exitGhost;
+    if (role == PhantomClipRole.exit) {
+      exitGhost = _phantomExitGhosts?[key];
+      if (exitGhost == null || !exitGhost.clipped) return null;
+      anchorKey = exitGhost.anchor;
+    } else {
+      final entryAnchor = _phantomClipAnchors?[key];
+      if (entryAnchor == null) return null;
+      anchorKey = entryAnchor;
+    }
 
     final width = constraints.crossAxisExtent;
 
@@ -3140,10 +3378,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       // BELOW `bandTop`, which would flip the legacy instantaneous test to
       // the downward branch mid-slide and re-expose the trailing-below
       // region (the one-frame pop). The persisted flag is stable across
-      // that crossover. The `?? (paintedY > bandTop)` fallback preserves
-      // today's behavior for any ghost without a `_phantomExitSlidUp`
-      // entry (defensive).
-      final slidUp = _phantomExitSlidUp?[key] ?? (paintedY > bandTop);
+      // that crossover.
+      final slidUp = exitGhost!.slidUp;
       if (slidUp) {
         // Ghost came from below, sliding UP into the header. Visible =
         // [bandBottom, remainingPaintExtent] ALWAYS — clipping away
@@ -3271,19 +3507,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // Lazy viewport: only built if a ghost row is encountered.
     ViewportSnapshot? hitViewport;
 
-    for (int i = startIndex; i < visibleNodes.length; i++) {
+    // Per-row test shared by the idle single loop, the slide-active
+    // z-ordered passes, and Phase 2b (edge ghosts).
+    bool testRow(int i) {
       final nid = orderNids[i];
-      if (_sticky.isSticky(nid)) {
-        continue;
-      }
-
       final nodeId = visibleNodes[i];
       final child = getChildForNode(nodeId);
-      if (child == null) continue;
+      if (child == null) return false;
 
       // Skip exiting nodes - they should not receive interactions
       // This prevents crashes when rapidly tapping delete buttons
-      if (controller.isExitingNid(nid)) continue;
+      if (controller.isExitingNid(nid)) return false;
 
       final parentData = child.parentData! as SliverTreeParentData;
       // Edge-ghost rows paint at `composer.baseFor + slideDelta` (NOT at
@@ -3294,7 +3528,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
       final double nodeOffset;
       if (_composer.ghosts.entryFor(nodeId) != null) {
         hitViewport ??= _currentViewportSnapshot();
-        nodeOffset = _composer.baseFor(nodeId, hitViewport) ?? parentData.layoutOffset;
+        nodeOffset =
+            _composer.baseFor(nodeId, hitViewport!) ?? parentData.layoutOffset;
       } else {
         nodeOffset = parentData.layoutOffset;
       }
@@ -3310,12 +3545,36 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           : 0.0;
       final localMainAxisPosition =
           mainAxisPosition + scrollOffset - nodeOffset - slideDelta;
-      if (localMainAxisPosition < 0) continue;
-      if (localMainAxisPosition >= nodeExtent) continue;
+      if (localMainAxisPosition < 0) return false;
+      if (localMainAxisPosition >= nodeExtent) return false;
 
       final localCrossAxisPosition =
           crossAxisPosition - parentData.indent - slideDeltaX;
-      if (localCrossAxisPosition < 0) continue;
+      if (localCrossAxisPosition < 0) return false;
+
+      final paintedMainOffset = nodeOffset - scrollOffset + slideDelta;
+      final paintedCrossOffset = parentData.indent + slideDeltaX;
+
+      // Audit 4.7: paint clips an entry-phantom row to the region outside
+      // its anchor's bounds; the clipped-away (occluded) portion must not
+      // steal hits from the anchor covering it. Reject when the hit point
+      // (already in sliver-local paint space, the space the clip rect is
+      // computed in) lies outside the visible region.
+      if (_phantomClipAnchors?.containsKey(nodeId) ?? false) {
+        final clipRect = _resolvePhantomAnchorBounds(
+          nid: nid,
+          paintedY: paintedMainOffset,
+          offset: Offset.zero,
+          remainingPaintExtent: constraints.remainingPaintExtent,
+          role: PhantomClipRole.entry,
+        );
+        if (clipRect != null &&
+            !clipRect.contains(
+              Offset(crossAxisPosition, mainAxisPosition),
+            )) {
+          return false;
+        }
+      }
 
       // Mirror paint's clip-and-translate trick. When a node is animating
       // and its visible extent is smaller than its intrinsic box, paint
@@ -3328,9 +3587,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
           ? (child.size.height - nodeExtent)
           : 0.0;
 
-      final paintedMainOffset = nodeOffset - scrollOffset + slideDelta;
-      final paintedCrossOffset = parentData.indent + slideDeltaX;
-      final hit = result.addWithAxisOffset(
+      return result.addWithAxisOffset(
         paintOffset: Offset(paintedCrossOffset, paintedMainOffset),
         mainAxisOffset: paintedMainOffset,
         crossAxisOffset: paintedCrossOffset,
@@ -3348,8 +3605,80 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
               );
             },
       );
+    }
 
-      if (hit) return true;
+    // Bounded iteration end (audit 5.2) — see paint's Pass A for the
+    // derivation. Composer edge-ghost rows past the break are covered by
+    // Phase 2b below.
+    final hitBound = hitOffset + slideOverreach;
+
+    debugLastHitTestIterationCount = 0;
+    if (!hasSlides) {
+      // Idle fast path: structural order, single loop — zero overhead on
+      // the common path (paint z-order only diverges during slides).
+      for (int i = startIndex; i < visibleNodes.length; i++) {
+        debugLastHitTestIterationCount++;
+        final nid = orderNids[i];
+        if (_structuralOffsetAt(i, nid) > hitBound) break;
+        if (_sticky.isSticky(nid)) continue;
+        if (testRow(i)) return true;
+      }
+      return false;
+    }
+
+    // Slide-active path (audit 4.7): match paint's z-order. Paint draws
+    // static rows first, then sliding rows in ASCENDING |delta| (the row
+    // that moved most paints last, on top) — so hit priority is the
+    // reverse: sliding rows in DESCENDING |delta| first, then static
+    // rows. Ties preserve paint's natural-order rule (later index paints
+    // later → tested first).
+    final slidingIdx = <int>[];
+    final staticIdx = <int>[];
+    for (int i = startIndex; i < visibleNodes.length; i++) {
+      debugLastHitTestIterationCount++;
+      final nid = orderNids[i];
+      if (_structuralOffsetAt(i, nid) > hitBound) break;
+      if (_sticky.isSticky(nid)) continue;
+      final dy = controller.getSlideDeltaNid(nid);
+      final dx = hasXSlides ? controller.getSlideDeltaXNid(nid) : 0.0;
+      if (dy != 0.0 || dx != 0.0) {
+        slidingIdx.add(i);
+      } else {
+        staticIdx.add(i);
+      }
+    }
+    slidingIdx.sort((a, b) {
+      final da = controller.getSlideDeltaNid(orderNids[a]).abs();
+      final db = controller.getSlideDeltaNid(orderNids[b]).abs();
+      final cmp = db.compareTo(da);
+      if (cmp != 0) return cmp;
+      return b.compareTo(a);
+    });
+    for (final i in slidingIdx) {
+      if (testRow(i)) return true;
+    }
+    for (final i in staticIdx) {
+      if (testRow(i)) return true;
+    }
+
+    // Phase 2b: composer edge-ghost rows paint at the live viewport edge
+    // regardless of structural position, so the bounded main loop may
+    // have broken before reaching them. The registry is small; test any
+    // entries the main loop did not cover.
+    if (_composer.hasGhosts) {
+      for (final ghostKey in _composer.ghosts.activeKeys) {
+        final nid = controller.nidOf(ghostKey);
+        if (nid < 0) continue;
+        final i = controller.visibleIndexOfNid(nid);
+        if (i < 0) continue;
+        // Rows inside the bounded range were already tested above.
+        if (i >= startIndex &&
+            _structuralOffsetAt(i, nid) <= hitBound) {
+          continue;
+        }
+        if (_sticky.isSticky(nid)) continue;
+        if (testRow(i)) return true;
+      }
     }
 
     return false;

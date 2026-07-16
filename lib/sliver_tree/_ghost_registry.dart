@@ -54,6 +54,14 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
 
   TreeController<TKey, TData> _controller;
 
+  /// Render-supplied structural-offset resolver: `(visibleIndex, nid) →
+  /// structural scroll-space y`. When set, [_computeTrueStructuralAt]
+  /// resolves in O(1) from the render layer's per-frame offsets instead
+  /// of a prefix-sum walk (audit 5.8 — `normalizeForViewport` runs per
+  /// scroll frame while ghosts exist). Optional so the registry stays
+  /// decoupled and standalone-testable.
+  double Function(int index, int nid)? structuralYOf;
+
   /// Active edge ghosts keyed by emerging row key. The registry owns
   /// this map; the render layer consults it only through the read API
   /// ([baseFor], [hasGhosts], [entryFor]) and the lifecycle methods
@@ -153,18 +161,29 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
   }
 
   /// Computes the row's true structural Y (no slideDelta), or -1 if
-  /// the row is not in `visibleNodes`. O(N_visible). Called only for
-  /// edge-ghost keys during re-promotion checks; total cost is bounded
-  /// by (N_ghosts × N_visible) per consume which is tiny in practice.
+  /// the row is not in `visibleNodes`.
+  ///
+  /// The index resolves through the controller's O(1) reverse index
+  /// (formerly an O(N_visible) key-equality scan per ghost — and
+  /// [normalizeForViewport] runs this per ghost on EVERY scroll frame
+  /// while ghosts exist). The offset comes from the render-supplied
+  /// [structuralYOf] when wired (O(1)); the fallback prefix-sums current
+  /// extents up to the index (exact, O(index)).
   double _computeTrueStructuralAt(TKey key) {
-    final visible = _controller.visibleNodes;
+    final nid = _controller.nidOf(key);
+    if (nid < 0) return -1.0;
+    final index = _controller.visibleIndexOfNid(nid);
+    if (index < 0) return -1.0;
+    final resolver = structuralYOf;
+    if (resolver != null) {
+      return resolver(index, nid);
+    }
     final orderNids = _controller.orderNidsView;
     double structural = 0.0;
-    for (int i = 0; i < visible.length; i++) {
-      if (visible[i] == key) return structural;
+    for (int i = 0; i < index; i++) {
       structural += _controller.getCurrentExtentNid(orderNids[i]);
     }
-    return -1.0;
+    return structural;
   }
 
   /// Step 4: re-evaluate every active edge ghost. Three outcomes per row:

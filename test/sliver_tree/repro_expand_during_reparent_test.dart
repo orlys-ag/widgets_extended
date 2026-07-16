@@ -60,8 +60,12 @@ const double _kFrameMs = 16.0;
 /// flips (the hand-off being tested):
 /// - visible row: `layoutOffset + slideDelta(key)`.
 /// - exit/entry ghost (not in visibleNodes): mirror Pass A.5's paint formula
-///   `anchorLayoutOffset + slideDelta(anchor) + slideDelta(key)` where [anchor]
-///   is the deepest visible ancestor.
+///   `anchorSettledTop + slideDelta(key)` where [anchor] is the deepest
+///   visible ancestor. The SETTLED top is the anchor's structural
+///   `layoutOffset` WITHOUT the anchor's own slide delta — the ghost
+///   converges on the settled position; the anchor's live band only drives
+///   the exit clip (see `_exitGhostPaintedBaseScrollSpace`). The
+///   direction-aware tuck is 0 here (all rows share the same height).
 double? _paintedY(
   WidgetTester tester,
   TreeController<String, String> c,
@@ -73,10 +77,10 @@ double? _paintedY(
     if (p.offset == null) return null;
     return p.offset! + c.getSlideDelta(key);
   }
-  // Ghost: anchored to its visible ancestor.
+  // Ghost: anchored to its visible ancestor's settled top.
   final a = _probe(tester, anchor);
   if (a.offset == null) return null;
-  return a.offset! + c.getSlideDelta(anchor) + c.getSlideDelta(key);
+  return a.offset! + c.getSlideDelta(key);
 }
 
 /// Asserts painted-Y continuity across consecutive [samples]. [intervalMs] is

@@ -36,6 +36,14 @@ import 'types.dart';
 ///
 /// This controller does not own the [TreeController] — it drives it.
 /// Dispose this controller before disposing the underlying [TreeController].
+///
+/// **Composes with direct controller mutations.** Every diff reads the
+/// controller's live state ([TreeController.liveRootKeys] /
+/// [TreeController.getLiveChildren]) as its "current" baseline, so
+/// structural mutations that bypass this controller — imperative
+/// `insert`/`remove`/`moveNode` calls through an escape-hatch reference,
+/// or [TreeReorderController] committing a drag-drop — are simply the new
+/// baseline for the next sync. No resync hook is needed.
 class TreeSyncController<TKey, TData> {
   /// Creates a sync controller.
   ///
@@ -61,11 +69,18 @@ class TreeSyncController<TKey, TData> {
   /// Remembered expansion states for removed nodes.
   final Map<TKey, bool> _expansionMemory = {};
 
-  /// Current root keys in order, tracked to compute diffs.
-  final List<TKey> _currentRoots = [];
-
-  /// Current child keys per parent, tracked to compute diffs.
-  final Map<TKey, List<TKey>> _currentChildren = {};
+  /// Parents whose child list was emptied by a sync while the parent
+  /// itself survived **collapsed** (e.g. a filter-sync temporarily
+  /// removing all children of a user-collapsed parent).
+  ///
+  /// This is the suppress signal for the "gained first children"
+  /// auto-expand heuristic (surfaced through [snapshotRememberedKeys]):
+  /// when the children return in a later sync, the heuristic must not
+  /// override the user's deliberate collapse. [_expansionMemory] cannot
+  /// carry this — the parent is never removed, so a memory entry for it
+  /// would be consumed by the restore/prune passes of the very sync that
+  /// recorded it. Bounded by [maxExpansionMemorySize] (FIFO eviction).
+  final Set<TKey> _emptiedWhileCollapsed = <TKey>{};
 
   /// During a [syncRoots] call with [childrenOf], holds the union of all
   /// desired child keys across all parents. [syncChildren] checks this to
@@ -124,7 +139,11 @@ class TreeSyncController<TKey, TData> {
   }) {
     final desiredKeys = desired.map((n) => n.key).toList();
     final desiredSet = desiredKeys.toSet();
-    final currentSet = _currentRoots.toSet();
+    // Controller truth as the diff baseline. Live-filtered: exiting
+    // (pending-deletion) roots are neither "current" (which would put
+    // them in toRemove and restart their exit animation) nor retained.
+    final currentRoots = _controller.liveRootKeys;
+    final currentSet = currentRoots.toSet();
 
     // Pre-compute the full set of desired descendant keys so the reparenting
     // check below can detect a root that is moving to any depth in the new
@@ -161,7 +180,7 @@ class TreeSyncController<TKey, TData> {
       for (int i = 0; i < desiredKeys.length; i++) desiredKeys[i]: i,
     };
     final remaining = <TKey>[
-      for (final k in _currentRoots)
+      for (final k in currentRoots)
         if (!toRemove.contains(k)) k,
     ];
     final remainingBit = _Fenwick(desiredKeys.length);
@@ -210,7 +229,6 @@ class TreeSyncController<TKey, TData> {
             slideDuration: _controller.animationDuration,
             slideCurve: _controller.animationCurve,
           );
-          _currentChildren[oldParent]?.remove(node.key);
         }
       } else {
         _controller.insertRoot(node, index: targetIndex, animate: animate);
@@ -222,17 +240,13 @@ class TreeSyncController<TKey, TData> {
 
     // 4. Update data for retained roots whose payload changed.
     //
-    //    Retained roots that are mid-exit-animation are intentionally
-    //    LEFT alone here: a pending-deletion node is still in the
-    //    controller's `rootKeys` (and therefore in the `currentSet`
-    //    that `initializeTracking` snapshots), so a caller mirroring
-    //    `controller.rootKeys` back into `desired` would otherwise
-    //    have its imperative `remove()` silently undone by an automatic
-    //    `insertRoot(preservePendingSubtreeState: true)` here. Callers
-    //    that want a removed root to come back mid-animation should
-    //    mirror live state via `liveRootKeys` (so the row drops out of
-    //    `currentSet` on the next sync and the toAdd branch handles
-    //    cancellation) or call `insertRoot` themselves.
+    //    Exiting (pending-deletion) roots never reach this loop: the
+    //    live-filtered `currentSet` excludes them, so a desired key that
+    //    is mid-exit lands in `toAdd` and the branch above cancels the
+    //    deletion (the desired state is authoritative — asking for the
+    //    key means it should exist). Callers that want an imperative
+    //    `remove()` to keep animating out should mirror live state via
+    //    `liveRootKeys` so the exiting key drops out of `desired`.
     final retained = desiredSet.intersection(currentSet);
     for (final node in desired) {
       if (!retained.contains(node.key)) continue;
@@ -278,10 +292,12 @@ class TreeSyncController<TKey, TData> {
         for (final key in toRemove) {
           // Skip roots that are themselves being reparented: their entire
           // subtree rides along with the moveNode call in step 3 or step 5,
-          // so it's expected that their tracked descendants are still in
+          // so it's expected that their remaining descendants are still in
           // desiredDescendants — that's how moveNode found them.
           if (desiredDescendants.contains(key)) continue;
-          final tracked = _currentChildren[key] ?? const [];
+          final tracked = _controller.getNodeData(key) != null
+              ? _controller.getChildren(key)
+              : const [];
           for (final childKey in tracked) {
             assert(
               !desiredDescendants.contains(childKey),
@@ -313,7 +329,6 @@ class TreeSyncController<TKey, TData> {
       // `key` are non-desired descendants that are about to be purged.
       _rememberExpansion(key);
       _controller.remove(key: key, animate: animate);
-      _clearChildrenTracking(key);
     }
 
     // 6. Reorder all live roots to match desired order if needed.
@@ -347,12 +362,7 @@ class TreeSyncController<TKey, TData> {
       _restoreExpansion(key, animate: animate);
     }
 
-    // 8. Update tracking state.
-    _currentRoots
-      ..clear()
-      ..addAll(desiredKeys);
-
-    // 9. Prune expansion memory of keys that are now live in the controller.
+    // 8. Prune expansion memory of keys that are now live in the controller.
     if (preserveExpansion) {
       _pruneExpansionMemory();
     }
@@ -404,11 +414,9 @@ class TreeSyncController<TKey, TData> {
   /// Throws [ArgumentError] when [desired] contains the same key more
   /// than once. The diff machinery downstream dedupes via a set, but the
   /// per-position loops walk the raw list — duplicates land in the
-  /// internal `remaining` tracker and `_currentChildren`/`_currentRoots`
-  /// snapshots, producing wrong Fenwick offsets and stale tracking on
-  /// subsequent syncs. `TreeController.setRoots`/`setChildren` already
-  /// enforce this for the imperative path; matching it here closes the
-  /// declarative path.
+  /// internal `remaining` tracker, producing wrong Fenwick offsets.
+  /// `TreeController.setRoots`/`setChildren` already enforce this for the
+  /// imperative path; matching it here closes the declarative path.
   static void _assertNoDuplicateKeys<TKey, TData>(
     List<TreeNode<TKey, TData>> desired,
     String context,
@@ -429,10 +437,47 @@ class TreeSyncController<TKey, TData> {
     List<TreeNode<TKey, TData>> desired, {
     bool animate = true,
   }) {
+    // Cheap early-out (audit 2.5), mirroring TreeController.setChildren's
+    // C026 fast path: when [desired] exactly matches the controller's
+    // current child list — same keys in order, same data, no
+    // pending-deletion members — skip the whole diff (keys list, two
+    // sets, Fenwick) before any allocation. The deferred
+    // expansion-restore retry still runs: a parent whose children arrived
+    // in an earlier sync may still be awaiting its expand.
+    if (_childrenExactMatch(parentKey, desired)) {
+      if (preserveExpansion &&
+          !_deferExpansionRestore &&
+          _expansionMemory.containsKey(parentKey)) {
+        _restoreExpansion(parentKey, animate: animate);
+      }
+      return;
+    }
+
     final desiredKeys = desired.map((n) => n.key).toList();
     final desiredSet = desiredKeys.toSet();
-    final currentKeys = _currentChildren[parentKey] ?? const [];
+    // Controller truth as the diff baseline. Live-filtered: exiting
+    // (pending-deletion) children are neither "current" (which would put
+    // them in toRemove and restart their exit animation) nor retained.
+    final currentKeys = _controller.getLiveChildren(parentKey);
     final currentSet = currentKeys.toSet();
+
+    // Track a deliberate collapse across a child-list emptying: when this
+    // sync removes the parent's last child while the parent survives in a
+    // collapsed state, record the suppress signal so the auto-expand
+    // heuristic does not re-open the parent when children return in a
+    // later sync. Consume the signal as soon as children (re)arrive.
+    if (preserveExpansion && maxExpansionMemorySize > 0) {
+      if (desiredKeys.isEmpty && currentKeys.isNotEmpty) {
+        if (!_controller.isExpanded(parentKey)) {
+          _emptiedWhileCollapsed.add(parentKey);
+          while (_emptiedWhileCollapsed.length > maxExpansionMemorySize) {
+            _emptiedWhileCollapsed.remove(_emptiedWhileCollapsed.first);
+          }
+        }
+      } else if (desiredKeys.isNotEmpty) {
+        _emptiedWhileCollapsed.remove(parentKey);
+      }
+    }
 
     // 1. Remove children no longer desired. Skip nodes that:
     //    - have already been moved elsewhere (controller parent != parentKey)
@@ -450,7 +495,6 @@ class TreeSyncController<TKey, TData> {
       }
       _rememberExpansion(key);
       _controller.remove(key: key, animate: animate);
-      _clearChildrenTracking(key);
     }
 
     // 2. Build the post-removal list plus a Fenwick tree keyed by desired
@@ -481,11 +525,6 @@ class TreeSyncController<TKey, TData> {
       final targetIndex = remainingBit.prefixSum(p);
 
       if (_controller.getNodeData(node.key) != null) {
-        // Read the old parent before the move so we can drop the now-stale
-        // tracking entry under it. Without this, a caller that later calls
-        // syncChildren(oldParent, [...node...]) would see the key as already
-        // present under oldParent, skip the moveNode, and diverge from the
-        // controller's actual state.
         final oldParent = _controller.getParent(node.key);
         if (oldParent == parentKey) {
           // Same parent: insert handles relocation and, when the node is
@@ -514,9 +553,6 @@ class TreeSyncController<TKey, TData> {
             slideDuration: _controller.animationDuration,
             slideCurve: _controller.animationCurve,
           );
-          if (oldParent != null) {
-            _currentChildren[oldParent]?.remove(node.key);
-          }
         }
       } else {
         _controller.insert(
@@ -555,27 +591,35 @@ class TreeSyncController<TKey, TData> {
     }
 
     // 5. Reorder all live children to match desired order if needed.
-    //    Filter out keys whose exit animation is still in flight: they
-    //    are not in the controller's `liveChildren` set that
-    //    `reorderChildren` validates against, so passing them would trip
-    //    the length check. The exiting rows continue animating out
-    //    untouched.
-    final liveDesiredKeys = <TKey>[
+    //    Compare against CONTROLLER truth, not the tracking mirror: a
+    //    deferred cross-parent mover (skipped in step 1 because it is
+    //    globally desired elsewhere) is still a live child of [parentKey]
+    //    at this point, so a mirror-derived comparison both misses genuine
+    //    misorders (the mirror never disagrees with itself — silent
+    //    permanent misorder) and, when a reorder IS issued, fails
+    //    [TreeController.reorderChildren]'s exact-live-set validation.
+    //
+    //    Build the target order as a permutation of the controller's live
+    //    children: desired keys first (in desired order), then any live
+    //    children not in the desired set — i.e. the deferred movers, in
+    //    their current relative order, appended. The movers are moved out
+    //    later in the same batch when their destination parent syncs, so
+    //    the transient tail position is invisible. Exiting
+    //    (pending-deletion) rows are excluded by [getLiveChildren] and
+    //    continue animating out untouched.
+    final controllerLive = _controller.getLiveChildren(parentKey);
+    final controllerLiveSet = controllerLive.toSet();
+    final orderedKeys = <TKey>[
       for (final k in desiredKeys)
-        if (!_controller.isExiting(k)) k,
+        if (controllerLiveSet.contains(k)) k,
+      for (final k in controllerLive)
+        if (!desiredSet.contains(k)) k,
     ];
-    final liveRemaining = <TKey>[
-      for (final k in remaining)
-        if (!_controller.isExiting(k)) k,
-    ];
-    if (!_listEquals(liveRemaining, liveDesiredKeys)) {
-      _controller.reorderChildren(parentKey, liveDesiredKeys, animate: animate);
+    if (!_listEquals(controllerLive, orderedKeys)) {
+      _controller.reorderChildren(parentKey, orderedKeys, animate: animate);
     }
 
-    // 6. Update tracking state.
-    _currentChildren[parentKey] = desiredKeys;
-
-    // 7. If the parent itself had a pending expansion restore that was
+    // 6. If the parent itself had a pending expansion restore that was
     // deferred because its children weren't registered yet, retry now that
     // they are. Without this retry, a re-added parent whose children arrive
     // in a later sync would remain silently collapsed.
@@ -643,99 +687,123 @@ class TreeSyncController<TKey, TData> {
     });
   }
 
-  /// Initializes tracking state from the current tree controller.
+  /// No-op, kept for backward compatibility.
   ///
-  /// Call after construction when the tree controller already has nodes
-  /// (e.g., when recreating the sync controller mid-lifetime). Without
-  /// this, the first [syncRoots] call treats all existing nodes as new
-  /// and cannot remove nodes that are no longer desired.
-  void initializeTracking() {
-    _currentRoots
-      ..clear()
-      ..addAll(_controller.rootKeys);
-    _currentChildren.clear();
+  /// Diffs now read the controller's live state directly
+  /// ([TreeController.liveRootKeys] / [TreeController.getLiveChildren]),
+  /// so there is no private tracking state to initialize: a sync
+  /// controller created against a populated [TreeController] — or one
+  /// whose tree was mutated directly — always diffs against the
+  /// controller's actual current state.
+  void initializeTracking() {}
 
+  /// Returns a deep-copied snapshot of the current live child order,
+  /// derived from the controller.
+  ///
+  /// The returned map and lists are detached from the controller's internal
+  /// state, so callers can safely compare snapshots across sync operations.
+  /// Exiting (pending-deletion) nodes are excluded — they are on their way
+  /// out and not part of the current logical tree.
+  Map<TKey, List<TKey>> snapshotCurrentChildren() {
+    final out = <TKey, List<TKey>>{};
     // Iterative DFS so deep linear chains do not stack-overflow Dart's
     // recursion limit (typically ~10k–20k frames).
-    final stack = <TKey>[..._currentRoots];
+    final stack = <TKey>[..._controller.liveRootKeys];
     while (stack.isNotEmpty) {
       final key = stack.removeLast();
-      final children = _controller.getChildren(key);
-      _currentChildren[key] = List<TKey>.of(children);
+      final children = _controller.getLiveChildren(key);
+      out[key] = children;
       for (final childKey in children) {
         stack.add(childKey);
       }
     }
-  }
-
-  /// Returns a deep-copied snapshot of the current tracked child order.
-  ///
-  /// The returned map and lists are detached from the controller's internal
-  /// state, so callers can safely compare snapshots across sync operations.
-  Map<TKey, List<TKey>> snapshotCurrentChildren() {
-    return <TKey, List<TKey>>{
-      for (final entry in _currentChildren.entries)
-        entry.key: List<TKey>.of(entry.value),
-    };
+    return out;
   }
 
   /// Clears all remembered expansion state.
   void clearExpansionMemory() {
     _expansionMemory.clear();
+    _emptiedWhileCollapsed.clear();
   }
 
-  /// Returns the set of keys currently held in expansion memory.
+  /// Returns the set of keys currently held in expansion memory, plus
+  /// parents whose child list was emptied by a sync while they survived
+  /// collapsed.
   ///
   /// A key is present here only if it was previously removed by
   /// [syncRoots]/[syncChildren] and its expansion state was recorded
-  /// for restoration on re-add. Intended for callers (e.g., the auto-expand
-  /// heuristic in [SyncedSliverTree]) that need to distinguish a genuinely
-  /// new key from one that is being re-added after having been filtered out.
+  /// for restoration on re-add, or if it is a retained parent whose
+  /// deliberate collapse must not be overridden when its children return.
+  /// Intended for callers (e.g., the auto-expand heuristic in
+  /// [SyncedSliverTree]) that need to distinguish a genuinely new key
+  /// from one that is being re-added after having been filtered out.
   Set<TKey> snapshotRememberedKeys() {
-    return _expansionMemory.keys.toSet();
+    return {..._expansionMemory.keys, ..._emptiedWhileCollapsed};
   }
 
   /// Releases resources. Call before disposing the underlying [TreeController].
   void dispose() {
     _expansionMemory.clear();
-    _currentRoots.clear();
-    _currentChildren.clear();
+    _emptiedWhileCollapsed.clear();
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // PRIVATE HELPERS
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Clears [_currentChildren] tracking for [key] and all its tracked
-  /// descendants. Must be called when a node is removed so that future
-  /// [syncChildren] calls don't diff against stale state.
-  ///
-  /// Iterative DFS so deep linear chains do not stack-overflow.
-  void _clearChildrenTracking(TKey key) {
-    final stack = <TKey>[key];
-    while (stack.isNotEmpty) {
-      final current = stack.removeLast();
-      final children = _currentChildren.remove(current);
-      if (children != null) {
-        for (final childKey in children) {
-          stack.add(childKey);
-        }
+  /// Whether [desired] exactly matches the controller's current child
+  /// list under [parentKey]: same keys in the same order, same data
+  /// values, and no pending-deletion children (which would need the slow
+  /// path's resurrection logic). One O(children) walk, zero allocation.
+  bool _childrenExactMatch(
+    TKey parentKey,
+    List<TreeNode<TKey, TData>> desired,
+  ) {
+    final current = _controller.getChildren(parentKey);
+    if (current.length != desired.length) {
+      return false;
+    }
+    for (int i = 0; i < desired.length; i++) {
+      final key = current[i];
+      if (key != desired[i].key) {
+        return false;
+      }
+      if (_controller.isPendingDeletion(key)) {
+        return false;
+      }
+      final data = _controller.getNodeData(key);
+      if (data == null || data.data != desired[i].data) {
+        return false;
       }
     }
+    return true;
   }
 
   /// Collects all desired descendant keys into [_globallyDesiredChildren].
   ///
-  /// Iterative DFS so deep desired trees do not stack-overflow.
+  /// Iterative DFS so deep desired trees do not stack-overflow. Guards
+  /// against revisits: a cyclic [childrenOf] (`a → b → a`) would loop
+  /// forever on an unguarded walk (hanging the UI thread), and a DAG
+  /// (same key under two parents) would walk exponentially before
+  /// producing last-write-wins thrash. Throws [ArgumentError] naming the
+  /// repeated key, matching the validation the other `SyncedSliverTree`
+  /// input modes already perform.
   void _collectDesiredDescendants(
     List<TreeNode<TKey, TData>> nodes,
     List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
   ) {
+    final seen = <TKey>{for (final n in nodes) n.key};
     final stack = <TreeNode<TKey, TData>>[...nodes];
     while (stack.isNotEmpty) {
       final node = stack.removeLast();
       final children = childrenOf(node.key);
       for (final child in children) {
+        if (!seen.add(child.key)) {
+          throw ArgumentError(
+            "syncRoots childrenOf detected a cycle or repeated key "
+            "involving key \"${child.key}\".",
+          );
+        }
         _globallyDesiredChildren!.add(child.key);
         stack.add(child);
       }
@@ -766,6 +834,11 @@ class TreeSyncController<TKey, TData> {
     List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
     bool animate,
   ) {
+    // Revisit guard — see [_collectDesiredDescendants]. That walk runs
+    // first and throws on the same inputs, but [childrenOf] is a caller
+    // function that may answer differently across calls, so this walk
+    // carries its own guard rather than trusting the earlier pass.
+    final seen = <TKey>{for (final n in nodes) n.key};
     final stack = <TreeNode<TKey, TData>>[];
     final restoreOrder = <TKey>[];
     for (int i = nodes.length - 1; i >= 0; i--) {
@@ -774,6 +847,14 @@ class TreeSyncController<TKey, TData> {
     while (stack.isNotEmpty) {
       final node = stack.removeLast();
       final children = childrenOf(node.key);
+      for (final child in children) {
+        if (!seen.add(child.key)) {
+          throw ArgumentError(
+            "syncRoots childrenOf detected a cycle or repeated key "
+            "involving key \"${child.key}\".",
+          );
+        }
+      }
       syncChildren(node.key, children, animate: animate);
       // Defer restore to after all descendants are synced (bottom-up).
       for (final child in children) {

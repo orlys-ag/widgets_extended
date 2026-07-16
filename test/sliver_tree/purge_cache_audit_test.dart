@@ -37,6 +37,9 @@ void expectInsertConsistent(
 }
 
 void main() {
+  // These suites exist to exercise the cross-structure invariants -
+  // run the full consistency sweep after every mutation (audit 5.11).
+  TreeController.debugFullConsistencyChecks = true;
   group("purge paths that defer visible-order maintenance", () {
     testWidgets("immediate (animate: false) remove of one child", (tester) async {
       final c = TreeController<String, String>(

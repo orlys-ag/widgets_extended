@@ -168,6 +168,16 @@ class SlideAnimation<TKey> {
   /// creates a fresh entry with default false) or destroyed.
   bool preserveProgressOnRebatch = false;
 
+  /// Monotonic stamp bumped by every in-place composition (retarget).
+  ///
+  /// The engine's completion cleanup compares stamps instead of relying
+  /// on object identity alone: composition mutates the entry IN PLACE, so
+  /// identity cannot distinguish "the entry that just completed" from
+  /// "the same object, freshly retargeted by an `_onTick` listener" —
+  /// identity-only cleanup would silently kill the just-composed slide
+  /// (audit 6.4).
+  int installStamp = 0;
+
   /// Whether this animation has completed.
   bool get isComplete => progress >= 1.0;
 }
@@ -451,7 +461,14 @@ class BulkAnimationData<TKey> {
   /// Whether [key] is a member of the bulk group (in either the live
   /// member set or the pending-removal set). Always false on an invalid
   /// snapshot.
-  bool containsMember(TKey key) {
+  ///
+  /// The parameter is typed `Object?` (like [Set.contains]) deliberately:
+  /// [inactive] returns a const `BulkAnimationData<Never>` sentinel cast
+  /// to `BulkAnimationData<TKey>`, and a `TKey`-typed parameter would
+  /// trigger Dart's generic covariance check against the actual type
+  /// argument (`Never`) before the body runs — throwing for ANY real key
+  /// instead of returning false.
+  bool containsMember(Object? key) {
     final m = _members;
     if (m != null && m.contains(key)) return true;
     final p = _pendingRemoval;

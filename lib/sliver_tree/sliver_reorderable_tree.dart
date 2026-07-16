@@ -55,6 +55,7 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
     this.draggedOpacity = 0.3,
     this.dropIndicatorColor = const Color(0xFF2196F3),
     this.dropIndicatorThickness = 2.0,
+    this.addRepaintBoundaries = true,
     super.key,
   });
 
@@ -88,6 +89,10 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
 
   /// Thickness of the drop indicator line in logical pixels.
   final double dropIndicatorThickness;
+
+  /// Whether to wrap each row in a [RepaintBoundary]. Forwarded to
+  /// [SliverTree.addRepaintBoundaries].
+  final bool addRepaintBoundaries;
 
   @override
   State<SliverReorderableTree<TKey, TData>> createState() =>
@@ -218,6 +223,7 @@ class _SliverReorderableTreeState<TKey, TData>
       child: SliverTree<TKey, TData>(
         controller: widget.controller,
         maxStickyDepth: widget.maxStickyDepth,
+        addRepaintBoundaries: widget.addRepaintBoundaries,
         nodeBuilder: (context, key, depth) {
           Widget wrap({
             required Widget child,
@@ -268,6 +274,23 @@ class _ReorderableRow<TKey, TData> extends StatefulWidget {
 class _ReorderableRowState<TKey, TData>
     extends State<_ReorderableRow<TKey, TData>> {
   bool _isDraggingThisRow = false;
+
+  @override
+  void deactivate() {
+    // Lifecycle backstop: if this row unmounts while it owns the drag
+    // (node removed mid-drag, tree swapped, ...), its gesture callbacks
+    // can never fire again — end the session promptly instead of leaving
+    // it (and the autoscroll ticker) orphaned. Eviction itself is
+    // prevented by the render object's drag pin; this covers the
+    // remaining unmount paths.
+    if (_isDraggingThisRow &&
+        widget.state.widget.reorderController.draggedKey == widget.nodeKey) {
+      _isDraggingThisRow = false;
+      widget.state.widget.reorderController.cancelDrag();
+      widget.state._onDragEnd();
+    }
+    super.deactivate();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -330,20 +353,36 @@ class _ReorderableRowState<TKey, TData>
     widget.state._onDragStart(widget.nodeKey);
   }
 
+  /// Whether this row still OWNS the controller's drag session. The local
+  /// [_isDraggingThisRow] flag alone is not enough: an external
+  /// `cancelDrag()` (or a second gesture silently replacing the session
+  /// via `startDrag`) clears/replaces the controller session without
+  /// resetting the row-local flag, and a later gesture callback from this
+  /// row would then commit or cancel a DIFFERENT session. Clears the
+  /// stale local flag when ownership is lost.
+  bool _ownsSession() {
+    if (!_isDraggingThisRow) return false;
+    if (widget.state.widget.reorderController.draggedKey != widget.nodeKey) {
+      _isDraggingThisRow = false;
+      return false;
+    }
+    return true;
+  }
+
   void _updateDrag(Offset globalPosition) {
-    if (!_isDraggingThisRow) return;
+    if (!_ownsSession()) return;
     widget.state.widget.reorderController.updateDrag(globalPosition);
   }
 
   void _endDrag() {
-    if (!_isDraggingThisRow) return;
+    if (!_ownsSession()) return;
     _isDraggingThisRow = false;
     widget.state.widget.reorderController.endDrag();
     widget.state._onDragEnd();
   }
 
   void _cancelDrag() {
-    if (!_isDraggingThisRow) return;
+    if (!_ownsSession()) return;
     _isDraggingThisRow = false;
     widget.state.widget.reorderController.cancelDrag();
     widget.state._onDragEnd();

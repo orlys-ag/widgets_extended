@@ -18,6 +18,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
+  // These suites exist to exercise the cross-structure invariants -
+  // run the full consistency sweep after every mutation (audit 5.11).
+  TreeController.debugFullConsistencyChecks = true;
   testWidgets("delete + insert across exit-animation finalize keeps cache consistent",
       (tester) async {
     final controller = TreeController<String, String>(

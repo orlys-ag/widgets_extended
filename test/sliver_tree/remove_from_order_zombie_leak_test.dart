@@ -28,6 +28,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
+  // These suites exist to exercise the cross-structure invariants -
+  // run the full consistency sweep after every mutation (audit 5.11).
+  TreeController.debugFullConsistencyChecks = true;
   testWidgets(
     "standalone finalize batch mixing a purged node with a collapse-exit "
     "node does not leak a zombie order entry",

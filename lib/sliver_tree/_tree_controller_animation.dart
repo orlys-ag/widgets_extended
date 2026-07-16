@@ -32,66 +32,19 @@ double _computeAnimationSpeedMultiplier(
 /// high-level contract; this extension only exists so we can split the file.
 extension _TreeControllerAnimationOps<TKey, TData>
     on TreeController<TKey, TData> {
-  /// Computes the visible extent for a standalone [AnimationState],
-  /// matching the read path in [getCurrentExtentNid]. When the
-  /// state's `targetExtent` is unknown (the row hasn't been measured
-  /// yet), [AnimationState.currentExtent] holds `lerp(0, -1, t) = -t`
-  /// — a stale, negative value that bypasses the proportional
-  /// fallback. Capture sites must use this helper instead of reading
-  /// `state.currentExtent` directly, otherwise the captured value
-  /// becomes a negative number and corrupts a downstream op-group
-  /// member's envelope.
-  double _standaloneVisibleExtent(TKey key, AnimationState state) {
-    if (state.targetExtent != _unknownExtent) {
-      return state.currentExtent;
-    }
-    final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
-    final t = animationCurve.transform(state.progress.clamp(0.0, 1.0));
-    return state.type == AnimationType.entering ? full * t : full * (1.0 - t);
-  }
-
-  /// Captures a node's current animated extent from whichever source it's in,
-  /// removes it from that source, and returns the extent (or null if not animating).
-  double? _captureAndRemoveFromGroups(TKey key) {
-    // 1. Check operation group
-    final opGroupKey = _operationGroupOf(key);
-    if (opGroupKey != null) {
-      final group = _opGroupAt(opGroupKey);
-      if (group != null) {
-        final member = group.members[key];
-        if (member != null) {
-          final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
-          final extent = member.computeExtent(group.curvedValue, full);
-          group.members.remove(key);
-          group.pendingRemoval.remove(key);
-          _clearOperationGroup(key);
-          _bumpAnimGen();
-          _disposeOperationGroupIfEmpty(opGroupKey, group);
-          return extent;
-        }
-      }
-      _clearOperationGroup(key);
-    }
-
-    // 2. Check bulk animation group
-    if (_activeBulkGroup?.members.contains(key) == true) {
-      final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
-      final extent = full * _activeBulkGroup!.value;
-      _removeBulkMember(key);
-      _removeBulkPending(key);
-      _bumpBulkGen();
-      return extent;
-    }
-
-    // 3. Check standalone animations
-    final standalone = _clearStandalone(key);
-    if (standalone != null) {
-      _bumpAnimGen();
-      return _standaloneVisibleExtent(key, standalone);
-    }
-
-    return null;
-  }
+  // Audit 6.1: the extension's private copies of
+  // `_captureAndRemoveFromGroups` and `_removeAnimation` were deleted.
+  // Dart's lexical scoping made unqualified calls INSIDE this extension
+  // resolve to those copies while class-body calls resolved through the
+  // controller's forwarders to the AnimationCoordinator's copies — two
+  // live implementations that had already diverged (the extension's bulk
+  // check was `members.contains`; the coordinator's `bulk.isMember`
+  // covers members ∪ pendingRemoval, the mirror the render layer uses).
+  // All call sites now route through the forwarders in
+  // tree_controller.dart to the single AnimationCoordinator
+  // implementation ([AnimationCoordinator.captureAndRemoveFromGroups] /
+  // [AnimationCoordinator.removeFromAllSources]); the standalone
+  // visible-extent read lives in [StandaloneAnimator.visibleExtent].
 
   // Plan A: _disposeOperationGroupIfEmpty and _installOperationGroup
   // moved into OperationGroupRegistry (disposeIfEmpty, install). The
@@ -263,36 +216,9 @@ extension _TreeControllerAnimationOps<TKey, TData>
     }
   }
 
-  /// Removes an animation from all sources and cleans up group membership.
-  AnimationState? _removeAnimation(TKey key) {
-    final state = _clearStandalone(key);
-    if (state != null) {
-      _bumpAnimGen();
-    }
-    // Remove from operation group
-    final opGroupKey = _clearOperationGroup(key);
-    if (opGroupKey != null) {
-      final group = _opGroupAt(opGroupKey);
-      if (group != null) {
-        final removedMember = group.members.remove(key) != null;
-        final removedPending = group.pendingRemoval.remove(key);
-        if (removedMember || removedPending) {
-          _bumpAnimGen();
-        }
-        _disposeOperationGroupIfEmpty(opGroupKey, group);
-      }
-    }
-    // Also remove from bulk animation group
-    final bulk = _activeBulkGroup;
-    if (bulk != null) {
-      final removedMember = _removeBulkMember(key);
-      final removedPending = _removeBulkPending(key);
-      if (removedMember || removedPending) {
-        _bumpBulkGen();
-      }
-    }
-    return state;
-  }
+  // `_removeAnimation` — see the audit 6.1 note above: single copy lives
+  // in [AnimationCoordinator.removeFromAllSources], reached through the
+  // controller's `_removeAnimation` forwarder.
 
   // Plan A: _createBulkAnimationGroup and _disposeBulkAnimationGroup
   // moved into BulkAnimator (createGroup, disposeGroup). The
@@ -653,11 +579,11 @@ extension _TreeControllerAnimationOps<TKey, TData>
         //
         // Visible loss = key (if visible) + every visible pending-deletion
         // descendant. Descendants with their own in-flight animation are
-        // counted here too: when they later finalize, their parent slot
-        // points to this nid (which is about to be freed), so
-        // _parentKeyOfKey returns null and their own visibleLoss block
-        // is skipped. Without pre-counting them here, the ancestor's
-        // cache would stay inflated by the descendant count forever.
+        // counted here too: their parent pointers are severed below, so
+        // when they later finalize, _parentKeyOfKey returns null and their
+        // own visibleLoss block is skipped. Without pre-counting them here,
+        // the ancestor's cache would stay inflated by the descendant count
+        // forever.
         if (parentKey != null) {
           int visibleLoss = 0;
           final keyNid = _nids[key];
@@ -683,15 +609,47 @@ extension _TreeControllerAnimationOps<TKey, TData>
           }
         }
 
-        // Skip _visibleOrder.remove — caller batches it
-        _purgeNodeData(key);
+        // Compute the exact set this pass will purge: the node itself plus
+        // every pending-deletion descendant without its own exit animation.
+        // Descendants with an in-flight animation survive and finalize
+        // themselves later.
+        final purgedKeys = <TKey>{key};
         for (final desc in descendants) {
-          // Only purge orphans that have no active exit animation.
-          // Visible descendants with their own animation will finalize
-          // themselves when their animation completes.
           if (_isPendingDeletion(desc) && !_hasStandalone(desc)) {
-            _purgeNodeData(desc);
+            purgedKeys.add(desc);
           }
+        }
+
+        // Sever the parent pointer of every surviving descendant whose
+        // structural parent is purged in this pass. Purging releases the
+        // parent's nid, and the registry's free list recycles nids — a
+        // survivor finalizing after recycling would resolve an UNRELATED
+        // node as its parent and decrement that node's visible-subtree-size
+        // chain (ABA corruption). Severing makes the survivor's later
+        // finalize take the deterministic `parentKey == null` path.
+        //
+        // Must run BEFORE the purge (parent lookups and the
+        // ancestors-expanded propagation must only walk live nids) and
+        // AFTER the visible-loss block above. The suppression is
+        // load-bearing: the visible-loss block already decremented the
+        // ancestor chain for these survivors; handleParentChanged
+        // early-returns under suppression so the sever does not
+        // re-decrement it.
+        _order.runWithSubtreeSizeUpdatesSuppressed(() {
+          for (final desc in descendants) {
+            if (purgedKeys.contains(desc)) {
+              continue;
+            }
+            final descParent = _parentKeyOfKey(desc);
+            if (descParent != null && purgedKeys.contains(descParent)) {
+              _setParentKey(desc, null);
+            }
+          }
+        });
+
+        // Skip _visibleOrder.remove — caller batches it
+        for (final purged in purgedKeys) {
+          _purgeNodeData(purged);
         }
         return true;
       } else {

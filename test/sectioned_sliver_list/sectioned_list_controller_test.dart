@@ -317,7 +317,14 @@ void main() {
       (tester) async {
         final controller = _make(tester);
         addTearDown(controller.dispose);
-        controller.setSections(["a", "b"], itemsOf: (_) => const ["x", "y"]);
+        // Item keys are global across sections — give each section its
+        // own items (the old `(_) => const ["x", "y"]` claimed the same
+        // items under both sections, which sync-time validation now
+        // rejects as a repeated key).
+        controller.setSections(
+          ["a", "b"],
+          itemsOf: (s) => s == "a" ? const ["x", "y"] : const <String>[],
+        );
 
         final itemFires = <String>[];
         controller.addItemPayloadListener(itemFires.add);

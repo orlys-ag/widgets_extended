@@ -330,6 +330,10 @@ class SlideAnimationEngine<TKey> {
         existing.preserveProgressOnRebatch = false;
         existing.progress = 0.0;
         existing.curve = curve;
+        // Mark the in-place retarget so a completion cleanup collected
+        // BEFORE this composition (same tick) cannot mistake the fresh
+        // slide for the entry that completed (audit 6.4).
+        existing.installStamp++;
         final nid = _nids[key];
         if (nid != null) touched.add(nid);
         installed++;
@@ -402,7 +406,7 @@ class SlideAnimationEngine<TKey> {
       _ticker?.stop();
       return;
     }
-    final completedEntries = <(int, SlideAnimation<TKey>)>[];
+    final completedEntries = <(int, SlideAnimation<TKey>, int)>[];
     bool anyStillActive = false;
     for (final nid in _activeSlideNids) {
       final entry = _slideByNid[nid]!;
@@ -421,7 +425,7 @@ class SlideAnimationEngine<TKey> {
       if (complete) {
         entry.currentDelta = 0.0;
         entry.currentDeltaX = 0.0;
-        completedEntries.add((nid, entry));
+        completedEntries.add((nid, entry, entry.installStamp));
       } else {
         entry.currentDelta = lerpDouble(entry.startDelta, 0.0, t)!;
         entry.currentDeltaX = lerpDouble(entry.startDeltaX, 0.0, t)!;
@@ -433,9 +437,14 @@ class SlideAnimationEngine<TKey> {
 
     // Reference-safe cleanup AFTER paint scheduling. Only clear the slot
     // if it still holds the entry that completed — an `_onTick` listener
-    // may have re-installed a new slide on the same nid.
-    for (final (nid, originalEntry) in completedEntries) {
-      if (_slideByNid[nid] != originalEntry) continue;
+    // may have re-installed a new slide on the same nid (identity check)
+    // or COMPOSED onto the completed entry, which mutates it in place
+    // (stamp check — identity alone would delete the freshly retargeted
+    // slide, audit 6.4).
+    for (final (nid, originalEntry, stamp) in completedEntries) {
+      final current = _slideByNid[nid];
+      if (!identical(current, originalEntry)) continue;
+      if (originalEntry.installStamp != stamp) continue;
       if (originalEntry.startDeltaX != 0.0) _xActiveCount--;
       _slideByNid[nid] = null;
       _activeSlideNids.remove(nid);
@@ -443,6 +452,14 @@ class SlideAnimationEngine<TKey> {
 
     if (!anyStillActive && _activeSlideNids.isEmpty) {
       _ticker?.stop();
+      // Post-cleanup settle notify: the notify above fired with
+      // `hasActive` still true (the documented zero-delta-paint
+      // contract), and the ticker stops here — with no further tick, a
+      // listener routing slide-only ticks to paint (audit 5.7) could
+      // never observe the active → idle transition that must trigger the
+      // one layout pass where Step 0a/0b ghost pruning runs. Fire once
+      // more now that the map is clear so the transition is observable.
+      _onTick();
     }
   }
 

@@ -130,12 +130,12 @@ class VisibleOrderBuffer<TKey> {
   // ──────────────────────────────────────────────────────────────────────
   // Reverse-index writes
   // ──────────────────────────────────────────────────────────────────────
-
-  /// Writes [index] into the reverse-index slot for [nid]. [nid] must be
-  /// live. Does not touch the order buffer.
-  void setIndexByNid(int nid, int index) {
-    _indexByNid[nid] = index;
-  }
+  //
+  // Audit 6.2: the raw per-slot write (`setIndexByNid`) was removed from
+  // the surface — bulk repositioning goes through [reindexFrom] /
+  // [rebuildIndex] / [removeContiguousRange] / [purgeCompact], which own
+  // the corresponding order/index protocols. The raw views ([orderNids],
+  // [indexByNid]) remain for READ-ONLY hot paths.
 
   /// Marks [key] as not visible. Safe on an unregistered key.
   void clearIndexOf(TKey key) {
@@ -166,8 +166,14 @@ class VisibleOrderBuffer<TKey> {
     }
   }
 
+  /// Number of [resetIndexAll] invocations over this buffer's lifetime.
+  /// Perf oracle: an O(nidCapacity) memset per incremental mutation is
+  /// exactly what the contiguous removal fast path exists to avoid.
+  int debugResetIndexAllCount = 0;
+
   /// Resets every reverse-index slot to [kNotVisible].
   void resetIndexAll() {
+    debugResetIndexAllCount++;
     _indexByNid.fillRange(0, _indexByNid.length, kNotVisible);
   }
 
@@ -212,6 +218,26 @@ class VisibleOrderBuffer<TKey> {
     for (int i = startIndex; i < _len; i++) {
       _indexByNid[_orderNids[i]] = i;
     }
+  }
+
+  /// Debug-only: verifies order/reverse-index agreement over
+  /// `[fromIndex, length)` — the O(changed-range) inline check that
+  /// replaces the full consistency sweep on the incremental-mutation hot
+  /// path (audit 5.11). Live nids must index back to their position;
+  /// zombie entries (freed nids awaiting a batched sweep) are skipped.
+  void debugAssertSpanIndexed(int fromIndex) {
+    assert(() {
+      for (int i = fromIndex; i < _len; i++) {
+        final nid = _orderNids[i];
+        if (_nids.keyOf(nid) == null) continue; // zombie — swept later
+        assert(
+          _indexByNid[nid] == i,
+          "VisibleOrderBuffer: order/index disagreement at position $i "
+          "(nid $nid indexes to ${_indexByNid[nid]})",
+        );
+      }
+      return true;
+    }());
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -466,6 +492,38 @@ class VisibleOrderBuffer<TKey> {
     _orderNids.setRange(start, _len - n, _orderNids, start + n);
     _len -= n;
     _onMutated();
+  }
+
+  /// Intention-revealing bulk removal of the contiguous range
+  /// `[start, endExclusive)`: clears each removed entry's reverse-index
+  /// slot, removes the physical range, and reindexes the shifted suffix
+  /// — the full "contiguous removal" protocol in one owner (audit 6.2;
+  /// formerly spelled as cross-file raw `indexByNid` writes). Subtree-
+  /// size cache decrements follow [removeRange]'s suppression contract.
+  void removeContiguousRange(int start, int endExclusive) {
+    final end = endExclusive < _len ? endExclusive : _len;
+    for (int i = start; i < end; i++) {
+      final nid = _orderNids[i];
+      if (nid >= 0 && nid < _indexByNid.length) {
+        _indexByNid[nid] = kNotVisible;
+      }
+    }
+    removeRange(start, endExclusive);
+    reindexFrom(start);
+  }
+
+  /// Intention-revealing non-contiguous compaction: clears the removed
+  /// keys' reverse-index slots, sweeps the order — dropping [keys] AND
+  /// any zombie entries whose nid was already released (the zombie
+  /// protocol documented on [removeWhereKeyIn]) — then rebuilds the
+  /// reverse index wholesale. The full "non-contiguous removal" protocol
+  /// in one owner (audit 6.2).
+  void purgeCompact(Set<TKey> keys) {
+    for (final key in keys) {
+      clearIndexOf(key);
+    }
+    removeWhereKeyIn(keys);
+    rebuildIndex();
   }
 
   /// Compacts the order by dropping every entry whose key is in [keys], or
