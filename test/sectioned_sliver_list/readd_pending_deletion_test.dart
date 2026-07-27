@@ -1,17 +1,18 @@
 /// Verifies sync semantics for pending-deletion nodes when their key
 /// reappears in a subsequent `setSections` / `setItems`.
 ///
-/// The retained-branch in `syncRoots` / `syncChildren` does NOT auto-
-/// cancel pending-deletion nodes — that policy would silently undo
-/// imperative `removeItem` / `removeSection` calls in patterns that
-/// mirror the controller back through `setSections`.
+/// Desired state is authoritative (audit 2.2): syncs diff against
+/// controller truth with LIVE-filtered reads, so a desired list that
+/// still contains a removed (mid-exit) key lands it in the toAdd branch
+/// and resurrects it (the `preservePendingSubtreeState` re-add, or
+/// `moveNode`'s pending-subtree revert for a cross-parent mover); a
+/// desired list that omits the key leaves the exit animation untouched.
 ///
-/// Callers that intend to cancel mid-animation should either:
-///   • mirror through live queries (`sectionKeys` / `itemKeysOf`) so
-///     the pending row drops out of the mirror; the toAdd branch's
-///     `preservePendingSubtreeState` path then handles cancellation
-///     cleanly via re-add; OR
-///   • call `addSection` / `addItem` directly.
+/// Callers that want an imperative `removeItem` / `removeSection` to
+/// stick must therefore mirror through live queries (`sectionKeys` /
+/// `itemKeysOf`) so the pending row drops out of the mirror — the first
+/// test pins exactly that; the second pins the deliberate mid-animation
+/// cancel via `addSection`.
 library;
 
 import 'package:flutter_test/flutter_test.dart';

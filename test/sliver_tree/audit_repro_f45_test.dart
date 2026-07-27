@@ -6,8 +6,8 @@ import 'package:widgets_extended/sliver_tree/types.dart';
 /// BulkAnimationData.containsMember throws a TypeError on the inactive
 /// sentinel instead of returning false.
 ///
-/// The inactive sentinel is a const BulkAnimationData<Never> that
-/// `BulkAnimationData.inactive<TKey>()` casts to BulkAnimationData<TKey>.
+/// The inactive sentinel is a const `BulkAnimationData<Never>` that
+/// `BulkAnimationData.inactive<TKey>()` casts to `BulkAnimationData<TKey>`.
 /// Because `containsMember` takes a TKey parameter, Dart's generic
 /// covariance check validates the argument against the ACTUAL type
 /// argument (Never) before the method body runs, so any call with a real

@@ -15,7 +15,6 @@
 ///      render layer keeps relayouting until extents settle.
 library;
 
-import 'package:flutter/animation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';

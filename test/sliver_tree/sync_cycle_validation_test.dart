@@ -44,10 +44,13 @@ void main() {
           childrenOf: childrenOf,
           animate: false,
         ),
+        // R7: match the guard's actual key-naming fragment — a bare
+        // contains("a") matched virtually any English error text and
+        // added zero discrimination over isA<ArgumentError>().
         throwsA(isA<ArgumentError>().having(
           (e) => e.message.toString(),
           "message",
-          contains("a"),
+          contains("involving key \"a\""),
         )),
       );
     },
@@ -92,7 +95,7 @@ void main() {
         throwsA(isA<ArgumentError>().having(
           (e) => e.message.toString(),
           "message",
-          contains("x"),
+          contains("involving key \"x\""),
         )),
       );
     },
@@ -132,7 +135,11 @@ void main() {
           childrenOf: childrenOf,
           animate: false,
         ),
-        throwsA(isA<ArgumentError>()),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message.toString(),
+          "message",
+          contains("involving key \"b\""),
+        )),
       );
     },
     timeout: const Timeout(Duration(seconds: 30)),

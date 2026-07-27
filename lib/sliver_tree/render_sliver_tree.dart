@@ -92,6 +92,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
     // its call sites run inside layout, where the per-frame offsets for
     // the relevant rows are fresh (bulk-aware via _structuralOffsetAt).
     // Controller-agnostic closure — survives controller swaps.
+    //
+    // Accepted staleness (2026-07-15 review): `normalizeForViewport` runs
+    // early in performLayout, so the offsets it reads can be one
+    // animation-tick stale versus the old prefix-summed live extents.
+    // Only shifts the edge-ghost re-promotion threshold by ≤1 frame —
+    // cosmetic, inherent to the O(1) design; the exact O(index) fallback
+    // remains for unwired registries.
     _composer.ghosts.structuralYOf = _structuralOffsetAt;
   }
 
@@ -1385,9 +1392,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver {
   ///   scrollOffset when pinned, else `layoutOffset` WITHOUT the anchor's
   ///   own slide — see the settled-top commentary in Pass A.5) minus the
   ///   direction-aware tuck; x is the anchor's live painted indent.
-  /// - Anchor unmounted with a registered [_phantomExitEdge]: the LIVE
-  ///   viewport edge base (mirroring the paint fallback); x is the
-  ///   ghost's own indent.
+  /// - Anchor unmounted with a persisted [ViewportEdge] on its
+  ///   [_ExitGhost] record: the LIVE viewport edge base (mirroring the
+  ///   paint fallback); x is the ghost's own indent.
   ///
   /// Returns null when the ghost cannot be painted this frame (freed key,
   /// truly orphaned anchor) — callers skip the entry.

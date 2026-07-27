@@ -1,3 +1,13 @@
+## 0.0.26
+
+- `TreeSyncController` / `SectionedListController`: syncs now diff against
+controller truth; a desired list that still contains a removed (mid-exit) key
+resurrects it. Derive mirrored state from live reads (`getLiveChildren` /
+`liveItemsOf`) to preserve imperative removals.
+- `TreeController.animateScrollToKey`: animated-mode scrolls are now
+single-flight — starting a new scroll cancels the one in flight (its future
+resolves false).
+
 ## 0.0.25
 
 - Animate same-parent reorders in `SyncedSliverTree`.

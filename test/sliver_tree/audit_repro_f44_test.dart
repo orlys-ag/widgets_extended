@@ -13,6 +13,8 @@
 /// complete without throwing (degrading to a cancel when the session is
 /// stale) and must always clear the session. They FAIL on current code if
 /// and only if the bug is real.
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';

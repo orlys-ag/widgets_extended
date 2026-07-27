@@ -575,12 +575,18 @@ class TreeSyncController<TKey, TData> {
     }
 
     // 4. Update data for retained children whose payload changed.
-    //    See `_syncRootsImpl` step 4 for the rationale: pending-deletion
-    //    nodes are intentionally NOT auto-cancelled here — that policy
-    //    would silently undo an imperative `removeItem` whose mirror
-    //    cycle through the widget includes the still-present pending
-    //    row. Mirror via `liveItemsOf` to express "post-mutation intent"
-    //    instead of full state.
+    //
+    //    Exiting (pending-deletion) children never reach this loop: the
+    //    live-filtered `currentSet` excludes them, so a desired key that
+    //    is mid-exit lands in `toAdd`, and step 3's re-add cancels the
+    //    deletion (same parent: `insert` with
+    //    `preservePendingSubtreeState: true`; cross-parent mover:
+    //    `moveNode`'s pending-subtree revert) — the same policy as
+    //    `_syncRootsImpl` step 4: the desired state is authoritative;
+    //    asking for the key means it should exist. Callers
+    //    that want an imperative `remove()` / `removeItem` to keep
+    //    animating out should mirror live state (`getLiveChildren` /
+    //    `liveItemsOf`) so the exiting key drops out of `desired`.
     final retained = desiredSet.intersection(currentSet);
     for (final node in desired) {
       if (!retained.contains(node.key)) continue;

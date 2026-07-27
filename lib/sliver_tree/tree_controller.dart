@@ -318,11 +318,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     onOrderMutated: () => _scroll.invalidatePrefix(),
   );
 
-  /// Debug-only forwarder preserved for the existing fuzz test surface
-  /// (`test/sliver_tree/visible_subtree_size_invariant_fuzz_test.dart`,
-  /// the four `purge_*` tests, etc.). After Plan B the assertion lives
-  /// inside [VisibleOrderBuffer.debugAssertSubtreeSizeConsistent].
-  @visibleForTesting
   /// Number of full reverse-index resets (O(nidCapacity) memsets) the
   /// order buffer has performed. Perf oracle for the contiguous-removal
   /// fast path: incremental mutations must not trigger one.
@@ -338,6 +333,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// enable this.
   static bool debugFullConsistencyChecks = false;
 
+  /// Debug-only forwarder preserved for the existing fuzz test surface
+  /// (`test/sliver_tree/visible_subtree_size_invariant_fuzz_test.dart`,
+  /// the four `purge_*` tests, etc.). After Plan B the assertion lives
+  /// inside [VisibleOrderBuffer.debugAssertSubtreeSizeConsistent].
+  @visibleForTesting
   void debugAssertVisibleSubtreeSizeConsistency() =>
       _order.debugAssertSubtreeSizeConsistent();
 
@@ -1359,8 +1359,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// computed sliver-local offset. Leave at 0.0 when [SliverTree] is the
   /// first (or only) sliver in the [CustomScrollView].
   ///
+  /// Animated-mode scrolls are single-flight: starting one while another
+  /// is still in flight cancels the earlier scroll (its future resolves
+  /// false) — the newer target wins.
+  ///
   /// Returns true if a scroll was issued, false if [key] could not be
-  /// resolved or [scrollController] has no attached position.
+  /// resolved, [scrollController] has no attached position, or the scroll
+  /// was cancelled (superseded, or the controller was disposed) before
+  /// completing.
   Future<bool> animateScrollToKey(
     TKey key, {
     required ScrollController scrollController,
@@ -1722,10 +1728,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
       _store.setData(node.key, node);
-      // C022: fire node-data channel for the data update.
-      _notifyNodeDataChanged(node.key);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != null) {
+        // C022: fire the node-data channel BEFORE delegating. moveNode's
+        // structural notification is targeted — on a depth-preserving
+        // move its affectedKeys omits the moved key itself — so this is
+        // the only refresh path for the overwritten payload.
+        _notifyNodeDataChanged(node.key);
         // Different parent — delegate to moveNode. Forward the caller's
         // `animate` so insertRoot(animate: false) doesn't silently slide
         // (now that moveNode itself defaults to animate: true).
@@ -1764,12 +1773,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _markVisibleOrderDirty();
         // Relocation changes row positions (and the payload was
         // overwritten) — structural refresh, which subsumes the data
-        // channel's row refresh.
+        // channel's row refresh (R3: no data fire on this path).
         _notifyStructural(affectedKeys: <TKey>{node.key});
+      } else {
+        // C022: data-only update — fire the node-data channel only,
+        // matching updateNode's contract. Firing a structural
+        // notification too refreshed the same row twice (audit 6.6).
+        _notifyNodeDataChanged(node.key);
       }
-      // Data-only update: the node-data channel above already refreshed
-      // the row — matching updateNode's contract. Firing a structural
-      // notification too refreshed the same row twice (audit 6.6).
       return;
     }
 
@@ -2170,10 +2181,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
       _store.setData(node.key, node);
-      // C022: fire node-data channel for the data update.
-      _notifyNodeDataChanged(node.key);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != parentKey) {
+        // C022: fire the node-data channel BEFORE delegating. moveNode's
+        // structural notification is targeted — on a depth-preserving
+        // move its affectedKeys omits the moved key itself — so this is
+        // the only refresh path for the overwritten payload.
+        _notifyNodeDataChanged(node.key);
         // Different parent — delegate to moveNode. Forward the caller's
         // `animate` so insert(animate: false) doesn't silently slide
         // (now that moveNode itself defaults to animate: true).
@@ -2212,12 +2226,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _markVisibleOrderDirty();
         // Relocation changes row positions (and the payload was
         // overwritten) — structural refresh, which subsumes the data
-        // channel's row refresh.
+        // channel's row refresh (R3: no data fire on this path).
         _notifyStructural(affectedKeys: <TKey>{node.key});
+      } else {
+        // C022: data-only update — fire the node-data channel only,
+        // matching updateNode's contract. Firing a structural
+        // notification too refreshed the same row twice (audit 6.6).
+        _notifyNodeDataChanged(node.key);
       }
-      // Data-only update: the node-data channel above already refreshed
-      // the row — matching updateNode's contract. Firing a structural
-      // notification too refreshed the same row twice (audit 6.6).
       return;
     }
     final parentDepth = _depthOfKey(parentKey);

@@ -278,16 +278,48 @@ class _ReorderableRowState<TKey, TData>
   @override
   void deactivate() {
     // Lifecycle backstop: if this row unmounts while it owns the drag
-    // (node removed mid-drag, tree swapped, ...), its gesture callbacks
-    // can never fire again — end the session promptly instead of leaving
-    // it (and the autoscroll ticker) orphaned. Eviction itself is
-    // prevented by the render object's drag pin; this covers the
-    // remaining unmount paths.
-    if (_isDraggingThisRow &&
-        widget.state.widget.reorderController.draggedKey == widget.nodeKey) {
+    // (node removed and purged mid-drag, tree swapped, ...), its gesture
+    // callbacks can never fire again — end the session instead of leaving
+    // it (and the autoscroll ticker) orphaned. Eviction of a LIVE dragged
+    // row is prevented by the render object's drag pin; this covers the
+    // remaining unmount paths (dead-node GC deliberately ignores pins —
+    // a purged row has nothing left to build).
+    //
+    // deactivate() only ever runs inside a BuildOwner.buildScope — for
+    // the removed-and-purged case, the element's post-frame dead-node GC
+    // pass. cancelDrag()'s notifyListeners and the ancestor's setState
+    // must therefore NOT run synchronously here: they would throw
+    // "setState() or markNeedsBuild() called during build" and abort the
+    // rest of the GC pass. Only the local flag flip stays synchronous;
+    // the teardown is deferred to a post-frame callback (the first point
+    // guaranteed outside every build scope — a microtask can still land
+    // inside this frame's build window). The callback re-validates
+    // session ownership before acting: by the time it runs a new session
+    // may have started, or the reorder controller may have been disposed
+    // (after dispose, draggedKey is null, so the ownership check covers
+    // both). Everything the callback needs is captured now — `widget` is
+    // unreadable after this State unmounts.
+    if (_isDraggingThisRow) {
       _isDraggingThisRow = false;
-      widget.state.widget.reorderController.cancelDrag();
-      widget.state._onDragEnd();
+      final reorder = widget.state.widget.reorderController;
+      final ownerState = widget.state;
+      final nodeKey = widget.nodeKey;
+      if (reorder.draggedKey == nodeKey) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (reorder.draggedKey != nodeKey) {
+            return;
+          }
+          reorder.cancelDrag();
+          // cancelDrag's notifyListeners already drives the ancestor's
+          // _onControllerChanged → _onDragEnd while it is listening; the
+          // direct call covers the listener having moved to a different
+          // reorder controller (didUpdateWidget swap). The _draggedKey
+          // guard keeps it from clearing UI owned by another session.
+          if (ownerState.mounted && ownerState._draggedKey == nodeKey) {
+            ownerState._onDragEnd();
+          }
+        });
+      }
     }
     super.deactivate();
   }

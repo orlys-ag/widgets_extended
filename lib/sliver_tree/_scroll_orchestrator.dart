@@ -31,13 +31,33 @@ class ScrollOrchestrator<TKey, TData> {
   /// loop's exit conditions can otherwise never fire).
   bool _disposed = false;
 
-  /// The in-flight [_animatedConcurrentScroll] resources, held so
-  /// [dispose] can tear them down SYNCHRONOUSLY. Waiting for the loop's
-  /// next iteration is not enough: `TreeController.dispose()` typically
-  /// runs inside the vsync State's own dispose, and an active Ticker at
-  /// that point trips the framework's active-Ticker assert.
-  AnimationController? _activeScrollProgress;
-  VoidCallback? _activeFollower;
+  /// The in-flight [_animatedConcurrentScroll] session, held so [dispose]
+  /// and a superseding scroll can tear it down SYNCHRONOUSLY. Waiting for
+  /// the loop's next iteration is not enough: `TreeController.dispose()`
+  /// typically runs inside the vsync State's own dispose, and an active
+  /// Ticker at that point trips the framework's active-Ticker assert.
+  ///
+  /// Animated scrolls are SINGLE-FLIGHT: starting a new one cancels the
+  /// in-flight one (the newer target wins — two concurrent animations
+  /// fighting over `position.jumpTo` was never meaningful), which is what
+  /// makes this single slot correct by construction. Before R2 the slot
+  /// held bare progress/follower fields that a second concurrent scroll
+  /// simply overwrote — the first scroll's resources then leaked past
+  /// [dispose], re-tripping the exact active-Ticker assert 1.9 fixed.
+  _ActiveScroll? _activeScroll;
+
+  /// Idempotently releases [session]'s resources (follower listener +
+  /// progress controller). Callable from the owning loop's `finally`,
+  /// from a superseding scroll, and from [dispose] — whichever runs
+  /// first wins; the rest no-op via [_ActiveScroll.tornDown].
+  void _teardownScroll(_ActiveScroll session) {
+    if (session.tornDown) {
+      return;
+    }
+    session.tornDown = true;
+    _controller.removeAnimationListener(session.follower);
+    session.progress.dispose();
+  }
 
   // ──────────────────────────────────────────────────────────────────────
   // PREFIX-SUM CACHE
@@ -334,8 +354,18 @@ class ScrollOrchestrator<TKey, TData> {
     }
 
     _controller.addAnimationListener(follower);
-    _activeScrollProgress = scrollProgress;
-    _activeFollower = follower;
+    // Single-flight: cancel and tear down any scroll already in flight
+    // BEFORE installing this one. Its loop wakes on the next frame, sees
+    // its own `cancelled` token, and resolves false without the final
+    // snap; its `finally` no-ops (already torn down) and leaves the slot
+    // alone (identity check below).
+    final superseded = _activeScroll;
+    if (superseded != null) {
+      superseded.cancelled = true;
+      _teardownScroll(superseded);
+    }
+    final session = _ActiveScroll(scrollProgress, follower);
+    _activeScroll = session;
 
     // Wait for both timelines to complete:
     //   1. The dedicated [scrollProgress] (so the curve reaches 1.0).
@@ -345,12 +375,14 @@ class ScrollOrchestrator<TKey, TData> {
     //
     // The try/finally makes the listener removal + controller disposal
     // structural: every exit path (normal completion, lost clients,
-    // cancellation, or an unexpected throw) releases both. When [dispose]
-    // cancelled us it already tore both down synchronously — skip the
-    // double-dispose.
+    // cancellation, or an unexpected throw) releases both, idempotently —
+    // when [dispose] or a superseding scroll cancelled this session, they
+    // already tore it down synchronously and [_teardownScroll] no-ops.
+    // The `cancelled` check must run before anything touches
+    // [scrollProgress]: a cancelled session's controller is disposed.
     try {
       while (true) {
-        if (_disposed) {
+        if (session.cancelled || _disposed) {
           // Cancelled: exit without the final snap.
           return false;
         }
@@ -371,12 +403,13 @@ class ScrollOrchestrator<TKey, TData> {
         await SchedulerBinding.instance.endOfFrame;
       }
     } finally {
-      if (!_disposed) {
-        _controller.removeAnimationListener(follower);
-        scrollProgress.dispose();
+      _teardownScroll(session);
+      // Clear the slot only if it still holds THIS invocation's session —
+      // never a successor's (the pre-R2 unconditional null-out is exactly
+      // what stranded a successor's teardown handles).
+      if (identical(_activeScroll, session)) {
+        _activeScroll = null;
       }
-      _activeScrollProgress = null;
-      _activeFollower = null;
     }
 
     if (!scrollController.hasClients) return true;
@@ -409,14 +442,29 @@ class ScrollOrchestrator<TKey, TData> {
   /// [TreeController.dispose].
   void dispose() {
     _disposed = true;
-    final follower = _activeFollower;
-    if (follower != null) {
-      _controller.removeAnimationListener(follower);
-      _activeFollower = null;
+    final active = _activeScroll;
+    if (active != null) {
+      active.cancelled = true;
+      _teardownScroll(active);
+      _activeScroll = null;
     }
-    _activeScrollProgress?.dispose();
-    _activeScrollProgress = null;
     _fullOffsetPrefix = null;
     _fullOffsetPrefixDirty = true;
   }
+}
+
+/// Per-invocation session record for [ScrollOrchestrator]'s animated
+/// concurrent scroll. Bundles the resources needing teardown with the
+/// flags that make teardown single-flight-safe: [cancelled] is the
+/// per-session cancellation token the completion loop polls (a successor
+/// or [ScrollOrchestrator.dispose] sets it), [tornDown] makes teardown
+/// idempotent across the three parties that may race to perform it (the
+/// owning loop's `finally`, a superseding scroll, dispose).
+class _ActiveScroll {
+  _ActiveScroll(this.progress, this.follower);
+
+  final AnimationController progress;
+  final VoidCallback follower;
+  bool cancelled = false;
+  bool tornDown = false;
 }

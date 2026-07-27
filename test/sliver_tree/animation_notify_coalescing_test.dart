@@ -53,10 +53,14 @@ void main() {
       await tester.pumpAndSettle();
 
       int fires = 0;
-      controller.addAnimationListener(() {
+      void listener() {
         fires++;
+      }
+
+      controller.addAnimationListener(listener);
+      addTearDown(() {
+        controller.removeAnimationListener(listener);
       });
-      addTearDown(() {});
 
       // Three concurrent op-group animations, each with its own ticker.
       controller.expand(key: "p1");

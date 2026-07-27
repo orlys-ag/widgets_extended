@@ -397,6 +397,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   /// settled-offset snapshots, scroll prefix rebuild, sticky computer,
   /// admission policy) must not pay a nid→key→hash→nid round-trip per
   /// row. Caller must guarantee [nid] is live and within range.
+  @override
   double? fullExtentOfNid(int nid) {
     final ext = _fullExtentByNid[nid];
     return ext < 0 ? null : ext;

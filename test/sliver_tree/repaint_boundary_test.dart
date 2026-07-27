@@ -3,6 +3,14 @@
 /// ListView/SliverList convention), so scroll/slide frames re-composite
 /// cached row layers instead of re-recording every visible row's display
 /// list. Opting out removes the wrappers.
+///
+/// R6 (2026-07-15 review): the default-on oracle must scope its search to
+/// INSIDE the sliver. A MaterialApp route always contains
+/// framework-inserted [RepaintBoundary]s above the sliver (every page is
+/// wrapped by `_ModalScope`), so "the row has SOME RepaintBoundary
+/// ancestor" is tautologically true and proves nothing about
+/// [SliverTree.addRepaintBoundaries]. Both tests share one helper and
+/// assert exact mirror outcomes.
 library;
 
 import 'package:flutter/material.dart';
@@ -34,6 +42,32 @@ Widget _harness(
   );
 }
 
+/// Whether the NEAREST [RepaintBoundary] ancestor of the row for [rowKey]
+/// lives INSIDE the [SliverTree] element — i.e. it is the per-row wrapper
+/// inserted by `addRepaintBoundaries`, not a framework boundary above the
+/// sliver (route/viewport).
+bool _hasRowBoundaryInsideSliver(WidgetTester tester, Key rowKey) {
+  final boundaries = find.ancestor(
+    of: find.byKey(rowKey),
+    matching: find.byType(RepaintBoundary),
+  );
+  if (boundaries.evaluate().isEmpty) {
+    return false;
+  }
+  // find.ancestor walks upward, so `first` is the nearest boundary.
+  final boundary = tester.element(boundaries.first);
+  final sliver = tester.element(find.byType(SliverTree<String, String>));
+  bool insideSliver = false;
+  boundary.visitAncestorElements((ancestor) {
+    if (identical(ancestor, sliver)) {
+      insideSliver = true;
+      return false;
+    }
+    return true;
+  });
+  return insideSliver;
+}
+
 void main() {
   testWidgets("rows are wrapped in RepaintBoundary by default",
       (tester) async {
@@ -51,12 +85,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.ancestor(
-        of: find.byKey(const ValueKey("row-a")),
-        matching: find.byType(RepaintBoundary),
-      ),
-      findsWidgets,
-      reason: "each row must be wrapped in a RepaintBoundary by default",
+      _hasRowBoundaryInsideSliver(tester, const ValueKey("row-a")),
+      isTrue,
+      reason: "each row must be wrapped in a RepaintBoundary INSIDE the "
+          "sliver by default — a boundary above the sliver is the "
+          "route/viewport's own and proves nothing (R6)",
+    );
+    expect(
+      _hasRowBoundaryInsideSliver(tester, const ValueKey("row-b")),
+      isTrue,
+      reason: "every row gets its own wrapper, not just the first",
     );
   });
 
@@ -74,29 +112,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The nearest RepaintBoundary ancestor must live OUTSIDE the sliver
-    // (the viewport's own boundary), not as the row's direct wrapper.
-    final row = find.byKey(const ValueKey("row-a"));
-    final directWrapper = find.ancestor(
-      of: row,
-      matching: find.byType(RepaintBoundary),
+    expect(
+      _hasRowBoundaryInsideSliver(tester, const ValueKey("row-a")),
+      isFalse,
+      reason: "with addRepaintBoundaries: false no per-row boundary may "
+          "be inserted inside the sliver (the nearest boundary ancestor "
+          "must be the viewport's own, outside the sliver)",
     );
-    if (directWrapper.evaluate().isNotEmpty) {
-      final boundary = tester.element(directWrapper.first);
-      final sliver = tester.element(
-        find.byType(SliverTree<String, String>),
-      );
-      bool boundaryInsideSliver = false;
-      boundary.visitAncestorElements((a) {
-        if (identical(a, sliver)) {
-          boundaryInsideSliver = true;
-          return false;
-        }
-        return true;
-      });
-      expect(boundaryInsideSliver, isFalse,
-          reason: "with addRepaintBoundaries: false no per-row boundary "
-              "may be inserted inside the sliver");
-    }
   });
 }
