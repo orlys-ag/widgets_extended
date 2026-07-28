@@ -332,7 +332,7 @@ class SlideAnimationEngine<TKey> {
         existing.curve = curve;
         // Mark the in-place retarget so a completion cleanup collected
         // BEFORE this composition (same tick) cannot mistake the fresh
-        // slide for the entry that completed (audit 6.4).
+        // slide for the entry that completed.
         existing.installStamp++;
         final nid = _nids[key];
         if (nid != null) touched.add(nid);
@@ -414,7 +414,7 @@ class SlideAnimationEngine<TKey> {
           elapsed.inMicroseconds - entry.slideStartElapsed.inMicroseconds;
       final totalUs = entry.slideDuration.inMicroseconds;
       final raw = totalUs <= 0 ? 1.0 : perSlideMicros / totalUs;
-      // 1e-9 epsilon (A046): absorbs floating-point drift from the
+      // 1e-9 epsilon: absorbs floating-point drift from the
       // microsecond division so a slide that should settle exactly at
       // duration boundary doesn't linger one extra tick at progress
       // ≈ 0.999999999. Trades off ≤ 1 sub-frame of early settle for
@@ -440,7 +440,7 @@ class SlideAnimationEngine<TKey> {
     // may have re-installed a new slide on the same nid (identity check)
     // or COMPOSED onto the completed entry, which mutates it in place
     // (stamp check — identity alone would delete the freshly retargeted
-    // slide, audit 6.4).
+    // slide).
     for (final (nid, originalEntry, stamp) in completedEntries) {
       final current = _slideByNid[nid];
       if (!identical(current, originalEntry)) continue;
@@ -455,7 +455,7 @@ class SlideAnimationEngine<TKey> {
       // Post-cleanup settle notify: the notify above fired with
       // `hasActive` still true (the documented zero-delta-paint
       // contract), and the ticker stops here — with no further tick, a
-      // listener routing slide-only ticks to paint (audit 5.7) could
+      // listener routing slide-only ticks to paint could
       // never observe the active → idle transition that must trigger the
       // one layout pass where Step 0a/0b ghost pruning runs. Fire once
       // more now that the map is clear so the transition is observable.

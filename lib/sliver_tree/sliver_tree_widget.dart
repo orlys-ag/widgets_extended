@@ -27,12 +27,12 @@ import 'tree_controller.dart';
 ///     super.initState();
 ///     _controller = TreeController<String, String>(vsync: this);
 ///     _controller.setRoots([
-///       TreeNodeData(id: '1', data: 'Root 1'),
-///       TreeNodeData(id: '2', data: 'Root 2'),
+///       TreeNode(key: '1', data: 'Root 1'),
+///       TreeNode(key: '2', data: 'Root 2'),
 ///     ]);
 ///     _controller.setChildren('1', [
-///       TreeNodeData(id: '1.1', data: 'Child 1.1'),
-///       TreeNodeData(id: '1.2', data: 'Child 1.2'),
+///       TreeNode(key: '1.1', data: 'Child 1.1'),
+///       TreeNode(key: '1.2', data: 'Child 1.2'),
 ///     ]);
 ///   }
 ///

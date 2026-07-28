@@ -1,6 +1,7 @@
 library;
 
 export 'render_sliver_tree.dart' show RenderSliverTree;
+export 'reorder_render_port.dart' show ReorderRenderPort;
 export 'sliver_reorderable_tree.dart'
     show ReorderableNodeWrapper, SliverReorderableTree;
 export 'sliver_tree_widget.dart' show SliverTree;

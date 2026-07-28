@@ -40,6 +40,15 @@ import '_internal_keys.dart';
 /// Inside [runBatch], structural notifications coalesce to a single
 /// fire at batch exit, and payload notifications are deferred and
 /// deduped by key.
+///
+/// **Unknown keys throw.** Every mutator and expansion method that takes
+/// a section or item key ([setItems], [removeSection], [updateSection],
+/// [moveSection], [addItem], [removeItem], [updateItem], [moveItem],
+/// [reorderItems], [expandSection], [collapseSection], [toggleSection])
+/// throws a [StateError] if the key is not present. Debug builds assert
+/// first, so the failure surfaces at the call site during development;
+/// release builds throw. Query with [hasSection] / [hasItem] when the
+/// key's presence is not already guaranteed.
 class SectionedListController<K extends Object, Section, Item>
     implements Listenable {
   SectionedListController({

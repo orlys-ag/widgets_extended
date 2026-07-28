@@ -337,7 +337,7 @@ class TreeSyncController<TKey, TData> {
     //    roots should match desiredKeys (possibly in a different order).
     //
     //    `reorderRoots` validates against the controller's `liveRootKeys`
-    //    (roots not in `_pendingDeletion`), so callers that mirror the
+    //    (roots that are not pending deletion), so callers that mirror the
     //    raw `rootKeys` view back into `desired` while a section's exit
     //    animation is still in flight would otherwise pass the exiting
     //    key in `desiredKeys` and trip the length check. Filter
@@ -437,8 +437,8 @@ class TreeSyncController<TKey, TData> {
     List<TreeNode<TKey, TData>> desired, {
     bool animate = true,
   }) {
-    // Cheap early-out (audit 2.5), mirroring TreeController.setChildren's
-    // C026 fast path: when [desired] exactly matches the controller's
+    // Cheap early-out, mirroring TreeController.setChildren's exact-match
+    // fast path: when [desired] exactly matches the controller's
     // current child list — same keys in order, same data, no
     // pending-deletion members — skip the whole diff (keys list, two
     // sets, Fenwick) before any allocation. The deferred
@@ -585,8 +585,9 @@ class TreeSyncController<TKey, TData> {
     //    `_syncRootsImpl` step 4: the desired state is authoritative;
     //    asking for the key means it should exist. Callers
     //    that want an imperative `remove()` / `removeItem` to keep
-    //    animating out should mirror live state (`getLiveChildren` /
-    //    `liveItemsOf`) so the exiting key drops out of `desired`.
+    //    animating out should mirror live state (`getLiveChildren`, or
+    //    `SectionedListController.itemsOf` with its default
+    //    `includeExiting: false`) so the exiting key drops out of `desired`.
     final retained = desiredSet.intersection(currentSet);
     for (final node in desired) {
       if (!retained.contains(node.key)) continue;
@@ -648,8 +649,8 @@ class TreeSyncController<TKey, TData> {
   /// The same child key MUST NOT appear under two different parents in
   /// [desiredByParent]. If it does, the second `syncChildren` call would
   /// reparent the key from the first parent's tree, producing last-write-
-  /// wins semantics (S014). Debug builds assert against this; release
-  /// builds silently apply last-write-wins.
+  /// wins semantics. Debug builds assert against this; release builds
+  /// silently apply last-write-wins.
   ///
   /// Set [animate] to false to suppress animations.
   void syncMultipleChildren(

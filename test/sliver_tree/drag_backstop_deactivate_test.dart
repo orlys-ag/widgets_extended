@@ -33,7 +33,7 @@ const _kIndicatorColor = Color(0xFF00B0FF);
 Future<
   ({
     TreeController<String, String> tree,
-    TreeReorderController<String, String> reorder,
+    TreeReorderController<String> reorder,
   })
 >
 _mount(WidgetTester tester) async {
@@ -48,7 +48,7 @@ _mount(WidgetTester tester) async {
     const TreeNode(key: "d", data: "D"),
   ]);
 
-  final reorder = TreeReorderController<String, String>(
+  final reorder = TreeReorderController<String>(
     treeController: tree,
     vsync: tester,
     slideDuration: const Duration(milliseconds: 80),

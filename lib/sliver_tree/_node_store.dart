@@ -3,10 +3,10 @@
 /// Owns the nid registry plus every dense per-nid array that describes the
 /// tree's structure (parent, children, depth, expansion, ancestors-expanded).
 /// Pure data: no animation state, no visibility/order state, no
-/// notifications. Visibility-related per-nid arrays
-/// (`_visibleSubtreeSizeByNid`, the order buffer's reverse index) live on
-/// the controller because they describe which nodes are currently rendered,
-/// not the structure itself.
+/// notifications. Visibility-related per-nid arrays (the visible-subtree-size
+/// cache and the reverse index) live in [VisibleOrderBuffer] instead, because
+/// they describe which nodes are currently rendered, not the structure
+/// itself.
 library;
 
 import 'dart:typed_data';

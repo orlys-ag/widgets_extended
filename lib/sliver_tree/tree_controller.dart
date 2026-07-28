@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 import '_animation_coordinator.dart';
 import '_node_id_registry.dart';
 import '_node_store.dart';
+import '_reorder_preview_engine.dart';
 import '_scroll_orchestrator.dart';
 import '_slide_animation_engine.dart';
 import '_visible_order_buffer.dart';
@@ -143,6 +144,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [setRoots] and [setChildren] sort their input before storing.
   final Comparator<TreeNode<TKey, TData>>? comparator;
 
+  /// Whether this controller sorts siblings with a [comparator].
+  ///
+  /// Exists because reading [comparator] itself through a covariantly-typed
+  /// reference (`TreeController<TKey, Object?>` — how `TreeReorderController`
+  /// holds its controller) throws a runtime `TypeError` whenever a
+  /// comparator is actually set: the comparator's function type uses
+  /// `TData` contravariantly, so a non-null value fails the implicit
+  /// covariance check on the read. (A null comparator reads fine — null
+  /// inhabits every nullable type — which makes the failure mode
+  /// data-dependent and easy to miss.) A `bool` carries no `TData` and is
+  /// safe from any reference type.
+  bool get hasComparator {
+    return comparator != null;
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   // ECS-STYLE COMPONENT STORAGE
   // ══════════════════════════════════════════════════════════════════════════
@@ -151,7 +167,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // expanded cache) lives inside [_store]. Visibility-related per-nid state
   // (the order buffer's reverse index, the visible-subtree-size cache, and
   // the roots list) lives inside [_order] (a [VisibleOrderBuffer]). Animation
-  // state stays here on the controller until Plan A extracts it.
+  // state lives inside [_anim] (an [AnimationCoordinator]).
   //
   // The store grows its dense arrays in lockstep with the controller's
   // own per-nid arrays via the [onCapacityGrew] callback wired up in the
@@ -172,15 +188,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         ..onParentChanged = (nid, oldParent, newParent) =>
             _order.handleParentChanged(nid, oldParent, newParent);
 
-  /// Convenience alias preserved so existing code that referenced `_nids`
-  /// directly continues to compile. Forwards to [NodeStore.nids].
+  /// Shorthand for [NodeStore.nids], used throughout this file and its
+  /// part files.
   NodeIdRegistry<TKey> get _nids => _store.nids;
 
-  /// Wired into [_store] via [NodeStore.onCapacityGrew]. After Plan A all
-  /// animation-related per-nid arrays live inside the AnimationCoordinator
-  /// (which aggregates each sub-coordinator's `resizeForCapacity`); after
-  /// Plan B the order buffer owns the visible-subtree-size cache + reverse
-  /// index. The controller itself no longer owns any per-nid arrays.
+  /// Wired into [_store] via [NodeStore.onCapacityGrew]. The controller owns
+  /// no per-nid arrays itself: [_anim] aggregates every sub-coordinator's
+  /// `resizeForCapacity`, and [_order] owns the visible-subtree-size cache
+  /// plus the reverse index.
   void _onStoreCapacityGrew(int newCapacity) {
     _anim.resizeForCapacity(newCapacity);
     _order.resizeForCapacity(newCapacity);
@@ -190,27 +205,22 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // STRUCTURAL DELEGATORS
   // ══════════════════════════════════════════════════════════════════════════
   //
-  // Thin wrappers over [_store] that preserve the original `_adoptKey` /
-  // `_setParentKey` / etc. names so the rest of the controller (and its
-  // part files) need no rewrites at every call site. Logic that mixes
-  // structural and visibility concerns (like the visible-subtree-size
-  // adjustment in [_setParentKey]) stays here on the controller because
-  // the controller is the only owner of the visibility-side state.
+  // Thin wrappers over [_store], used by the rest of the controller and
+  // its part files. Logic that mixes structural and visibility concerns
+  // (like the visible-subtree-size adjustment in [_setParentKey]) stays
+  // here on the controller, the only owner of the visibility-side state.
 
   /// Returns the nid for [key], allocating one if the key isn't registered.
-  /// Idempotent for already-registered keys. After Plan A's clearForNid
-  /// aggregation, every per-nid array reset (animation, visible-order)
-  /// happens via two calls.
+  /// Idempotent for already-registered keys. Nids are recycled, so a freshly
+  /// allocated one must have every per-nid array slot reset.
   int _adoptKey(TKey key) {
     final result = _store.adopt(key);
     final nid = result.nid;
     if (!result.isNew) {
       return nid;
     }
-    _order.clearForNid(nid); // Plan B: visible-subtree-size + reverse index
-    _anim.clearForNid(
-      nid,
-    ); // Plan A: every animation source + shared per-nid state
+    _order.clearForNid(nid); // visible-subtree-size + reverse index
+    _anim.clearForNid(nid); // every animation source + shared per-nid state
     return nid;
   }
 
@@ -238,8 +248,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void _releaseNid(TKey key) {
     final nid = _store.release(key);
     if (nid == null) return;
-    _order.clearForNid(nid); // Plan B
-    _anim.clearForNid(nid); // Plan A
+    _order.clearForNid(nid);
+    _anim.clearForNid(nid);
   }
 
   /// Nullable lookup of the [TreeNode] record for [key].
@@ -295,11 +305,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // VISIBILITY STATE
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Live, mutable accessor for the root-key list. Forwards to the order
-  /// buffer's owned roots list — `_order.roots` is the source of truth, and
-  /// the reference is stable for the lifetime of the buffer (Plan B G3
-  /// contract). Existing controller call sites mutate via standard List
-  /// operations (`add`, `remove`, `insert`, `..clear()..addAll(...)`); the
+  /// Live, mutable accessor for the root-key list. `_order.roots` is the
+  /// source of truth, and the reference is stable for the lifetime of the
+  /// buffer. Controller call sites mutate it via standard List operations
+  /// (`add`, `remove`, `insert`, `..clear()..addAll(...)`); the
   /// `UnmodifiableListView` exposed publicly as [rootKeys] reflects every
   /// mutation through the same underlying list.
   List<TKey> get _roots => _order.roots;
@@ -307,7 +316,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Flattened visible-order buffer: maintains the dense nid array, the
   /// reverse nid → visible-index map, the per-nid visible-subtree-size
   /// cache, and the roots list. Mutations invalidate the full-extent
-  /// prefix sum via the [onOrderMutated] callback. The buffer subscribes
+  /// prefix sum via the `onOrderMutated` callback. The buffer subscribes
   /// to [NodeStore.onParentChanged] (wired in the [_store] initializer
   /// cascade above) so the subtree-size cache shifts between ancestor
   /// chains automatically on reparent.
@@ -327,16 +336,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Opt-in: run the FULL cross-structure consistency sweep (whole order
   /// walk, nid-table walks, every animation mirror) after every
   /// incremental order mutation in debug builds. Off by default — the
-  /// sweep makes N sequential inserts O(N²) in debug (audit 5.11); the
-  /// default is an O(changed-range) order/reverse-index agreement check.
-  /// The fuzz/purge suites (which exist to exercise the invariants)
-  /// enable this.
+  /// sweep makes N sequential inserts O(N²) in debug; the default is an
+  /// O(changed-range) order/reverse-index agreement check. The fuzz/purge
+  /// suites, which exist to exercise the invariants, enable this.
   static bool debugFullConsistencyChecks = false;
 
-  /// Debug-only forwarder preserved for the existing fuzz test surface
-  /// (`test/sliver_tree/visible_subtree_size_invariant_fuzz_test.dart`,
-  /// the four `purge_*` tests, etc.). After Plan B the assertion lives
-  /// inside [VisibleOrderBuffer.debugAssertSubtreeSizeConsistent].
+  /// Debug-only forwarder to
+  /// [VisibleOrderBuffer.debugAssertSubtreeSizeConsistent], used by the
+  /// fuzz and purge suites.
   @visibleForTesting
   void debugAssertVisibleSubtreeSizeConsistency() =>
       _order.debugAssertSubtreeSizeConsistent();
@@ -354,7 +361,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ANIMATION STATE — extracted to AnimationCoordinator (Plan A)
+  // ANIMATION STATE — owned by AnimationCoordinator
   // ══════════════════════════════════════════════════════════════════════════
   //
   // Every animation source (standalone, per-operation groups, bulk, slide)
@@ -362,18 +369,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // union mirrors) lives inside [_anim]. The controller keeps:
   //
   // - Status-change handlers (`_onBulkAnimationComplete`,
-  //   `_onOperationGroupStatusChange`) on this class because they cross
-  //   structure / order / structural-notification concerns.
+  //   `_onOperationGroupStatusChange`) because they cross structure /
+  //   order / structural-notification concerns.
   // - The standalone-tick completion handler (`_onStandaloneTickComplete`)
-  //   for the same reason — it calls `_finalizeAnimation` which purges
+  //   for the same reason — it calls `_finalizeAnimation`, which purges
   //   structure.
-  // - Private forwarder methods (`_clearStandalone`, `_setOperationGroup`,
-  //   `_isPendingDeletion`, etc.) so the existing call sites in this file
-  //   and the part files don't need a mass rewrite.
+  // - Private forwarders (`_clearStandalone`, `_setOperationGroup`,
+  //   `_isPendingDeletion`, …) used by this file and the part files.
   // - `_keysToRemoveScratch` — controller-owned scratch buffer for the
   //   status / finalize handlers.
 
-  /// Animation subsystem facade. Owns the four animation sources plus
+  /// Animation subsystem facade. Owns the five animation sources plus
   /// every cross-source per-nid array.
   late final AnimationCoordinator<TKey> _anim = AnimationCoordinator<TKey>(
     vsync: _vsync,
@@ -383,9 +389,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     onOperationGroupStatus: _onOperationGroupStatusChange,
     onBulkAnimationStatus: _onBulkAnimationComplete,
     onStandaloneTickComplete: _onStandaloneTickComplete,
-    // Single-source of the unmeasured-row fallback (audit 6.1) — the
-    // animator layers can't import this class, so the constant is
-    // injected instead of mirrored.
+    // Single source of the unmeasured-row fallback: the animator layers
+    // can't import this class, so the constant is injected rather than
+    // mirrored.
     defaultExtent: defaultExtent,
   );
 
@@ -404,7 +410,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// handler. Stays here because `_finalizeAnimation` crosses structure /
   /// order / notification.
   ///
-  /// Mirrors today's `_onStandaloneTick` post-progress block: capture
+  /// Mirrors the standalone tick's post-progress block: capture
   /// parent-before-finalize → finalize each → batch _removeFromVisibleOrder
   /// → bump structure → fire structural notification. The animator's
   /// tick callback ALSO fires the listener channel via the wrapper
@@ -448,11 +454,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   // ──────── Forwarders to AnimationCoordinator ─────────────────────────
   //
-  // Existing call sites (in this file and the two part files) use these
-  // private names. After Plan A they're one-liners that delegate to
-  // `_anim`. Eventually a follow-up can inline them, but the forwarders
-  // satisfy Plan A's "no field-level grep hits" definition of done while
-  // minimizing mechanical churn.
+  // One-liners delegating to `_anim`, keeping the call sites in this file
+  // and the two part files free of the coordinator's internal layout.
 
   // Standalone animator
   AnimationState? _standaloneAt(TKey key) => _anim.standalone.at(key);
@@ -506,15 +509,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // Slide engine — used by the controller's public slide API forwarders
   // and by `_cancelAnimationStateForSubtree`.
   SlideAnimationEngine<TKey> get _slide => _anim.slide;
+  ReorderPreviewEngine get _preview => _anim.preview;
 
-  // Transitional cross-class accessors used by the part files
-  // (_tree_controller_animation.dart, _tree_controller_helpers.dart).
-  // Renamed away from the forbidden field-name grep list:
-  //   _activeBulkGroup → _activeBulkGroup
-  //   _operationGroups[X] / .containsKey(X) → _opGroupAt(X)
-  //   _operationGroups.values → _opGroupEntries
-  //   _operationGroups.remove(X) → _anim.opGroups.removeGroup(X)
-  //   _pendingDeletionCount → _anim.pendingDeletionCount (read-only)
+  // Cross-class accessors used by the part files
+  // (_tree_controller_animation.dart, _tree_controller_helpers.dart) so
+  // they reach bulk and operation-group state through one named hop
+  // instead of indexing the coordinator's collections directly. Group
+  // removal goes through `_anim.opGroups.removeGroup`; the
+  // pending-deletion count is read-only via `_anim.pendingDeletionCount`.
   AnimationGroup<TKey>? get _activeBulkGroup => _anim.bulk.group;
   OperationGroup<TKey>? _opGroupAt(TKey opKey) => _anim.opGroups.groupAt(opKey);
   Iterable<MapEntry<TKey, OperationGroup<TKey>>> get _opGroupEntries =>
@@ -631,17 +633,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   /// Whether [key] currently has a live (non-zero) FLIP slide delta — which,
-  /// per the exit-phantom Bug-1 fix, is also true for any in-flight exit-ghost
-  /// (its delta is non-zero for the whole settled traversal). Used to gate the
-  /// Bug-2 base-change staging so idle expand/collapse stays free of staging
+  /// because exit ghosts slide toward their anchor's SETTLED y, is also true
+  /// for any in-flight exit-ghost (its delta is non-zero for the whole
+  /// traversal). Gates base-change staging so idle expand/collapse stays
+  /// free of staging
   /// overhead. No need to peek the render layer's `_phantomExitGhosts`: a live
   /// exit-ghost always carries a non-zero slide delta here.
   bool _hasLiveSlideOrExitGhost(TKey key) => getSlideDelta(key) != 0.0;
 
-  /// Bug 2: stage a slide baseline (first-wins) when a row whose structural
+  /// Stages a slide baseline (first-wins) when a row whose structural
   /// base is about to change currently has a live slide/ghost. Called from
   /// [expand]/[collapse] BEFORE the structural mutation so the captured
-  /// painted positions are the FLIP "before". The next [performLayout] consume
+  /// painted positions are the FLIP "before". The next `performLayout` consume
   /// composes `newDelta = currentPaintedPosition − newStructuralOffset` through
   /// the engine's existing composition path, preserving painted position
   /// across the base change (no teleport, no extra layout pass).
@@ -665,9 +668,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     );
   }
 
-  // Animation tick listeners moved to AnimationCoordinator (Plan A).
-  // Forwarders for addAnimationListener / removeAnimationListener are
-  // in the ANIMATION LISTENERS section below.
+  // Animation tick listeners live in AnimationCoordinator; the
+  // addAnimationListener / removeAnimationListener forwarders are in the
+  // ANIMATION LISTENERS section below.
 
   /// Listeners notified when a single node's data changes without any
   /// structural change (e.g. [updateNode]). Receives the changed key.
@@ -748,16 +751,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   int _firstAnimatingIndexCacheSig = -1;
   int _firstAnimatingIndexCacheVal = 0;
 
-  // Plan A: _bumpAnimGen / _bumpBulkGen / _ensureAnimatingKeys /
-  // _isAnimatingByNid / _isExitingByNid / _writtenAnimating(Exiting)Nids /
-  // _animationGeneration / _animatingKeysCache(Gen) / _keysToRemoveScratch /
-  // _buildSyntheticEnteringState all moved to AnimationCoordinator.
-  // The forwarders in the ANIMATION STATE block above expose the
-  // controller-internal names that this file and the part files use.
-  //
-  // Public render-layer hot-path reads:
-  //   isAnimatingNid / isExitingNid → forwarders below in PUBLIC QUERIES
-  //   that delegate to _anim.
+  // The animation generation counters, union mirrors and animating-key
+  // caches all live in AnimationCoordinator; the ANIMATION STATE block
+  // above forwards to them. The two render-layer hot-path reads
+  // (isAnimatingNid / isExitingNid) are public and delegate directly.
 
   /// Hot-path equivalent of [isAnimating]: O(1) array read via the
   /// AnimationCoordinator's union mirror. Caller must guarantee [nid] is
@@ -894,7 +891,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Live, read-only view of every key currently animating across
   /// standalone, operation-group, and bulk sources. Backed by the lazy
-  /// [_ensureAnimatingKeys] cache; **do NOT mutate** — same convention as
+  /// `AnimationCoordinator.ensureAnimatingKeys` cache; **do NOT mutate**
+  /// — same convention as
   /// [orderNidsView]. Iteration is stable within one frame.
   Set<TKey> get currentlyAnimatingKeys => _anim.ensureAnimatingKeys();
 
@@ -926,7 +924,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// the node is not currently sliding. Hot-path equivalent of
   /// [getSlideDelta] — read every paint, hit-test, and transform call
   /// for visible rows, so saving the [TKey]→nid hash matters.
-  double getSlideDeltaNid(int nid) => _slide.deltaForNid(nid);
+  double getSlideDeltaNid(int nid) {
+    // Composed with the make-room preview: painted position =
+    // structural + FLIP delta + held preview offset. One boolean guard
+    // keeps the non-drag hot path unchanged.
+    final base = _slide.deltaForNid(nid);
+    if (!_preview.hasActive) {
+      return base;
+    }
+    return base + _preview.deltaForNid(nid);
+  }
 
   /// X-axis (cross-axis indent) slide delta for the live [nid], or 0.0
   /// when the node is not currently sliding. Hot-path equivalent of
@@ -1032,6 +1039,64 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return result;
   }
 
+  /// Whether [parent] has at least one live (non-pending-deletion) child.
+  ///
+  /// Non-allocating variant of `getLiveChildren(parent).isNotEmpty` for
+  /// per-pointer-move hot paths: drop-zone resolution asks this on every
+  /// pointer move and autoscroll tick, and the list-materializing form
+  /// copied the full child list just to test emptiness. O(1) when no
+  /// deletions are pending; otherwise O(children until the first live hit).
+  bool hasLiveChildren(TKey parent) {
+    final full = _childListOf(parent);
+    if (full == null || full.isEmpty) {
+      return false;
+    }
+    if (_anim.pendingDeletionCount == 0) {
+      return true;
+    }
+    for (final k in full) {
+      if (!_isPendingDeletion(k)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Number of live (non-pending-deletion) roots. Non-allocating variant
+  /// of `liveRootKeys.length` for hot paths (drop-zone boundary checks).
+  int get liveRootCount {
+    if (_anim.pendingDeletionCount == 0) {
+      return _roots.length;
+    }
+    var count = 0;
+    for (final k in _roots) {
+      if (!_isPendingDeletion(k)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /// Number of live (non-pending-deletion) children of [parent].
+  /// Non-allocating variant of `getLiveChildren(parent).length` for hot
+  /// paths (drop-zone boundary checks ask this per candidate level).
+  int liveChildCount(TKey parent) {
+    final full = _childListOf(parent);
+    if (full == null || full.isEmpty) {
+      return 0;
+    }
+    if (_anim.pendingDeletionCount == 0) {
+      return full.length;
+    }
+    var count = 0;
+    for (final k in full) {
+      if (!_isPendingDeletion(k)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   /// Returns the zero-based index of [key] within the **live** sibling list
   /// of its parent (or the live root list, if [key] is a root). Returns -1
   /// if [key] is not present or is itself pending deletion.
@@ -1070,7 +1135,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// signal that [hasActiveAnimations] drives. The sliver element routes
   /// slide-only ticks to [RenderObject.markNeedsPaint] rather than
   /// [RenderObject.markNeedsLayout] based on this flag.
-  bool get hasActiveSlides => _slide.hasActive;
+  bool get hasActiveSlides => _slide.hasActive || _preview.hasActive;
 
   /// Whether any in-flight slide has a non-zero X-axis component
   /// (depth-changing reparent). Hot-path render code uses this to skip
@@ -1094,13 +1159,26 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Shrinks toward 0.0 as the slide progresses (since entries'
   /// currentDelta lerps to 0), so the transient overbuild contracts with
   /// the animation.
-  double get maxActiveSlideAbsDelta => _slide.maxAbsDelta;
+  double get maxActiveSlideAbsDelta {
+    final base = _slide.maxAbsDelta;
+    if (!_preview.hasActive) {
+      return base;
+    }
+    final previewMax = _preview.maxAbsDelta;
+    return base > previewMax ? base : previewMax;
+  }
 
   /// Current slide delta for [key] in scroll-space y, or 0.0 if the node is
   /// not currently sliding. Read by [RenderSliverTree.paint],
   /// [RenderSliverTree.applyPaintTransform], and the hit-test path on
   /// every frame (no caching — staleness-safe under tick-without-paint).
-  double getSlideDelta(TKey key) => _slide.deltaForKey(key);
+  double getSlideDelta(TKey key) {
+    final base = _slide.deltaForKey(key);
+    if (!_preview.hasActive) {
+      return base;
+    }
+    return base + _preview.deltaForNid(nidOf(key));
+  }
 
   /// True when a bulk animation group is currently active and has members
   /// animating in either direction.
@@ -1140,7 +1218,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// for zero per-call allocation.
   BulkAnimationData<TKey> bulkAnimationData() => _anim.bulkAnimationData();
 
-  /// Returns the smallest [_visibleOrder] index among all currently-animating
+  /// Returns the smallest visible-order index among all currently-animating
   /// nodes, or [visibleNodeCount] when none are visible / none are animating.
   ///
   /// Used by the render object to skip the O(N) Pass 1 offset rescan during
@@ -1234,7 +1312,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// has its own enter/exit animation for that). A zero delta installs no
   /// entry.
   ///
-  /// Composes with an in-flight slide: if [key] already has an entry,
+  /// Composes with an in-flight slide: if a key already has an entry,
   /// its `startDelta` is replaced with `currentDelta_old + (prior - current)`
   /// and `progress` is reset to 0.0. This preserves the currently rendered
   /// position as the new animation's starting point (no visual jump).
@@ -1265,6 +1343,116 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     maxSlideDistance: maxSlideDistance,
     structuralAnimationsDisabled: animationDuration == Duration.zero,
   );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MAKE-ROOM PREVIEW
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Opens (or re-targets) the paint-only make-room preview for a drag of
+  /// [draggedKey] hovering [targetKey]: rows at/after the gap slot shift
+  /// down by the dragged subtree's visible extent, rows after the vacated
+  /// slot shift up, and the offsets are HELD until this is called again
+  /// (new slot) or [clearReorderPreview] releases them.
+  ///
+  /// [gapBelowTarget] selects the slot edge, matching the drop-indicator
+  /// rule: `false` = the gap opens above [targetKey]'s row (the `above`
+  /// zone); `true` = directly below it (`into`/`below` zones — including
+  /// the below-on-expanded-parent first-child resolution, whose slot is
+  /// visually the same edge).
+  ///
+  /// Structure never changes: no structural listeners fire, no sync diff
+  /// runs, layout is untouched. The offsets ride the same composed read
+  /// path as FLIP slide deltas, so painted positions, painted-truth
+  /// snapshots (FLIP baselines — this is what makes the commit handoff
+  /// seamless), hit-testing, retention, and overreach all see them
+  /// automatically. Snaps instead of animating when [animationDuration]
+  /// is zero.
+  ///
+  /// The dragged subtree's own rows keep their painted position (the
+  /// reorderable widget hides them behind the drag proxy in make-room
+  /// mode).
+  void setReorderPreview({
+    required TKey draggedKey,
+    required TKey targetKey,
+    required bool gapBelowTarget,
+    required Duration duration,
+    required Curve curve,
+  }) {
+    final draggedNid = _nids[draggedKey];
+    final targetNid = _nids[targetKey];
+    if (draggedNid == null || targetNid == null) {
+      clearReorderPreview(animate: false);
+      return;
+    }
+    _ensureVisibleOrder();
+    final draggedIndex = _order.indexByNid[draggedNid];
+    final targetIndex = _order.indexByNid[targetNid];
+    if (draggedIndex < 0 || targetIndex < 0) {
+      clearReorderPreview(animate: false);
+      return;
+    }
+    final draggedSize = _order.subtreeSizeOf(draggedNid);
+    final draggedEnd = draggedIndex + draggedSize;
+    final nids = orderNidsView;
+    double lift = 0.0;
+    for (int i = draggedIndex; i < draggedEnd; i++) {
+      lift += getCurrentExtentNid(nids[i]);
+    }
+    if (lift <= 0.0) {
+      clearReorderPreview(animate: false);
+      return;
+    }
+    final gapIndex = gapBelowTarget ? targetIndex + 1 : targetIndex;
+
+    // Per-row shift over the CURRENT visible order (which still contains
+    // the dragged rows in place): closing the vacated slot (−lift for
+    // rows after the dragged subtree) composes with opening the gap
+    // (+lift for rows at/after the slot). Rows on the far side of both
+    // cancel to zero; only the span between the old and new positions
+    // moves.
+    final targets = <int, double>{};
+    for (int i = 0; i < nids.length; i++) {
+      if (i >= draggedIndex && i < draggedEnd) {
+        continue;
+      }
+      double shift = 0.0;
+      if (i >= draggedEnd) {
+        shift -= lift;
+      }
+      if (i >= gapIndex) {
+        shift += lift;
+      }
+      if (shift != 0.0) {
+        targets[nids[i]] = shift;
+      }
+    }
+    _preview.setTargetsForNids(
+      targets,
+      duration: duration,
+      curve: curve,
+      snap: animationDuration == Duration.zero || duration == Duration.zero,
+    );
+  }
+
+  /// Ends the make-room preview: animate the shifted rows back
+  /// ([animate] true — pointer left every valid slot, or the drag was
+  /// cancelled) or drop the offsets instantly ([animate] false — the
+  /// commit path, where the staged FLIP baseline has already captured the
+  /// shifted painted positions and the mutation's layout takes over).
+  void clearReorderPreview({
+    required bool animate,
+    Duration duration = const Duration(milliseconds: 220),
+    Curve curve = Curves.easeOutCubic,
+  }) {
+    if (!_preview.hasActive) {
+      return;
+    }
+    if (!animate || animationDuration == Duration.zero) {
+      _preview.snapClearAll();
+    } else {
+      _preview.releaseAll(duration: duration, curve: curve);
+    }
+  }
 
   /// Stores the measured full extent for a node.
   ///
@@ -1388,7 +1576,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ANIMATION LISTENERS — forwarded to AnimationCoordinator (Plan A)
+  // ANIMATION LISTENERS — forwarded to AnimationCoordinator
   // ══════════════════════════════════════════════════════════════════════════
 
   /// Registers a callback that fires on every animation tick.
@@ -1603,6 +1791,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Initializes the tree with the given root nodes.
   ///
   /// This clears any existing state.
+  ///
+  /// Throws an [ArgumentError] if [roots] contains duplicate keys.
   void setRoots(List<TreeNode<TKey, TData>> roots) {
     final seen = <TKey>{};
     for (final node in roots) {
@@ -1694,7 +1884,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
       _adoptKey(node.key);
       _store.setData(node.key, node);
-      // C022: fire the node-data channel so subscribers via
+      // Fire the node-data channel so subscribers via
       // [addNodeDataListener] see the data update. The structural
       // notification below covers a different channel (full refresh)
       // that some callers don't subscribe to.
@@ -1730,7 +1920,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _store.setData(node.key, node);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != null) {
-        // C022: fire the node-data channel BEFORE delegating. moveNode's
+        // Fire the node-data channel BEFORE delegating. moveNode's
         // structural notification is targeted — on a depth-preserving
         // move its affectedKeys omits the moved key itself — so this is
         // the only refresh path for the overwritten payload.
@@ -1773,12 +1963,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _markVisibleOrderDirty();
         // Relocation changes row positions (and the payload was
         // overwritten) — structural refresh, which subsumes the data
-        // channel's row refresh (R3: no data fire on this path).
+        // channel's row refresh, so the data channel does not also fire.
         _notifyStructural(affectedKeys: <TKey>{node.key});
       } else {
-        // C022: data-only update — fire the node-data channel only,
-        // matching updateNode's contract. Firing a structural
-        // notification too refreshed the same row twice (audit 6.6).
+        // Data-only update — fire the node-data channel only, matching
+        // updateNode's contract. Firing a structural notification too
+        // would refresh the same row twice.
         _notifyNodeDataChanged(node.key);
       }
       return;
@@ -1893,8 +2083,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// (which would otherwise force the slow path's resurrection logic).
   ///
   /// Used to short-circuit no-op `setChildren` calls so reactive sync
-  /// code doesn't destroy in-flight animation state on identical input
-  /// (C026).
+  /// code doesn't destroy in-flight animation state on identical input.
   bool _isExactKeyAndDataMatch(
     List<TKey> oldKeys,
     List<TreeNode<TKey, TData>> newNodes,
@@ -1918,6 +2107,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// The children are added but not visible until the parent is expanded.
   /// If the parent already has children, the old children and their
   /// descendants are purged from all data structures first.
+  ///
+  /// Throws a [StateError] if [parentKey] is pending deletion (animating
+  /// out), which would orphan the new children when the parent is purged.
+  ///
+  /// Throws an [ArgumentError] if [children] contains duplicate keys, if
+  /// any child key equals [parentKey], or if any child key already exists
+  /// under a *different* parent — use [moveNode] or [remove] for that
+  /// case rather than re-parenting by side effect.
   void setChildren(TKey parentKey, List<TreeNode<TKey, TData>> children) {
     assert(_hasKey(parentKey), 'Parent node $parentKey not found');
     // Runtime check (not just an assert) so release builds also reject
@@ -1957,7 +2154,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
 
-    // C026 fast path: if the new list exactly matches the existing child
+    // Fast path: if the new list exactly matches the existing child
     // list — same keys in order, same data values, no pending-deletion
     // children — this is a structural no-op. Without this short-circuit,
     // the purge-and-re-adopt loop below destroys any in-flight animation
@@ -2151,9 +2348,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
       _adoptKey(node.key);
       _store.setData(node.key, node);
-      // C022: same as insertRoot's matching branch — fire node-data
-      // channel so listeners subscribed via [addNodeDataListener] see
-      // the data update.
+      // Same as insertRoot's matching branch — fire the node-data channel
+      // so listeners subscribed via [addNodeDataListener] see the data
+      // update.
       _notifyNodeDataChanged(node.key);
       if (preservePendingSubtreeState) {
         _markVisibleOrderDirty();
@@ -2183,7 +2380,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _store.setData(node.key, node);
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != parentKey) {
-        // C022: fire the node-data channel BEFORE delegating. moveNode's
+        // Fire the node-data channel BEFORE delegating. moveNode's
         // structural notification is targeted — on a depth-preserving
         // move its affectedKeys omits the moved key itself — so this is
         // the only refresh path for the overwritten payload.
@@ -2226,12 +2423,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _markVisibleOrderDirty();
         // Relocation changes row positions (and the payload was
         // overwritten) — structural refresh, which subsumes the data
-        // channel's row refresh (R3: no data fire on this path).
+        // channel's row refresh, so the data channel does not also fire.
         _notifyStructural(affectedKeys: <TKey>{node.key});
       } else {
-        // C022: data-only update — fire the node-data channel only,
-        // matching updateNode's contract. Firing a structural
-        // notification too refreshed the same row twice (audit 6.6).
+        // Data-only update — fire the node-data channel only, matching
+        // updateNode's contract. Firing a structural notification too
+        // would refresh the same row twice.
         _notifyNodeDataChanged(node.key);
       }
       return;
@@ -2371,8 +2568,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Reorders the root nodes to match [orderedKeys].
   ///
   /// [orderedKeys] must contain exactly the current live (non-pending-deletion)
-  /// root keys. Expansion state, animation state, and measured extents are
-  /// preserved. Pending-deletion roots are appended after the live roots.
+  /// root keys, with no duplicates; violating that throws an
+  /// [ArgumentError]. Expansion state, animation state, and measured
+  /// extents are preserved. Pending-deletion roots are appended after the
+  /// live roots.
   void reorderRoots(List<TKey> orderedKeys, {bool animate = true}) {
     final pendingRoots = <TKey>[];
     final liveRootSet = <TKey>{};
@@ -2419,8 +2618,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Reorders the children of [parentKey] to match [orderedKeys].
   ///
   /// [orderedKeys] must contain exactly the current live (non-pending-deletion)
-  /// children of [parentKey]. Expansion state, animation state, and measured
-  /// extents are preserved.
+  /// children of [parentKey], with no duplicates; violating that throws an
+  /// [ArgumentError], as does an unknown [parentKey]. Expansion state,
+  /// animation state, and measured extents are preserved.
   void reorderChildren(TKey parentKey, List<TKey> orderedKeys,
       {bool animate = true}) {
     if (!_hasKey(parentKey)) {
@@ -2468,7 +2668,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     bool needsVisibleRebuild = visible;
     if (!needsVisibleRebuild) {
       // Even if the parent is not expanded, children may still be present
-      // in _visibleOrder because they are mid-animation (collapse in
+      // in the visible order because they are mid-animation (collapse in
       // progress, pending-deletion exit). Those entries would otherwise
       // retain the old order until the animation completes.
       for (final child in _childListOf(parentKey)!) {
@@ -2522,6 +2722,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// when the controller's [animationDuration] is `Duration.zero` (the
   /// engine no-ops in that case to honor the global animation-disabled
   /// setting).
+  ///
+  /// Throws a [StateError] — in all build modes, not just debug — if
+  /// [key] is [newParentKey], if [newParentKey] is a descendant of [key]
+  /// (either would form a cycle), or if [newParentKey] is pending
+  /// deletion (it will be purged when its exit animation completes,
+  /// orphaning the moved subtree). Callers driving this from a gesture,
+  /// such as `TreeReorderController`, must re-validate against current
+  /// tree state before committing.
   void moveNode(
     TKey key,
     TKey? newParentKey, {
@@ -2578,7 +2786,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // requested, nothing to do. With an explicit [index] that matches the
     // node's current position under the same parent, also a no-op —
     // avoid wasted baseline staging + structural notification + slide
-    // composition for a mutation that produces zero visual change (C031).
+    // composition for a mutation that produces zero visual change.
     //
     // CRITICAL: this no-op return MUST precede the animate staging below.
     // Otherwise an animated no-op call would stage a baseline (via
@@ -2612,8 +2820,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final wasVisible = animate && _isStructurallyVisible(key);
 
     // Lazily computed, shared expansion-gated flatten of the moved
-    // subtree (audit 5.5). The phantom-anchor, exit-anchor, and
-    // affected-keys consumers below all need the identical set — the
+    // subtree. The phantom-anchor, exit-anchor, and affected-keys
+    // consumers below all need the identical set — the
     // subtree's INTERNAL structure (children lists, expansion flags) is
     // invariant across the move; only key's parent pointer and the
     // subtree's depths change — so one walk serves whichever of the
@@ -2687,7 +2895,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // composition path requires reading the still-live slideY in the
     // post-mutation snapshot to recognize the row as having an active
     // slide and avoid the both-off-screen suppression guard inside
-    // `_applyClampAndInstallNewGhosts`. Composition correctly absorbs the
+    // `GhostRegistry.applyClampAndInstallNewGhosts`. Composition absorbs the
     // structural shift into the new currentDelta — no double-counting.
     _cancelAnimationStateForSubtree(key, cancelSlides: !animate);
 
@@ -2804,7 +3012,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _notifyStructural(affectedKeys: affected);
   }
 
-  /// Sets [_depths] for [key] and all its descendants. Iterative so deep
+  /// Sets the stored depth for [key] and all its descendants. Iterative so deep
   /// trees do not stack-overflow. Depth for each descendant is computed
   /// on visit from the entry paired with it in the worklist, not derived
   /// from its parent's already-written depth, so visit order is irrelevant.
@@ -2851,7 +3059,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // See [insert] for the rationale: flush any deferred visible-order
     // rebuild so `_order.indexOf(key)` below reads fresh state.
     _ensureVisibleOrder();
-    // Bug 2: if any descendant about to (re)enter visible order currently has
+    // If any descendant about to (re)enter visible order currently has
     // a live exit-slide/ghost, stage a slide baseline FIRST (first-wins),
     // capturing each row's pre-expand painted position. Must precede
     // `_setExpandedKey`/op-group install so the baseline is the FLIP "before";
@@ -2971,7 +3179,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // OperationGroup internally and wires the tick + status callbacks).
     final nodesToShow = _flattenSubtree(key, includeRoot: false);
     final group = _anim.opGroups.install(key, animationCurve);
-    _bumpAnimGen(); // matches today's `_installOperationGroup` body
+    _bumpAnimGen(); // invalidate animation-generation-keyed caches
 
     // Fast path check: count new vs existing nodes
     int newNodeCount = 0;
@@ -3050,7 +3258,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
       if (insertOffset > 0) {
-        // The former inline loop was exactly a suffix reindex (audit 6.2).
         _updateIndicesFrom(minInsertIndex);
       }
     }
@@ -3058,9 +3265,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _structureGeneration++;
     group.controller.forward();
     // Path 2 creates no standalone states of its own — only keep the
-    // standalone ticker alive when states from other sources exist
-    // (audit 5.6: an ungated start costs one wasted start/stop frame
-    // per operation).
+    // standalone ticker alive when states from other sources exist. An
+    // ungated start costs one wasted start/stop frame per operation.
     if (_anim.standalone.hasAny) {
       _anim.standalone.ensureRunning();
     }
@@ -3081,7 +3287,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // rebuild so the descendant / index lookups below operate on fresh
     // state.
     _ensureVisibleOrder();
-    // Bug 2 (symmetric): if any visible descendant about to LEAVE visible
+    // Symmetric case: if any visible descendant about to LEAVE visible
     // order currently has a live entry-slide/ghost, stage a slide baseline
     // FIRST (first-wins), capturing pre-collapse painted positions. Computed
     // from the still-current visible order BEFORE `_setExpandedKey` flips the
@@ -3170,7 +3376,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       animationCurve,
       initialValue: 1.0,
     );
-    _bumpAnimGen(); // matches today's `_installOperationGroup` body
+    _bumpAnimGen(); // invalidate animation-generation-keyed caches
 
     for (final nodeId in descendants) {
       if (_isPendingDeletion(nodeId)) continue;
@@ -3188,7 +3394,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     group.controller.reverse();
-    // See the matching gate in the expand path (audit 5.6).
+    // See the matching gate in the expand path.
     if (_anim.standalone.hasAny) {
       _anim.standalone.ensureRunning();
     }
@@ -3409,7 +3615,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Create fresh group via the BulkAnimator (auto-disposes any
         // prior). All listener wiring happens inside createGroup.
         _anim.bulk.createGroup(animationDuration, animationCurve);
-        _bumpBulkGen(); // matches today's `_createBulkAnimationGroup` body
+        _bumpBulkGen(); // invalidate bulk + broad generation caches
 
         // Reverse standalone exit animations smoothly
         for (final key in nodesToReverseExit) {
@@ -3723,10 +3929,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   /// Populates the visible order (called by [VisibleOrderBuffer.rebuild]
-  /// as the closure body). Plan B: the wrapper [_order.rebuild] handles
-  /// `clear()`, `rebuildIndex()`, and `_rebuildSubtreeSizes()` itself, so
-  /// this body only walks the structure and calls [VisibleOrderBuffer.addKey]
-  /// for each visible nid.
+  /// as the closure body). The wrapper handles `clear()`, index rebuild,
+  /// and subtree-size rebuild itself, so this body only walks the
+  /// structure and calls [VisibleOrderBuffer.addKey] for each visible nid.
   void _rebuildVisibleOrderImpl() {
     final stack = <TKey>[];
     for (int i = _roots.length - 1; i >= 0; i--) {
@@ -3744,7 +3949,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (_isPendingDeletion(key)) {
         // Don't recurse based on expansion state (prevents zombie children),
         // but DO include children that are also pending deletion and still
-        // have running exit animations — they need to stay in _visibleOrder
+        // have running exit animations — they need to stay in the visible order
         // to animate out smoothly.
         for (int i = children.length - 1; i >= 0; i--) {
           final childId = children[i];
@@ -3787,7 +3992,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // _store reference past dispose. No-op if the wiring never fired.
     _store.onParentChanged = null;
     _clear();
-    _anim.dispose(); // Plan A: disposes sub-coordinators + slide engine
+    _anim.dispose(); // sub-coordinators + slide engine
     _nodeDataListeners.clear();
     _structuralListeners.clear();
     _renderHosts.clear();

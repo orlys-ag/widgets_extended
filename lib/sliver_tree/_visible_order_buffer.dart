@@ -131,11 +131,11 @@ class VisibleOrderBuffer<TKey> {
   // Reverse-index writes
   // ──────────────────────────────────────────────────────────────────────
   //
-  // Audit 6.2: the raw per-slot write (`setIndexByNid`) was removed from
-  // the surface — bulk repositioning goes through [reindexFrom] /
-  // [rebuildIndex] / [removeContiguousRange] / [purgeCompact], which own
-  // the corresponding order/index protocols. The raw views ([orderNids],
-  // [indexByNid]) remain for READ-ONLY hot paths.
+  // There is deliberately no raw per-slot index write. Bulk repositioning
+  // goes through [reindexFrom] / [rebuildIndex] / [removeContiguousRange]
+  // / [purgeCompact], each of which owns a complete order/index protocol.
+  // The raw views ([orderNids], [indexByNid]) exist for READ-ONLY hot
+  // paths only.
 
   /// Marks [key] as not visible. Safe on an unregistered key.
   void clearIndexOf(TKey key) {
@@ -196,10 +196,9 @@ class VisibleOrderBuffer<TKey> {
     }
   }
 
-  /// Backwards-compatible alias for [resizeForCapacity] used by older
-  /// call sites that grew only the reverse index. Plan B unifies the two
-  /// growth paths since both per-nid arrays must stay in lockstep with
-  /// the registry's capacity.
+  /// Alias for [resizeForCapacity]. Both per-nid arrays must stay in
+  /// lockstep with the registry's capacity, so there is only one growth
+  /// path.
   void resizeIndex(int capacity) => resizeForCapacity(capacity);
 
   /// Rebuilds [indexByNid] from the current order buffer. Use after bulk
@@ -223,7 +222,7 @@ class VisibleOrderBuffer<TKey> {
   /// Debug-only: verifies order/reverse-index agreement over
   /// `[fromIndex, length)` — the O(changed-range) inline check that
   /// replaces the full consistency sweep on the incremental-mutation hot
-  /// path (audit 5.11). Live nids must index back to their position;
+  /// path. Live nids must index back to their position;
   /// zombie entries (freed nids awaiting a batched sweep) are skipped.
   void debugAssertSpanIndexed(int fromIndex) {
     assert(() {
@@ -497,9 +496,8 @@ class VisibleOrderBuffer<TKey> {
   /// Intention-revealing bulk removal of the contiguous range
   /// `[start, endExclusive)`: clears each removed entry's reverse-index
   /// slot, removes the physical range, and reindexes the shifted suffix
-  /// — the full "contiguous removal" protocol in one owner (audit 6.2;
-  /// formerly spelled as cross-file raw `indexByNid` writes). Subtree-
-  /// size cache decrements follow [removeRange]'s suppression contract.
+  /// — the full "contiguous removal" protocol in one owner. Subtree-size
+  /// cache decrements follow [removeRange]'s suppression contract.
   void removeContiguousRange(int start, int endExclusive) {
     final end = endExclusive < _len ? endExclusive : _len;
     for (int i = start; i < end; i++) {
@@ -517,7 +515,7 @@ class VisibleOrderBuffer<TKey> {
   /// any zombie entries whose nid was already released (the zombie
   /// protocol documented on [removeWhereKeyIn]) — then rebuilds the
   /// reverse index wholesale. The full "non-contiguous removal" protocol
-  /// in one owner (audit 6.2).
+  /// in one owner.
   void purgeCompact(Set<TKey> keys) {
     for (final key in keys) {
       clearIndexOf(key);

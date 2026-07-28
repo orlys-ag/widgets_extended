@@ -17,16 +17,13 @@ import '_node_id_registry.dart';
 import 'types.dart';
 
 /// Marker value indicating the target extent should be determined from the
-/// measured size during layout. Mirrors `_unknownExtent` in the original
-/// `_tree_controller_animation.dart` part file.
+/// measured size during layout. Matches `_unknownExtent` in
+/// `_tree_controller_animation.dart`.
 const double _kUnknownExtent = -1.0;
 
-// Audit 6.1: the dead `computeStandaloneSpeedMultiplier` copy was
-// deleted (zero callers; the live implementation is
-// `_computeAnimationSpeedMultiplier` in `_tree_controller_animation.dart`),
-// and the hard-coded `_kDefaultExtent` mirror of
-// `TreeController.defaultExtent` was replaced by constructor injection —
-// see [StandaloneAnimator.defaultExtent].
+// The animation speed multiplier is owned by
+// `_computeAnimationSpeedMultiplier` in `_tree_controller_animation.dart`;
+// do not add a copy here.
 
 class StandaloneAnimator<TKey> {
   StandaloneAnimator({
@@ -53,12 +50,12 @@ class StandaloneAnimator<TKey> {
   final double? Function(int nid) _fullExtentGetter;
 
   /// Fallback extent for unmeasured rows, injected from
-  /// `TreeController.defaultExtent` via the coordinator (audit 6.1).
+  /// `TreeController.defaultExtent` via the coordinator.
   final double _defaultExtent;
 
   /// Per-nid animation slot. Null when the node is not animating via the
   /// standalone source. Reads / writes go through [at] / [set] / [clear]
-  /// so the [_activeStandaloneNids] working set stays in sync.
+  /// so the [_activeNids] working set stays in sync.
   List<AnimationState?> _byNid = <AnimationState?>[];
 
   /// Live "set of nids that have a non-null _byNid slot." The standalone

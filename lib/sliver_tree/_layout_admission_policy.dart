@@ -3,8 +3,7 @@
 /// Owns the dual-accumulator (live/post) admission decision used in the
 /// non-bulk path of the layout's Pass 2. Stateless apart from a back-pointer
 /// to its [TreeController] — every per-frame input is passed in via
-/// parameters. Mirrors the extracted-helper pattern set by
-/// [StickyHeaderComputer].
+/// parameters, as with [StickyHeaderComputer].
 ///
 /// Not exported from the package barrel; used only by [RenderSliverTree].
 library;

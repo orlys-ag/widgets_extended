@@ -3,9 +3,9 @@
 /// Owns every piece of state that exists solely to compute and cache
 /// sticky-header positions: the per-frame throttle counter, the
 /// last-computed-at scroll offset, the precompute scratch arrays, and the
-/// nid-indexed sticky lookup. Extracted from the render object so the
-/// sticky logic is testable in isolation by feeding precomputed offsets
-/// and extents in directly.
+/// nid-indexed sticky lookup. Kept out of the render object so the sticky
+/// logic is testable in isolation by feeding precomputed offsets and
+/// extents in directly.
 library;
 
 import 'dart:math' as math;

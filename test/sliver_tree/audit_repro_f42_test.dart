@@ -79,7 +79,7 @@ void main() {
         TreeNode(key: "e", data: "E"),
       ]);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -109,9 +109,8 @@ void main() {
       // target for dragged "c", so the resolved targetKey must be "a".
       reorder.startDrag(
         key: "c",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: rowACenter,
       );
       addTearDown(() {
@@ -133,18 +132,35 @@ void main() {
             "precedingScrollExtent (200px) lower",
       );
 
-      // Mirrored coordinate bug: indicatorScrollY is documented as
-      // VIEWPORT scroll space (its consumer subtracts position.pixels).
-      // Hovering the center of row "a" resolves the `into` zone, whose
-      // indicator sits at the row's bottom edge: 200px header + 50px row
-      // = 250 in viewport scroll space. Sliver-local math would report 50.
+      // Mirrored coordinate bug, post-D2 shape: the semantic target's
+      // `targetPaintedY` is SLIVER-LOCAL (row a at 0, NOT 200 — a target
+      // built from unconverted viewport scroll space would report 200),
+      // and the widget layer derives the viewport-scroll-space indicator
+      // edge by adding the port's precedingScrollExtent back: the `into`
+      // indicator sits at the row's bottom edge, 200px header + 50px row
+      // = 250 in viewport scroll space.
       expect(reorder.currentTarget?.zone, TreeDropZone.into,
           reason: "row center resolves the into zone for a valid target");
       expect(
-        reorder.currentTarget?.indicatorScrollY,
+        reorder.currentTarget?.targetPaintedY,
+        0.0,
+        reason: "targetPaintedY is sliver-local: row a is the first tree "
+            "row regardless of the 200px preceding sliver",
+      );
+      expect(
+        reorder.renderPort?.precedingScrollExtent,
+        200.0,
+        reason: "the port must expose the preceding sliver's extent — the "
+            "widget layer's indicator derivation depends on it",
+      );
+      final t = reorder.currentTarget!;
+      expect(
+        t.targetPaintedY + t.targetExtent +
+            reorder.renderPort!.precedingScrollExtent,
         250.0,
-        reason: "indicator must account for the 200px preceding sliver "
-            "(row a's bottom edge in viewport scroll space)",
+        reason: "derived indicator edge must account for the 200px "
+            "preceding sliver (row a's bottom edge in viewport scroll "
+            "space)",
       );
 
       reorder.cancelDrag();

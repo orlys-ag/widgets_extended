@@ -72,7 +72,7 @@ Offset _scrollYToGlobal(ScrollableState scrollable, double scrollY) {
 /// resolved to below-"c" (a real same-parent root reorder), then an
 /// animated `remove(key: "a")` mid-drag so the dragged key becomes
 /// pending-deletion while the stale drop target is retained.
-Future<TreeReorderController<String, String>> _setUpStaleDragSession(
+Future<TreeReorderController<String>> _setUpStaleDragSession(
   WidgetTester tester,
   TreeController<String, String> controller,
 ) async {
@@ -82,7 +82,7 @@ Future<TreeReorderController<String, String>> _setUpStaleDragSession(
     TreeNode(key: "c", data: "C"),
   ]);
 
-  final reorder = TreeReorderController<String, String>(
+  final reorder = TreeReorderController<String>(
     treeController: controller,
     vsync: tester,
   );
@@ -99,9 +99,8 @@ Future<TreeReorderController<String, String>> _setUpStaleDragSession(
   // same-parent root reorder (indexInFinalList = 2).
   reorder.startDrag(
     key: "a",
-    renderObject: render,
+    renderPort: render,
     scrollable: scrollable,
-    indentPerDepth: 24.0,
     pointerGlobal: _scrollYToGlobal(scrollable, 145.0),
   );
 

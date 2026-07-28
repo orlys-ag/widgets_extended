@@ -88,8 +88,8 @@ class BulkAnimator<TKey> {
 
   /// Bumps the generation counter. Public so optimized callers can
   /// invalidate downstream caches without going through a member mutation.
-  /// Mirrors today's `_bumpBulkGen` (controller-side caller would also
-  /// call `coordinator.bumpAnimGen()` to bump the broad counter; the
+  /// Bumps the bulk counter ONLY (a controller-side caller also calls
+  /// `coordinator.bumpAnimGen()` to bump the broad counter; the
   /// coordinator's `bumpBulkGen()` does both).
   void bumpGeneration() {
     _generation++;
@@ -118,7 +118,7 @@ class BulkAnimator<TKey> {
   /// Adds [key] to `_group.members` and updates the nid-keyed mirror.
   /// Returns true if the membership state changed. Caller is responsible
   /// for bumping the generation if needed (or the coordinator's
-  /// [bumpBulkGen] does it as part of the broader bump).
+  /// `AnimationCoordinator.bumpBulkGen` does it as part of the broader bump).
   bool addMember(TKey key) {
     final g = _group;
     if (g == null) return false;
@@ -226,8 +226,8 @@ class BulkAnimator<TKey> {
   }
 
   /// Disposes the current group's controller (if any) and zeros every
-  /// member's mirror slot. Mirrors today's `_disposeBulkAnimationGroup`
-  /// — set the field to null FIRST to prevent the disposing controller's
+  /// member's mirror slot. Sets the field to null FIRST, to prevent the
+  /// disposing controller's
   /// final synchronous status event from interfering.
   void disposeGroup() {
     final g = _group;

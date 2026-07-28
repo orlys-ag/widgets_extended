@@ -174,8 +174,7 @@ class SlideAnimation<TKey> {
   /// on object identity alone: composition mutates the entry IN PLACE, so
   /// identity cannot distinguish "the entry that just completed" from
   /// "the same object, freshly retargeted by an `_onTick` listener" —
-  /// identity-only cleanup would silently kill the just-composed slide
-  /// (audit 6.4).
+  /// identity-only cleanup would silently kill the just-composed slide.
   int installStamp = 0;
 
   /// Whether this animation has completed.

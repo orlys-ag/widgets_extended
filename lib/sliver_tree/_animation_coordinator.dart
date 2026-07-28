@@ -1,6 +1,10 @@
-/// Internal: facade over the four animation sources (standalone,
-/// per-operation groups, bulk, slide), plus the cross-source state and
-/// dispatch logic that span them.
+/// Internal: facade over the five animation sources (standalone,
+/// per-operation groups, bulk, slide, make-room preview), plus the
+/// cross-source state and dispatch logic that span them.
+///
+/// The first three drive layout and are unioned by [hasActiveAnimations];
+/// slide and preview are paint-only and are read through the slide-delta
+/// getters instead.
 ///
 /// Owns:
 /// - Cross-source per-nid state (`_fullExtentByNid`, `_isPendingDeletionByNid`,
@@ -8,10 +12,10 @@
 /// - The animation generation counter `_animationGeneration` (the broad
 ///   counter; the bulk-specific counter lives on [BulkAnimator]).
 /// - The animating-keys cache + sparse-tracking lists used by
-///   `_ensureAnimatingKeys`.
+///   [ensureAnimatingKeys].
 /// - The animation-listener channel (`addListener` / `removeListener` /
 ///   `notifyListeners`).
-/// - The four sub-coordinators (composition, not inheritance).
+/// - The five sub-coordinators (composition, not inheritance).
 ///
 /// Implements [AnimationReader] so [RenderSliverTree] can hold an abstract
 /// reference instead of the concrete coordinator (or the controller).
@@ -33,6 +37,7 @@ import 'package:flutter/scheduler.dart'
 import '_bulk_animator.dart';
 import '_node_id_registry.dart';
 import '_operation_group_registry.dart';
+import '_reorder_preview_engine.dart';
 import '_slide_animation_engine.dart';
 import '_standalone_animator.dart';
 import 'types.dart';
@@ -103,9 +108,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   final void Function(Iterable<TKey> completedKeys) _onStandaloneTickComplete;
 
   /// Fallback extent for unmeasured rows, injected from
-  /// `TreeController.defaultExtent` (audit 6.1 — layering forbids the
-  /// import, and a hard-coded mirror had already been copied three
-  /// times).
+  /// `TreeController.defaultExtent`. Injected rather than imported —
+  /// layering forbids the import, and a mirrored constant drifts.
   final double _defaultExtent;
 
   // ──────────────────────────────────────────────────────────────────────
@@ -157,6 +161,18 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     // dispatch would land after the cleanup. The engine runs ONE ticker
     // for all slides, so this contributes at most one sweep per frame —
     // it is not part of the K-multiplier the coalescing removes.
+    onTick: notifyListenersNow,
+  );
+
+  /// Make-room preview offsets: a sibling of [slide] holding
+  /// paint-only Y offsets that persist (rather than decay) until
+  /// re-targeted or released. Composed with slide deltas at the
+  /// [TreeController] read delegators — the render layer sees one
+  /// combined paint offset per row and needs no preview awareness.
+  /// Same immediate-dispatch rationale as [slide]: its notify-before-
+  /// cleanup settle contract needs uncoalesced delivery.
+  late final ReorderPreviewEngine preview = ReorderPreviewEngine(
+    vsync: _vsync,
     onTick: notifyListenersNow,
   );
 
@@ -220,8 +236,9 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     _animationGeneration++;
   }
 
-  /// Bumps both [_animationGeneration] and [bulk.generation]. Preserves
-  /// today's `_bumpBulkGen` "bumps both" semantic.
+  /// Bumps both [_animationGeneration] and the bulk generation. Bulk
+  /// progress invalidates broad animation-keyed caches too, so callers
+  /// never need to bump the two counters separately.
   void bumpBulkGen() {
     _animationGeneration++;
     bulk.bumpGeneration();
@@ -234,7 +251,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   final List<VoidCallback> _animationListeners = <VoidCallback>[];
 
   /// Reused snapshot buffer for [_dispatchListeners] — avoids a fresh
-  /// defensive list copy per sweep (audit 5.6).
+  /// defensive list copy per sweep.
   final List<VoidCallback> _dispatchScratch = <VoidCallback>[];
 
   /// Whether a coalesced dispatch microtask is already queued this frame.
@@ -253,7 +270,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   }
 
   void notifyListeners() {
-    // Per-frame coalescing (audit 5.6): with K concurrent op-group
+    // Per-frame coalescing: with K concurrent op-group
     // tickers plus the standalone/bulk/slide tickers, an uncoalesced
     // channel fires K+3 full listener sweeps per frame. During the
     // transient-callbacks phase (ticker callbacks) defer to a single
@@ -354,7 +371,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   /// `_isExitingByNid` — they're rebuilt from scratch on the next
   /// `ensureAnimatingKeys()` via the sparse-tracking lists.
   ///
-  /// **Generation invariant (C095):** this method does NOT bump
+  /// **Generation invariant:** this method does NOT bump
   /// `_animationGeneration`. Callers that read animation-gen-keyed caches
   /// (e.g. render-layer prefix-sum caches gated on `animationGeneration`)
   /// must ensure a bump happens before any such read between this call
@@ -370,6 +387,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     opGroups.clearForNid(nid);
     bulk.clearForNid(nid);
     slide.clearForNid(nid);
+    preview.clearForNid(nid);
     if (nid >= 0 && nid < _isPendingDeletionByNid.length &&
         _isPendingDeletionByNid[nid] != 0) {
       _isPendingDeletionByNid[nid] = 0;
@@ -406,10 +424,9 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   /// Coordinates across op-group members: if [key] is mid-flight in an
   /// op-group with `targetExtent == _unknownExtent`, resolves the target
   /// from [extent]; if `targetIsCaptured` is false and the value changed,
-  /// updates the natural full reference. ~30 lines of cross-source logic
-  /// — ported verbatim from `tree_controller.dart:1705`. Returns the
-  /// previous extent value (null if previously unmeasured) so callers can
-  /// invalidate downstream caches when it changed.
+  /// updates the natural full reference. Returns the previous extent
+  /// value (null if it was unmeasured) so callers can invalidate
+  /// downstream caches when it changed.
   double? setFullExtent(TKey key, double extent) {
     final oldExtent = fullExtentOf(key);
 
@@ -597,13 +614,11 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     return state;
   }
 
-  // Audit 6.1: the coordinator's `cancelAnimationStateForSubtree` copy
-  // was deleted. It had ZERO callers yet looked authoritative — and it
-  // LACKED the `preserveEntering` branch that the live implementation
-  // (`_cancelAnimationStateForSubtree` in `_tree_controller_animation.dart`,
-  // guarded by `move_preserves_entering_test.dart`) carries; "finishing
-  // the refactor" onto this copy would have silently regressed tested
-  // behavior. The extension version is the single spec.
+  // Subtree animation cancellation deliberately does NOT live here:
+  // `_cancelAnimationStateForSubtree` in `_tree_controller_animation.dart`
+  // is the single spec, because it needs the `preserveEntering` branch
+  // (guarded by `move_preserves_entering_test.dart`) that a
+  // coordinator-level copy would not naturally carry.
 
   // ──────────────────────────────────────────────────────────────────────
   // Per-key animation queries (forwarded by TreeController)
@@ -667,10 +682,9 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
 
   double getAnimatedExtent(TKey key, double fullExtent) {
     // 1. Bulk — `isMember` covers members ∪ pendingRemoval, matching the
-    // nid-keyed mirror `getCurrentExtentNid` consults (audit 6.5: a
-    // members-only check here would let the scroll orchestrator compute
-    // offsets that disagree with rendered layout if the two sets ever
-    // diverged).
+    // nid-keyed mirror `getCurrentExtentNid` consults. A members-only
+    // check here would let the scroll orchestrator compute offsets that
+    // disagree with rendered layout whenever the two sets diverge.
     if (bulk.isMember(key)) {
       return fullExtent * (bulk.group?.value ?? 0.0);
     }
@@ -861,14 +875,24 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   bool get hasActiveAnimations =>
       standalone.hasAny || opGroups.isNotEmpty || !bulk.isEmpty;
 
+  // Slide reads compose the FLIP engine with the make-room preview:
+  // the render layer sees one combined paint offset per row and needs no
+  // preview awareness. The hasActive guard keeps the non-drag hot path at
+  // one boolean check. X is FLIP-only (previews are Y offsets).
   @override
-  bool get hasActiveSlides => slide.hasActive;
+  bool get hasActiveSlides => slide.hasActive || preview.hasActive;
 
   @override
   bool get hasActiveXSlides => slide.hasActiveX;
 
   @override
-  double getSlideDeltaNid(int nid) => slide.deltaForNid(nid);
+  double getSlideDeltaNid(int nid) {
+    final base = slide.deltaForNid(nid);
+    if (!preview.hasActive) {
+      return base;
+    }
+    return base + preview.deltaForNid(nid);
+  }
 
   @override
   double getSlideDeltaXNid(int nid) => slide.deltaXForNid(nid);
@@ -893,6 +917,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     opGroups.clear();
     bulk.clear();
     slide.clearAll();
+    preview.clearAll();
     _fullExtentByNid = Float64List(0);
     _isPendingDeletionByNid = Uint8List(0);
     _isAnimatingByNid = Uint8List(0);
@@ -912,6 +937,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     opGroups.dispose();
     bulk.dispose();
     slide.dispose();
+    preview.dispose();
     _fullExtentByNid = Float64List(0);
     _isPendingDeletionByNid = Uint8List(0);
     _isAnimatingByNid = Uint8List(0);

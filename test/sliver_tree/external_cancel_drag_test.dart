@@ -30,7 +30,100 @@ double _opacityOf(WidgetTester tester, String rowKey) {
   return op.opacity;
 }
 
-Future<({TreeController<String, String> tree, TreeReorderController<String, String> reorder})>
+/// A mid-drag GESTURE-MODE swap (long-press ↔ handle, e.g. an app-level
+/// mode toggle hit by a second finger) replaces the recognizer that owns
+/// the active pointer — its end/cancel callbacks can never fire. The row
+/// must detect the swap and cancel the session instead of orphaning it
+/// (pin + scroll listener + ticker). The deactivate backstop does NOT
+/// cover this: the row's State survives; only its build output changes.
+void _addModeSwapTest() {
+  testWidgets(
+    "mid-drag gesture-mode swap cancels the session instead of orphaning "
+    "it",
+    (tester) async {
+      final tree = TreeController<String, String>(
+        vsync: tester,
+        animationDuration: Duration.zero,
+      );
+      tree.setRoots([
+        const TreeNode(key: "a", data: "A"),
+        const TreeNode(key: "b", data: "B"),
+        const TreeNode(key: "c", data: "C"),
+      ]);
+      final reorder = TreeReorderController<String>(
+        treeController: tree,
+        vsync: tester,
+      );
+      addTearDown(() {
+        if (reorder.isDragging) {
+          reorder.cancelDrag();
+        }
+        reorder.dispose();
+        tree.dispose();
+      });
+
+      final touchMode = ValueNotifier<bool>(true);
+      addTearDown(touchMode.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<bool>(
+              valueListenable: touchMode,
+              builder: (context, touch, _) => CustomScrollView(
+                slivers: [
+                  SliverReorderableTree<String, String>(
+                    controller: tree,
+                    reorderController: reorder,
+                    nodeBuilder: (context, key, depth, wrap) {
+                      return wrap(
+                        longPressToDrag: touch,
+                        handle: touch
+                            ? null
+                            : Icon(Icons.drag_indicator,
+                                key: ValueKey("h-$key")),
+                        child: SizedBox(
+                          key: ValueKey("row-$key"),
+                          height: 50,
+                          child: Text(key),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Lift row a via long-press, then swap to handle mode MID-DRAG.
+      final gesture = await tester.startGesture(const Offset(400, 25));
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      expect(reorder.isDragging, isTrue, reason: "setup: session active");
+
+      touchMode.value = false;
+      await tester.pump();
+      await tester.pump();
+
+      expect(reorder.isDragging, isFalse,
+          reason: "the swapped-out recognizer can never deliver "
+              "end/cancel — the row must cancel the session itself, or "
+              "the pin/listeners leak until an unrelated drag");
+      expect(_opacityOf(tester, "a"), 1.0,
+          reason: "the drag UI must be torn down with the session");
+
+      // The dead gesture's release must be inert (ownership guard).
+      await gesture.up();
+      await tester.pump();
+      expect(tree.liveRootKeys, ["a", "b", "c"],
+          reason: "nothing may commit from the orphaned gesture");
+      await tester.pumpAndSettle();
+    },
+  );
+}
+
+Future<({TreeController<String, String> tree, TreeReorderController<String> reorder})>
     _mount(WidgetTester tester) async {
   final tree = TreeController<String, String>(
     vsync: tester,
@@ -42,7 +135,7 @@ Future<({TreeController<String, String> tree, TreeReorderController<String, Stri
     const TreeNode(key: "c", data: "C"),
   ]);
 
-  final reorder = TreeReorderController<String, String>(
+  final reorder = TreeReorderController<String>(
     treeController: tree,
     vsync: tester,
     slideDuration: const Duration(milliseconds: 80),
@@ -86,6 +179,8 @@ Future<({TreeController<String, String> tree, TreeReorderController<String, Stri
 }
 
 void main() {
+  _addModeSwapTest();
+
   testWidgets(
     "external cancelDrag clears local UI state (S059)",
     (tester) async {
@@ -155,9 +250,8 @@ void main() {
       );
       h.reorder.startDrag(
         key: "b",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal:
             tester.getCenter(find.byKey(const ValueKey("row-c"))),
       );
@@ -197,13 +291,13 @@ void main() {
       addTearDown(tree.dispose);
       tree.setRoots([const TreeNode(key: "x", data: "X")]);
 
-      final reorderA = TreeReorderController<String, String>(
+      final reorderA = TreeReorderController<String>(
         treeController: tree,
         vsync: tester,
       );
       addTearDown(reorderA.dispose);
 
-      Widget buildWith(TreeReorderController<String, String> r) =>
+      Widget buildWith(TreeReorderController<String> r) =>
           MaterialApp(
             home: Scaffold(
               body: CustomScrollView(
@@ -227,7 +321,7 @@ void main() {
       await tester.pumpWidget(buildWith(reorderA));
       await tester.pumpAndSettle();
 
-      final reorderB = TreeReorderController<String, String>(
+      final reorderB = TreeReorderController<String>(
         treeController: tree,
         vsync: tester,
       );

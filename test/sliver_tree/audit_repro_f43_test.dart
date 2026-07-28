@@ -88,7 +88,7 @@ void main() {
       ]);
       controller.expand(key: "P");
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -128,9 +128,8 @@ void main() {
       // root; the destination parent is P).
       reorder.startDrag(
         key: "w",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: pointer,
       );
 

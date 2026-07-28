@@ -19,7 +19,7 @@ class _Harness {
   _Harness({required this.tree, required this.reorder});
 
   final TreeController<String, String> tree;
-  final TreeReorderController<String, String> reorder;
+  final TreeReorderController<String> reorder;
 }
 
 Future<_Harness> _mount(
@@ -38,7 +38,7 @@ Future<_Harness> _mount(
     TreeNode(key: "c", data: "C"),
   ]);
 
-  final reorder = TreeReorderController<String, String>(
+  final reorder = TreeReorderController<String>(
     treeController: tree,
     vsync: tester,
     slideDuration: const Duration(milliseconds: 80),
@@ -151,6 +151,82 @@ void main() {
       expect(_opacityOf(tester, "a"), 1.0,
           reason: "post-drop opacity must restore to full");
     });
+
+    testWidgets(
+      "canReorder=false: long-press starts no session and leaves the row "
+      "undimmed",
+      (tester) async {
+        // D3 contract at the widget layer: a refused startDrag returns
+        // false (no throw), and the wrapper must not enter its dragged
+        // state — no dim, no indicator, no session.
+        final tree = TreeController<String, String>(
+          vsync: tester,
+          animationDuration: Duration.zero,
+        );
+        tree.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
+        final reorder = TreeReorderController<String>(
+          treeController: tree,
+          vsync: tester,
+          canReorder: (key) => false,
+        );
+        addTearDown(() {
+          reorder.dispose();
+          tree.dispose();
+        });
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: CustomScrollView(
+                slivers: [
+                  SliverReorderableTree<String, String>(
+                    controller: tree,
+                    reorderController: reorder,
+                    draggedOpacity: 0.3,
+                    dropIndicatorColor: _kIndicatorColor,
+                    nodeBuilder: (context, key, depth, wrap) {
+                      return wrap(
+                        longPressToDrag: true,
+                        child: SizedBox(
+                          key: ValueKey("row-$key"),
+                          height: 50,
+                          child: Text(key),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byKey(const ValueKey("row-a"))),
+        );
+        await tester
+            .pump(kLongPressTimeout + const Duration(milliseconds: 100));
+
+        expect(reorder.isDragging, isFalse,
+            reason: "canReorder=false must decline the session");
+        expect(_opacityOf(tester, "a"), 1.0,
+            reason: "a refused drag must not dim the row");
+        expect(_indicatorFinder(), findsNothing,
+            reason: "a refused drag must not show the drop indicator");
+
+        await gesture.moveBy(const Offset(0, 60));
+        await tester.pump();
+        expect(reorder.isDragging, isFalse,
+            reason: "moves after a refused start must not create a session");
+
+        await gesture.up();
+        await tester.pump();
+      },
+    );
 
     testWidgets(
       "drop indicator is painted while dragging over a valid target",
@@ -317,7 +393,7 @@ void main() {
           TreeNode(key: "b2", data: "B2"),
         ]);
 
-        final reorder = TreeReorderController<String, String>(
+        final reorder = TreeReorderController<String>(
           treeController: tree,
           vsync: tester,
           slideDuration: const Duration(milliseconds: 80),
@@ -458,7 +534,7 @@ void main() {
             TreeNode(key: "r$i", data: i),
         ]);
 
-        final reorder = TreeReorderController<String, int>(
+        final reorder = TreeReorderController<String>(
           treeController: tree,
           vsync: tester,
           slideDuration: const Duration(milliseconds: 800),

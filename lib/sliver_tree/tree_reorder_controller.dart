@@ -7,116 +7,52 @@
 /// pointer updates via [updateDrag], and ends with [endDrag] (commit) or
 /// [cancelDrag] (no-op). Only one session can be active at a time.
 ///
-/// Coordinate space is exclusively **scroll-space** (distance from the start
-/// of the sliver's scroll extent, matching [SliverTreeParentData.layoutOffset]
-/// and [RenderSliverTree.snapshotVisibleOffsets]). The global pointer is
-/// converted once per [updateDrag].
+/// This file owns the PUBLIC API, policy (`canReorder`/`canAcceptDrop`,
+/// autoscroll/dwell/slide tuning), the notification channels, and the
+/// COMMIT SCRIPT. Everything else is delegated to the session
+/// architecture:
+///
+/// - `DragSession` (`_drag_session.dart`) — per-drag state; the single
+///   `resolve()` choreography site and the single `detachAll(SessionExit)`
+///   teardown site.
+/// - `PointerSpace` — the ONLY component touching the scrollable; every
+///   read is nullable (null = defunct scrollable) and every pointer event
+///   costs exactly one viewport lookup.
+/// - `DragProbe` — grab geometry + the touch-first probe shift + the
+///   resolution core over [DropZoneResolver] (`_drop_zone_resolver.dart`).
+/// - Behavior collaborators (`_drag_session_behaviors.dart`) —
+///   `AutoScroller` (per-session ticker), `DwellExpander`,
+///   `MakeRoomDriver`, `DropSettler`.
+///
+/// Render-layer access goes exclusively through [ReorderRenderPort] — this
+/// package never lets reorder code touch the concrete render object.
+/// Coordinate space is exclusively **sliver-local scroll-space** (distance
+/// from the start of the sliver's scroll extent, matching
+/// [SliverTreeParentData.layoutOffset]).
 library;
 
-import 'package:flutter/scheduler.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 
-import 'render_sliver_tree.dart';
+import '_drag_session.dart';
+import '_drag_session_behaviors.dart';
+import '_drop_zone_resolver.dart';
+import 'reorder_render_port.dart';
 import 'tree_controller.dart';
 
-/// Where the pointer lies relative to a candidate drop-target row.
-enum TreeDropZone {
-  /// Insert the dragged node as a sibling above [TreeDropTarget.targetKey].
-  above,
-
-  /// Insert the dragged node as the first child of [TreeDropTarget.targetKey].
-  into,
-
-  /// Insert the dragged node as a sibling below [TreeDropTarget.targetKey].
-  below,
-}
-
-/// Resolved drop target for the current pointer position during a drag.
-///
-/// Immutable snapshot produced by [TreeReorderController] from the pointer
-/// and the current visible-offset snapshot. Used to draw the drop indicator
-/// and to commit the reorder on drag end.
-@immutable
-class TreeDropTarget<TKey> {
-  const TreeDropTarget({
-    required this.targetKey,
-    required this.zone,
-    required this.parentKey,
-    required this.indexInFinalList,
-    required this.depth,
-    required this.indicatorScrollY,
-    required this.indicatorIndent,
-  });
-
-  /// The row the pointer is over.
-  final TKey targetKey;
-
-  /// Where the pointer sits relative to [targetKey].
-  final TreeDropZone zone;
-
-  /// The dragged node's new parent after commit. `null` means "root".
-  final TKey? parentKey;
-
-  /// The index the dragged node should occupy **in the final sibling list**
-  /// of [parentKey] after the move / reorder has completed.
-  ///
-  /// - Cross-parent drops: pass directly to
-  ///   [TreeController.moveNode] as `index`.
-  /// - Same-parent drops: build a live sibling list with the dragged key
-  ///   removed and re-inserted at this index, then pass to
-  ///   [TreeController.reorderChildren] / [TreeController.reorderRoots].
-  final int indexInFinalList;
-
-  /// Depth of the dragged node **after** the move, for indicator indent.
-  final int depth;
-
-  /// **Viewport scroll-space** y where the indicator line should be drawn:
-  /// distance from the top of the viewport's total scroll extent, including
-  /// any slivers that precede the tree. Subtract the scrollable's
-  /// `position.pixels` to convert to viewport-local. (Sliver-local row
-  /// offsets — the space `RenderSliverTree.findRowAtPaintedY` speaks —
-  /// differ from this by the tree sliver's `precedingScrollExtent`.)
-  final double indicatorScrollY;
-
-  /// Horizontal inset for the indicator line, computed from [depth] and
-  /// the tree's indent-per-depth.
-  final double indicatorIndent;
-}
-
-/// Per-drag state held only while a drag is active.
-class _DragSession<TKey> {
-  _DragSession({
-    required this.draggedKey,
-    required this.renderObject,
-    required this.scrollable,
-    required this.indentPerDepth,
-    required this.pointerGlobal,
-  });
-
-  final TKey draggedKey;
-  final RenderSliverTree<TKey, Object?> renderObject;
-  final ScrollableState scrollable;
-  final double indentPerDepth;
-
-  /// Latest pointer position in global coordinates. Updated on every
-  /// [TreeReorderController.updateDrag] call so the autoscroll ticker
-  /// can re-evaluate without an extra callback plumbing.
-  Offset pointerGlobal;
-
-  TreeDropTarget<TKey>? currentTarget;
-}
+export '_drop_zone_resolver.dart' show TreeDropTarget, TreeDropZone;
 
 /// Controls a drag-and-drop reorder over a [TreeController].
 ///
-/// Owns an autoscroll [Ticker] for edge-zone scrolling. Not usable with a
-/// comparator-based controller (auto-sort would override user order) —
-/// the constructor throws [ArgumentError] in that case.
+/// Not usable with a comparator-based controller (auto-sort would
+/// override user order) — the constructor throws [ArgumentError] in that
+/// case.
 ///
 /// Extends [ChangeNotifier]: listeners are notified whenever
 /// [currentTarget] changes or the drag session begins/ends. Consumers
 /// that need to repaint per-pointer-move (like the built-in drop
 /// indicator) subscribe here instead of polling per-frame.
-class TreeReorderController<TKey, TData> extends ChangeNotifier {
+class TreeReorderController<TKey> extends ChangeNotifier {
   TreeReorderController({
     required this.treeController,
     required TickerProvider vsync,
@@ -126,9 +62,13 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
     this.slideCurve = Curves.easeOutCubic,
     this.autoScrollEdgeZone = 48.0,
     this.autoScrollMaxVelocity = 1200.0,
+    this.autoExpandDelay = const Duration(milliseconds: 700),
   }) {
     // Runtime check in all build modes — asserts disappear in release.
-    if (treeController.comparator != null) {
+    // hasComparator, not comparator: reading the comparator getter through
+    // this class's covariant `TreeController<TKey, Object?>` view throws a
+    // TypeError (TData appears contravariantly in its function type).
+    if (treeController.hasComparator) {
       throw ArgumentError.value(
         treeController,
         "treeController",
@@ -137,11 +77,14 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
         "Pass a controller with comparator: null, or remove the comparator.",
       );
     }
-    _autoScrollTicker = vsync.createTicker(_onAutoScrollTick);
+    _vsync = vsync;
   }
 
   /// The tree controller to mutate on drop.
-  final TreeController<TKey, TData> treeController;
+  ///
+  /// Typed on the key only — reorder orchestration never reads node data,
+  /// so any `TreeController<TKey, *>` is accepted.
+  final TreeController<TKey, Object?> treeController;
 
   /// If set, rows for which this returns false cannot be dragged.
   final bool Function(TKey key)? canReorder;
@@ -168,9 +111,26 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// Peak autoscroll velocity in logical pixels per second.
   final double autoScrollMaxVelocity;
 
-  _DragSession<TKey>? _session;
-  late final Ticker _autoScrollTicker;
-  Duration? _lastAutoScrollTick;
+  /// How long the pointer must dwell on an `into` target that is
+  /// collapsed (and has live children to reveal) before the target
+  /// auto-expands — the conventional hover-to-open tree affordance.
+  ///
+  /// `null` or [Duration.zero] disables auto-expand. The dwell re-arms
+  /// on every target change and is cancelled by session end.
+  final Duration? autoExpandDelay;
+
+  /// Zone semantics, shared with commit-time re-validation. Late so it can
+  /// capture the final [treeController]/[canAcceptDrop] fields.
+  late final DropZoneResolver<TKey> _resolver = DropZoneResolver<TKey>(
+    treeController: treeController,
+    canAcceptDrop: canAcceptDrop,
+  );
+
+  DragSession<TKey>? _session;
+
+  /// Vsync for the per-session autoscroll ticker; the ticker itself lives
+  /// in each session's [AutoScroller].
+  late final TickerProvider _vsync;
 
   /// Whether a drag is currently in flight.
   bool get isDragging => _session != null;
@@ -178,77 +138,211 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// The currently-dragged key, or `null` if no drag is active.
   TKey? get draggedKey => _session?.draggedKey;
 
-  /// The current drop target, or `null` if the pointer is outside any row.
+  /// The current drop target, or `null` if the pointer is outside any row
+  /// or every candidate slot is a cycle.
+  ///
+  /// A target whose slot equals the dragged row's current position IS
+  /// valid ("returns here" feedback — the indicator/gap shows the original
+  /// slot instead of going dark); [endDrag] detects it and commits
+  /// nothing, behaving like [cancelDrag].
   TreeDropTarget<TKey>? get currentTarget => _session?.currentTarget;
+
+  /// The render port of the active drag session, or `null` when idle.
+  ///
+  /// For presentation-layer consumers: the semantic [TreeDropTarget]
+  /// carries sliver-local geometry, and converting it to viewport scroll
+  /// space needs [ReorderRenderPort.precedingScrollExtent]. The built-in
+  /// drop indicator reads this on every repaint.
+  ReorderRenderPort<TKey>? get renderPort => _session?.renderPort;
+
+  /// Per-pointer-move channel: the latest global pointer position, `null`
+  /// when idle. A drag proxy must reposition on EVERY move, whereas the
+  /// [ChangeNotifier] channel deliberately coalesces to semantic target
+  /// changes — two channels, two contracts.
+  ValueListenable<Offset?> get pointerPosition => _pointerPosition;
+  final ValueNotifier<Offset?> _pointerPosition = ValueNotifier<Offset?>(null);
+
+  /// The active session's grab geometry: the pointer's dy within the
+  /// dragged row at start, and that row's extent. `null` when idle.
+  /// Presentation consumers position the proxy at `pointer − grabDy`.
+  ({double grabDy, double rowExtent})? get dragProxyGeometry {
+    final session = _session;
+    if (session == null) {
+      return null;
+    }
+    return (
+      grabDy: session.probe.grabDy,
+      rowExtent: session.probe.grabRowExtent,
+    );
+  }
 
   /// Begins a drag session for [key].
   ///
-  /// [renderObject] is the [RenderSliverTree] that currently displays
-  /// [treeController]. [scrollable] is the ancestor scrollable whose
-  /// viewport clips the tree — used for pointer → scroll-space conversion
-  /// and autoscroll. [indentPerDepth] is the horizontal indent the tree
-  /// uses per depth level; used to position the drop indicator.
+  /// [renderPort] is the render surface currently displaying
+  /// [treeController] (the `RenderSliverTree`). [scrollable] is the
+  /// ancestor scrollable whose viewport clips the tree — used for
+  /// pointer → scroll-space conversion and autoscroll.
   ///
-  /// Throws [ArgumentError] if [renderObject.controller] is not the same
-  /// controller passed to this reorder controller (cross-controller drag
-  /// is out of scope) or if [canReorder] returns false for [key].
-  void startDrag({
+  /// Returns `true` when the session started. Returns `false` — starting
+  /// nothing — when [canReorder] refuses [key], or when [renderPort] has
+  /// not been laid out yet (no painted rows to resolve against). A policy
+  /// refusal is a normal runtime answer, not misuse, so it is a return
+  /// value rather than an exception.
+  ///
+  /// [depthForPointerX] maps the pointer's sliver-local x to an UNCLAMPED
+  /// preferred depth (e.g. `x ~/ indentPerDepth` — the widget layer owns
+  /// the pixel constant); the resolver clamps it to the legal candidate
+  /// chain when a below-zone drop sits at a subtree right-boundary. Omit
+  /// it to always resolve at the deepest legal level.
+  ///
+  /// When [makeRoom] AND [settleFromRelease] are BOTH set (touch-first
+  /// make-room mode), slot resolution probes at the PROXY MIDPOINT
+  /// (`pointer + rowExtent/2 − grabDy`, a session constant) instead of
+  /// the raw pointer: on touch there is no visible cursor, so selection
+  /// tracks the card in hand regardless of where it was grabbed. Every
+  /// other configuration resolves at the raw pointer.
+  ///
+  /// Throws [ArgumentError] for genuine wiring misuse: [renderPort] not
+  /// driven by [treeController] (cross-controller drag is out of scope).
+  bool startDrag({
     required TKey key,
-    required RenderSliverTree<TKey, TData> renderObject,
+    required ReorderRenderPort<TKey> renderPort,
     required ScrollableState scrollable,
-    required double indentPerDepth,
     required Offset pointerGlobal,
+    int Function(double sliverLocalX)? depthForPointerX,
+    bool makeRoom = false,
+    bool settleFromRelease = false,
   }) {
-    if (!identical(renderObject.controller, treeController)) {
+    if (!renderPort.drivesController(treeController)) {
       throw ArgumentError.value(
-        renderObject,
-        "renderObject",
-        "renderObject.controller must be the same TreeController passed to "
+        renderPort,
+        "renderPort",
+        "renderPort must be driven by the same TreeController passed to "
         "TreeReorderController. Cross-controller drag is not supported.",
       );
     }
+    if (!renderPort.isLaidOut) {
+      return false;
+    }
     if (canReorder != null && !canReorder!(key)) {
-      throw ArgumentError.value(
-        key,
-        "key",
-        "canReorder returned false for this key; drag cannot start",
-      );
+      return false;
     }
     if (_session != null) {
       cancelDrag();
     }
-    _session = _DragSession<TKey>(
-      draggedKey: key,
-      // Store under a less-tightly-typed field so this controller doesn't
-      // need to propagate the TData parameter into every internal helper.
-      renderObject: renderObject as RenderSliverTree<TKey, Object?>,
+    final pointerSpace = PointerSpace<TKey>(
       scrollable: scrollable,
-      indentPerDepth: indentPerDepth,
+      renderPort: renderPort,
+    );
+    final startSample = pointerSpace.sample(pointerGlobal);
+    if (startSample == null) {
+      // The scrollable is unmounted or its viewport is detached — there
+      // is nothing to drag within, so refuse like any other policy check.
+      return false;
+    }
+    // The probe is the single owner of grab geometry + probeDy; capture
+    // runs once here against the start sample.
+    final probe = DragProbe<TKey>(
+      renderPort: renderPort,
+      resolver: _resolver,
+      draggedKey: key,
+      depthForPointerX: depthForPointerX,
+    );
+    probe.captureGrab(
+      start: startSample,
+      midpointProbe: makeRoom && settleFromRelease,
+    );
+    final session = DragSession<TKey>(
+      draggedKey: key,
+      renderPort: renderPort,
+      pointerSpace: pointerSpace,
+      probe: probe,
       pointerGlobal: pointerGlobal,
     );
+    // Behavior collaborators capture the session's identity in their
+    // callbacks, hence assignment after construction.
+    session.autoScroller = AutoScroller<TKey>(
+      vsync: _vsync,
+      space: pointerSpace,
+      pointerGlobal: () => session.pointerGlobal,
+      edgeZone: autoScrollEdgeZone,
+      maxVelocity: autoScrollMaxVelocity,
+    );
+    session.dwell = DwellExpander<TKey>(
+      treeController: treeController,
+      delay: autoExpandDelay,
+      sessionLive: () => identical(_session, session),
+      requestResolve: () => _resolveAndNotify(session),
+    );
+    if (makeRoom) {
+      session.makeRoomDriver = MakeRoomDriver<TKey>(
+        treeController: treeController,
+        draggedKey: key,
+        duration: slideDuration,
+        curve: slideCurve,
+      );
+    }
+    if (settleFromRelease) {
+      session.settler = DropSettler<TKey>(
+        treeController: treeController,
+        space: pointerSpace,
+        pointerGlobal: () => session.pointerGlobal,
+        grabDy: () => probe.grabDy,
+        draggedKey: key,
+        duration: slideDuration,
+        curve: slideCurve,
+      );
+    }
+    _session = session;
     // Pin the dragged row against stale eviction for the session's
     // lifetime: the drag gesture lives on the row's own GestureDetector,
     // so autoscrolling it out of the cache region would otherwise evict
     // the row, its end/cancel callbacks would never fire, and the session
     // (plus the autoscroll ticker) would run forever.
-    renderObject.pinNode(key);
-    _recomputeDropTarget();
+    renderPort.pinNode(key);
+    session.subscribeScroll(scrollable.position, _onScrollPositionChanged);
+    _pointerPosition.value = pointerGlobal;
+    // One choreography site: probe + resolver + every behavior — the
+    // make-room gap of a session born over a valid slot opens here, and
+    // the edge-zone-at-start autoscroll evaluation runs here too.
+    session.resolve();
     // Drag session just started; currentTarget may have become non-null.
     notifyListeners();
+    return true;
+  }
+
+  /// Scroll listener, subscribed only while a session is active: content
+  /// moved under the (possibly stationary) pointer, so the resolved
+  /// target may have changed even though no pointer event fired.
+  void _onScrollPositionChanged() {
+    final session = _session;
+    if (session == null) {
+      return;
+    }
+    _resolveAndNotify(session);
+  }
+
+  /// Re-resolves through the session's single choreography site and fires
+  /// the coalesced [ChangeNotifier] channel iff the semantic target
+  /// changed. Notification stays controller-owned.
+  void _resolveAndNotify(DragSession<TKey> session) {
+    final previous = session.currentTarget;
+    session.resolve();
+    if (!_targetsEqual(previous, session.currentTarget)) {
+      notifyListeners();
+    }
   }
 
   /// Updates the pointer position. Re-resolves the drop target and starts
   /// / stops the autoscroll ticker as needed.
   void updateDrag(Offset pointerGlobal) {
     final session = _session;
-    if (session == null) return;
-    session.pointerGlobal = pointerGlobal;
-    final previous = session.currentTarget;
-    _recomputeDropTarget();
-    _updateAutoScroll();
-    if (!_targetsEqual(previous, session.currentTarget)) {
-      notifyListeners();
+    if (session == null) {
+      return;
     }
+    session.pointerGlobal = pointerGlobal;
+    _pointerPosition.value = pointerGlobal;
+    _resolveAndNotify(session);
   }
 
   /// Commits the drop: mutates [treeController] (via [TreeController.moveNode],
@@ -258,7 +352,7 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// If no valid target is currently resolved, behaves like [cancelDrag].
   ///
   /// The slide is installed IN-FRAME by the sliver render object: this
-  /// method asks the render object to capture a baseline of current painted
+  /// method asks the render port to capture a baseline of current painted
   /// offsets BEFORE mutating the controller; the next `performLayout`
   /// (triggered by that mutation) snapshots the post-mutation offsets and
   /// installs a FLIP slide from baseline → current. The paint pass of the
@@ -267,7 +361,9 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
   /// one-frame "jump to new position, then slide back" flicker.
   void endDrag() {
     final session = _session;
-    if (session == null) return;
+    if (session == null) {
+      return;
+    }
 
     // Re-resolve against CURRENT tree state, then validate, BEFORE staging
     // the FLIP baseline. The last pointer-move's target may be stale: with
@@ -277,7 +373,7 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
     // session permanently stuck, and a baseline staged before validation
     // would be consumed by nobody — first-wins staging then blocks every
     // subsequent slide stage until an unrelated layout flushes it.
-    _recomputeDropTarget();
+    session.resolveTargetOnly();
     final target = session.currentTarget;
     final dragged = session.draggedKey;
     final bool valid;
@@ -294,7 +390,7 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
         valid = treeController.getNodeData(parentKey) != null &&
             !treeController.isPendingDeletion(parentKey) &&
             parentKey != dragged &&
-            !_isStrictDescendantOf(parentKey, dragged);
+            !_resolver.isStrictDescendantOf(parentKey, dragged);
       }
     }
     if (!valid) {
@@ -302,21 +398,54 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
       return;
     }
 
-    _autoScrollTicker.stop();
-    _lastAutoScrollTick = null;
+    // Current-position drop: the resolver now reports the dragged row's
+    // own slot as a valid target ("returns here" feedback), but committing
+    // it must mutate NOTHING — and must stage NO baseline (an unconsumed
+    // baseline is exactly the protocol violation the expiry backstop
+    // guards against). cancelDrag is the precise semantic: settle-back
+    // glide, make-room release, clean teardown.
+    if (treeController.getParent(dragged) == target!.parentKey &&
+        target.indexInFinalList ==
+            treeController.getIndexInParent(dragged)) {
+      cancelDrag();
+      return;
+    }
+
+    // The autoscroll ticker stops in detachAll(commit) below; endDrag is
+    // synchronous, so no tick can interleave before then.
 
     // Stage the FLIP baseline BEFORE mutating. The render object's next
-    // performLayout will consume it and install the slide in-frame,
-    // avoiding the post-frame gap that used to produce a single-frame
-    // flicker of each moved row at its destination.
-    session.renderObject.beginSlideBaseline(
+    // performLayout consumes it and installs the slide in-frame, avoiding
+    // the post-frame gap that would flicker each moved row at its
+    // destination for one frame.
+    //
+    // Proxy drop-settle: overriding the dragged row's baseline entry to
+    // the RELEASE position (pointer − grab offset — exactly where the
+    // floating proxy is at this instant) carries the row from the user's
+    // hand into its new slot, instead of replaying the old-slot →
+    // new-slot reparent slide underneath the vanishing proxy.
+    session.renderPort.beginSlideBaseline(
       duration: slideDuration,
       curve: slideCurve,
+      // Proxy drop-settle: the dragged row's FLIP starts at the release
+      // position (null when no settler, or scrollable gone → classic
+      // old-slot FLIP).
+      baselineYOverrides: session.settler?.baselineOverrides(),
     );
+
+    // Make-room handoff: the baseline above captured the SHIFTED painted
+    // positions (preview offsets ride the composed slide-delta read).
+    // Snap the preview away now, BEFORE the mutation — the consume-time
+    // snapshot then reads clean post-mutation structural positions, and
+    // rows already previewing at their destination get ~zero FLIP deltas
+    // (no jump, no double animation). This ordering is why the snap is a
+    // named commit-script op rather than part of teardown.
+    session.makeRoomDriver?.snapForCommit();
 
     try {
       final currentParent = treeController.getParent(dragged);
-      final sameParent = currentParent == target!.parentKey;
+      // `target` was promoted non-null by the current-position check above.
+      final sameParent = currentParent == target.parentKey;
 
       if (sameParent) {
         // Build the live final sibling list — reorderChildren/reorderRoots
@@ -354,7 +483,8 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
       // The re-resolve + validation above makes the commit's throwing
       // paths unreachable, so an exception here is a genuine invariant
       // violation — let it propagate, but never leave the session stuck.
-      session.renderObject.unpinNode(dragged);
+      session.detachAll(SessionExit.commit);
+      _pointerPosition.value = null;
       _session = null;
       notifyListeners();
     }
@@ -362,25 +492,27 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
 
   /// Aborts the current drag without mutating the tree.
   void cancelDrag() {
-    _autoScrollTicker.stop();
-    _lastAutoScrollTick = null;
     final session = _session;
-    if (session == null) return;
-    session.renderObject.unpinNode(session.draggedKey);
+    if (session == null) {
+      return; // Per-session ticker: no session ⇒ nothing can be ticking.
+    }
+    session.detachAll(SessionExit.cancel);
+    _pointerPosition.value = null;
     _session = null;
     notifyListeners();
   }
 
-  /// Releases the autoscroll ticker. Call from the owning widget's
-  /// `dispose`.
+  /// Tears down any active session (its collaborators own their tickers
+  /// and timers). Call from the owning widget's `dispose`.
   @override
   void dispose() {
     final session = _session;
     if (session != null) {
-      session.renderObject.unpinNode(session.draggedKey);
+      session.detachAll(SessionExit.dispose);
+      _pointerPosition.value = null;
       _session = null;
     }
-    _autoScrollTicker.dispose();
+    _pointerPosition.dispose();
     super.dispose();
   }
 
@@ -391,305 +523,19 @@ class TreeReorderController<TKey, TData> extends ChangeNotifier {
     TreeDropTarget<TKey>? a,
     TreeDropTarget<TKey>? b,
   ) {
-    if (identical(a, b)) return true;
-    if (a == null || b == null) return false;
+    if (identical(a, b)) {
+      return true;
+    }
+    if (a == null || b == null) {
+      return false;
+    }
     return a.targetKey == b.targetKey &&
         a.zone == b.zone &&
         a.parentKey == b.parentKey &&
         a.indexInFinalList == b.indexInFinalList &&
         a.depth == b.depth &&
-        a.indicatorScrollY == b.indicatorScrollY &&
-        a.indicatorIndent == b.indicatorIndent;
+        a.targetPaintedY == b.targetPaintedY &&
+        a.targetExtent == b.targetExtent;
   }
 
-  /// Converts a global pointer offset to **sliver-local** y — distance from
-  /// the start of THIS tree sliver's scroll extent, the space
-  /// [RenderSliverTree.findRowAtPaintedY] consumes (first tree row at 0).
-  ///
-  /// Viewport scroll space and sliver-local space differ by the tree
-  /// sliver's `constraints.precedingScrollExtent` whenever any sliver
-  /// precedes the tree in the CustomScrollView; without the subtraction the
-  /// resolved drop target lands `precedingScrollExtent` px below the
-  /// hovered row.
-  double _pointerToSliverLocalY(
-    Offset globalPointer,
-    _DragSession<TKey> session,
-  ) {
-    final viewport =
-        session.scrollable.context.findRenderObject() as RenderBox;
-    final viewportLocal = viewport.globalToLocal(globalPointer);
-    final scrollSpaceY =
-        session.scrollable.position.pixels + viewportLocal.dy;
-    return scrollSpaceY - _precedingScrollExtent(session);
-  }
-
-  /// The tree sliver's `precedingScrollExtent`, or 0 when it has not been
-  /// laid out yet (its `constraints` are only readable after layout; the
-  /// sliver is laid out for the whole lifetime of a drag session).
-  double _precedingScrollExtent(_DragSession<TKey> session) {
-    final renderObject = session.renderObject;
-    if (renderObject.geometry == null) {
-      return 0.0;
-    }
-    return renderObject.constraints.precedingScrollExtent;
-  }
-
-  /// Finds the live row the pointer sits over via
-  /// [RenderSliverTree.findRowAtPaintedY], classifies above/into/below, and
-  /// resolves `(parentKey, indexInFinalList)`. Pending-deletion rows are
-  /// vanishing and cannot be valid drop targets; the lookup skips them.
-  void _recomputeDropTarget() {
-    final session = _session;
-    if (session == null) return;
-    final scrollPointerY = _pointerToSliverLocalY(
-      session.pointerGlobal,
-      session,
-    );
-
-    final hovered = session.renderObject.findRowAtPaintedY(scrollPointerY);
-    if (hovered == null) {
-      session.currentTarget = null;
-      return;
-    }
-
-    final resolved = _resolveZone(
-      session: session,
-      targetKey: hovered.key,
-      targetOffset: hovered.paintedOffset,
-      targetExtent: hovered.extent,
-      scrollPointerY: scrollPointerY,
-    );
-    session.currentTarget = resolved;
-  }
-
-  /// Classifies the pointer position into a [TreeDropZone] and builds a
-  /// [TreeDropTarget]. Returns `null` if the resolved target is invalid
-  /// (cycle, no-op, or rejected by [canAcceptDrop]).
-  TreeDropTarget<TKey>? _resolveZone({
-    required _DragSession<TKey> session,
-    required TKey targetKey,
-    required double targetOffset,
-    required double targetExtent,
-    required double scrollPointerY,
-  }) {
-    final dragged = session.draggedKey;
-    final localY = (scrollPointerY - targetOffset).clamp(0.0, targetExtent);
-    final t = targetExtent <= 0 ? 0.0 : localY / targetExtent;
-
-    // Rows that can't accept children collapse into/below into a two-zone
-    // split at the midpoint.
-    final targetAllowsChildren = !_isSameOrDescendant(targetKey, dragged) &&
-        _canTargetAcceptInto(targetKey, dragged);
-
-    TreeDropZone zone;
-    if (t < 1 / 3) {
-      zone = TreeDropZone.above;
-    } else if (t < 2 / 3 && targetAllowsChildren) {
-      zone = TreeDropZone.into;
-    } else {
-      zone = TreeDropZone.below;
-    }
-
-    // Translate (targetKey, zone) to (parentKey, rawIndex). All sibling
-    // indices are computed in live-list space, matching the reorder APIs.
-    //
-    // [targetOffset] is sliver-local (from findRowAtPaintedY);
-    // [TreeDropTarget.indicatorScrollY] is documented as VIEWPORT scroll
-    // space (its consumer subtracts `position.pixels`), so add the tree
-    // sliver's precedingScrollExtent when constructing the target.
-    final preceding = _precedingScrollExtent(session);
-    TKey? parentKey;
-    int rawIndex;
-    int depth;
-    double indicatorScrollY;
-    switch (zone) {
-      case TreeDropZone.above:
-        parentKey = treeController.getParent(targetKey);
-        rawIndex = treeController.getIndexInParent(targetKey);
-        depth = treeController.getDepth(targetKey);
-        indicatorScrollY = targetOffset + preceding;
-        break;
-      case TreeDropZone.below:
-        // Below an EXPANDED target with visible children, "next sibling
-        // of target" sits after the whole visible subtree — potentially
-        // many rows lower than the indicator line drawn directly under
-        // the target row (which is visually the FIRST CHILD's slot).
-        // Resolve as first-child (identical to `into`) so indicator and
-        // commit agree by construction — conventional tree-DnD
-        // semantics. Collapsed/leaf targets keep next-sibling semantics.
-        if (targetAllowsChildren &&
-            treeController.isExpanded(targetKey) &&
-            treeController.getLiveChildren(targetKey).isNotEmpty) {
-          parentKey = targetKey;
-          rawIndex = 0;
-          depth = treeController.getDepth(targetKey) + 1;
-        } else {
-          parentKey = treeController.getParent(targetKey);
-          rawIndex = treeController.getIndexInParent(targetKey) + 1;
-          depth = treeController.getDepth(targetKey);
-        }
-        indicatorScrollY = targetOffset + targetExtent + preceding;
-        break;
-      case TreeDropZone.into:
-        parentKey = targetKey;
-        rawIndex = 0;
-        depth = treeController.getDepth(targetKey) + 1;
-        indicatorScrollY = targetOffset + targetExtent + preceding;
-        break;
-    }
-
-    if (rawIndex < 0) {
-      return null;
-    }
-
-    // Cycle filter: can't parent under self or under a descendant.
-    if (parentKey != null) {
-      if (parentKey == dragged) return null;
-      if (_isStrictDescendantOf(parentKey, dragged)) return null;
-    }
-
-    // Same-parent final-list index adjustment. Same-parent drops take a
-    // final list to reorderChildren/reorderRoots; the index space is the
-    // live list with dragged removed and re-inserted. If dragged sits
-    // before rawIndex in the live list, subtract 1 to account for the
-    // implicit removal.
-    final currentParent = treeController.getParent(dragged);
-    final isSameParent = currentParent == parentKey;
-    int indexInFinalList = rawIndex;
-    if (isSameParent) {
-      final currentIndex = treeController.getIndexInParent(dragged);
-      if (currentIndex >= 0 && currentIndex < rawIndex) {
-        indexInFinalList = rawIndex - 1;
-      }
-    }
-
-    // No-op filter: drop exactly at current position.
-    if (isSameParent &&
-        indexInFinalList == treeController.getIndexInParent(dragged)) {
-      return null;
-    }
-
-    // User policy filter.
-    if (canAcceptDrop != null &&
-        !canAcceptDrop!(
-          movingKey: dragged,
-          newParent: parentKey,
-          index: indexInFinalList,
-        )) {
-      return null;
-    }
-
-    final indicatorIndent = session.indentPerDepth * depth;
-    return TreeDropTarget<TKey>(
-      targetKey: targetKey,
-      zone: zone,
-      parentKey: parentKey,
-      indexInFinalList: indexInFinalList,
-      depth: depth,
-      indicatorScrollY: indicatorScrollY,
-      indicatorIndent: indicatorIndent,
-    );
-  }
-
-  /// Whether [candidate] lies inside [rootKey]'s subtree (inclusive).
-  bool _isSameOrDescendant(TKey candidate, TKey rootKey) {
-    if (candidate == rootKey) return true;
-    return _isStrictDescendantOf(candidate, rootKey);
-  }
-
-  /// Cheap "can this row accept children as a drop target?" heuristic: the
-  /// node is not the dragged key and not one of its descendants. Finer
-  /// policies (leaf-only, depth limits) flow through [canAcceptDrop].
-  bool _canTargetAcceptInto(TKey targetKey, TKey draggedKey) {
-    if (targetKey == draggedKey) return false;
-    if (_isStrictDescendantOf(targetKey, draggedKey)) return false;
-    return true;
-  }
-
-  /// Whether [node] is a strict descendant (not [ancestor] itself) of
-  /// [ancestor]. O(depth) ancestor walk with no allocation — the drop-target
-  /// resolution path asks this up to three times per pointer move, and the
-  /// alternative `getDescendants(ancestor).contains(node)` materialized a
-  /// fresh list of every descendant on each call.
-  bool _isStrictDescendantOf(TKey node, TKey ancestor) {
-    TKey? current = treeController.getParent(node);
-    while (current != null) {
-      if (current == ancestor) return true;
-      current = treeController.getParent(current);
-    }
-    return false;
-  }
-
-  // ──────── Autoscroll ────────
-
-  void _updateAutoScroll() {
-    final session = _session;
-    if (session == null) return;
-    final viewport =
-        session.scrollable.context.findRenderObject() as RenderBox;
-    final local = viewport.globalToLocal(session.pointerGlobal);
-    final height = viewport.size.height;
-    final inEdgeZone =
-        local.dy < autoScrollEdgeZone ||
-        local.dy > height - autoScrollEdgeZone;
-    if (inEdgeZone) {
-      if (!_autoScrollTicker.isActive) {
-        _lastAutoScrollTick = null;
-        _autoScrollTicker.start();
-      }
-    } else {
-      if (_autoScrollTicker.isActive) {
-        _autoScrollTicker.stop();
-        _lastAutoScrollTick = null;
-      }
-    }
-  }
-
-  void _onAutoScrollTick(Duration elapsed) {
-    final session = _session;
-    if (session == null) {
-      _autoScrollTicker.stop();
-      _lastAutoScrollTick = null;
-      return;
-    }
-    final viewport =
-        session.scrollable.context.findRenderObject() as RenderBox;
-    final local = viewport.globalToLocal(session.pointerGlobal);
-    final height = viewport.size.height;
-
-    double velocity = 0;
-    if (local.dy < autoScrollEdgeZone) {
-      final t = 1 - (local.dy / autoScrollEdgeZone).clamp(0.0, 1.0);
-      velocity = -autoScrollMaxVelocity * t;
-    } else if (local.dy > height - autoScrollEdgeZone) {
-      final t =
-          ((local.dy - (height - autoScrollEdgeZone)) / autoScrollEdgeZone)
-              .clamp(0.0, 1.0);
-      velocity = autoScrollMaxVelocity * t;
-    }
-
-    if (velocity == 0) {
-      _autoScrollTicker.stop();
-      _lastAutoScrollTick = null;
-      return;
-    }
-
-    final dt = _lastAutoScrollTick == null
-        ? const Duration(milliseconds: 16)
-        : elapsed - _lastAutoScrollTick!;
-    _lastAutoScrollTick = elapsed;
-
-    final position = session.scrollable.position;
-    final newPixels = (position.pixels + velocity * dt.inMicroseconds / 1e6)
-        .clamp(position.minScrollExtent, position.maxScrollExtent);
-    if (newPixels != position.pixels) {
-      position.jumpTo(newPixels);
-      final previous = session.currentTarget;
-      _recomputeDropTarget();
-      if (!_targetsEqual(previous, session.currentTarget)) {
-        notifyListeners();
-      }
-    }
-  }
 }
-

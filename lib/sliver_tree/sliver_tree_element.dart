@@ -103,7 +103,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// layout (scroll, structural mutation, etc.).
   bool _priorTickHadSlides = false;
 
-
   // ══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
   // ══════════════════════════════════════════════════════════════════════════
@@ -251,13 +250,13 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// previous tick saw active animations, the current tick is the settle
   /// tick and must relayout even though the flag is now false.
   ///
-  /// Slide-only ticks are routed to [RenderObject.markNeedsPaint]
-  /// (audit 5.7): slides are paint-only by contract — the build window is
-  /// computed at the install layout with overreach = max |delta| and only
-  /// shrinks thereafter, so no new rows need building mid-slide, and
-  /// scrolling during a slide triggers layout through the viewport
-  /// anyway. A full relayout per slide tick amplified the per-frame
-  /// layout costs on every FLIP reorder.
+  /// Slide-only ticks are routed to [RenderObject.markNeedsPaint]: slides
+  /// are paint-only by contract — the build window is computed at the
+  /// install layout with overreach = max |delta| and only shrinks
+  /// thereafter, so no new rows need building mid-slide, and scrolling
+  /// during a slide triggers layout through the viewport anyway. A full
+  /// relayout per slide tick would amplify the per-frame layout cost of
+  /// every FLIP reorder.
   ///
   /// Layout IS marked on the slide settle transition
   /// (`_priorTickHadSlides && !hasSlides`): that one pass runs the ghost

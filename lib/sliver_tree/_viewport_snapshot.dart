@@ -13,9 +13,8 @@ import 'dart:math' as math;
 
 /// Which side of the viewport an edge ghost is anchored to.
 ///
-/// Replaces the old "frozen absolute edgeY" representation that the
-/// render layer used to keep in `_phantomEdgeExits`. The actual painted
-/// Y is derived live from the current viewport via
+/// A ghost stores the SIDE, not a frozen absolute y. The painted y is
+/// derived live from the current viewport via
 /// [ViewportSnapshot.baseForEdge], so the ghost stays pinned to the live
 /// edge under concurrent scrolling.
 enum ViewportEdge {
@@ -96,7 +95,7 @@ final class ViewportSnapshot {
   /// "Meaningfully visible" predicate. Used for slide-pipeline branch
   /// decisions: the clamp's priorOn / targetOn classification in
   /// `applyClampAndInstallNewGhosts` and edge-ghost re-promotion in
-  /// `reEvaluateGhostStatus` / `normalizeEdgeGhostsForViewport`. The
+  /// `reEvaluateGhostStatus` / `normalizeForViewport`. The
   /// question being answered is "does the user perceive this row as
   /// on-screen?"
   ///
@@ -139,7 +138,7 @@ final class ViewportSnapshot {
   /// Top side iff `y < top`; otherwise bottom (the symmetric exclusive
   /// convention from [intersects]).
   ///
-  /// Boundary tie-break (A074): a coordinate exactly at `top` resolves to
+  /// Boundary tie-break: a coordinate exactly at `top` resolves to
   /// the bottom edge. This matches the [intersects] convention where the
   /// top boundary is exclusive (`y < top` is off-screen above). Reachable
   /// only in the exact-pixel-alignment case; choosing one side

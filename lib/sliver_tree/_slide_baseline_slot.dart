@@ -36,6 +36,17 @@ final class _SlideBaseline<TKey> {
 class SlideBaselineSlot<TKey> {
   _SlideBaseline<TKey>? _pending;
 
+  /// Monotonic stamp of the currently-pending stage. Lets the
+  /// expiry backstop discard exactly the stage it was scheduled for:
+  /// consume/reset/re-stage all change the pending identity, so a stale
+  /// scheduled check becomes a no-op instead of discarding a newer
+  /// baseline.
+  int _stamp = 0;
+  int _pendingStamp = 0;
+
+  /// Stamp of the pending baseline. Only meaningful while [isStaged].
+  int get pendingStamp => _pendingStamp;
+
   /// Stages a baseline. First-wins per frame: returns `true` if the slot
   /// was empty and the baseline was accepted, `false` if a prior stage
   /// in the same frame already filled the slot.
@@ -52,6 +63,20 @@ class SlideBaselineSlot<TKey> {
       duration: duration,
       curve: curve,
     );
+    _pendingStamp = ++_stamp;
+    return true;
+  }
+
+  /// Discards the pending baseline iff it is still the stage identified
+  /// by [stamp] — the expiry backstop. Returns `true` when a discard
+  /// happened — i.e. the caller-contract violation ("every successful
+  /// stage MUST be followed by a same-frame layout-triggering mutation")
+  /// actually occurred and the baseline was never consumed.
+  bool discardIfStale(int stamp) {
+    if (_pending == null || _pendingStamp != stamp) {
+      return false;
+    }
+    _pending = null;
     return true;
   }
 

@@ -18,7 +18,7 @@ import 'tree_controller.dart';
 ///     if (hasChildren) {
 ///       return IconButton(
 ///         icon: Icon(isExpanded ? Icons.expand_less : Icons.expand_more),
-///         onPressed: () => controller.toggle(path),
+///         onPressed: () => controller.toggle(key: path),
 ///       );
 ///     }
 ///     return const SizedBox.shrink();

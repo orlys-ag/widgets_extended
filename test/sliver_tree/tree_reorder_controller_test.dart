@@ -41,7 +41,7 @@ RenderSliverTree<String, String> _findRender(WidgetTester tester) {
 }
 
 /// Converts a scroll-space y to a global pointer offset using the scrollable's
-/// viewport render box so TreeReorderController's `_pointerToScrollSpaceY`
+/// viewport render box so TreeReorderController's `_pointerToSliverLocal`
 /// reverses it correctly.
 Offset _scrollYToGlobal(ScrollableState scrollable, double scrollY) {
   final viewport = scrollable.context.findRenderObject() as RenderBox;
@@ -68,7 +68,7 @@ void main() {
       addTearDown(controller.dispose);
 
       expect(
-        () => TreeReorderController<String, String>(
+        () => TreeReorderController<String>(
           treeController: controller,
           vsync: tester,
         ),
@@ -83,7 +83,7 @@ void main() {
       );
       addTearDown(controller.dispose);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -108,7 +108,7 @@ void main() {
       addTearDown(treeB.dispose);
 
       treeB.setRoots([TreeNode(key: "x", data: "X")]);
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: treeA,
         vsync: tester,
       );
@@ -122,16 +122,15 @@ void main() {
       expect(
         () => reorder.startDrag(
           key: "x",
-          renderObject: renderB,
+          renderPort: renderB,
           scrollable: scrollable,
-          indentPerDepth: 24.0,
           pointerGlobal: Offset.zero,
         ),
         throwsA(isA<ArgumentError>()),
       );
     });
 
-    testWidgets("throws ArgumentError when canReorder returns false",
+    testWidgets("returns false when canReorder refuses the key",
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
@@ -140,7 +139,7 @@ void main() {
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "a", data: "A")]);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
         canReorder: (key) => false,
@@ -151,16 +150,18 @@ void main() {
       final render = _findRender(tester);
       final scrollable = _findScrollable(tester);
 
-      expect(
-        () => reorder.startDrag(
-          key: "a",
-          renderObject: render,
-          scrollable: scrollable,
-          indentPerDepth: 24.0,
-          pointerGlobal: Offset.zero,
-        ),
-        throwsA(isA<ArgumentError>()),
+      // D3 contract: a policy refusal is a normal runtime answer — a false
+      // return with no session started — not an exception. (Throwing is
+      // reserved for genuine wiring misuse; see the cross-controller test.)
+      final started = reorder.startDrag(
+        key: "a",
+        renderPort: render,
+        scrollable: scrollable,
+        pointerGlobal: Offset.zero,
       );
+      expect(started, false);
+      expect(reorder.isDragging, false);
+      expect(reorder.draggedKey, isNull);
     });
   });
 
@@ -178,7 +179,7 @@ void main() {
         TreeNode(key: "c", data: "C"),
       ]);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -196,9 +197,8 @@ void main() {
       // indexInFinalList 0 / 0 / 1, none of which equal 2).
       reorder.startDrag(
         key: "c",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: _scrollYToGlobal(scrollable, 10.0),
       );
       // Top third of a (y=10 in [0..50]) → above.
@@ -231,7 +231,7 @@ void main() {
       controller.expand(key: "a");
       controller.expand(key: "b");
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -243,25 +243,29 @@ void main() {
       final render = _findRender(tester);
       final scrollable = _findScrollable(tester);
 
-      // Drag "a", hover in the middle of "b" (descendant): "into" would
-      // reparent a under b, a cycle. Expect currentTarget == null.
+      // Drag "a", hover in the middle of "b" (descendant): every candidate
+      // that parents inside a's subtree is a cycle and must be rejected.
       reorder.startDrag(
         key: "a",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: _scrollYToGlobal(scrollable, 75.0),
       );
-      // Middle of b (y=75 in row [50..100]). With descendant check, "into"
-      // is forbidden so the zone resolves to below; but below "b" would
-      // reparent to b's parent (which is "a", the dragged) — also a cycle.
-      // Expected: null target.
-      expect(reorder.currentTarget, isNull);
+      // Middle of b (y=75 in row [50..100]) → two-zone → below-b. The
+      // in-subtree candidates (first-child-of-b, sibling-under-a) are
+      // cycles; the chain falls back to the ROOT current-position slot —
+      // the safety invariant is that the resolved parent is NEVER a or a
+      // descendant of a.
+      expect(reorder.currentTarget?.parentKey, isNull,
+          reason: "no target may parent inside the dragged subtree");
+      expect(reorder.currentTarget?.indexInFinalList, 0,
+          reason: "the only legal slot here is a's current position");
       reorder.cancelDrag();
     });
 
-    testWidgets("no-op: dropping at current position yields null target",
-        (tester) async {
+    testWidgets(
+        "current-position hover resolves a valid 'returns here' target, "
+        "and dropping it commits nothing", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
         animationDuration: Duration.zero,
@@ -272,7 +276,12 @@ void main() {
         TreeNode(key: "b", data: "B"),
       ]);
 
-      final reorder = TreeReorderController<String, String>(
+      var structuralNotifications = 0;
+      controller.addListener(() {
+        structuralNotifications++;
+      });
+
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -284,18 +293,32 @@ void main() {
       final render = _findRender(tester);
       final scrollable = _findScrollable(tester);
 
-      // Drag "a" and hover above "a" itself (its own current position at y=0)
-      // — dropping above-self is a no-op.
+      // Drag "a" and hover above "a" itself (its own current position at
+      // y=0). The slot resolves — feedback never goes dark over your own
+      // position — but it IS the current position.
       reorder.startDrag(
         key: "a",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: _scrollYToGlobal(scrollable, 5.0),
       );
-      expect(reorder.currentTarget, isNull,
-          reason: "drop above self should be filtered");
-      reorder.cancelDrag();
+      final target = reorder.currentTarget;
+      expect(target, isNotNull,
+          reason: "hovering your own slot must show 'returns here', not "
+              "a dead zone");
+      expect(target?.parentKey, isNull);
+      expect(target?.indexInFinalList, 0,
+          reason: "the slot is a's current position");
+
+      // Dropping the current-position slot is a settle-back: no mutation,
+      // no structural traffic, session cleanly ended.
+      final notificationsBefore = structuralNotifications;
+      reorder.endDrag();
+      expect(reorder.isDragging, isFalse);
+      expect(controller.liveRootKeys, ["a", "b"],
+          reason: "a current-position drop must not reorder anything");
+      expect(structuralNotifications, notificationsBefore,
+          reason: "no mutation may fire from a current-position drop");
     });
 
     testWidgets("canAcceptDrop policy filters targets", (tester) async {
@@ -309,7 +332,7 @@ void main() {
         TreeNode(key: "b", data: "B"),
       ]);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
         canAcceptDrop: ({required movingKey, newParent, index}) =>
@@ -325,13 +348,18 @@ void main() {
 
       reorder.startDrag(
         key: "a",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: _scrollYToGlobal(scrollable, 75.0),
       );
-      // "into b" would make newParent = b, rejected by canAcceptDrop.
-      expect(reorder.currentTarget, isNull);
+      // "into b" is rejected by canAcceptDrop — so b collapses to the
+      // two-zone midpoint split and t=0.5 resolves BELOW-b (root parent,
+      // which policy allows) instead of a dead middle third.
+      expect(reorder.currentTarget, isNotNull,
+          reason: "a vetoed `into` must fall back to the sibling split, "
+              "not a dead zone");
+      expect(reorder.currentTarget?.zone, TreeDropZone.below);
+      expect(reorder.currentTarget?.parentKey, isNull);
       reorder.cancelDrag();
     });
   });
@@ -350,7 +378,7 @@ void main() {
         TreeNode(key: "c", data: "C"),
       ]);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -365,9 +393,8 @@ void main() {
       // Drag "a" to below "c" (y in [100..150], bottom third).
       reorder.startDrag(
         key: "a",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: _scrollYToGlobal(scrollable, 145.0),
       );
       expect(reorder.currentTarget?.zone, TreeDropZone.below);
@@ -394,7 +421,7 @@ void main() {
       controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
       controller.expand(key: "a");
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -410,9 +437,8 @@ void main() {
       // Drag "a1" INTO "b" (middle of b, y=125).
       reorder.startDrag(
         key: "a1",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: _scrollYToGlobal(scrollable, 125.0),
       );
       expect(reorder.currentTarget?.zone, TreeDropZone.into);
@@ -443,7 +469,7 @@ void main() {
         TreeNode(key: "c", data: "C"),
       ]);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -464,9 +490,8 @@ void main() {
 
       reorder.startDrag(
         key: "a",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         // Hover near where "b" would be (y≈60). Resolution should NOT
         // produce "b" as a target.
         pointerGlobal: _scrollYToGlobal(scrollable, 60.0),

@@ -1,3 +1,49 @@
+## 0.0.30
+
+- Internal refactor of the drag-and-drop reorder stack into per-session
+collaborators; no public API changes.
+- Fewer render-tree lookups per pointer move during drags.
+- `startDrag` against an already-unmounted scrollable now returns `false`
+instead of asserting.
+
+## 0.0.29
+
+- Touch-first drag anchoring: slot selection follows the floating card's
+midpoint in make-room + proxy sessions (the finger hides under the card).
+- Fix handle-drag grab geometry skew caused by touch-slop acceptance.
+- Mid-drag gesture-mode swaps now cancel the session cleanly.
+- Fix throws when a drag ends after the scrollable was unmounted.
+- New opt-in `SliverReorderableTree.hapticsOnDrag`.
+- Workspaces example: handle-mode / touch-mode toggle.
+
+## 0.0.28
+
+- Re-resolve the drop target on any scroll (wheel / trackpad / autoscroll),
+not just pointer moves.
+- X-aware drop depth at subtree boundaries (pick nesting level from the
+pointer's horizontal position).
+- Hover-dwell auto-expand of collapsed drop targets (`autoExpandDelay`).
+- Reorder semantics (accessibility) actions on wrapped rows.
+- Floating drag proxy (`showDragProxy` / `dragProxyBuilder`); drops settle
+from the release position instead of replaying the old-slot slide.
+- Make-room preview (`makeRoomOnDrag`): rows part to open a paint-only gap
+at the prospective slot; the drop lands with zero jump.
+- Eliminate drop-zone dead zones ("returns here" targets, two-zone split
+under `into` vetoes) and section-boundary gap oscillation.
+- Discard FLIP baselines staged without a following mutation.
+- New `TreeController.liveChildCount` / `liveRootCount`.
+
+## 0.0.27
+
+- **BREAKING** drag-and-drop reorder API refactor: `TreeReorderController`
+is key-only (`<TKey>`), `startDrag` takes a `ReorderRenderPort` and
+returns `bool` for policy refusals, and `TreeDropTarget` is purely
+semantic (indicator geometry derived by the widget layer).
+- New `SliverReorderableTree.showDropIndicator` to disable the built-in
+indicator line.
+- New `TreeController.hasLiveChildren` / `hasComparator`.
+- Fix double-invoked drag-UI teardown in `SliverReorderableTree`.
+
 ## 0.0.26
 
 - `TreeSyncController` / `SectionedListController`: syncs now diff against

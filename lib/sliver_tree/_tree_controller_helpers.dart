@@ -9,15 +9,12 @@ part of "tree_controller.dart";
 /// file-size reasons; the logical owner is still [TreeController].
 extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   void _clear() {
-    // Plan A: AnimationCoordinator owns every animation source, the
-    // shared per-nid arrays (full-extent, pending-deletion, union
-    // mirrors), the standalone ticker, and the listener channel. Its
-    // clear() aggregates each sub-coordinator's clear() plus resets
-    // coordinator-owned state.
+    // Each aggregate resets everything it owns: _anim covers all four
+    // animation sources plus the shared per-nid arrays, ticker and
+    // listener channel; _order covers the order buffer, the
+    // visible-subtree-size cache, the reverse index and the roots list.
     _anim.clear();
     _store.clear();
-    // Plan B: _order.reset() also clears the visible-subtree-size cache
-    // and the roots list.
     _order.reset();
     _keysToRemoveScratch.clear();
   }
@@ -44,10 +41,10 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
 
   /// Debug assertion to verify index consistency.
   ///
-  /// By default (audit 5.11) only an O(changed-range) order/reverse-index
-  /// agreement check runs for the span the caller just touched — the full
-  /// sweep (whole order walk + full nid-table walks + every animation
-  /// mirror) made N sequential inserts O(N²) in debug and taxed the whole
+  /// By default only an O(changed-range) order/reverse-index agreement
+  /// check runs for the span the caller just touched: the full sweep
+  /// (whole order walk + full nid-table walks + every animation mirror)
+  /// makes N sequential inserts O(N²) in debug, taxing the whole
   /// widget-test suite on every mutation. The full sweep stays available
   /// behind [TreeController.debugFullConsistencyChecks], enabled by the
   /// fuzz/purge suites that exist to exercise it.
@@ -76,20 +73,21 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   /// Debug-only: verifies the per-nid animation arrays agree with their
   /// working-set counters / sets.
   ///
-  /// 1. [_pendingDeletionCount] equals the number of 1-bits in
-  ///    [_isPendingDeletionByNid] across live nids.
-  /// 2. [_activeStandaloneNids] contains exactly the nids whose
-  ///    [_standaloneByNid] slot is non-null.
-  /// 3. [_activeSlideNids] contains exactly the nids whose
-  ///    [_slideByNid] slot is non-null.
-  /// 4. Every [_isPendingDeletionByNid] = 1 / non-null _standaloneByNid /
-  ///    non-null _slideByNid lives at a registered nid (no orphans
-  ///    surviving past [_releaseNid]).
+  /// 1. The coordinator's `_pendingDeletionCount` equals the number of
+  ///    1-bits in its `_isPendingDeletionByNid` across live nids.
+  /// 2. `StandaloneAnimator._activeNids` contains exactly the nids whose
+  ///    `_byNid` slot is non-null.
+  /// 3. `SlideAnimationEngine._activeSlideNids` contains exactly the nids
+  ///    whose `_slideByNid` slot is non-null.
+  /// 4. Every pending-deletion bit, standalone slot, and slide slot lives
+  ///    at a registered nid — no orphans surviving past [_releaseNid].
   void _assertAnimationStateConsistency() {
     assert(() {
-      // Plan A: AnimationCoordinator owns the union of consistency checks
-      // across all four animation sources (standalone, op groups, bulk,
-      // slide) plus the coordinator-level pending-deletion-counter check.
+      // The coordinator checks standalone, op groups and bulk, plus its
+      // own pending-deletion counter. The slide engine is checked
+      // separately — it is the one source the coordinator's sweep does
+      // not cover. (The preview engine holds no per-nid invariant to
+      // check.)
       _anim.debugAssertConsistent();
       _slide.debugAssertConsistent();
       return true;
@@ -162,12 +160,12 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     final allKeysPresent = visibleCount == keys.length;
     if (allKeysPresent && maxIdx >= 0 && maxIdx - minIdx + 1 == visibleCount) {
       // Contiguous: the buffer owns the clear-index + range-remove +
-      // reindex protocol (audit 6.2).
+      // reindex protocol.
       _order.removeContiguousRange(minIdx, maxIdx + 1);
       _assertIndexConsistency(fromIndex: minIdx);
     } else {
       // Non-contiguous: the buffer owns the zombie-sweep compaction +
-      // full reindex protocol (audit 6.2).
+      // full reindex protocol.
       _order.purgeCompact(keys);
       _assertIndexConsistency();
     }
@@ -361,7 +359,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   /// `_removeFromVisibleOrder` call).
   ///
   /// Callers retain responsibility for any *other* per-site cleanup
-  /// (e.g. clearing `_nodeToOperationGroup` membership) before invoking
+  /// (e.g. clearing operation-group membership) before invoking
   /// this helper.
   void _purgeAndRemoveFromOrder(
     Iterable<TKey> nodesToRemove, {
@@ -373,7 +371,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       return;
     }
 
-    // Contiguity capture (audit 5.4). Step 2's purge releases the nids
+    // Contiguity capture. Step 2's purge releases the nids
     // and clears their reverse-index slots, so by Step 3 every key
     // reports kNotVisible and only the O(N + nidCapacity) sweep
     // (`removeWhereKeyIn` + `resetIndexAll`) can compact. Capture the
@@ -450,7 +448,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     // cache was already decremented in Step 1.
     if (compactOrder) {
       if (contiguous) {
-        // Range fast path (audit 5.4): the purge above already cleared
+        // Range fast path: the purge above already cleared
         // each released nid's reverse-index slot (the buffer method's
         // own clears are harmless re-writes), so this is O(range +
         // suffix) — no full sweep, no O(nidCapacity) reverse-index reset.

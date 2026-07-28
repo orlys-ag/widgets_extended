@@ -34,7 +34,7 @@ void main() {
       ]);
       controller.expand(key: "p", animate: false);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -75,9 +75,8 @@ void main() {
 
       reorder.startDrag(
         key: "x",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: pointer,
       );
       addTearDown(() {
@@ -94,10 +93,12 @@ void main() {
           reason: "setup: the bottom of the row is the below zone");
 
       // The indicator sits directly under row p — the first child's slot.
+      // (Since D2 the target is semantic: the widget layer derives the
+      // below/into indicator edge as targetPaintedY + targetExtent.)
       expect(
-        target.indicatorScrollY,
+        target.targetPaintedY + target.targetExtent,
         50.0,
-        reason: "the below indicator is drawn at row p's bottom edge",
+        reason: "the below indicator edge is row p's bottom edge",
       );
       expect(
         target.parentKey,
@@ -135,7 +136,7 @@ void main() {
       ]);
       // p stays collapsed.
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: controller,
         vsync: tester,
       );
@@ -173,9 +174,8 @@ void main() {
       final pTop = tester.getTopLeft(find.byKey(const ValueKey("row-p"))).dy;
       reorder.startDrag(
         key: "x",
-        renderObject: render,
+        renderPort: render,
         scrollable: scrollable,
-        indentPerDepth: 24.0,
         pointerGlobal: Offset(200, pTop + 45.0),
       );
       addTearDown(() {

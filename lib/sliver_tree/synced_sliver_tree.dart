@@ -717,7 +717,7 @@ class _SyncedSliverTreeState<TKey, TItem>
       return;
     }
 
-    // Identity fast path (audit 2.5): callers routinely rebuild an
+    // Identity fast path: callers routinely rebuild an
     // ancestor every frame while passing the SAME collection instance —
     // re-running the full diff (deep map copies, snapshot validation,
     // full-tree desired walk, per-parent Fenwick) is O(N) UI-thread work

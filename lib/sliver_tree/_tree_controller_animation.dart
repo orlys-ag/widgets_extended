@@ -30,28 +30,17 @@ double _computeAnimationSpeedMultiplier(
 
 /// Animation-driver methods for [TreeController]. See class docs for the
 /// high-level contract; this extension only exists so we can split the file.
+///
+/// Cross-source capture/teardown must NOT be redefined here. Dart's
+/// lexical scoping would resolve unqualified calls inside this extension
+/// to the local copy while class-body calls resolve through the
+/// controller's forwarders — two implementations that silently diverge.
+/// Every call site routes through the forwarders in tree_controller.dart
+/// to [AnimationCoordinator.captureAndRemoveFromGroups] /
+/// [AnimationCoordinator.removeFromAllSources]. Likewise, op-group and
+/// bulk-group lifecycle lives in [OperationGroupRegistry] / [BulkAnimator].
 extension _TreeControllerAnimationOps<TKey, TData>
     on TreeController<TKey, TData> {
-  // Audit 6.1: the extension's private copies of
-  // `_captureAndRemoveFromGroups` and `_removeAnimation` were deleted.
-  // Dart's lexical scoping made unqualified calls INSIDE this extension
-  // resolve to those copies while class-body calls resolved through the
-  // controller's forwarders to the AnimationCoordinator's copies — two
-  // live implementations that had already diverged (the extension's bulk
-  // check was `members.contains`; the coordinator's `bulk.isMember`
-  // covers members ∪ pendingRemoval, the mirror the render layer uses).
-  // All call sites now route through the forwarders in
-  // tree_controller.dart to the single AnimationCoordinator
-  // implementation ([AnimationCoordinator.captureAndRemoveFromGroups] /
-  // [AnimationCoordinator.removeFromAllSources]); the standalone
-  // visible-extent read lives in [StandaloneAnimator.visibleExtent].
-
-  // Plan A: _disposeOperationGroupIfEmpty and _installOperationGroup
-  // moved into OperationGroupRegistry (disposeIfEmpty, install). The
-  // controller-side forwarder for _disposeOperationGroupIfEmpty is in
-  // tree_controller.dart; the install callers (Path-2 fresh-expand /
-  // fresh-collapse in expand() and collapse()) call _anim.opGroups.install
-  // directly with the appropriate initialValue.
 
   /// Prepares [key]'s subtree for reparenting. Clears in-flight slide
   /// animations (their deltas were computed against the prior position and
@@ -81,18 +70,18 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// fold preservation collection into the same pass as detach work
   /// because op-group operation keys are always ancestors of their
   /// members (members are created via `_flattenSubtree(key,
-  /// includeRoot: false)` with `_nodeToOperationGroup[member] = key`).
+  /// includeRoot: false)`, and each member's reverse-index slot points at
+  /// that same operation key).
   /// Pre-order visits ancestors before descendants, so by the time we
   /// process a node, every ancestor inside the subtree has already been
-  /// added to [preservedOpKeys] if applicable — the membership lookup
+  /// added to `preservedOpKeys` if applicable — the membership lookup
   /// is correct. If this traversal order ever changes to BFS or
   /// post-order, the lookup will silently desync; keep pre-order or
   /// split into two passes again.
   ///
   /// Iterative (heap worklist) so deep dragged subtrees cannot
-  /// stack-overflow. Children pushed in reverse so pops preserve the
-  /// left-to-right visit order the two recursive closures used to
-  /// produce.
+  /// stack-overflow. Children are pushed in reverse so pops preserve
+  /// left-to-right visit order.
   void _cancelAnimationStateForSubtree(
     TKey key, {
     bool cancelSlides = true,
@@ -105,8 +94,8 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // Add to preservedOpKeys BEFORE the detach branch so the lookup
       // `preservedOpKeys.contains(opGroupKey)` below resolves correctly
       // for nodes whose op-group's operationKey IS this node (rare but
-      // possible in principle; harmless in practice since
-      // _nodeToOperationGroup never points a member at itself).
+      // possible in principle; harmless in practice since the op-group
+      // reverse index never points a member at itself).
       if (_opGroupAt(nodeId) != null) {
         preservedOpKeys.add(nodeId);
       }
@@ -129,7 +118,8 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // and the next consume will COMPOSE the existing slide toward the
       // new destination. Cancelling here would force the consume's
       // post-mutation snapshot to read `slideY = 0`, masking the in-
-      // flight state from `_applyClampAndInstallNewGhosts` — its both-
+      // flight state from `GhostRegistry.applyClampAndInstallNewGhosts` —
+      // its both-
       // off-screen guard would then suppress what should have been a
       // composition install, and the row would jump structurally with
       // no visible animation.
@@ -216,21 +206,11 @@ extension _TreeControllerAnimationOps<TKey, TData>
     }
   }
 
-  // `_removeAnimation` — see the audit 6.1 note above: single copy lives
-  // in [AnimationCoordinator.removeFromAllSources], reached through the
-  // controller's `_removeAnimation` forwarder.
-
-  // Plan A: _createBulkAnimationGroup and _disposeBulkAnimationGroup
-  // moved into BulkAnimator (createGroup, disposeGroup). The
-  // controller-side forwarder for _disposeBulkAnimationGroup is in
-  // tree_controller.dart; the create-group callers (expandAll /
-  // collapseAll fresh-group branches) call _anim.bulk.createGroup
-  // directly with the appropriate initialValue.
 
   /// Called when the bulk animation completes or is dismissed. The
   /// [_unusedStatus] parameter matches the BulkAnimator's onStatusChanged
   /// callback contract; the body reads the status from the controller
-  /// directly (matching today's flow).
+  /// directly.
   void _onBulkAnimationComplete([AnimationStatus? _unusedStatus]) {
     if (_activeBulkGroup == null) {
       return;
@@ -537,12 +517,11 @@ extension _TreeControllerAnimationOps<TKey, TData>
     _anim.standalone.ensureRunning();
   }
 
-  // Plan A: _ensureStandaloneTickerRunning and _onStandaloneTick moved
-  // into StandaloneAnimator (ensureRunning, _runTick). The
-  // controller-side completion handler is `_onStandaloneTickComplete`
-  // (constructor-injected into the AnimationCoordinator), which receives
-  // the completed-key list and drives `_finalizeAnimation` per key,
-  // batches the order removal, fires the structural notification.
+  // The standalone ticker itself lives in [StandaloneAnimator]. Its
+  // completion handler is `_onStandaloneTickComplete`, injected into the
+  // AnimationCoordinator: it receives the completed-key list, drives
+  // `_finalizeAnimation` per key, batches the order removal, and fires
+  // the structural notification.
 
   bool _finalizeAnimation(TKey key) {
     final state = _clearStandalone(key);
@@ -647,7 +626,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
           }
         });
 
-        // Skip _visibleOrder.remove — caller batches it
+        // Skip the visible-order removal — the caller batches it
         for (final purged in purgedKeys) {
           _purgeNodeData(purged);
         }
@@ -695,8 +674,8 @@ extension _TreeControllerAnimationOps<TKey, TData>
     int insertIndex = parentVisibleIndex + 1;
     if (siblings != null) {
       // Fast path via [VisibleOrderBuffer.subtreeSizeOf]: one O(1) cache
-      // read per prior sibling instead of the former
-      // O(visibleSubtreeSize) `_countVisibleDescendants` walk inside an
+      // read per prior sibling instead of an O(visibleSubtreeSize)
+      // descendant walk inside an
       // O(siblingIndex) loop. Keeps re-expansion of an operation group
       // linear in the sibling count regardless of per-sibling subtree depth.
       for (final sib in siblings) {

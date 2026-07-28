@@ -44,7 +44,7 @@ void main() {
         for (var i = 0; i < 100; i++) TreeNode(key: "r$i", data: "R$i"),
       ]);
 
-      final reorder = TreeReorderController<String, String>(
+      final reorder = TreeReorderController<String>(
         treeController: tree,
         vsync: tester,
         slideDuration: const Duration(milliseconds: 80),
