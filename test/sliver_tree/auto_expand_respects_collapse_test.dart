@@ -52,7 +52,7 @@ class _HarnessState extends State<_Harness> {
                 return item.parentId;
               },
               initiallyExpanded: true,
-              animationDuration: Duration.zero,
+              animationStyle: TreeAnimationStyle.disabled,
               itemBuilder: (context, node) {
                 _capturedController = node.controller;
                 return SizedBox(height: 48, child: Text(node.item.id));

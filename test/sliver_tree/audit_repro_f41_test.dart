@@ -38,7 +38,7 @@ void main() {
       // (default 800x600 test surface, cacheExtent defaults to 250 px).
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         for (var i = 0; i < 100; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -47,8 +47,6 @@ void main() {
       final reorder = TreeReorderController<String>(
         treeController: tree,
         vsync: tester,
-        slideDuration: const Duration(milliseconds: 80),
-        slideCurve: Curves.linear,
       );
 
       addTearDown(() {

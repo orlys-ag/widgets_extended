@@ -10,6 +10,7 @@
 /// `RenderSliverTree.findRowAtPaintedY` would report.
 library;
 
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/_drop_zone_resolver.dart';
@@ -22,7 +23,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -65,7 +66,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -92,7 +93,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -130,7 +131,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -163,7 +164,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -210,7 +211,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -242,8 +243,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
       // Three roots: with only [p, x], "below p" would be x's own current
@@ -288,7 +288,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       // Three roots — see the pending-deletion variant above for why two
@@ -320,7 +320,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -349,7 +349,7 @@ void main() {
         "level at a subtree right-boundary", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       // X first so root-level drops below A's subtree are not no-ops.
@@ -408,7 +408,7 @@ void main() {
         "ancestor", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -447,7 +447,7 @@ void main() {
         "next-nearest depth", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -486,7 +486,7 @@ void main() {
         "band)", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       // Two "sections" with children — the workspaces shape. The slot
@@ -548,7 +548,7 @@ void main() {
         "shallow slot as the default", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -584,7 +584,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([

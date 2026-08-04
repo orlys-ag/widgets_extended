@@ -29,7 +29,7 @@ void main() {
               itemsOf: (_) => const ["a", "b", "c"],
               sectionKeyOf: (s) => s,
               itemKeyOf: (i) => i,
-              animationDuration: const Duration(milliseconds: 200),
+              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
               headerBuilder: (_, view) {
                 controller = view.controller;
                 return SizedBox(height: 30, child: Text("H:${view.key}"));

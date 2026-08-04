@@ -45,7 +45,7 @@ void main() {
     setUp(() {
       controller = TreeController<String, String>(
         vsync: const TestVSync(),
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       policy = LayoutAdmissionPolicy<String, String>(controller: controller);
       writtenNids = <int>[];
@@ -122,7 +122,7 @@ void main() {
     test('controller setter updates the back-pointer', () {
       final c2 = TreeController<String, String>(
         vsync: const TestVSync(),
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       try {
         expect(policy.controller, same(controller));

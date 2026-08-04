@@ -29,7 +29,7 @@ void main() {
       (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 100),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
     );
     addTearDown(controller.dispose);
 
@@ -99,7 +99,7 @@ void main() {
       (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 100),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
     );
     addTearDown(controller.dispose);
 

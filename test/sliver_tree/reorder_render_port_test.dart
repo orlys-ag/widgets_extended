@@ -14,6 +14,7 @@
 ///   anymore) downgrades to a cancel — no baseline, no mutation.
 library;
 
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/reorder_render_port.dart';
@@ -108,7 +109,7 @@ Future<ScrollableState> _mountScrollable(WidgetTester tester) async {
 TreeController<String, String> _threeRootController(WidgetTester tester) {
   final controller = TreeController<String, String>(
     vsync: tester,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
   controller.setRoots([
     const TreeNode(key: "a", data: "A"),

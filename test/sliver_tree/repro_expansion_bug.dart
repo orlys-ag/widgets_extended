@@ -1,3 +1,4 @@
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/synced_sliver_tree.dart';
@@ -31,8 +32,7 @@ class _HarnessState extends State<_Harness> {
                 return [TreeNode(key: "${key}_1", data: "${key}_1")];
               },
               maxStickyDepth: 1,
-              animationDuration: const Duration(milliseconds: 300),
-              animationCurve: Curves.linear,
+              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
               itemBuilder: (context, node) {
                 _controller ??= node.controller;
                 return SizedBox(
@@ -69,8 +69,7 @@ class _AsyncLoadHarnessState extends State<_AsyncLoadHarness> {
             SyncedSliverTree<String, String>.nodes(
               roots: const [TreeNode(key: "parent", data: "parent")],
               childrenOf: widget.childrenOfProvider,
-              animationDuration: const Duration(milliseconds: 300),
-              animationCurve: Curves.linear,
+              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
               itemBuilder: (context, node) {
                 _controller ??= node.controller;
                 return SizedBox(

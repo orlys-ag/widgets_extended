@@ -16,7 +16,7 @@
 /// position, painted-truth snapshot (FLIP baselines!), painted-space hit
 /// test, retention check, and overreach bound reads slide deltas through
 /// `TreeController.getSlideDeltaNid` / `hasActiveSlides` /
-/// `maxActiveSlideAbsDelta`, and those delegators compose
+/// `composedSlideAbsDeltaBound`, and those delegators compose
 /// `slide + preview`. The free consequence is the seamless commit
 /// handoff: a FLIP baseline staged while a preview is held captures the
 /// SHIFTED painted positions; the commit clears the preview and mutates;

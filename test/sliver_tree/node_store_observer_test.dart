@@ -22,7 +22,7 @@ void main() {
     (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(c.dispose);
 
@@ -60,7 +60,7 @@ void main() {
     (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(c.dispose);
 
@@ -88,7 +88,7 @@ void main() {
     (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       // Drive at least one mutation so the wiring is established.
       c.setRoots([const TreeNode(key: "r", data: "r")]);

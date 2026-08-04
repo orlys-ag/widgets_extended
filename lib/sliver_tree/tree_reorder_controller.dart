@@ -8,8 +8,12 @@
 /// [cancelDrag] (no-op). Only one session can be active at a time.
 ///
 /// This file owns the PUBLIC API, policy (`canReorder`/`canAcceptDrop`,
-/// autoscroll/dwell/slide tuning), the notification channels, and the
-/// COMMIT SCRIPT. Everything else is delegated to the session
+/// autoscroll/dwell tuning), the notification channels, and the
+/// COMMIT SCRIPT. Animation timing is NOT owned here: the drag
+/// animations read the tree controller's `animationStyle`
+/// (`reorderSlide` for the commit FLIP, `effectiveMakeRoom` for the
+/// gap, `effectiveDropSettle` for the proxy glides), resolved once per
+/// session at `startDrag`. Everything else is delegated to the session
 /// architecture:
 ///
 /// - `DragSession` (`_drag_session.dart`) — per-drag state; the single
@@ -58,8 +62,6 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     required TickerProvider vsync,
     this.canReorder,
     this.canAcceptDrop,
-    this.slideDuration = const Duration(milliseconds: 220),
-    this.slideCurve = Curves.easeOutCubic,
     this.autoScrollEdgeZone = 48.0,
     this.autoScrollMaxVelocity = 1200.0,
     this.autoExpandDelay = const Duration(milliseconds: 700),
@@ -96,12 +98,6 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     TKey? newParent,
     int? index,
   })? canAcceptDrop;
-
-  /// Duration of the FLIP slide animation on commit.
-  final Duration slideDuration;
-
-  /// Curve of the FLIP slide animation.
-  final Curve slideCurve;
 
   /// Height in pixels from each viewport edge within which the pointer
   /// triggers autoscroll. Velocity ramps linearly from 0 at the zone's
@@ -252,12 +248,17 @@ class TreeReorderController<TKey> extends ChangeNotifier {
       start: startSample,
       midpointProbe: makeRoom && settleFromRelease,
     );
+    // Per-session animation resolution: the tree controller's style is
+    // read ONCE here — a mid-drag restyle never retimes a live session;
+    // the next drag picks it up.
+    final style = treeController.animationStyle;
     final session = DragSession<TKey>(
       draggedKey: key,
       renderPort: renderPort,
       pointerSpace: pointerSpace,
       probe: probe,
       pointerGlobal: pointerGlobal,
+      commitSlideSpec: style.reorderSlide,
     );
     // Behavior collaborators capture the session's identity in their
     // callbacks, hence assignment after construction.
@@ -278,8 +279,8 @@ class TreeReorderController<TKey> extends ChangeNotifier {
       session.makeRoomDriver = MakeRoomDriver<TKey>(
         treeController: treeController,
         draggedKey: key,
-        duration: slideDuration,
-        curve: slideCurve,
+        duration: style.effectiveMakeRoom.duration,
+        curve: style.effectiveMakeRoom.curve,
       );
     }
     if (settleFromRelease) {
@@ -289,8 +290,8 @@ class TreeReorderController<TKey> extends ChangeNotifier {
         pointerGlobal: () => session.pointerGlobal,
         grabDy: () => probe.grabDy,
         draggedKey: key,
-        duration: slideDuration,
-        curve: slideCurve,
+        duration: style.effectiveDropSettle.duration,
+        curve: style.effectiveDropSettle.curve,
       );
     }
     _session = session;
@@ -414,6 +415,21 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // The autoscroll ticker stops in detachAll(commit) below; endDrag is
     // synchronous, so no tick can interleave before then.
 
+    // Dead-commit-slide settle fallback: when the commit FLIP cannot run
+    // (its reorderSlide family is zeroed — captured or live) but the
+    // drop-settle family is live and a proxy settler exists, the handoff
+    // glide is installed DIRECTLY after the mutation instead of riding a
+    // baseline override. The baseline MUST NOT be staged in this mode
+    // (and the mutation must not self-stage): a dead baseline's consume
+    // runs the slide engine's disabled clear-all and would wipe the
+    // just-installed glide one frame later.
+    final style = treeController.animationStyle;
+    final useSettleFallback =
+        (session.commitSlideSpec.duration == Duration.zero ||
+            style.reorderSlide.duration == Duration.zero) &&
+        session.settler != null &&
+        style.effectiveDropSettle.duration != Duration.zero;
+
     // Stage the FLIP baseline BEFORE mutating. The render object's next
     // performLayout consumes it and installs the slide in-frame, avoiding
     // the post-frame gap that would flicker each moved row at its
@@ -424,14 +440,16 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // floating proxy is at this instant) carries the row from the user's
     // hand into its new slot, instead of replaying the old-slot →
     // new-slot reparent slide underneath the vanishing proxy.
-    session.renderPort.beginSlideBaseline(
-      duration: slideDuration,
-      curve: slideCurve,
-      // Proxy drop-settle: the dragged row's FLIP starts at the release
-      // position (null when no settler, or scrollable gone → classic
-      // old-slot FLIP).
-      baselineYOverrides: session.settler?.baselineOverrides(),
-    );
+    if (!useSettleFallback) {
+      session.renderPort.beginSlideBaseline(
+        duration: session.commitSlideSpec.duration,
+        curve: session.commitSlideSpec.curve,
+        // Proxy drop-settle: the dragged row's FLIP starts at the release
+        // position (null when no settler, or scrollable gone → classic
+        // old-slot FLIP).
+        baselineYOverrides: session.settler?.baselineOverrides(),
+      );
+    }
 
     // Make-room handoff: the baseline above captured the SHIFTED painted
     // positions (preview offsets ride the composed slide-delta read).
@@ -477,7 +495,21 @@ class TreeReorderController<TKey> extends ChangeNotifier {
           dragged,
           target.parentKey,
           index: target.indexInFinalList,
+          // In the settle fallback, moveNode's own baseline self-staging
+          // carries the same dead-consume hazard as the skipped staging
+          // above. On the normal path it stays enabled (first-wins-
+          // shadowed by the staging above).
+          animate: !useSettleFallback,
         );
+      }
+      if (useSettleFallback) {
+        // No pending-baseline guard needed since the disabled-mode
+        // split: a foreign same-frame baseline's consume RE-BASES the
+        // glide instead of clearing it (zero-family installs create no
+        // motion but never destroy other families' motion). The
+        // fallback e2e pins (glide install / frame survival) police
+        // this script's own no-staging rule.
+        session.settler?.glideIntoCommittedSlot();
       }
     } finally {
       // The re-resolve + validation above makes the commit's throwing

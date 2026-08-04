@@ -77,8 +77,7 @@ class SectionedSliverList<K extends Object, Section, Item>
     bool initiallyExpanded = true,
     bool? Function(K key, Section section)? initialSectionExpansion,
     bool preserveExpansion = true,
-    Duration animationDuration = const Duration(milliseconds: 300),
-    Curve animationCurve = Curves.easeInOut,
+    TreeAnimationStyle animationStyle = const TreeAnimationStyle(),
     double itemIndent = 0.0,
     super.key,
   }) : _controller = null,
@@ -90,8 +89,7 @@ class SectionedSliverList<K extends Object, Section, Item>
        _initiallyExpanded = initiallyExpanded,
        _initialSectionExpansion = initialSectionExpansion,
        _preserveExpansion = preserveExpansion,
-       _animationDuration = animationDuration,
-       _animationCurve = animationCurve,
+       _animationStyle = animationStyle,
        _itemIndent = itemIndent;
 
   /// Push-model imperative form. The caller-owned [controller] is the
@@ -116,8 +114,7 @@ class SectionedSliverList<K extends Object, Section, Item>
        _initiallyExpanded = null,
        _initialSectionExpansion = null,
        _preserveExpansion = null,
-       _animationDuration = null,
-       _animationCurve = null,
+       _animationStyle = null,
        _itemIndent = null;
 
   /// Builds the header for each section.
@@ -150,8 +147,7 @@ class SectionedSliverList<K extends Object, Section, Item>
   final bool? _initiallyExpanded;
   final bool? Function(K key, Section section)? _initialSectionExpansion;
   final bool? _preserveExpansion;
-  final Duration? _animationDuration;
-  final Curve? _animationCurve;
+  final TreeAnimationStyle? _animationStyle;
   final double? _itemIndent;
 
   @override
@@ -177,8 +173,7 @@ class SectionedSliverList<K extends Object, Section, Item>
       initiallyExpanded: _initiallyExpanded!,
       initialSectionExpansion: _initialSectionExpansion,
       preserveExpansion: _preserveExpansion!,
-      animationDuration: _animationDuration!,
-      animationCurve: _animationCurve!,
+      animationStyle: _animationStyle!,
       itemIndent: _itemIndent!,
       headerBuilder: headerBuilder,
       itemBuilder: itemBuilder,
@@ -202,8 +197,7 @@ class _DeclarativeSectionedSliver<K extends Object, Section, Item>
     required this.initiallyExpanded,
     required this.initialSectionExpansion,
     required this.preserveExpansion,
-    required this.animationDuration,
-    required this.animationCurve,
+    required this.animationStyle,
     required this.itemIndent,
     required this.headerBuilder,
     required this.itemBuilder,
@@ -219,8 +213,7 @@ class _DeclarativeSectionedSliver<K extends Object, Section, Item>
   final bool initiallyExpanded;
   final bool? Function(K key, Section section)? initialSectionExpansion;
   final bool preserveExpansion;
-  final Duration animationDuration;
-  final Curve animationCurve;
+  final TreeAnimationStyle animationStyle;
   final double itemIndent;
   final SectionHeaderBuilder<K, Section, Item> headerBuilder;
   final SectionItemBuilder<K, Section, Item> itemBuilder;
@@ -244,8 +237,7 @@ class _DeclarativeSectionedSliverState<K extends Object, Section, Item>
       vsync: this,
       sectionKeyOf: widget.sectionKeyOf,
       itemKeyOf: widget.itemKeyOf,
-      animationDuration: widget.animationDuration,
-      animationCurve: widget.animationCurve,
+      animationStyle: widget.animationStyle,
       itemIndent: widget.itemIndent,
       preserveExpansion: widget.preserveExpansion,
     );
@@ -258,11 +250,8 @@ class _DeclarativeSectionedSliverState<K extends Object, Section, Item>
     super.didUpdateWidget(oldWidget);
 
     // Propagate animation / indent / preserveExpansion params.
-    if (oldWidget.animationDuration != widget.animationDuration) {
-      _controller.animationDuration = widget.animationDuration;
-    }
-    if (oldWidget.animationCurve != widget.animationCurve) {
-      _controller.animationCurve = widget.animationCurve;
+    if (oldWidget.animationStyle != widget.animationStyle) {
+      _controller.animationStyle = widget.animationStyle;
     }
     if (oldWidget.itemIndent != widget.itemIndent) {
       _controller.itemIndent = widget.itemIndent;

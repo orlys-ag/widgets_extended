@@ -12,6 +12,7 @@
 /// [ScrollableState] / the fake [Timer] clock — no [SliverTree] mounts.
 library;
 
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/_drag_session.dart';
@@ -103,7 +104,7 @@ void main() {
     setUp(() {
       controller = TreeController<String, String>(
         vsync: const TestVSync(),
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       controller.setRoots(const [
         TreeNode(key: "a", data: "A"),
@@ -199,7 +200,7 @@ void main() {
     setUp(() {
       controller = TreeController<String, String>(
         vsync: const TestVSync(),
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       controller.setRoots(const [
         TreeNode(key: "a", data: "A"),
@@ -441,7 +442,7 @@ void main() {
     void seedTree(WidgetTester tester) {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots(const [

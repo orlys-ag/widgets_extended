@@ -8,7 +8,7 @@
 /// the mutation frame (no jump). Everything here fails on pre-D14 code
 /// (the APIs and the flag do not exist).
 ///
-/// The trees use `animationDuration: Duration.zero`, which snaps preview
+/// The trees use `animationStyle: TreeAnimationStyle.disabled`, which snaps preview
 /// offsets (global animations-disabled convention) — painted positions
 /// are deterministic per frame.
 library;
@@ -25,7 +25,7 @@ void main() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(tree.dispose);
       tree.setRoots([
@@ -99,7 +99,7 @@ void main() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         const TreeNode(key: "a", data: "A"),
@@ -127,7 +127,6 @@ void main() {
                 SliverReorderableTree<String, String>(
                   controller: tree,
                   reorderController: reorder,
-                  makeRoomOnDrag: true,
                   showDragProxy: true,
                   nodeBuilder: (context, key, depth, wrap) {
                     return wrap(
@@ -205,7 +204,7 @@ void main() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         const TreeNode(key: "a", data: "A"),
@@ -238,7 +237,6 @@ void main() {
                 SliverReorderableTree<String, String>(
                   controller: tree,
                   reorderController: reorder,
-                  makeRoomOnDrag: true,
                   showDragProxy: true,
                   nodeBuilder: (context, key, depth, wrap) {
                     return wrap(
@@ -296,7 +294,7 @@ void main() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         const TreeNode(key: "a", data: "A"),
@@ -321,7 +319,6 @@ void main() {
                 SliverReorderableTree<String, String>(
                   controller: tree,
                   reorderController: reorder,
-                  makeRoomOnDrag: true,
                   showDragProxy: true,
                   nodeBuilder: (context, key, depth, wrap) {
                     return wrap(

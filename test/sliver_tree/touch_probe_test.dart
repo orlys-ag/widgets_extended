@@ -25,14 +25,13 @@ import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 Future<({TreeController<String, String> tree, TreeReorderController<String> reorder})>
     _mount(
   WidgetTester tester, {
-  bool makeRoom = true,
   bool proxy = true,
   bool flatPolicy = true,
   Map<String, double> heights = const {"r0": 100.0},
 }) async {
   final tree = TreeController<String, String>(
     vsync: tester,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
   tree.setRoots([
     for (var i = 0; i < 5; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -60,7 +59,6 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
             SliverReorderableTree<String, String>(
               controller: tree,
               reorderController: reorder,
-              makeRoomOnDrag: makeRoom,
               showDragProxy: proxy,
               nodeBuilder: (context, key, depth, wrap) {
                 return wrap(
@@ -289,7 +287,7 @@ void main() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         for (var i = 0; i < 4; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -315,7 +313,6 @@ void main() {
                 SliverReorderableTree<String, String>(
                   controller: tree,
                   reorderController: reorder,
-                  makeRoomOnDrag: true,
                   showDragProxy: true,
                   nodeBuilder: (context, key, depth, wrap) {
                     return wrap(
@@ -367,18 +364,59 @@ void main() {
   testWidgets(
     "T4 pin: proxy WITHOUT make-room keeps the raw pointer probe",
     (tester) async {
-      final h = await _mount(tester, makeRoom: false);
-      final gesture = await _lift(tester, const Offset(400, 5));
-      // Pointer 82 → a shifted probe would flip (127 ≥ 125); the raw
-      // pointer (82) is still inside r0's own band.
-      await gesture.moveTo(const Offset(400, 82));
-      await tester.pump();
-      expect(h.reorder.currentTarget?.indexInFinalList, 0,
-          reason: "pin: indicator-precision mode aims with the visible "
-              "cursor — no probe shift outside make-room");
-      await gesture.up();
-      await tester.pump();
-      await tester.pumpAndSettle();
+      // No longer expressible through SliverReorderableTree — make-room is
+      // unconditional there — so drive the controller directly. The shift
+      // is gated on make-room AND settle-from-release; this pins that it
+      // really is an AND.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        const TreeNode(key: "a", data: "A"),
+        const TreeNode(key: "b", data: "B"),
+        const TreeNode(key: "c", data: "C"),
+      ]);
+      final port = _FakePort(controller: controller);
+      final reorder = TreeReorderController<String>(
+        treeController: controller,
+        vsync: tester,
+        // Flat-list policy so crossed rows take the two-zone MIDPOINT
+        // split — the raw/shifted discrimination below only holds there.
+        canAcceptDrop: ({required movingKey, newParent, index}) =>
+            newParent == null,
+      );
+      addTearDown(reorder.dispose);
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: [SliverToBoxAdapter(child: SizedBox(height: 2000))],
+            ),
+          ),
+        ),
+      );
+      final scrollable =
+          tester.state<ScrollableState>(find.byType(Scrollable));
+
+      reorder.startDrag(
+        key: "a",
+        renderPort: port,
+        scrollable: scrollable,
+        pointerGlobal: const Offset(200, 5),
+        makeRoom: false,
+        settleFromRelease: true,
+      );
+      // Rows are 50px. grabDy = 5, so a midpoint probe would sit at
+      // pointer + 20. Pointer 70 → top half of b → above-b ≡ a's current
+      // slot (index 0). A shifted probe (90) would read b's bottom half →
+      // below-b (index 1).
+      reorder.updateDrag(const Offset(200, 70));
+      expect(reorder.currentTarget?.indexInFinalList, 0,
+          reason: "pin: the midpoint shift needs make-room too — with only "
+              "a proxy there is no card-anchored slot selection");
+      reorder.cancelDrag();
     },
   );
 
@@ -404,7 +442,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([

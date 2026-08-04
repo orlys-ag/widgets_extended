@@ -50,7 +50,7 @@ void main() {
       // Controller A: a single root with key "shared".
       final controllerA = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controllerA.dispose);
 
@@ -68,7 +68,7 @@ void main() {
       // common "same logical row, different data source" pattern.
       final controllerB = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controllerB.dispose);
 
@@ -97,7 +97,7 @@ void main() {
     (tester) async {
       final controllerA = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controllerA.dispose);
 
@@ -117,7 +117,7 @@ void main() {
       // Controller B: keeps "shared", drops "a_only", adds "b_only".
       final controllerB = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controllerB.dispose);
       controllerB.setRoots([

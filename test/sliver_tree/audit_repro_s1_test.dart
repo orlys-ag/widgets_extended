@@ -22,6 +22,7 @@
 /// negative-value assert fires earlier.
 library;
 
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree_widget.dart';
@@ -56,8 +57,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
 

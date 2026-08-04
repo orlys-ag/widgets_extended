@@ -44,7 +44,7 @@ void main() {
     testWidgets("immediate (animate: false) remove of one child", (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(c.dispose);
       c.setRoots([const TreeNode(key: "r", data: "r")]);
@@ -63,7 +63,7 @@ void main() {
     testWidgets("immediate (animate: false) remove of a subtree", (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(c.dispose);
       c.setRoots([const TreeNode(key: "r", data: "r")]);
@@ -87,7 +87,7 @@ void main() {
       // case alongside the immediate-remove cases above.
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(c.dispose);
       c.setRoots([const TreeNode(key: "r", data: "r")]);
@@ -123,7 +123,7 @@ void main() {
     testWidgets("removing a root with no children", (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(c.dispose);
       c.setRoots([
@@ -145,7 +145,7 @@ void main() {
         (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(c.dispose);
       c.setRoots([const TreeNode(key: "r", data: "r")]);
@@ -188,7 +188,7 @@ void main() {
         (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(c.dispose);
       c.setRoots([const TreeNode(key: "r", data: "r")]);

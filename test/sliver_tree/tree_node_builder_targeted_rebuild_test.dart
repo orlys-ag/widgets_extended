@@ -9,7 +9,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       controller.setRoots([
         const TreeNode(key: 'A', data: 'A'),
@@ -63,7 +63,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       // A starts with no children; B has children.
       controller.setRoots([
@@ -122,7 +122,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       controller.setRoots([
         const TreeNode(key: 'A', data: 'A'),

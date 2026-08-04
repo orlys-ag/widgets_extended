@@ -81,8 +81,9 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   AnimationCoordinator({
     required TickerProvider vsync,
     required NodeIdRegistry<TKey> nids,
-    required Duration Function() animationDurationGetter,
-    required Curve Function() animationCurveGetter,
+    required Duration Function() enterExitDurationGetter,
+    required Curve Function() enterExitCurveGetter,
+    required Duration Function() expandCollapseDurationGetter,
     required void Function(TKey opKey, AnimationStatus status)
         onOperationGroupStatus,
     required void Function(AnimationStatus status) onBulkAnimationStatus,
@@ -91,8 +92,9 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     required double defaultExtent,
   }) : _vsync = vsync,
        _nids = nids,
-       _animationDurationGetter = animationDurationGetter,
-       _animationCurveGetter = animationCurveGetter,
+       _enterExitDurationGetter = enterExitDurationGetter,
+       _enterExitCurveGetter = enterExitCurveGetter,
+       _expandCollapseDurationGetter = expandCollapseDurationGetter,
        _onOperationGroupStatus = onOperationGroupStatus,
        _onBulkAnimationStatus = onBulkAnimationStatus,
        _onStandaloneTickComplete = onStandaloneTickComplete,
@@ -100,8 +102,13 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
 
   final TickerProvider _vsync;
   final NodeIdRegistry<TKey> _nids;
-  final Duration Function() _animationDurationGetter;
-  final Curve Function() _animationCurveGetter;
+  /// Enter/exit (standalone) timing — the style's `effectiveEnterExit`.
+  final Duration Function() _enterExitDurationGetter;
+  final Curve Function() _enterExitCurveGetter;
+
+  /// Expand/collapse timing — the style's `expandCollapse`. Feeds the
+  /// per-operation group registry's controller durations.
+  final Duration Function() _expandCollapseDurationGetter;
   final void Function(TKey opKey, AnimationStatus status)
       _onOperationGroupStatus;
   final void Function(AnimationStatus status) _onBulkAnimationStatus;
@@ -119,8 +126,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   late final StandaloneAnimator<TKey> standalone = StandaloneAnimator<TKey>(
     vsync: _vsync,
     nids: _nids,
-    animationCurveGetter: _animationCurveGetter,
-    animationDurationGetter: _animationDurationGetter,
+    enterExitCurveGetter: _enterExitCurveGetter,
+    enterExitDurationGetter: _enterExitDurationGetter,
     defaultExtent: _defaultExtent,
     fullExtentGetter: (nid) {
       if (nid < 0 || nid >= _fullExtentByNid.length) return null;
@@ -139,7 +146,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
       OperationGroupRegistry<TKey>(
     nids: _nids,
     vsync: _vsync,
-    durationGetter: _animationDurationGetter,
+    durationGetter: _expandCollapseDurationGetter,
     onTick: notifyListeners,
     onStatusChanged: _onOperationGroupStatus,
   );
@@ -149,6 +156,12 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     vsync: _vsync,
     onTick: notifyListeners,
     onStatusChanged: _onBulkAnimationStatus,
+    // Group disposal invalidates the generation-keyed union mirrors
+    // ([ensureAnimatingKeys]) — wired here, at the construction boundary,
+    // so no disposal caller (completion handler, createGroup replacement,
+    // clear) can forget the pairing. bumpBulkGen only increments counters,
+    // so the extra bumps on replacement/teardown paths are free.
+    onGroupDisposed: bumpBulkGen,
   );
 
   late final SlideAnimationEngine<TKey> slide = SlideAnimationEngine<TKey>(
@@ -458,7 +471,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
       if (animation != null && animation.targetExtent == _kUnknownExtent) {
         if (animation.type == AnimationType.entering) {
           animation.targetExtent = extent;
-          animation.updateExtent(_animationCurveGetter());
+          animation.updateExtent(_enterExitCurveGetter());
         }
       }
       return oldExtent;
@@ -470,12 +483,12 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     if (animation != null && animation.targetExtent == _kUnknownExtent) {
       if (animation.type == AnimationType.entering) {
         animation.targetExtent = extent;
-        animation.updateExtent(_animationCurveGetter());
+        animation.updateExtent(_enterExitCurveGetter());
       }
     } else if (animation != null) {
       if (animation.type == AnimationType.entering) {
         animation.targetExtent = extent;
-        animation.updateExtent(_animationCurveGetter());
+        animation.updateExtent(_enterExitCurveGetter());
       }
       // Exiting: leave startExtent as historical (extent at exit start).
     }
@@ -702,7 +715,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     // 3. Standalone
     final animation = standalone.at(key);
     if (animation == null) return fullExtent;
-    final t = _animationCurveGetter()
+    final t = _enterExitCurveGetter()
         .transform(animation.progress.clamp(0.0, 1.0));
     if (animation.targetExtent == _kUnknownExtent) {
       return animation.type == AnimationType.entering
@@ -847,7 +860,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     // 3. Standalone
     final animation = standalone.slotAtNid(nid);
     if (animation == null) return full;
-    final t = _animationCurveGetter()
+    final t = _enterExitCurveGetter()
         .transform(animation.progress.clamp(0.0, 1.0));
     if (animation.targetExtent == _kUnknownExtent) {
       return animation.type == AnimationType.entering

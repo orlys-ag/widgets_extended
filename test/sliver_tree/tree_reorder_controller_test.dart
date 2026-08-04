@@ -62,7 +62,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
         comparator: (a, b) => a.key.compareTo(b.key),
       );
       addTearDown(controller.dispose);
@@ -79,7 +79,7 @@ void main() {
     testWidgets("accepts a comparator-less TreeController", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
 
@@ -98,12 +98,12 @@ void main() {
         (tester) async {
       final treeA = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(treeA.dispose);
       final treeB = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(treeB.dispose);
 
@@ -134,7 +134,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "a", data: "A")]);
@@ -170,7 +170,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -222,7 +222,7 @@ void main() {
     testWidgets("cycle: drop-into-descendant rejected", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "a", data: "A")]);
@@ -268,7 +268,7 @@ void main() {
         "and dropping it commits nothing", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -324,7 +324,7 @@ void main() {
     testWidgets("canAcceptDrop policy filters targets", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -369,7 +369,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -411,7 +411,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -459,8 +459,7 @@ void main() {
         "drop target resolution skips pending-deletion rows", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([

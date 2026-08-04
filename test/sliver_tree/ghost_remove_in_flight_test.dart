@@ -46,8 +46,7 @@ void main() {
   testWidgets("ghost re-moved to visible parent does NOT snap", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 1000),
-      animationCurve: Curves.linear,
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
     );
     addTearDown(controller.dispose);
 
@@ -155,8 +154,7 @@ void main() {
       (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 1000),
-      animationCurve: Curves.linear,
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
     );
     addTearDown(controller.dispose);
 

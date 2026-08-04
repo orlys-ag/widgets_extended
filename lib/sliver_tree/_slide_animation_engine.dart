@@ -163,11 +163,17 @@ class SlideAnimationEngine<TKey> {
   /// [priorOffsets] and [currentOffsets]. See
   /// [TreeController.animateSlideFromOffsets] for the full contract.
   ///
-  /// [structuralAnimationsDisabled] = controller's `animationDuration ==
-  /// Duration.zero` — caller passes it in so the engine never reaches back
-  /// into the controller for it. The engine ALSO short-circuits when
-  /// [duration] is zero. Both gates exist in the original code and are
-  /// preserved bit-for-bit.
+  /// [structuralAnimationsDisabled] = the calling family's spec is
+  /// zeroed (`reorderSlide` for this public path; the drop-settle
+  /// channel passes its own family's flag) — caller passes it in so the
+  /// engine never reaches back into the controller for it. The engine
+  /// treats an explicit zero [duration] the same way. DISABLED-MODE
+  /// SPLIT: either gate means this call CREATES no motion — nothing
+  /// fresh installs — but existing entries are NOT destroyed: entries
+  /// whose bases this batch moved are re-based on their OWN
+  /// duration/curve so they continue seamlessly. Stopping existing
+  /// motion is an explicit transition event ([purgeActive]), never a
+  /// side effect of another family's install call.
   void animateFromOffsets(
     Map<TKey, ({double y, double x})> priorOffsets,
     Map<TKey, ({double y, double x})> currentOffsets, {
@@ -177,11 +183,69 @@ class SlideAnimationEngine<TKey> {
     double maxSlideDistance = double.infinity,
   }) {
     if (structuralAnimationsDisabled || duration == Duration.zero) {
-      // No-animation mode: drop any in-flight slide and return.
-      if (hasActive) {
-        _clearAllSlidesInternal();
-        _ticker?.stop();
+      // Disabled-mode split: refuse fresh installs; re-base survivors.
+      // O(1) on the dominant no-actives path (`.disabled` configs).
+      if (!hasActive) {
+        return;
       }
+      if (_ticker == null || !_ticker!.isActive) {
+        _lastTickElapsed = Duration.zero;
+      }
+      // Iterate ACTIVES (a handful), not the maps (every visible row).
+      // Copy: _clearSlide mutates the set mid-iteration.
+      final touched = <int>{};
+      for (final nid in _activeSlideNids.toList()) {
+        final entry = _slideByNid[nid]!;
+        final key = _nids.keyOfUnchecked(nid);
+        final current = currentOffsets[key];
+        final prior = priorOffsets[key];
+        if (current == null || prior == null) {
+          continue; // Absent from this batch: re-baselined below.
+        }
+        final rawDeltaY = prior.y - current.y;
+        final rawDeltaX = prior.x - current.x;
+        final composedY = entry.currentDelta + rawDeltaY;
+        final composedX = entry.currentDeltaX + rawDeltaX;
+        if (composedY.abs() > maxSlideDistance) {
+          _clearSlide(key);
+          continue;
+        }
+        if (composedY == 0.0 && composedX == 0.0) {
+          _clearSlide(key); // Painted where it belongs — no slide left.
+          continue;
+        }
+        if (rawDeltaY == 0.0 && rawDeltaX == 0.0) {
+          // No-op for this entry: the un-touched branch below is the
+          // only authority over its clock (mirrors the enabled path's
+          // no-op composition rule).
+          continue;
+        }
+        final hadX = entry.startDeltaX != 0.0;
+        final newHasX = composedX != 0.0;
+        if (hadX && !newHasX) {
+          _xActiveCount--;
+        } else if (!hadX && newHasX) {
+          _xActiveCount++;
+        }
+        entry.startDelta = composedY;
+        entry.currentDelta = composedY;
+        entry.startDeltaX = composedX;
+        entry.currentDeltaX = composedX;
+        entry.slideStartElapsed = _lastTickElapsed;
+        entry.progress = 0.0;
+        // KEEP entry.slideDuration and entry.curve — the staged timing
+        // belongs to the fresh installs this branch refuses.
+        entry.preserveProgressOnRebatch = false;
+        entry.installStamp++;
+        touched.add(nid);
+      }
+      _rebaselineUntouched(touched);
+      // hasActive ⇒ ticker active holds at every stop site, and this
+      // branch only mutates pre-existing actives — ensure-start keeps
+      // the invariant locally enforced WITHOUT threading the enabled
+      // tail's `installed == 0` early-return (which always fires here).
+      final ticker = _ticker ??= _vsync.createTicker(_onSlideTick);
+      if (!ticker.isActive) ticker.start();
       return;
     }
 
@@ -340,31 +404,7 @@ class SlideAnimationEngine<TKey> {
       }
     }
 
-    // Re-baseline every active slide that this call did NOT touch — without
-    // this, an un-touched slide's progress would snap to ~0 and lerp
-    // currentDelta back to its ORIGINAL startDelta (visible jump).
-    //
-    // Slides marked [SlideAnimation.preserveProgressOnRebatch] (set by
-    // the render layer for active edge-ghost and exit-phantom slides) are
-    // skipped — their progress continues uninterrupted across batches so
-    // that concurrent mutations (e.g. autoscroll commits) don't reset
-    // ghost slides that should be settling smoothly.
-    if (_activeSlideNids.length != touched.length) {
-      for (final nid in _activeSlideNids) {
-        if (touched.contains(nid)) continue;
-        final entry = _slideByNid[nid]!;
-        if (entry.currentDelta == 0.0 && entry.currentDeltaX == 0.0) {
-          // Already settled — let the next tick mark complete and clear.
-          continue;
-        }
-        if (entry.preserveProgressOnRebatch) continue;
-        entry.startDelta = entry.currentDelta;
-        entry.startDeltaX = entry.currentDeltaX;
-        entry.slideStartElapsed = _lastTickElapsed;
-        entry.progress = 0.0;
-        // Keep the un-touched entry's existing curve and slideDuration.
-      }
-    }
+    _rebaselineUntouched(touched);
 
     if (!hasActive) {
       _ticker?.stop();
@@ -513,10 +553,29 @@ class SlideAnimationEngine<TKey> {
     entry.preserveProgressOnRebatch = true;
   }
 
+  /// Capacity-preserving purge of every active slide: entries cleared,
+  /// ticker STOPPED (not disposed — the next install restarts it via
+  /// the `_ticker ??= … / start()` pattern).
+  ///
+  /// The controller calls this on the style transition that means
+  /// "stop slide motion now" (`reorderSlide` zeroed) — the
+  /// disabled-mode split: a zero family refuses NEW motion at install
+  /// time, while stopping EXISTING motion is this explicit transition
+  /// event. Unlike [clearAll], safe mid-lifecycle: `_slideByNid`'s
+  /// capacity is preserved, so subsequent installs cannot range-error.
+  void purgeActive() {
+    if (hasActive) {
+      _clearAllSlidesInternal();
+    }
+    _ticker?.stop();
+  }
+
   /// Resets every slide-related field back to its initial state and
   /// disposes the ticker. Called from `TreeController._clear` (and
   /// indirectly from `dispose`). The next [animateFromOffsets] call
   /// recreates the ticker via the existing `_ticker ??= ...` pattern.
+  /// NOT safe mid-lifecycle (drops `_slideByNid` capacity) — use
+  /// [purgeActive] for that.
   void clearAll() {
     _ticker?.dispose();
     _ticker = null;
@@ -592,6 +651,36 @@ class SlideAnimationEngine<TKey> {
     return Duration(
       microseconds: math.max(_minDurationMicros, clamped),
     );
+  }
+
+  /// Re-baselines every active slide that a batch did NOT touch —
+  /// shared by the enabled install/compose path and the disabled-mode
+  /// re-base branch (the "no third mechanism" rule). Without this, an
+  /// un-touched slide's progress would snap to ~0 after a fresh-ticker
+  /// elapsed reset and lerp currentDelta back to its ORIGINAL
+  /// startDelta (visible jump).
+  ///
+  /// Slides marked [SlideAnimation.preserveProgressOnRebatch] (set by
+  /// the render layer for active edge-ghost and exit-phantom slides)
+  /// are skipped — their progress continues uninterrupted across
+  /// batches so concurrent mutations (e.g. autoscroll commits) don't
+  /// reset ghost slides that should be settling smoothly. Un-touched
+  /// entries keep their existing curve and slideDuration.
+  void _rebaselineUntouched(Set<int> touched) {
+    if (_activeSlideNids.length == touched.length) return;
+    for (final nid in _activeSlideNids) {
+      if (touched.contains(nid)) continue;
+      final entry = _slideByNid[nid]!;
+      if (entry.currentDelta == 0.0 && entry.currentDeltaX == 0.0) {
+        // Already settled — let the next tick mark complete and clear.
+        continue;
+      }
+      if (entry.preserveProgressOnRebatch) continue;
+      entry.startDelta = entry.currentDelta;
+      entry.startDeltaX = entry.currentDeltaX;
+      entry.slideStartElapsed = _lastTickElapsed;
+      entry.progress = 0.0;
+    }
   }
 
   void _clearAllSlidesInternal() {

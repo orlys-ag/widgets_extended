@@ -81,8 +81,12 @@ TreeController<String, int> _newController(
 }) {
   return TreeController<String, int>(
     vsync: tester,
-    animationDuration: duration,
-    animationCurve: Curves.linear,
+    animationStyle: TreeAnimationStyle(
+      expandCollapse: TreeAnimationSpec(
+        duration: duration,
+        curve: Curves.linear,
+      ),
+    ),
   );
 }
 

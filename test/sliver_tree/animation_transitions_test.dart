@@ -19,7 +19,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -85,7 +85,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -120,7 +120,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -164,7 +164,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -223,7 +223,7 @@ void main() {
       // a geometric reality, not a duration bug.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -304,8 +304,7 @@ void main() {
       // the group finishes, then resume their own preserved clock.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 400),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
 
@@ -379,8 +378,7 @@ void main() {
       // continuity across each boundary.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 400),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
 
@@ -451,7 +449,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -486,7 +484,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -522,7 +520,7 @@ void main() {
         "exit and re-anchors at new position", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -565,7 +563,7 @@ void main() {
         "leak op-groups or corrupt state", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -592,7 +590,7 @@ void main() {
         "consistent", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 

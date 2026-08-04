@@ -1,6 +1,6 @@
-/// D5 repro tests: the drop target and indicator must stay honest when the
-/// viewport scrolls WITHOUT a pointer move, and autoscroll must engage
-/// when the drag starts inside an edge zone.
+/// D5 repro tests: the drop target must stay honest when the viewport
+/// scrolls WITHOUT a pointer move, and autoscroll must engage when the
+/// drag starts inside an edge zone.
 ///
 /// Repro-test methodology: each test asserts the EXPECTED behavior and
 /// fails on pre-D5 code, where re-resolution is driven only by pointer
@@ -12,19 +12,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
-const Color _kIndicatorColor = Color(0xFF123456);
-
-Finder _indicatorFinder() {
-  return find.byWidgetPredicate(
-    (w) => w is ColoredBox && w.color == _kIndicatorColor,
-  );
-}
-
 Future<({TreeController<String, String> tree, TreeReorderController<String> reorder})>
     _mount(WidgetTester tester, {int rowCount = 40}) async {
   final tree = TreeController<String, String>(
     vsync: tester,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
   tree.setRoots([
     for (var i = 0; i < rowCount; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -33,8 +25,6 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
   final reorder = TreeReorderController<String>(
     treeController: tree,
     vsync: tester,
-    slideDuration: const Duration(milliseconds: 80),
-    slideCurve: Curves.linear,
   );
   addTearDown(() {
     if (reorder.isDragging) {
@@ -52,7 +42,6 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
             SliverReorderableTree<String, String>(
               controller: tree,
               reorderController: reorder,
-              dropIndicatorColor: _kIndicatorColor,
               nodeBuilder: (context, key, depth, wrap) {
                 return wrap(
                   longPressToDrag: true,
@@ -115,51 +104,16 @@ void main() {
     },
   );
 
-  testWidgets(
-    "external scroll mid-drag repositions the indicator even when the "
-    "semantic target survives",
-    (tester) async {
-      final h = await _mount(tester);
-      final scrollable = tester.state<ScrollableState>(
-        find.byType(Scrollable),
-      );
-
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byKey(const ValueKey("row-r0"))),
-      );
-      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
-      await gesture.moveTo(const Offset(400, 125));
-      await tester.pump();
-
-      expect(h.reorder.currentTarget?.targetKey, "r2",
-          reason: "setup: into-r2 resolved");
-      expect(_indicatorFinder(), findsOneWidget,
-          reason: "setup: indicator visible");
-      final beforeTop = tester.getTopLeft(_indicatorFinder()).dy;
-
-      // Scroll 10px: pointer scroll-space y becomes 135 — still the
-      // middle third of r2, so the SEMANTIC target is unchanged (no
-      // controller notification). The indicator's viewport-local position
-      // must still shift up by 10px.
-      scrollable.position.jumpTo(10.0);
-      await tester.pump();
-
-      expect(h.reorder.currentTarget?.targetKey, "r2",
-          reason: "setup: the semantic target must survive this scroll — "
-              "the point of this test is the presentation-only update");
-      final afterTop = tester.getTopLeft(_indicatorFinder()).dy;
-      expect(
-        afterTop,
-        beforeTop - 10.0,
-        reason: "the indicator tracks the row on screen; a stale position "
-            "means the indicator does not listen to the scroll position",
-      );
-
-      await gesture.up();
-      await tester.pump();
-      await tester.pumpAndSettle();
-    },
-  );
+  // REMOVED with the drop-indicator line: "external scroll mid-drag
+  // repositions the indicator even when the semantic target survives".
+  // It pinned a widget-layer mechanism — the indicator overlay re-deriving
+  // its viewport position from `position.pixels` — that no longer exists.
+  // There is no equivalent under make-room: the gap is a per-node paint
+  // offset that rides the content automatically (covered by
+  // `make_room_preview_test.dart`), and with the gap open the pointer sits
+  // at a slot boundary, so no scroll of any size leaves the target intact
+  // to assert against. The re-resolve-on-scroll contract itself is covered
+  // by the test above.
 
   testWidgets(
     "a drag starting inside the edge zone autoscrolls without any "

@@ -14,7 +14,7 @@ void main() {
       "rebuilds rows against the new controller's data", (tester) async {
     final controllerA = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controllerA.dispose);
     controllerA.setRoots([
@@ -24,7 +24,7 @@ void main() {
 
     final controllerB = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controllerB.dispose);
     controllerB.setRoots([

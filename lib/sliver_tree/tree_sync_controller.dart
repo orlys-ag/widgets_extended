@@ -226,8 +226,8 @@ class TreeSyncController<TKey, TData> {
             null,
             index: targetIndex,
             animate: animate,
-            slideDuration: _controller.animationDuration,
-            slideCurve: _controller.animationCurve,
+            slideDuration: _controller.animationStyle.expandCollapse.duration,
+            slideCurve: _controller.animationStyle.expandCollapse.curve,
           );
         }
       } else {
@@ -353,7 +353,15 @@ class TreeSyncController<TKey, TData> {
         if (!_controller.isExiting(k)) k,
     ];
     if (!_listEquals(liveRoots, liveDesiredKeys)) {
-      _controller.reorderRoots(liveDesiredKeys, animate: animate);
+      // Explicit expandCollapse timing: sync-driven slides stay in
+      // lockstep with the extent animations they compose with inside
+      // the same batch, independent of the reorderSlide default.
+      _controller.reorderRoots(
+        liveDesiredKeys,
+        animate: animate,
+        slideDuration: _controller.animationStyle.expandCollapse.duration,
+        slideCurve: _controller.animationStyle.expandCollapse.curve,
+      );
     }
 
     // 7. Restore expansion state for newly inserted roots after their
@@ -550,8 +558,8 @@ class TreeSyncController<TKey, TData> {
             parentKey,
             index: targetIndex,
             animate: animate,
-            slideDuration: _controller.animationDuration,
-            slideCurve: _controller.animationCurve,
+            slideDuration: _controller.animationStyle.expandCollapse.duration,
+            slideCurve: _controller.animationStyle.expandCollapse.curve,
           );
         }
       } else {
@@ -623,7 +631,14 @@ class TreeSyncController<TKey, TData> {
         if (!desiredSet.contains(k)) k,
     ];
     if (!_listEquals(controllerLive, orderedKeys)) {
-      _controller.reorderChildren(parentKey, orderedKeys, animate: animate);
+      // Explicit expandCollapse timing — see the reorderRoots call site.
+      _controller.reorderChildren(
+        parentKey,
+        orderedKeys,
+        animate: animate,
+        slideDuration: _controller.animationStyle.expandCollapse.duration,
+        slideCurve: _controller.animationStyle.expandCollapse.curve,
+      );
     }
 
     // 6. If the parent itself had a pending expansion restore that was

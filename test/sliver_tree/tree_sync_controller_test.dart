@@ -10,7 +10,7 @@ void main() {
     testWidgets('returns a deep-copied snapshot', (tester) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -37,7 +37,7 @@ void main() {
     testWidgets('reorders roots when only order changes', (tester) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -64,7 +64,7 @@ void main() {
     testWidgets('updates data for retained roots', (tester) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -84,7 +84,7 @@ void main() {
     testWidgets('reorders children when only order changes', (tester) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -112,7 +112,7 @@ void main() {
     testWidgets('updates data for retained children', (tester) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -141,7 +141,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -173,7 +173,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -215,7 +215,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -247,7 +247,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -294,7 +294,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -328,7 +328,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
       );
       sync = TreeSyncController(treeController: controller);
 
@@ -363,7 +363,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -400,7 +400,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -448,7 +448,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -501,7 +501,7 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
       );
       sync = TreeSyncController(treeController: controller);
 
@@ -565,7 +565,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
         );
         sync = TreeSyncController(treeController: controller);
 
@@ -625,7 +625,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
         );
         sync = TreeSyncController(treeController: controller);
 
@@ -681,7 +681,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
         );
         sync = TreeSyncController(treeController: controller);
 
@@ -749,7 +749,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
         );
         sync = TreeSyncController(treeController: controller);
 
@@ -829,7 +829,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         sync = TreeSyncController(
           treeController: controller,
@@ -880,7 +880,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         sync = TreeSyncController(
           treeController: controller,
@@ -923,7 +923,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
         );
         sync = TreeSyncController(treeController: controller);
 
@@ -971,7 +971,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1011,7 +1011,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1066,7 +1066,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         sync = TreeSyncController(
           treeController: controller,
@@ -1123,8 +1123,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 400),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1206,8 +1205,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 400),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1274,7 +1272,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1312,7 +1310,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1359,8 +1357,7 @@ void main() {
         // current _roots length matching the desired view.
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 400),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1397,7 +1394,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1480,8 +1477,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 400),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {

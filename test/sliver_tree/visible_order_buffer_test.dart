@@ -27,7 +27,7 @@ void main() {
   TreeController<String, String> buildSeedTree(WidgetTester tester) {
     final c = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     c.setRoots([
       const TreeNode(key: "r1", data: "r1"),
@@ -175,7 +175,7 @@ void main() {
       (tester) async {
         final c = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         addTearDown(c.dispose);
 

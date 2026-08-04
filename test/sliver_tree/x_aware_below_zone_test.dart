@@ -21,7 +21,7 @@ void main() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       // x first so root-level drops below a's subtree are not no-ops.
       tree.setRoots([

@@ -2,10 +2,10 @@
 
 High-performance sliver widgets for Flutter: animated tree, sectioned list, and drag-and-drop reorder.
 
-- **`SectionedSliverList`** — header + items list with sticky headers, expand/collapse, and animated insert/remove.
-- **`SyncedSliverTree`** — declarative tree that diffs against a source-of-truth and animates the transitions.
-- **`SliverReorderableTree`** — drag-and-drop reorder layer on top of the tree.
-- **`SliverTree` + `TreeController`** — imperative escape hatch.
+- **`SectionedSliverList`**: header + items list with sticky headers, expand/collapse, and animated insert/remove.
+- **`SyncedSliverTree`**: declarative tree that diffs against a source-of-truth and animates the transitions.
+- **`SliverReorderableTree`**: drag-and-drop reorder layer on top of the tree.
+- **`SliverTree` + `TreeController`**: imperative escape hatch.
 
 All widgets are built on the same sliver/`TreeController` core: viewport-aware lazy layout, ECS-style state storage, animation finalization that doesn't relayout idle rows.
 
@@ -104,11 +104,12 @@ SliverReorderableTree<String, RowData>(
     child: ListTile(title: Text(treeController.getNodeData(key)!.data.label)),
   ),
   indentPerDepth: 24.0,
-  dropIndicatorColor: Colors.blue,
 )
 ```
 
-The `wrap(child:)` callback turns an arbitrary row into a draggable target with the framework-managed drop indicator.
+The `wrap(child:)` callback turns an arbitrary row into a draggable target. Drop feedback is the make-room preview: rows part to open a live gap at the prospective slot (paint-only, so the tree is not mutated until the drop commits), while a floating proxy of the dragged row follows the pointer. The proxy renders in the root `Overlay`, outside the row's ancestry, so rows built from Material widgets need a `dragProxyBuilder` that re-provides a `Material` ancestor, the same contract as `Draggable.feedback`.
+
+`indentPerDepth` maps the pointer's horizontal position to a drop depth at subtree boundaries; set it to `0` to always drop at the deepest legal level.
 
 ## SliverTree + TreeController (imperative)
 
@@ -127,4 +128,41 @@ CustomScrollView(slivers: [
 ])
 ```
 
-`TreeController` exposes `addListener` (structure changes), `addAnimationListener` (animation ticks — no relayout), and `runBatch(...)` (coalesce mutations into one notification).
+`TreeController` exposes `addListener` (structure changes), `addAnimationListener` (animation ticks, no relayout), and `runBatch(...)` (coalesce mutations into one notification).
+
+## Animation styling
+
+One immutable `TreeAnimationStyle` configures timing and easing for every animation family, owned by the `TreeController` and inherited by everything downstream (the sync layer, the drag stack, and the declarative widgets via their `animationStyle` parameter):
+
+| Family | Drives | Fallback |
+| --- | --- | --- |
+| `expandCollapse` | expand/collapse groups, `expandAll`/`collapseAll`, sync-driven slide cohesion | none |
+| `enterExit` | insert/remove row animations | `expandCollapse` |
+| `reorderSlide` | FLIP slides: `moveNode`, `reorderRoots`/`reorderChildren`, drag-commit | none |
+| `makeRoom` | the drag make-room gap (open / re-target / release) | `reorderSlide` |
+| `dropSettle` | drag proxy settle glides (commit handoff, cancel return) | `reorderSlide` |
+
+```dart
+final controller = TreeController<String, RowData>(
+  vsync: this,
+  animationStyle: const TreeAnimationStyle(
+    expandCollapse: TreeAnimationSpec(
+      duration: Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+    ),
+    reorderSlide: TreeAnimationSpec(
+      duration: Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+    ),
+    // enterExit / makeRoom / dropSettle inherit when unset.
+  ),
+);
+```
+
+Rules of the system:
+
+- **Defaults are uniform**: every family defaults to 300ms / `Curves.linear` (`TreeAnimationStyle.defaultSpec`). `TreeAnimationStyle.uniform(duration:, curve:)` builds a one-spec-everywhere style.
+- **Per-call overrides win** for value selection: `moveNode`, `reorderRoots`/`reorderChildren`, `animateSlideFromOffsets`, and the preview methods take optional `Duration`/`Curve` params that beat the style when passed.
+- **Zero is a per-family kill switch**: a family whose resolved spec has `Duration.zero` duration snaps instead of animating, and that dominates explicit per-call durations. `TreeAnimationStyle.disabled` zeroes every family, which is the synchronous-test configuration.
+- **Runtime restyle** is a plain assignment (`controller.animationStyle = ...`). Duration changes rewrite in-flight expand/collapse groups (they finish at their old rate; the new duration applies from the next start), curves apply to newly started groups, and enter/exit animations re-read the style every tick. Drag sessions resolve the style once at `startDrag`, so a mid-drag restyle applies from the next drag.
+- Unset fallback families keep **inheriting**: `copyWith` preserves their unset-ness, so restyling `reorderSlide` also retimes an unset `makeRoom`/`dropSettle`.

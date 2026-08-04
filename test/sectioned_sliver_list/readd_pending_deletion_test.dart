@@ -15,6 +15,7 @@
 /// cancel via `addSection`.
 library;
 
+import 'package:flutter/animation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -25,7 +26,7 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationDuration: const Duration(milliseconds: 100),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
     );
     addTearDown(controller.dispose);
 
@@ -57,7 +58,7 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationDuration: const Duration(milliseconds: 100),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
     );
     addTearDown(controller.dispose);
 

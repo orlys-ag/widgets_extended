@@ -30,23 +30,23 @@ class StandaloneAnimator<TKey> {
     required TickerProvider vsync,
     required NodeIdRegistry<TKey> nids,
     required void Function(Iterable<TKey> completedKeys) onTick,
-    required Curve Function() animationCurveGetter,
-    required Duration Function() animationDurationGetter,
+    required Curve Function() enterExitCurveGetter,
+    required Duration Function() enterExitDurationGetter,
     required double? Function(int nid) fullExtentGetter,
     required double defaultExtent,
   }) : _vsync = vsync,
        _nids = nids,
        _onTick = onTick,
-       _animationCurveGetter = animationCurveGetter,
-       _animationDurationGetter = animationDurationGetter,
+       _enterExitCurveGetter = enterExitCurveGetter,
+       _enterExitDurationGetter = enterExitDurationGetter,
        _fullExtentGetter = fullExtentGetter,
        _defaultExtent = defaultExtent;
 
   final TickerProvider _vsync;
   final NodeIdRegistry<TKey> _nids;
   final void Function(Iterable<TKey> completedKeys) _onTick;
-  final Curve Function() _animationCurveGetter;
-  final Duration Function() _animationDurationGetter;
+  final Curve Function() _enterExitCurveGetter;
+  final Duration Function() _enterExitDurationGetter;
   final double? Function(int nid) _fullExtentGetter;
 
   /// Fallback extent for unmeasured rows, injected from
@@ -162,7 +162,7 @@ class StandaloneAnimator<TKey> {
     final nid = _nids[key];
     final full = (nid != null ? _fullExtentGetter(nid) : null)
         ?? _defaultExtent;
-    final t = _animationCurveGetter()
+    final t = _enterExitCurveGetter()
         .transform(state.progress.clamp(0.0, 1.0));
     return state.type == AnimationType.entering ? full * t : full * (1.0 - t);
   }
@@ -191,7 +191,7 @@ class StandaloneAnimator<TKey> {
 
   /// Internal ticker callback. Per-tick steps:
   /// 1. Stop early if nothing to animate; snap everything to completion
-  ///    if animationDuration is zero.
+  ///    if the effective enter/exit duration is zero.
   /// 2. Compute dt and advance every active state's progress + extent.
   /// 3. Collect newly-completed keys and forward them to the controller's
   ///    [onTick] callback (which drives `_finalizeAnimation` and fires
@@ -201,17 +201,17 @@ class StandaloneAnimator<TKey> {
       _ticker?.stop();
       return;
     }
-    final duration = _animationDurationGetter();
+    final duration = _enterExitDurationGetter();
     if (duration.inMicroseconds == 0) {
       // Zero duration means "animations complete instantly" — the same
-      // convention every mutator applies on entry (`if (animationDuration
+      // convention every mutator applies on entry (`if (enter/exit spec
       // == Duration.zero) animate = false`). Snap every active state to
       // completion and route the full set through the completion handler
       // (purge, order removal, structural notification). Stop-and-abandon
       // here would strand rows at partial extent, leak pending-deletion
       // nodes forever (this finalize path is the only purge path for
       // standalone exits), and pin hasActiveAnimations true permanently.
-      final snapCurve = _animationCurveGetter();
+      final snapCurve = _enterExitCurveGetter();
       _completedScratch.clear();
       for (final nid in _activeNids) {
         final state = _byNid[nid]!;
@@ -234,7 +234,7 @@ class StandaloneAnimator<TKey> {
         : elapsed - _lastTickElapsed!;
     _lastTickElapsed = elapsed;
     final progressDelta = dt.inMicroseconds / duration.inMicroseconds;
-    final curve = _animationCurveGetter();
+    final curve = _enterExitCurveGetter();
 
     _completedScratch.clear();
     for (final nid in _activeNids) {

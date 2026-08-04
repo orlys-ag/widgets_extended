@@ -19,7 +19,7 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
 
@@ -54,7 +54,7 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
 

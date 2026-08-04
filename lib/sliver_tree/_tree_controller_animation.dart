@@ -323,19 +323,12 @@ extension _TreeControllerAnimationOps<TKey, TData>
       final affectedParents = <TKey>{};
       if (categoryOne.isNotEmpty) {
         _purgeAndRemoveFromOrder(categoryOne, compactOrder: false);
-        // Detect parents whose child list became empty as a result.
-        // The helper purged the children and released their nids; the
-        // captured parents may themselves have been purged (their key
-        // looked up returns null). _childListOf handles unregistered
-        // keys by returning null — treat that as "child list empty"
-        // for the affectedKeys signal (a dead key in affectedKeys is a
-        // cheap no-op at the element side).
-        for (final parent in parentsOfCategoryOne) {
-          final siblings = _childListOf(parent);
-          if (siblings == null || siblings.isEmpty) {
-            affectedParents.add(parent);
-          }
-        }
+        // Every captured parent's child-list length just changed; its
+        // builder may render the count (TreeItemView.childCount), so it
+        // must refresh, not only on the empty flip. Captured parents may
+        // themselves have been purged along with their children; a dead
+        // key in affectedKeys is a cheap no-op at the element side.
+        affectedParents.addAll(parentsOfCategoryOne);
         _keysToRemoveScratch.addAll(categoryOne);
       }
 
@@ -359,9 +352,10 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // removal member was already hidden (ancestor re-collapsed mid-flight,
       // reparented, etc.), this branch is structurally a no-op.
       //
-      // Affected keys: parents whose hasChildren flipped false. Removed
-      // rows are GC'd by SliverTreeElement. Remaining visible rows retain
-      // their builder output (depth/data/parent unchanged).
+      // Affected keys: parents whose child-list length changed (their
+      // builders may render the count). Removed rows are GC'd by
+      // SliverTreeElement. Other visible rows retain their builder
+      // output (depth/data/parent unchanged).
       if (didMutateOrder) {
         _notifyStructural(affectedKeys: affectedParents);
       }
@@ -405,7 +399,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     bool animate = true,
     bool preserveSubtreeState = false,
   }) {
-    if (animationDuration == Duration.zero) {
+    if (_animationStyle.effectiveEnterExit.duration == Duration.zero) {
       animate = false;
     }
     _clearPendingDeletion(key);

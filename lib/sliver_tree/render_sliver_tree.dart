@@ -1588,27 +1588,58 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     return result;
   }
 
+  /// Debug-only: rows examined by the last [findRowAtPaintedY] call
+  /// (bounded-scan phases 1–3, the full-scan loop length, or the fast
+  /// path's forward/backward walk). Pins the bounded path's O(window)
+  /// contract against routing re-widening.
+  int debugLastFindRowIterationCount = 0;
+
+  /// Debug-only: whether the last [findRowAtPaintedY] call with active
+  /// composed deltas took the exact full-scan fallback (true) or the
+  /// bounded window scan (false). Untouched by no-delta fast-path calls.
+  bool debugLastFindRowUsedFullScan = false;
+
   /// Finds the first live (non-pending-deletion) visible row whose painted
   /// scroll-space range `[paintedOffset, paintedOffset + extent)` contains
   /// [scrollY], falling back to the last live row when [scrollY] sits past
   /// the bottom of the tree. Returns null when the visible order is empty or
   /// every entry is pending-deletion.
   ///
-  /// Painted offsets include the node's current FLIP slide delta, matching
-  /// what [snapshotVisibleOffsets] would return — but without allocating an
-  /// O(N) map. Designed for [TreeReorderController], which polls the hovered
-  /// row every pointer move and every autoscroll tick; the previous
-  /// implementation materialized a `Map<TKey, double>` for the whole tree on
-  /// each call.
+  /// Painted offsets include the node's composed slide delta (FLIP engine
+  /// + make-room preview), matching what [snapshotVisibleOffsets] would
+  /// return — but without allocating an O(N) map. Designed for
+  /// [TreeReorderController], which polls the hovered row every pointer
+  /// move and every autoscroll tick.
   ///
-  /// Fast path (no active slides): O(log N) via binary search on
-  /// structural offsets, plus a forward scan to skip pending-deletion rows.
+  /// Routing — three branches:
   ///
-  /// Slow path (active slides): O(N) linear scan — slide deltas can reorder
-  /// painted positions relative to structural positions, so binary search
-  /// over structural offsets is unsafe. A slide only overlaps a drag when
-  /// the user starts a new drag while a prior commit's FLIP is still
-  /// animating (≤ slideDuration).
+  /// 1. **No composed deltas** ([TreeController.hasActiveSlides] false):
+  ///    O(log N) binary search on structural offsets plus a forward scan
+  ///    to skip pending-deletion rows. The make-room preview is a HELD
+  ///    offset, so during a widget-driven drag this branch is never
+  ///    taken — the preview keeps `hasActiveSlides` true from the first
+  ///    resolve to release. (The historical "slides only overlap a drag
+  ///    for ≤ slideDuration" rationale predated the preview composition
+  ///    and routed every drag resolve to the O(N) scan.)
+  /// 2. **Exact full scan** ([_findRowFullScan], O(N) over controller
+  ///    truth) when a bounded-scan precondition fails: edge ghosts exist
+  ///    (ghost rows paint at the live viewport edge, unbounded by ±D —
+  ///    and ghost pruning keys on the COMPOSED delta, so a held preview
+  ///    can retain settled ghosts for an entire back-to-back drag); the
+  ///    last layout was bulk-only (per-nid offsets stale off-cache); or
+  ///    a structural mutation has not been laid out yet (per-nid offsets
+  ///    stale — the full scan computes from controller truth and is
+  ///    immune).
+  /// 3. **Bounded window scan** ([_findRowBoundedScan], O(window)) — the
+  ///    steady state of every drag. `painted = structural + delta` with
+  ///    `|delta| ≤ D =` [TreeController.composedSlideAbsDeltaBound], so
+  ///    only rows whose structural span intersects `[scrollY − D,
+  ///    scrollY + D]` need exact testing; any live row past the window
+  ///    matches trivially, and the fallback is tracked inside the scan.
+  ///    Extents read the layout-stamped arrays — at most one frame behind
+  ///    controller truth during extent animations (extent ticks force
+  ///    relayout every frame), the same staleness class [_liveRowAt]
+  ///    already accepts.
   @override
   ({TKey key, double paintedOffset, double extent})? findRowAtPaintedY(
     double scrollY,
@@ -1617,50 +1648,26 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     if (visible.isEmpty) return null;
 
     if (controller.hasActiveSlides) {
-      TKey? lastLiveKey;
-      double lastLiveOffset = 0.0;
-      double lastLiveExtent = 0.0;
-      double structural = 0.0;
-      final orderNids = controller.orderNidsView;
-      final hasEdgeGhosts = _composer.hasGhosts;
-      // Lazy: only build viewport snapshot if there are ghosts to
-      // resolve. Edge ghosts paint at the LIVE viewport edge.
-      final ViewportSnapshot? viewportForGhosts =
-          hasEdgeGhosts ? _currentViewportSnapshot() : null;
-      for (int i = 0; i < visible.length; i++) {
-        final nid = orderNids[i];
-        final key = visible[i];
-        final extent = controller.getCurrentExtentNid(nid);
-        final slide = controller.getSlideDeltaNid(nid);
-        // Edge-ghost rows paint at `liveBaseY + slide`, not at
-        // `structural + slide`. Substitute so drag-target lookup lands
-        // on the correct ghost row.
-        final ghostBase = hasEdgeGhosts
-            ? _composer.baseFor(key, viewportForGhosts!)
-            : null;
-        final paintedOffset =
-            ghostBase != null ? ghostBase + slide : structural + slide;
-        if (!controller.isPendingDeletion(key)) {
-          if (scrollY < paintedOffset + extent) {
-            return (key: key, paintedOffset: paintedOffset, extent: extent);
-          }
-          lastLiveKey = key;
-          lastLiveOffset = paintedOffset;
-          lastLiveExtent = extent;
-        }
-        structural += extent;
+      // Bounded-scan preconditions: no ghost bases, and per-nid
+      // offset/extent arrays fresh for ALL visible rows (last layout was
+      // non-bulk and newer than the last structural mutation). The
+      // `controller.visibleNodes` read above flushed any batch-deferred
+      // generation bump, so the stamp comparison sees post-flush truth.
+      if (_composer.hasGhosts ||
+          _lastFrameUsedBulkCumulatives ||
+          controller.structureGeneration != _lastStructureGeneration) {
+        debugLastFindRowUsedFullScan = true;
+        return _findRowFullScan(scrollY, visible);
       }
-      if (lastLiveKey == null) return null;
-      return (
-        key: lastLiveKey,
-        paintedOffset: lastLiveOffset,
-        extent: lastLiveExtent,
-      );
+      debugLastFindRowUsedFullScan = false;
+      return _findRowBoundedScan(scrollY, visible);
     }
 
-    // Fast path: no slides active, painted offset == structural offset.
+    // Fast path: no composed deltas, painted offset == structural offset.
+    debugLastFindRowIterationCount = 0;
     final startIdx = _findFirstVisibleIndex(scrollY);
     for (int i = startIdx; i < visible.length; i++) {
+      debugLastFindRowIterationCount++;
       final key = visible[i];
       if (controller.isPendingDeletion(key)) continue;
       return _liveRowAt(i, key);
@@ -1668,9 +1675,185 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // Past the end (or every trailing row is pending-deletion) — walk back
     // for the last live row.
     for (int i = visible.length - 1; i >= 0; i--) {
+      debugLastFindRowIterationCount++;
       final key = visible[i];
       if (controller.isPendingDeletion(key)) continue;
       return _liveRowAt(i, key);
+    }
+    return null;
+  }
+
+  /// Test-only oracle access to [_findRowFullScan], so equivalence tests
+  /// can compare the bounded scan's routing result against the exact
+  /// full-scan answer for the same [scrollY] with zero drift risk.
+  @visibleForTesting
+  ({TKey key, double paintedOffset, double extent})? debugFindRowFullScan(
+    double scrollY,
+  ) {
+    final visible = controller.visibleNodes;
+    if (visible.isEmpty) {
+      return null;
+    }
+    return _findRowFullScan(scrollY, visible);
+  }
+
+  /// Exact O(N) fallback for [findRowAtPaintedY]: index-order scan over
+  /// CONTROLLER truth (current extents accumulated per row, live composed
+  /// deltas, ghost-base substitution). Correct in every state — including
+  /// stale layout offsets and edge-ghost bases — at full-scan cost.
+  ({TKey key, double paintedOffset, double extent})? _findRowFullScan(
+    double scrollY,
+    List<TKey> visible,
+  ) {
+    TKey? lastLiveKey;
+    double lastLiveOffset = 0.0;
+    double lastLiveExtent = 0.0;
+    double structural = 0.0;
+    final orderNids = controller.orderNidsView;
+    final hasEdgeGhosts = _composer.hasGhosts;
+    // Lazy: only build viewport snapshot if there are ghosts to
+    // resolve. Edge ghosts paint at the LIVE viewport edge.
+    final ViewportSnapshot? viewportForGhosts =
+        hasEdgeGhosts ? _currentViewportSnapshot() : null;
+    debugLastFindRowIterationCount = 0;
+    for (int i = 0; i < visible.length; i++) {
+      debugLastFindRowIterationCount++;
+      final nid = orderNids[i];
+      final key = visible[i];
+      final extent = controller.getCurrentExtentNid(nid);
+      final slide = controller.getSlideDeltaNid(nid);
+      // Edge-ghost rows paint at `liveBaseY + slide`, not at
+      // `structural + slide`. Substitute so drag-target lookup lands
+      // on the correct ghost row.
+      final ghostBase = hasEdgeGhosts
+          ? _composer.baseFor(key, viewportForGhosts!)
+          : null;
+      final paintedOffset =
+          ghostBase != null ? ghostBase + slide : structural + slide;
+      if (!controller.isPendingDeletion(key)) {
+        if (scrollY < paintedOffset + extent) {
+          return (key: key, paintedOffset: paintedOffset, extent: extent);
+        }
+        lastLiveKey = key;
+        lastLiveOffset = paintedOffset;
+        lastLiveExtent = extent;
+      }
+      structural += extent;
+    }
+    if (lastLiveKey == null) return null;
+    return (
+      key: lastLiveKey,
+      paintedOffset: lastLiveOffset,
+      extent: lastLiveExtent,
+    );
+  }
+
+  /// Bounded window scan for [findRowAtPaintedY] — the steady-drag path.
+  ///
+  /// Preconditions (enforced by the caller's routing): no edge ghosts,
+  /// `!_lastFrameUsedBulkCumulatives` (so [_nodeOffsetsByNid] /
+  /// [_nodeExtentsByNid] are fully populated and [_findFirstVisibleIndex]
+  /// binary-searches the same arrays — one offset source per call), and
+  /// no structural mutation since the last layout.
+  ///
+  /// With `D = composedSlideAbsDeltaBound` and rows contiguous in
+  /// structural space:
+  /// - rows before the seed have `structuralEnd ≤ scrollY − D`, hence
+  ///   `paintedEnd ≤ scrollY` — they can never match the (strict) hit
+  ///   predicate;
+  /// - rows past the window have `structuralStart > scrollY + D`, hence
+  ///   `paintedStart > scrollY` strictly — any LIVE one matches
+  ///   trivially (even at zero extent);
+  /// - therefore only the window needs exact per-row testing, and the
+  ///   full scan's fallback (highest-index live row) is either the last
+  ///   live row seen inside the window (phase 1 tracks it — live rows in
+  ///   the window can FAIL the predicate, e.g. the pointer below the
+  ///   whole list with the seed clamped to the last row) or, when the
+  ///   window and everything after it hold no live row at all, the first
+  ///   live row walking down from the seed.
+  ({TKey key, double paintedOffset, double extent})? _findRowBoundedScan(
+    double scrollY,
+    List<TKey> visible,
+  ) {
+    final orderNids = controller.orderNidsView;
+    final n = visible.length;
+    final d = controller.composedSlideAbsDeltaBound;
+    final upperBound = scrollY + d;
+    final seed = _findFirstVisibleIndex(scrollY - d);
+    debugLastFindRowIterationCount = 0;
+
+    TKey? lastLiveKey;
+    double lastLiveOffset = 0.0;
+    double lastLiveExtent = 0.0;
+
+    // Phase 1: exact scan inside the window, tracking the last live row
+    // (hit or miss) for the fallback.
+    int i = seed;
+    for (; i < n; i++) {
+      final nid = orderNids[i];
+      final structural = _nodeOffsetsByNid[nid];
+      if (structural > upperBound) {
+        // Not counted here — phase 2 examines (and counts) this row.
+        break;
+      }
+      debugLastFindRowIterationCount++;
+      final key = visible[i];
+      if (controller.isPendingDeletion(key)) {
+        continue;
+      }
+      final painted = structural + controller.getSlideDeltaNid(nid);
+      final extent = _nodeExtentsByNid[nid];
+      if (scrollY < painted + extent) {
+        return (key: key, paintedOffset: painted, extent: extent);
+      }
+      lastLiveKey = key;
+      lastLiveOffset = painted;
+      lastLiveExtent = extent;
+    }
+
+    // Phase 2: the first live row past the window matches trivially
+    // (painted start strictly below it can't reach back above scrollY).
+    // O(consecutive pending-deletion rows), not O(N).
+    for (; i < n; i++) {
+      debugLastFindRowIterationCount++;
+      final key = visible[i];
+      if (controller.isPendingDeletion(key)) {
+        continue;
+      }
+      final nid = orderNids[i];
+      final painted =
+          _nodeOffsetsByNid[nid] + controller.getSlideDeltaNid(nid);
+      return (
+        key: key,
+        paintedOffset: painted,
+        extent: _nodeExtentsByNid[nid],
+      );
+    }
+
+    // Phase 3: no live row at/after the seed matched. The highest-index
+    // live row ≥ seed (if any) was tracked by phase 1; otherwise every
+    // live row sits above the window — walk down for the highest one.
+    if (lastLiveKey != null) {
+      return (
+        key: lastLiveKey,
+        paintedOffset: lastLiveOffset,
+        extent: lastLiveExtent,
+      );
+    }
+    for (int j = seed - 1; j >= 0; j--) {
+      debugLastFindRowIterationCount++;
+      final key = visible[j];
+      if (controller.isPendingDeletion(key)) {
+        continue;
+      }
+      final nid = orderNids[j];
+      final painted =
+          _nodeOffsetsByNid[nid] + controller.getSlideDeltaNid(nid);
+      return (
+        key: key,
+        paintedOffset: painted,
+        extent: _nodeExtentsByNid[nid],
+      );
     }
     return null;
   }
@@ -2114,8 +2297,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // where a sliding row should appear (no child created for it), and
     // the gap does NOT resolve on scroll because the build decision still
     // only considers structural offsets. Overreach shrinks to 0 as the
-    // slide progresses (see [TreeController.maxActiveSlideAbsDelta]), so
-    // the transient overbuild contracts with the animation.
+    // slide progresses (see [TreeController.composedSlideAbsDeltaBound]),
+    // so the transient overbuild contracts with the animation.
     //
     // Future optimization (Option B): replace this blanket clamp with a
     // per-entry precise union. For each active slide, compute the
@@ -2126,7 +2309,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // of a per-entry scan every frame. Worth doing only when the
     // overbuild measurably hurts — large-subtree swaps are rare and
     // short-lived, so the blanket clamp is usually fine.
-    final slideOverreach = controller.maxActiveSlideAbsDelta;
+    // Summed bound, not max: a row can carry a FLIP delta AND a held
+    // make-room offset at once (drag started mid-FLIP), and the composed
+    // displacement reaches the sum. Identical to the max whenever only
+    // one engine is active.
+    final slideOverreach = controller.composedSlideAbsDeltaBound;
     final effectiveCacheStart = cacheStart - slideOverreach;
     final effectiveCacheEnd = cacheEnd + slideOverreach;
 
@@ -2823,7 +3010,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // on rows whose painted y lies past the viewport, so extra iterated
     // rows on the bottom edge are harmless. See the matching comment in
     // `performLayout` for why structural offsets alone aren't enough.
-    final slideOverreach = controller.maxActiveSlideAbsDelta;
+    // Summed bound, not max — see the matching performLayout comment.
+    final slideOverreach = controller.composedSlideAbsDeltaBound;
     final startIndex = _findFirstVisibleIndex(scrollOffset - slideOverreach);
 
     // Pass A: Paint non-sticky nodes. Rows with a non-zero slide delta are
@@ -3591,7 +3779,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // — is still tested. The per-row `localMainAxisPosition` bounds
     // check below naturally skips non-overlapping rows, so iterating
     // extra rows at the top is cheap.
-    final slideOverreach = controller.maxActiveSlideAbsDelta;
+    // Summed bound, not max — see the matching performLayout comment.
+    final slideOverreach = controller.composedSlideAbsDeltaBound;
     final hitOffset = scrollOffset + mainAxisPosition;
     final startIndex = _findFirstVisibleIndex(hitOffset - slideOverreach);
 

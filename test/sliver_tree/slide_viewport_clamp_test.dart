@@ -77,8 +77,7 @@ Widget _harness(
 TreeController<String, int> _newController(WidgetTester tester) {
   final c = TreeController<String, int>(
     vsync: tester,
-    animationDuration: const Duration(milliseconds: 400),
-    animationCurve: Curves.linear,
+    animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
   );
   return c;
 }
@@ -319,7 +318,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Switch to instant mode.
-      controller.animationDuration = Duration.zero;
+      controller.animationStyle = TreeAnimationStyle.disabled;
       await _stageAndMutate(tester, () {
         controller.reorderRoots([
           for (var i = 1; i < 30; i++) "r$i",

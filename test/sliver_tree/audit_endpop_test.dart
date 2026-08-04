@@ -20,6 +20,7 @@
 /// `containsKey`-guards and the settle frame asserts key-ABSENCE.
 library;
 
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/render_sliver_tree.dart';
@@ -69,8 +70,7 @@ class _HarnessState extends State<_Harness> {
             SyncedSliverTree<String, String>(
               tree: widget.builder(),
               maxStickyDepth: 1,
-              animationDuration: const Duration(milliseconds: 400),
-              animationCurve: Curves.linear,
+              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
               itemBuilder: (context, node) {
                 controller ??= node.controller;
                 return SizedBox(

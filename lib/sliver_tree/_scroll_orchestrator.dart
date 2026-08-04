@@ -180,7 +180,7 @@ class ScrollOrchestrator<TKey, TData> {
     TKey key, {
     required ScrollController scrollController,
     Duration duration = const Duration(milliseconds: 300),
-    Curve curve = Curves.easeInOut,
+    Curve curve = Curves.linear,
     double alignment = 0.0,
     AncestorExpansionMode ancestorExpansion = AncestorExpansionMode.immediate,
     double Function(TKey key)? extentEstimator,
@@ -207,7 +207,7 @@ class ScrollOrchestrator<TKey, TData> {
     // when there's nothing to expand or when animations are disabled.
     if (ancestorExpansion == AncestorExpansionMode.animated &&
         collapsedAncestors.isNotEmpty &&
-        _controller.animationDuration != Duration.zero &&
+        _controller.animationStyle.expandCollapse.duration != Duration.zero &&
         duration != Duration.zero) {
       return _animatedConcurrentScroll(
         key: key,

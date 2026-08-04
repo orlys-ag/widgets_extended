@@ -22,8 +22,10 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
     _mount(WidgetTester tester) async {
   final tree = TreeController<String, String>(
     vsync: tester,
-    animationDuration: const Duration(milliseconds: 200),
-    animationCurve: Curves.linear,
+    animationStyle: TreeAnimationStyle.uniform(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.linear,
+    ),
   );
   tree.setRoots([
     for (var i = 0; i < 6; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -31,8 +33,6 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
   final reorder = TreeReorderController<String>(
     treeController: tree,
     vsync: tester,
-    slideDuration: const Duration(milliseconds: 200),
-    slideCurve: Curves.linear,
   );
   addTearDown(() {
     if (reorder.isDragging) {
@@ -161,8 +161,10 @@ void main() {
       // must be skipped, not thrown.
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
-        animationCurve: Curves.linear,
+        animationStyle: TreeAnimationStyle.uniform(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.linear,
+        ),
       );
       tree.setRoots([
         for (var i = 0; i < 4; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -170,8 +172,6 @@ void main() {
       final reorder = TreeReorderController<String>(
         treeController: tree,
         vsync: tester,
-        slideDuration: const Duration(milliseconds: 200),
-        slideCurve: Curves.linear,
       );
       addTearDown(() {
         if (reorder.isDragging) {
@@ -195,7 +195,6 @@ void main() {
                           controller: tree,
                           reorderController: reorder,
                           showDragProxy: true,
-                          makeRoomOnDrag: true,
                           nodeBuilder: (context, key, depth, wrap) {
                             return wrap(
                               longPressToDrag: true,
@@ -243,13 +242,15 @@ void main() {
   testWidgets(
     "without a proxy the classic old-slot reparent slide is preserved",
     (tester) async {
-      // No showDragProxy: nothing was visually at the pointer, so sliding
-      // from the release position would be wrong — the pre-existing
+      // showDragProxy: false — nothing was visually at the pointer, so
+      // sliding from the release position would be wrong; the classic
       // behavior (FLIP from the old slot) must remain.
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
-        animationCurve: Curves.linear,
+        animationStyle: TreeAnimationStyle.uniform(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.linear,
+        ),
       );
       tree.setRoots([
         for (var i = 0; i < 6; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -257,8 +258,6 @@ void main() {
       final reorder = TreeReorderController<String>(
         treeController: tree,
         vsync: tester,
-        slideDuration: const Duration(milliseconds: 200),
-        slideCurve: Curves.linear,
       );
       addTearDown(() {
         reorder.dispose();
@@ -273,6 +272,7 @@ void main() {
                 SliverReorderableTree<String, String>(
                   controller: tree,
                   reorderController: reorder,
+                  showDragProxy: false,
                   nodeBuilder: (context, key, depth, wrap) {
                     return wrap(
                       longPressToDrag: true,

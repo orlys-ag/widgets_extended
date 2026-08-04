@@ -15,7 +15,7 @@ SectionedListController<String, String, String> _makeController(
     vsync: tester,
     sectionKeyOf: (s) => s,
     itemKeyOf: (i) => i,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
 }
 
@@ -35,7 +35,7 @@ void main() {
             itemKeyOf: (i) => i,
             headerBuilder: (ctx, view) => Text("H:${view.section}"),
             itemBuilder: (ctx, view) => Text("I:${view.item}"),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -58,7 +58,7 @@ void main() {
             headerBuilder: (ctx, view) => Text("H:${view.section}"),
             itemBuilder: (ctx, view) => Text("I:${view.item}"),
             initiallyExpanded: false,
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -81,7 +81,7 @@ void main() {
             itemBuilder: (ctx, view) => Text("I:${view.item}"),
             initiallyExpanded: true,
             initialSectionExpansion: (key, _) => key == "a" ? false : null,
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -106,7 +106,7 @@ void main() {
             headerBuilder: (ctx, view) => Text("H:${view.section}"),
             itemBuilder: (ctx, view) => Text("I:${view.item}"),
             hideEmptySections: true,
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -126,7 +126,7 @@ void main() {
             itemKeyOf: (i) => i,
             headerBuilder: (ctx, view) => Text("H:${view.section}"),
             itemBuilder: (ctx, view) => Text("I:${view.item}"),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         );
       }
@@ -152,7 +152,7 @@ void main() {
             initiallyExpanded: false, // would normally hide a1
             headerBuilder: (ctx, view) => Text("H:${view.section}"),
             itemBuilder: (ctx, view) => Text("I:${view.item}"),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -285,7 +285,7 @@ void main() {
               captured[view.key] = view;
               return Text("I:${view.item}");
             },
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -389,7 +389,7 @@ void main() {
               return Text("H:${v.section} c=${v.isCollapsible}");
             },
             itemBuilder: (ctx, v) => Text("I:${v.item}"),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -430,7 +430,7 @@ void main() {
               );
             },
             itemBuilder: (ctx, view) => Text(view.item),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -460,7 +460,7 @@ void main() {
               );
             },
             itemBuilder: (ctx, view) => Text(view.item),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -498,7 +498,7 @@ void main() {
             },
             itemBuilder: (ctx, view) =>
                 view.watch(builder: (ctx, v) => Text("item:${v.item}")),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -531,7 +531,7 @@ void main() {
                   return Text("item:${v.item}");
                 },
               ),
-              animationDuration: Duration.zero,
+              animationStyle: TreeAnimationStyle.disabled,
             ),
           ),
         );
@@ -566,7 +566,7 @@ void main() {
             itemIndent: 24.0,
             headerBuilder: (ctx, view) => Text(view.section),
             itemBuilder: (ctx, view) => Text(view.item),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );
@@ -589,7 +589,7 @@ void main() {
             itemIndent: 32.0,
             headerBuilder: (ctx, view) => Text(view.section),
             itemBuilder: (ctx, view) => Text(view.item),
-            animationDuration: Duration.zero,
+            animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
       );

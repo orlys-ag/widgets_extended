@@ -61,7 +61,7 @@ void main() {
   testWidgets("attach registers a host; detach unregisters", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 200),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -105,7 +105,7 @@ void main() {
   testWidgets("two slivers register independently", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 200),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -136,11 +136,11 @@ void main() {
   testWidgets("registry survives controller swap", (tester) async {
     final controllerA = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 200),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
     );
     final controllerB = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 200),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
     );
     addTearDown(controllerA.dispose);
     addTearDown(controllerB.dispose);
@@ -198,7 +198,7 @@ void main() {
   testWidgets("dispose-before-detach is safe", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 200),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
     );
     controller.setRoots([
       const TreeNode(key: "a", data: "A"),

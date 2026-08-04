@@ -61,7 +61,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         addTearDown(controller.dispose);
 
@@ -95,7 +95,7 @@ void main() {
     testWidgets('rows can change height at the same width', (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
 
@@ -388,8 +388,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 400),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
         );
         addTearDown(controller.dispose);
 
@@ -466,8 +465,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 400),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
         );
         addTearDown(controller.dispose);
 
@@ -533,8 +531,7 @@ void main() {
       // ticks that only call markNeedsLayout must not trigger rebuilds.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 600),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 600), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
 
@@ -606,8 +603,7 @@ void main() {
         // show NO rebuilds of descendants at settle time.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
         );
         addTearDown(controller.dispose);
 
@@ -689,8 +685,7 @@ void main() {
         // descendant gets a fresh `nodeBuilder` invocation in that window.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
         );
         addTearDown(controller.dispose);
 
@@ -785,8 +780,7 @@ void main() {
         // animation.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
         );
         addTearDown(controller.dispose);
 
@@ -881,8 +875,7 @@ void main() {
         // they are already present — no pop.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
         );
         addTearDown(controller.dispose);
 
@@ -991,8 +984,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 200),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
         );
         addTearDown(controller.dispose);
 
@@ -1058,7 +1050,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -1107,7 +1099,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -1152,7 +1144,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         addTearDown(controller.dispose);
         // 50 roots — only a handful are mounted at once given 48px rows.
@@ -1203,7 +1195,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         addTearDown(controller.dispose);
         controller.setRoots([
@@ -1682,8 +1674,7 @@ void main() {
         // Post-fix: the sibling's Y advances smoothly each frame.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 400),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
         );
         addTearDown(controller.dispose);
 
@@ -1805,7 +1796,7 @@ class _RebuildTestHarnessState extends State<_RebuildTestHarness>
     super.initState();
     _controller = TreeController<String, String>(
       vsync: this,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     _controller.setRoots([TreeNode(key: 'a', data: 'A')]);
     widget.onControllerCreated(_controller);
@@ -1903,7 +1894,7 @@ class _ScrollToKeyHarnessState extends State<_ScrollToKeyHarness>
     _scrollController = ScrollController();
     _controller = TreeController<String, String>(
       vsync: this,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     _controller.setRoots([
       for (int i = 0; i < widget.rowCount; i++)
@@ -1992,7 +1983,12 @@ class _DeepCollapsedTreeHarnessState extends State<_DeepCollapsedTreeHarness>
     _scrollController = ScrollController();
     _controller = TreeController<String, String>(
       vsync: this,
-      animationDuration: widget.treeAnimationDuration,
+      animationStyle: TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: widget.treeAnimationDuration,
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
 
     final roots = <TreeNode<String, String>>[
@@ -2069,7 +2065,7 @@ Widget buildFlatSyncedTree({
       return resolveParentOf(entry.key, entry.value);
     },
     initiallyExpanded: initiallyExpanded,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
     itemBuilder:
         itemBuilder ??
         (context, node) {

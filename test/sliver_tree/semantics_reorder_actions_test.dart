@@ -26,7 +26,7 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
 }) async {
   final tree = TreeController<String, String>(
     vsync: tester,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
   tree.setRoots([
     const TreeNode(key: "a", data: "A"),

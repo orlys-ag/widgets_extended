@@ -190,7 +190,7 @@ class _ScrollToKeyHarnessState extends State<_ScrollToKeyHarness>
     _scrollController = ScrollController();
     _controller = TreeController<String, String>(
       vsync: this,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     _controller.setRoots([
       for (int i = 0; i < widget.rowCount; i++)

@@ -77,7 +77,7 @@ void main() {
             slivers: [
               SyncedSliverTree<int, int>(
                 tree: [root],
-                animationDuration: Duration.zero,
+                animationStyle: TreeAnimationStyle.disabled,
                 initiallyExpanded: false,
                 itemBuilder: (context, view) =>
                     Text("${view.key}", textDirection: TextDirection.ltr),

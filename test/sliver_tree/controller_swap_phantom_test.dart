@@ -40,8 +40,7 @@ void main() {
       // collapsed parent, populating _phantomExitGhosts mid-animation.
       final controllerA = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 400),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
       );
       addTearDown(controllerA.dispose);
 
@@ -83,7 +82,7 @@ void main() {
       // underlying data model with different versions).
       final controllerB = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controllerB.dispose);
       controllerB.setRoots([const TreeNode(key: "Y", data: "Y-fresh")]);

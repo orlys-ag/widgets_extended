@@ -20,6 +20,7 @@ import 'package:flutter/widgets.dart';
 
 import '_drag_session_behaviors.dart';
 import '_drop_zone_resolver.dart';
+import 'animation_style.dart';
 import 'reorder_render_port.dart';
 
 /// How a drag session ended. Collaborator teardown dispatches on this:
@@ -222,7 +223,14 @@ class DragSession<TKey> {
     required this.pointerSpace,
     required this.probe,
     required this.pointerGlobal,
+    required this.commitSlideSpec,
   });
+
+  /// Commit-slide timing, resolved from the tree controller's
+  /// `animationStyle.reorderSlide` ONCE at session start — a mid-drag
+  /// restyle never retimes a live session; the next drag picks it up.
+  /// Consumed by the commit script's baseline staging.
+  final TreeAnimationSpec commitSlideSpec;
 
   final TKey draggedKey;
   final ReorderRenderPort<TKey> renderPort;

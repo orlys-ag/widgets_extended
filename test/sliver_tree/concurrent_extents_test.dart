@@ -72,7 +72,7 @@ void main() {
         "throughout the animation", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -119,7 +119,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "p", data: "P")]);
@@ -154,7 +154,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -207,7 +207,7 @@ void main() {
         "without leaving the cache inconsistent", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -242,7 +242,7 @@ void main() {
         "smoothly, position stays valid, no exception", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -295,7 +295,7 @@ void main() {
         "as children get measured frame-by-frame", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "r0", data: "R0")]);
@@ -337,7 +337,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 100),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 

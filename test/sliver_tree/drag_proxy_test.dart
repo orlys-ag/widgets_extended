@@ -79,7 +79,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -161,7 +161,7 @@ void main() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         const TreeNode(key: "a", data: "A"),
@@ -246,7 +246,7 @@ void main() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         const TreeNode(key: "a", data: "A"),

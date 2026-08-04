@@ -247,6 +247,10 @@ class MakeRoomDriver<TKey> {
       // session's exit paths below.
       return;
     }
+    // Deliberately unconditional — no driver-side debounce. The
+    // controller memoizes identical geometry inside [setReorderPreview]
+    // (all callers, self-healing against extent/structure changes), so a
+    // same-slot re-send is already O(1) there. Do not re-add one here.
     _treeController.setReorderPreview(
       draggedKey: _draggedKey,
       targetKey: target.targetKey,
@@ -329,17 +333,39 @@ class DropSettler<TKey> {
       return;
     }
     // Mirror of the commit settle: no mutation happened, so there is no
-    // consume-time FLIP to override — install the return glide directly.
-    // No-ops when animations are disabled. A null sample means the
-    // scrollable is gone (this path also runs from the deactivate
-    // backstop's POST-FRAME callback after a full tree swap-out) —
-    // nothing is visible to glide, skip.
+    // consume-time FLIP to override — install the return glide directly
+    // toward the row's unchanged slot.
+    _installReleaseGlide();
+  }
+
+  /// Named commit-script op for the DEAD-commit-slide fallback: the
+  /// commit FLIP cannot carry the proxy handoff when its reorderSlide
+  /// family is zeroed, so the glide from the release position into the
+  /// row's NEW (post-mutation) slot is installed directly, through the
+  /// drop-settle channel. Called by `endDrag` after the mutation and
+  /// before teardown; NOT part of [detach].
+  void glideIntoCommittedSlot() {
+    _installReleaseGlide();
+  }
+
+  /// Shared glide install: proxy release position → the row's CURRENT
+  /// structural slot (pre-mutation on the cancel path, post-mutation in
+  /// the dead-commit fallback).
+  ///
+  /// Rides the drop-settle channel, so the glide honors its OWN
+  /// family's zero rule rather than `reorderSlide`'s. A null sample
+  /// means the scrollable is gone (the cancel path also runs from the
+  /// deactivate backstop's POST-FRAME callback after a full tree
+  /// swap-out); a null structural y means the row left the visible
+  /// order (dead-commit fallback into a collapsed parent). Both skip
+  /// silently — nothing is visible to glide.
+  void _installReleaseGlide() {
     final release = _space.sample(_pointerGlobal());
     final structuralY = _treeController.scrollOffsetOf(_draggedKey);
     if (release == null || structuralY == null) {
       return;
     }
-    _treeController.animateSlideFromOffsets(
+    _treeController.animateDropSettleGlide(
       <TKey, ({double y, double x})>{
         _draggedKey: (y: release.sliverY - _grabDy(), x: 0.0),
       },

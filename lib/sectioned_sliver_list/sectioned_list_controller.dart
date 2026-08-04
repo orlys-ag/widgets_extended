@@ -8,6 +8,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 
+import '../sliver_tree/animation_style.dart';
 import '../sliver_tree/tree_controller.dart';
 import '../sliver_tree/tree_sync_controller.dart';
 import '../sliver_tree/types.dart';
@@ -55,14 +56,12 @@ class SectionedListController<K extends Object, Section, Item>
     required TickerProvider vsync,
     required this.sectionKeyOf,
     required this.itemKeyOf,
-    Duration animationDuration = const Duration(milliseconds: 300),
-    Curve animationCurve = Curves.easeInOut,
+    TreeAnimationStyle animationStyle = const TreeAnimationStyle(),
     double itemIndent = 0.0,
     bool preserveExpansion = true,
   }) : _tree = TreeController<SecKey<K>, SecPayload<Section, Item>>(
          vsync: vsync,
-         animationDuration: animationDuration,
-         animationCurve: animationCurve,
+         animationStyle: animationStyle,
          indentWidth: itemIndent,
        ),
        _preserveExpansion = preserveExpansion {
@@ -114,24 +113,17 @@ class SectionedListController<K extends Object, Section, Item>
   // Configuration setters
   // ──────────────────────────────────────────────────────────────────
 
-  set animationDuration(Duration value) {
+  /// Animation timing/easing for every family. Forwards to
+  /// [TreeController.animationStyle] — see it for the runtime-mutation
+  /// semantics.
+  set animationStyle(TreeAnimationStyle value) {
     _checkNotDisposed();
-    _tree.animationDuration = value;
+    _tree.animationStyle = value;
   }
 
-  Duration get animationDuration {
+  TreeAnimationStyle get animationStyle {
     _checkNotDisposed();
-    return _tree.animationDuration;
-  }
-
-  set animationCurve(Curve value) {
-    _checkNotDisposed();
-    _tree.animationCurve = value;
-  }
-
-  Curve get animationCurve {
-    _checkNotDisposed();
-    return _tree.animationCurve;
+    return _tree.animationStyle;
   }
 
   /// Visual indent applied to items under section headers, in logical
@@ -407,10 +399,10 @@ class SectionedListController<K extends Object, Section, Item>
   /// When [animate] is true (the default), a cross-section reparent runs
   /// a paint-only FLIP slide on the moved row from its old painted
   /// position to its new one, using [slideDuration] / [slideCurve].
-  /// Both default to the controller's [animationDuration] /
-  /// [animationCurve] so the slide stays in sync with the inserts /
-  /// removes / expands / collapses that may compose with it inside the
-  /// same [runBatch].
+  /// Both default to the controller's expand/collapse animation spec
+  /// (`animationStyle.expandCollapse`) so the slide stays in sync with
+  /// the inserts / removes / expands / collapses that may compose with
+  /// it inside the same [runBatch].
   ///
   /// In-section reorders are pure repositioning ops that never animate
   /// regardless of [animate] — neighbouring rows shift in place, the
@@ -433,8 +425,9 @@ class SectionedListController<K extends Object, Section, Item>
         SectionKey<K>(toSection),
         index: index,
         animate: animate,
-        slideDuration: slideDuration ?? _tree.animationDuration,
-        slideCurve: slideCurve ?? _tree.animationCurve,
+        slideDuration:
+            slideDuration ?? _tree.animationStyle.expandCollapse.duration,
+        slideCurve: slideCurve ?? _tree.animationStyle.expandCollapse.curve,
       );
       return;
     }
@@ -460,9 +453,15 @@ class SectionedListController<K extends Object, Section, Item>
   void reorderItems(K sectionKey, List<K> orderedKeys) {
     _checkNotDisposed();
     _requireSection(sectionKey, "reorderItems");
-    _tree.reorderChildren(SectionKey<K>(sectionKey), <SecKey<K>>[
-      for (final k in orderedKeys) ItemKey<K>(k),
-    ]);
+    // Explicit expandCollapse timing: sectioned reorders stay in
+    // lockstep with the extent animations they may compose with,
+    // independent of the tree's reorderSlide default.
+    _tree.reorderChildren(
+      SectionKey<K>(sectionKey),
+      <SecKey<K>>[for (final k in orderedKeys) ItemKey<K>(k)],
+      slideDuration: _tree.animationStyle.expandCollapse.duration,
+      slideCurve: _tree.animationStyle.expandCollapse.curve,
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────

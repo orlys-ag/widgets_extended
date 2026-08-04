@@ -38,7 +38,7 @@ class _HarnessState extends State<_Harness> {
             SyncedSliverTree<String, String>.nodes(
               roots: widget.roots,
               childrenOf: widget.childrenOf,
-              animationDuration: const Duration(milliseconds: 300),
+              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
               itemBuilder: (context, node) {
                 widget.onController(node.controller);
                 return SizedBox(height: 48, child: Text(node.key));

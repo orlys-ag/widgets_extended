@@ -37,7 +37,7 @@ void main() {
   ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -76,7 +76,7 @@ void main() {
   ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -122,7 +122,7 @@ void main() {
       // defeats the test (an unmounted row obviously can't rebuild).
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -163,7 +163,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -199,7 +199,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -229,9 +229,10 @@ void main() {
       await tester.pump();
 
       expect(
-        counts["p"],
-        before["p"],
-        reason: "parent already had children — hasChildren did not flip",
+        counts["p"]!,
+        greaterThan(before["p"]!),
+        reason: "parent's child count changed (1 to 2); its builder may "
+            "render the count, so the row must refresh",
       );
       expect(counts["existing"], before["existing"]);
       expect(counts["other"], before["other"]);
@@ -244,7 +245,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -291,7 +292,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -329,7 +330,7 @@ void main() {
   testWidgets("reorderRoots does not rebuild any row", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -372,7 +373,7 @@ void main() {
       // fast path's rationale.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "parent", data: "P")]);
@@ -418,7 +419,7 @@ void main() {
   testWidgets("updateNode rebuilds only the updated node", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -458,7 +459,7 @@ void main() {
       // have been re-created (not just reused).
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([

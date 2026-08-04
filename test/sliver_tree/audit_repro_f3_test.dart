@@ -1,3 +1,5 @@
+import 'package:flutter/animation.dart';
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
@@ -39,7 +41,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 100),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
         );
         addTearDown(controller.dispose);
 
@@ -89,7 +91,7 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 100),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
         );
         addTearDown(controller.dispose);
 

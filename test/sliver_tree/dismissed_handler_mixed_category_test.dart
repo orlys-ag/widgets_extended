@@ -10,6 +10,7 @@
 /// happening simultaneously inside one operation group.
 library;
 
+import 'package:flutter/animation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -20,7 +21,7 @@ void main() {
     (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 80),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 80), curve: Curves.easeInOut)),
       );
       addTearDown(c.dispose);
 
@@ -78,7 +79,7 @@ void main() {
     (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 60),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 60), curve: Curves.easeInOut)),
       );
       addTearDown(c.dispose);
 

@@ -18,7 +18,7 @@ void main() {
   testWidgets("syncRoots rejects duplicate desired keys", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
     final sync = TreeSyncController<String, String>(
@@ -40,7 +40,7 @@ void main() {
   testWidgets("syncChildren rejects duplicate desired keys", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
     final sync = TreeSyncController<String, String>(

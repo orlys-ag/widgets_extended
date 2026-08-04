@@ -17,6 +17,8 @@
 // duration is restored, per the setter's documented contract). They
 // FAIL on current code if the bug is real.
 
+import 'package:flutter/animation.dart';
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
@@ -30,7 +32,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
         );
         addTearDown(controller.dispose);
 
@@ -65,7 +67,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
         );
         addTearDown(controller.dispose);
 
@@ -85,7 +87,7 @@ void main() {
 
         // App reacts to e.g. an accessibility "disable animations"
         // toggle while the exit is in flight.
-        controller.animationDuration = Duration.zero;
+        controller.animationStyle = TreeAnimationStyle.disabled;
 
         // A few bounded frames. The zero-duration tick branch stops the
         // ticker itself, so these pumps cannot hang.
@@ -116,7 +118,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 300),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
         );
         addTearDown(controller.dispose);
 
@@ -128,15 +130,21 @@ void main() {
         controller.remove(key: "a", animate: true);
         await tester.pump(const Duration(milliseconds: 16));
 
-        controller.animationDuration = Duration.zero;
+        controller.animationStyle = TreeAnimationStyle.disabled;
         await tester.pump(const Duration(milliseconds: 16));
         await tester.pump(const Duration(milliseconds: 16));
 
-        // Re-enable animations. Per the setter's documented contract
-        // ("the per-node standalone ticker re-reads this on every tick,
-        // so its animations adjust on the next frame"), the in-flight
-        // exit should at the very least resume and finish now.
-        controller.animationDuration = const Duration(milliseconds: 300);
+        // Re-enable animations. Per the style's documented contract
+        // ("the per-node standalone ticker re-reads the resolved
+        // enter/exit spec on every tick, so its animations adjust on the
+        // next frame"), the in-flight exit should at the very least
+        // resume and finish now.
+        controller.animationStyle = const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        );
 
         // Bounded pump loop far past the full 300ms duration.
         for (var i = 0; i < 60 && controller.hasActiveAnimations; i++) {

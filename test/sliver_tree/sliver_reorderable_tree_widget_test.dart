@@ -5,16 +5,6 @@ import 'package:widgets_extended/sliver_tree/render_sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree_widget.dart';
 
-/// Distinct color used so the indicator's ColoredBox can be matched without
-/// false-positives against Scaffold background or other incidental painters.
-const Color _kIndicatorColor = Color(0xFFABCDEF);
-
-Finder _indicatorFinder() {
-  return find.byWidgetPredicate(
-    (w) => w is ColoredBox && w.color == _kIndicatorColor,
-  );
-}
-
 class _Harness {
   _Harness({required this.tree, required this.reorder});
 
@@ -25,12 +15,20 @@ class _Harness {
 Future<_Harness> _mount(
   WidgetTester tester, {
   bool longPressToDrag = true,
-  double draggedOpacity = 0.3,
+  bool showDragProxy = false,
 }) async {
   final tree = TreeController<String, String>(
     vsync: tester,
-    animationDuration: const Duration(milliseconds: 100),
-    animationCurve: Curves.linear,
+    animationStyle: const TreeAnimationStyle(
+      expandCollapse: TreeAnimationSpec(
+        duration: Duration(milliseconds: 100),
+        curve: Curves.linear,
+      ),
+      reorderSlide: TreeAnimationSpec(
+        duration: Duration(milliseconds: 80),
+        curve: Curves.linear,
+      ),
+    ),
   );
   tree.setRoots([
     TreeNode(key: "a", data: "A"),
@@ -41,8 +39,6 @@ Future<_Harness> _mount(
   final reorder = TreeReorderController<String>(
     treeController: tree,
     vsync: tester,
-    slideDuration: const Duration(milliseconds: 80),
-    slideCurve: Curves.linear,
   );
 
   await tester.pumpWidget(
@@ -53,8 +49,11 @@ Future<_Harness> _mount(
             SliverReorderableTree<String, String>(
               controller: tree,
               reorderController: reorder,
-              draggedOpacity: draggedOpacity,
-              dropIndicatorColor: _kIndicatorColor,
+              // Default-off here: several tests read the in-place row's
+              // opacity or geometry, and the default proxy clones the
+              // dragged row's child into the overlay — making those
+              // finders ambiguous mid-drag.
+              showDragProxy: showDragProxy,
               nodeBuilder: (context, key, depth, wrap) {
                 return wrap(
                   longPressToDrag: longPressToDrag,
@@ -125,9 +124,8 @@ void main() {
           reason: "reorder must preserve the membership of the roots");
     });
 
-    testWidgets("dragged source row renders at reduced opacity",
-        (tester) async {
-      final h = await _mount(tester, draggedOpacity: 0.25);
+    testWidgets("dragged source row is hidden in place", (tester) async {
+      final h = await _mount(tester);
 
       expect(_opacityOf(tester, "a"), 1.0,
           reason: "pre-drag opacity must be full");
@@ -138,8 +136,10 @@ void main() {
       await gesture.moveBy(const Offset(0, 10));
       await tester.pump();
 
-      expect(_opacityOf(tester, "a"), 0.25,
-          reason: "mid-drag source row must render at draggedOpacity");
+      expect(_opacityOf(tester, "a"), 0.0,
+          reason: "mid-drag source row must be hidden — make-room closes "
+              "its slot underneath it, so residual paint would overlap "
+              "the rows shifting into that space");
       expect(_opacityOf(tester, "b"), 1.0,
           reason: "non-dragged siblings must remain fully opaque");
 
@@ -154,14 +154,14 @@ void main() {
 
     testWidgets(
       "canReorder=false: long-press starts no session and leaves the row "
-      "undimmed",
+      "visible",
       (tester) async {
         // D3 contract at the widget layer: a refused startDrag returns
         // false (no throw), and the wrapper must not enter its dragged
-        // state — no dim, no indicator, no session.
+        // state — the row stays visible and no session starts.
         final tree = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         tree.setRoots([
           TreeNode(key: "a", data: "A"),
@@ -185,8 +185,7 @@ void main() {
                   SliverReorderableTree<String, String>(
                     controller: tree,
                     reorderController: reorder,
-                    draggedOpacity: 0.3,
-                    dropIndicatorColor: _kIndicatorColor,
+                    showDragProxy: false,
                     nodeBuilder: (context, key, depth, wrap) {
                       return wrap(
                         longPressToDrag: true,
@@ -214,9 +213,7 @@ void main() {
         expect(reorder.isDragging, isFalse,
             reason: "canReorder=false must decline the session");
         expect(_opacityOf(tester, "a"), 1.0,
-            reason: "a refused drag must not dim the row");
-        expect(_indicatorFinder(), findsNothing,
-            reason: "a refused drag must not show the drop indicator");
+            reason: "a refused drag must not hide the row");
 
         await gesture.moveBy(const Offset(0, 60));
         await tester.pump();
@@ -229,12 +226,17 @@ void main() {
     );
 
     testWidgets(
-      "drop indicator is painted while dragging over a valid target",
+      "drag proxy is mounted while dragging and torn down on drop",
       (tester) async {
-        final h = await _mount(tester);
+        // The proxy overlay replaced the drop-indicator overlay as the
+        // widget-layer drag UI. Like the indicator before it, it must
+        // appear on pointer move — driven by the controller's
+        // notifyListeners, NOT by a per-frame poll waiting for an
+        // unrelated frame — and must be removed with the session.
+        final h = await _mount(tester, showDragProxy: true);
 
-        expect(_indicatorFinder(), findsNothing,
-            reason: "no indicator before any drag");
+        expect(find.text("a"), findsOneWidget,
+            reason: "no proxy clone before any drag");
 
         final rowACenter =
             tester.getCenter(find.byKey(const ValueKey("row-a")));
@@ -248,18 +250,16 @@ void main() {
 
         expect(h.reorder.currentTarget, isNotNull,
             reason: "pointer is over a valid target row");
-        expect(_indicatorFinder(), findsOneWidget,
-            reason:
-                "indicator must be painted in the overlay on pointer move, "
-                "driven by TreeReorderController.notifyListeners — NOT by a "
-                "per-frame poll that waits for an unrelated frame to fire");
+        expect(find.text("a"), findsNWidgets(2),
+            reason: "the default proxy clones the dragged row's child into "
+                "the overlay (hidden in-place copy + floating copy)");
 
         await gesture.up();
         await tester.pump();
         await tester.pumpAndSettle();
 
-        expect(_indicatorFinder(), findsNothing,
-            reason: "indicator overlay removed after drop");
+        expect(find.text("a"), findsOneWidget,
+            reason: "proxy overlay removed after drop");
         expect(h.reorder.currentTarget, isNull);
         expect(h.reorder.isDragging, false);
       },
@@ -380,8 +380,16 @@ void main() {
         // duration comfortably longer than that.
         final tree = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(seconds: 2),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(seconds: 2),
+              curve: Curves.linear,
+            ),
+            reorderSlide: TreeAnimationSpec(
+              duration: Duration(milliseconds: 80),
+              curve: Curves.linear,
+            ),
+          ),
         );
         tree.setRoots([
           TreeNode(key: "a", data: "A"),
@@ -396,8 +404,6 @@ void main() {
         final reorder = TreeReorderController<String>(
           treeController: tree,
           vsync: tester,
-          slideDuration: const Duration(milliseconds: 80),
-          slideCurve: Curves.linear,
         );
         addTearDown(() {
           reorder.dispose();
@@ -412,7 +418,7 @@ void main() {
                   SliverReorderableTree<String, String>(
                     controller: tree,
                     reorderController: reorder,
-                    dropIndicatorColor: _kIndicatorColor,
+                    showDragProxy: false,
                     nodeBuilder: (context, key, depth, wrap) {
                       return wrap(
                         longPressToDrag: true,
@@ -526,8 +532,10 @@ void main() {
         // / retention path naturally.
         final tree = TreeController<String, int>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 800),
-          animationCurve: Curves.linear,
+          animationStyle: TreeAnimationStyle.uniform(
+            duration: const Duration(milliseconds: 800),
+            curve: Curves.linear,
+          ),
         );
         tree.setRoots([
           for (var i = 0; i < 30; i++)
@@ -537,8 +545,6 @@ void main() {
         final reorder = TreeReorderController<String>(
           treeController: tree,
           vsync: tester,
-          slideDuration: const Duration(milliseconds: 800),
-          slideCurve: Curves.linear,
         );
         addTearDown(() {
           reorder.dispose();
@@ -555,7 +561,7 @@ void main() {
                     SliverReorderableTree<String, int>(
                       controller: tree,
                       reorderController: reorder,
-                      dropIndicatorColor: _kIndicatorColor,
+                      showDragProxy: false,
                       nodeBuilder: (context, key, depth, wrap) {
                         return wrap(
                           child: SizedBox(

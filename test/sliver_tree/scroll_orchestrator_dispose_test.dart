@@ -42,7 +42,7 @@ class _HostState extends State<_Host> with TickerProviderStateMixin {
     super.initState();
     controller = TreeController<String, String>(
       vsync: this,
-      animationDuration: const Duration(milliseconds: 300),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
     );
     scrollController = ScrollController();
     controller.setRoots([
@@ -92,7 +92,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
       );
       final scrollController = ScrollController();
       addTearDown(scrollController.dispose);
@@ -242,7 +242,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 300),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
       final scrollController = ScrollController();

@@ -21,7 +21,7 @@ void main() {
       "startDelta when the ticker is reset", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: const Duration(milliseconds: 1000),
+      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.easeInOut)),
     );
     addTearDown(controller.dispose);
     controller.setRoots([

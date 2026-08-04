@@ -12,7 +12,7 @@
 ///
 /// Before the fix, the synchronous `cancelDrag()` in `deactivate()`
 /// notified listeners that call `setState` on the ancestor
-/// `_SliverReorderableTreeState` and on `_DropIndicatorState` while
+/// `_SliverReorderableTreeState` and rebuild the overlay drag proxy while
 /// `_debugBuilding` is true ("setState() or markNeedsBuild() called
 /// during build"), and the follow-up direct `_onDragEnd()` call threw
 /// UNCAUGHT out of the GC's buildScope — aborting the remaining
@@ -28,8 +28,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
-const _kIndicatorColor = Color(0xFF00B0FF);
-
 Future<
   ({
     TreeController<String, String> tree,
@@ -39,7 +37,7 @@ Future<
 _mount(WidgetTester tester) async {
   final tree = TreeController<String, String>(
     vsync: tester,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
   tree.setRoots([
     const TreeNode(key: "a", data: "A"),
@@ -51,8 +49,6 @@ _mount(WidgetTester tester) async {
   final reorder = TreeReorderController<String>(
     treeController: tree,
     vsync: tester,
-    slideDuration: const Duration(milliseconds: 80),
-    slideCurve: Curves.linear,
   );
 
   await tester.pumpWidget(
@@ -63,8 +59,6 @@ _mount(WidgetTester tester) async {
             SliverReorderableTree<String, String>(
               controller: tree,
               reorderController: reorder,
-              draggedOpacity: 0.3,
-              dropIndicatorColor: _kIndicatorColor,
               nodeBuilder: (context, key, depth, wrap) {
                 return wrap(
                   longPressToDrag: true,
@@ -160,39 +154,37 @@ void main() {
   );
 
   testWidgets(
-    "tree swapped out mid-drag: deactivate must not setState the overlay "
-    "indicator during build; session cancelled, indicator removed",
+    "tree swapped out mid-drag: deactivate must not rebuild the overlay "
+    "proxy during build; session cancelled, proxy removed",
     (tester) async {
       final h = await _mount(tester);
 
       final gesture = await _startDragOn(tester, "a");
       // Hover the center of row "c" so a real drop target resolves and
-      // the overlay indicator is painting a line.
+      // the overlay proxy is floating the dragged row's clone.
       await gesture.moveTo(
         tester.getCenter(find.byKey(const ValueKey("row-c"))),
       );
       await tester.pump();
 
-      // Setup sanity: active session with a visible indicator line in the
+      // Setup sanity: active session with the proxy clone mounted in the
       // root overlay (it survives the home swap below).
       expect(h.reorder.isDragging, isTrue);
       expect(h.reorder.currentTarget, isNotNull,
-          reason: "setup: a resolved drop target is required for the "
-              "indicator line to be painting");
+          reason: "setup: a resolved drop target is required for the drag "
+              "UI to be live");
       expect(
-        find.byWidgetPredicate(
-          (w) => w is ColoredBox && w.color == _kIndicatorColor,
-        ),
-        findsOneWidget,
-        reason: "setup: indicator line must be visible pre-swap",
+        find.text("a"),
+        findsNWidgets(2),
+        reason: "setup: the proxy clones the dragged row's child into the "
+            "overlay (hidden in-place copy + floating copy)",
       );
 
       // Swap the tree out (same MaterialApp, so the root overlay — where
-      // the indicator entry and its still-active _DropIndicatorState live
-      // — persists). Row deactivation runs inside this pump's build
-      // phase; on the unfixed tree the synchronous cancelDrag() notifies
-      // _DropIndicatorState, whose setState during build is a reported
-      // FlutterError.
+      // the proxy entry and its still-active state live — persists). Row
+      // deactivation runs inside this pump's build phase; on the unfixed
+      // tree the synchronous cancelDrag() drives the overlay's rebuild
+      // during build, a reported FlutterError.
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(body: Center(child: Text("no tree"))),
@@ -206,11 +198,10 @@ void main() {
           reason: "backstop must cancel the session when its row unmounts "
               "with the tree");
       expect(
-        find.byWidgetPredicate(
-          (w) => w is ColoredBox && w.color == _kIndicatorColor,
-        ),
+        find.text("a"),
         findsNothing,
-        reason: "overlay indicator entry must be removed, not leaked",
+        reason: "the overlay proxy entry must be removed, not leaked — the "
+            "tree itself is gone, so the in-place copy is gone too",
       );
 
       await gesture.up();

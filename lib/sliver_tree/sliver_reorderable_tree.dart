@@ -26,30 +26,25 @@
 /// render surface by walking up to the first [ReorderRenderPort] ancestor
 /// rather than any concrete render type.
 ///
-/// Drag UI lives in overlay entries owned by this widget's state:
+/// Drop feedback is the **make-room preview**, always on: while dragging,
+/// rows part to open a live gap at the prospective slot. The gap is
+/// paint-only — structure is untouched until the drop commits, and no
+/// structural listeners or sync diffs fire from the preview. The dragged
+/// row's in-place copy is hidden entirely (its slot closes up under it),
+/// so the floating drag proxy is its only representation.
 ///
-/// - The drop indicator ([showDropIndicator]) subscribes to the reorder
-///   controller's [ChangeNotifier] channel (coalesced to semantic target
-///   changes) plus the scrollable's position (pure repositioning — an
-///   external scroll can move the target row on screen without a target
-///   change). Geometry is derived HERE, not by the controller: the
-///   semantic [TreeDropTarget] carries sliver-local row geometry
-///   (`targetPaintedY` / `targetExtent` / `depth`), converted using
-///   [SliverReorderableTree.indentPerDepth] and the render port's
-///   `precedingScrollExtent`.
-/// - The drag proxy ([showDragProxy] / [dragProxyBuilder]) subscribes to
-///   [TreeReorderController.pointerPosition] — the per-move channel —
-///   and floats the dragged row's preview at the grab point.
+/// Drag UI lives in one overlay entry owned by this widget's state: the
+/// drag proxy ([showDragProxy] / [dragProxyBuilder]) subscribes to
+/// [TreeReorderController.pointerPosition] — the per-move channel — and
+/// floats the dragged row's preview at the grab point.
 ///
 /// The pointer's horizontal position picks the drop depth at subtree
 /// right-boundaries (the default `x ~/ indentPerDepth` mapper passed to
-/// `startDrag`), and [makeRoomOnDrag] switches the feedback paradigm from
-/// the indicator line to a live paint-only gap at the prospective slot.
-/// In make-room mode with a proxy, slot selection is CARD-ANCHORED: it
-/// probes at the floating card's midpoint rather than the pointer, so a
-/// long-press touch drag tracks the card in hand regardless of grab
-/// point (handle drags are unaffected — their grab is centered). Opt-in
-/// [hapticsOnDrag] adds lift / slot-change feedback.
+/// `startDrag`). With the proxy enabled (the default), slot selection is
+/// CARD-ANCHORED: it probes at the floating card's midpoint rather than
+/// the pointer, so a long-press touch drag tracks the card in hand
+/// regardless of grab point (handle drags are unaffected — their grab is
+/// centered). Opt-in [hapticsOnDrag] adds lift / slot-change feedback.
 library;
 
 import 'package:flutter/gestures.dart' show DragStartBehavior;
@@ -89,13 +84,8 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
     required this.nodeBuilder,
     this.maxStickyDepth = 0,
     this.indentPerDepth = 24.0,
-    this.draggedOpacity = 0.3,
-    this.showDropIndicator = true,
-    this.dropIndicatorColor = const Color(0xFF2196F3),
-    this.dropIndicatorThickness = 2.0,
-    this.showDragProxy = false,
+    this.showDragProxy = true,
     this.dragProxyBuilder,
-    this.makeRoomOnDrag = false,
     this.hapticsOnDrag = false,
     this.addRepaintBoundaries = true,
     super.key,
@@ -123,28 +113,22 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
   /// See [SliverTree.maxStickyDepth].
   final int maxStickyDepth;
 
-  /// Horizontal indent used per depth level when positioning the drop
-  /// indicator. Should match the indent your [nodeBuilder] produces.
+  /// Horizontal indent per depth level, used to map the pointer's
+  /// horizontal position to a preferred drop depth (`x ~/ indentPerDepth`)
+  /// at subtree boundaries, where one visible slot has several legal depth
+  /// expressions. Should match the indent your [nodeBuilder] produces.
+  ///
+  /// Set to `0` to disable x-aware depth selection entirely — drops then
+  /// always resolve at the deepest legal level.
   final double indentPerDepth;
 
-  /// Opacity applied to the source row while it is being dragged.
-  final double draggedOpacity;
-
-  /// Whether to render the built-in drop-indicator line. Set to false when
-  /// providing custom drop feedback (e.g. a listener on
-  /// [reorderController] driving your own overlay).
-  final bool showDropIndicator;
-
-  /// Color of the drop indicator line.
-  final Color dropIndicatorColor;
-
-  /// Thickness of the drop indicator line in logical pixels.
-  final double dropIndicatorThickness;
-
   /// Whether to render a floating preview of the dragged row that follows
-  /// the pointer, anchored at the grab point. Defaults to false — the
-  /// classic in-place dimmed row. Implied true when
-  /// [dragProxyBuilder] is provided.
+  /// the pointer, anchored at the grab point. Defaults to true, and is
+  /// implied true when [dragProxyBuilder] is provided.
+  ///
+  /// Turning this off leaves the drag with no representation under the
+  /// pointer: the make-room preview hides the dragged row's in-place copy
+  /// so its slot can close, and only the opening gap remains as feedback.
   ///
   /// The preview renders in the root [Overlay], OUTSIDE the row's original
   /// ancestry — the same contract as `Draggable.feedback`. Rows using
@@ -165,21 +149,6 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
   /// typically wrap the preview in a transparency `Material` here).
   final Widget Function(BuildContext context, TKey key, Widget? rowChild)?
   dragProxyBuilder;
-
-  /// Make-room mode: while dragging, rows part to open a live gap at the
-  /// prospective drop slot (paint-only — structure is untouched until the
-  /// drop commits, and no structural listeners or sync diffs fire from
-  /// the preview). Defaults to false — the classic indicator-line
-  /// paradigm.
-  ///
-  /// In make-room mode the dragged row's in-place copy is hidden entirely
-  /// (its slot closes up under it), so pair this with [showDragProxy] or
-  /// [dragProxyBuilder] — the floating preview becomes the dragged row's
-  /// only representation, and slot selection is then CARD-ANCHORED
-  /// (probed at the proxy's midpoint — see `startDrag`). Best suited to
-  /// leaf/collapsed drags: an expanded parent's descendant rows are not
-  /// lifted with it.
-  final bool makeRoomOnDrag;
 
   /// Opt-in drag haptics: [HapticFeedback.selectionClick] on lift and on
   /// each SEMANTIC SLOT change. Deliberately debounced on the slot identity
@@ -211,9 +180,7 @@ class _ReorderableScope<TKey> extends InheritedWidget {
   const _ReorderableScope({
     required this.reorderController,
     required this.draggedKey,
-    required this.draggedOpacity,
     required this.indentPerDepth,
-    required this.makeRoomOnDrag,
     required this.dragProxyEnabled,
     required this.onDragStart,
     required this.onSessionInterrupted,
@@ -222,11 +189,9 @@ class _ReorderableScope<TKey> extends InheritedWidget {
 
   final TreeReorderController<TKey> reorderController;
 
-  /// The key whose row is currently dragged, or null. Drives source-row
-  /// dimming declaratively.
+  /// The key whose row is currently dragged, or null. Drives hiding the
+  /// source row declaratively — make-room closes its slot underneath it.
   final TKey? draggedKey;
-
-  final double draggedOpacity;
 
   /// Indent per depth level; rows use it to build the default x → depth
   /// hint mapper passed to `startDrag`. Carried as the raw double
@@ -234,20 +199,14 @@ class _ReorderableScope<TKey> extends InheritedWidget {
   /// stays honest.
   final double indentPerDepth;
 
-  /// Make-room mode: rows pass it to `startDrag`, and the dragged row's
-  /// in-place copy renders at opacity 0 (its slot closes up — the drag
-  /// proxy is its only representation).
-  final bool makeRoomOnDrag;
-
   /// Whether the floating drag proxy is enabled. Rows forward it as
   /// `startDrag(settleFromRelease:)` so the drop FLIP starts at the
   /// proxy's release position — the proxy hands off to the real row
   /// mid-flight instead of the row replaying the old-slot slide.
   final bool dragProxyEnabled;
 
-  /// Row [key] successfully started a drag session: dim it, show the
-  /// drop indicator, and (when enabled) float the drag proxy built from
-  /// [rowChild].
+  /// Row [key] successfully started a drag session: hide it and (when
+  /// enabled) float the drag proxy built from [rowChild].
   final void Function(TKey key, Widget rowChild) onDragStart;
 
   /// Deactivate-backstop channel: the row owning [key]'s session unmounted
@@ -259,9 +218,7 @@ class _ReorderableScope<TKey> extends InheritedWidget {
   @override
   bool updateShouldNotify(_ReorderableScope<TKey> old) {
     return draggedKey != old.draggedKey ||
-        draggedOpacity != old.draggedOpacity ||
         indentPerDepth != old.indentPerDepth ||
-        makeRoomOnDrag != old.makeRoomOnDrag ||
         dragProxyEnabled != old.dragProxyEnabled ||
         !identical(reorderController, old.reorderController);
   }
@@ -274,7 +231,6 @@ class _ReorderableScope<TKey> extends InheritedWidget {
 
 class _SliverReorderableTreeState<TKey, TData>
     extends State<SliverReorderableTree<TKey, TData>> {
-  OverlayEntry? _indicatorEntry;
   OverlayEntry? _proxyEntry;
   TKey? _draggedKey;
 
@@ -295,9 +251,6 @@ class _SliverReorderableTreeState<TKey, TData>
       oldWidget.reorderController.removeListener(_onControllerChanged);
       widget.reorderController.addListener(_onControllerChanged);
     }
-    if (!widget.showDropIndicator) {
-      _removeIndicator();
-    }
     if (!widget.showDragProxy && widget.dragProxyBuilder == null) {
       _removeProxy();
     }
@@ -306,12 +259,11 @@ class _SliverReorderableTreeState<TKey, TData>
   @override
   void dispose() {
     widget.reorderController.removeListener(_onControllerChanged);
-    _removeIndicator();
     _removeProxy();
     super.dispose();
   }
 
-  /// Syncs local drag UI (dimmed row + drop indicator) with the
+  /// Syncs local drag UI (hidden source row + drag proxy) with the
   /// controller's session state. This is the SINGLE owner of drag-UI
   /// teardown for controller-driven session ends: the row wrappers'
   /// end/cancel handlers only forward to the controller, whose
@@ -361,38 +313,6 @@ class _SliverReorderableTreeState<TKey, TData>
     _hapticsDragging = dragging;
   }
 
-  void _removeIndicator() {
-    _indicatorEntry?.remove();
-    _indicatorEntry = null;
-  }
-
-  void _ensureIndicator(BuildContext context) {
-    if (!widget.showDropIndicator) {
-      return;
-    }
-    if (_indicatorEntry != null) {
-      return;
-    }
-    final overlay = Overlay.maybeOf(context, rootOverlay: true);
-    if (overlay == null) {
-      return;
-    }
-    _indicatorEntry = OverlayEntry(
-      builder: (_) => _DropIndicator<TKey>(
-        reorderController: widget.reorderController,
-        color: widget.dropIndicatorColor,
-        thickness: widget.dropIndicatorThickness,
-        indentPerDepth: widget.indentPerDepth,
-        scrollableFinder: () {
-          // Resolve the innermost scrollable at this widget's build context.
-          // Called lazily on every repaint so a changing viewport still works.
-          return Scrollable.maybeOf(this.context);
-        },
-      ),
-    );
-    overlay.insert(_indicatorEntry!);
-  }
-
   void _removeProxy() {
     _proxyEntry?.remove();
     _proxyEntry = null;
@@ -425,22 +345,20 @@ class _SliverReorderableTreeState<TKey, TData>
     overlay.insert(_proxyEntry!);
   }
 
-  /// Called (via the scope) from a row wrapper when drag starts. Lowers
-  /// the source row's opacity, shows the drop indicator, and floats the
-  /// drag proxy when enabled.
+  /// Called (via the scope) from a row wrapper when drag starts. Hides the
+  /// source row (make-room closes its slot) and floats the drag proxy when
+  /// enabled.
   void _onDragStart(TKey key, Widget rowChild) {
     _draggedRowChild = rowChild;
-    _ensureIndicator(context);
     _ensureProxy(context);
     setState(() => _draggedKey = key);
   }
 
-  /// Called when drag ends or cancels. Restores opacity and hides the
-  /// indicator and proxy.
+  /// Called when drag ends or cancels. Restores the source row and hides
+  /// the proxy.
   void _onDragEnd() {
     if (!mounted) return;
     setState(() => _draggedKey = null);
-    _removeIndicator();
     _removeProxy();
   }
 
@@ -466,9 +384,7 @@ class _SliverReorderableTreeState<TKey, TData>
     return _ReorderableScope<TKey>(
       reorderController: widget.reorderController,
       draggedKey: _draggedKey,
-      draggedOpacity: widget.draggedOpacity,
       indentPerDepth: widget.indentPerDepth,
-      makeRoomOnDrag: widget.makeRoomOnDrag,
       dragProxyEnabled:
           widget.showDragProxy || widget.dragProxyBuilder != null,
       onDragStart: _onDragStart,
@@ -501,7 +417,7 @@ class _SliverReorderableTreeState<TKey, TData>
 /// Wrapper produced by `wrap(...)` in the node builder. Handles:
 ///
 /// - Gesture recognition (long-press on the whole row or drag from a handle).
-/// - Dimming the source during a drag.
+/// - Hiding the source row during a drag (make-room closes its slot).
 /// - Forwarding pointer events to the [TreeReorderController] (read from
 ///   the inherited scope — no ancestor-State reference).
 class _ReorderableRow<TKey> extends StatefulWidget {
@@ -549,7 +465,6 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
   /// the one that actually owns the session.
   late TreeReorderController<TKey> _reorder;
   late double _indentPerDepth;
-  late bool _makeRoomOnDrag;
   late bool _dragProxyEnabled;
   late void Function(TKey, Widget) _onDragStartCallback;
   late void Function(TKey) _onSessionInterruptedCallback;
@@ -565,7 +480,6 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     );
     _reorder = scope!.reorderController;
     _indentPerDepth = scope.indentPerDepth;
-    _makeRoomOnDrag = scope.makeRoomOnDrag;
     _dragProxyEnabled = scope.dragProxyEnabled;
     _onDragStartCallback = scope.onDragStart;
     _onSessionInterruptedCallback = scope.onSessionInterrupted;
@@ -659,19 +573,13 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
   Widget build(BuildContext context) {
     final scope = _ReorderableScope.maybeOf<TKey>(context);
     final isMe = scope?.draggedKey == widget.nodeKey;
-    // Make-room mode hides the in-place dragged row entirely: its slot
-    // closes up underneath it, so any residual paint would overlap the
-    // rows shifting into that space. The drag proxy is its representation.
-    final double opacity;
-    if (!isMe) {
-      opacity = 1.0;
-    } else if (scope?.makeRoomOnDrag ?? false) {
-      opacity = 0.0;
-    } else {
-      opacity = scope?.draggedOpacity ?? 1.0;
-    }
-
-    Widget content = Opacity(opacity: opacity, child: widget.child);
+    // Make-room hides the in-place dragged row entirely: its slot closes
+    // up underneath it, so any residual paint would overlap the rows
+    // shifting into that space. The drag proxy is its representation.
+    Widget content = Opacity(
+      opacity: isMe ? 0.0 : 1.0,
+      child: widget.child,
+    );
 
     if (widget.handle != null) {
       // Handle-only drag: row is otherwise freely scrollable/tappable.
@@ -882,7 +790,7 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
       pointerGlobal: globalPosition,
       depthForPointerX:
           indent > 0 ? (x) => (x / indent).floor() : null,
-      makeRoom: _makeRoomOnDrag,
+      makeRoom: true,
       settleFromRelease: _dragProxyEnabled,
     );
     if (!started) {
@@ -995,124 +903,6 @@ class _DragProxy<TKey> extends StatelessWidget {
               width: viewport.size.width,
               height: geometry.rowExtent > 0 ? geometry.rowExtent : null,
               child: IgnorePointer(child: content),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Overlay entry rendering the drop indicator line.
-///
-/// Subscribes directly to [TreeReorderController] (which is a
-/// [ChangeNotifier]) so the indicator rebuilds on every target change —
-/// including pointer moves that don't otherwise schedule a frame.
-///
-/// Derives the indicator's position from the SEMANTIC target: sliver-local
-/// row geometry + zone select the edge (above → row top, into/below → row
-/// bottom), the render port's `precedingScrollExtent` converts to viewport
-/// scroll space, and [indentPerDepth] × depth gives the indent.
-class _DropIndicator<TKey> extends StatefulWidget {
-  const _DropIndicator({
-    required this.reorderController,
-    required this.color,
-    required this.thickness,
-    required this.indentPerDepth,
-    required this.scrollableFinder,
-  });
-
-  final TreeReorderController<TKey> reorderController;
-  final Color color;
-  final double thickness;
-  final double indentPerDepth;
-  final ScrollableState? Function() scrollableFinder;
-
-  @override
-  State<_DropIndicator<TKey>> createState() => _DropIndicatorState<TKey>();
-}
-
-class _DropIndicatorState<TKey> extends State<_DropIndicator<TKey>> {
-  @override
-  void initState() {
-    super.initState();
-    widget.reorderController.addListener(_onControllerChanged);
-  }
-
-  @override
-  void didUpdateWidget(covariant _DropIndicator<TKey> oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.reorderController, widget.reorderController)) {
-      oldWidget.reorderController.removeListener(_onControllerChanged);
-      widget.reorderController.addListener(_onControllerChanged);
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.reorderController.removeListener(_onControllerChanged);
-    super.dispose();
-  }
-
-  void _onControllerChanged() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final target = widget.reorderController.currentTarget;
-    if (target == null) return const SizedBox.shrink();
-    final port = widget.reorderController.renderPort;
-    if (port == null) return const SizedBox.shrink();
-    final scrollable = widget.scrollableFinder();
-    if (scrollable == null) return const SizedBox.shrink();
-
-    // Rebuild on every scroll tick: viewport-local position depends on
-    // position.pixels, and an external scroll can move the target row
-    // on screen WITHOUT a controller notification (the semantic target
-    // often survives small scrolls). ListenableBuilder manages the
-    // subscription across position identity changes.
-    return ListenableBuilder(
-      listenable: scrollable.position,
-      builder: (context, _) {
-        final viewport = scrollable.context.findRenderObject() as RenderBox?;
-        if (viewport == null || !viewport.attached) {
-          return const SizedBox.shrink();
-        }
-
-        // Zone selects the row edge: `above` draws at the row's top,
-        // `into`/`below` at its bottom (for `below` on an expanded parent
-        // the resolver already picked first-child semantics, and the
-        // bottom edge IS the first child's slot). Sliver-local → viewport
-        // scroll space by adding the tree's precedingScrollExtent.
-        final sliverLocalY = target.zone == TreeDropZone.above
-            ? target.targetPaintedY
-            : target.targetPaintedY + target.targetExtent;
-        final indicatorScrollY = sliverLocalY + port.precedingScrollExtent;
-        final indicatorIndent = widget.indentPerDepth * target.depth;
-
-        final viewportLocalY = indicatorScrollY - scrollable.position.pixels;
-        if (viewportLocalY < 0 || viewportLocalY > viewport.size.height) {
-          return const SizedBox.shrink();
-        }
-
-        final globalTopLeft = viewport.localToGlobal(
-          Offset(indicatorIndent, viewportLocalY),
-        );
-        final lineWidth = viewport.size.width - indicatorIndent;
-
-        // Center the line visually on the indicator y rather than
-        // painting it below so the user's eye lands where the insertion
-        // will occur.
-        final topOffset = globalTopLeft.dy - widget.thickness / 2;
-        return Stack(
-          children: [
-            Positioned(
-              left: globalTopLeft.dx,
-              top: topOffset,
-              width: lineWidth,
-              height: widget.thickness,
-              child: IgnorePointer(child: ColoredBox(color: widget.color)),
             ),
           ],
         );

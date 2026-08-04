@@ -14,6 +14,7 @@ import '_reorder_preview_engine.dart';
 import '_scroll_orchestrator.dart';
 import '_slide_animation_engine.dart';
 import '_visible_order_buffer.dart';
+import 'animation_style.dart';
 import 'types.dart';
 
 export '_animation_coordinator.dart' show AnimationReader;
@@ -65,59 +66,63 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [TickerProviderStateMixin] or [SingleTickerProviderStateMixin].
   TreeController({
     required TickerProvider vsync,
-    Duration animationDuration = const Duration(milliseconds: 300),
-    Curve animationCurve = Curves.easeInOut,
+    TreeAnimationStyle animationStyle = const TreeAnimationStyle(),
     double indentWidth = 0.0,
     this.comparator,
-  }) : _animationDuration = animationDuration,
-       _animationCurve = animationCurve,
+  }) : assert(animationStyle.debugValidate()),
+       _animationStyle = animationStyle,
        _indentWidth = indentWidth,
        _vsync = vsync;
 
   final TickerProvider _vsync;
 
-  Duration _animationDuration;
+  TreeAnimationStyle _animationStyle;
 
-  /// Duration for expand/collapse animations.
+  /// Animation timing/easing for every family: expand/collapse,
+  /// enter/exit, reorder slides, make-room preview, drop settle.
   ///
-  /// Mutable at runtime. The new value is written onto every in-flight
+  /// Mutable at runtime. When [TreeAnimationStyle.expandCollapse]'s
+  /// duration changes, the new value is written onto every in-flight
   /// [AnimationController] (operation groups and the bulk group), but a
   /// running simulation is **not** re-timed — the controller reads
   /// `duration` at the next `forward()`/`reverse()`, so in-flight groups
   /// finish at their old rate and the new duration applies from the next
-  /// start. The per-node standalone ticker re-reads this on every tick,
-  /// so its animations adjust rate on the next frame; setting
-  /// [Duration.zero] makes all in-flight standalone animations complete
-  /// (finalize) on the next tick. Newly started animations pick up the
-  /// new duration at construction time.
-  Duration get animationDuration => _animationDuration;
-  set animationDuration(Duration value) {
-    if (value == _animationDuration) {
-      return;
-    }
-    _animationDuration = value;
-    _activeBulkGroup?.controller.duration = value;
-    for (final entry in _opGroupEntries) {
-      entry.value.controller.duration = value;
-    }
+  /// start. Curves apply to newly started groups only. The per-node
+  /// standalone ticker re-reads [TreeAnimationStyle.effectiveEnterExit]
+  /// on every tick, so enter/exit animations adjust immediately; a zero
+  /// enter/exit duration makes all in-flight standalone animations
+  /// complete (finalize) on the next tick.
+  TreeAnimationStyle get animationStyle {
+    return _animationStyle;
   }
 
-  Curve _animationCurve;
-
-  /// Curve for expand/collapse animations.
-  ///
-  /// Mutable at runtime. The standalone ticker re-reads this every frame,
-  /// so per-node enter/exit animations switch curves immediately. Bulk and
-  /// operation groups capture the curve at construction and keep it for the
-  /// remainder of that animation — swapping a group's curve mid-flight would
-  /// produce a visual discontinuity since the prior frames were already
-  /// committed under the old curve. New groups pick up the new curve.
-  Curve get animationCurve => _animationCurve;
-  set animationCurve(Curve value) {
-    if (value == _animationCurve) {
+  set animationStyle(TreeAnimationStyle value) {
+    assert(value.debugValidate());
+    if (value == _animationStyle) {
       return;
     }
-    _animationCurve = value;
+    final oldOpDuration = _animationStyle.expandCollapse.duration;
+    final oldSlideDuration = _animationStyle.reorderSlide.duration;
+    _animationStyle = value;
+    final newOpDuration = value.expandCollapse.duration;
+    if (newOpDuration != oldOpDuration) {
+      _activeBulkGroup?.controller.duration = newOpDuration;
+      for (final entry in _opGroupEntries) {
+        entry.value.controller.duration = newOpDuration;
+      }
+    }
+    // Disabled-mode split: a zero family CREATES no motion (install-time
+    // refusal), while DISABLING — this transition — STOPS motion. Zeroing
+    // the reorderSlide family purges in-flight slides here, explicitly;
+    // no other family transition purges (a live drop-settle glide already
+    // survives a live dropSettle zeroing, and standalone/op-group
+    // families carry their own live-read semantics).
+    if (oldSlideDuration != Duration.zero &&
+        value.reorderSlide.duration == Duration.zero) {
+      _slide.purgeActive();
+      // Rows painted mid-delta must repaint at their snapped positions.
+      _notifyAnimationListeners();
+    }
   }
 
   double _indentWidth;
@@ -384,8 +389,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   late final AnimationCoordinator<TKey> _anim = AnimationCoordinator<TKey>(
     vsync: _vsync,
     nids: _nids,
-    animationDurationGetter: () => _animationDuration,
-    animationCurveGetter: () => _animationCurve,
+    enterExitDurationGetter: () =>
+        _animationStyle.effectiveEnterExit.duration,
+    enterExitCurveGetter: () => _animationStyle.effectiveEnterExit.curve,
+    expandCollapseDurationGetter: () =>
+        _animationStyle.expandCollapse.duration,
     onOperationGroupStatus: _onOperationGroupStatusChange,
     onBulkAnimationStatus: _onBulkAnimationComplete,
     onStandaloneTickComplete: _onStandaloneTickComplete,
@@ -434,10 +442,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _keysToRemoveScratch.add(key);
         final parent = parentBeforeFinalize[key];
         if (parent != null) {
-          final siblings = _childListOf(parent);
-          if (siblings == null || siblings.isEmpty) {
-            affectedParents.add(parent);
-          }
+          // The parent's child-list length just changed; its builder may
+          // render the count (TreeItemView.childCount), so it must
+          // refresh, not only on the empty flip. A parent purged along
+          // with its subtree is a dead key here, which is a cheap no-op
+          // at the element side.
+          affectedParents.add(parent);
         }
       }
     }
@@ -663,8 +673,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     if (!anyLive) return;
     _stageSlideBaselineOnHosts(
-      duration: animationDuration,
-      curve: animationCurve,
+      duration: _animationStyle.expandCollapse.duration,
+      curve: _animationStyle.expandCollapse.curve,
     );
   }
 
@@ -1143,22 +1153,22 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// case, since most reorders are same-depth.
   bool get hasActiveXSlides => _slide.hasActiveX;
 
-  /// Maximum |currentDelta| across every active slide entry, or 0.0 when
-  /// no slides are active.
+  /// Test-only: the LARGER of the two engines' maxima (|currentDelta|
+  /// ceilings), or 0.0 when both are idle.
   ///
-  /// The render object uses this as a "slide overreach" to widen its build
-  /// and iteration ranges during a FLIP slide: a row whose *structural* y
-  /// is outside the viewport can still be painted inside the viewport if
-  /// its slide delta translates it there, and conversely a row whose
-  /// structural y is inside the viewport can translate out. Both ranges
-  /// (build window in performLayout, iteration window in paint/hit-test)
-  /// need to extend by this amount on each side to cover the displaced
-  /// rows — otherwise a swap of two large subtrees paints a visible gap
-  /// where a sliding row should appear.
-  ///
-  /// Shrinks toward 0.0 as the slide progresses (since entries'
-  /// currentDelta lerps to 0), so the transient overbuild contracts with
-  /// the animation.
+  /// NOT a bound on the composed per-row delta and deliberately not part
+  /// of the production read surface: [getSlideDeltaNid] SUMS the FLIP
+  /// engine and the make-room preview, so a row carrying both can exceed
+  /// this max — the bug class every former consumer was migrated off of.
+  /// Every window that must provably contain the composed painted
+  /// positions (the render's build/paint/hit-test overreach widening, the
+  /// bounded drop-target scan) reads [composedSlideAbsDeltaBound] (the
+  /// sum). This getter is retained solely for tests that pin the
+  /// max-vs-sum distinction: the make-room composition pin, and the
+  /// bounded-scan oracle's teeth gate, which must prove its engineered
+  /// overlap state exceeds a max-based bound — a value not derivable from
+  /// any other public read.
+  @visibleForTesting
   double get maxActiveSlideAbsDelta {
     final base = _slide.maxAbsDelta;
     if (!_preview.hasActive) {
@@ -1167,6 +1177,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final previewMax = _preview.maxAbsDelta;
     return base > previewMax ? base : previewMax;
   }
+
+  /// A true upper bound on the COMPOSED per-row delta — the SUM companion
+  /// of [maxActiveSlideAbsDelta]'s max. [getSlideDeltaNid] SUMS the FLIP
+  /// engine and the make-room preview, and a row can carry both at once
+  /// (a drag started while the prior commit's FLIP is still animating),
+  /// reaching up to `slideMax + previewMax`; a max-based bound
+  /// under-estimates exactly there. Use THIS bound wherever a window must
+  /// provably contain every composed painted position (render overreach
+  /// widening, the bounded drop-target scan). Degenerates to the single
+  /// engine's max whenever the other is idle (an idle engine's max is
+  /// 0.0), so single-engine states pay no extra width. Both engine maxima
+  /// are computed on demand — never stale.
+  double get composedSlideAbsDeltaBound =>
+      _slide.maxAbsDelta + _preview.maxAbsDelta;
 
   /// Current slide delta for [key] in scroll-space y, or 0.0 if the node is
   /// not currently sliding. Read by [RenderSliverTree.paint],
@@ -1332,21 +1356,85 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void animateSlideFromOffsets(
     Map<TKey, ({double y, double x})> priorOffsets,
     Map<TKey, ({double y, double x})> currentOffsets, {
-    Duration duration = const Duration(milliseconds: 220),
-    Curve curve = Curves.easeOutCubic,
+    Duration? duration,
+    Curve? curve,
     double maxSlideDistance = double.infinity,
-  }) => _slide.animateFromOffsets(
-    priorOffsets,
-    currentOffsets,
-    duration: duration,
-    curve: curve,
-    maxSlideDistance: maxSlideDistance,
-    structuralAnimationsDisabled: animationDuration == Duration.zero,
-  );
+  }) {
+    // Null timing resolves to the style's reorderSlide spec.
+    _slide.animateFromOffsets(
+      priorOffsets,
+      currentOffsets,
+      duration: duration ?? _animationStyle.reorderSlide.duration,
+      curve: curve ?? _animationStyle.reorderSlide.curve,
+      maxSlideDistance: maxSlideDistance,
+      structuralAnimationsDisabled:
+          _animationStyle.reorderSlide.duration == Duration.zero,
+    );
+  }
+
+  /// Internal-use-only: installs a drop-settle glide (the drag proxy's
+  /// cancel return / dead-commit-slide fallback).
+  ///
+  /// Identical to [animateSlideFromOffsets] except the slide-engine
+  /// kill switch is computed from the DROP-SETTLE family
+  /// ([TreeAnimationStyle.effectiveDropSettle]) instead of
+  /// `reorderSlide`, so the glide honors its own family's zero rule.
+  /// [duration]/[curve] are the drag session's CAPTURED spec — values
+  /// are captured per session, the kill switch reads the live style
+  /// (the same split the make-room family uses).
+  void animateDropSettleGlide(
+    Map<TKey, ({double y, double x})> priorOffsets,
+    Map<TKey, ({double y, double x})> currentOffsets, {
+    required Duration duration,
+    required Curve curve,
+  }) {
+    _slide.animateFromOffsets(
+      priorOffsets,
+      currentOffsets,
+      duration: duration,
+      curve: curve,
+      structuralAnimationsDisabled:
+          _animationStyle.effectiveDropSettle.duration == Duration.zero,
+    );
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // MAKE-ROOM PREVIEW
   // ══════════════════════════════════════════════════════════════════════════
+
+  /// Debug-only: number of visible-order slots examined by the last
+  /// [setReorderPreview] target computation. -1 when the computation has
+  /// never run (calls that exit before the target loop leave it
+  /// unchanged). Pins the loop's O(visibleNodeCount) contract — the order
+  /// buffer is grow-only, so an unbounded loop would silently scan the
+  /// stale capacity tail after a high-water mark.
+  int debugLastPreviewTargetIterationCount = -1;
+
+  /// Debug-only: number of full target-map computations performed by
+  /// [setReorderPreview] (memo misses). Never decremented. Pins the
+  /// geometry memo's contract: re-resolving an unchanged slot at pointer
+  /// frequency must not recompute the O(visibleNodeCount) target map.
+  int debugPreviewInstallCount = 0;
+
+  // Geometry memo for [setReorderPreview]: the target map is a pure
+  // function of (draggedNid, gapIndex, lift) over the visible order, so
+  // an identical re-send — the per-pointer-event common case while the
+  // pointer dwells in one slot — can skip the O(visibleNodeCount) loop
+  // and map allocation entirely. `_previewMemoStructureGen` guards the
+  // one case geometry can't see (an equal-extent swap inside the shifted
+  // span); the validity flag (rather than `_preview.hasActive`) keeps
+  // empty-target installs — hovering the dragged block's own slot, the
+  // initial state of every drag — memoizable too. Reset as the first
+  // line of [clearReorderPreview]; every other preview writer is either
+  // a purge path (which bumps the structure generation) or the engine's
+  // self-settle (only reachable via a release that started in
+  // [clearReorderPreview]).
+  bool _previewMemoValid = false;
+  int _previewMemoDraggedNid = -1;
+  int _previewMemoGapIndex = -1;
+  double _previewMemoLift = -1.0;
+  int _previewMemoStructureGen = -1;
+  bool _previewMemoSnap = false;
 
   /// Opens (or re-targets) the paint-only make-room preview for a drag of
   /// [draggedKey] hovering [targetKey]: rows at/after the gap slot shift
@@ -1365,8 +1453,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// path as FLIP slide deltas, so painted positions, painted-truth
   /// snapshots (FLIP baselines — this is what makes the commit handoff
   /// seamless), hit-testing, retention, and overreach all see them
-  /// automatically. Snaps instead of animating when [animationDuration]
-  /// is zero.
+  /// automatically. Snaps instead of animating when the effective
+  /// make-room spec (or the resolved per-call duration) is zero.
   ///
   /// The dragged subtree's own rows keep their painted position (the
   /// reorderable widget hides them behind the drag proxy in make-room
@@ -1375,8 +1463,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     required TKey draggedKey,
     required TKey targetKey,
     required bool gapBelowTarget,
-    required Duration duration,
-    required Curve curve,
+    Duration? duration,
+    Curve? curve,
   }) {
     final draggedNid = _nids[draggedKey];
     final targetNid = _nids[targetKey];
@@ -1404,6 +1492,33 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     final gapIndex = gapBelowTarget ? targetIndex + 1 : targetIndex;
 
+    // Null timing resolves to the style's effective make-room spec. The
+    // snap MODE is resolved here, above the memo check, because it is
+    // part of the memo key: the engine's retarget path early-outs on
+    // identical targets (so dropped re-sends with different
+    // duration/curve VALUES are behavior-identical), but the snap branch
+    // has no such early-out — an animating→snap re-send with identical
+    // geometry forces instant arrival and must not be skipped.
+    final resolvedDuration =
+        duration ?? _animationStyle.effectiveMakeRoom.duration;
+    final resolvedSnap =
+        _animationStyle.effectiveMakeRoom.duration == Duration.zero ||
+            resolvedDuration == Duration.zero;
+
+    // Geometry memo (see field docs): identical geometry + timing mode
+    // already installed — nothing to do. `lift` compares exactly: an
+    // unchanged state recomputes the same left-to-right sum bitwise, and
+    // any input extent change flows into the sum (or into gapIndex / the
+    // structure generation).
+    if (_previewMemoValid &&
+        draggedNid == _previewMemoDraggedNid &&
+        gapIndex == _previewMemoGapIndex &&
+        lift == _previewMemoLift &&
+        _structureGeneration == _previewMemoStructureGen &&
+        resolvedSnap == _previewMemoSnap) {
+      return;
+    }
+
     // Per-row shift over the CURRENT visible order (which still contains
     // the dragged rows in place): closing the vacated slot (−lift for
     // rows after the dragged subtree) composes with opening the gap
@@ -1411,7 +1526,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // cancel to zero; only the span between the old and new positions
     // moves.
     final targets = <int, double>{};
-    for (int i = 0; i < nids.length; i++) {
+    // Bound the scan by the VISIBLE count, not the buffer's grow-only
+    // capacity: [orderNidsView]'s tail beyond `_order.length` holds stale
+    // nids from the high-water mark ("only the first N entries are
+    // valid"). The `_ensureVisibleOrder()` above already flushed, so the
+    // length is current.
+    final scanCount = _order.length;
+    debugLastPreviewTargetIterationCount = scanCount;
+    for (int i = 0; i < scanCount; i++) {
       if (i >= draggedIndex && i < draggedEnd) {
         continue;
       }
@@ -1426,12 +1548,22 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         targets[nids[i]] = shift;
       }
     }
+    debugPreviewInstallCount++;
     _preview.setTargetsForNids(
       targets,
-      duration: duration,
-      curve: curve,
-      snap: animationDuration == Duration.zero || duration == Duration.zero,
+      duration: resolvedDuration,
+      curve: curve ?? _animationStyle.effectiveMakeRoom.curve,
+      snap: resolvedSnap,
     );
+    // Written after the install, for every install — including an
+    // empty-target one (own-slot hover), which the engine expresses as
+    // "no entries" but is still a held, re-skippable state.
+    _previewMemoValid = true;
+    _previewMemoDraggedNid = draggedNid;
+    _previewMemoGapIndex = gapIndex;
+    _previewMemoLift = lift;
+    _previewMemoStructureGen = _structureGeneration;
+    _previewMemoSnap = resolvedSnap;
   }
 
   /// Ends the make-room preview: animate the shifted rows back
@@ -1441,16 +1573,29 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// shifted painted positions and the mutation's layout takes over).
   void clearReorderPreview({
     required bool animate,
-    Duration duration = const Duration(milliseconds: 220),
-    Curve curve = Curves.easeOutCubic,
+    Duration? duration,
+    Curve? curve,
   }) {
+    // BEFORE the hasActive early return: a cleared-then-restarted preview
+    // must never memo-skip its first re-install, and the empty-target
+    // (own-slot) memo state has no engine entries to make hasActive true.
+    _previewMemoValid = false;
     if (!_preview.hasActive) {
       return;
     }
-    if (!animate || animationDuration == Duration.zero) {
+    // Null timing resolves to the style's effective make-room spec; a
+    // resolved zero snaps (mirrors [setReorderPreview]'s snap rule).
+    final resolvedDuration =
+        duration ?? _animationStyle.effectiveMakeRoom.duration;
+    if (!animate ||
+        _animationStyle.effectiveMakeRoom.duration == Duration.zero ||
+        resolvedDuration == Duration.zero) {
       _preview.snapClearAll();
     } else {
-      _preview.releaseAll(duration: duration, curve: curve);
+      _preview.releaseAll(
+        duration: resolvedDuration,
+        curve: curve ?? _animationStyle.effectiveMakeRoom.curve,
+      );
     }
   }
 
@@ -1529,7 +1674,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///   re-derived from the current animated offsets so it stays glued to
   ///   the moving target. A precise jump lands on the settled offset once
   ///   both finish. In this mode the concurrent phase runs for
-  ///   `max(duration, animationDuration)` so both the expansion and the
+  ///   `max(duration, expandCollapse.duration)` so both the expansion and the
   ///   scroll have time to complete.
   ///
   /// [alignment] controls placement within the viewport:
@@ -1559,7 +1704,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     TKey key, {
     required ScrollController scrollController,
     Duration duration = const Duration(milliseconds: 300),
-    Curve curve = Curves.easeInOut,
+    Curve curve = Curves.linear,
     double alignment = 0.0,
     AncestorExpansionMode ancestorExpansion = AncestorExpansionMode.immediate,
     double Function(TKey key)? extentEstimator,
@@ -1838,7 +1983,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     bool animate = true,
     bool preservePendingSubtreeState = false,
   }) {
-    if (animationDuration == Duration.zero) animate = false;
+    if (_animationStyle.effectiveEnterExit.duration == Duration.zero) {
+      animate = false;
+    }
     // See [insert] for the rationale: flush any deferred visible-order
     // rebuild from a prior in-batch mutator so the positional reads
     // below (`_calculateRootInsertIndex`, `_order.length`) operate on
@@ -2279,7 +2426,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     bool animate = true,
     bool preservePendingSubtreeState = false,
   }) {
-    if (animationDuration == Duration.zero) animate = false;
+    if (_animationStyle.effectiveEnterExit.duration == Duration.zero) {
+      animate = false;
+    }
     assert(_hasKey(parentKey), "Parent node $parentKey not found");
     // Flush any pending visible-order rebuild from a prior in-batch mutator
     // (moveNode, reorderRoots, reorderChildren, cancelDeletion, …). Without
@@ -2444,7 +2593,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Add to parent's children. Explicit index is live-space; the
     // comparator path already returns a full-space position.
     final siblings = _childListOrCreate(parentKey);
-    final parentHadChildren = siblings.isNotEmpty;
     final effectiveIndex = index != null
         ? _liveIndexToFullInsertIndex(siblings, index)
         : (comparator != null ? _sortedIndex(siblings, node) : null);
@@ -2492,21 +2640,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
     // The new key enters via createChild. The only retained row whose
-    // builder output can change is the parent — and only when its
-    // hasChildren state just flipped from false → true (the chevron
-    // appears for the first time).
-    final affected = <TKey>{};
-    if (!parentHadChildren) {
-      affected.add(parentKey);
-    }
-    _notifyStructural(affectedKeys: affected);
+    // builder output can change is the parent: its child count grew (and
+    // possibly its hasChildren flipped), both reachable from nodeBuilder
+    // via TreeItemView.
+    _notifyStructural(affectedKeys: <TKey>{parentKey});
   }
 
   /// Removes a node and all its descendants from the tree.
   ///
   /// If [animate] is true, the nodes will animate out.
   void remove({required TKey key, bool animate = true}) {
-    if (animationDuration == Duration.zero) animate = false;
+    if (_animationStyle.effectiveEnterExit.duration == Duration.zero) {
+      animate = false;
+    }
     if (!_hasKey(key)) {
       return;
     }
@@ -2528,19 +2674,22 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           _startStandaloneExitAnimation(nodeId);
         }
       }
-      // Animated path: parent's child list is not mutated until exit
-      // animations complete; the hasChildren-flip refresh is fired from
-      // the standalone-tick / group-dismissed sites at completion time.
+      // Animated path: the parent's child list is not mutated until exit
+      // animations complete; the raw-count refresh fires from the
+      // standalone-tick / group-dismissed sites at purge time. But the
+      // parent's LIVE child count changed right here: pending-deletion
+      // marking is the moment liveChildCount readers go stale, so the
+      // parent row must refresh now as well.
+      if (parentKey != null) {
+        affected.add(parentKey);
+      }
     } else {
       _removeNodesImmediate(nodesToRemove);
       _structureGeneration++;
-      // Immediate path: if [key] was the last child under its parent, the
-      // parent's hasChildren just flipped true → false.
+      // Immediate path: the parent's child-list length changed (and its
+      // hasChildren may have flipped); its builder may render the count.
       if (parentKey != null) {
-        final siblings = _childListOf(parentKey);
-        if (siblings == null || siblings.isEmpty) {
-          affected.add(parentKey);
-        }
+        affected.add(parentKey);
       }
     }
     _notifyStructural(affectedKeys: affected);
@@ -2572,7 +2721,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [ArgumentError]. Expansion state, animation state, and measured
   /// extents are preserved. Pending-deletion roots are appended after the
   /// live roots.
-  void reorderRoots(List<TKey> orderedKeys, {bool animate = true}) {
+  ///
+  /// When [animate] is true, shifted roots get a paint-only FLIP slide
+  /// over [slideDuration]/[slideCurve]; both default to the controller's
+  /// [animationStyle] `reorderSlide` spec when omitted.
+  void reorderRoots(
+    List<TKey> orderedKeys, {
+    bool animate = true,
+    Duration? slideDuration,
+    Curve? slideCurve,
+  }) {
     final pendingRoots = <TKey>[];
     final liveRootSet = <TKey>{};
     for (final k in _roots) {
@@ -2598,10 +2756,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Stage the FLIP slide baseline BEFORE mutating so shifted roots slide to
     // their new positions (roots are depth-0 and the _markVisibleOrderDirty
     // below always fires, so the next layout consumes the baseline).
-    if (animate && animationDuration != Duration.zero) {
+    // Family kill switch: a zero reorderSlide spec disables reorder
+    // slides even for explicit per-call durations (the engine also
+    // snaps a staged zero duration on its own).
+    if (animate && _animationStyle.reorderSlide.duration != Duration.zero) {
+      // Null timing resolves to the style's reorderSlide spec.
       _stageSlideBaselineOnHosts(
-        duration: animationDuration,
-        curve: animationCurve,
+        duration: slideDuration ?? _animationStyle.reorderSlide.duration,
+        curve: slideCurve ?? _animationStyle.reorderSlide.curve,
       );
     }
     _roots
@@ -2621,8 +2783,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// children of [parentKey], with no duplicates; violating that throws an
   /// [ArgumentError], as does an unknown [parentKey]. Expansion state,
   /// animation state, and measured extents are preserved.
-  void reorderChildren(TKey parentKey, List<TKey> orderedKeys,
-      {bool animate = true}) {
+  ///
+  /// When [animate] is true and the children are visible, shifted rows
+  /// get a paint-only FLIP slide over [slideDuration]/[slideCurve]; both
+  /// default to the controller's [animationStyle] `reorderSlide` spec
+  /// when omitted.
+  void reorderChildren(
+    TKey parentKey,
+    List<TKey> orderedKeys, {
+    bool animate = true,
+    Duration? slideDuration,
+    Curve? slideCurve,
+  }) {
     if (!_hasKey(parentKey)) {
       throw ArgumentError.value(parentKey, "parentKey", "not found");
     }
@@ -2657,10 +2829,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // unconsumed baseline.
     final visible =
         _isExpandedKey(parentKey) && _ancestorsExpandedFast(parentKey);
-    if (animate && visible && animationDuration != Duration.zero) {
+    // Family kill switch — see reorderRoots.
+    if (animate &&
+        visible &&
+        _animationStyle.reorderSlide.duration != Duration.zero) {
+      // Null timing resolves to the style's reorderSlide spec.
       _stageSlideBaselineOnHosts(
-        duration: animationDuration,
-        curve: animationCurve,
+        duration: slideDuration ?? _animationStyle.reorderSlide.duration,
+        curve: slideCurve ?? _animationStyle.reorderSlide.curve,
       );
     }
 
@@ -2705,8 +2881,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// as a result of the move (the moved subtree itself plus any siblings
   /// that shift to make room) gets a FLIP slide that lerps from its
   /// pre-move painted position to its post-move structural position over
-  /// [slideDuration] using [slideCurve]. The slide is paint-only — layout
-  /// settles immediately at the new structural positions.
+  /// [slideDuration] using [slideCurve]. Both default to the
+  /// controller's [animationStyle] `reorderSlide` spec when omitted.
+  /// The slide is paint-only — layout settles immediately at the new
+  /// structural positions.
   ///
   /// **Same-frame composition:** multiple animated `moveNode` calls in the
   /// same synchronous block (or inside the same [runBatch]) coalesce under
@@ -2719,7 +2897,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// row whose final position differs from its baseline gets a slide).
   ///
   /// Has no effect when no [SliverTree] is mounted on this controller, or
-  /// when the controller's [animationDuration] is `Duration.zero` (the
+  /// when the style's `reorderSlide` duration is `Duration.zero` (the
   /// engine no-ops in that case to honor the global animation-disabled
   /// setting).
   ///
@@ -2735,8 +2913,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     TKey? newParentKey, {
     int? index,
     bool animate = true,
-    Duration slideDuration = const Duration(milliseconds: 220),
-    Curve slideCurve = Curves.easeOutCubic,
+    Duration? slideDuration,
+    Curve? slideCurve,
   }) {
     assert(_hasKey(key), 'Node $key not found');
     assert(
@@ -2844,9 +3022,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // long-finished move to the wrong slide cycle.
     bool hostParticipating = false;
     if (animate) {
+      // Null timing resolves to the style's reorderSlide spec. Zero
+      // durations are killed downstream by the slide engine's disabled
+      // gate, not here — hostParticipating has anchor-draining side
+      // effects that must match today's master-zero shape.
       hostParticipating = _stageSlideBaselineOnHosts(
-        duration: slideDuration,
-        curve: slideCurve,
+        duration: slideDuration ?? _animationStyle.reorderSlide.duration,
+        curve: slideCurve ?? _animationStyle.reorderSlide.curve,
       );
 
       // Phantom-anchor for collapsed → visible reparenting:
@@ -2880,9 +3062,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     // Snapshot state needed to compute precise affected-keys after the move.
     final oldDepth = _depthOfKey(key);
-    final newParentWasEmpty = newParentKey != null
-        ? (_childListOf(newParentKey)?.isEmpty ?? true)
-        : false;
 
     // Cancel any animation/deletion state tied to the moved subtree's old
     // position. Without this, a node caught mid-exit-animation would still
@@ -2998,15 +3177,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (newDepth != oldDepth) {
       affected.addAll(movedSubtree());
     }
-    // Old parent may have just lost its last child (hasChildren true → false).
+    // Both parents' child-list lengths changed (and hasChildren may have
+    // flipped on either); their builders may render the count.
     if (oldParent != null) {
-      final siblings = _childListOf(oldParent);
-      if (siblings == null || siblings.isEmpty) {
-        affected.add(oldParent);
-      }
+      affected.add(oldParent);
     }
-    // New parent may have just gained its first child (hasChildren false → true).
-    if (newParentKey != null && newParentWasEmpty) {
+    if (newParentKey != null) {
       affected.add(newParentKey);
     }
     _notifyStructural(affectedKeys: affected);
@@ -3041,7 +3217,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Expands the given node, revealing its children.
   void expand({required TKey key, bool animate = true}) {
-    if (animationDuration == Duration.zero) animate = false;
+    if (_animationStyle.expandCollapse.duration == Duration.zero) {
+      animate = false;
+    }
     if (!_hasKey(key)) {
       return;
     }
@@ -3178,7 +3356,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // OperationGroupRegistry's install API (constructs the controller +
     // OperationGroup internally and wires the tick + status callbacks).
     final nodesToShow = _flattenSubtree(key, includeRoot: false);
-    final group = _anim.opGroups.install(key, animationCurve);
+    final group = _anim.opGroups.install(
+      key,
+      _animationStyle.expandCollapse.curve,
+    );
     _bumpAnimGen(); // invalidate animation-generation-keyed caches
 
     // Fast path check: count new vs existing nodes
@@ -3279,7 +3460,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// node is re-expanded, any previously expanded children will also show
   /// their children automatically.
   void collapse({required TKey key, bool animate = true}) {
-    if (animationDuration == Duration.zero) animate = false;
+    if (_animationStyle.expandCollapse.duration == Duration.zero) {
+      animate = false;
+    }
     if (!_hasKey(key) || !_isExpandedKey(key)) {
       return;
     }
@@ -3373,7 +3556,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // (collapse starts fully expanded and reverses toward 0).
     final group = _anim.opGroups.install(
       key,
-      animationCurve,
+      _animationStyle.expandCollapse.curve,
       initialValue: 1.0,
     );
     _bumpAnimGen(); // invalidate animation-generation-keyed caches
@@ -3414,7 +3597,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// Uses batch operations for better performance with large trees.
   void expandAll({bool animate = true, int? maxDepth}) {
-    if (animationDuration == Duration.zero) animate = false;
+    if (_animationStyle.expandCollapse.duration == Duration.zero) {
+      animate = false;
+    }
     // Flush any pending visible-order rebuild from a prior in-batch mutator
     // (moveNode, reorderRoots, reorderChildren, cancelDeletion, …). The
     // collection loop below classifies children via `_order.contains`;
@@ -3614,7 +3799,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       } else {
         // Create fresh group via the BulkAnimator (auto-disposes any
         // prior). All listener wiring happens inside createGroup.
-        _anim.bulk.createGroup(animationDuration, animationCurve);
+        _anim.bulk.createGroup(
+          _animationStyle.expandCollapse.duration,
+          _animationStyle.expandCollapse.curve,
+        );
         _bumpBulkGen(); // invalidate bulk + broad generation caches
 
         // Reverse standalone exit animations smoothly
@@ -3651,7 +3839,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// Uses batch operations for better performance with large trees.
   void collapseAll({bool animate = true, int? maxDepth}) {
-    if (animationDuration == Duration.zero) animate = false;
+    if (_animationStyle.expandCollapse.duration == Duration.zero) {
+      animate = false;
+    }
     // Flush any pending visible-order rebuild from a prior in-batch mutator.
     // `_getVisibleDescendants` below reads `_order.contains`; inside a
     // [runBatch] the order still reflects state at batch entry, so a node
@@ -3806,8 +3996,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Create fresh group via the BulkAnimator with value=1.0 (collapse
         // starts fully expanded and reverses toward 0).
         _anim.bulk.createGroup(
-          animationDuration,
-          animationCurve,
+          _animationStyle.expandCollapse.duration,
+          _animationStyle.expandCollapse.curve,
           initialValue: 1.0,
         );
         _bumpBulkGen();

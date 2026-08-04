@@ -39,7 +39,7 @@ void main() {
 
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         for (var i = 0; i < 5; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -68,7 +68,6 @@ void main() {
                 SliverReorderableTree<String, String>(
                   controller: tree,
                   reorderController: reorder,
-                  makeRoomOnDrag: true,
                   showDragProxy: true,
                   hapticsOnDrag: true,
                   nodeBuilder: (context, key, depth, wrap) {
@@ -157,7 +156,7 @@ void main() {
 
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         for (var i = 0; i < 3; i++) TreeNode(key: "r$i", data: "R$i"),
@@ -250,7 +249,7 @@ void main() {
 
     final tree = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     tree.setRoots([
       for (var i = 0; i < 3; i++) TreeNode(key: "r$i", data: "R$i"),

@@ -13,7 +13,7 @@ void main() {
       "stack-overflow on a 20k-deep chain", (tester) async {
     final controller = TreeController<int, int>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
 
@@ -39,7 +39,7 @@ void main() {
       "_clearChildrenTracking", (tester) async {
     final controller = TreeController<int, int>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
 

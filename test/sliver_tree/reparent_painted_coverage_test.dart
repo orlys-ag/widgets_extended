@@ -52,8 +52,12 @@ Widget _harness(
 TreeController<String, int> _newController(WidgetTester tester) {
   return TreeController<String, int>(
     vsync: tester,
-    animationDuration: _kSlideDuration,
-    animationCurve: Curves.easeOutCubic,
+    animationStyle: const TreeAnimationStyle(
+      expandCollapse: TreeAnimationSpec(
+        duration: _kSlideDuration,
+        curve: Curves.easeOutCubic,
+      ),
+    ),
   );
 }
 

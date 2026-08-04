@@ -16,6 +16,7 @@ library;
 import 'package:flutter/widgets.dart';
 
 import '_sync_helpers.dart';
+import 'animation_style.dart';
 import 'sliver_tree_widget.dart';
 import 'synced_tree_node.dart';
 import 'tree_controller.dart';
@@ -73,8 +74,27 @@ class TreeItemView<TKey, TItem> {
   }
 
   /// Number of direct children currently attached to this node.
+  ///
+  /// Includes children that are still animating out after a removal:
+  /// during an exit animation the departing rows are still painted, and
+  /// this count matches them. Use [liveChildCount] for the settled count.
   int get childCount {
     return controller.getChildCount(key);
+  }
+
+  /// Number of direct children excluding those animating out.
+  ///
+  /// Prefer [childCount] for a count rendered alongside the children
+  /// themselves: during an exit animation the departing rows are still
+  /// painted, and [childCount] matches them. Use this when the count
+  /// should describe the settled state instead.
+  int get liveChildCount {
+    return controller.liveChildCount(key);
+  }
+
+  /// Whether this node has children that are not animating out.
+  bool get hasLiveChildren {
+    return controller.hasLiveChildren(key);
   }
 
   /// Whether this node is currently expanded.
@@ -506,8 +526,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required this.itemBuilder,
     this.preserveExpansion = true,
     this.initiallyExpanded = true,
-    this.animationDuration = const Duration(milliseconds: 300),
-    this.animationCurve = Curves.easeInOut,
+    this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
@@ -531,8 +550,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required this.itemBuilder,
     this.preserveExpansion = true,
     this.initiallyExpanded = true,
-    this.animationDuration = const Duration(milliseconds: 300),
-    this.animationCurve = Curves.easeInOut,
+    this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
@@ -556,8 +574,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required this.itemBuilder,
     this.preserveExpansion = true,
     this.initiallyExpanded = true,
-    this.animationDuration = const Duration(milliseconds: 300),
-    this.animationCurve = Curves.easeInOut,
+    this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
@@ -581,8 +598,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required this.itemBuilder,
     this.preserveExpansion = true,
     this.initiallyExpanded = true,
-    this.animationDuration = const Duration(milliseconds: 300),
-    this.animationCurve = Curves.easeInOut,
+    this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
@@ -604,8 +620,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required this.itemBuilder,
     this.preserveExpansion = true,
     this.initiallyExpanded = true,
-    this.animationDuration = const Duration(milliseconds: 300),
-    this.animationCurve = Curves.easeInOut,
+    this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
@@ -641,11 +656,9 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// Whether all nodes should be expanded when the tree is first created.
   final bool initiallyExpanded;
 
-  /// Duration for expand/collapse and add/remove animations.
-  final Duration animationDuration;
-
-  /// Curve for animations.
-  final Curve animationCurve;
+  /// Animation timing/easing for every family, forwarded to the
+  /// internal [TreeController.animationStyle].
+  final TreeAnimationStyle animationStyle;
 
   /// Horizontal indent per depth level in logical pixels.
   final double indentWidth;
@@ -676,8 +689,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     super.initState();
     _treeController = TreeController<TKey, TItem>(
       vsync: this,
-      animationDuration: widget.animationDuration,
-      animationCurve: widget.animationCurve,
+      animationStyle: widget.animationStyle,
       indentWidth: widget.indentWidth,
     );
     _syncController = TreeSyncController<TKey, TItem>(
@@ -694,11 +706,8 @@ class _SyncedSliverTreeState<TKey, TItem>
   void didUpdateWidget(SyncedSliverTree<TKey, TItem> oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.animationDuration != widget.animationDuration) {
-      _treeController.animationDuration = widget.animationDuration;
-    }
-    if (oldWidget.animationCurve != widget.animationCurve) {
-      _treeController.animationCurve = widget.animationCurve;
+    if (oldWidget.animationStyle != widget.animationStyle) {
+      _treeController.animationStyle = widget.animationStyle;
     }
     if (oldWidget.indentWidth != widget.indentWidth) {
       _treeController.indentWidth = widget.indentWidth;

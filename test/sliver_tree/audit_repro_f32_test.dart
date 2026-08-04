@@ -17,7 +17,7 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       final sync = TreeSyncController(treeController: controller);
       addTearDown(() {

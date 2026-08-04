@@ -18,8 +18,7 @@ void main() {
               itemsOf: (_) => [for (var i = 0; i < 6; i++) "a_$i"],
               sectionKeyOf: (s) => s,
               itemKeyOf: (i) => i,
-              animationDuration: const Duration(milliseconds: 300),
-              animationCurve: Curves.easeInOut,
+              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
               headerBuilder: (ctx, v) {
                 controller = v.controller;
                 return Text(v.section);

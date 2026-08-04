@@ -21,7 +21,7 @@ void main() {
       "stickiness to its replacement", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
 

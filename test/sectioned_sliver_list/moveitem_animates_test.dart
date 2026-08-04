@@ -5,6 +5,7 @@
 /// one [runBatch] produced visually inconsistent animations.
 library;
 
+import 'package:flutter/animation.dart';
 import "package:flutter_test/flutter_test.dart";
 import "package:widgets_extended/sectioned_sliver_list/sectioned_sliver_list.dart";
 
@@ -20,7 +21,7 @@ void main() {
         vsync: tester,
         sectionKeyOf: (s) => s,
         itemKeyOf: (i) => i,
-        animationDuration: const Duration(milliseconds: 400),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -45,7 +46,8 @@ void main() {
       expect(controller.itemKeysOf("b"), equals(["a1"]));
 
       // Let any animation finish. With animate: true and a non-zero
-      // duration, pumping for at least the controller's animationDuration
+      // duration, pumping for at least the controller's expand/collapse
+      // spec duration
       // settles the slide cleanly without leaving stuck baselines /
       // ghosts in the controller.
       await tester.pump(const Duration(milliseconds: 500));

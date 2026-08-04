@@ -25,15 +25,24 @@ class BulkAnimator<TKey> {
     required TickerProvider vsync,
     required void Function() onTick,
     required void Function(AnimationStatus status) onStatusChanged,
+    required void Function() onGroupDisposed,
   }) : _nids = nids,
        _vsync = vsync,
        _onTick = onTick,
-       _onStatusChanged = onStatusChanged;
+       _onStatusChanged = onStatusChanged,
+       _onGroupDisposed = onGroupDisposed;
 
   final NodeIdRegistry<TKey> _nids;
   final TickerProvider _vsync;
   final void Function() _onTick;
   final void Function(AnimationStatus status) _onStatusChanged;
+
+  /// Invoked whenever an existing group is disposed (from any caller:
+  /// completion teardown, [createGroup] replacement, [clear]). Wired by
+  /// the coordinator to its broad-generation bump so "group disposal ⇒
+  /// union mirrors invalidated" holds by construction — the bug class
+  /// where a completion handler forgets the pairing cannot recur.
+  final void Function() _onGroupDisposed;
 
   AnimationGroup<TKey>? _group;
 
@@ -229,6 +238,10 @@ class BulkAnimator<TKey> {
   /// member's mirror slot. Sets the field to null FIRST, to prevent the
   /// disposing controller's
   /// final synchronous status event from interfering.
+  ///
+  /// Generation contract: the coordinator-wired [_onGroupDisposed]
+  /// callback discharges the broad-generation bump for every disposal, so
+  /// callers never pair one manually.
   void disposeGroup() {
     final g = _group;
     _group = null;
@@ -248,8 +261,11 @@ class BulkAnimator<TKey> {
         }
       }
       _generation++;
+      // After the field is nulled and the mirror is zeroed, so any
+      // re-entrant read triggered from here observes post-bump state.
+      _onGroupDisposed();
+      g.dispose();
     }
-    g?.dispose();
   }
 
   // ──────────────────────────────────────────────────────────────────────

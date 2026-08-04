@@ -58,8 +58,7 @@ Future<TreeController<String, String>> _startMidFlightExit(
 ) async {
   final controller = TreeController<String, String>(
     vsync: tester,
-    animationDuration: const Duration(milliseconds: 300),
-    animationCurve: Curves.linear,
+    animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
   );
   addTearDown(controller.dispose);
 
@@ -87,7 +86,7 @@ Future<TreeController<String, String>> _startMidFlightExit(
 
   // Trigger the claimed bug: honor a reduce-motion-style setting
   // mid-flight.
-  controller.animationDuration = Duration.zero;
+  controller.animationStyle = TreeAnimationStyle.disabled;
 
   // Bounded pumps only (the buggy state never settles, so no
   // pumpAndSettle). Total simulated time here (~1.16s) far exceeds the

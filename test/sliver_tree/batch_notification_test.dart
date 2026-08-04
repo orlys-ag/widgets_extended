@@ -1,3 +1,5 @@
+import 'package:flutter/animation.dart';
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import "package:flutter_test/flutter_test.dart";
 import "package:widgets_extended/sliver_tree/tree_controller.dart";
 import "package:widgets_extended/sliver_tree/tree_sync_controller.dart";
@@ -14,7 +16,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "a", data: "A")]);
@@ -42,7 +44,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "a", data: "A")]);
@@ -69,7 +71,7 @@ void main() {
     testWidgets("fires notification even when body throws", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "a", data: "A")]);
@@ -97,7 +99,7 @@ void main() {
     testWidgets("empty runBatch fires zero notifications", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "a", data: "A")]);
@@ -113,7 +115,7 @@ void main() {
     testWidgets("runBatch returns body's value", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
 
@@ -128,7 +130,7 @@ void main() {
     testWidgets("does not suppress animation tick listeners", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
       );
       addTearDown(controller.dispose);
 
@@ -163,7 +165,7 @@ void main() {
         // suppressed rather than firing a second notification.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         addTearDown(controller.dispose);
 
@@ -191,7 +193,7 @@ void main() {
       // structural notification). This test pins that contract.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
 
@@ -246,7 +248,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 100),
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
         );
         addTearDown(controller.dispose);
 
@@ -278,7 +280,7 @@ void main() {
         // payload changes — node-data listener must fire.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         addTearDown(controller.dispose);
 
@@ -304,7 +306,7 @@ void main() {
         // Same as above but for the insert() method (not insertRoot).
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         addTearDown(controller.dispose);
 
@@ -337,7 +339,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       final sync = TreeSyncController<String, String>(
@@ -371,7 +373,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       final sync = TreeSyncController<String, String>(
@@ -410,7 +412,7 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
       final sync = TreeSyncController<String, String>(
@@ -439,7 +441,7 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationDuration: Duration.zero,
+          animationStyle: TreeAnimationStyle.disabled,
         );
         addTearDown(controller.dispose);
         final sync = TreeSyncController<String, String>(

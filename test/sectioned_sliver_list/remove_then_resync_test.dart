@@ -2,6 +2,8 @@
 /// exit animation is still in flight must not throw inside reorderRoots.
 library;
 
+import 'package:flutter/animation.dart';
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sectioned_sliver_list/sectioned_list_controller.dart';
 
@@ -10,7 +12,7 @@ SectionedListController<String, String, String> _make(WidgetTester tester) {
     vsync: tester,
     sectionKeyOf: (s) => s,
     itemKeyOf: (i) => i,
-    animationDuration: const Duration(milliseconds: 100),
+    animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
   );
 }
 

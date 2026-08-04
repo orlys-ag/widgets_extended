@@ -1,12 +1,12 @@
 /// Regression test for S059: when app code calls
 /// `controller.cancelDrag()` directly (NOT via the widget's gesture
 /// handlers), the local UI in `_SliverReorderableTreeState` must clear
-/// — `_draggedKey` reset and the drop indicator removed.
+/// — `_draggedKey` reset and the drag proxy overlay removed.
 ///
 /// Before the fix, the state class never subscribed to the reorder
 /// controller; only the gesture handlers cleared `_draggedKey`. An
 /// external `cancelDrag()` cleared the controller's `_session` but
-/// left the row dimmed at `draggedOpacity` indefinitely.
+/// left the source row hidden indefinitely.
 ///
 /// The fix adds an `initState`/`didUpdateWidget`/`dispose` lifecycle
 /// for a controller listener that calls `_onDragEnd` when the session
@@ -18,8 +18,10 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
-const _kIndicatorColor = Color(0xFF00B0FF);
-
+/// Reads the in-place row's opacity. Mounts that assert on it disable the
+/// drag proxy: the default proxy clones the dragged row's child into the
+/// overlay under its own [Opacity], which would make this finder ambiguous
+/// mid-drag.
 double _opacityOf(WidgetTester tester, String rowKey) {
   final op = tester.widget<Opacity>(
     find.ancestor(
@@ -43,7 +45,7 @@ void _addModeSwapTest() {
     (tester) async {
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       tree.setRoots([
         const TreeNode(key: "a", data: "A"),
@@ -127,7 +129,7 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
     _mount(WidgetTester tester) async {
   final tree = TreeController<String, String>(
     vsync: tester,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
   tree.setRoots([
     const TreeNode(key: "a", data: "A"),
@@ -138,8 +140,6 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
   final reorder = TreeReorderController<String>(
     treeController: tree,
     vsync: tester,
-    slideDuration: const Duration(milliseconds: 80),
-    slideCurve: Curves.linear,
   );
 
   await tester.pumpWidget(
@@ -150,8 +150,7 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
             SliverReorderableTree<String, String>(
               controller: tree,
               reorderController: reorder,
-              draggedOpacity: 0.3,
-              dropIndicatorColor: _kIndicatorColor,
+              showDragProxy: false,
               nodeBuilder: (context, key, depth, wrap) {
                 return wrap(
                   longPressToDrag: true,
@@ -195,8 +194,9 @@ void main() {
       await tester.pump();
 
       // Sanity: drag is active.
-      expect(_opacityOf(tester, "a"), 0.3,
-          reason: "Mid-drag, row 'a' must be dimmed");
+      expect(_opacityOf(tester, "a"), 0.0,
+          reason: "Mid-drag, row 'a' must be hidden — make-room closes "
+              "its slot underneath it");
       expect(h.reorder.isDragging, isTrue);
 
       // External cancel — bypasses the gesture system entirely.
@@ -210,7 +210,7 @@ void main() {
         1.0,
         reason: "External cancelDrag() must clear _draggedKey via the "
             "state's controller listener (S059). Without the fix, "
-            "the row stays dimmed at draggedOpacity indefinitely.",
+            "the row stays hidden indefinitely.",
       );
 
       // Clean up the held gesture so the test framework doesn't
@@ -286,7 +286,7 @@ void main() {
       // Sanity test for the didUpdateWidget swap path.
       final tree = TreeController<String, String>(
         vsync: tester,
-        animationDuration: Duration.zero,
+        animationStyle: TreeAnimationStyle.disabled,
       );
       addTearDown(tree.dispose);
       tree.setRoots([const TreeNode(key: "x", data: "X")]);

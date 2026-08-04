@@ -80,8 +80,7 @@ void main() {
         addTearDown(scroll.dispose);
         final controller = TreeController<String, int>(
           vsync: tester,
-          animationDuration: const Duration(milliseconds: 800),
-          animationCurve: Curves.linear,
+          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 800), curve: Curves.linear)),
           indentWidth: _kIndentWidth,
         );
         addTearDown(controller.dispose);

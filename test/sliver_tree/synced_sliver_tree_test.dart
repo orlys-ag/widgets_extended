@@ -114,7 +114,7 @@ void main() {
                 SyncedSliverTree<String, String>(
                   tree: tree,
                   initiallyExpanded: true,
-                  animationDuration: Duration.zero,
+                  animationStyle: TreeAnimationStyle.disabled,
                   itemBuilder: (context, node) {
                     return SizedBox(
                       height: 48,
@@ -153,7 +153,7 @@ void main() {
                   SyncedSliverTree<String, String>(
                     tree: tree,
                     initiallyExpanded: true,
-                    animationDuration: Duration.zero,
+                    animationStyle: TreeAnimationStyle.disabled,
                     itemBuilder: (context, node) {
                       return SizedBox(height: 48, child: Text(node.item));
                     },
@@ -199,7 +199,7 @@ void main() {
               slivers: <Widget>[
                 SyncedSliverTree<String, String>(
                   tree: tree,
-                  animationDuration: Duration.zero,
+                  animationStyle: TreeAnimationStyle.disabled,
                   itemBuilder: (context, node) {
                     return const SizedBox(height: 48);
                   },
@@ -245,7 +245,7 @@ void main() {
               slivers: <Widget>[
                 SyncedSliverTree<String, String>(
                   tree: tree,
-                  animationDuration: Duration.zero,
+                  animationStyle: TreeAnimationStyle.disabled,
                   itemBuilder: (context, node) {
                     return const SizedBox(height: 48);
                   },
@@ -283,7 +283,7 @@ void main() {
                 SyncedSliverTree<String, String>(
                   tree: tree,
                   initiallyExpanded: false,
-                  animationDuration: Duration.zero,
+                  animationStyle: TreeAnimationStyle.disabled,
                   itemBuilder: (context, node) {
                     if (node.hasChildren) {
                       return node.watch(
@@ -346,7 +346,7 @@ void main() {
                         childrenByParent[key] ??
                         const <TreeNode<String, String>>[],
                     initiallyExpanded: true,
-                    animationDuration: Duration.zero,
+                    animationStyle: TreeAnimationStyle.disabled,
                     itemBuilder: (context, node) {
                       return SizedBox(
                         height: 48,
@@ -394,7 +394,7 @@ void main() {
                   keyOf: _workKey,
                   childrenOf: _workChildren,
                   initiallyExpanded: false,
-                  animationDuration: Duration.zero,
+                  animationStyle: TreeAnimationStyle.disabled,
                   itemBuilder: (context, node) {
                     return GestureDetector(
                       onTap: node.hasChildren ? node.toggle : null,
@@ -445,7 +445,7 @@ void main() {
                     return item.parentId;
                   },
                   initiallyExpanded: true,
-                  animationDuration: Duration.zero,
+                  animationStyle: TreeAnimationStyle.disabled,
                   itemBuilder: (context, node) {
                     return SizedBox(
                       height: 48,
@@ -506,7 +506,7 @@ void main() {
                 SyncedSliverTree<String, String>.snapshot(
                   snapshot: snapshot,
                   initiallyExpanded: true,
-                  animationDuration: Duration.zero,
+                  animationStyle: TreeAnimationStyle.disabled,
                   itemBuilder: (context, node) {
                     return SizedBox(
                       height: 48,
@@ -950,7 +950,7 @@ class _PreserveExpansionFlipState
               },
               preserveExpansion: widget.preserveExpansion,
               initiallyExpanded: widget.initiallyExpanded,
-              animationDuration: Duration.zero,
+              animationStyle: TreeAnimationStyle.disabled,
               itemBuilder: (context, node) {
                 _capturedController = node.controller;
                 return SizedBox(height: 48, child: Text(node.item.label));
@@ -996,7 +996,7 @@ class _MidAnimationFilterHarnessState
                 return item.parentId;
               },
               initiallyExpanded: true,
-              animationDuration: const Duration(milliseconds: 300),
+              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
               itemBuilder: (context, node) {
                 _capturedController = node.controller;
                 return SizedBox(height: 48, child: Text(node.item.label));
@@ -1048,7 +1048,7 @@ class _MidAnimationNodesHarnessState
               childrenOf: snapshot.buildChildren,
               initiallyExpanded: true,
               maxStickyDepth: 1,
-              animationDuration: const Duration(milliseconds: 300),
+              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
               itemBuilder: (context, node) {
                 _capturedController = node.controller;
                 return SizedBox(height: 48, child: Text(node.item.label));

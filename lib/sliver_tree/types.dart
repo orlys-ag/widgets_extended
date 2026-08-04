@@ -157,7 +157,7 @@ class SlideAnimation<TKey> {
   /// Duration of this specific slide. Set on install/composition. Per-slide
   /// rather than shared so multi-batch installs with different durations
   /// animate at their own rates.
-  Duration slideDuration = const Duration(milliseconds: 220);
+  Duration slideDuration = const Duration(milliseconds: 300);
 
   /// When true, the engine's un-touched re-baseline branch in
   /// `animateFromOffsets` skips this slide. Set by the render layer for

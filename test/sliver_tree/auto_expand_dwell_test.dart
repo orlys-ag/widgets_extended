@@ -7,6 +7,7 @@
 /// (no dwell timer exists).
 library;
 
+import 'package:widgets_extended/sliver_tree/animation_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/reorder_render_port.dart';
@@ -78,7 +79,7 @@ Future<ScrollableState> _mountScrollable(WidgetTester tester) async {
 TreeController<String, String> _collapsedParentTree(WidgetTester tester) {
   final controller = TreeController<String, String>(
     vsync: tester,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
   controller.setRoots([
     const TreeNode(key: "p", data: "P"),
@@ -215,7 +216,7 @@ void main() {
       (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationDuration: Duration.zero,
+      animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
     controller.setRoots([

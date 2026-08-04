@@ -12,7 +12,7 @@ import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 TreeController<String, int> _newController(WidgetTester tester) {
   return TreeController<String, int>(
     vsync: tester,
-    animationDuration: Duration.zero,
+    animationStyle: TreeAnimationStyle.disabled,
   );
 }
 

@@ -42,8 +42,7 @@ void main() {
     testWidgets("default (animate: true) slides shifted roots", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -71,8 +70,7 @@ void main() {
     testWidgets("animate: false snaps (no slide)", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -97,8 +95,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "root", data: "R")]);
@@ -129,8 +126,7 @@ void main() {
         (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "root", data: "R")]);
@@ -154,8 +150,7 @@ void main() {
     testWidgets("animate: false snaps (no slide)", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationDuration: const Duration(milliseconds: 200),
-        animationCurve: Curves.linear,
+        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "root", data: "R")]);
