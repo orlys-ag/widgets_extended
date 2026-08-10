@@ -24,47 +24,49 @@ void main() {
 
       // Two short rows total ~80px. A tall (100px) sticky header would
       // otherwise inflate paintExtent above totalScrollExtent.
-      controller.setRoots([
-        const TreeNode(key: "root", data: "root"),
-      ]);
+      controller.setRoots([const TreeNode(key: "root", data: "root")]);
       controller.setChildren("root", [
         const TreeNode(key: "child", data: "child"),
       ]);
       controller.expand(key: "root", animate: false);
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            height: 400,
-            child: CustomScrollView(
-              slivers: [
-                SliverTree<String, String>(
-                  controller: controller,
-                  maxStickyDepth: 1,
-                  nodeBuilder: (_, key, depth) => SizedBox(
-                    // Root is the sticky candidate; make it tall (100px).
-                    // Children are short (40px). totalScrollExtent ≈ 140.
-                    height: depth == 0 ? 100 : 40,
-                    child: Text(key),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: CustomScrollView(
+                slivers: [
+                  SliverTree<String, String>(
+                    controller: controller,
+                    maxStickyDepth: 1,
+                    nodeBuilder: (_, key, depth) => SizedBox(
+                      // Root is the sticky candidate; make it tall (100px).
+                      // Children are short (40px). totalScrollExtent ≈ 140.
+                      height: depth == 0 ? 100 : 40,
+                      child: Text(key),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
-      ));
+      );
 
       await tester.pumpAndSettle();
 
       // Find the sliver render object.
-      final sliver = tester
-          .renderObject<RenderSliver>(find.byType(SliverTree<String, String>));
+      final sliver = tester.renderObject<RenderSliver>(
+        find.byType(SliverTree<String, String>),
+      );
       final geometry = sliver.geometry!;
 
       expect(
         geometry.paintExtent,
         lessThanOrEqualTo(geometry.maxPaintExtent),
-        reason: "Sticky inflation must not push paintExtent above "
+        reason:
+            "Sticky inflation must not push paintExtent above "
             "maxPaintExtent (= totalScrollExtent). "
             "paintExtent=${geometry.paintExtent}, "
             "maxPaintExtent=${geometry.maxPaintExtent}",

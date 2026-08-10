@@ -47,10 +47,12 @@ class TreeNodeBuilder<TKey, TData> extends StatefulWidget {
   builder;
 
   @override
-  State<TreeNodeBuilder<TKey, TData>> createState() => _TreeNodeBuilderState<TKey, TData>();
+  State<TreeNodeBuilder<TKey, TData>> createState() =>
+      _TreeNodeBuilderState<TKey, TData>();
 }
 
-class _TreeNodeBuilderState<TKey, TData> extends State<TreeNodeBuilder<TKey, TData>> {
+class _TreeNodeBuilderState<TKey, TData>
+    extends State<TreeNodeBuilder<TKey, TData>> {
   late bool _hasChildren;
   late bool _isExpanded;
 

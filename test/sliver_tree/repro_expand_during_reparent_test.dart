@@ -24,9 +24,10 @@ import 'package:widgets_extended/sliver_tree/synced_tree_node.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
 
-SyncedTreeNode<String, String> _n(String k,
-        [List<SyncedTreeNode<String, String>>? c]) =>
-    SyncedTreeNode(key: k, data: k, children: c ?? const []);
+SyncedTreeNode<String, String> _n(
+  String k, [
+  List<SyncedTreeNode<String, String>>? c,
+]) => SyncedTreeNode(key: k, data: k, children: c ?? const []);
 
 const double _kRow = 48.0;
 
@@ -106,7 +107,8 @@ void _expectContinuous(
     expect(
       step,
       lessThanOrEqualTo(bound),
-      reason: "$label: painted jump between sample $i ($a) and "
+      reason:
+          "$label: painted jump between sample $i ($a) and "
           "${i + 1} ($b) = $step px exceeds $bound px over "
           "${intervalMs[i]} ms ($frames frames) — teleport",
     );
@@ -131,7 +133,12 @@ class _HarnessState extends State<_Harness> {
             SyncedSliverTree<String, String>(
               tree: widget.builder(),
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 400),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 controller ??= node.controller;
                 return SizedBox(
@@ -153,9 +160,19 @@ void main() {
     "expand collapsed section mid exit-slide hands off continuously",
     (tester) async {
       var fav = true;
-      await tester.pumpWidget(_Harness(builder: () => fav
-          ? [_n("fav", [_n("x"), _n("keep")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]));
+      await tester.pumpWidget(
+        _Harness(
+          builder: () => fav
+              ? [
+                  _n("fav", [_n("x"), _n("keep")]),
+                  _n("others", [_n("o1")]),
+                ]
+              : [
+                  _n("fav", [_n("keep")]),
+                  _n("others", [_n("x"), _n("o1")]),
+                ],
+        ),
+      );
       await tester.pumpAndSettle();
       final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
 
@@ -165,8 +182,14 @@ void main() {
 
       // Un-favorite x -> exit-slide into the collapsed `others` header.
       fav = false;
-      await tester.pumpWidget(_Harness(builder: () =>
-          [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]));
+      await tester.pumpWidget(
+        _Harness(
+          builder: () => [
+            _n("fav", [_n("keep")]),
+            _n("others", [_n("x"), _n("o1")]),
+          ],
+        ),
+      );
       await tester.pump();
 
       // Let the exit-slide run partway, then sample painted-Y across the
@@ -223,17 +246,33 @@ void main() {
       // Build state: x hidden in collapsed `others`; reparent x into `fav`
       // (visible) so it enters with a slide, then collapse `fav` mid-entry.
       var moved = false;
-      await tester.pumpWidget(_Harness(builder: () => moved
-          ? [_n("fav", [_n("keep"), _n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]));
+      await tester.pumpWidget(
+        _Harness(
+          builder: () => moved
+              ? [
+                  _n("fav", [_n("keep"), _n("x")]),
+                  _n("others", [_n("o1")]),
+                ]
+              : [
+                  _n("fav", [_n("keep")]),
+                  _n("others", [_n("x"), _n("o1")]),
+                ],
+        ),
+      );
       await tester.pumpAndSettle();
       final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
 
       // x is currently in `others`. Reparent x into `fav` to trigger an
       // entry-slide into the visible `fav` section.
       moved = true;
-      await tester.pumpWidget(_Harness(builder: () =>
-          [_n("fav", [_n("keep"), _n("x")]), _n("others", [_n("o1")])]));
+      await tester.pumpWidget(
+        _Harness(
+          builder: () => [
+            _n("fav", [_n("keep"), _n("x")]),
+            _n("others", [_n("o1")]),
+          ],
+        ),
+      );
       await tester.pump();
 
       // Run the entry-slide partway.

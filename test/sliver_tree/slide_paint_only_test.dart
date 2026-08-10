@@ -16,7 +16,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -56,10 +61,16 @@ void main() {
         slideCurve: Curves.linear,
       );
       await tester.pump(); // install frame (consumes the baseline)
-      expect(controller.hasActiveSlides, isTrue,
-          reason: "setup: the FLIP slide must be in flight");
-      expect(controller.hasActiveAnimations, isFalse,
-          reason: "setup: no extent animations — pure slide");
+      expect(
+        controller.hasActiveSlides,
+        isTrue,
+        reason: "setup: the FLIP slide must be in flight",
+      );
+      expect(
+        controller.hasActiveAnimations,
+        isFalse,
+        reason: "setup: no extent animations — pure slide",
+      );
 
       final afterInstall = render.debugPerformLayoutCount;
 
@@ -67,12 +78,16 @@ void main() {
       for (int i = 0; i < 10; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
-      expect(controller.hasActiveSlides, isTrue,
-          reason: "setup: still mid-slide after 160 of 400 ms");
+      expect(
+        controller.hasActiveSlides,
+        isTrue,
+        reason: "setup: still mid-slide after 160 of 400 ms",
+      );
       expect(
         render.debugPerformLayoutCount,
         afterInstall,
-        reason: "pure slide ticks are paint-only — no performLayout may "
+        reason:
+            "pure slide ticks are paint-only — no performLayout may "
             "run between the install and settle frames",
       );
 
@@ -82,7 +97,8 @@ void main() {
       expect(
         render.debugPerformLayoutCount,
         afterInstall + 1,
-        reason: "the settle transition triggers exactly one layout pass "
+        reason:
+            "the settle transition triggers exactly one layout pass "
             "so Step 0a/0b ghost pruning runs",
       );
     },

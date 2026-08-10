@@ -27,10 +27,7 @@ void main() {
 
       // Initial state: roots [r1, r2]; r1 -> [a, b, c]; r2 -> [].
       sync.syncRoots(
-        [
-          TreeNode(key: "r1", data: "R1"),
-          TreeNode(key: "r2", data: "R2"),
-        ],
+        [TreeNode(key: "r1", data: "R1"), TreeNode(key: "r2", data: "R2")],
         childrenOf: (key) {
           if (key == "r1") {
             return [
@@ -51,10 +48,7 @@ void main() {
       // One sync that both moves "a" from r1 to r2 AND swaps b/c under r1.
       // Expected (correct) behavior: no throw, tree matches desired state.
       sync.syncRoots(
-        [
-          TreeNode(key: "r1", data: "R1"),
-          TreeNode(key: "r2", data: "R2"),
-        ],
+        [TreeNode(key: "r1", data: "R1"), TreeNode(key: "r2", data: "R2")],
         childrenOf: (key) {
           if (key == "r1") {
             return [

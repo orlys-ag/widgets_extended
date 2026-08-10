@@ -600,7 +600,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// hit-testing.
   @visibleForTesting
   final Map<TKey, ({Rect ghostRect, Rect? clipRect, Rect anchorBand})>
-      debugLastPhantomGhostPaint = {};
+  debugLastPhantomGhostPaint = {};
 
   // Edge-ghost storage and lifecycle now live in `_composer.ghosts`
   // (`GhostRegistry`). Render-side reads go through `_composer.baseFor`
@@ -658,7 +658,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   void beginSlideBaseline({
     required Duration duration,
     required Curve curve,
-    Map<TKey, double>? baselineYOverrides,
+    Map<TKey, ({double y, double? x})>? baselineOverrides,
   }) {
     // Not-laid-out guard: snapshotVisibleOffsets walks visible rows
     // accumulating extents from controller state. Before first layout,
@@ -666,15 +666,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // fictitious. Silently no-op rather than stage a garbage baseline.
     if (geometry == null) return;
     final offsets = snapshotVisibleOffsets();
-    // Per-key y overrides (proxy drop-settle): the consume path installs
+    // Per-key overrides (proxy drop-settle): the consume path installs
     // the FLIP from these positions instead of the painted ones. Only
     // keys already in the snapshot participate — an absent key has no
-    // "current" to diff against.
-    if (baselineYOverrides != null) {
-      for (final entry in baselineYOverrides.entries) {
+    // "current" to diff against. A null x preserves the snapshot's
+    // captured cross offset (which includes any in-flight x slide, so
+    // recomputing it from the structural indent here would be wrong):
+    // the y-only semantics of sessions with no proxy cross-offset
+    // source.
+    if (baselineOverrides != null) {
+      for (final entry in baselineOverrides.entries) {
         final existing = offsets[entry.key];
         if (existing != null) {
-          offsets[entry.key] = (y: entry.value, x: existing.x);
+          offsets[entry.key] = (
+            y: entry.value.y,
+            x: entry.value.x ?? existing.x,
+          );
         }
       }
     }
@@ -749,9 +756,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// tick — and with it the listener chain that reaches `markNeedsLayout`
   /// / `markNeedsPaint` on this sliver — lands on the next vsync, outside
   /// layout.
-  void _consumeSlideBaselineIfAny({
-    required ViewportSnapshot currentViewport,
-  }) {
+  void _consumeSlideBaselineIfAny({required ViewportSnapshot currentViewport}) {
     final pending = _composer.baselineSlot.consume();
     if (pending == null) return;
     final baseline = pending.offsets;
@@ -989,12 +994,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           // decision (so the paint pass — which has no baseline —
           // reproduces it exactly) + the direction-aware EXIT clip flag
           // so the anchor occludes the ghost as it slides in.
-          (_phantomExitGhosts ??= <TKey, _ExitGhost<TKey>>{})[key] =
-              _ExitGhost<TKey>(
-                anchor: anchorKey,
-                slidUp: slidUp,
-                clipped: true,
-              );
+          (_phantomExitGhosts ??=
+              <TKey, _ExitGhost<TKey>>{})[key] = _ExitGhost<TKey>(
+            anchor: anchorKey,
+            slidUp: slidUp,
+            clipped: true,
+          );
         } else {
           // Anchor off-screen at consume: ghost slides toward the
           // current viewport edge (with overhang) nearest the anchor's
@@ -1032,8 +1037,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     for (final key in baseline.keys.toList()) {
       if (current.containsKey(key)) continue;
       // Already handled by controller-staged exit phantom above? Skip.
-      if (_phantomExitGhosts != null &&
-          _phantomExitGhosts!.containsKey(key)) {
+      if (_phantomExitGhosts != null && _phantomExitGhosts!.containsKey(key)) {
         continue;
       }
       TKey? cursor = controller.getParent(key);
@@ -1282,7 +1286,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// key"): the render object stays ignorant of drag semantics and the
   /// set is reusable for any future retention need. Currently pinned by
   /// [TreeReorderController] for the lifetime of a drag session — the drag
-  /// gesture lives on the dragged row's own GestureDetector, so evicting
+  /// gesture's recognizer lives on the dragged row's own State, so evicting
   /// that row would orphan the session (its end/cancel callbacks could
   /// never fire).
   final Set<TKey> _pinnedNodes = <TKey>{};
@@ -1409,8 +1413,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // active edge ghosts. Ghost rows paint at the LIVE viewport edge,
     // so snapshot must derive their painted Y from the current viewport,
     // not a frozen capture.
-    final ViewportSnapshot? viewportForGhosts =
-        hasEdgeGhosts ? _currentViewportSnapshot() : null;
+    final ViewportSnapshot? viewportForGhosts = hasEdgeGhosts
+        ? _currentViewportSnapshot()
+        : null;
     for (int i = 0; i < visible.length; i++) {
       final nid = orderNids[i];
       final key = visible[i];
@@ -1469,14 +1474,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         );
         if (base == null) continue; // unpaintable this frame
         final ghostNid = controller.nidOf(ghostKey);
-        final ghostSlideY =
-            hasSlides ? controller.getSlideDeltaNid(ghostNid) : 0.0;
-        final ghostSlideX =
-            hasXSlides ? controller.getSlideDeltaXNid(ghostNid) : 0.0;
-        result[ghostKey] = (
-          y: base.y + ghostSlideY,
-          x: base.x + ghostSlideX,
-        );
+        final ghostSlideY = hasSlides
+            ? controller.getSlideDeltaNid(ghostNid)
+            : 0.0;
+        final ghostSlideX = hasXSlides
+            ? controller.getSlideDeltaXNid(ghostNid)
+            : 0.0;
+        result[ghostKey] = (y: base.y + ghostSlideY, x: base.x + ghostSlideX);
       }
     }
     return result;
@@ -1683,6 +1687,35 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     return null;
   }
 
+  /// Where [key] is painted, sliver-local. See [ReorderRenderPort].
+  ///
+  /// Delegates to [_anchorPaintedBounds], which already substitutes the
+  /// pinned band for a sticky-pinned key and falls back to the structural
+  /// band otherwise, then converts PAINT space to sliver-local by adding
+  /// back `constraints.scrollOffset`. Mixing those two spaces yields an
+  /// error that is invisible while scrolled to the top, which is exactly
+  /// the shape of the bug this member exists to fix.
+  ///
+  /// Call-phase note, and it relaxes [_anchorPaintedBounds]'s stated
+  /// "only from paint()" rule for one specific caller. This runs at
+  /// GESTURE time, which is neither layout nor paint, so `_sticky` holds
+  /// the last PAINTED frame's values. That is not a tolerated staleness:
+  /// it is precisely the geometry the user was looking at when they
+  /// pressed, which is what grab capture wants. The rule stands for
+  /// layout-time callers (`_consumeSlideBaselineIfAny`), where `_sticky`
+  /// predates this frame's recompute and would be genuinely wrong.
+  @override
+  ({double paintedOffset, double extent})? paintedRowBounds(TKey key) {
+    final bounds = _anchorPaintedBounds(key);
+    if (bounds == null) {
+      return null;
+    }
+    return (
+      paintedOffset: bounds.top + constraints.scrollOffset,
+      extent: bounds.height,
+    );
+  }
+
   /// Test-only oracle access to [_findRowFullScan], so equivalence tests
   /// can compare the bounded scan's routing result against the exact
   /// full-scan answer for the same [scrollY] with zero drift risk.
@@ -1713,8 +1746,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     final hasEdgeGhosts = _composer.hasGhosts;
     // Lazy: only build viewport snapshot if there are ghosts to
     // resolve. Edge ghosts paint at the LIVE viewport edge.
-    final ViewportSnapshot? viewportForGhosts =
-        hasEdgeGhosts ? _currentViewportSnapshot() : null;
+    final ViewportSnapshot? viewportForGhosts = hasEdgeGhosts
+        ? _currentViewportSnapshot()
+        : null;
     debugLastFindRowIterationCount = 0;
     for (int i = 0; i < visible.length; i++) {
       debugLastFindRowIterationCount++;
@@ -1728,8 +1762,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       final ghostBase = hasEdgeGhosts
           ? _composer.baseFor(key, viewportForGhosts!)
           : null;
-      final paintedOffset =
-          ghostBase != null ? ghostBase + slide : structural + slide;
+      final paintedOffset = ghostBase != null
+          ? ghostBase + slide
+          : structural + slide;
       if (!controller.isPendingDeletion(key)) {
         if (scrollY < paintedOffset + extent) {
           return (key: key, paintedOffset: paintedOffset, extent: extent);
@@ -1821,13 +1856,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         continue;
       }
       final nid = orderNids[i];
-      final painted =
-          _nodeOffsetsByNid[nid] + controller.getSlideDeltaNid(nid);
-      return (
-        key: key,
-        paintedOffset: painted,
-        extent: _nodeExtentsByNid[nid],
-      );
+      final painted = _nodeOffsetsByNid[nid] + controller.getSlideDeltaNid(nid);
+      return (key: key, paintedOffset: painted, extent: _nodeExtentsByNid[nid]);
     }
 
     // Phase 3: no live row at/after the seed matched. The highest-index
@@ -1847,13 +1877,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         continue;
       }
       final nid = orderNids[j];
-      final painted =
-          _nodeOffsetsByNid[nid] + controller.getSlideDeltaNid(nid);
-      return (
-        key: key,
-        paintedOffset: painted,
-        extent: _nodeExtentsByNid[nid],
-      );
+      final painted = _nodeOffsetsByNid[nid] + controller.getSlideDeltaNid(nid);
+      return (key: key, paintedOffset: painted, extent: _nodeExtentsByNid[nid]);
     }
     return null;
   }
@@ -2028,7 +2053,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     debugLastParentDataCumulativeBuilds++;
     if (_parentDataRefreshScratch.length < visibleCount + 1) {
       _parentDataRefreshScratch = Float64List(
-        math.max(visibleCount + 1, math.max(16, _parentDataRefreshScratch.length * 2)),
+        math.max(
+          visibleCount + 1,
+          math.max(16, _parentDataRefreshScratch.length * 2),
+        ),
       );
     }
     final cum = _parentDataRefreshScratch;
@@ -2162,7 +2190,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // plain (x = indent, y = layoutOffset) coordinates with no axis mapping.
     // Running in any other axis/growth/reverse configuration silently renders
     // incorrectly, so fail loudly in debug builds.
-    final bool axisOk = constraints.axis == Axis.vertical &&
+    final bool axisOk =
+        constraints.axis == Axis.vertical &&
         constraints.axisDirection == AxisDirection.down &&
         constraints.growthDirection == GrowthDirection.forward;
     if (!axisOk) {
@@ -2277,8 +2306,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // offset array, so all three steps are safe before Pass 1.
     final currentViewport = _currentViewportSnapshot();
     final currentScroll = currentViewport.scrollOffset;
-    final scrollChanged = !_lastObservedScrollOffset.isNaN
-        && currentScroll != _lastObservedScrollOffset;
+    final scrollChanged =
+        !_lastObservedScrollOffset.isNaN &&
+        currentScroll != _lastObservedScrollOffset;
     if (scrollChanged && _composer.hasGhosts) {
       _composer.ghosts.normalizeForViewport(
         viewport: currentViewport,
@@ -2455,8 +2485,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       final fullStart =
           _stableCumulative[cacheStartIndex] +
           _bulkFullCumulative[cacheStartIndex];
-      fullCacheEnd =
-          fullStart + remainingCacheExtent + slideOverreach * 2.0;
+      fullCacheEnd = fullStart + remainingCacheExtent + slideOverreach * 2.0;
     } else {
       fullCacheEnd = 0.0;
     }
@@ -2922,7 +2951,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     if (_lastFrameUsedBulkCumulatives) {
       final gen = _controller.structureGeneration;
       final canCache = !_controller.hasActiveAnimations;
-      final cumulativeFresh = canCache &&
+      final cumulativeFresh =
+          canCache &&
           _findFirstScratchGen == gen &&
           _findFirstScratchCount == n &&
           _findFirstScratchCumulative != null &&
@@ -3068,9 +3098,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       // invisible until the next layout's prune. Instead, only skip
       // when there's actually a delta to render via the edge-ghost
       // pass; otherwise fall through to standard paint at structural+0.
-      if (hasEdgeGhosts
-          && _composer.ghosts.entryFor(nodeId) != null
-          && (slideDelta != 0.0 || slideDeltaX != 0.0)) {
+      if (hasEdgeGhosts &&
+          _composer.ghosts.entryFor(nodeId) != null &&
+          (slideDelta != 0.0 || slideDeltaX != 0.0)) {
         continue;
       }
 
@@ -3114,8 +3144,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           nid: orderNids[i],
           child: child,
           slideDelta: controller.getSlideDeltaNid(orderNids[i]),
-          slideDeltaX:
-              hasXSlides ? controller.getSlideDeltaXNid(orderNids[i]) : 0.0,
+          slideDeltaX: hasXSlides
+              ? controller.getSlideDeltaXNid(orderNids[i])
+              : 0.0,
           scrollOffset: scrollOffset,
           remainingPaintExtent: remainingPaintExtent,
         );
@@ -3152,8 +3183,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           continue;
         }
         final ghostSlide = controller.getSlideDeltaNid(ghostNid);
-        final ghostSlideX =
-            hasXSlides ? controller.getSlideDeltaXNid(ghostNid) : 0.0;
+        final ghostSlideX = hasXSlides
+            ? controller.getSlideDeltaXNid(ghostNid)
+            : 0.0;
         // An ADJACENT exit-ghost has ZERO own-slide (its baseline already
         // equals the settled destination-header position) yet is NOT done:
         // it must keep painting (stationary, getting progressively occluded)
@@ -3285,8 +3317,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // Sticky + slide-OUT-to-far-off-screen is uncommon.
         if (_sticky.isSticky(ghostNid)) continue;
         final ghostSlide = controller.getSlideDeltaNid(ghostNid);
-        final ghostSlideX =
-            hasXSlides ? controller.getSlideDeltaXNid(ghostNid) : 0.0;
+        final ghostSlideX = hasXSlides
+            ? controller.getSlideDeltaXNid(ghostNid)
+            : 0.0;
         if (ghostSlide == 0.0 && ghostSlideX == 0.0) {
           // Settled — Step 0b reaps on next layout.
           continue;
@@ -3338,8 +3371,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // Skip if the band is fully outside the paint region.
         if (band.top >= remainingPaintExtent) continue;
         if (band.top + band.height <= 0) continue;
-        final paintOffset =
-            offset + Offset(anchorParentData.indent, band.top);
+        final paintOffset = offset + Offset(anchorParentData.indent, band.top);
         context.pushClipRect(
           needsCompositing,
           paintOffset,
@@ -3504,8 +3536,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       // both at rest. Edge ghosts: off-screen anchor slide is 0, so this is
       // byte-equivalent to the old ghost-only test for them.
       final anchorNid = controller.nidOf(ghost.anchor);
-      final anchorDy =
-          anchorNid >= 0 ? controller.getSlideDeltaNid(anchorNid) : 0.0;
+      final anchorDy = anchorNid >= 0
+          ? controller.getSlideDeltaNid(anchorNid)
+          : 0.0;
       return dy == 0.0 && dx == 0.0 && anchorDy == 0.0;
     });
     if (ghosts.isEmpty) {
@@ -3823,9 +3856,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       // structural position nobody sees during a slide. Skip the read
       // when no slides are in flight.
       final slideDelta = hasSlides ? controller.getSlideDeltaNid(nid) : 0.0;
-      final slideDeltaX = hasXSlides
-          ? controller.getSlideDeltaXNid(nid)
-          : 0.0;
+      final slideDeltaX = hasXSlides ? controller.getSlideDeltaXNid(nid) : 0.0;
       final localMainAxisPosition =
           mainAxisPosition + scrollOffset - nodeOffset - slideDelta;
       if (localMainAxisPosition < 0) return false;
@@ -3852,9 +3883,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           role: PhantomClipRole.entry,
         );
         if (clipRect != null &&
-            !clipRect.contains(
-              Offset(crossAxisPosition, mainAxisPosition),
-            )) {
+            !clipRect.contains(Offset(crossAxisPosition, mainAxisPosition))) {
           return false;
         }
       }
@@ -3955,8 +3984,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         final i = controller.visibleIndexOfNid(nid);
         if (i < 0) continue;
         // Rows inside the bounded range were already tested above.
-        if (i >= startIndex &&
-            _structuralOffsetAt(i, nid) <= hitBound) {
+        if (i >= startIndex && _structuralOffsetAt(i, nid) <= hitBound) {
           continue;
         }
         if (_sticky.isSticky(nid)) continue;
@@ -4009,10 +4037,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // no slides are in flight (idle-state fast path).
     final hasSlides = controller.hasActiveSlides;
     final hasXSlides = hasSlides && controller.hasActiveXSlides;
-    final slideDelta =
-        (hasSlides && nid >= 0) ? controller.getSlideDeltaNid(nid) : 0.0;
-    final slideDeltaX =
-        (hasXSlides && nid >= 0) ? controller.getSlideDeltaXNid(nid) : 0.0;
+    final slideDelta = (hasSlides && nid >= 0)
+        ? controller.getSlideDeltaNid(nid)
+        : 0.0;
+    final slideDeltaX = (hasXSlides && nid >= 0)
+        ? controller.getSlideDeltaXNid(nid)
+        : 0.0;
 
     final scrollOffset = constraints.scrollOffset;
     // Edge-ghost rows paint at `composer.baseFor + slideDelta`, not at
@@ -4024,10 +4054,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // hasn't run, fall back to the structural offset so post-settlement
     // queries report the row's real (off-screen) position.
     final typedNodeId = nodeId as TKey?;
-    final edgeEntry =
-        typedNodeId == null ? null : _composer.ghosts.entryFor(typedNodeId);
-    final useGhost = edgeEntry != null
-        && (slideDelta != 0.0 || slideDeltaX != 0.0);
+    final edgeEntry = typedNodeId == null
+        ? null
+        : _composer.ghosts.entryFor(typedNodeId);
+    final useGhost =
+        edgeEntry != null && (slideDelta != 0.0 || slideDeltaX != 0.0);
     final base = useGhost
         ? _currentViewportSnapshot().baseForEdge(edgeEntry.edge)
         : parentData.layoutOffset;

@@ -321,8 +321,7 @@ class StickyHeaderComputer<TKey, TData> {
       final nid = orderNids[i];
       final actualEnd = nodeOffsetsByNid[nid] + nodeExtentsByNid[nid];
       final end = _subtreeEndIndex[i];
-      final descendantStableSum =
-          _stablePrefix[end + 1] - _stablePrefix[i + 1];
+      final descendantStableSum = _stablePrefix[end + 1] - _stablePrefix[i + 1];
       _subtreeBottomByIndex[i] = actualEnd + descendantStableSum;
     }
     _lastPrecomputedCount = n;

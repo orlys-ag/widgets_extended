@@ -9,10 +9,15 @@ import 'package:widgets_extended/sliver_tree/render_sliver_tree.dart';
 
 // Sample the actual rendered layout offsets and visibleExtents for each node.
 Map<String, ({double offset, double visibleExtent, double measuredHeight})>
-    _sampleRenderState<K>(WidgetTester tester) {
-  final result = <String, ({double offset, double visibleExtent, double measuredHeight})>{};
-  final render =
-      tester.renderObject<RenderSliverTree<String, String>>(find.byType(SliverTree<String, String>));
+_sampleRenderState<K>(WidgetTester tester) {
+  final result =
+      <
+        String,
+        ({double offset, double visibleExtent, double measuredHeight})
+      >{};
+  final render = tester.renderObject<RenderSliverTree<String, String>>(
+    find.byType(SliverTree<String, String>),
+  );
   render.visitChildren((child) {
     if (child is! RenderBox) return;
     final pd = child.parentData as SliverTreeParentData;
@@ -50,10 +55,17 @@ Widget _buildTree(TreeController<String, String> controller) {
 }
 
 void main() {
-  testWidgets("rendered extent is smooth across re-insert of leaf", (tester) async {
+  testWidgets("rendered extent is smooth across re-insert of leaf", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -81,20 +93,33 @@ void main() {
     await tester.pump(const Duration(milliseconds: 150));
     final mid = _sampleRenderState(tester);
     // b should be at ~50 visible extent; c should have shifted up to 150.
-    expect(mid["b"]!.visibleExtent, closeTo(50, 2),
-        reason: "b should be half-way through exit");
-    expect(mid["c"]!.offset, closeTo(150, 2),
-        reason: "c should follow b's shrinking");
+    expect(
+      mid["b"]!.visibleExtent,
+      closeTo(50, 2),
+      reason: "b should be half-way through exit",
+    );
+    expect(
+      mid["c"]!.offset,
+      closeTo(150, 2),
+      reason: "c should follow b's shrinking",
+    );
 
     // NOW reinsert 'b' as root. Should reverse smoothly.
     controller.insertRoot(TreeNode(key: "b", data: "B"), index: 1);
     await tester.pumpAndSettle();
   });
 
-  testWidgets("rendered extent smooth - direct insertRoot re-insert", (tester) async {
+  testWidgets("rendered extent smooth - direct insertRoot re-insert", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -129,13 +154,22 @@ void main() {
     final postBExtent = postReinsert["b"]!.visibleExtent;
     final postCOffset = postReinsert["c"]!.offset;
     // ignore: avoid_print
-    print("Post-reinsert (pump 0): b.extent=$postBExtent, c.offset=$postCOffset");
+    print(
+      "Post-reinsert (pump 0): b.extent=$postBExtent, c.offset=$postCOffset",
+    );
 
     // Critical test: the visible extent of b must not jump.
-    expect(postBExtent, closeTo(midBExtent, 2),
-        reason: "b's rendered extent jumped from $midBExtent to $postBExtent on reinsert");
-    expect(postCOffset, closeTo(midCOffset, 2),
-        reason: "c's offset jumped on reinsert");
+    expect(
+      postBExtent,
+      closeTo(midBExtent, 2),
+      reason:
+          "b's rendered extent jumped from $midBExtent to $postBExtent on reinsert",
+    );
+    expect(
+      postCOffset,
+      closeTo(midCOffset, 2),
+      reason: "c's offset jumped on reinsert",
+    );
 
     // Continue animation and sample each frame.
     final samples = <double>[postBExtent];
@@ -175,7 +209,12 @@ void main() {
       // 'b' WITHOUT preservePendingSubtreeState → 'b1' gets yanked out.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -221,14 +260,18 @@ void main() {
       if (jump > 5) {
         // ignore: avoid_print
         print(
-            "DETECTED VISUAL SKIP: c offset jumped from $cOffsetMid to $cOffsetPost (delta=$jump)");
+          "DETECTED VISUAL SKIP: c offset jumped from $cOffsetMid to $cOffsetPost (delta=$jump)",
+        );
       }
       // The reasonable thing: c should stay roughly where it was.
       // This test DOCUMENTS the current behavior.
-      expect(cOffsetPost, closeTo(cOffsetMid, 5),
-          reason:
-              "c should not visually jump on reinsert. midOffset=$cOffsetMid postOffset=$cOffsetPost. "
-              "b1ExtentMid=$b1ExtentMid. If jump is ~$b1ExtentMid, b1 was removed from visible order.");
+      expect(
+        cOffsetPost,
+        closeTo(cOffsetMid, 5),
+        reason:
+            "c should not visually jump on reinsert. midOffset=$cOffsetMid postOffset=$cOffsetPost. "
+            "b1ExtentMid=$b1ExtentMid. If jump is ~$b1ExtentMid, b1 was removed from visible order.",
+      );
       await tester.pumpAndSettle();
     },
   );
@@ -238,7 +281,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -274,9 +322,12 @@ void main() {
       // ignore: avoid_print
       print("Post-reinsert: c.offset=$cOffsetPost");
 
-      expect(cOffsetPost, closeTo(cOffsetMid, 2),
-          reason:
-              "With preserveSubtreeState, c should not jump. mid=$cOffsetMid post=$cOffsetPost");
+      expect(
+        cOffsetPost,
+        closeTo(cOffsetMid, 2),
+        reason:
+            "With preserveSubtreeState, c should not jump. mid=$cOffsetMid post=$cOffsetPost",
+      );
 
       // Continue and verify smooth animation back to full.
       await tester.pumpAndSettle();
@@ -292,7 +343,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       final sync = TreeSyncController<String, String>(
@@ -300,14 +356,11 @@ void main() {
       );
       addTearDown(sync.dispose);
 
-      sync.syncRoots(
-        [
-          TreeNode(key: "a", data: "A"),
-          TreeNode(key: "b", data: "B"),
-          TreeNode(key: "c", data: "C"),
-        ],
-        animate: false,
-      );
+      sync.syncRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+        TreeNode(key: "c", data: "C"),
+      ], animate: false);
 
       await tester.pumpWidget(_buildTree(controller));
       await tester.pumpAndSettle();
@@ -340,10 +393,16 @@ void main() {
       final cOffsetPost = post["c"]!.offset;
       final bExtentPost = post["b"]!.visibleExtent;
 
-      expect(bExtentPost, closeTo(bExtentMid, 2),
-          reason: "b extent jumped on re-sync. mid=$bExtentMid post=$bExtentPost");
-      expect(cOffsetPost, closeTo(cOffsetMid, 2),
-          reason: "c offset jumped on re-sync. mid=$cOffsetMid post=$cOffsetPost");
+      expect(
+        bExtentPost,
+        closeTo(bExtentMid, 2),
+        reason: "b extent jumped on re-sync. mid=$bExtentMid post=$bExtentPost",
+      );
+      expect(
+        cOffsetPost,
+        closeTo(cOffsetMid, 2),
+        reason: "c offset jumped on re-sync. mid=$cOffsetMid post=$cOffsetPost",
+      );
       await tester.pumpAndSettle();
     },
   );
@@ -353,7 +412,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -452,7 +516,12 @@ void main() {
       // as normal.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -476,80 +545,99 @@ void main() {
       await tester.pump();
 
       // b1 should still exist structurally (mid-exit).
-      expect(controller.getNodeData("b1"), isNotNull,
-          reason: "b1 should not have been purged by the re-insert");
-      expect(controller.getParent("b1"), "b",
-          reason: "b1 should still be a child of b");
+      expect(
+        controller.getNodeData("b1"),
+        isNotNull,
+        reason: "b1 should not have been purged by the re-insert",
+      );
+      expect(
+        controller.getParent("b1"),
+        "b",
+        reason: "b1 should still be a child of b",
+      );
 
       // Remove b again. This exercises the "pending re-entry" path.
       controller.remove(key: "b");
       await tester.pumpAndSettle();
 
       // After full settle: b and b1 should both be fully purged.
-      expect(controller.getNodeData("b"), isNull,
-          reason: "b should be purged after second remove + settle");
-      expect(controller.getNodeData("b1"), isNull,
-          reason: "b1 should be purged after second remove + settle");
+      expect(
+        controller.getNodeData("b"),
+        isNull,
+        reason: "b should be purged after second remove + settle",
+      );
+      expect(
+        controller.getNodeData("b1"),
+        isNull,
+        reason: "b1 should be purged after second remove + settle",
+      );
       expect(controller.rootKeys, ["a"]);
     },
   );
 
-  testWidgets(
-    "reinsert then re-expand restores descendants smoothly",
-    (tester) async {
-      // Remove a parent with an expanded subtree. Midway, re-insert it
-      // (collapsed by default). Then re-expand it. Descendants should
-      // animate back up from whatever extent their exit left them at.
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
-      );
-      addTearDown(controller.dispose);
+  testWidgets("reinsert then re-expand restores descendants smoothly", (
+    tester,
+  ) async {
+    // Remove a parent with an expanded subtree. Midway, re-insert it
+    // (collapsed by default). Then re-expand it. Descendants should
+    // animate back up from whatever extent their exit left them at.
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
 
-      controller.setRoots([
-        TreeNode(key: "a", data: "A"),
-        TreeNode(key: "b", data: "B"),
-        TreeNode(key: "c", data: "C"),
-      ]);
-      controller.setChildren("b", [TreeNode(key: "b1", data: "B1")]);
-      controller.expand(key: "b", animate: false);
+    controller.setRoots([
+      TreeNode(key: "a", data: "A"),
+      TreeNode(key: "b", data: "B"),
+      TreeNode(key: "c", data: "C"),
+    ]);
+    controller.setChildren("b", [TreeNode(key: "b1", data: "B1")]);
+    controller.expand(key: "b", animate: false);
 
-      await tester.pumpWidget(_buildTree(controller));
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(_buildTree(controller));
+    await tester.pumpAndSettle();
 
-      controller.remove(key: "b");
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 150));
+    controller.remove(key: "b");
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
 
-      // Reinsert b collapsed (default).
-      controller.insertRoot(TreeNode(key: "b", data: "B"), index: 1);
-      await tester.pump();
+    // Reinsert b collapsed (default).
+    controller.insertRoot(TreeNode(key: "b", data: "B"), index: 1);
+    await tester.pump();
 
-      // Re-expand b — b1 should animate back to full height.
-      controller.expand(key: "b");
-      await tester.pumpAndSettle();
+    // Re-expand b — b1 should animate back to full height.
+    controller.expand(key: "b");
+    await tester.pumpAndSettle();
 
-      final final_ = _sampleRenderState(tester);
-      expect(final_["b"]!.visibleExtent, 100);
-      expect(final_["b1"]!.visibleExtent, 100);
-      expect(final_["a"]!.offset, 0);
-      expect(final_["b"]!.offset, 100);
-      expect(final_["b1"]!.offset, 200);
-      expect(final_["c"]!.offset, 300);
-    },
-  );
+    final final_ = _sampleRenderState(tester);
+    expect(final_["b"]!.visibleExtent, 100);
+    expect(final_["b1"]!.visibleExtent, 100);
+    expect(final_["a"]!.offset, 0);
+    expect(final_["b"]!.offset, 100);
+    expect(final_["b1"]!.offset, 200);
+    expect(final_["c"]!.offset, 300);
+  });
 
   testWidgets(
     "insert new child mid-collapse then re-expand preserves child order",
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
-      controller.setRoots([
-        const TreeNode(key: "root", data: "root"),
-      ]);
+      controller.setRoots([const TreeNode(key: "root", data: "root")]);
       controller.setChildren("root", [
         const TreeNode(key: "a", data: "a"),
         const TreeNode(key: "c", data: "c"),
@@ -586,7 +674,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "root", data: "root")]);
@@ -601,18 +694,12 @@ void main() {
       await tester.pumpWidget(_buildTree(controller));
       await tester.pumpAndSettle();
 
-      expect(
-        controller.visibleNodes.toList(),
-        ["root", "a", "a1", "c"],
-      );
+      expect(controller.visibleNodes.toList(), ["root", "a", "a1", "c"]);
 
       controller.collapse(key: "a");
       await tester.pump(const Duration(milliseconds: 50));
 
-      expect(
-        controller.visibleNodes.toList(),
-        ["root", "a", "a1", "c"],
-      );
+      expect(controller.visibleNodes.toList(), ["root", "a", "a1", "c"]);
 
       controller.insert(
         node: const TreeNode(key: "b", data: "b"),
@@ -620,10 +707,7 @@ void main() {
         index: 1,
       );
 
-      expect(
-        controller.visibleNodes.toList(),
-        ["root", "a", "a1", "b", "c"],
-      );
+      expect(controller.visibleNodes.toList(), ["root", "a", "a1", "b", "c"]);
 
       await tester.pumpAndSettle();
       expect(controller.visibleNodes.toList(), ["root", "a", "b", "c"]);

@@ -58,7 +58,12 @@ Future<TreeController<String, String>> _startMidFlightExit(
 ) async {
   final controller = TreeController<String, String>(
     vsync: tester,
-    animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+    animationStyle: const TreeAnimationStyle(
+      expandCollapse: TreeAnimationSpec(
+        duration: Duration(milliseconds: 300),
+        curve: Curves.linear,
+      ),
+    ),
   );
   addTearDown(controller.dispose);
 
@@ -77,12 +82,21 @@ Future<TreeController<String, String>> _startMidFlightExit(
 
   // Sanity: the exit is genuinely in flight (mid-exit) — these are setup
   // preconditions, not the bug assertions.
-  expect(controller.isPendingDeletion("a"), isTrue,
-      reason: "setup: 'a' must be mid-exit (pending deletion)");
-  expect(controller.isVisible("a"), isTrue,
-      reason: "setup: 'a' must still be in the visible order mid-exit");
-  expect(controller.hasActiveAnimations, isTrue,
-      reason: "setup: the standalone exit must be active");
+  expect(
+    controller.isPendingDeletion("a"),
+    isTrue,
+    reason: "setup: 'a' must be mid-exit (pending deletion)",
+  );
+  expect(
+    controller.isVisible("a"),
+    isTrue,
+    reason: "setup: 'a' must still be in the visible order mid-exit",
+  );
+  expect(
+    controller.hasActiveAnimations,
+    isTrue,
+    reason: "setup: the standalone exit must be active",
+  );
 
   // Trigger the claimed bug: honor a reduce-motion-style setting
   // mid-flight.
@@ -111,15 +125,27 @@ void main() {
       // EXPECTED (doc contract at tree_controller.dart:82-88): in-flight
       // animations adjust on the next frame — with a zero duration that
       // means immediate completion, so "a" must be finalized and purged.
-      expect(controller.isPendingDeletion("a"), isFalse,
-          reason: "after duration is set to zero, the in-flight exit of "
-              "'a' must complete and be finalized, not freeze forever");
-      expect(controller.visibleNodes, isNot(contains("a")),
-          reason: "the removed node must leave visibleNodes once its exit "
-              "completes under zero duration");
-      expect(find.byKey(const ValueKey("row-a")), findsNothing,
-          reason: "the removed row must visibly disappear; a frozen "
-              "partial-extent row means the exit was stranded");
+      expect(
+        controller.isPendingDeletion("a"),
+        isFalse,
+        reason:
+            "after duration is set to zero, the in-flight exit of "
+            "'a' must complete and be finalized, not freeze forever",
+      );
+      expect(
+        controller.visibleNodes,
+        isNot(contains("a")),
+        reason:
+            "the removed node must leave visibleNodes once its exit "
+            "completes under zero duration",
+      );
+      expect(
+        find.byKey(const ValueKey("row-a")),
+        findsNothing,
+        reason:
+            "the removed row must visibly disappear; a frozen "
+            "partial-extent row means the exit was stranded",
+      );
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );
@@ -134,11 +160,15 @@ void main() {
       // left to animate. A permanently-true hasActiveAnimations makes the
       // render layer defer stale-child eviction and sticky precomputation
       // indefinitely.
-      expect(controller.hasActiveAnimations, isFalse,
-          reason: "no animation can still be active after the duration "
-              "was set to zero and >1s of frames were pumped; a "
-              "permanently-true value means the standalone state was "
-              "stranded instead of completed");
+      expect(
+        controller.hasActiveAnimations,
+        isFalse,
+        reason:
+            "no animation can still be active after the duration "
+            "was set to zero and >1s of frames were pumped; a "
+            "permanently-true value means the standalone state was "
+            "stranded instead of completed",
+      );
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );

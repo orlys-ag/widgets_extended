@@ -17,43 +17,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
-  testWidgets(
-    "setParent fires onParentChanged: cache shifts on reparent",
-    (tester) async {
-      final c = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(c.dispose);
+  testWidgets("setParent fires onParentChanged: cache shifts on reparent", (
+    tester,
+  ) async {
+    final c = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(c.dispose);
 
-      c.setRoots([
-        const TreeNode(key: "p1", data: "p1"),
-        const TreeNode(key: "p2", data: "p2"),
-      ]);
-      c.setChildren("p1", [const TreeNode(key: "n", data: "n")]);
-      c.setChildren("n", [
-        const TreeNode(key: "n1", data: "n1"),
-        const TreeNode(key: "n2", data: "n2"),
-      ]);
-      // Give p2 a placeholder child so we can expand it (expand is a
-      // no-op on a childless node), then expand both subtrees.
-      c.setChildren("p2", [const TreeNode(key: "ph", data: "ph")]);
-      c.expand(key: "p1");
-      c.expand(key: "n");
-      c.expand(key: "p2");
-      c.debugAssertVisibleSubtreeSizeConsistency();
-      expect(c.visibleNodes.toList(), ["p1", "n", "n1", "n2", "p2", "ph"]);
+    c.setRoots([
+      const TreeNode(key: "p1", data: "p1"),
+      const TreeNode(key: "p2", data: "p2"),
+    ]);
+    c.setChildren("p1", [const TreeNode(key: "n", data: "n")]);
+    c.setChildren("n", [
+      const TreeNode(key: "n1", data: "n1"),
+      const TreeNode(key: "n2", data: "n2"),
+    ]);
+    // Give p2 a placeholder child so we can expand it (expand is a
+    // no-op on a childless node), then expand both subtrees.
+    c.setChildren("p2", [const TreeNode(key: "ph", data: "ph")]);
+    c.expand(key: "p1");
+    c.expand(key: "n");
+    c.expand(key: "p2");
+    c.debugAssertVisibleSubtreeSizeConsistency();
+    expect(c.visibleNodes.toList(), ["p1", "n", "n1", "n2", "p2", "ph"]);
 
-      // Reparent n (subtree size 3) from p1 to p2.
-      // The Observer subscriber must shift the cache from p1's chain to
-      // p2's chain. Cache invariant must hold afterward, regardless of
-      // index ordering inside p2's child list.
-      c.moveNode("n", "p2");
-      c.debugAssertVisibleSubtreeSizeConsistency();
-      // p2 still expanded; n + n1 + n2 + ph all visible under p2.
-      expect(c.visibleNodes.length, 6); // p1, p2, n, n1, n2, ph (order varies)
-    },
-  );
+    // Reparent n (subtree size 3) from p1 to p2.
+    // The Observer subscriber must shift the cache from p1's chain to
+    // p2's chain. Cache invariant must hold afterward, regardless of
+    // index ordering inside p2's child list.
+    c.moveNode("n", "p2");
+    c.debugAssertVisibleSubtreeSizeConsistency();
+    // p2 still expanded; n + n1 + n2 + ph all visible under p2.
+    expect(c.visibleNodes.length, 6); // p1, p2, n, n1, n2, ph (order varies)
+  });
 
   testWidgets(
     "setParent(key, sameParent) is a cache no-op (handler short-circuits)",
@@ -83,18 +82,17 @@ void main() {
     },
   );
 
-  testWidgets(
-    "dispose clears Observer wiring without throwing",
-    (tester) async {
-      final c = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      // Drive at least one mutation so the wiring is established.
-      c.setRoots([const TreeNode(key: "r", data: "r")]);
-      c.setChildren("r", [const TreeNode(key: "x", data: "x")]);
-      // dispose() should clear `_store.onParentChanged` and run cleanly.
-      c.dispose();
-    },
-  );
+  testWidgets("dispose clears Observer wiring without throwing", (
+    tester,
+  ) async {
+    final c = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    // Drive at least one mutation so the wiring is established.
+    c.setRoots([const TreeNode(key: "r", data: "r")]);
+    c.setChildren("r", [const TreeNode(key: "x", data: "x")]);
+    // dispose() should clear `_store.onParentChanged` and run cleanly.
+    c.dispose();
+  });
 }

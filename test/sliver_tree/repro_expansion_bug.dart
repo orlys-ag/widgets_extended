@@ -3,7 +3,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/synced_sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
-import 'package:widgets_extended/sliver_tree/types.dart';
+import 'package:widgets_extended/sliver_tree/synced_tree_node.dart';
+import 'tree_input_helpers.dart';
+
+/// Section list to tree input: each section owns one child, `${section}_1`.
+/// Rebuilt per build so a changed section list re-syncs, matching the
+/// per-build roots list this fixture used before.
+List<SyncedTreeNode<String, String>> _treeFor(List<String> sections) {
+  return treeFrom(
+    roots: sections,
+    dataByKey: <String, String>{
+      for (final s in sections) ...<String, String>{s: s, "${s}_1": "${s}_1"},
+    },
+    childrenByParent: <String, List<String>>{
+      for (final s in sections) s: <String>["${s}_1"],
+    },
+  );
+}
 
 class _Harness extends StatefulWidget {
   const _Harness({required this.sections});
@@ -18,21 +34,19 @@ class _HarnessState extends State<_Harness> {
 
   @override
   Widget build(BuildContext context) {
-    final roots = <TreeNode<String, String>>[
-      for (final s in widget.sections) TreeNode(key: s, data: s),
-    ];
     return MaterialApp(
       home: Scaffold(
         body: CustomScrollView(
           slivers: [
-            SyncedSliverTree<String, String>.nodes(
-              roots: roots,
-              childrenOf: (key) {
-                if (key.endsWith("_1")) return const [];
-                return [TreeNode(key: "${key}_1", data: "${key}_1")];
-              },
+            SyncedSliverTree<String, String>(
+              tree: _treeFor(widget.sections),
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 300),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 _controller ??= node.controller;
                 return SizedBox(
@@ -50,8 +64,10 @@ class _HarnessState extends State<_Harness> {
 }
 
 class _AsyncLoadHarness extends StatefulWidget {
-  const _AsyncLoadHarness({required this.childrenOfProvider});
-  final List<TreeNode<String, String>> Function(String) childrenOfProvider;
+  const _AsyncLoadHarness({required this.childKeys});
+
+  /// Children of "parent", empty until the simulated load resolves.
+  final List<String> childKeys;
 
   @override
   State<_AsyncLoadHarness> createState() => _AsyncLoadHarnessState();
@@ -66,10 +82,23 @@ class _AsyncLoadHarnessState extends State<_AsyncLoadHarness> {
       home: Scaffold(
         body: CustomScrollView(
           slivers: [
-            SyncedSliverTree<String, String>.nodes(
-              roots: const [TreeNode(key: "parent", data: "parent")],
-              childrenOf: widget.childrenOfProvider,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+            SyncedSliverTree<String, String>(
+              tree: treeFrom(
+                roots: const ["parent"],
+                dataByKey: <String, String>{
+                  "parent": "parent",
+                  for (final k in widget.childKeys) k: k,
+                },
+                childrenByParent: widget.childKeys.isEmpty
+                    ? const <String, List<String>>{}
+                    : <String, List<String>>{"parent": widget.childKeys},
+              ),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 300),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 _controller ??= node.controller;
                 return SizedBox(
@@ -122,14 +151,7 @@ void main() {
   testWidgets(
     "parent that gains its first children (async-load) still auto-expands",
     (tester) async {
-      List<TreeNode<String, String>> providerFn(String key) {
-        if (key == "parent") return const [];
-        return const [];
-      }
-
-      await tester.pumpWidget(
-        _AsyncLoadHarness(childrenOfProvider: providerFn),
-      );
+      await tester.pumpWidget(const _AsyncLoadHarness(childKeys: <String>[]));
       await tester.pumpAndSettle();
 
       final controller = tester
@@ -139,17 +161,7 @@ void main() {
       expect(controller.hasChildren("parent"), isFalse);
 
       await tester.pumpWidget(
-        _AsyncLoadHarness(
-          childrenOfProvider: (key) {
-            if (key == "parent") {
-              return const [
-                TreeNode(key: "c1", data: "c1"),
-                TreeNode(key: "c2", data: "c2"),
-              ];
-            }
-            return const [];
-          },
-        ),
+        const _AsyncLoadHarness(childKeys: <String>["c1", "c2"]),
       );
       await tester.pumpAndSettle();
 
@@ -158,7 +170,7 @@ void main() {
         controller.isExpanded("parent"),
         isTrue,
         reason:
-            "parent gained its first children via a later sync — the "
+            "parent gained its first children via a later sync: the "
             "auto-expand heuristic must still fire for this async-load case",
       );
     },

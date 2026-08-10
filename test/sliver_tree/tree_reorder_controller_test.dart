@@ -58,8 +58,9 @@ void main() {
   });
 
   group("Constructor validation", () {
-    testWidgets("rejects comparator-based TreeController with ArgumentError",
-        (tester) async {
+    testWidgets("rejects comparator-based TreeController with ArgumentError", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -94,8 +95,9 @@ void main() {
   });
 
   group("startDrag validation", () {
-    testWidgets("throws ArgumentError on cross-controller renderObject",
-        (tester) async {
+    testWidgets("throws ArgumentError on cross-controller renderObject", (
+      tester,
+    ) async {
       final treeA = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -130,8 +132,9 @@ void main() {
       );
     });
 
-    testWidgets("returns false when canReorder refuses the key",
-        (tester) async {
+    testWidgets("returns false when canReorder refuses the key", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -166,8 +169,9 @@ void main() {
   });
 
   group("Drop target resolution", () {
-    testWidgets("classifies above / into / below by vertical third",
-        (tester) async {
+    testWidgets("classifies above / into / below by vertical third", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -256,70 +260,91 @@ void main() {
       // cycles; the chain falls back to the ROOT current-position slot —
       // the safety invariant is that the resolved parent is NEVER a or a
       // descendant of a.
-      expect(reorder.currentTarget?.parentKey, isNull,
-          reason: "no target may parent inside the dragged subtree");
-      expect(reorder.currentTarget?.indexInFinalList, 0,
-          reason: "the only legal slot here is a's current position");
+      expect(
+        reorder.currentTarget?.parentKey,
+        isNull,
+        reason: "no target may parent inside the dragged subtree",
+      );
+      expect(
+        reorder.currentTarget?.indexInFinalList,
+        0,
+        reason: "the only legal slot here is a's current position",
+      );
       reorder.cancelDrag();
     });
 
     testWidgets(
-        "current-position hover resolves a valid 'returns here' target, "
-        "and dropping it commits nothing", (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([
-        TreeNode(key: "a", data: "A"),
-        TreeNode(key: "b", data: "B"),
-      ]);
+      "current-position hover resolves a valid 'returns here' target, "
+      "and dropping it commits nothing",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: TreeAnimationStyle.disabled,
+        );
+        addTearDown(controller.dispose);
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
 
-      var structuralNotifications = 0;
-      controller.addListener(() {
-        structuralNotifications++;
-      });
+        var structuralNotifications = 0;
+        controller.addListener(() {
+          structuralNotifications++;
+        });
 
-      final reorder = TreeReorderController<String>(
-        treeController: controller,
-        vsync: tester,
-      );
-      addTearDown(reorder.dispose);
+        final reorder = TreeReorderController<String>(
+          treeController: controller,
+          vsync: tester,
+        );
+        addTearDown(reorder.dispose);
 
-      await tester.pumpWidget(_Harness(controller: controller).build());
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(_Harness(controller: controller).build());
+        await tester.pumpAndSettle();
 
-      final render = _findRender(tester);
-      final scrollable = _findScrollable(tester);
+        final render = _findRender(tester);
+        final scrollable = _findScrollable(tester);
 
-      // Drag "a" and hover above "a" itself (its own current position at
-      // y=0). The slot resolves — feedback never goes dark over your own
-      // position — but it IS the current position.
-      reorder.startDrag(
-        key: "a",
-        renderPort: render,
-        scrollable: scrollable,
-        pointerGlobal: _scrollYToGlobal(scrollable, 5.0),
-      );
-      final target = reorder.currentTarget;
-      expect(target, isNotNull,
-          reason: "hovering your own slot must show 'returns here', not "
-              "a dead zone");
-      expect(target?.parentKey, isNull);
-      expect(target?.indexInFinalList, 0,
-          reason: "the slot is a's current position");
+        // Drag "a" and hover above "a" itself (its own current position at
+        // y=0). The slot resolves — feedback never goes dark over your own
+        // position — but it IS the current position.
+        reorder.startDrag(
+          key: "a",
+          renderPort: render,
+          scrollable: scrollable,
+          pointerGlobal: _scrollYToGlobal(scrollable, 5.0),
+        );
+        final target = reorder.currentTarget;
+        expect(
+          target,
+          isNotNull,
+          reason:
+              "hovering your own slot must show 'returns here', not "
+              "a dead zone",
+        );
+        expect(target?.parentKey, isNull);
+        expect(
+          target?.indexInFinalList,
+          0,
+          reason: "the slot is a's current position",
+        );
 
-      // Dropping the current-position slot is a settle-back: no mutation,
-      // no structural traffic, session cleanly ended.
-      final notificationsBefore = structuralNotifications;
-      reorder.endDrag();
-      expect(reorder.isDragging, isFalse);
-      expect(controller.liveRootKeys, ["a", "b"],
-          reason: "a current-position drop must not reorder anything");
-      expect(structuralNotifications, notificationsBefore,
-          reason: "no mutation may fire from a current-position drop");
-    });
+        // Dropping the current-position slot is a settle-back: no mutation,
+        // no structural traffic, session cleanly ended.
+        final notificationsBefore = structuralNotifications;
+        reorder.endDrag();
+        expect(reorder.isDragging, isFalse);
+        expect(
+          controller.liveRootKeys,
+          ["a", "b"],
+          reason: "a current-position drop must not reorder anything",
+        );
+        expect(
+          structuralNotifications,
+          notificationsBefore,
+          reason: "no mutation may fire from a current-position drop",
+        );
+      },
+    );
 
     testWidgets("canAcceptDrop policy filters targets", (tester) async {
       final controller = TreeController<String, String>(
@@ -355,9 +380,13 @@ void main() {
       // "into b" is rejected by canAcceptDrop — so b collapses to the
       // two-zone midpoint split and t=0.5 resolves BELOW-b (root parent,
       // which policy allows) instead of a dead middle third.
-      expect(reorder.currentTarget, isNotNull,
-          reason: "a vetoed `into` must fall back to the sibling split, "
-              "not a dead zone");
+      expect(
+        reorder.currentTarget,
+        isNotNull,
+        reason:
+            "a vetoed `into` must fall back to the sibling split, "
+            "not a dead zone",
+      );
       expect(reorder.currentTarget?.zone, TreeDropZone.below);
       expect(reorder.currentTarget?.parentKey, isNull);
       reorder.cancelDrag();
@@ -365,8 +394,9 @@ void main() {
   });
 
   group("Commit paths", () {
-    testWidgets("same-parent reorder routes through reorderRoots",
-        (tester) async {
+    testWidgets("same-parent reorder routes through reorderRoots", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -407,8 +437,7 @@ void main() {
       expect(controller.visibleNodes, ["b", "c", "a"]);
     });
 
-    testWidgets("cross-parent reorder routes through moveNode",
-        (tester) async {
+    testWidgets("cross-parent reorder routes through moveNode", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -455,11 +484,17 @@ void main() {
   });
 
   group("Live-list correctness", () {
-    testWidgets(
-        "drop target resolution skips pending-deletion rows", (tester) async {
+    testWidgets("drop target resolution skips pending-deletion rows", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([

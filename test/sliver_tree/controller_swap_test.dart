@@ -32,28 +32,34 @@ void main() {
       const TreeNode(key: "onlyB", data: "ONLY-B"),
     ]);
 
-    final ValueNotifier<TreeController<String, String>> active =
-        ValueNotifier(controllerA);
+    final ValueNotifier<TreeController<String, String>> active = ValueNotifier(
+      controllerA,
+    );
     addTearDown(active.dispose);
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: ValueListenableBuilder<TreeController<String, String>>(
-          valueListenable: active,
-          builder: (_, controller, _) {
-            return CustomScrollView(slivers: [
-              SliverTree<String, String>(
-                controller: controller,
-                nodeBuilder: (_, key, _) {
-                  final data = controller.getNodeData(key)?.data ?? "<gone>";
-                  return SizedBox(height: 40, child: Text("$key=$data"));
-                },
-              ),
-            ]);
-          },
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ValueListenableBuilder<TreeController<String, String>>(
+            valueListenable: active,
+            builder: (_, controller, _) {
+              return CustomScrollView(
+                slivers: [
+                  SliverTree<String, String>(
+                    controller: controller,
+                    nodeBuilder: (_, key, _) {
+                      final data =
+                          controller.getNodeData(key)?.data ?? "<gone>";
+                      return SizedBox(height: 40, child: Text("$key=$data"));
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
-    ));
+    );
     await tester.pumpAndSettle();
 
     // Sanity: A is rendered.
@@ -68,15 +74,27 @@ void main() {
 
     // The "shared" key exists in both controllers but with different data —
     // the row must rebuild against B's data.
-    expect(find.text("shared=DATA-FROM-A"), findsNothing,
-        reason: "Old data leaked through after controller swap");
-    expect(find.text("shared=DATA-FROM-B"), findsOneWidget,
-        reason: "Shared key did not rebuild against new controller's data");
+    expect(
+      find.text("shared=DATA-FROM-A"),
+      findsNothing,
+      reason: "Old data leaked through after controller swap",
+    );
+    expect(
+      find.text("shared=DATA-FROM-B"),
+      findsOneWidget,
+      reason: "Shared key did not rebuild against new controller's data",
+    );
     // OnlyA must be evicted; OnlyB must appear.
-    expect(find.text("onlyA=ONLY-A"), findsNothing,
-        reason: "Stale 'onlyA' from the old controller is still painted");
-    expect(find.text("onlyB=ONLY-B"), findsOneWidget,
-        reason: "New 'onlyB' from the swapped controller did not render");
+    expect(
+      find.text("onlyA=ONLY-A"),
+      findsNothing,
+      reason: "Stale 'onlyA' from the old controller is still painted",
+    );
+    expect(
+      find.text("onlyB=ONLY-B"),
+      findsOneWidget,
+      reason: "New 'onlyB' from the swapped controller did not render",
+    );
 
     // No orphan RenderBoxes: every adopted child of the render object must
     // have a corresponding live entry in the new controller.
@@ -84,10 +102,16 @@ void main() {
         tester.renderObject(find.byType(SliverTree<String, String>))
             as RenderSliverTree<String, String>;
     for (final key in const ["shared", "onlyB"]) {
-      expect(renderObject.getChildForNode(key), isNotNull,
-          reason: "Render object lost track of '$key' after swap");
+      expect(
+        renderObject.getChildForNode(key),
+        isNotNull,
+        reason: "Render object lost track of '$key' after swap",
+      );
     }
-    expect(renderObject.getChildForNode("onlyA"), isNull,
-        reason: "Stale render box for 'onlyA' still adopted by render object");
+    expect(
+      renderObject.getChildForNode("onlyA"),
+      isNull,
+      reason: "Stale render box for 'onlyA' still adopted by render object",
+    );
   });
 }

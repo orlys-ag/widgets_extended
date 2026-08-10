@@ -84,8 +84,9 @@ Widget _harness(
             SliverTree<String, String>(
               controller: controller,
               nodeBuilder: (context, key, depth) {
-                final double height =
-                    heightFor != null ? heightFor(key) : _kRow;
+                final double height = heightFor != null
+                    ? heightFor(key)
+                    : _kRow;
                 return SizedBox(
                   key: ValueKey("row-$key"),
                   height: height,
@@ -117,7 +118,12 @@ Future<TreeController<String, String>> _pumpTree(
 }) async {
   final controller = TreeController<String, String>(
     vsync: tester,
-    animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+    animationStyle: const TreeAnimationStyle(
+      expandCollapse: TreeAnimationSpec(
+        duration: Duration(milliseconds: 400),
+        curve: Curves.linear,
+      ),
+    ),
   );
   addTearDown(controller.dispose);
 
@@ -167,19 +173,37 @@ Future<void> _startAdjacentAbsorption(
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 200));
 
-  expect(controller.getSlideDelta("a2").abs(), lessThan(0.5),
-      reason: "setup: adjacent ghost must have ~zero own FLIP delta "
-          "(the degenerate case this finding targets)");
-  expect(controller.getSlideDelta("B").abs(), greaterThan(1.0),
-      reason: "setup: destination header B must still be sliding up "
-          "(absorption in flight)");
-  expect(render.debugPhantomExitGhostCount, 1,
-      reason: "setup: a2 must be a live exit ghost");
-  expect(render.debugLastPhantomGhostPaint.containsKey("a2"), isTrue,
-      reason: "setup: the absorbing ghost must be painted this frame");
-  expect(render.debugLastPhantomGhostPaint["a2"]!.clipRect, isNotNull,
-      reason: "setup: a healthy mid-absorption frame clips the ghost to "
-          "the destination header's band");
+  expect(
+    controller.getSlideDelta("a2").abs(),
+    lessThan(0.5),
+    reason:
+        "setup: adjacent ghost must have ~zero own FLIP delta "
+        "(the degenerate case this finding targets)",
+  );
+  expect(
+    controller.getSlideDelta("B").abs(),
+    greaterThan(1.0),
+    reason:
+        "setup: destination header B must still be sliding up "
+        "(absorption in flight)",
+  );
+  expect(
+    render.debugPhantomExitGhostCount,
+    1,
+    reason: "setup: a2 must be a live exit ghost",
+  );
+  expect(
+    render.debugLastPhantomGhostPaint.containsKey("a2"),
+    isTrue,
+    reason: "setup: the absorbing ghost must be painted this frame",
+  );
+  expect(
+    render.debugLastPhantomGhostPaint["a2"]!.clipRect,
+    isNotNull,
+    reason:
+        "setup: a healthy mid-absorption frame clips the ghost to "
+        "the destination header's band",
+  );
 }
 
 /// Bounded drain — never an unbounded pumpAndSettle on a scene that might
@@ -227,24 +251,38 @@ void main() {
 
       // Post-mutation sanity: the ghost is still absorbing and still painted
       // (Step 0a's lockstep prune keeps it while the anchor slides).
-      expect(controller.getSlideDelta("B").abs(), greaterThan(1.0),
-          reason: "setup: B must still be absorbing after the unrelated move");
-      expect(render.debugPhantomExitGhostCount, greaterThanOrEqualTo(1),
-          reason: "setup: a2's exit ghost must survive the unrelated consume");
-      expect(render.debugLastPhantomGhostPaint.containsKey("a2"), isTrue,
-          reason: "setup: the still-absorbing ghost must be painted this "
-              "frame");
+      expect(
+        controller.getSlideDelta("B").abs(),
+        greaterThan(1.0),
+        reason: "setup: B must still be absorbing after the unrelated move",
+      );
+      expect(
+        render.debugPhantomExitGhostCount,
+        greaterThanOrEqualTo(1),
+        reason: "setup: a2's exit ghost must survive the unrelated consume",
+      );
+      expect(
+        render.debugLastPhantomGhostPaint.containsKey("a2"),
+        isTrue,
+        reason:
+            "setup: the still-absorbing ghost must be painted this "
+            "frame",
+      );
 
       // EXPECTED behavior: the EXIT clip is retained for the whole time the
       // ghost keeps painting. A null clip here means the consume-time
       // _phantomClipAnchors prune (ghost-delta-only criterion) stripped the
       // entry while _phantomExitGhosts (ghost+anchor criterion) kept the
       // ghost alive — the f13 map desync.
-      expect(render.debugLastPhantomGhostPaint["a2"]!.clipRect, isNotNull,
-          reason: "a still-absorbing adjacent exit ghost must keep its EXIT "
-              "clip across an unrelated consume (f13: consume-time prune "
-              "must match _pruneSettledPhantomExitGhosts' ghost+anchor "
-              "settled criterion)");
+      expect(
+        render.debugLastPhantomGhostPaint["a2"]!.clipRect,
+        isNotNull,
+        reason:
+            "a still-absorbing adjacent exit ghost must keep its EXIT "
+            "clip across an unrelated consume (f13: consume-time prune "
+            "must match _pruneSettledPhantomExitGhosts' ghost+anchor "
+            "settled criterion)",
+      );
 
       await _drain(tester, controller);
     },
@@ -255,9 +293,12 @@ void main() {
     "f13: TALL adjacent exit ghost stays band-clipped after an unrelated "
     "overlapping move (no re-exposed overhang past the live band top)",
     (tester) async {
-      final controller = await _pumpTree(tester, heightFor: (key) {
-        return key == "a2" ? _kTallRow : _kRow;
-      });
+      final controller = await _pumpTree(
+        tester,
+        heightFor: (key) {
+          return key == "a2" ? _kTallRow : _kRow;
+        },
+      );
       final render = _render(tester);
 
       await _startAdjacentAbsorption(tester, controller, render);
@@ -277,28 +318,41 @@ void main() {
       // the true far overhang (not even the header repaint covers it).
       await tester.pump(const Duration(milliseconds: 200));
 
-      expect(controller.getSlideDelta("B").abs(), greaterThan(1.0),
-          reason: "setup: B must still be absorbing at the sample frame");
+      expect(
+        controller.getSlideDelta("B").abs(),
+        greaterThan(1.0),
+        reason: "setup: B must still be absorbing at the sample frame",
+      );
 
       final recorder = _Recorder(ContainerLayer(), Offset.zero & _kSurface);
       render.paint(recorder, Offset.zero);
 
       final capture = render.debugLastPhantomGhostPaint["a2"];
-      expect(capture, isNotNull,
-          reason: "setup: ghost must be painted at the sample frame");
+      expect(
+        capture,
+        isNotNull,
+        reason: "setup: ghost must be painted at the sample frame",
+      );
       final double bandTop = capture!.anchorBand.top;
       final double bandBottom = capture.anchorBand.bottom;
 
       // Discrimination sanity: unclipped, the tall card's raw painted rect
       // overhangs past the band BOTTOM this frame, so the EXIT clip is
       // load-bearing (a pass could not be trivial).
-      expect(capture.ghostRect.bottom, greaterThan(bandBottom + 5.0),
-          reason: "setup: sample frame must be one where the raw ghost rect "
-              "overhangs the live band (clip is load-bearing)");
+      expect(
+        capture.ghostRect.bottom,
+        greaterThan(bandBottom + 5.0),
+        reason:
+            "setup: sample frame must be one where the raw ghost rect "
+            "overhangs the live band (clip is load-bearing)",
+      );
 
       final ghostBox = render.getChildForNode("a2");
-      expect(ghostBox, isNotNull,
-          reason: "setup: ghost RenderBox must still be retained");
+      expect(
+        ghostBox,
+        isNotNull,
+        reason: "setup: ghost RenderBox must still be retained",
+      );
 
       double visibleBottom = double.negativeInfinity;
       bool painted = false;
@@ -314,18 +368,25 @@ void main() {
           visibleBottom = visible.bottom;
         }
       }
-      expect(painted, isTrue,
-          reason: "setup: ghost RenderBox must be painted this frame");
+      expect(
+        painted,
+        isTrue,
+        reason: "setup: ghost RenderBox must be painted this frame",
+      );
 
       // EXPECTED behavior: the downward EXIT clip bounds the ghost's visible
       // paint to [0, bandTop]. Visible paint below the live band top (and in
       // this frame even below bandBottom — the re-exposed far overhang)
       // means the clip was stripped by the consume-time prune (f13).
-      expect(visibleBottom, lessThanOrEqualTo(bandTop + 0.5),
-          reason: "the EXIT clip must bound the absorbed tall card to "
-              "[0, bandTop=$bandTop] (bandBottom=$bandBottom); visible paint "
-              "reaching $visibleBottom means the clip was stripped while the "
-              "ghost was still absorbing (f13)");
+      expect(
+        visibleBottom,
+        lessThanOrEqualTo(bandTop + 0.5),
+        reason:
+            "the EXIT clip must bound the absorbed tall card to "
+            "[0, bandTop=$bandTop] (bandBottom=$bandBottom); visible paint "
+            "reaching $visibleBottom means the clip was stripped while the "
+            "ghost was still absorbing (f13)",
+      );
 
       await _drain(tester, controller);
     },

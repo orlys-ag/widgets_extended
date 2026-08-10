@@ -86,7 +86,8 @@ class PointerSpace<TKey> {
     final local = box.globalToLocal(globalPointer);
     return (
       sliverX: local.dx,
-      sliverY: _scrollable.position.pixels +
+      sliverY:
+          _scrollable.position.pixels +
           local.dy -
           _renderPort.precedingScrollExtent,
       viewportDy: local.dy,
@@ -145,29 +146,43 @@ class DragProbe<TKey> {
   double _probeDy = 0.0;
 
   /// Captures grab geometry once at session start against the start
-  /// sample. [midpointProbe] is applied ONLY on a successful capture:
-  /// the fallback branch sets grabDy = 0 with a non-zero extent, which
-  /// would fabricate a bogus half-extent shift exactly when the geometry
-  /// is least trustworthy.
+  /// sample.
+  ///
+  /// Asks the render port where the DRAGGED KEY is painted, rather than
+  /// what row happens to sit at the pointer. Those differ at a sticky
+  /// header: a pinned header paints at its pinned band while its
+  /// structural offset has scrolled away above, so
+  /// [ReorderRenderPort.findRowAtPaintedY] answers with whatever content
+  /// is scrolled UNDERNEATH the pinned strip.
+  ///
+  /// The old positional form asked that question and then checked whether
+  /// the answer was the key it already knew, which is a roundabout way of
+  /// asking where a known key is. On a pinned header the check failed and
+  /// capture fell back to a top anchor carrying the foreign row's extent:
+  /// the proxy jumped to the pointer, rendered at the wrong height, and
+  /// the midpoint probe silently switched off, so the card on screen and
+  /// the gap in the list disagreed. Nothing threw.
+  ///
+  /// Because the key is now addressed directly, there is no "wrong row"
+  /// category left, so a located row is always trustworthy geometry and
+  /// [midpointProbe] applies whenever it is requested. The one remaining
+  /// failure is an unlocatable (unmounted) row, which zeroes the record:
+  /// there is no trustworthy extent to report either, and a zero extent
+  /// is already the drag proxy's "size to your content" signal.
   void captureGrab({
     required PointerSample start,
     required bool midpointProbe,
   }) {
-    final startRow = _renderPort.findRowAtPaintedY(start.sliverY);
-    if (startRow != null && startRow.key == _draggedKey) {
-      _grabDy = (start.sliverY - startRow.paintedOffset).clamp(
-        0.0,
-        startRow.extent,
-      );
-      _grabRowExtent = startRow.extent;
-      if (midpointProbe) {
-        _probeDy = startRow.extent / 2 - _grabDy;
-      }
-    } else {
-      // Defensive: the pointer should sit over the dragged row at start
-      // (both gesture modes originate on it); fall back to a top anchor.
+    final bounds = _renderPort.paintedRowBounds(_draggedKey);
+    if (bounds == null) {
       _grabDy = 0.0;
-      _grabRowExtent = startRow?.extent ?? 0.0;
+      _grabRowExtent = 0.0;
+      return;
+    }
+    _grabDy = (start.sliverY - bounds.paintedOffset).clamp(0.0, bounds.extent);
+    _grabRowExtent = bounds.extent;
+    if (midpointProbe) {
+      _probeDy = bounds.extent / 2 - _grabDy;
     }
   }
 

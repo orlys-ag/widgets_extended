@@ -95,8 +95,10 @@ Widget _harness(TreeController<String, String> controller) {
 /// Y's painted top this frame in sliver-local coords, read from the render
 /// object's parent data + the controller's slide delta.
 double _paintedTop(
-    RenderSliverTree<String, String> render, TreeController<String, String> c,
-    String key) {
+  RenderSliverTree<String, String> render,
+  TreeController<String, String> c,
+  String key,
+) {
   double? off;
   render.visitChildren((child) {
     if (child is! RenderBox) return;
@@ -114,7 +116,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -178,8 +185,9 @@ void main() {
         final rowBottom = yTop + _kRow;
         if (hit.clip == null) return _kRow; // unclipped — fully visible
         final visTop = rowTop > hit.clip!.top ? rowTop : hit.clip!.top;
-        final visBottom =
-            rowBottom < hit.clip!.bottom ? rowBottom : hit.clip!.bottom;
+        final visBottom = rowBottom < hit.clip!.bottom
+            ? rowBottom
+            : hit.clip!.bottom;
         final ext = visBottom - visTop;
         return ext > 0 ? ext : 0.0;
       }
@@ -189,21 +197,33 @@ void main() {
       // half-plane reveals it; the band rework did NOT clip it to zero.
       await tester.pump(const Duration(milliseconds: 100));
       final early = measureVisibleExtent();
-      expect(early, greaterThan(0.0),
-          reason: "Entry row must be VISIBLE on the destination side of its "
-              "anchor as it emerges (legacy half-plane, NOT band-clipped to "
-              "zero). Got $early.");
-      expect(early, lessThan(_kRow),
-          reason: "Test setup: Y should be only PARTLY emerged at ~100ms so "
-              "growth is observable. Got $early.");
+      expect(
+        early,
+        greaterThan(0.0),
+        reason:
+            "Entry row must be VISIBLE on the destination side of its "
+            "anchor as it emerges (legacy half-plane, NOT band-clipped to "
+            "zero). Got $early.",
+      );
+      expect(
+        early,
+        lessThan(_kRow),
+        reason:
+            "Test setup: Y should be only PARTLY emerged at ~100ms so "
+            "growth is observable. Got $early.",
+      );
 
       // Advance the slide; the visible extent must GROW as Y slides away
       // from its anchor.
       await tester.pump(const Duration(milliseconds: 150));
       final later = measureVisibleExtent();
-      expect(later, greaterThan(early),
-          reason: "Entry row's destination-side visible extent must GROW as "
-              "it emerges past its anchor. early=$early later=$later.");
+      expect(
+        later,
+        greaterThan(early),
+        reason:
+            "Entry row's destination-side visible extent must GROW as "
+            "it emerges past its anchor. early=$early later=$later.",
+      );
 
       await tester.pumpAndSettle();
       // Fully emerged: Y visible.

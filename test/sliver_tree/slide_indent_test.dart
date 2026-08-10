@@ -23,28 +23,32 @@ void main() {
   });
 
   group("SlideAnimation X-axis fields", () {
-    test("startDeltaX defaults to 0; currentDeltaX initializes to startDeltaX",
-        () {
-      final s = SlideAnimation<String>(
-        startDelta: 100.0,
-        curve: Curves.linear,
-      );
-      expect(s.startDeltaX, 0.0);
-      expect(s.currentDeltaX, 0.0);
-      expect(s.startDelta, 100.0);
-      expect(s.currentDelta, 100.0);
-    });
+    test(
+      "startDeltaX defaults to 0; currentDeltaX initializes to startDeltaX",
+      () {
+        final s = SlideAnimation<String>(
+          startDelta: 100.0,
+          curve: Curves.linear,
+        );
+        expect(s.startDeltaX, 0.0);
+        expect(s.currentDeltaX, 0.0);
+        expect(s.startDelta, 100.0);
+        expect(s.currentDelta, 100.0);
+      },
+    );
 
-    test("explicit startDeltaX initializes both startDeltaX and currentDeltaX",
-        () {
-      final s = SlideAnimation<String>(
-        startDelta: 100.0,
-        startDeltaX: -24.0,
-        curve: Curves.linear,
-      );
-      expect(s.startDeltaX, -24.0);
-      expect(s.currentDeltaX, -24.0);
-    });
+    test(
+      "explicit startDeltaX initializes both startDeltaX and currentDeltaX",
+      () {
+        final s = SlideAnimation<String>(
+          startDelta: 100.0,
+          startDeltaX: -24.0,
+          curve: Curves.linear,
+        );
+        expect(s.startDeltaX, -24.0);
+        expect(s.currentDeltaX, -24.0);
+      },
+    );
   });
 
   group("animateFromOffsets with X axis", () {
@@ -52,7 +56,12 @@ void main() {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -66,19 +75,31 @@ void main() {
       );
 
       expect(controller.hasActiveSlides, true);
-      expect(controller.getSlideDelta("a"), 0.0,
-          reason: "Y delta = 50 - 50 = 0");
-      expect(controller.getSlideDeltaX("a"), 24.0,
-          reason: "X delta = 24 - 0 = 24");
+      expect(
+        controller.getSlideDelta("a"),
+        0.0,
+        reason: "Y delta = 50 - 50 = 0",
+      );
+      expect(
+        controller.getSlideDeltaX("a"),
+        24.0,
+        reason: "X delta = 24 - 0 = 24",
+      );
       await tester.pumpAndSettle();
     });
 
-    testWidgets("both X and Y lerp independently to 0 at completion",
-        (tester) async {
+    testWidgets("both X and Y lerp independently to 0 at completion", (
+      tester,
+    ) async {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -94,10 +115,16 @@ void main() {
       await tester.pump();
       // Halfway.
       await tester.pump(const Duration(milliseconds: 50));
-      expect(controller.getSlideDelta("a"), closeTo(50.0, 10.0),
-          reason: "Y lerps from 100 toward 0");
-      expect(controller.getSlideDeltaX("a"), closeTo(24.0, 5.0),
-          reason: "X lerps from 48 toward 0 with same curve/progress");
+      expect(
+        controller.getSlideDelta("a"),
+        closeTo(50.0, 10.0),
+        reason: "Y lerps from 100 toward 0",
+      );
+      expect(
+        controller.getSlideDeltaX("a"),
+        closeTo(24.0, 5.0),
+        reason: "X lerps from 48 toward 0 with same curve/progress",
+      );
 
       await tester.pumpAndSettle();
       expect(controller.getSlideDelta("a"), 0.0);
@@ -108,7 +135,12 @@ void main() {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -144,7 +176,12 @@ void main() {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -162,7 +199,12 @@ void main() {
     testWidgets("returns 0 for non-sliding keys", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);

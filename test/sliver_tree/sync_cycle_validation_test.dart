@@ -1,12 +1,13 @@
 /// Regression tests for audit item 2.3: a cyclic or DAG-shaped
-/// `childrenOf` passed to raw [TreeSyncController.syncRoots] (or
-/// `SyncedSliverTree.nodes`, which routes through it) must throw
+/// `childrenOf` passed to raw [TreeSyncController.syncRoots] must throw
 /// [ArgumentError] instead of hanging the UI thread (cycle) or walking
 /// exponentially into last-write-wins thrash (DAG).
 ///
-/// Four of five `SyncedSliverTree` input modes already validate this;
-/// the `.nodes` mode and direct `syncRoots(childrenOf:)` callers got no
-/// validation at all.
+/// Every `SyncedSliverTree` input mode validates its own input before it
+/// reaches the sync layer; direct `syncRoots(childrenOf:)` callers got no
+/// validation at all, which is what these cover. (The since-removed
+/// `.nodes` mode was the case that routed an unvalidated `childrenOf`
+/// straight through.)
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -47,11 +48,13 @@ void main() {
         // R7: match the guard's actual key-naming fragment — a bare
         // contains("a") matched virtually any English error text and
         // added zero discrimination over isA<ArgumentError>().
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message.toString(),
-          "message",
-          contains("involving key \"a\""),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message.toString(),
+            "message",
+            contains("involving key \"a\""),
+          ),
+        ),
       );
     },
     timeout: const Timeout(Duration(seconds: 30)),
@@ -92,56 +95,54 @@ void main() {
           childrenOf: childrenOf,
           animate: false,
         ),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message.toString(),
-          "message",
-          contains("involving key \"x\""),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message.toString(),
+            "message",
+            contains("involving key \"x\""),
+          ),
+        ),
       );
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
 
-  testWidgets(
-    "syncRoots with a key that is both a root and a child throws "
-    "ArgumentError",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      final sync = TreeSyncController<String, String>(
-        treeController: controller,
-      );
-      addTearDown(() {
-        sync.dispose();
-        controller.dispose();
-      });
+  testWidgets("syncRoots with a key that is both a root and a child throws "
+      "ArgumentError", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    final sync = TreeSyncController<String, String>(treeController: controller);
+    addTearDown(() {
+      sync.dispose();
+      controller.dispose();
+    });
 
-      // b is a desired root AND a child of a.
-      List<TreeNode<String, String>> childrenOf(String key) {
-        return switch (key) {
-          "a" => const [TreeNode(key: "b", data: "B")],
-          _ => const <TreeNode<String, String>>[],
-        };
-      }
+    // b is a desired root AND a child of a.
+    List<TreeNode<String, String>> childrenOf(String key) {
+      return switch (key) {
+        "a" => const [TreeNode(key: "b", data: "B")],
+        _ => const <TreeNode<String, String>>[],
+      };
+    }
 
-      expect(
-        () => sync.syncRoots(
-          [
-            const TreeNode(key: "a", data: "A"),
-            const TreeNode(key: "b", data: "B"),
-          ],
-          childrenOf: childrenOf,
-          animate: false,
-        ),
-        throwsA(isA<ArgumentError>().having(
+    expect(
+      () => sync.syncRoots(
+        [
+          const TreeNode(key: "a", data: "A"),
+          const TreeNode(key: "b", data: "B"),
+        ],
+        childrenOf: childrenOf,
+        animate: false,
+      ),
+      throwsA(
+        isA<ArgumentError>().having(
           (e) => e.message.toString(),
           "message",
           contains("involving key \"b\""),
-        )),
-      );
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+        ),
+      ),
+    );
+  }, timeout: const Timeout(Duration(seconds: 30)));
 }

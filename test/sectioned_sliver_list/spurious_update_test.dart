@@ -23,25 +23,20 @@ void main() {
     );
     addTearDown(controller.dispose);
 
-    controller.setSections(
-      ["s1"],
-      itemsOf: (_) => const ["i1", "i2"],
-    );
+    controller.setSections(["s1"], itemsOf: (_) => const ["i1", "i2"]);
 
     final fires = <String>[];
     controller.addSectionPayloadListener(fires.add);
     controller.addItemPayloadListener(fires.add);
 
     // Re-sync with IDENTICAL payloads.
-    controller.setSections(
-      ["s1"],
-      itemsOf: (_) => const ["i1", "i2"],
-    );
+    controller.setSections(["s1"], itemsOf: (_) => const ["i1", "i2"]);
 
     expect(
       fires,
       isEmpty,
-      reason: "setSections with identical payloads fired ${fires.length} "
+      reason:
+          "setSections with identical payloads fired ${fires.length} "
           "node-data notifications. SectionPayload/ItemPayload must "
           "compare wrapped values (not wrapper identity) so retained "
           "rows aren't refreshed on every sync.",
@@ -58,10 +53,7 @@ void main() {
     );
     addTearDown(controller.dispose);
 
-    controller.setSections(
-      ["s1"],
-      itemsOf: (_) => const ["i1", "i2"],
-    );
+    controller.setSections(["s1"], itemsOf: (_) => const ["i1", "i2"]);
 
     final fires = <String>[];
     controller.addItemPayloadListener(fires.add);
@@ -71,7 +63,8 @@ void main() {
     expect(
       fires,
       isEmpty,
-      reason: "setItems with identical payloads fired ${fires.length} "
+      reason:
+          "setItems with identical payloads fired ${fires.length} "
           "notifications.",
     );
   });

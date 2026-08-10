@@ -41,7 +41,9 @@ void main() {
   // run the full consistency sweep after every mutation (audit 5.11).
   TreeController.debugFullConsistencyChecks = true;
   group("purge paths that defer visible-order maintenance", () {
-    testWidgets("immediate (animate: false) remove of one child", (tester) async {
+    testWidgets("immediate (animate: false) remove of one child", (
+      tester,
+    ) async {
       final c = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -60,7 +62,9 @@ void main() {
       expect(c.getChildren("r"), equals(["c0", "c1", "c3", "c4", "n0"]));
     });
 
-    testWidgets("immediate (animate: false) remove of a subtree", (tester) async {
+    testWidgets("immediate (animate: false) remove of a subtree", (
+      tester,
+    ) async {
       final c = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -82,12 +86,19 @@ void main() {
       expect(c.getChildren("r"), equals(["sibling", "fresh"]));
     });
 
-    testWidgets("animated remove + animation finalize + insert", (tester) async {
+    testWidgets("animated remove + animation finalize + insert", (
+      tester,
+    ) async {
       // This is the originally-reported bug, kept here as a sibling
       // case alongside the immediate-remove cases above.
       final c = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(c.dispose);
       c.setRoots([const TreeNode(key: "r", data: "r")]);
@@ -96,22 +107,24 @@ void main() {
       ]);
       c.expand(key: "r", animate: false);
 
-      await tester.pumpWidget(Directionality(
-        textDirection: TextDirection.ltr,
-        child: SizedBox(
-          width: 400,
-          height: 600,
-          child: CustomScrollView(slivers: [
-            SliverTree<String, String>(
-              controller: c,
-              nodeBuilder: (_, k, _) => SizedBox(
-                height: 24,
-                child: Text(k),
-              ),
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: SizedBox(
+            width: 400,
+            height: 600,
+            child: CustomScrollView(
+              slivers: [
+                SliverTree<String, String>(
+                  controller: c,
+                  nodeBuilder: (_, k, _) =>
+                      SizedBox(height: 24, child: Text(k)),
+                ),
+              ],
             ),
-          ]),
+          ),
         ),
-      ));
+      );
       await tester.pump();
 
       c.remove(key: "c1", animate: true);
@@ -141,11 +154,17 @@ void main() {
       expect(c.getChildren("r1"), equals(["r1c", "n0"]));
     });
 
-    testWidgets("collapse with animation, then insert under same parent",
-        (tester) async {
+    testWidgets("collapse with animation, then insert under same parent", (
+      tester,
+    ) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(c.dispose);
       c.setRoots([const TreeNode(key: "r", data: "r")]);
@@ -154,22 +173,24 @@ void main() {
       ]);
       c.expand(key: "r", animate: false);
 
-      await tester.pumpWidget(Directionality(
-        textDirection: TextDirection.ltr,
-        child: SizedBox(
-          width: 400,
-          height: 600,
-          child: CustomScrollView(slivers: [
-            SliverTree<String, String>(
-              controller: c,
-              nodeBuilder: (_, k, _) => SizedBox(
-                height: 24,
-                child: Text(k),
-              ),
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: SizedBox(
+            width: 400,
+            height: 600,
+            child: CustomScrollView(
+              slivers: [
+                SliverTree<String, String>(
+                  controller: c,
+                  nodeBuilder: (_, k, _) =>
+                      SizedBox(height: 24, child: Text(k)),
+                ),
+              ],
             ),
-          ]),
+          ),
         ),
-      ));
+      );
       await tester.pump();
 
       // Remove a child mid-animation, then collapse the parent (which
@@ -184,29 +205,31 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets("setChildren that drops some retained, adds some, removes some",
-        (tester) async {
-      final c = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(c.dispose);
-      c.setRoots([const TreeNode(key: "r", data: "r")]);
-      c.setChildren("r", [
-        const TreeNode(key: "a", data: "a"),
-        const TreeNode(key: "b", data: "b"),
-        const TreeNode(key: "c", data: "c"),
-        const TreeNode(key: "d", data: "d"),
-      ]);
-      c.expand(key: "r", animate: false);
+    testWidgets(
+      "setChildren that drops some retained, adds some, removes some",
+      (tester) async {
+        final c = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: TreeAnimationStyle.disabled,
+        );
+        addTearDown(c.dispose);
+        c.setRoots([const TreeNode(key: "r", data: "r")]);
+        c.setChildren("r", [
+          const TreeNode(key: "a", data: "a"),
+          const TreeNode(key: "b", data: "b"),
+          const TreeNode(key: "c", data: "c"),
+          const TreeNode(key: "d", data: "d"),
+        ]);
+        c.expand(key: "r", animate: false);
 
-      c.setChildren("r", [
-        const TreeNode(key: "a", data: "a"),
-        const TreeNode(key: "c", data: "c"),
-        const TreeNode(key: "e", data: "e"),
-      ]);
-      expectInsertConsistent(c, "r", "n0");
-      expect(c.getChildren("r"), equals(["a", "c", "e", "n0"]));
-    });
+        c.setChildren("r", [
+          const TreeNode(key: "a", data: "a"),
+          const TreeNode(key: "c", data: "c"),
+          const TreeNode(key: "e", data: "e"),
+        ]);
+        expectInsertConsistent(c, "r", "n0");
+        expect(c.getChildren("r"), equals(["a", "c", "e", "n0"]));
+      },
+    );
   });
 }

@@ -12,20 +12,27 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: CustomScrollView(slivers: [
-            SectionedSliverList<String, String, String>(
-              sections: const ["a"],
-              itemsOf: (_) => [for (var i = 0; i < 6; i++) "a_$i"],
-              sectionKeyOf: (s) => s,
-              itemKeyOf: (i) => i,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-              headerBuilder: (ctx, v) {
-                controller = v.controller;
-                return Text(v.section);
-              },
-              itemBuilder: (ctx, v) => Text(v.item),
-            ),
-          ]),
+          body: CustomScrollView(
+            slivers: [
+              SectionedSliverList<String, String, String>(
+                sections: const ["a"],
+                itemsOf: (_) => [for (var i = 0; i < 6; i++) "a_$i"],
+                sectionKeyOf: (s) => s,
+                itemKeyOf: (i) => i,
+                animationStyle: const TreeAnimationStyle(
+                  expandCollapse: TreeAnimationSpec(
+                    duration: Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                  ),
+                ),
+                headerBuilder: (ctx, v) {
+                  controller = v.controller;
+                  return Text(v.section);
+                },
+                itemBuilder: (ctx, v) => Text(v.item),
+              ),
+            ],
+          ),
         ),
       ),
     );

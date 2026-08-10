@@ -27,9 +27,18 @@ import 'package:widgets_extended/sliver_tree/types.dart';
 /// (containing range, last-row fallback past the bottom). Records every
 /// requested scrollY so tests can pin WHERE the probe looked.
 class _FakeRenderPort implements ReorderRenderPort<String> {
-  _FakeRenderPort(this.rows, {this.precedingScrollExtent = 0.0});
+  _FakeRenderPort(
+    this.rows, {
+    this.precedingScrollExtent = 0.0,
+    this.pinned = const <String, ({double paintedOffset, double extent})>{},
+  });
 
   final List<({String key, double paintedOffset, double extent})> rows;
+
+  /// Painted bands that differ from the positional script, modelling
+  /// sticky-pinned headers: a pinned header paints at its pinned band
+  /// while its structural offset has scrolled away above.
+  final Map<String, ({double paintedOffset, double extent})> pinned;
   final List<double> lookups = <double>[];
 
   @override
@@ -41,6 +50,23 @@ class _FakeRenderPort implements ReorderRenderPort<String> {
   @override
   bool drivesController(Object treeController) {
     return true;
+  }
+
+  /// Key-addressed inverse of [findRowAtPaintedY]. Deliberately does
+  /// NOT record into [lookups]: that list pins WHERE the probe looked
+  /// positionally, and grab capture no longer looks positionally.
+  @override
+  ({double paintedOffset, double extent})? paintedRowBounds(String key) {
+    final pin = pinned[key];
+    if (pin != null) {
+      return pin;
+    }
+    for (final row in rows) {
+      if (row.key == key) {
+        return (paintedOffset: row.paintedOffset, extent: row.extent);
+      }
+    }
+    return null;
   }
 
   @override
@@ -74,7 +100,7 @@ class _FakeRenderPort implements ReorderRenderPort<String> {
   void beginSlideBaseline({
     required Duration duration,
     required Curve curve,
-    Map<String, double>? baselineYOverrides,
+    Map<String, ({double y, double? x})>? baselineOverrides,
   }) {}
 }
 
@@ -151,22 +177,83 @@ void main() {
     });
 
     test(
-        "fallback: pointer over a DIFFERENT row → top anchor, that row's "
-        "extent, and NO probe shift even when gated", () {
-      final probe = probeOver(_FakeRenderPort(threeRows()));
-      // Dragging b, but the start sample sits over a (0..50).
-      probe.captureGrab(start: _sampleAt(10.0), midpointProbe: true);
+      "pointer above the dragged row: clamps against the row's OWN band",
+      () {
+        // Rewritten when grab capture moved from a positional lookup to a
+        // key-addressed one. It used to assert the "distrust" fallback: a
+        // positional lookup that returned a DIFFERENT key meant the geometry
+        // was untrustworthy, so grabDy went to 0, the FOREIGN row's extent
+        // was reported, and the midpoint probe was suppressed.
+        //
+        // Asking by key removes that category entirely. There is no wrong
+        // row to resolve any more, so the answer below is trustworthy: the
+        // pointer is above b, grabDy clamps to b's top, and the extent is
+        // b's own. The probe therefore applies, where it previously could
+        // not. Strictly better geometry, and the reason the old expectations
+        // are gone rather than preserved.
+        final probe = probeOver(_FakeRenderPort(threeRows()));
+        // Dragging b (50..100), but the start sample sits at 10.
+        probe.captureGrab(start: _sampleAt(10.0), midpointProbe: true);
 
-      expect(probe.grabDy, 0.0);
-      expect(probe.grabRowExtent, 50.0);
-      // D-A gate: a fabricated half-extent shift from grabDy = 0 is
-      // exactly the untrustworthy-geometry case — must stay 0.
-      expect(probe.probeDy, 0.0);
+        expect(probe.grabDy, 0.0);
+        expect(probe.grabRowExtent, 50.0, reason: "b's extent, not a's");
+        expect(
+          probe.probeDy,
+          25.0,
+          reason: "trustworthy capture, probe applies",
+        );
+      },
+    );
+
+    test("REPRO: a sticky-pinned row captures against its PAINTED band", () {
+      // The bug. A pinned header paints at its pinned band while its
+      // structural offset has scrolled away above, so asking
+      // findRowAtPaintedY what sits at the pinned strip returns whatever
+      // content is scrolled UNDERNEATH it. The key comparison then failed
+      // and capture silently fell back to a top anchor carrying a foreign
+      // extent.
+      //
+      // Modelled here exactly as the render layer produces it: "b" is
+      // pinned at 0..32 (a 32px header), while the positional script still
+      // reports the 50px content rows at their structural offsets.
+      final port = _FakeRenderPort(
+        threeRows(),
+        pinned: const <String, ({double paintedOffset, double extent})>{
+          "b": (paintedOffset: 0.0, extent: 32.0),
+        },
+      );
+      final probe = probeOver(port);
+
+      // Setup sanity: positionally, y=20 is row "a", NOT the dragged "b".
+      // Without this the test could pass for the trivial reason that the
+      // two lookups happened to agree.
+      expect(port.findRowAtPaintedY(20.0)?.key, "a");
+
+      // Grab the pinned header 20px down from its painted top.
+      probe.captureGrab(start: _sampleAt(20.0), midpointProbe: true);
+
+      expect(
+        probe.grabDy,
+        20.0,
+        reason: "held where grabbed, not snapped to the row's top",
+      );
+      expect(
+        probe.grabRowExtent,
+        32.0,
+        reason: "the header's own extent, not the row scrolled beneath it",
+      );
+      expect(
+        probe.probeDy,
+        -4.0,
+        reason: "midpoint probe stays live: 32/2 - 20",
+      );
     });
 
     test("no row at all: zeroed grab record, no probe shift", () {
       final probe = probeOver(
-        _FakeRenderPort(<({String key, double paintedOffset, double extent})>[]),
+        _FakeRenderPort(
+          <({String key, double paintedOffset, double extent})>[],
+        ),
       );
       probe.captureGrab(start: _sampleAt(10.0), midpointProbe: true);
 
@@ -175,13 +262,9 @@ void main() {
       expect(probe.probeDy, 0.0);
     });
 
-    test(
-        "clamp: past-the-bottom fallback resolves the last row and clamps "
+    test("clamp: past-the-bottom fallback resolves the last row and clamps "
         "grabDy to its extent", () {
-      final probe = probeOver(
-        _FakeRenderPort(threeRows()),
-        draggedKey: "c",
-      );
+      final probe = probeOver(_FakeRenderPort(threeRows()), draggedKey: "c");
       // 175 is past c's bottom (150); the port's last-row fallback
       // reports c, and raw dy (175 − 100 = 75) exceeds the 50px extent.
       probe.captureGrab(start: _sampleAt(175.0), midpointProbe: true);
@@ -227,6 +310,7 @@ void main() {
         parentKey: null,
         indexInFinalList: 0,
         depth: 0,
+        gapVisibleIndex: 0,
         targetPaintedY: 0.0,
         targetExtent: 50.0,
       );
@@ -249,6 +333,7 @@ void main() {
         parentKey: null,
         indexInFinalList: 0,
         depth: 0,
+        gapVisibleIndex: 0,
         targetPaintedY: 0.0,
         targetExtent: 50.0,
       );
@@ -262,8 +347,7 @@ void main() {
       expect(target, isNull);
     });
 
-    test(
-        "probes at sliverY + probeDy while the depth hint keeps the RAW "
+    test("probes at sliverY + probeDy while the depth hint keeps the RAW "
         "pointer x", () {
       final port = _FakeRenderPort(threeRows());
       final seenX = <double>[];
@@ -338,25 +422,22 @@ void main() {
         home: Scaffold(
           body: ListView(
             children: [
-              for (int i = 0; i < 30; i++) SizedBox(height: 50.0, child: Text("row $i")),
+              for (int i = 0; i < 30; i++)
+                SizedBox(height: 50.0, child: Text("row $i")),
             ],
           ),
         ),
       );
     }
 
-    testWidgets("sample converts global → sliver-local + viewport coords",
-        (tester) async {
+    testWidgets("sample converts global → sliver-local + viewport coords", (
+      tester,
+    ) async {
       await tester.pumpWidget(scrollableApp());
-      final scrollable = tester.state<ScrollableState>(
-        find.byType(Scrollable),
-      );
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
       final space = PointerSpace<String>(
         scrollable: scrollable,
-        renderPort: _FakeRenderPort(
-          threeRows(),
-          precedingScrollExtent: 40.0,
-        ),
+        renderPort: _FakeRenderPort(threeRows(), precedingScrollExtent: 40.0),
       );
 
       expect(space.isLive, isTrue);
@@ -374,15 +455,10 @@ void main() {
 
     testWidgets("sample tracks the live scroll offset", (tester) async {
       await tester.pumpWidget(scrollableApp());
-      final scrollable = tester.state<ScrollableState>(
-        find.byType(Scrollable),
-      );
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
       final space = PointerSpace<String>(
         scrollable: scrollable,
-        renderPort: _FakeRenderPort(
-          threeRows(),
-          precedingScrollExtent: 40.0,
-        ),
+        renderPort: _FakeRenderPort(threeRows(), precedingScrollExtent: 40.0),
       );
 
       scrollable.position.jumpTo(120.0);
@@ -393,12 +469,11 @@ void main() {
       expect(sample!.sliverY, 330.0);
     });
 
-    testWidgets("defunct scrollable: isLive false, position and sample null",
-        (tester) async {
+    testWidgets("defunct scrollable: isLive false, position and sample null", (
+      tester,
+    ) async {
       await tester.pumpWidget(scrollableApp());
-      final scrollable = tester.state<ScrollableState>(
-        find.byType(Scrollable),
-      );
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
       final space = PointerSpace<String>(
         scrollable: scrollable,
         renderPort: _FakeRenderPort(threeRows()),
@@ -462,13 +537,15 @@ void main() {
         parentKey: key,
         indexInFinalList: 0,
         depth: 1,
+        gapVisibleIndex: 1,
         targetPaintedY: 0.0,
         targetExtent: 50.0,
       );
     }
 
-    testWidgets("arms on into+collapsed+children, expands after the delay",
-        (tester) async {
+    testWidgets("arms on into+collapsed+children, expands after the delay", (
+      tester,
+    ) async {
       seedTree(tester);
       final dwell = makeDwell();
 
@@ -482,8 +559,9 @@ void main() {
       expect(resolveCount, 1);
     });
 
-    testWidgets("re-delivering the SAME candidate leaves the timer running",
-        (tester) async {
+    testWidgets("re-delivering the SAME candidate leaves the timer running", (
+      tester,
+    ) async {
       seedTree(tester);
       final dwell = makeDwell();
 
@@ -511,8 +589,9 @@ void main() {
       expect(resolveCount, 0);
     });
 
-    testWidgets("non-arming targets: leaf, already-expanded, non-into zone",
-        (tester) async {
+    testWidgets("non-arming targets: leaf, already-expanded, non-into zone", (
+      tester,
+    ) async {
       seedTree(tester);
       final dwell = makeDwell();
 
@@ -529,6 +608,7 @@ void main() {
           parentKey: null,
           indexInFinalList: 0,
           depth: 0,
+          gapVisibleIndex: 0,
           targetPaintedY: 0.0,
           targetExtent: 50.0,
         ),
@@ -543,8 +623,9 @@ void main() {
       expect(resolveCount, 0);
     });
 
-    testWidgets("dead session at fire time: no expand, no re-resolve",
-        (tester) async {
+    testWidgets("dead session at fire time: no expand, no re-resolve", (
+      tester,
+    ) async {
       seedTree(tester);
       final dwell = makeDwell();
 

@@ -2,8 +2,9 @@
 /// [SliverTree]: gesture lifecycle, drop-target resolution, autoscroll near
 /// viewport edges, and FLIP slide animation on commit.
 ///
-/// The controller is **stateless when idle** — it holds no per-frame state
-/// outside an active drag. A drag session begins with [startDrag], receives
+/// The controller holds no PER-FRAME state outside an active drag (the
+/// monotonic [TreeReorderController.dragGeneration] survives idleness by
+/// design). A drag session begins with [startDrag], receives
 /// pointer updates via [updateDrag], and ends with [endDrag] (commit) or
 /// [cancelDrag] (no-op). Only one session can be active at a time.
 ///
@@ -54,14 +55,16 @@ export '_drop_zone_resolver.dart' show TreeDropTarget, TreeDropZone;
 ///
 /// Extends [ChangeNotifier]: listeners are notified whenever
 /// [currentTarget] changes or the drag session begins/ends. Consumers
-/// that need to repaint per-pointer-move (like the built-in drop
-/// indicator) subscribe here instead of polling per-frame.
+/// that need to repaint per-pointer-move subscribe here instead of
+/// polling per-frame; the per-move [pointerPosition] channel exists for
+/// those that must follow the pointer itself.
 class TreeReorderController<TKey> extends ChangeNotifier {
   TreeReorderController({
     required this.treeController,
     required TickerProvider vsync,
     this.canReorder,
     this.canAcceptDrop,
+    this.onReorder,
     this.autoScrollEdgeZone = 48.0,
     this.autoScrollMaxVelocity = 1200.0,
     this.autoExpandDelay = const Duration(milliseconds: 700),
@@ -75,8 +78,8 @@ class TreeReorderController<TKey> extends ChangeNotifier {
         treeController,
         "treeController",
         "TreeReorderController is incompatible with a comparator-based "
-        "TreeController: comparator auto-sort would override drag order. "
-        "Pass a controller with comparator: null, or remove the comparator.",
+            "TreeController: comparator auto-sort would override drag order. "
+            "Pass a controller with comparator: null, or remove the comparator.",
       );
     }
     _vsync = vsync;
@@ -93,27 +96,54 @@ class TreeReorderController<TKey> extends ChangeNotifier {
 
   /// If set, rejected drop targets are filtered out. Receives the dragged
   /// key, the candidate new parent, and the final-list index.
-  final bool Function({
-    required TKey movingKey,
-    TKey? newParent,
-    int? index,
-  })? canAcceptDrop;
+  final bool Function({required TKey movingKey, TKey? newParent, int? index})?
+  canAcceptDrop;
+
+  /// Reports every committed reorder, whatever initiated it: a pointer
+  /// drop, [moveTo], or one of the four semantic moves.
+  ///
+  /// `index` follows the package's live-space FINAL-list convention: the
+  /// position among the destination's live children AFTER `key` has been
+  /// removed from wherever it was. A same-parent downward move therefore
+  /// reports one less than a caller computing against the pre-removal
+  /// list would expect.
+  ///
+  /// Fires exactly once per commit, and never for a refused or no-op
+  /// move. On the drag path it fires after the session has been torn
+  /// down and before the session-end notification, so a synchronous
+  /// `setState` here cannot land mid-commit.
+  ///
+  /// This is the only way to observe a reorder that did not come from a
+  /// pointer. Assistive technology drives the semantic moves directly,
+  /// and without this a consumer holding authoritative data would never
+  /// hear about them.
+  final void Function(TKey key, TKey? newParent, int index)? onReorder;
 
   /// Height in pixels from each viewport edge within which the pointer
   /// triggers autoscroll. Velocity ramps linearly from 0 at the zone's
   /// inner edge to [autoScrollMaxVelocity] at the viewport edge.
-  final double autoScrollEdgeZone;
+  ///
+  /// Mutable at runtime. Captured once per drag session at [startDrag]
+  /// (the same per-session policy as the animation style), so a change
+  /// never retunes a live drag; the next drag picks it up.
+  double autoScrollEdgeZone;
 
   /// Peak autoscroll velocity in logical pixels per second.
-  final double autoScrollMaxVelocity;
+  ///
+  /// Mutable at runtime; captured per drag session, see
+  /// [autoScrollEdgeZone].
+  double autoScrollMaxVelocity;
 
   /// How long the pointer must dwell on an `into` target that is
   /// collapsed (and has live children to reveal) before the target
-  /// auto-expands — the conventional hover-to-open tree affordance.
+  /// auto-expands, the conventional hover-to-open tree affordance.
   ///
   /// `null` or [Duration.zero] disables auto-expand. The dwell re-arms
   /// on every target change and is cancelled by session end.
-  final Duration? autoExpandDelay;
+  ///
+  /// Mutable at runtime; captured per drag session, see
+  /// [autoScrollEdgeZone].
+  Duration? autoExpandDelay;
 
   /// Zone semantics, shared with commit-time re-validation. Late so it can
   /// capture the final [treeController]/[canAcceptDrop] fields.
@@ -131,6 +161,28 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   /// Whether a drag is currently in flight.
   bool get isDragging => _session != null;
 
+  /// Monotonically increasing identity for drag sessions.
+  ///
+  /// Starts at 0 and increments by exactly one each time [startDrag]
+  /// INSTALLS a session, before that call's session-start notification.
+  /// Never decreases and never repeats, so it answers "is this still the
+  /// drag that was in flight when I scheduled this?", which [isDragging]
+  /// and [draggedKey] cannot: the same node dragged twice is
+  /// indistinguishable through them.
+  ///
+  /// Deferred work captures the value and re-reads it later; a mismatch
+  /// means the callback has been outlived by its session. That single
+  /// compare covers a replacement session ([startDrag] cancels a live one
+  /// first, so a listener sees `isDragging` go false then true inside one
+  /// call), a start that BAILS after that cancel (which notifies false
+  /// with no matching true, and consumes no generation), and callbacks
+  /// arriving after a later session has both begun and ended.
+  ///
+  /// Not incremented by [endDrag], [cancelDrag] or [dispose]: it
+  /// identifies the session, not its transitions.
+  int get dragGeneration => _dragGeneration;
+  int _dragGeneration = 0;
+
   /// The currently-dragged key, or `null` if no drag is active.
   TKey? get draggedKey => _session?.draggedKey;
 
@@ -138,8 +190,8 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   /// or every candidate slot is a cycle.
   ///
   /// A target whose slot equals the dragged row's current position IS
-  /// valid ("returns here" feedback — the indicator/gap shows the original
-  /// slot instead of going dark); [endDrag] detects it and commits
+  /// valid: the "returns here" feedback shows the gap at the original
+  /// slot instead of going dark. [endDrag] detects it and commits
   /// nothing, behaving like [cancelDrag].
   TreeDropTarget<TKey>? get currentTarget => _session?.currentTarget;
 
@@ -147,8 +199,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   ///
   /// For presentation-layer consumers: the semantic [TreeDropTarget]
   /// carries sliver-local geometry, and converting it to viewport scroll
-  /// space needs [ReorderRenderPort.precedingScrollExtent]. The built-in
-  /// drop indicator reads this on every repaint.
+  /// space needs [ReorderRenderPort.precedingScrollExtent].
   ReorderRenderPort<TKey>? get renderPort => _session?.renderPort;
 
   /// Per-pointer-move channel: the latest global pointer position, `null`
@@ -186,10 +237,20 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   /// value rather than an exception.
   ///
   /// [depthForPointerX] maps the pointer's sliver-local x to an UNCLAMPED
-  /// preferred depth (e.g. `x ~/ indentPerDepth` — the widget layer owns
+  /// preferred depth (e.g. `x ~/ indentWidth` — the widget layer owns
   /// the pixel constant); the resolver clamps it to the legal candidate
   /// chain when a below-zone drop sits at a subtree right-boundary. Omit
   /// it to always resolve at the deepest legal level.
+  ///
+  /// [proxyCrossOffset] reports the floating drag proxy's VISUAL cross
+  /// offset, in sliver cross space, sampled at settle-glide install time
+  /// (release, cancel, or the dead-commit fallback) so the proxy-to-row
+  /// handoff starts exactly where the card visually is, even when
+  /// released mid-animation. Presentation-supplied, following the
+  /// [depthForPointerX] precedent. Omit it (imperative drags with no
+  /// proxy) and the glides carry no x motion while the commit baseline
+  /// preserves the captured x — the classic y-only handoff. Only
+  /// consulted when [settleFromRelease] builds a settler.
   ///
   /// When [makeRoom] AND [settleFromRelease] are BOTH set (touch-first
   /// make-room mode), slot resolution probes at the PROXY MIDPOINT
@@ -206,6 +267,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     required ScrollableState scrollable,
     required Offset pointerGlobal,
     int Function(double sliverLocalX)? depthForPointerX,
+    double Function()? proxyCrossOffset,
     bool makeRoom = false,
     bool settleFromRelease = false,
   }) {
@@ -214,7 +276,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
         renderPort,
         "renderPort",
         "renderPort must be driven by the same TreeController passed to "
-        "TreeReorderController. Cross-controller drag is not supported.",
+            "TreeReorderController. Cross-controller drag is not supported.",
       );
     }
     if (!renderPort.isLaidOut) {
@@ -292,14 +354,16 @@ class TreeReorderController<TKey> extends ChangeNotifier {
         draggedKey: key,
         duration: style.effectiveDropSettle.duration,
         curve: style.effectiveDropSettle.curve,
+        proxyCrossOffset: proxyCrossOffset,
       );
     }
+    _dragGeneration++;
     _session = session;
     // Pin the dragged row against stale eviction for the session's
-    // lifetime: the drag gesture lives on the row's own GestureDetector,
-    // so autoscrolling it out of the cache region would otherwise evict
-    // the row, its end/cancel callbacks would never fire, and the session
-    // (plus the autoscroll ticker) would run forever.
+    // lifetime: the drag gesture's recognizer lives on the row's own
+    // `State`, so autoscrolling it out of the cache region would otherwise
+    // evict the row, its `Drag`'s end/cancel would never fire, and the
+    // session (plus the autoscroll ticker) would run forever.
     renderPort.pinNode(key);
     session.subscribeScroll(scrollable.position, _onScrollPositionChanged);
     _pointerPosition.value = pointerGlobal;
@@ -323,10 +387,57 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     _resolveAndNotify(session);
   }
 
-  /// Re-resolves through the session's single choreography site and fires
-  /// the coalesced [ChangeNotifier] channel iff the semantic target
-  /// changed. Notification stays controller-owned.
+  /// Re-resolves through [DragSession.resolve] and fires the coalesced
+  /// [ChangeNotifier] channel iff the semantic target changed, AND
+  /// enforces [canReorder] for the life of the drag.
+  ///
+  /// Policy enforcement lives here rather than in `updateDrag`, which is
+  /// where it was first written and where it did nothing. `updateDrag`
+  /// only fires on pointer events, and the case that needs enforcing is a
+  /// drag whose row has autoscrolled out of the cache region: the row is
+  /// held mounted by the drag pin but never rebuilt, so the widget
+  /// layer's build-time and deactivate backstops are both mute, and a
+  /// finger parked in the autoscroll edge zone produces no pointer events
+  /// at all. Measured, that placement ran zero times in sixty frames of
+  /// exactly that scenario. Every re-resolution trigger funnels through
+  /// HERE instead: pointer moves, scroll notifications (which is what
+  /// autoscroll produces), and the dwell timer.
+  ///
+  /// Edge-triggered, not polled: an idle drag with no movement and no
+  /// scrolling costs nothing.
+  ///
+  /// Deliberately synchronous. Unlike the widget layer's backstop, which
+  /// must defer because `build` and `deactivate` run in
+  /// `persistentCallbacks`, every phase reaching this method is idle or
+  /// `transientCallbacks`. `ScrollPosition.setPixels` asserts it never
+  /// notifies during `persistentCallbacks`, and the layout-driven
+  /// correction path does not notify at all.
+  ///
+  /// RESIDUAL, worth knowing: a pointer parked OUTSIDE the autoscroll
+  /// edge zone with the row off-screen re-resolves nothing, so a refusal
+  /// there is not noticed until the next pointer event or the lift. The
+  /// consequences are cosmetic (the gap, pin and proxy stay up); the drop
+  /// itself is still refused by `_canCommit`. Closing it would need a
+  /// per-frame poll or a listenable policy, both worse than the symptom.
   void _resolveAndNotify(DragSession<TKey> session) {
+    // Stale on ENTRY: `updateDrag` publishes the `pointerPosition`
+    // channel, which is app code, before calling this.
+    if (!identical(_session, session)) {
+      return;
+    }
+
+    if (canReorder != null && !canReorder!(session.draggedKey)) {
+      // The policy is app code too, and may have ended this session or
+      // started another. A verdict about THIS session must never cancel
+      // a different one.
+      if (identical(_session, session)) {
+        cancelDrag();
+      }
+      return;
+    }
+    if (!identical(_session, session)) {
+      return;
+    }
     final previous = session.currentTarget;
     session.resolve();
     if (!_targetsEqual(previous, session.currentTarget)) {
@@ -370,31 +481,29 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // the FLIP baseline. The last pointer-move's target may be stale: with
     // server-driven updates the dragged node or the target parent can have
     // become pending-deletion (or been purged) since. Committing a stale
-    // target would throw out of a GestureDetector callback with the
-    // session permanently stuck, and a baseline staged before validation
+    // target would throw out of a gesture callback with the session
+    // permanently stuck, and a baseline staged before validation
     // would be consumed by nobody — first-wins staging then blocks every
     // subsequent slide stage until an unrelated layout flushes it.
     session.resolveTargetOnly();
     final target = session.currentTarget;
     final dragged = session.draggedKey;
-    final bool valid;
     if (target == null) {
-      valid = false;
-    } else if (treeController.getNodeData(dragged) == null ||
-        treeController.isPendingDeletion(dragged)) {
-      valid = false;
-    } else {
-      final parentKey = target.parentKey;
-      if (parentKey == null) {
-        valid = true;
-      } else {
-        valid = treeController.getNodeData(parentKey) != null &&
-            !treeController.isPendingDeletion(parentKey) &&
-            parentKey != dragged &&
-            !_resolver.isStrictDescendantOf(parentKey, dragged);
-      }
+      cancelDrag();
+      return;
     }
-    if (!valid) {
+    final commitAllowed = _canCommit(dragged, target.parentKey);
+    // `_canCommit` runs `canReorder`, which is app code. If it tore this
+    // session down, everything below (baseline staging, the make-room
+    // snap, `_applyMove`, and `detachAll` in the `finally`) would run
+    // against a session that no longer exists: a second `detachAll`
+    // double-disposes the autoscroll ticker and throws out of the
+    // `finally`, which skips `_fireOnReorder` entirely. The tree gets
+    // mutated and the app is never told.
+    if (!identical(_session, session)) {
+      return;
+    }
+    if (!commitAllowed) {
       cancelDrag();
       return;
     }
@@ -405,8 +514,20 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // baseline is exactly the protocol violation the expiry backstop
     // guards against). cancelDrag is the precise semantic: settle-back
     // glide, make-room release, clean teardown.
-    if (treeController.getParent(dragged) == target!.parentKey &&
-        target.indexInFinalList ==
+    // Compare the RESOLVED index, the way `moveTo` does. The resolver
+    // never emits an out-of-range one today, so this is equivalence
+    // rather than a fix; it stops the guard drifting from `_applyMove`'s
+    // clamp for whatever calls this next.
+    if (treeController.getParent(dragged) == target.parentKey &&
+        target.indexInFinalList.clamp(
+              0,
+              (target.parentKey == null
+                      ? treeController.liveRootCount
+                      : treeController.liveChildCount(
+                          target.parentKey as TKey,
+                        )) -
+                  1,
+            ) ==
             treeController.getIndexInParent(dragged)) {
       cancelDrag();
       return;
@@ -446,8 +567,10 @@ class TreeReorderController<TKey> extends ChangeNotifier {
         curve: session.commitSlideSpec.curve,
         // Proxy drop-settle: the dragged row's FLIP starts at the release
         // position (null when no settler, or scrollable gone → classic
-        // old-slot FLIP).
-        baselineYOverrides: session.settler?.baselineOverrides(),
+        // old-slot FLIP). The override's x is the proxy's visual cross
+        // offset, or null (preserve the captured x) when the session has
+        // no proxy cross-offset source.
+        baselineOverrides: session.settler?.baselineOverrides(),
       );
     }
 
@@ -460,48 +583,21 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // named commit-script op rather than part of teardown.
     session.makeRoomDriver?.snapForCommit();
 
+    ({TKey key, TKey? newParent, int index})? committed;
     try {
-      final currentParent = treeController.getParent(dragged);
-      // `target` was promoted non-null by the current-position check above.
-      final sameParent = currentParent == target.parentKey;
-
-      if (sameParent) {
-        // Build the live final sibling list — reorderChildren/reorderRoots
-        // reject lists containing pending-deletion entries and re-append them
-        // internally after validating the live ordering.
-        final liveSiblings = target.parentKey == null
-            ? treeController.liveRootKeys
-            : treeController.getLiveChildren(target.parentKey as TKey);
-        liveSiblings.remove(dragged);
-        final insertAt = target.indexInFinalList.clamp(0, liveSiblings.length);
-        liveSiblings.insert(insertAt, dragged);
-
-        if (target.parentKey == null) {
-          // Drag commit: the reorderable widget owns the drop animation, so
-          // keep the structural commit a snap to avoid double-animating the
-          // item.
-          treeController.reorderRoots(liveSiblings, animate: false);
-        } else {
-          treeController.reorderChildren(
-            target.parentKey as TKey,
-            liveSiblings,
-            animate: false,
-          );
-        }
-      } else {
-        // Cross-parent: moveNode's `index` is the position in the new
-        // parent's final child list — exactly indexInFinalList.
-        treeController.moveNode(
-          dragged,
-          target.parentKey,
-          index: target.indexInFinalList,
-          // In the settle fallback, moveNode's own baseline self-staging
-          // carries the same dead-consume hazard as the skipped staging
-          // above. On the normal path it stays enabled (first-wins-
-          // shadowed by the staging above).
-          animate: !useSettleFallback,
-        );
-      }
+      // Same-parent drops keep the structural commit a SNAP: the
+      // reorderable widget owns the drop animation, so animating here
+      // would double-animate the row. Cross-parent keeps moveNode's own
+      // baseline self-staging except in the settle fallback, where it
+      // carries the same dead-consume hazard as the skipped staging
+      // above (on the normal path it is first-wins-shadowed by it).
+      final sameParent = treeController.getParent(dragged) == target.parentKey;
+      committed = _applyMove(
+        dragged,
+        target.parentKey,
+        target.indexInFinalList,
+        animate: sameParent ? false : !useSettleFallback,
+      );
       if (useSettleFallback) {
         // No pending-baseline guard needed since the disabled-mode
         // split: a foreign same-frame baseline's consume RE-BASES the
@@ -518,8 +614,232 @@ class TreeReorderController<TKey> extends ChangeNotifier {
       session.detachAll(SessionExit.commit);
       _pointerPosition.value = null;
       _session = null;
-      notifyListeners();
+      // Report AFTER teardown, so a synchronous setState in the handler
+      // cannot land mid-commit and a throwing handler cannot leave a
+      // session stuck, and BEFORE the session-end notification, which
+      // this must not suppress. A throwing MUTATION leaves `committed`
+      // null and fires nothing, which is correct: no commit happened.
+      try {
+        if (committed != null) {
+          _fireOnReorder(committed);
+        }
+      } finally {
+        notifyListeners();
+      }
     }
+  }
+
+  /// Whether [key] may legally become a child of [newParent], ignoring
+  /// position. Shared by the drag commit script and [moveTo] so the two
+  /// cannot drift: [canReorder], existence, pending-deletion on both
+  /// ends, self-parent, and the cycle check.
+  ///
+  /// [canReorder] belongs here rather than only at `startDrag`, because
+  /// [moveTo] is a second way in. Without it a programmatic or
+  /// assistive-technology move could reposition a row the policy says is
+  /// immovable, and the only gate would be presentation.
+  bool _canCommit(TKey key, TKey? newParent) {
+    if (canReorder != null && !canReorder!(key)) {
+      return false;
+    }
+    if (treeController.getNodeData(key) == null ||
+        treeController.isPendingDeletion(key)) {
+      return false;
+    }
+    if (newParent == null) {
+      return true;
+    }
+    return treeController.getNodeData(newParent) != null &&
+        !treeController.isPendingDeletion(newParent) &&
+        newParent != key &&
+        !_resolver.isStrictDescendantOf(newParent, key);
+  }
+
+  /// THE mutation site. Picks the mutation shape from the keys alone and
+  /// returns the triple it committed, with the index RESOLVED: callers
+  /// report that rather than their own argument, so an out-of-range
+  /// request cannot be published as though it were a real position.
+  ///
+  /// Deliberately does NOT notify: [endDrag] must report after its
+  /// session teardown, while [moveTo] reports immediately, so the two
+  /// orderings are the callers' business and the notification has exactly
+  /// one implementation ([_fireOnReorder]).
+  ///
+  /// [index] is live-space and names the position in the FINAL sibling
+  /// list, after [key] has been removed from wherever it was.
+  ({TKey key, TKey? newParent, int index}) _applyMove(
+    TKey key,
+    TKey? newParent,
+    int index, {
+    required bool animate,
+  }) {
+    final sameParent = treeController.getParent(key) == newParent;
+    if (sameParent) {
+      // reorderChildren/reorderRoots reject lists containing
+      // pending-deletion entries and re-append them internally after
+      // validating the live ordering.
+      //
+      // Copied rather than used in place: `getLiveChildren` returns a
+      // `const []` for an absent or empty child list, and mutating that
+      // throws. Both current callers have already established that `key`
+      // is a live child here, so the list cannot be empty, but this
+      // method's contract is "unchecked" and the next caller will not
+      // know that.
+      final liveSiblings = List<TKey>.of(
+        newParent == null
+            ? treeController.liveRootKeys
+            : treeController.getLiveChildren(newParent),
+      );
+      liveSiblings.remove(key);
+      final insertAt = index.clamp(0, liveSiblings.length);
+      liveSiblings.insert(insertAt, key);
+      if (newParent == null) {
+        treeController.reorderRoots(liveSiblings, animate: animate);
+      } else {
+        treeController.reorderChildren(
+          newParent,
+          liveSiblings,
+          animate: animate,
+        );
+      }
+      return (key: key, newParent: newParent, index: insertAt);
+    }
+    // Cross-parent: moveNode's `index` is already the position in the new
+    // parent's final child list.
+    treeController.moveNode(key, newParent, index: index, animate: animate);
+    return (key: key, newParent: newParent, index: index);
+  }
+
+  /// The single [onReorder] invocation site.
+  void _fireOnReorder(({TKey key, TKey? newParent, int index}) move) {
+    onReorder?.call(move.key, move.newParent, move.index);
+  }
+
+  /// Commits a programmatic move of [key] under [newParent] at [index],
+  /// exactly as a pointer drop would: same mutation choice, same
+  /// live-space final-list index convention, same [onReorder] report.
+  ///
+  /// Returns false, mutating and notifying NOTHING, when:
+  ///
+  /// - a drag session is active (see below);
+  /// - [key] is absent or pending deletion;
+  /// - [newParent] is absent, pending deletion, [key] itself, or one of
+  ///   [key]'s descendants;
+  /// - [canAcceptDrop] rejects the destination;
+  /// - [key] already occupies that slot.
+  ///
+  /// **Refused during a drag on purpose.** Mutating structure underneath
+  /// a live session leaves it resolving against painted offsets that
+  /// predate the change, collides with the commit script's first-wins
+  /// FLIP baseline, and can strand the make-room gap on a slot that no
+  /// longer exists. Callers that genuinely want to interrupt a drag
+  /// should [cancelDrag] first.
+  bool moveTo(
+    TKey key,
+    TKey? newParent, {
+    required int index,
+    bool animate = true,
+  }) {
+    if (_session != null) {
+      return false;
+    }
+    if (!_canCommit(key, newParent)) {
+      return false;
+    }
+    // Resolve the index the way [_applyMove] will, so an out-of-range
+    // request that clamps onto the node's current slot is recognised as
+    // the no-op it is rather than reported as a move.
+    final sameParent = treeController.getParent(key) == newParent;
+    final int destinationLength = newParent == null
+        ? treeController.liveRootCount
+        : treeController.liveChildCount(newParent);
+    // The FINAL list excludes `key` only when it is already there.
+    final effectiveIndex = index.clamp(
+      0,
+      sameParent ? destinationLength - 1 : destinationLength,
+    );
+    if (sameParent && treeController.getIndexInParent(key) == effectiveIndex) {
+      return false;
+    }
+    if (canAcceptDrop != null &&
+        !canAcceptDrop!(
+          movingKey: key,
+          newParent: newParent,
+          index: effectiveIndex,
+        )) {
+      return false;
+    }
+    _fireOnReorder(
+      _applyMove(key, newParent, effectiveIndex, animate: animate),
+    );
+    return true;
+  }
+
+  /// Moves [key] one position earlier among its live siblings.
+  ///
+  /// One of the four moves exposed to assistive technology, where pointer
+  /// drags are unusable. Each returns whether it committed, applies
+  /// [canAcceptDrop], and reports through [onReorder], exactly as
+  /// [moveTo] does.
+  bool moveUp(TKey key) {
+    return _moveBySiblingDelta(key, -1);
+  }
+
+  /// Moves [key] one position later among its live siblings. See [moveUp].
+  bool moveDown(TKey key) {
+    return _moveBySiblingDelta(key, 1);
+  }
+
+  bool _moveBySiblingDelta(TKey key, int delta) {
+    final index = treeController.getIndexInParent(key);
+    if (index < 0) {
+      return false;
+    }
+    final parent = treeController.getParent(key);
+    final liveCount = parent == null
+        ? treeController.liveRootCount
+        : treeController.liveChildCount(parent);
+    final target = index + delta;
+    if (target < 0 || target >= liveCount) {
+      return false;
+    }
+    return moveTo(key, parent, index: target);
+  }
+
+  /// Moves [key] out of its parent, to sit directly after that parent
+  /// among its grandparent's children. See [moveUp].
+  bool moveOut(TKey key) {
+    if (treeController.getIndexInParent(key) < 0) {
+      return false;
+    }
+    final parent = treeController.getParent(key);
+    if (parent == null) {
+      return false;
+    }
+    return moveTo(
+      key,
+      treeController.getParent(parent),
+      index: treeController.getIndexInParent(parent) + 1,
+    );
+  }
+
+  /// Moves [key] in as the last child of its previous live sibling.
+  /// See [moveUp].
+  bool moveIntoPrevious(TKey key) {
+    final index = treeController.getIndexInParent(key);
+    if (index <= 0) {
+      return false;
+    }
+    final parent = treeController.getParent(key);
+    final previous = treeController.liveSiblingAt(parent, index - 1);
+    if (previous == null) {
+      return false;
+    }
+    return moveTo(
+      key,
+      previous,
+      index: treeController.liveChildCount(previous),
+    );
   }
 
   /// Aborts the current drag without mutating the tree.
@@ -566,8 +886,14 @@ class TreeReorderController<TKey> extends ChangeNotifier {
         a.parentKey == b.parentKey &&
         a.indexInFinalList == b.indexInFinalList &&
         a.depth == b.depth &&
+        // Not implied by the fields above: a dwell auto-expand under a
+        // stationary pointer changes where the gap opens without changing
+        // the semantic slot. Included for value-equality honesty on a
+        // type this method claims to compare structurally; the preview
+        // does not depend on it, since the driver installs outside this
+        // gate and re-installation is governed by the geometry memo.
+        a.gapVisibleIndex == b.gapVisibleIndex &&
         a.targetPaintedY == b.targetPaintedY &&
         a.targetExtent == b.targetExtent;
   }
-
 }

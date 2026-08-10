@@ -32,10 +32,8 @@ Widget _harness({
           slivers: [
             SliverTree<String, String>(
               controller: controller,
-              nodeBuilder: (_, key, _) => SizedBox(
-                height: _rowH,
-                child: Text(key),
-              ),
+              nodeBuilder: (_, key, _) =>
+                  SizedBox(height: _rowH, child: Text(key)),
             ),
           ],
         ),
@@ -72,7 +70,12 @@ void main() {
         "throughout the animation", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -101,7 +104,8 @@ void main() {
         expect(
           render.geometry!.scrollExtent,
           closeTo(_liveScrollExtent(controller), 0.5),
-          reason: "Frame $i: scrollExtent (${render.geometry!.scrollExtent}) "
+          reason:
+              "Frame $i: scrollExtent (${render.geometry!.scrollExtent}) "
               "vs live sum (${_liveScrollExtent(controller)})",
         );
       }
@@ -110,16 +114,22 @@ void main() {
       // After settle: r0, r1, r3, r4, rNew — 5 rows, 200px.
       expect(controller.visibleNodes.length, 5);
       expect(render.geometry!.scrollExtent, closeTo(5 * _rowH, 0.5));
-      expect(controller.visibleNodes.toList(),
-          equals(["r0", "r1", "r3", "r4", "rNew"]));
+      expect(
+        controller.visibleNodes.toList(),
+        equals(["r0", "r1", "r3", "r4", "rNew"]),
+      );
     });
 
     testWidgets("removing a child while inserting siblings under same "
-        "parent: visible-subtree-size cache stays consistent",
-        (tester) async {
+        "parent: visible-subtree-size cache stays consistent", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "p", data: "P")]);
@@ -133,7 +143,10 @@ void main() {
 
       controller.runBatch(() {
         controller.remove(key: "c1", animate: true);
-        controller.insert(parentKey: "p", node: const TreeNode(key: "cNew", data: "NEW"));
+        controller.insert(
+          parentKey: "p",
+          node: const TreeNode(key: "cNew", data: "NEW"),
+        );
       });
 
       for (var i = 0; i < 20; i++) {
@@ -143,18 +156,23 @@ void main() {
 
       await tester.pumpAndSettle();
       controller.debugAssertVisibleSubtreeSizeConsistency();
-      expect(controller.getChildren("p"),
-          equals(["c0", "c2", "c3", "cNew"]));
+      expect(controller.getChildren("p"), equals(["c0", "c2", "c3", "cNew"]));
     });
   });
 
   group("concurrent expand + collapse", () {
     testWidgets("expand of one parent while collapsing another: "
-        "scrollExtent equals the live per-node sum every frame",
-        (tester) async {
+        "scrollExtent equals the live per-node sum every frame", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -170,9 +188,7 @@ void main() {
       // 'a' starts expanded, 'b' starts collapsed.
       controller.expand(key: "a", animate: false);
 
-      await tester.pumpWidget(
-        _harness(controller: controller, height: 600),
-      );
+      await tester.pumpWidget(_harness(controller: controller, height: 600));
       await tester.pumpAndSettle();
 
       // Trigger both animations at once.
@@ -187,7 +203,8 @@ void main() {
         expect(
           render.geometry!.scrollExtent,
           closeTo(_liveScrollExtent(controller), 0.5),
-          reason: "Frame $i mismatch — scrollExtent="
+          reason:
+              "Frame $i mismatch — scrollExtent="
               "${render.geometry!.scrollExtent}, live="
               "${_liveScrollExtent(controller)}",
         );
@@ -196,8 +213,10 @@ void main() {
 
       await tester.pumpAndSettle();
       // After settle: a collapsed, b expanded.
-      expect(controller.visibleNodes.toList(),
-          equals(["a", "b", "b0", "b1", "b2"]));
+      expect(
+        controller.visibleNodes.toList(),
+        equals(["a", "b", "b0", "b1", "b2"]),
+      );
       expect(render.geometry!.scrollExtent, closeTo(5 * _rowH, 0.5));
     });
   });
@@ -207,16 +226,19 @@ void main() {
         "without leaving the cache inconsistent", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
         for (var i = 0; i < 8; i++) TreeNode(key: "r$i", data: "R$i"),
       ]);
 
-      await tester.pumpWidget(
-        _harness(controller: controller, height: 400),
-      );
+      await tester.pumpWidget(_harness(controller: controller, height: 400));
       await tester.pumpAndSettle();
 
       // Stagger 5 removes. Some overlap.
@@ -242,7 +264,12 @@ void main() {
         "smoothly, position stays valid, no exception", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -262,8 +289,10 @@ void main() {
       // a specific total — just assert it matches the controller's
       // live sum.
       final render = _renderOf(tester);
-      expect(render.geometry!.scrollExtent,
-          closeTo(_liveScrollExtent(controller), 0.5));
+      expect(
+        render.geometry!.scrollExtent,
+        closeTo(_liveScrollExtent(controller), 0.5),
+      );
 
       // Scroll partway, then start a remove. Continue scrolling during
       // the animation.
@@ -285,8 +314,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.rootKeys.length, 29);
       // Same caveat about measured vs unmeasured rows post-settle.
-      expect(render.geometry!.scrollExtent,
-          closeTo(_liveScrollExtent(controller), 0.5));
+      expect(
+        render.geometry!.scrollExtent,
+        closeTo(_liveScrollExtent(controller), 0.5),
+      );
     });
   });
 
@@ -295,7 +326,12 @@ void main() {
         "as children get measured frame-by-frame", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "r0", data: "R0")]);
@@ -333,11 +369,17 @@ void main() {
 
   group("combined chaos", () {
     testWidgets("expand + remove + insert + scroll all overlapping: "
-        "no extent drift, cache invariant holds, final state correct",
-        (tester) async {
+        "no extent drift, cache invariant holds, final state correct", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -385,8 +427,10 @@ void main() {
       await tester.pumpAndSettle();
       controller.debugAssertVisibleSubtreeSizeConsistency();
       // Final order: a, a0, a1, a2, c, c0, c1, c2, d, z. ('b' removed.)
-      expect(controller.visibleNodes.toList(),
-          equals(["a", "a0", "a1", "a2", "c", "c0", "c1", "c2", "d", "z"]));
+      expect(
+        controller.visibleNodes.toList(),
+        equals(["a", "a0", "a1", "a2", "c", "c0", "c1", "c2", "d", "z"]),
+      );
       expect(render.geometry!.scrollExtent, closeTo(10 * _rowH, 0.5));
     });
   });

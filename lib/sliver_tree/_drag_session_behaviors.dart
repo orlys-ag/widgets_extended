@@ -63,8 +63,10 @@ class AutoScroller<TKey> {
       return -maxVelocity * t;
     }
     if (viewportDy > viewportHeight - edgeZone) {
-      final t = ((viewportDy - (viewportHeight - edgeZone)) / edgeZone)
-          .clamp(0.0, 1.0);
+      final t = ((viewportDy - (viewportHeight - edgeZone)) / edgeZone).clamp(
+        0.0,
+        1.0,
+      );
       return maxVelocity * t;
     }
     return 0.0;
@@ -77,7 +79,8 @@ class AutoScroller<TKey> {
       _stop();
       return;
     }
-    final inEdgeZone = sample.viewportDy < _edgeZone ||
+    final inEdgeZone =
+        sample.viewportDy < _edgeZone ||
         sample.viewportDy > sample.viewportHeight - _edgeZone;
     if (inEdgeZone) {
       if (!_ticker.isActive) {
@@ -248,13 +251,20 @@ class MakeRoomDriver<TKey> {
       return;
     }
     // Deliberately unconditional — no driver-side debounce. The
-    // controller memoizes identical geometry inside [setReorderPreview]
-    // (all callers, self-healing against extent/structure changes), so a
-    // same-slot re-send is already O(1) there. Do not re-add one here.
-    _treeController.setReorderPreview(
+    // controller memoizes identical geometry inside
+    // [setReorderPreviewAtIndex] (all callers, self-healing against
+    // extent/structure changes), so a same-slot re-send is already O(1)
+    // there. Do not re-add one here.
+    //
+    // The gap comes from the RESOLVED SLOT, not from the hovered row.
+    // Deriving it from the row is only correct while the slot is
+    // adjacent to it, which stops being true whenever a policy veto or a
+    // cycle disables the below-on-expanded-parent rule over a row that
+    // has a visible subtree. The gap then opens under the row while the
+    // commit lands past that row's whole subtree.
+    _treeController.setReorderPreviewAtIndex(
       draggedKey: _draggedKey,
-      targetKey: target.targetKey,
-      gapBelowTarget: target.zone != TreeDropZone.above,
+      gapVisibleIndex: target.gapVisibleIndex,
       duration: _duration,
       curve: _curve,
     );
@@ -283,12 +293,13 @@ class MakeRoomDriver<TKey> {
   }
 }
 
-/// Drop-settle glides: the floating proxy hands off to the real row
-/// mid-flight. On commit, [baselineOverrides] rewrites the dragged row's
-/// FLIP baseline entry to the release position; on cancel, [detach]
-/// installs the mirror glide back to the unchanged slot. Grab geometry is
-/// read through a callback into the session's [DragProbe], the single
-/// grab owner.
+/// Drop-settle glides: the floating proxy hands off to the real rows
+/// mid-flight, the dragged row AND its visible subtree alike. On
+/// commit, [baselineOverrides] rewrites each subtree row's FLIP
+/// baseline entry to its position in the proxy stack at release; on
+/// cancel, [detach] installs the mirror glides back to the unchanged
+/// slots. Grab geometry is read through a callback into the session's
+/// [DragProbe], the single grab owner.
 class DropSettler<TKey> {
   DropSettler({
     required TreeController<TKey, Object?> treeController,
@@ -298,13 +309,17 @@ class DropSettler<TKey> {
     required TKey draggedKey,
     required Duration duration,
     required Curve curve,
+    double Function()? proxyCrossOffset,
   }) : _treeController = treeController,
        _space = space,
        _pointerGlobal = pointerGlobal,
        _grabDy = grabDy,
        _draggedKey = draggedKey,
        _duration = duration,
-       _curve = curve;
+       _curve = curve,
+       _proxyCrossOffset = proxyCrossOffset {
+    _stack = _captureStack();
+  }
 
   final TreeController<TKey, Object?> _treeController;
   final PointerSpace<TKey> _space;
@@ -314,18 +329,86 @@ class DropSettler<TKey> {
   final Duration _duration;
   final Curve _curve;
 
+  /// The dragged VISIBLE subtree's stack, captured at construction
+  /// (`startDrag` time, the same reads the proxy's drawing capture
+  /// uses): each row in visible order with its y offset within the
+  /// stack (cumulative captured extents) and its indent RELATIVE to
+  /// the dragged row. Entry 0 is the dragged row at (0, 0), so a leaf
+  /// or collapsed drag degenerates to the single-entry maps this
+  /// settler always emitted. Frozen per session; rows that leave the
+  /// visible order mid-drag are skipped per entry at install time.
+  late final List<({TKey key, double relativeY, double relativeIndent})>
+  _stack;
+
+  List<({TKey key, double relativeY, double relativeIndent})>
+  _captureStack() {
+    final tree = _treeController;
+    final single = <({TKey key, double relativeY, double relativeIndent})>[
+      (key: _draggedKey, relativeY: 0.0, relativeIndent: 0.0),
+    ];
+    final index = tree.getVisibleIndex(_draggedKey);
+    if (index < 0) {
+      // Imperative drag of a hidden row: no stack geometry to speak
+      // of, keep the single-entry behavior.
+      return single;
+    }
+    final size = tree.visibleSubtreeSize(_draggedKey);
+    if (size <= 1) {
+      return single;
+    }
+    final draggedDepth = tree.getDepth(_draggedKey);
+    final indentWidth = tree.indentWidth;
+    final rows = <({TKey key, double relativeY, double relativeIndent})>[];
+    double y = 0.0;
+    for (int i = index; i < index + size; i++) {
+      final rowKey = tree.visibleNodes[i];
+      final nid = tree.nidOf(rowKey);
+      rows.add((
+        key: rowKey,
+        relativeY: y,
+        relativeIndent: (tree.getDepth(rowKey) - draggedDepth) * indentWidth,
+      ));
+      y += nid >= 0 ? tree.getCurrentExtentNid(nid) : 0.0;
+    }
+    return rows;
+  }
+
+  /// The proxy's VISUAL cross offset in sliver cross space, sampled at
+  /// glide-install time so a release mid-animation hands off exactly
+  /// where the card visually is. Presentation-supplied through
+  /// `startDrag(proxyCrossOffset:)`; null for sessions with no proxy
+  /// presentation (imperative callers, unit tests), whose glides then
+  /// carry no x motion and whose baseline override preserves the
+  /// captured x, exactly the pre-existing y-only behavior.
+  final double Function()? _proxyCrossOffset;
+
   /// The commit script's baseline override: the dragged row's FLIP
   /// starts at the proxy's release position (pointer − grab offset).
   /// Null when the scrollable is gone — the classic old-slot FLIP is the
   /// graceful fallback.
-  Map<TKey, double>? baselineOverrides() {
+  Map<TKey, ({double y, double? x})>? baselineOverrides() {
     final release = _space.sample(_pointerGlobal());
     if (release == null) {
       return null;
     }
-    return <TKey, double>{
-      _draggedKey: release.sliverY - _grabDy(),
-    };
+    // One entry per subtree row: y stacks below the release position
+    // by the captured cumulative extents; x is the proxy's visual
+    // cross offset plus the row's relative indent, or null (preserve
+    // the captured x, per row) when this session has no proxy
+    // presentation. For closure-less `settleFromRelease` sessions the
+    // multi-row y is a deliberate extension: their subtree rows emerge
+    // stacked under the release point, completing the
+    // release-position handoff those callers opted into.
+    final baseY = release.sliverY - _grabDy();
+    final crossOffset = _proxyCrossOffset?.call();
+    final map = <TKey, ({double y, double? x})>{};
+    for (final row in _stack) {
+      map[row.key] = (
+        y: baseY + row.relativeY,
+        x: crossOffset == null ? null : crossOffset + row.relativeIndent,
+      );
+    }
+    return map;
   }
 
   void detach(SessionExit exit) {
@@ -359,19 +442,45 @@ class DropSettler<TKey> {
   /// swap-out); a null structural y means the row left the visible
   /// order (dead-commit fallback into a collapsed parent). Both skip
   /// silently — nothing is visible to glide.
+  ///
+  /// X: each glide starts at the row's position in the proxy stack
+  /// (the proxy's visual cross offset plus the row's relative indent)
+  /// and settles at the row's structural indent. With no proxy
+  /// cross-offset source the prior x equals the current x per row
+  /// (zero x delta): the pre-existing no-x-motion behavior for
+  /// closure-less sessions.
+  ///
+  /// One entry per subtree row; a row whose structural y is null (left
+  /// the visible order mid-drag, or the whole subtree landed under a
+  /// collapsed parent) is skipped per entry, generalizing the old
+  /// single-key skip.
   void _installReleaseGlide() {
     final release = _space.sample(_pointerGlobal());
-    final structuralY = _treeController.scrollOffsetOf(_draggedKey);
-    if (release == null || structuralY == null) {
+    if (release == null) {
+      return;
+    }
+    final baseY = release.sliverY - _grabDy();
+    final crossOffset = _proxyCrossOffset?.call();
+    final prior = <TKey, ({double y, double x})>{};
+    final current = <TKey, ({double y, double x})>{};
+    for (final row in _stack) {
+      final structuralY = _treeController.scrollOffsetOf(row.key);
+      if (structuralY == null) {
+        continue;
+      }
+      final structuralX = _treeController.getIndent(row.key);
+      final releaseX = crossOffset == null
+          ? structuralX
+          : crossOffset + row.relativeIndent;
+      prior[row.key] = (y: baseY + row.relativeY, x: releaseX);
+      current[row.key] = (y: structuralY, x: structuralX);
+    }
+    if (prior.isEmpty) {
       return;
     }
     _treeController.animateDropSettleGlide(
-      <TKey, ({double y, double x})>{
-        _draggedKey: (y: release.sliverY - _grabDy(), x: 0.0),
-      },
-      <TKey, ({double y, double x})>{
-        _draggedKey: (y: structuralY, x: 0.0),
-      },
+      prior,
+      current,
       duration: _duration,
       curve: _curve,
     );

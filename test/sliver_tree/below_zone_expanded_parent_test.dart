@@ -65,9 +65,7 @@ void main() {
       final render = tester.renderObject<RenderSliverTree<String, String>>(
         find.byType(SliverTree<String, String>),
       );
-      final scrollable = tester.state<ScrollableState>(
-        find.byType(Scrollable),
-      );
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
 
       // Hover the bottom fifth of row "p" — squarely the below zone.
       final pTop = tester.getTopLeft(find.byKey(const ValueKey("row-p"))).dy;
@@ -87,10 +85,12 @@ void main() {
 
       final target = reorder.currentTarget;
       expect(target, isNotNull);
-      expect(target!.targetKey, "p",
-          reason: "setup: the pointer hovers row p");
-      expect(target.zone, TreeDropZone.below,
-          reason: "setup: the bottom of the row is the below zone");
+      expect(target!.targetKey, "p", reason: "setup: the pointer hovers row p");
+      expect(
+        target.zone,
+        TreeDropZone.below,
+        reason: "setup: the bottom of the row is the below zone",
+      );
 
       // The indicator sits directly under row p — the first child's slot.
       // (Since D2 the target is semantic: the widget layer derives the
@@ -103,7 +103,8 @@ void main() {
       expect(
         target.parentKey,
         "p",
-        reason: "below an EXPANDED parent, the slot under the row is the "
+        reason:
+            "below an EXPANDED parent, the slot under the row is the "
             "first-child position — commit must match the indicator",
       );
       expect(target.indexInFinalList, 0);
@@ -111,9 +112,13 @@ void main() {
       reorder.endDrag();
       await tester.pumpAndSettle();
 
-      expect(controller.getParent("x"), "p",
-          reason: "x must land as a child of p (where the indicator "
-              "pointed), not as p's next sibling below the whole subtree");
+      expect(
+        controller.getParent("x"),
+        "p",
+        reason:
+            "x must land as a child of p (where the indicator "
+            "pointed), not as p's next sibling below the whole subtree",
+      );
       expect(controller.getLiveChildren("p"), ["x", "c1", "c2"]);
     },
   );
@@ -131,9 +136,7 @@ void main() {
         const TreeNode(key: "q", data: "Q"),
         const TreeNode(key: "x", data: "X"),
       ]);
-      controller.setChildren("p", [
-        const TreeNode(key: "c1", data: "C1"),
-      ]);
+      controller.setChildren("p", [const TreeNode(key: "c1", data: "C1")]);
       // p stays collapsed.
 
       final reorder = TreeReorderController<String>(
@@ -167,9 +170,7 @@ void main() {
       final render = tester.renderObject<RenderSliverTree<String, String>>(
         find.byType(SliverTree<String, String>),
       );
-      final scrollable = tester.state<ScrollableState>(
-        find.byType(Scrollable),
-      );
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
 
       final pTop = tester.getTopLeft(find.byKey(const ValueKey("row-p"))).dy;
       reorder.startDrag(
@@ -187,15 +188,21 @@ void main() {
       final target = reorder.currentTarget;
       expect(target, isNotNull);
       expect(target!.zone, TreeDropZone.below);
-      expect(target.parentKey, isNull,
-          reason: "below a COLLAPSED parent stays a sibling slot");
+      expect(
+        target.parentKey,
+        isNull,
+        reason: "below a COLLAPSED parent stays a sibling slot",
+      );
 
       reorder.endDrag();
       await tester.pumpAndSettle();
 
       expect(controller.getParent("x"), isNull);
-      expect(controller.liveRootKeys, ["p", "x", "q"],
-          reason: "x lands as p's next sibling");
+      expect(controller.liveRootKeys, [
+        "p",
+        "x",
+        "q",
+      ], reason: "x lands as p's next sibling");
     },
   );
 }

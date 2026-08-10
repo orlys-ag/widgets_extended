@@ -48,11 +48,15 @@ void main() {
         }
       }
     }
-    expect(offenders, isEmpty,
-        reason: "UTF-8-as-ANSI mojibake detected — a scripted rewrite "
-            "decoded BOM-less UTF-8 as ANSI before writing. Repair with "
-            "an iterative CP1252-encode → UTF-8-decode reversal (see "
-            "this file's library docs), and fix the script to read "
-            "BYTES as UTF-8, never Get-Content -Raw.");
+    expect(
+      offenders,
+      isEmpty,
+      reason:
+          "UTF-8-as-ANSI mojibake detected — a scripted rewrite "
+          "decoded BOM-less UTF-8 as ANSI before writing. Repair with "
+          "an iterative CP1252-encode → UTF-8-decode reversal (see "
+          "this file's library docs), and fix the script to read "
+          "BYTES as UTF-8, never Get-Content -Raw.",
+    );
   });
 }

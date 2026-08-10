@@ -20,10 +20,7 @@ Widget _harness(TreeController<String, String> controller) {
             SliverTree<String, String>(
               controller: controller,
               nodeBuilder: (context, key, depth) {
-                return SizedBox(
-                  height: 40,
-                  child: Text(key),
-                );
+                return SizedBox(height: 40, child: Text(key));
               },
             ),
           ],
@@ -61,7 +58,12 @@ void main() {
   testWidgets("attach registers a host; detach unregisters", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -71,8 +73,11 @@ void main() {
 
     // No sliver mounted yet.
     controller.moveNode("a", null, index: 1, animate: true);
-    expect(controller.hasActiveSlides, false,
-        reason: "no host registered → no slide installed");
+    expect(
+      controller.hasActiveSlides,
+      false,
+      reason: "no host registered → no slide installed",
+    );
 
     // Mount a sliver.
     controller.moveNode("a", null, index: 0); // restore order
@@ -89,8 +94,11 @@ void main() {
       slideCurve: Curves.linear,
     );
     await tester.pump();
-    expect(controller.hasActiveSlides, true,
-        reason: "after attach, animated move installs a slide");
+    expect(
+      controller.hasActiveSlides,
+      true,
+      reason: "after attach, animated move installs a slide",
+    );
     await tester.pumpAndSettle();
 
     // Unmount.
@@ -98,14 +106,22 @@ void main() {
 
     // Host unregistered: animated move is a no-op again.
     controller.moveNode("a", null, index: 0, animate: true);
-    expect(controller.hasActiveSlides, false,
-        reason: "after detach, no host → no slide");
+    expect(
+      controller.hasActiveSlides,
+      false,
+      reason: "after detach, no host → no slide",
+    );
   });
 
   testWidgets("two slivers register independently", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -136,11 +152,21 @@ void main() {
   testWidgets("registry survives controller swap", (tester) async {
     final controllerA = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     final controllerB = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controllerA.dispose);
     addTearDown(controllerB.dispose);
@@ -176,8 +202,11 @@ void main() {
 
     // A no longer has the host; animated move on A is a no-op.
     controllerA.moveNode("a", null, index: 0, animate: true);
-    expect(controllerA.hasActiveSlides, false,
-        reason: "after swap, controller A has no host");
+    expect(
+      controllerA.hasActiveSlides,
+      false,
+      reason: "after swap, controller A has no host",
+    );
 
     // B has the host now; animated move on B installs slide.
     controllerB.moveNode(
@@ -189,8 +218,11 @@ void main() {
       slideCurve: Curves.linear,
     );
     await tester.pump();
-    expect(controllerB.hasActiveSlides, true,
-        reason: "after swap, controller B has the host");
+    expect(
+      controllerB.hasActiveSlides,
+      true,
+      reason: "after swap, controller B has the host",
+    );
 
     await tester.pumpAndSettle();
   });
@@ -198,11 +230,14 @@ void main() {
   testWidgets("dispose-before-detach is safe", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
-    controller.setRoots([
-      const TreeNode(key: "a", data: "A"),
-    ]);
+    controller.setRoots([const TreeNode(key: "a", data: "A")]);
 
     await tester.pumpWidget(_harness(controller));
     await tester.pumpAndSettle();

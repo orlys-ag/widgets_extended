@@ -1,7 +1,7 @@
 /// D6 full-stack repro: dropping below the last row of a nested subtree
 /// picks the target depth from the POINTER'S HORIZONTAL POSITION, VS
 /// Code-style. `SliverReorderableTree` supplies the default x → depth
-/// mapper (`x ~/ indentPerDepth`); this test drives it through a real
+/// mapper (`x ~/ indentWidth`); this test drives it through a real
 /// long-press drag.
 ///
 /// Repro-test methodology: on pre-D6 code every below-boundary drop
@@ -53,10 +53,9 @@ void main() {
                 SliverReorderableTree<String, String>(
                   controller: tree,
                   reorderController: reorder,
-                  indentPerDepth: 24.0,
-                  nodeBuilder: (context, key, depth, wrap) {
-                    return wrap(
-                      longPressToDrag: true,
+                  indentWidth: 24.0,
+                  nodeBuilder: (context, key, depth) {
+                    return TreeDelayedDragHandle(
                       child: SizedBox(
                         key: ValueKey("row-$key"),
                         height: 50,
@@ -78,18 +77,25 @@ void main() {
         tester.getCenter(find.byKey(const ValueKey("row-x"))),
       );
       await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
-      expect(reorder.isDragging, isTrue,
-          reason: "setup: long press must start the session");
+      expect(
+        reorder.isDragging,
+        isTrue,
+        reason: "setup: long press must start the session",
+      );
 
       // Pointer x inside the ROOT indent column (0..24): root level.
       await gesture.moveTo(const Offset(5, 195));
       await tester.pump();
-      expect(reorder.currentTarget?.zone, TreeDropZone.below,
-          reason: "setup: bottom of row c is the below zone");
+      expect(
+        reorder.currentTarget?.zone,
+        TreeDropZone.below,
+        reason: "setup: bottom of row c is the below zone",
+      );
       expect(
         reorder.currentTarget?.parentKey,
         isNull,
-        reason: "x=5 is the root indent column — the drop must target the "
+        reason:
+            "x=5 is the root indent column — the drop must target the "
             "root level, after a's whole subtree",
       );
       expect(reorder.currentTarget?.depth, 0);

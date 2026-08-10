@@ -38,7 +38,12 @@ void main() {
     (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 60), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 60),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(c.dispose);
 
@@ -57,9 +62,7 @@ void main() {
         const TreeNode(key: "leaf1", data: "leaf1"),
         const TreeNode(key: "B", data: "B"),
       ]);
-      c.setChildren("B", [
-        const TreeNode(key: "C", data: "C"),
-      ]);
+      c.setChildren("B", [const TreeNode(key: "C", data: "C")]);
       c.expand(key: "root", animate: false);
       await tester.pump();
       expect(c.visibleNodes, equals(["root", "A", "victim"]));

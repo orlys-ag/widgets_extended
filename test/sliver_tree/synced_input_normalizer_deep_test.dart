@@ -1,10 +1,13 @@
-/// Verifies that [TreeSnapshot] construction does not stack-overflow on
-/// a 20k-deep chain. The internal `_validate` cycle-checker, plus the
-/// `fromHierarchy` walker, both recursed one frame per node.
+/// Verifies that input normalization does not stack-overflow on a
+/// 20k-deep chain. The walkers all recursed one frame per node in an
+/// earlier form, and `normalizeFlat`'s reachability walk is the successor
+/// of `TreeSnapshot._validate`'s cycle-checker, which carried the same
+/// duty for flat inputs; each must stay iterative.
 library;
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/sliver_tree/_synced_input_normalizer.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 class _DeepNode {
@@ -14,29 +17,22 @@ class _DeepNode {
 }
 
 void main() {
-  test("TreeSnapshot constructor does not stack-overflow on a 20k-deep "
-      "chain", () {
+  test("normalizeFlat does not stack-overflow on a 20k-deep chain", () {
     const depth = 20000;
-    final dataByKey = <int, int>{
-      for (var i = 0; i < depth; i++) i: i,
-    };
-    final childrenByParent = <int, List<int>>{
-      for (var i = 0; i < depth - 1; i++) i: [i + 1],
-    };
     expect(
-      () => TreeSnapshot<int, int>(
-        roots: [0],
-        dataByKey: dataByKey,
-        childrenByParent: childrenByParent,
+      () => normalizeFlat<int, int>(
+        items: [for (var i = 0; i < depth; i++) i],
+        keyOf: (item) => item,
+        parentOf: (item) => item == 0 ? null : item - 1,
       ),
       returnsNormally,
-      reason: "TreeSnapshot._validate stack-overflowed on a 20k-deep chain — "
-          "the cycle-detection visit() helper needs to be iterative.",
+      reason:
+          "normalizeFlat stack-overflowed on a 20k-deep chain; the "
+          "reachability walk needs to be iterative.",
     );
   });
 
-  test("TreeSnapshot.fromHierarchy does not stack-overflow on a 20k-deep "
-      "chain", () {
+  test("normalizeHierarchy does not stack-overflow on a 20k-deep chain", () {
     const depth = 20000;
     // Build a 20k-deep chain of _DeepNode objects.
     _DeepNode? tail;
@@ -45,14 +41,15 @@ void main() {
     }
     final root = tail!;
     expect(
-      () => TreeSnapshot<int, _DeepNode>.fromHierarchy(
+      () => normalizeHierarchy<int, _DeepNode>(
         roots: [root],
         keyOf: (n) => n.id,
         childrenOf: (n) => n.child == null ? const [] : [n.child!],
       ),
       returnsNormally,
-      reason: "TreeSnapshot.fromHierarchy stack-overflowed on a 20k-deep "
-          "chain — the visit() helper needs to be iterative.",
+      reason:
+          "normalizeHierarchy stack-overflowed on a 20k-deep chain; the "
+          "walker needs to be iterative.",
     );
   });
 
@@ -87,8 +84,9 @@ void main() {
         ),
       ),
       returnsNormally,
-      reason: "SyncedSliverTree._normalizeTree stack-overflowed on a 20k-deep "
-          "nested SyncedTreeNode tree.",
+      reason:
+          "normalizeSyncedNodes stack-overflowed on a 20k-deep nested "
+          "SyncedTreeNode tree.",
     );
   });
 }

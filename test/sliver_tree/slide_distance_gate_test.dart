@@ -34,12 +34,18 @@ void main() {
   });
 
   group("animateSlideFromOffsets distance gate", () {
-    testWidgets("delta exceeding maxSlideDistance is dropped (snap)",
-        (tester) async {
+    testWidgets("delta exceeding maxSlideDistance is dropped (snap)", (
+      tester,
+    ) async {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -51,17 +57,26 @@ void main() {
         duration: const Duration(milliseconds: 100),
         maxSlideDistance: 100.0,
       );
-      expect(controller.hasActiveSlides, false,
-          reason: "200px delta with 100px gate must be snapped");
+      expect(
+        controller.hasActiveSlides,
+        false,
+        reason: "200px delta with 100px gate must be snapped",
+      );
       expect(controller.getSlideDelta("a"), 0.0);
     });
 
-    testWidgets("delta within maxSlideDistance installs normally",
-        (tester) async {
+    testWidgets("delta within maxSlideDistance installs normally", (
+      tester,
+    ) async {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -83,7 +98,12 @@ void main() {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -94,19 +114,28 @@ void main() {
         const {"a": (y: 0.0, x: 0.0)},
         duration: const Duration(milliseconds: 100),
       );
-      expect(controller.hasActiveSlides, true,
-          reason: "default maxSlideDistance is infinity");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "default maxSlideDistance is infinity",
+      );
       expect(controller.getSlideDelta("a"), 10000.0);
 
       await tester.pumpAndSettle();
     });
 
-    testWidgets("composed delta exceeding gate clears in-flight slide",
-        (tester) async {
+    testWidgets("composed delta exceeding gate clears in-flight slide", (
+      tester,
+    ) async {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 1000),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "a", data: "A")]);
@@ -138,8 +167,11 @@ void main() {
         greaterThan(100),
         reason: "sanity: pre-state must satisfy composed > gate",
       );
-      expect(controller.getSlideDelta("a"), 0.0,
-          reason: "composed delta exceeded gate → clearSlide → snap to 0");
+      expect(
+        controller.getSlideDelta("a"),
+        0.0,
+        reason: "composed delta exceeded gate → clearSlide → snap to 0",
+      );
       expect(controller.hasActiveSlides, false);
     });
   });

@@ -57,7 +57,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -92,9 +97,13 @@ void main() {
         }
         if (pGone && !dAlive) break;
       }
-      expect(pPurgedBeforeD, isTrue,
-          reason: "setup: P must finalize (purge) while D is still mid-exit "
-              "for the dangling-parent-nid window to open");
+      expect(
+        pPurgedBeforeD,
+        isTrue,
+        reason:
+            "setup: P must finalize (purge) while D is still mid-exit "
+            "for the dangling-parent-nid window to open",
+      );
 
       // 4. Recycle P's freed nid with an unrelated root K.
       controller.insertRoot(
@@ -107,8 +116,11 @@ void main() {
       // 5. Let D finalize; then check cache consistency.
       await tester.pumpAndSettle();
 
-      expect(controller.getNodeData("d"), isNull,
-          reason: "D should be purged after its exit settles");
+      expect(
+        controller.getNodeData("d"),
+        isNull,
+        reason: "D should be purged after its exit settles",
+      );
       expect(controller.visibleNodes.contains("k"), isTrue);
 
       // The critical oracle: the visible-subtree-size cache must still be

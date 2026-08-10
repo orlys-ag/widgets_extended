@@ -648,9 +648,7 @@ class SlideAnimationEngine<TKey> {
       requested.inMicroseconds,
       maxMicrosForVisiblePerTick,
     );
-    return Duration(
-      microseconds: math.max(_minDurationMicros, clamped),
-    );
+    return Duration(microseconds: math.max(_minDurationMicros, clamped));
   }
 
   /// Re-baselines every active slide that a batch did NOT touch —

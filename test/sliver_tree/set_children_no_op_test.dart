@@ -22,7 +22,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -65,7 +70,8 @@ void main() {
       expect(
         c1AfterSetChildren,
         c1MidFlight,
-        reason: "setChildren with identical input must preserve c1's "
+        reason:
+            "setChildren with identical input must preserve c1's "
             "in-flight animation state. Got "
             "${c1AfterSetChildren.toStringAsFixed(2)} (before: "
             "${c1MidFlight.toStringAsFixed(2)}). A difference indicates "
@@ -89,16 +95,12 @@ void main() {
       addTearDown(controller.dispose);
 
       controller.setRoots([const TreeNode(key: "p", data: "P")]);
-      controller.setChildren("p", [
-        const TreeNode(key: "c1", data: "C1"),
-      ]);
+      controller.setChildren("p", [const TreeNode(key: "c1", data: "C1")]);
 
       expect(controller.getChildren("p"), ["c1"]);
 
       // Replace with a different child. Slow path runs.
-      controller.setChildren("p", [
-        const TreeNode(key: "c2", data: "C2"),
-      ]);
+      controller.setChildren("p", [const TreeNode(key: "c2", data: "C2")]);
 
       expect(controller.getChildren("p"), ["c2"]);
     },
@@ -125,9 +127,7 @@ void main() {
 
       // Same key, different data. Slow path runs and the data is
       // updated via the normal _store.setData call in the re-adopt loop.
-      controller.setChildren("p", [
-        const TreeNode(key: "c1", data: "updated"),
-      ]);
+      controller.setChildren("p", [const TreeNode(key: "c1", data: "updated")]);
 
       expect(controller.getNodeData("c1")?.data, "updated");
     },

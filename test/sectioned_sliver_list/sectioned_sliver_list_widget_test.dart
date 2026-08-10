@@ -131,16 +131,25 @@ void main() {
         );
       }
 
-      await tester.pumpWidget(build({"a": ["a1"]}));
+      await tester.pumpWidget(
+        build({
+          "a": ["a1"],
+        }),
+      );
       expect(find.text("I:a1"), findsOneWidget);
 
-      await tester.pumpWidget(build({"a": ["a1", "a2"]}));
+      await tester.pumpWidget(
+        build({
+          "a": ["a1", "a2"],
+        }),
+      );
       await tester.pump();
       expect(find.text("I:a2"), findsOneWidget);
     });
 
-    testWidgets("collapsible: false force-expands every section",
-        (tester) async {
+    testWidgets("collapsible: false force-expands every section", (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _wrap(
           SectionedSliverList<String, String, String>(
@@ -184,8 +193,9 @@ void main() {
       expect(find.text("I:a2"), findsOneWidget);
     });
 
-    testWidgets("controller mutations reflect without a prop rebuild",
-        (tester) async {
+    testWidgets("controller mutations reflect without a prop rebuild", (
+      tester,
+    ) async {
       final controller = _makeController(tester);
       addTearDown(controller.dispose);
       controller.addSection("a", items: ["a1"]);
@@ -211,8 +221,9 @@ void main() {
       expect(find.text("I:a1"), findsNothing);
     });
 
-    testWidgets("collapsible: false is advisory — does NOT force-expand",
-        (tester) async {
+    testWidgets("collapsible: false is advisory — does NOT force-expand", (
+      tester,
+    ) async {
       final controller = _makeController(tester);
       addTearDown(controller.dispose);
       controller.addSection("a", items: ["a1"]);
@@ -235,31 +246,34 @@ void main() {
       expect(
         controller.isExpanded("a"),
         isFalse,
-        reason: "collapsible:false must not alter the controller's "
+        reason:
+            "collapsible:false must not alter the controller's "
             "expansion state in the controlled form.",
       );
       expect(find.text("I:a1"), findsNothing);
     });
 
-    testWidgets("external controller is NOT disposed when the widget unmounts",
-        (tester) async {
-      final controller = _makeController(tester);
-      addTearDown(controller.dispose);
-      controller.addSection("a");
+    testWidgets(
+      "external controller is NOT disposed when the widget unmounts",
+      (tester) async {
+        final controller = _makeController(tester);
+        addTearDown(controller.dispose);
+        controller.addSection("a");
 
-      await tester.pumpWidget(
-        _wrap(
-          SectionedSliverList<String, String, String>.controlled(
-            controller: controller,
-            headerBuilder: (ctx, view) => Text("H:${view.section}"),
-            itemBuilder: (ctx, view) => Text("I:${view.item}"),
+        await tester.pumpWidget(
+          _wrap(
+            SectionedSliverList<String, String, String>.controlled(
+              controller: controller,
+              headerBuilder: (ctx, view) => Text("H:${view.section}"),
+              itemBuilder: (ctx, view) => Text("I:${view.item}"),
+            ),
           ),
-        ),
-      );
-      await tester.pumpWidget(const SizedBox.shrink());
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
 
-      expect(() => controller.hasSection("a"), returnsNormally);
-    });
+        expect(() => controller.hasSection("a"), returnsNormally);
+      },
+    );
   });
 
   group("SectionedSliverList — view shortcuts", () {
@@ -293,12 +307,15 @@ void main() {
       return captured[itemKey]!;
     }
 
-    testWidgets("ItemView.update writes through to the controller",
-        (tester) async {
+    testWidgets("ItemView.update writes through to the controller", (
+      tester,
+    ) async {
       final view = await captureItemView(
         tester,
         sections: ["a"],
-        items: {"a": ["a1"]},
+        items: {
+          "a": ["a1"],
+        },
         itemKey: "a1",
       );
       view.update("a1!");
@@ -306,24 +323,26 @@ void main() {
     });
 
     testWidgets(
-        "ItemView.moveTo (section + index) → moveItem(toSection, index)",
-        (tester) async {
-      final view = await captureItemView(
-        tester,
-        sections: ["a", "b"],
-        items: {
-          "a": ["a1", "a2"],
-          "b": ["b1"],
-        },
-        itemKey: "a1",
-      );
-      view.moveTo(section: "b", index: 0);
-      expect(view.controller.itemKeysOf("a"), equals(["a2"]));
-      expect(view.controller.itemKeysOf("b"), equals(["a1", "b1"]));
-    });
+      "ItemView.moveTo (section + index) → moveItem(toSection, index)",
+      (tester) async {
+        final view = await captureItemView(
+          tester,
+          sections: ["a", "b"],
+          items: {
+            "a": ["a1", "a2"],
+            "b": ["b1"],
+          },
+          itemKey: "a1",
+        );
+        view.moveTo(section: "b", index: 0);
+        expect(view.controller.itemKeysOf("a"), equals(["a2"]));
+        expect(view.controller.itemKeysOf("b"), equals(["a1", "b1"]));
+      },
+    );
 
-    testWidgets("ItemView.moveTo (section only) → moveItem appends",
-        (tester) async {
+    testWidgets("ItemView.moveTo (section only) → moveItem appends", (
+      tester,
+    ) async {
       final view = await captureItemView(
         tester,
         sections: ["a", "b"],
@@ -338,12 +357,15 @@ void main() {
       expect(view.controller.itemKeysOf("b"), equals(["b1", "a1"]));
     });
 
-    testWidgets("ItemView.moveTo (index only) → in-section reorder",
-        (tester) async {
+    testWidgets("ItemView.moveTo (index only) → in-section reorder", (
+      tester,
+    ) async {
       final view = await captureItemView(
         tester,
         sections: ["a"],
-        items: {"a": ["a1", "a2", "a3"]},
+        items: {
+          "a": ["a1", "a2", "a3"],
+        },
         itemKey: "a1",
       );
       view.moveTo(index: 2);
@@ -354,7 +376,9 @@ void main() {
       final view = await captureItemView(
         tester,
         sections: ["a"],
-        items: {"a": ["a1", "a2"]},
+        items: {
+          "a": ["a1", "a2"],
+        },
         itemKey: "a1",
       );
       view.moveTo();
@@ -365,7 +389,9 @@ void main() {
       final view = await captureItemView(
         tester,
         sections: ["a"],
-        items: {"a": ["a1"]},
+        items: {
+          "a": ["a1"],
+        },
         itemKey: "a1",
       );
       view.remove(animate: false);
@@ -373,41 +399,43 @@ void main() {
     });
 
     testWidgets(
-        "SectionView expand/collapse pass through despite isCollapsible:false",
-        (tester) async {
-      late SectionView<String, String, String> view;
-      await tester.pumpWidget(
-        _wrap(
-          SectionedSliverList<String, String, String>(
-            sections: const ["a"],
-            itemsOf: (_) => const ["a1"],
-            sectionKeyOf: (s) => s,
-            itemKeyOf: (i) => i,
-            collapsible: false, // isCollapsible == false
-            headerBuilder: (ctx, v) {
-              view = v;
-              return Text("H:${v.section} c=${v.isCollapsible}");
-            },
-            itemBuilder: (ctx, v) => Text("I:${v.item}"),
-            animationStyle: TreeAnimationStyle.disabled,
+      "SectionView expand/collapse pass through despite isCollapsible:false",
+      (tester) async {
+        late SectionView<String, String, String> view;
+        await tester.pumpWidget(
+          _wrap(
+            SectionedSliverList<String, String, String>(
+              sections: const ["a"],
+              itemsOf: (_) => const ["a1"],
+              sectionKeyOf: (s) => s,
+              itemKeyOf: (i) => i,
+              collapsible: false, // isCollapsible == false
+              headerBuilder: (ctx, v) {
+                view = v;
+                return Text("H:${v.section} c=${v.isCollapsible}");
+              },
+              itemBuilder: (ctx, v) => Text("I:${v.item}"),
+              animationStyle: TreeAnimationStyle.disabled,
+            ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
 
-      expect(view.isCollapsible, isFalse);
-      expect(find.text("H:a c=false"), findsOneWidget);
-      // collapsible:false force-expands; expand/collapse still pass through.
-      view.collapse(animate: false);
-      expect(view.controller.isExpanded("a"), isFalse);
-      view.expand(animate: false);
-      expect(view.controller.isExpanded("a"), isTrue);
-    });
+        expect(view.isCollapsible, isFalse);
+        expect(find.text("H:a c=false"), findsOneWidget);
+        // collapsible:false force-expands; expand/collapse still pass through.
+        view.collapse(animate: false);
+        expect(view.controller.isExpanded("a"), isFalse);
+        view.expand(animate: false);
+        expect(view.controller.isExpanded("a"), isTrue);
+      },
+    );
   });
 
-  group("SectionedSliverList — watch", () {
-    testWidgets("SectionView.watch rebuilds on expand/collapse only",
-        (tester) async {
+  group("SectionedSliverList — row freshness", () {
+    testWidgets("a header tracks expand/collapse with direct reads", (
+      tester,
+    ) async {
       late SectionedListController<String, String, String> controller;
       var headerBuilds = 0;
       await tester.pumpWidget(
@@ -420,13 +448,9 @@ void main() {
             initiallyExpanded: false,
             headerBuilder: (ctx, view) {
               controller = view.controller;
-              return view.watch(
-                builder: (ctx, v) {
-                  headerBuilds++;
-                  return Text(
-                    "${v.section} ${v.isExpanded ? 'open' : 'closed'}",
-                  );
-                },
+              headerBuilds++;
+              return Text(
+                "${view.section} ${view.isExpanded ? 'open' : 'closed'}",
               );
             },
             itemBuilder: (ctx, view) => Text(view.item),
@@ -443,8 +467,9 @@ void main() {
       expect(headerBuilds, greaterThan(initial));
     });
 
-    testWidgets("SectionView.watch rebuilds on item add/remove (count change)",
-        (tester) async {
+    testWidgets("a header tracks item add/remove (count change)", (
+      tester,
+    ) async {
       late SectionedListController<String, String, String> controller;
       await tester.pumpWidget(
         _wrap(
@@ -455,9 +480,7 @@ void main() {
             itemKeyOf: (i) => i,
             headerBuilder: (ctx, view) {
               controller = view.controller;
-              return view.watch(
-                builder: (ctx, v) => Text("${v.section}: ${v.itemCount}"),
-              );
+              return Text("${view.section}: ${view.itemCount}");
             },
             itemBuilder: (ctx, view) => Text(view.item),
             animationStyle: TreeAnimationStyle.disabled,
@@ -483,7 +506,7 @@ void main() {
       expect(find.text("a: 0"), findsOneWidget);
     });
 
-    testWidgets("ItemView.watch rebuilds on updateItem", (tester) async {
+    testWidgets("an item row tracks updateItem", (tester) async {
       late SectionedListController<String, String, String> controller;
       await tester.pumpWidget(
         _wrap(
@@ -496,8 +519,7 @@ void main() {
               controller = view.controller;
               return Text(view.section);
             },
-            itemBuilder: (ctx, view) =>
-                view.watch(builder: (ctx, v) => Text("item:${v.item}")),
+            itemBuilder: (ctx, view) => Text("item:${view.item}"),
             animationStyle: TreeAnimationStyle.disabled,
           ),
         ),
@@ -510,7 +532,7 @@ void main() {
     });
 
     testWidgets(
-      "ItemView.watch only rebuilds the affected item, not its neighbors",
+      "updateItem rebuilds only the affected item row, not its neighbors",
       (tester) async {
         late SectionedListController<String, String, String> controller;
         final builds = <String, int>{"a1": 0, "a2": 0};
@@ -525,12 +547,10 @@ void main() {
                 controller = view.controller;
                 return Text(view.section);
               },
-              itemBuilder: (ctx, view) => view.watch(
-                builder: (ctx, v) {
-                  builds[v.key] = (builds[v.key] ?? 0) + 1;
-                  return Text("item:${v.item}");
-                },
-              ),
+              itemBuilder: (ctx, view) {
+                builds[view.key] = (builds[view.key] ?? 0) + 1;
+                return Text("item:${view.item}");
+              },
               animationStyle: TreeAnimationStyle.disabled,
             ),
           ),
@@ -541,21 +561,27 @@ void main() {
         controller.updateItem("a1", "a1!");
         await tester.pumpAndSettle();
 
-        expect(builds["a1"], greaterThan(a1Initial),
-            reason: "a1's watcher must rebuild — its payload changed.");
+        expect(
+          builds["a1"],
+          greaterThan(a1Initial),
+          reason: "a1's row must rebuild: its payload changed.",
+        );
         expect(
           builds["a2"],
           equals(a2Initial),
-          reason: "a2's watcher must NOT rebuild — its payload didn't "
-              "change, and the typed payload listener is filtered by key.",
+          reason:
+              "a2's row must NOT rebuild: its payload did not change, and "
+              "the node-data channel dirties only the updated key. Direct "
+              "reads are as targeted as the old watch wrapper was.",
         );
       },
     );
   });
 
   group("SectionedSliverList — itemIndent", () {
-    testWidgets("itemIndent offsets item rows and propagates on rebuild",
-        (tester) async {
+    testWidgets("itemIndent offsets item rows and propagates on rebuild", (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _wrap(
           SectionedSliverList<String, String, String>(
@@ -573,10 +599,7 @@ void main() {
       // Items live one depth below their header, so their painted
       // cross-axis offset is exactly one itemIndent past the header.
       final headerX = tester.getTopLeft(find.text("a")).dx;
-      expect(
-        tester.getTopLeft(find.text("a1")).dx - headerX,
-        equals(24.0),
-      );
+      expect(tester.getTopLeft(find.text("a1")).dx - headerX, equals(24.0));
 
       // didUpdateWidget should propagate a new itemIndent.
       await tester.pumpWidget(
@@ -594,10 +617,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(
-        tester.getTopLeft(find.text("a1")).dx - headerX,
-        equals(32.0),
-      );
+      expect(tester.getTopLeft(find.text("a1")).dx - headerX, equals(32.0));
     });
   });
 }

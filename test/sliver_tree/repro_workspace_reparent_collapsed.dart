@@ -18,8 +18,10 @@ import 'package:widgets_extended/sliver_tree/synced_tree_node.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
 
-SyncedTreeNode<String, String> _n(String k, [List<SyncedTreeNode<String, String>>? c]) =>
-    SyncedTreeNode(key: k, data: k, children: c ?? const []);
+SyncedTreeNode<String, String> _n(
+  String k, [
+  List<SyncedTreeNode<String, String>>? c,
+]) => SyncedTreeNode(key: k, data: k, children: c ?? const []);
 
 double? _extentOf(WidgetTester tester, String key, TreeController c) {
   final render = tester.renderObject<RenderSliverTree<String, String>>(
@@ -67,7 +69,12 @@ class _HarnessState extends State<_Harness> {
             SyncedSliverTree<String, String>(
               tree: widget.builder(),
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 400),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 controller ??= node.controller;
                 return SizedBox(
@@ -97,79 +104,137 @@ void main() {
   // enters) and moves x into collapsed others.
   testWidgets("A: fav->placeholder, x into collapsed others", (tester) async {
     var fav = true;
-    final c = await _pump(tester, () => fav
-        ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-        : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])]);
+    final c = await _pump(
+      tester,
+      () => fav
+          ? [
+              _n("fav", [_n("x")]),
+              _n("others", [_n("o1")]),
+            ]
+          : [
+              _n("fav", [_n("fav_ph")]),
+              _n("others", [_n("x"), _n("o1")]),
+            ],
+    );
     await tester.pumpAndSettle();
 
     c.collapse(key: "others", animate: false);
     await tester.pump();
 
     fav = false;
-    await tester.pumpWidget(_Harness(builder: () =>
-        [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])]));
+    await tester.pumpWidget(
+      _Harness(
+        builder: () => [
+          _n("fav", [_n("fav_ph")]),
+          _n("others", [_n("x"), _n("o1")]),
+        ],
+      ),
+    );
     await tester.pump();
 
     // ignore: avoid_print
-    print("[A] hasActiveSlides=${c.hasActiveSlides} "
-        "slideDelta(x)=${c.getSlideDelta("x")} "
-        "fav_ph extent@consume=${_extentOf(tester, "fav_ph", c)} "
-        "others offset@consume=${_offsetOf(tester, "others", c)} "
-        "fav_ph extent@consume2=${_extentOf(tester, "fav_ph", c)}");
+    print(
+      "[A] hasActiveSlides=${c.hasActiveSlides} "
+      "slideDelta(x)=${c.getSlideDelta("x")} "
+      "fav_ph extent@consume=${_extentOf(tester, "fav_ph", c)} "
+      "others offset@consume=${_offsetOf(tester, "others", c)} "
+      "fav_ph extent@consume2=${_extentOf(tester, "fav_ph", c)}",
+    );
     await tester.pump(const Duration(milliseconds: 200));
     // ignore: avoid_print
-    print("[A] mid-anim: others offset=${_offsetOf(tester, "others", c)} "
-        "fav_ph extent=${_extentOf(tester, "fav_ph", c)} "
-        "slideDelta(x)=${c.getSlideDelta("x")}");
+    print(
+      "[A] mid-anim: others offset=${_offsetOf(tester, "others", c)} "
+      "fav_ph extent=${_extentOf(tester, "fav_ph", c)} "
+      "slideDelta(x)=${c.getSlideDelta("x")}",
+    );
     await tester.pumpAndSettle();
     // ignore: avoid_print
-    print("[A] settled: others offset=${_offsetOf(tester, "others", c)} "
-        "fav_ph extent=${_extentOf(tester, "fav_ph", c)}");
+    print(
+      "[A] settled: others offset=${_offsetOf(tester, "others", c)} "
+      "fav_ph extent=${_extentOf(tester, "fav_ph", c)}",
+    );
   });
 
   // CASE B — control: fav has x AND keep; un-favorite x leaves fav non-empty
   // (no placeholder, `keep` shifts instantly), x into collapsed others.
-  testWidgets("B: fav stays non-empty, x into collapsed others", (tester) async {
+  testWidgets("B: fav stays non-empty, x into collapsed others", (
+    tester,
+  ) async {
     var fav = true;
-    final c = await _pump(tester, () => fav
-        ? [_n("fav", [_n("x"), _n("keep")]), _n("others", [_n("o1")])]
-        : [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]);
+    final c = await _pump(
+      tester,
+      () => fav
+          ? [
+              _n("fav", [_n("x"), _n("keep")]),
+              _n("others", [_n("o1")]),
+            ]
+          : [
+              _n("fav", [_n("keep")]),
+              _n("others", [_n("x"), _n("o1")]),
+            ],
+    );
     await tester.pumpAndSettle();
 
     c.collapse(key: "others", animate: false);
     await tester.pump();
 
     fav = false;
-    await tester.pumpWidget(_Harness(builder: () =>
-        [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]));
+    await tester.pumpWidget(
+      _Harness(
+        builder: () => [
+          _n("fav", [_n("keep")]),
+          _n("others", [_n("x"), _n("o1")]),
+        ],
+      ),
+    );
     await tester.pump();
 
     // ignore: avoid_print
-    print("[B] hasActiveSlides=${c.hasActiveSlides} "
-        "slideDelta(x)=${c.getSlideDelta("x")}");
+    print(
+      "[B] hasActiveSlides=${c.hasActiveSlides} "
+      "slideDelta(x)=${c.getSlideDelta("x")}",
+    );
     await tester.pumpAndSettle();
   });
 
   // CASE C — fav empties to NOTHING (no placeholder child at all).
-  testWidgets("C: fav->empty (no placeholder), x into collapsed others",
-      (tester) async {
+  testWidgets("C: fav->empty (no placeholder), x into collapsed others", (
+    tester,
+  ) async {
     var fav = true;
-    final c = await _pump(tester, () => fav
-        ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-        : [_n("fav"), _n("others", [_n("x"), _n("o1")])]);
+    final c = await _pump(
+      tester,
+      () => fav
+          ? [
+              _n("fav", [_n("x")]),
+              _n("others", [_n("o1")]),
+            ]
+          : [
+              _n("fav"),
+              _n("others", [_n("x"), _n("o1")]),
+            ],
+    );
     await tester.pumpAndSettle();
 
     c.collapse(key: "others", animate: false);
     await tester.pump();
 
     fav = false;
-    await tester.pumpWidget(_Harness(builder: () =>
-        [_n("fav"), _n("others", [_n("x"), _n("o1")])]));
+    await tester.pumpWidget(
+      _Harness(
+        builder: () => [
+          _n("fav"),
+          _n("others", [_n("x"), _n("o1")]),
+        ],
+      ),
+    );
     await tester.pump();
 
     // ignore: avoid_print
-    print("[C] hasActiveSlides=${c.hasActiveSlides} "
-        "slideDelta(x)=${c.getSlideDelta("x")}");
+    print(
+      "[C] hasActiveSlides=${c.hasActiveSlides} "
+      "slideDelta(x)=${c.getSlideDelta("x")}",
+    );
     await tester.pumpAndSettle();
   });
 }

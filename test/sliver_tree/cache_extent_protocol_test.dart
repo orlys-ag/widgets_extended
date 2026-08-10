@@ -48,8 +48,7 @@ void main() {
                 SliverList(
                   key: trailingKey,
                   delegate: SliverChildBuilderDelegate(
-                    (context, i) =>
-                        SizedBox(height: 50, child: Text("t$i")),
+                    (context, i) => SizedBox(height: 50, child: Text("t$i")),
                     childCount: 20,
                   ),
                 ),
@@ -75,7 +74,8 @@ void main() {
       expect(
         tree.geometry!.cacheExtent,
         550.0,
-        reason: "cacheExtent is the cache-region portion this sliver "
+        reason:
+            "cacheExtent is the cache-region portion this sliver "
             "consumes (calculateCacheOffset), not its whole scrollExtent",
       );
 
@@ -85,7 +85,8 @@ void main() {
       expect(
         trailing.constraints.remainingCacheExtent,
         550.0,
-        reason: "the trailing sliver's cache budget must not be starved "
+        reason:
+            "the trailing sliver's cache budget must not be starved "
             "by the tree over-reporting its cacheExtent",
       );
     },

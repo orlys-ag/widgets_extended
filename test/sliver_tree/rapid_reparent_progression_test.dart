@@ -89,10 +89,7 @@ void _populateExampleTree(TreeController<String, int> controller) {
   });
 }
 
-void _reparentAll(
-  TreeController<String, int> controller,
-  Random random,
-) {
+void _reparentAll(TreeController<String, int> controller, Random random) {
   final allItems = <String>[];
   for (int p = 0; p < 8; p++) {
     allItems.addAll(controller.getChildren("parent-$p"));
@@ -122,101 +119,100 @@ void _reparentAll(
 
 void main() {
   group("Cascaded Reparent ALL: slide progression", () {
-    testWidgets(
-      "after 3 rapid Reparent ALL clicks, slides settle within "
-      "(slideDuration + reasonable batch overhead) — NOT stuck forever",
-      (tester) async {
-        final controller = _newController(tester);
-        addTearDown(controller.dispose);
-        _populateExampleTree(controller);
-        await tester.pumpWidget(_harness(controller));
-        await tester.pumpAndSettle();
+    testWidgets("after 3 rapid Reparent ALL clicks, slides settle within "
+        "(slideDuration + reasonable batch overhead) — NOT stuck forever", (
+      tester,
+    ) async {
+      final controller = _newController(tester);
+      addTearDown(controller.dispose);
+      _populateExampleTree(controller);
+      await tester.pumpWidget(_harness(controller));
+      await tester.pumpAndSettle();
 
-        final random = Random(42);
-        // 3 rapid clicks, 100 ms apart.
-        for (int batch = 0; batch < 3; batch++) {
-          _reparentAll(controller, random);
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 100));
-        }
-        // After the third click, all slides should settle within the
-        // slide duration plus some buffer. Without the preserve-all-
-        // batched fix, slides get re-baselined every batch and never
-        // settle: pumpAndSettle would time out.
-        final stopwatch = Stopwatch()..start();
-        await tester.pumpAndSettle(
-          const Duration(milliseconds: 50),
-          EnginePhase.sendSemanticsUpdate,
-          _kSlideDuration + const Duration(milliseconds: 500),
-        );
-        stopwatch.stop();
-        // Sanity: pumpAndSettle returned (didn't timeout). Real test
-        // is implicit — if slides were stuck, pumpAndSettle throws.
-        expect(controller.hasActiveSlides, false,
-            reason: "All slides must settle after pumpAndSettle.");
-      },
-    );
-
-    testWidgets(
-      "mid-cascaded-batch state: rows visibly progress (not all at "
-      "their initial positions)",
-      (tester) async {
-        final controller = _newController(tester);
-        addTearDown(controller.dispose);
-        _populateExampleTree(controller);
-        await tester.pumpWidget(_harness(controller));
-        await tester.pumpAndSettle();
-
-        final random = Random(13);
-        // Snapshot positions at each batch and verify they're
-        // CHANGING (not stuck at the same values).
-        final positionsByBatch = <List<MapEntry<String, double>>>[];
-        for (int batch = 0; batch < 3; batch++) {
-          _reparentAll(controller, random);
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 100));
-          final snapshot = <MapEntry<String, double>>[];
-          for (final key in controller.visibleNodes) {
-            final finder = find.byKey(ValueKey("row-$key"));
-            if (finder.evaluate().isEmpty) continue;
-            snapshot.add(
-              MapEntry(key, tester.getTopLeft(finder).dy),
-            );
-          }
-          positionsByBatch.add(snapshot);
-        }
-
-        // Pump one more time to advance slides.
+      final random = Random(42);
+      // 3 rapid clicks, 100 ms apart.
+      for (int batch = 0; batch < 3; batch++) {
+        _reparentAll(controller, random);
+        await tester.pump();
         await tester.pump(const Duration(milliseconds: 100));
-        final finalSnapshot = <MapEntry<String, double>>[];
+      }
+      // After the third click, all slides should settle within the
+      // slide duration plus some buffer. Without the preserve-all-
+      // batched fix, slides get re-baselined every batch and never
+      // settle: pumpAndSettle would time out.
+      final stopwatch = Stopwatch()..start();
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 50),
+        EnginePhase.sendSemanticsUpdate,
+        _kSlideDuration + const Duration(milliseconds: 500),
+      );
+      stopwatch.stop();
+      // Sanity: pumpAndSettle returned (didn't timeout). Real test
+      // is implicit — if slides were stuck, pumpAndSettle throws.
+      expect(
+        controller.hasActiveSlides,
+        false,
+        reason: "All slides must settle after pumpAndSettle.",
+      );
+    });
+
+    testWidgets("mid-cascaded-batch state: rows visibly progress (not all at "
+        "their initial positions)", (tester) async {
+      final controller = _newController(tester);
+      addTearDown(controller.dispose);
+      _populateExampleTree(controller);
+      await tester.pumpWidget(_harness(controller));
+      await tester.pumpAndSettle();
+
+      final random = Random(13);
+      // Snapshot positions at each batch and verify they're
+      // CHANGING (not stuck at the same values).
+      final positionsByBatch = <List<MapEntry<String, double>>>[];
+      for (int batch = 0; batch < 3; batch++) {
+        _reparentAll(controller, random);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        final snapshot = <MapEntry<String, double>>[];
         for (final key in controller.visibleNodes) {
           final finder = find.byKey(ValueKey("row-$key"));
           if (finder.evaluate().isEmpty) continue;
-          finalSnapshot.add(
-            MapEntry(key, tester.getTopLeft(finder).dy),
-          );
+          snapshot.add(MapEntry(key, tester.getTopLeft(finder).dy));
         }
+        positionsByBatch.add(snapshot);
+      }
 
-        // Check that finalSnapshot differs from positionsByBatch[2]
-        // for at least SOME rows. If slides were stuck, all positions
-        // would match exactly.
-        final lastBatch = Map.fromEntries(positionsByBatch[2]);
-        int changedCount = 0;
-        for (final entry in finalSnapshot) {
-          final prev = lastBatch[entry.key];
-          if (prev == null) continue;
-          if ((entry.value - prev).abs() > 0.5) changedCount++;
-        }
-        expect(changedCount, greaterThan(0),
-            reason: "Slides appear stuck — positions unchanged after "
-                "100 ms pump. Without the preserve-all-batched fix, "
-                "rapid cascaded batches re-baseline non-preserve "
-                "slides each time, leaving them with progress=0 "
-                "permanently.");
+      // Pump one more time to advance slides.
+      await tester.pump(const Duration(milliseconds: 100));
+      final finalSnapshot = <MapEntry<String, double>>[];
+      for (final key in controller.visibleNodes) {
+        final finder = find.byKey(ValueKey("row-$key"));
+        if (finder.evaluate().isEmpty) continue;
+        finalSnapshot.add(MapEntry(key, tester.getTopLeft(finder).dy));
+      }
 
-        await tester.pumpAndSettle();
-      },
-    );
+      // Check that finalSnapshot differs from positionsByBatch[2]
+      // for at least SOME rows. If slides were stuck, all positions
+      // would match exactly.
+      final lastBatch = Map.fromEntries(positionsByBatch[2]);
+      int changedCount = 0;
+      for (final entry in finalSnapshot) {
+        final prev = lastBatch[entry.key];
+        if (prev == null) continue;
+        if ((entry.value - prev).abs() > 0.5) changedCount++;
+      }
+      expect(
+        changedCount,
+        greaterThan(0),
+        reason:
+            "Slides appear stuck — positions unchanged after "
+            "100 ms pump. Without the preserve-all-batched fix, "
+            "rapid cascaded batches re-baseline non-preserve "
+            "slides each time, leaving them with progress=0 "
+            "permanently.",
+      );
+
+      await tester.pumpAndSettle();
+    });
   });
 
   group("Slide-IN clustering: distribution check", () {
@@ -292,59 +288,64 @@ void main() {
         // off-screen during slide. The cluster spreads quickly as each
         // row lerps to its destination. Loose bound here just verifies
         // we're not catastrophically stacking everything.
-        expect(maxClusterSize, lessThanOrEqualTo(20),
-            reason: "Cluster of $maxClusterSize rows in one 5-px "
-                "bucket — may indicate a regression worse than the "
-                "expected edge-clustering trade-off.");
+        expect(
+          maxClusterSize,
+          lessThanOrEqualTo(20),
+          reason:
+              "Cluster of $maxClusterSize rows in one 5-px "
+              "bucket — may indicate a regression worse than the "
+              "expected edge-clustering trade-off.",
+        );
 
         await tester.pumpAndSettle();
       },
     );
 
-    testWidgets(
-      "after slide settles, all visible rows are at their structural "
-      "positions (no left-over cluster artifacts)",
-      (tester) async {
-        final scroll = ScrollController();
-        addTearDown(scroll.dispose);
-        final controller = _newController(tester);
-        addTearDown(controller.dispose);
-        _populateExampleTree(controller);
-        await tester.pumpWidget(_harness(controller, scrollController: scroll));
-        await tester.pumpAndSettle();
-        scroll.jumpTo(2000);
+    testWidgets("after slide settles, all visible rows are at their structural "
+        "positions (no left-over cluster artifacts)", (tester) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final controller = _newController(tester);
+      addTearDown(controller.dispose);
+      _populateExampleTree(controller);
+      await tester.pumpWidget(_harness(controller, scrollController: scroll));
+      await tester.pumpAndSettle();
+      scroll.jumpTo(2000);
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      final random = Random(44);
+      for (int batch = 0; batch < 3; batch++) {
+        _reparentAll(controller, random);
         await tester.pump();
-        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+      await tester.pumpAndSettle();
 
-        final random = Random(44);
-        for (int batch = 0; batch < 3; batch++) {
-          _reparentAll(controller, random);
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 200));
-        }
-        await tester.pumpAndSettle();
-
-        // Compute expected structural positions per visibleNodes order.
-        final visible = controller.visibleNodes;
-        double expectedY = -scroll.offset;
-        for (final key in visible) {
-          final finder = find.byKey(ValueKey("row-$key"));
-          if (finder.evaluate().isNotEmpty) {
-            final actualY = tester.getTopLeft(finder).dy;
-            // Only assert for rows in the viewport region.
-            if (expectedY >= 0 && expectedY < _kViewportHeight) {
-              // After cascaded settle, slides reach their final
-              // (structural) positions. Allow ~50px tolerance for
-              // residual layout/paint jitter from rapid composition.
-              expect(actualY, closeTo(expectedY, 50.0),
-                  reason: "After settle, row $key should be near its "
-                      "structural position viewport-y=$expectedY. "
-                      "Got $actualY (>50 px off).");
-            }
+      // Compute expected structural positions per visibleNodes order.
+      final visible = controller.visibleNodes;
+      double expectedY = -scroll.offset;
+      for (final key in visible) {
+        final finder = find.byKey(ValueKey("row-$key"));
+        if (finder.evaluate().isNotEmpty) {
+          final actualY = tester.getTopLeft(finder).dy;
+          // Only assert for rows in the viewport region.
+          if (expectedY >= 0 && expectedY < _kViewportHeight) {
+            // After cascaded settle, slides reach their final
+            // (structural) positions. Allow ~50px tolerance for
+            // residual layout/paint jitter from rapid composition.
+            expect(
+              actualY,
+              closeTo(expectedY, 50.0),
+              reason:
+                  "After settle, row $key should be near its "
+                  "structural position viewport-y=$expectedY. "
+                  "Got $actualY (>50 px off).",
+            );
           }
-          expectedY += _kRowHeight;
         }
-      },
-    );
+        expectedY += _kRowHeight;
+      }
+    });
   });
 }

@@ -188,10 +188,7 @@ class SlideAnimation<TKey> {
 /// - forward() for expanding, reverse() for collapsing
 /// - Interrupting just changes direction, value continues smoothly
 class AnimationGroup<TKey> {
-  AnimationGroup({
-    required this.controller,
-    required this.curve,
-  });
+  AnimationGroup({required this.controller, required this.curve});
 
   /// The animation controller driving this group.
   final AnimationController controller;

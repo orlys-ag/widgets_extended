@@ -13,7 +13,8 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:flutter/animation.dart' show AnimationController, AnimationStatus, Curve;
+import 'package:flutter/animation.dart'
+    show AnimationController, AnimationStatus, Curve;
 import 'package:flutter/scheduler.dart' show TickerProvider;
 
 import '_node_id_registry.dart';
@@ -85,7 +86,9 @@ class BulkAnimator<TKey> {
 
   bool isMember(TKey key) {
     final nid = _nids[key];
-    return nid != null && nid < _isMemberByNid.length && _isMemberByNid[nid] != 0;
+    return nid != null &&
+        nid < _isMemberByNid.length &&
+        _isMemberByNid[nid] != 0;
   }
 
   bool isMemberNid(int nid) {
@@ -148,7 +151,8 @@ class BulkAnimator<TKey> {
     if (removed) {
       final nid = _nids[key];
       // Only zero the mirror if the key isn't ALSO in pendingRemoval.
-      if (nid != null && nid < _isMemberByNid.length &&
+      if (nid != null &&
+          nid < _isMemberByNid.length &&
           !g.pendingRemoval.contains(key)) {
         _isMemberByNid[nid] = 0;
       }
@@ -176,7 +180,8 @@ class BulkAnimator<TKey> {
     if (removed) {
       final nid = _nids[key];
       // Only zero the mirror if the key isn't ALSO in members.
-      if (nid != null && nid < _isMemberByNid.length &&
+      if (nid != null &&
+          nid < _isMemberByNid.length &&
           !g.members.contains(key)) {
         _isMemberByNid[nid] = 0;
       }
@@ -191,7 +196,8 @@ class BulkAnimator<TKey> {
     for (final key in g.pendingRemoval) {
       final nid = _nids[key];
       // Only zero if not in members.
-      if (nid != null && nid < _isMemberByNid.length &&
+      if (nid != null &&
+          nid < _isMemberByNid.length &&
           !g.members.contains(key)) {
         _isMemberByNid[nid] = 0;
       }
@@ -218,10 +224,7 @@ class BulkAnimator<TKey> {
       duration: duration,
       value: initialValue,
     );
-    final group = AnimationGroup<TKey>(
-      controller: controller,
-      curve: curve,
-    );
+    final group = AnimationGroup<TKey>(controller: controller, curve: curve);
     controller.addListener(_onTick);
     controller.addStatusListener((status) {
       if (status == AnimationStatus.completed ||

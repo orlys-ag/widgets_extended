@@ -9,11 +9,8 @@ Widget _build(TreeController<String, String> controller) {
         slivers: [
           SliverTree<String, String>(
             controller: controller,
-            nodeBuilder: (context, key, depth) => SizedBox(
-              key: ValueKey(key),
-              height: 50,
-              child: Text(key),
-            ),
+            nodeBuilder: (context, key, depth) =>
+                SizedBox(key: ValueKey(key), height: 50, child: Text(key)),
           ),
         ],
       ),
@@ -21,8 +18,9 @@ Widget _build(TreeController<String, String> controller) {
   );
 }
 
-Map<String, ({double layoutOffset, double visibleExtent})>
-    _sampleLayout(WidgetTester tester) {
+Map<String, ({double layoutOffset, double visibleExtent})> _sampleLayout(
+  WidgetTester tester,
+) {
   final render = tester.renderObject<RenderSliverTree<String, String>>(
     find.byType(SliverTree<String, String>),
   );
@@ -71,7 +69,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
         controller.setRoots([
@@ -106,33 +109,51 @@ void main() {
 
         final during = _sampleLayout(tester);
         // layoutOffset unchanged.
-        expect(during["a"]!.layoutOffset, 0.0,
-            reason: "slide must not mutate layout");
-        expect(during["b"]!.layoutOffset, 50.0,
-            reason: "siblings must not be affected by slide of 'a'");
+        expect(
+          during["a"]!.layoutOffset,
+          0.0,
+          reason: "slide must not mutate layout",
+        );
+        expect(
+          during["b"]!.layoutOffset,
+          50.0,
+          reason: "siblings must not be affected by slide of 'a'",
+        );
 
         // Painted position shifted by slide delta.
         final aDuringPaintedY = _paintedY(tester, "a");
-        expect(aDuringPaintedY, greaterThan(aBeforePaintedY),
-            reason:
-                "'a' is mid-slide with positive delta, so paint y must be "
-                "below its layout offset.");
+        expect(
+          aDuringPaintedY,
+          greaterThan(aBeforePaintedY),
+          reason:
+              "'a' is mid-slide with positive delta, so paint y must be "
+              "below its layout offset.",
+        );
 
         // Settle.
         await tester.pumpAndSettle();
         final afterPaintedY = _paintedY(tester, "a");
-        expect(afterPaintedY, aBeforePaintedY,
-            reason: "after settle, painted y snaps exactly back to structural");
+        expect(
+          afterPaintedY,
+          aBeforePaintedY,
+          reason: "after settle, painted y snaps exactly back to structural",
+        );
         expect(controller.hasActiveSlides, false);
         expect(controller.getSlideDelta("a"), 0.0);
       },
     );
 
-    testWidgets("sibling structural offsets are unaffected by slide",
-        (tester) async {
+    testWidgets("sibling structural offsets are unaffected by slide", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -169,7 +190,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 100),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
         controller.setRoots([
@@ -189,9 +215,11 @@ void main() {
 
         final state = _sampleLayout(tester);
         expect(state["a1"], isNotNull);
-        expect(state["a1"]!.visibleExtent, 50.0,
-            reason:
-                "extent animation must settle to final height via relayout");
+        expect(
+          state["a1"]!.visibleExtent,
+          50.0,
+          reason: "extent animation must settle to final height via relayout",
+        );
       },
     );
   });

@@ -35,6 +35,7 @@ class _FakePort implements ReorderRenderPort<String> {
   double preceding = 0.0;
   ({String key, double paintedOffset, double extent})? Function(double y)?
   rowAt;
+  ({double paintedOffset, double extent})? Function(String key)? boundsOf;
 
   @override
   bool get isLaidOut {
@@ -49,6 +50,28 @@ class _FakePort implements ReorderRenderPort<String> {
   @override
   bool drivesController(Object treeController) {
     return drives && identical(controller, treeController);
+  }
+
+  /// Defaults to deriving the band from [rowAt] by probing each 50px
+  /// row midpoint, so existing scripts keep working untouched. Set
+  /// [boundsOf] to model a sticky header, whose painted band is NOT
+  /// discoverable positionally.
+  @override
+  ({double paintedOffset, double extent})? paintedRowBounds(String key) {
+    final override = boundsOf;
+    if (override != null) {
+      return override(key);
+    }
+    for (double y = 25.0; y < 2000.0; y += 50.0) {
+      final row = rowAt?.call(y);
+      if (row == null) {
+        continue;
+      }
+      if (row.key == key) {
+        return (paintedOffset: row.paintedOffset, extent: row.extent);
+      }
+    }
+    return null;
   }
 
   @override
@@ -72,7 +95,7 @@ class _FakePort implements ReorderRenderPort<String> {
   void beginSlideBaseline({
     required Duration duration,
     required Curve curve,
-    Map<String, double>? baselineYOverrides,
+    Map<String, ({double y, double? x})>? baselineOverrides,
   }) {
     log.add("baseline");
   }
@@ -85,9 +108,7 @@ Future<ScrollableState> _mountScrollable(WidgetTester tester) async {
     MaterialApp(
       home: Scaffold(
         body: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(child: SizedBox(height: 2000)),
-          ],
+          slivers: [SliverToBoxAdapter(child: SizedBox(height: 2000))],
         ),
       ),
     ),
@@ -120,8 +141,9 @@ TreeController<String, String> _threeRootController(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets("start/cancel pin-unpin pairing and session surface",
-      (tester) async {
+  testWidgets("start/cancel pin-unpin pairing and session surface", (
+    tester,
+  ) async {
     final controller = _threeRootController(tester);
     addTearDown(controller.dispose);
     final port = _FakePort(controller: controller)..rowAt = _threeRows;
@@ -144,20 +166,26 @@ void main() {
     expect(started, isTrue);
     expect(reorder.isDragging, isTrue);
     expect(reorder.draggedKey, "a");
-    expect(reorder.renderPort, same(port),
-        reason: "the session's port is exposed for presentation consumers");
+    expect(
+      reorder.renderPort,
+      same(port),
+      reason: "the session's port is exposed for presentation consumers",
+    );
     expect(reorder.currentTarget?.targetKey, "c");
     expect(port.log, ["pin:a"]);
 
     reorder.cancelDrag();
     expect(reorder.isDragging, isFalse);
     expect(reorder.renderPort, isNull);
-    expect(port.log, ["pin:a", "unpin:a"],
-        reason: "cancel must unpin exactly the dragged row");
+    expect(port.log, [
+      "pin:a",
+      "unpin:a",
+    ], reason: "cancel must unpin exactly the dragged row");
   });
 
-  testWidgets("startDrag returns false on a not-laid-out port (no pin)",
-      (tester) async {
+  testWidgets("startDrag returns false on a not-laid-out port (no pin)", (
+    tester,
+  ) async {
     final controller = _threeRootController(tester);
     addTearDown(controller.dispose);
     final port = _FakePort(controller: controller)
@@ -181,8 +209,9 @@ void main() {
     expect(port.log, isEmpty, reason: "a refused start must pin nothing");
   });
 
-  testWidgets("startDrag throws for a port driving a different controller",
-      (tester) async {
+  testWidgets("startDrag throws for a port driving a different controller", (
+    tester,
+  ) async {
     final controller = _threeRootController(tester);
     addTearDown(controller.dispose);
     final port = _FakePort(controller: controller)
@@ -227,13 +256,18 @@ void main() {
     expect(port.log, ["pin:b"]);
 
     reorder.dispose();
-    expect(port.log, ["pin:b", "unpin:b"],
-        reason: "disposing mid-drag must release the eviction pin — a "
-            "leaked pin retains the row forever");
+    expect(
+      port.log,
+      ["pin:b", "unpin:b"],
+      reason:
+          "disposing mid-drag must release the eviction pin — a "
+          "leaked pin retains the row forever",
+    );
   });
 
-  testWidgets("endDrag stages the FLIP baseline BEFORE the mutation",
-      (tester) async {
+  testWidgets("endDrag stages the FLIP baseline BEFORE the mutation", (
+    tester,
+  ) async {
     final controller = _threeRootController(tester);
     addTearDown(controller.dispose);
     final port = _FakePort(controller: controller)..rowAt = _threeRows;
@@ -261,27 +295,39 @@ void main() {
       scrollable: scrollable,
       pointerGlobal: const Offset(200, 145),
     );
-    expect(reorder.currentTarget?.targetKey, "c",
-        reason: "setup: below-c must be resolved before the drop");
+    expect(
+      reorder.currentTarget?.targetKey,
+      "c",
+      reason: "setup: below-c must be resolved before the drop",
+    );
 
     reorder.endDrag();
 
-    expect(controller.liveRootKeys, ["b", "c", "a"],
-        reason: "the below-c drop must commit the root reorder");
+    expect(
+      controller.liveRootKeys,
+      ["b", "c", "a"],
+      reason: "the below-c drop must commit the root reorder",
+    );
     final baselineIndex = port.log.indexOf("baseline");
     final mutationIndex = port.log.indexOf("mutation");
     expect(baselineIndex, isNot(-1));
     expect(mutationIndex, isNot(-1));
-    expect(baselineIndex, lessThan(mutationIndex),
-        reason: "a baseline captured AFTER the mutation would snapshot "
-            "already-new offsets and produce a zero-delta (no visible "
-            "slide)");
-    expect(port.log.last, "unpin:a",
-        reason: "the pin must be released once the session ends");
+    expect(
+      baselineIndex,
+      lessThan(mutationIndex),
+      reason:
+          "a baseline captured AFTER the mutation would snapshot "
+          "already-new offsets and produce a zero-delta (no visible "
+          "slide)",
+    );
+    expect(
+      port.log.last,
+      "unpin:a",
+      reason: "the pin must be released once the session ends",
+    );
   });
 
-  testWidgets(
-      "endDrag re-resolves: a stale target downgrades to cancel (no "
+  testWidgets("endDrag re-resolves: a stale target downgrades to cancel (no "
       "baseline, no mutation)", (tester) async {
     final controller = _threeRootController(tester);
     addTearDown(controller.dispose);
@@ -299,8 +345,11 @@ void main() {
       scrollable: scrollable,
       pointerGlobal: const Offset(200, 145),
     );
-    expect(reorder.currentTarget, isNotNull,
-        reason: "setup: a live target must exist before it goes stale");
+    expect(
+      reorder.currentTarget,
+      isNotNull,
+      reason: "setup: a live target must exist before it goes stale",
+    );
 
     // The tree emptied under the pointer between the last move and the
     // drop (server-driven update): the re-resolve in endDrag must observe
@@ -312,11 +361,18 @@ void main() {
     reorder.endDrag();
 
     expect(reorder.isDragging, isFalse);
-    expect(controller.liveRootKeys, ["a", "b", "c"],
-        reason: "no valid target at drop time — nothing may mutate");
-    expect(port.log, isNot(contains("baseline")),
-        reason: "a baseline staged for a drop that then cancels would "
-            "block every subsequent slide stage (first-wins slot)");
+    expect(
+      controller.liveRootKeys,
+      ["a", "b", "c"],
+      reason: "no valid target at drop time — nothing may mutate",
+    );
+    expect(
+      port.log,
+      isNot(contains("baseline")),
+      reason:
+          "a baseline staged for a drop that then cancels would "
+          "block every subsequent slide stage (first-wins slot)",
+    );
     expect(port.log, ["pin:a", "unpin:a"]);
   });
 }

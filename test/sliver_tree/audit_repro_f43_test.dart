@@ -53,9 +53,11 @@ RenderSliverTree<String, String> _findRender(WidgetTester tester) {
 
 /// Bounded settle: pumps fixed frames instead of pumpAndSettle so a scene
 /// that never settles cannot hang the test.
-Future<void> _pumpBounded(WidgetTester tester,
-    {int frames = 30,
-    Duration step = const Duration(milliseconds: 50)}) async {
+Future<void> _pumpBounded(
+  WidgetTester tester, {
+  int frames = 30,
+  Duration step = const Duration(milliseconds: 50),
+}) async {
   for (int i = 0; i < frames; i++) {
     await tester.pump(step);
   }
@@ -72,7 +74,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -107,12 +114,21 @@ void main() {
 
       // Sanity: "x" is pending-deletion but still present in the FULL list;
       // the LIVE list is [y, z].
-      expect(controller.isPendingDeletion("x"), true,
-          reason: "setup: x must be mid-exit for the repro");
-      expect(controller.getChildren("P"), ["x", "y", "z"],
-          reason: "setup: full list still contains pending-deletion x");
-      expect(controller.getLiveChildren("P"), ["y", "z"],
-          reason: "setup: live list excludes pending-deletion x");
+      expect(
+        controller.isPendingDeletion("x"),
+        true,
+        reason: "setup: x must be mid-exit for the repro",
+      );
+      expect(
+        controller.getChildren("P"),
+        ["x", "y", "z"],
+        reason: "setup: full list still contains pending-deletion x",
+      );
+      expect(
+        controller.getLiveChildren("P"),
+        ["y", "z"],
+        reason: "setup: live list excludes pending-deletion x",
+      );
 
       final render = _findRender(tester);
       final scrollable = _findScrollable(tester);
@@ -139,8 +155,11 @@ void main() {
       expect(target!.zone, TreeDropZone.above, reason: "setup: above z");
       expect(target.targetKey, "z", reason: "setup: hovering row z");
       expect(target.parentKey, "P", reason: "setup: destination parent P");
-      expect(target.indexInFinalList, 1,
-          reason: "setup: live index of z among live siblings [y, z]");
+      expect(
+        target.indexInFinalList,
+        1,
+        reason: "setup: live index of z among live siblings [y, z]",
+      );
 
       reorder.endDrag();
 
@@ -148,15 +167,21 @@ void main() {
       // order under P must be [y, w, z]. The bug inserts the live-space
       // index 1 into the FULL list [x(pending), y, z], producing
       // [x, w, y, z] -> live [w, y, z]: w lands above y instead of above z.
-      expect(controller.getLiveChildren("P"), ["y", "w", "z"],
-          reason: "w was dropped above z; it must sit between y and z");
+      expect(
+        controller.getLiveChildren("P"),
+        ["y", "w", "z"],
+        reason: "w was dropped above z; it must sit between y and z",
+      );
 
       // Let the exit animation and the FLIP slide finish (bounded), then
       // verify the wrong order does not merely self-heal after x's purge.
       await _pumpBounded(tester);
       expect(controller.isPendingDeletion("x"), false);
-      expect(controller.getChildren("P"), ["y", "w", "z"],
-          reason: "after x purges, the persistent order must be [y, w, z]");
+      expect(
+        controller.getChildren("P"),
+        ["y", "w", "z"],
+        reason: "after x purges, the persistent order must be [y, w, z]",
+      );
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );

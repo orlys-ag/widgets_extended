@@ -64,84 +64,88 @@ void main() {
       await tester.pumpAndSettle();
 
       final sliver = tester.renderObject<RenderSliverTree<String, String>>(
-          find.byType(SliverTree<String, String>));
+        find.byType(SliverTree<String, String>),
+      );
 
       expect(
         sliver.debugLastParentDataRefreshIterationCount,
         lessThanOrEqualTo(sliver.debugChildCount),
-        reason: "parentData refresh loop must iterate at most "
+        reason:
+            "parentData refresh loop must iterate at most "
             "_children.length times per layout",
       );
     },
   );
 
-  testWidgets(
-    "pure-scroll frame with all mounted children in-cache builds NO "
-    "structural cumulative (audit 5.1)",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
-      final scrollController = ScrollController();
-      addTearDown(scrollController.dispose);
+  testWidgets("pure-scroll frame with all mounted children in-cache builds NO "
+      "structural cumulative (audit 5.1)", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
+    final scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
 
-      // Large flat tree so a scroll frame has plenty of below-viewport
-      // rows: the refresh loop must not pay an O(N_visible) cumulative
-      // build (with allocation) to service zero off-cache children.
-      controller.setRoots([
-        for (int i = 0; i < 500; i++) TreeNode(key: "r$i", data: "R$i"),
-      ]);
+    // Large flat tree so a scroll frame has plenty of below-viewport
+    // rows: the refresh loop must not pay an O(N_visible) cumulative
+    // build (with allocation) to service zero off-cache children.
+    controller.setRoots([
+      for (int i = 0; i < 500; i++) TreeNode(key: "r$i", data: "R$i"),
+    ]);
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: SizedBox(
-              height: 600,
-              child: CustomScrollView(
-                controller: scrollController,
-                slivers: [
-                  SliverTree<String, String>(
-                    controller: controller,
-                    nodeBuilder: (_, key, depth) =>
-                        SizedBox(height: 48, child: Text(key)),
-                  ),
-                ],
-              ),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 600,
+            child: CustomScrollView(
+              controller: scrollController,
+              slivers: [
+                SliverTree<String, String>(
+                  controller: controller,
+                  nodeBuilder: (_, key, depth) =>
+                      SizedBox(height: 48, child: Text(key)),
+                ),
+              ],
             ),
           ),
         ),
-      );
-      await tester.pumpAndSettle();
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      final sliver = tester.renderObject<RenderSliverTree<String, String>>(
-          find.byType(SliverTree<String, String>));
+    final sliver = tester.renderObject<RenderSliverTree<String, String>>(
+      find.byType(SliverTree<String, String>),
+    );
 
-      // Jump deep, then give the post-frame eviction sweep a frame to
-      // release the rows mounted at the old position (they are
-      // legitimately off-cache during the jump frame itself).
-      scrollController.jumpTo(2000.0);
-      await tester.pump();
-      await tester.pump();
+    // Jump deep, then give the post-frame eviction sweep a frame to
+    // release the rows mounted at the old position (they are
+    // legitimately off-cache during the jump frame itself).
+    scrollController.jumpTo(2000.0);
+    await tester.pump();
+    await tester.pump();
 
-      // Pure scroll, small step (no row crosses out of the cache
-      // region): every mounted child is still in-cache, so the refresh
-      // loop must not build the O(N_visible) structural cumulative.
-      scrollController.jumpTo(2010.0);
-      await tester.pump();
+    // Pure scroll, small step (no row crosses out of the cache
+    // region): every mounted child is still in-cache, so the refresh
+    // loop must not build the O(N_visible) structural cumulative.
+    scrollController.jumpTo(2010.0);
+    await tester.pump();
 
-      expect(
-        sliver.debugLastParentDataCumulativeBuilds,
-        0,
-        reason: "a pure-scroll frame with every mounted child in-cache "
-            "must not rebuild the O(N_visible) structural cumulative — "
-            "the dominant steady-state cost for large trees",
-      );
-      expect(controller.hasActiveAnimations, isFalse,
-          reason: "sanity: this is a pure-scroll frame");
-    },
-  );
+    expect(
+      sliver.debugLastParentDataCumulativeBuilds,
+      0,
+      reason:
+          "a pure-scroll frame with every mounted child in-cache "
+          "must not rebuild the O(N_visible) structural cumulative — "
+          "the dominant steady-state cost for large trees",
+    );
+    expect(
+      controller.hasActiveAnimations,
+      isFalse,
+      reason: "sanity: this is a pure-scroll frame",
+    );
+  });
 
   testWidgets(
     "bound holds under structural churn (insert + collapse + expand)",
@@ -155,8 +159,7 @@ void main() {
       controller.setRoots([const TreeNode(key: "root", data: "root")]);
       // Build a wider tree to exercise more mounted children.
       controller.setChildren("root", [
-        for (int i = 0; i < 20; i++)
-          TreeNode(key: "n$i", data: "N$i"),
+        for (int i = 0; i < 20; i++) TreeNode(key: "n$i", data: "N$i"),
       ]);
       controller.expand(key: "root", animate: false);
 
@@ -164,7 +167,8 @@ void main() {
       await tester.pumpAndSettle();
 
       final sliver = tester.renderObject<RenderSliverTree<String, String>>(
-          find.byType(SliverTree<String, String>));
+        find.byType(SliverTree<String, String>),
+      );
 
       // Churn: collapse, re-expand, insert, remove. Re-layout each time
       // and verify the bound holds.
@@ -201,38 +205,39 @@ void main() {
     },
   );
 
-  testWidgets(
-    "counter resets at the top of each layout (never accumulates)",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
+  testWidgets("counter resets at the top of each layout (never accumulates)", (
+    tester,
+  ) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
 
-      controller.setRoots([const TreeNode(key: "a", data: "A")]);
+    controller.setRoots([const TreeNode(key: "a", data: "A")]);
 
-      await tester.pumpWidget(_harness(controller));
+    await tester.pumpWidget(_harness(controller));
+    await tester.pumpAndSettle();
+
+    final sliver = tester.renderObject<RenderSliverTree<String, String>>(
+      find.byType(SliverTree<String, String>),
+    );
+
+    final firstCount = sliver.debugLastParentDataRefreshIterationCount;
+
+    // Force several additional layouts via structural churn.
+    for (int i = 0; i < 5; i++) {
+      controller.insertRoot(TreeNode(key: "r$i", data: "R$i"));
       await tester.pumpAndSettle();
-
-      final sliver = tester.renderObject<RenderSliverTree<String, String>>(
-          find.byType(SliverTree<String, String>));
-
-      final firstCount = sliver.debugLastParentDataRefreshIterationCount;
-
-      // Force several additional layouts via structural churn.
-      for (int i = 0; i < 5; i++) {
-        controller.insertRoot(TreeNode(key: "r$i", data: "R$i"));
-        await tester.pumpAndSettle();
-        // Counter must reflect ONE layout's iteration, not cumulative
-        // across layouts.
-        expect(
-          sliver.debugLastParentDataRefreshIterationCount,
-          lessThanOrEqualTo(sliver.debugChildCount),
-          reason: "Counter must reset at the top of each layout. "
-              "Original count: $firstCount, iteration $i",
-        );
-      }
-    },
-  );
+      // Counter must reflect ONE layout's iteration, not cumulative
+      // across layouts.
+      expect(
+        sliver.debugLastParentDataRefreshIterationCount,
+        lessThanOrEqualTo(sliver.debugChildCount),
+        reason:
+            "Counter must reset at the top of each layout. "
+            "Original count: $firstCount, iteration $i",
+      );
+    }
+  });
 }

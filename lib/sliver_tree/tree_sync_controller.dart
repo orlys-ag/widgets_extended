@@ -63,8 +63,20 @@ class TreeSyncController<TKey, TData> {
 
   /// Maximum number of entries in [_expansionMemory]. When exceeded, the
   /// oldest entries are evicted (FIFO via [LinkedHashMap] insertion order).
-  /// Set to 0 to disable expansion memory entirely.
+  /// Set to 0 to disable expansion memory entirely; every observable
+  /// effect of [preserveExpansion] flows through the memory this bounds,
+  /// so 0 is equivalent to `preserveExpansion: false`.
   final int maxExpansionMemorySize;
+
+  /// The single gate for expansion memory: both knobs agree it is on.
+  /// Every memory read and write site routes through this, so the two
+  /// flags can never answer differently at different sites. (The read
+  /// sides would no-op on the empty stores either way; routing them
+  /// through the same gate makes that a property of the code rather
+  /// than a consequence of emptiness.)
+  bool get _memoryEnabled {
+    return preserveExpansion && maxExpansionMemorySize > 0;
+  }
 
   /// Remembered expansion states for removed nodes.
   final Map<TKey, bool> _expansionMemory = {};
@@ -111,6 +123,12 @@ class TreeSyncController<TKey, TData> {
   /// was previously expanded (and [preserveExpansion] is true), it is
   /// automatically expanded after its children are set.
   ///
+  /// [childrenOf] must be a PURE function of its argument. The desired
+  /// tree is walked twice (descendant collection, then the diff), and the
+  /// answer is memoized across both, so it is consulted exactly once per
+  /// node per sync. Returning different children for the same key within
+  /// one sync is a caller bug and the second answer is not observed.
+  ///
   /// **Reparent through removed root.** A descendant of a root that is
   /// being removed in this sync, but that appears elsewhere in the desired
   /// tree (under a different parent), is animated (slid) into its new
@@ -145,15 +163,45 @@ class TreeSyncController<TKey, TData> {
     final currentRoots = _controller.liveRootKeys;
     final currentSet = currentRoots.toSet();
 
+    // The desired tree is walked twice: here, to collect descendant keys
+    // for the reparent detection below, and again at step 5 to apply the
+    // diff. Both walks need the same answer from [childrenOf], and asking
+    // twice built a second [TreeNode] for every node in the tree to
+    // produce a list identical to the one the first walk already had.
+    //
+    // Memoized for the duration of this sync, so [childrenOf] is consulted
+    // exactly once per node. Holding the answers costs O(N) for the length
+    // of the sync, which is what the two walks transiently allocated
+    // anyway. This is why [syncRoots] documents [childrenOf] as pure: a
+    // caller that answers differently across calls now has its first
+    // answer used for both walks.
+    final List<TreeNode<TKey, TData>> Function(TKey key)? resolveChildren;
+    if (childrenOf == null) {
+      resolveChildren = null;
+    } else {
+      final memo = <TKey, List<TreeNode<TKey, TData>>>{};
+      resolveChildren = (key) {
+        // `putIfAbsent` would re-hash on every hit; an empty list is a
+        // legitimate cached answer and is never confused with a miss.
+        final cached = memo[key];
+        if (cached != null) {
+          return cached;
+        }
+        final resolved = childrenOf(key);
+        memo[key] = resolved;
+        return resolved;
+      };
+    }
+
     // Pre-compute the full set of desired descendant keys so the reparenting
     // check below can detect a root that is moving to any depth in the new
     // tree (not just a direct child of another new root). This set is also
     // reused in step 6 to defer cross-parent removals in _syncChildrenRecursive.
     Set<TKey>? desiredDescendants;
-    if (childrenOf != null) {
+    if (resolveChildren != null) {
       desiredDescendants = <TKey>{};
       _globallyDesiredChildren = desiredDescendants;
-      _collectDesiredDescendants(desired, childrenOf);
+      _collectDesiredDescendants(desired, resolveChildren);
     }
 
     // 1. Compute which roots are no longer desired, but DEFER their actual
@@ -270,10 +318,12 @@ class TreeSyncController<TKey, TData> {
     //    until after this pass, moveNode can resolve getParent(child) cleanly
     //    and stage a FLIP slide against a stable baseline — the fix for the
     //    "reparent through removed root" bug.
-    if (childrenOf != null) {
+    if (resolveChildren != null) {
       _deferExpansionRestore = true;
       try {
-        _syncChildrenRecursive(desired, childrenOf, animate);
+        // The memoized resolver, so this walk reuses the child lists the
+        // collection walk above already built rather than rebuilding them.
+        _syncChildrenRecursive(desired, resolveChildren, animate);
       } finally {
         _deferExpansionRestore = false;
         _globallyDesiredChildren = null;
@@ -302,8 +352,8 @@ class TreeSyncController<TKey, TData> {
             assert(
               !desiredDescendants.contains(childKey),
               "Descendant $childKey of soon-to-be-removed $key was not "
-                  "reparented out before root removal. Step 5 should have "
-                  "moved it via moveNode.",
+              "reparented out before root removal. Step 5 should have "
+              "moved it via moveNode.",
             );
           }
         }
@@ -371,7 +421,7 @@ class TreeSyncController<TKey, TData> {
     }
 
     // 8. Prune expansion memory of keys that are now live in the controller.
-    if (preserveExpansion) {
+    if (_memoryEnabled) {
       _pruneExpansionMemory();
     }
   }
@@ -453,7 +503,7 @@ class TreeSyncController<TKey, TData> {
     // expansion-restore retry still runs: a parent whose children arrived
     // in an earlier sync may still be awaiting its expand.
     if (_childrenExactMatch(parentKey, desired)) {
-      if (preserveExpansion &&
+      if (_memoryEnabled &&
           !_deferExpansionRestore &&
           _expansionMemory.containsKey(parentKey)) {
         _restoreExpansion(parentKey, animate: animate);
@@ -474,7 +524,7 @@ class TreeSyncController<TKey, TData> {
     // collapsed state, record the suppress signal so the auto-expand
     // heuristic does not re-open the parent when children return in a
     // later sync. Consume the signal as soon as children (re)arrive.
-    if (preserveExpansion && maxExpansionMemorySize > 0) {
+    if (_memoryEnabled) {
       if (desiredKeys.isEmpty && currentKeys.isNotEmpty) {
         if (!_controller.isExpanded(parentKey)) {
           _emptiedWhileCollapsed.add(parentKey);
@@ -645,7 +695,7 @@ class TreeSyncController<TKey, TData> {
     // deferred because its children weren't registered yet, retry now that
     // they are. Without this retry, a re-added parent whose children arrive
     // in a later sync would remain silently collapsed.
-    if (preserveExpansion &&
+    if (_memoryEnabled &&
         !_deferExpansionRestore &&
         _expansionMemory.containsKey(parentKey)) {
       _restoreExpansion(parentKey, animate: animate);
@@ -742,6 +792,49 @@ class TreeSyncController<TKey, TData> {
     return out;
   }
 
+  /// Every live node's key, mapped to whether it currently has live
+  /// children.
+  ///
+  /// The cheap counterpart to [snapshotCurrentChildren], for callers that
+  /// only ask "which nodes exist" and "does this one have children". Those
+  /// are the only two questions the initial-expansion and auto-expand
+  /// passes ask, and answering them through [snapshotCurrentChildren]
+  /// copied every child key in the tree once per call, twice per sync, to
+  /// produce lists nothing ever read.
+  ///
+  /// The key set is identical to [snapshotCurrentChildren]'s: one entry per
+  /// live node, leaves included and mapped to false. Exiting
+  /// (pending-deletion) nodes are excluded from the key set and are not
+  /// counted as children, matching that method.
+  ///
+  /// Iterates the controller's child lists through the unmodifiable view
+  /// rather than the live-filtered copies, so the walk allocates the
+  /// result map and nothing per node.
+  Map<TKey, bool> snapshotChildPresence() {
+    final out = <TKey, bool>{};
+    // Iterative DFS so deep linear chains do not stack-overflow Dart's
+    // recursion limit (typically ~10k–20k frames).
+    final stack = <TKey>[];
+    for (final rootKey in _controller.rootKeys) {
+      if (!_controller.isPendingDeletion(rootKey)) {
+        stack.add(rootKey);
+      }
+    }
+    while (stack.isNotEmpty) {
+      final key = stack.removeLast();
+      var hasLiveChildren = false;
+      for (final childKey in _controller.getChildren(key)) {
+        if (_controller.isPendingDeletion(childKey)) {
+          continue;
+        }
+        hasLiveChildren = true;
+        stack.add(childKey);
+      }
+      out[key] = hasLiveChildren;
+    }
+    return out;
+  }
+
   /// Clears all remembered expansion state.
   void clearExpansionMemory() {
     _expansionMemory.clear();
@@ -801,6 +894,20 @@ class TreeSyncController<TKey, TData> {
     return true;
   }
 
+  /// Records a visit to [key] in debug builds, returning false when it has
+  /// already been visited.
+  ///
+  /// Takes a NULLABLE set and answers true for null, so the caller can
+  /// leave the set unbuilt in release without every call site repeating
+  /// the null test. Never call this outside an [assert]: in release the
+  /// set is null, so it records nothing and always passes.
+  static bool _debugRecordVisit<TKey>(Set<TKey>? seen, TKey key) {
+    if (seen == null) {
+      return true;
+    }
+    return seen.add(key);
+  }
+
   /// Collects all desired descendant keys into [_globallyDesiredChildren].
   ///
   /// Iterative DFS so deep desired trees do not stack-overflow. Guards
@@ -856,11 +963,25 @@ class TreeSyncController<TKey, TData> {
     List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
     bool animate,
   ) {
-    // Revisit guard — see [_collectDesiredDescendants]. That walk runs
-    // first and throws on the same inputs, but [childrenOf] is a caller
-    // function that may answer differently across calls, so this walk
-    // carries its own guard rather than trusting the earlier pass.
-    final seen = <TKey>{for (final n in nodes) n.key};
+    // Revisit guard, DEBUG-ONLY — see [_collectDesiredDescendants]. That
+    // walk runs first, over the SAME memoized answers (`_syncRootsImpl`
+    // hands both walks one resolver), and throws [ArgumentError] on
+    // exactly this condition in every build mode. So the caller-facing
+    // rejection of a cyclic or DAG-shaped `childrenOf` is already
+    // unconditional, and by the time control reaches here the desired tree
+    // is known acyclic and duplicate-free.
+    //
+    // What survives is an internal-invariant check: it can only fire if
+    // that ordering is broken by a future edit, which is a bug in this
+    // file rather than bad caller input. That is an [AssertionError]'s
+    // job, not an [ArgumentError]'s, and it should not cost a set of every
+    // key in the tree on every release-mode sync. [seen] stays null in
+    // release, where the asserts strip out entirely.
+    Set<TKey>? seen;
+    assert(() {
+      seen = <TKey>{for (final n in nodes) n.key};
+      return true;
+    }());
     final stack = <TreeNode<TKey, TData>>[];
     final restoreOrder = <TKey>[];
     for (int i = nodes.length - 1; i >= 0; i--) {
@@ -870,12 +991,14 @@ class TreeSyncController<TKey, TData> {
       final node = stack.removeLast();
       final children = childrenOf(node.key);
       for (final child in children) {
-        if (!seen.add(child.key)) {
-          throw ArgumentError(
-            "syncRoots childrenOf detected a cycle or repeated key "
-            "involving key \"${child.key}\".",
-          );
-        }
+        assert(
+          _debugRecordVisit(seen, child.key),
+          "syncRoots childrenOf detected a cycle or repeated key involving "
+          "key \"${child.key}\" during the child sync walk. "
+          "_collectDesiredDescendants runs first over the same memoized "
+          "answers and should already have rejected this, so reaching here "
+          "means the two walks disagree.",
+        );
       }
       syncChildren(node.key, children, animate: animate);
       // Defer restore to after all descendants are synced (bottom-up).
@@ -902,7 +1025,7 @@ class TreeSyncController<TKey, TData> {
   ///
   /// Iterative DFS so deep linear chains do not stack-overflow.
   void _rememberExpansion(TKey key) {
-    if (!preserveExpansion || maxExpansionMemorySize <= 0) {
+    if (!_memoryEnabled) {
       return;
     }
     final stack = <TKey>[key];
@@ -952,7 +1075,7 @@ class TreeSyncController<TKey, TData> {
   /// children can finish restoring. Clearing eagerly would leave the node
   /// permanently collapsed on re-add.
   void _restoreExpansion(TKey key, {required bool animate}) {
-    if (!preserveExpansion) return;
+    if (!_memoryEnabled) return;
     final wasExpanded = _expansionMemory[key];
     if (wasExpanded != true) {
       _expansionMemory.remove(key);
@@ -982,9 +1105,7 @@ class TreeSyncController<TKey, TData> {
 /// per call across a batch of insertions, in place of the prior O(N)
 /// linear walk over the desired order.
 class _Fenwick {
-  _Fenwick(int size)
-      : _size = size,
-        _tree = List<int>.filled(size + 1, 0);
+  _Fenwick(int size) : _size = size, _tree = List<int>.filled(size + 1, 0);
 
   final int _size;
   final List<int> _tree;

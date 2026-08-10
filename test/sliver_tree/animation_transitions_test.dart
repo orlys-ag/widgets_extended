@@ -15,11 +15,17 @@ import 'package:widgets_extended/widgets_extended.dart';
 void main() {
   group("remove → re-insert reversal", () {
     testWidgets("removed root, re-inserted via insertRoot mid-exit, "
-        "preserves visual continuity (no jump) and ends entering",
-        (tester) async {
+        "preserves visual continuity (no jump) and ends entering", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -46,46 +52,77 @@ void main() {
       }
 
       final extentMidExit = controller.getCurrentExtent("b");
-      expect(extentMidExit, lessThan(40.0),
-          reason: "Sanity: extent should have shrunk during exit");
-      expect(extentMidExit, greaterThan(0.0),
-          reason: "Sanity: extent should not be fully zero yet");
+      expect(
+        extentMidExit,
+        lessThan(40.0),
+        reason: "Sanity: extent should have shrunk during exit",
+      );
+      expect(
+        extentMidExit,
+        greaterThan(0.0),
+        reason: "Sanity: extent should not be fully zero yet",
+      );
 
       // Re-insert via insertRoot — this must cancel the deletion and
       // reverse the exit into an enter.
       controller.insertRoot(const TreeNode(key: "b", data: "B"));
 
-      expect(controller.isPendingDeletion("b"), isFalse,
-          reason: "Re-insert must clear pending-deletion");
-      expect(controller.isExiting("b"), isFalse,
-          reason: "Re-insert must NOT leave the node in exiting state");
+      expect(
+        controller.isPendingDeletion("b"),
+        isFalse,
+        reason: "Re-insert must clear pending-deletion",
+      );
+      expect(
+        controller.isExiting("b"),
+        isFalse,
+        reason: "Re-insert must NOT leave the node in exiting state",
+      );
       final enterState = controller.getAnimationState("b");
-      expect(enterState?.type, AnimationType.entering,
-          reason: "Re-insert must transition to entering");
+      expect(
+        enterState?.type,
+        AnimationType.entering,
+        reason: "Re-insert must transition to entering",
+      );
 
       // The startExtent of the new entering animation should equal the
       // extent we observed mid-exit — visual continuity, no jump back
       // to 0 or to full.
-      expect(enterState!.startExtent, closeTo(extentMidExit, 0.5),
-          reason: "Entering animation must start from the exit's "
-              "current visual extent for smooth reversal. "
-              "Expected ~$extentMidExit, got ${enterState.startExtent}");
+      expect(
+        enterState!.startExtent,
+        closeTo(extentMidExit, 0.5),
+        reason:
+            "Entering animation must start from the exit's "
+            "current visual extent for smooth reversal. "
+            "Expected ~$extentMidExit, got ${enterState.startExtent}",
+      );
 
       // Drain the rest of the animation. 'b' should remain alive.
       for (var i = 0; i < 30; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
-      expect(controller.getNodeData("b"), isNotNull,
-          reason: "'b' must survive the original exit duration");
-      expect(controller.getCurrentExtent("b"), closeTo(40.0, 0.5),
-          reason: "After enter completes, extent should be back to full");
+      expect(
+        controller.getNodeData("b"),
+        isNotNull,
+        reason: "'b' must survive the original exit duration",
+      );
+      expect(
+        controller.getCurrentExtent("b"),
+        closeTo(40.0, 0.5),
+        reason: "After enter completes, extent should be back to full",
+      );
     });
 
-    testWidgets("removed child, re-inserted via insert mid-exit, reverses",
-        (tester) async {
+    testWidgets("removed child, re-inserted via insert mid-exit, reverses", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -104,7 +141,10 @@ void main() {
       final mid = controller.getCurrentExtent("c");
       expect(mid, lessThan(30.0));
 
-      controller.insert(parentKey: "p", node: const TreeNode(key: "c", data: "C"));
+      controller.insert(
+        parentKey: "p",
+        node: const TreeNode(key: "c", data: "C"),
+      );
       expect(controller.isPendingDeletion("c"), isFalse);
       expect(controller.getAnimationState("c")?.type, AnimationType.entering);
 
@@ -116,11 +156,17 @@ void main() {
   });
 
   group("collapse ↔ expand reversal", () {
-    testWidgets("expand → collapse mid-expand reverses the operation group",
-        (tester) async {
+    testWidgets("expand → collapse mid-expand reverses the operation group", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -155,16 +201,26 @@ void main() {
       // After collapse settles, children leave the visible order (still
       // structurally present, just collapsed).
       expect(controller.visibleNodes.toList(), equals(["p"]));
-      expect(controller.getNodeData("c1"), isNotNull,
-          reason: "Collapse must NOT purge structural data — "
-              "children remain registered, just hidden.");
+      expect(
+        controller.getNodeData("c1"),
+        isNotNull,
+        reason:
+            "Collapse must NOT purge structural data — "
+            "children remain registered, just hidden.",
+      );
     });
 
-    testWidgets("collapse → expand mid-collapse reverses the operation group",
-        (tester) async {
+    testWidgets("collapse → expand mid-collapse reverses the operation group", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -196,105 +252,122 @@ void main() {
     });
 
     testWidgets(
-        "expand-after-mid-collapse animates smoothly from each member's "
-        "current extent up to full over the configured duration",
-        (tester) async {
-      // Repro for the "child list appears fully expanded" regression
-      // and the follow-up "duration speeds up" perception.
-      //
-      // Setup: P → C → c1, c2. C starts collapsed.
-      // 1. Expand C (animate). c1, c2 join C's op-group with
-      //    targetExtent=48 (full extent set via setFullExtent).
-      // 2. Mid-flight, collapse P. C, c1, c2 are captured into P's
-      //    collapse op-group with targetExtent = their captured
-      //    (mid-flight) extent.
-      // 3. Mid-collapse, expand P. Path 1 reverse-collapse runs.
-      //
-      // The original bug: Path 1 only reset targetExtent to full and
-      // left the controller mid-flight. The lerp produced an extent
-      // close to full almost immediately — "appears fully expanded".
-      //
-      // The fix: rebase each member's startExtent to its current visual
-      // extent, set targetExtent to its full extent, then reset the
-      // controller to value=0 and forward(). At t=0 the lerp returns
-      // currentExtent (no jump), and the animation plays smoothly up to
-      // full over the FULL configured duration. The visible motion
-      // range scales with how far the collapse had progressed — that is
-      // a geometric reality, not a duration bug.
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
-      );
-      addTearDown(controller.dispose);
+      "expand-after-mid-collapse animates smoothly from each member's "
+      "current extent up to full over the configured duration",
+      (tester) async {
+        // Repro for the "child list appears fully expanded" regression
+        // and the follow-up "duration speeds up" perception.
+        //
+        // Setup: P → C → c1, c2. C starts collapsed.
+        // 1. Expand C (animate). c1, c2 join C's op-group with
+        //    targetExtent=48 (full extent set via setFullExtent).
+        // 2. Mid-flight, collapse P. C, c1, c2 are captured into P's
+        //    collapse op-group with targetExtent = their captured
+        //    (mid-flight) extent.
+        // 3. Mid-collapse, expand P. Path 1 reverse-collapse runs.
+        //
+        // The original bug: Path 1 only reset targetExtent to full and
+        // left the controller mid-flight. The lerp produced an extent
+        // close to full almost immediately — "appears fully expanded".
+        //
+        // The fix: rebase each member's startExtent to its current visual
+        // extent, set targetExtent to its full extent, then reset the
+        // controller to value=0 and forward(). At t=0 the lerp returns
+        // currentExtent (no jump), and the animation plays smoothly up to
+        // full over the FULL configured duration. The visible motion
+        // range scales with how far the collapse had progressed — that is
+        // a geometric reality, not a duration bug.
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
 
-      controller.setRoots([const TreeNode(key: "p", data: "P")]);
-      controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
-      controller.setChildren("c", [
-        const TreeNode(key: "c1", data: "c1"),
-        const TreeNode(key: "c2", data: "c2"),
-      ]);
-      controller.expand(key: "p", animate: false);
-      controller.setFullExtent("c1", 48.0);
-      controller.setFullExtent("c2", 48.0);
+        controller.setRoots([const TreeNode(key: "p", data: "P")]);
+        controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
+        controller.setChildren("c", [
+          const TreeNode(key: "c1", data: "c1"),
+          const TreeNode(key: "c2", data: "c2"),
+        ]);
+        controller.expand(key: "p", animate: false);
+        controller.setFullExtent("c1", 48.0);
+        controller.setFullExtent("c2", 48.0);
 
-      // 1. Expand C (animated). c1, c2 enter via C's op-group.
-      controller.expand(key: "c", animate: true);
-      for (var i = 0; i < 2; i++) {
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      final extentDuringInnerExpand = controller.getCurrentExtent("c1");
-      expect(extentDuringInnerExpand, lessThan(20.0),
-          reason: "Sanity: c1 should be small mid-inner-expand");
+        // 1. Expand C (animated). c1, c2 enter via C's op-group.
+        controller.expand(key: "c", animate: true);
+        for (var i = 0; i < 2; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        final extentDuringInnerExpand = controller.getCurrentExtent("c1");
+        expect(
+          extentDuringInnerExpand,
+          lessThan(20.0),
+          reason: "Sanity: c1 should be small mid-inner-expand",
+        );
 
-      // 2. Collapse P mid-flight.
-      controller.collapse(key: "p", animate: true);
-      for (var i = 0; i < 2; i++) {
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      // Capture c1's visual extent at the exact moment we trigger the
-      // reversal — Path 1 must preserve this value across the boundary
-      // (no jump up, no snap to 0).
-      final extentJustBeforeReversal = controller.getCurrentExtent("c1");
+        // 2. Collapse P mid-flight.
+        controller.collapse(key: "p", animate: true);
+        for (var i = 0; i < 2; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        // Capture c1's visual extent at the exact moment we trigger the
+        // reversal — Path 1 must preserve this value across the boundary
+        // (no jump up, no snap to 0).
+        final extentJustBeforeReversal = controller.getCurrentExtent("c1");
 
-      // 3. Expand P. Path 1 reverse-collapse: smooth rebase + value=0
-      // reset, so the next frame holds at currentExtent and then plays
-      // up to full over the FULL configured duration.
-      controller.expand(key: "p", animate: true);
-      await tester.pump(const Duration(milliseconds: 1));
+        // 3. Expand P. Path 1 reverse-collapse: smooth rebase + value=0
+        // reset, so the next frame holds at currentExtent and then plays
+        // up to full over the FULL configured duration.
+        controller.expand(key: "p", animate: true);
+        await tester.pump(const Duration(milliseconds: 1));
 
-      // First frame after reversal: c1's extent must be effectively
-      // unchanged from the moment of reversal (smooth continuity, no
-      // jump up to near-full and no snap-down to 0).
-      final extentFirstFrame = controller.getCurrentExtent("c1");
-      expect(
-        extentFirstFrame,
-        closeTo(extentJustBeforeReversal, 1.5),
-        reason: "Path 1 smooth reversal must preserve the visual "
-            "position. Got $extentFirstFrame, expected ≈ "
-            "$extentJustBeforeReversal.",
-      );
+        // First frame after reversal: c1's extent must be effectively
+        // unchanged from the moment of reversal (smooth continuity, no
+        // jump up to near-full and no snap-down to 0).
+        final extentFirstFrame = controller.getCurrentExtent("c1");
+        expect(
+          extentFirstFrame,
+          closeTo(extentJustBeforeReversal, 1.5),
+          reason:
+              "Path 1 smooth reversal must preserve the visual "
+              "position. Got $extentFirstFrame, expected ≈ "
+              "$extentJustBeforeReversal.",
+        );
 
-      // Animation must take the full configured duration. Pump a small
-      // fraction; c1 should NOT yet be at full and should be growing.
-      await tester.pump(const Duration(milliseconds: 80));
-      final extentMidExpand = controller.getCurrentExtent("c1");
-      expect(extentMidExpand, greaterThan(extentFirstFrame));
-      expect(extentMidExpand, lessThan(48.0),
-          reason: "BUG: animation completed too quickly. "
-              "At ~40% of duration, c1 should still be growing.");
+        // Animation must take the full configured duration. Pump a small
+        // fraction; c1 should NOT yet be at full and should be growing.
+        await tester.pump(const Duration(milliseconds: 80));
+        final extentMidExpand = controller.getCurrentExtent("c1");
+        expect(extentMidExpand, greaterThan(extentFirstFrame));
+        expect(
+          extentMidExpand,
+          lessThan(48.0),
+          reason:
+              "BUG: animation completed too quickly. "
+              "At ~40% of duration, c1 should still be growing.",
+        );
 
-      // After full settling, c1 reaches full extent.
-      for (var i = 0; i < 60; i++) {
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      expect(controller.getCurrentExtent("c1"), 48.0);
-      expect(controller.visibleNodes.toList(), equals(["p", "c", "c1", "c2"]));
-    });
+        // After full settling, c1 reaches full extent.
+        for (var i = 0; i < 60; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(controller.getCurrentExtent("c1"), 48.0);
+        expect(
+          controller.visibleNodes.toList(),
+          equals(["p", "c", "c1", "c2"]),
+        );
+      },
+    );
 
-    testWidgets(
-        "Path 1 reversal of a mid-collapse animates over the FULL "
-        "configured duration, not just the remaining controller progress",
-        (tester) async {
+    testWidgets("Path 1 reversal of a mid-collapse animates over the FULL "
+        "configured duration, not just the remaining controller progress", (
+      tester,
+    ) async {
       // For non-captured members of the reversing op-group, the
       // shared op-group controller is the timing primitive. Path-1
       // reversal rebases each member's envelope and resets the
@@ -304,7 +377,12 @@ void main() {
       // the group finishes, then resume their own preserved clock.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -336,7 +414,8 @@ void main() {
       expect(
         extentFirstFrame,
         closeTo(extentMidCollapse, 1.5),
-        reason: "Path 1 reversal must preserve visual continuity. "
+        reason:
+            "Path 1 reversal must preserve visual continuity. "
             "Got extentFirstFrame=$extentFirstFrame, "
             "expected ≈ $extentMidCollapse.",
       );
@@ -351,7 +430,8 @@ void main() {
       expect(
         extentHalfway,
         closeTo(expectedHalfway, 2.0),
-        reason: "At 200ms of 400ms (linear), c should be halfway "
+        reason:
+            "At 200ms of 400ms (linear), c should be halfway "
             "between $extentMidCollapse and 48 (≈$expectedHalfway). "
             "Got extentHalfway=$extentHalfway.",
       );
@@ -362,10 +442,8 @@ void main() {
       expect(controller.getCurrentExtent("c"), closeTo(48, 0.5));
     });
 
-    testWidgets(
-        "collapse → mid-flight expand → mid-flight collapse preserves "
-        "visual continuity at every Path-1 reversal boundary",
-        (tester) async {
+    testWidgets("collapse → mid-flight expand → mid-flight collapse preserves "
+        "visual continuity at every Path-1 reversal boundary", (tester) async {
       // Regression: after the smooth-rebase fix in the expand Path-1
       // branch, members carry a non-zero startExtent reflecting their
       // visual position at the boundary. The collapse Path-1 branch was
@@ -378,7 +456,12 @@ void main() {
       // continuity across each boundary.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -405,7 +488,8 @@ void main() {
       expect(
         extentAfterFirstReversal,
         closeTo(extentMidCollapse, 1.5),
-        reason: "Boundary 1 (collapse → expand) must hold the visual "
+        reason:
+            "Boundary 1 (collapse → expand) must hold the visual "
             "position. Got $extentAfterFirstReversal, expected ≈ "
             "$extentMidCollapse",
       );
@@ -416,7 +500,8 @@ void main() {
       expect(
         extentMidReExpand,
         greaterThan(extentMidCollapse + 1),
-        reason: "Sanity: c should be growing past $extentMidCollapse "
+        reason:
+            "Sanity: c should be growing past $extentMidCollapse "
             "during re-expand. Got $extentMidReExpand",
       );
       expect(extentMidReExpand, lessThan(48));
@@ -430,7 +515,8 @@ void main() {
       expect(
         extentAfterSecondReversal,
         closeTo(extentMidReExpand, 1.5),
-        reason: "Boundary 2 (expand → collapse) must hold the visual "
+        reason:
+            "Boundary 2 (expand → collapse) must hold the visual "
             "position. Got $extentAfterSecondReversal, expected ≈ "
             "$extentMidReExpand. A value lower than this indicates the "
             "Path-1 reverse-expand branch is overwriting startExtent "
@@ -445,11 +531,17 @@ void main() {
   });
 
   group("expandAll ↔ collapseAll reversal", () {
-    testWidgets("expandAll → collapseAll mid-bulk reverses the bulk group",
-        (tester) async {
+    testWidgets("expandAll → collapseAll mid-bulk reverses the bulk group", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -476,15 +568,24 @@ void main() {
       for (var i = 0; i < 30; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
-      expect(controller.visibleNodes.toList(), equals(["a", "b"]),
-          reason: "After full collapse, only roots remain visible");
+      expect(
+        controller.visibleNodes.toList(),
+        equals(["a", "b"]),
+        reason: "After full collapse, only roots remain visible",
+      );
     });
 
-    testWidgets("collapseAll → expandAll mid-bulk reverses the bulk group",
-        (tester) async {
+    testWidgets("collapseAll → expandAll mid-bulk reverses the bulk group", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -510,8 +611,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 16));
       }
       // After full expand, all children visible.
-      expect(controller.visibleNodes.toList(),
-          equals(["a", "a1", "b", "b1"]));
+      expect(controller.visibleNodes.toList(), equals(["a", "a1", "b", "b1"]));
     });
   });
 
@@ -520,7 +620,12 @@ void main() {
         "exit and re-anchors at new position", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -544,12 +649,17 @@ void main() {
       controller.moveNode("x", "p2");
       controller.expand(key: "p2", animate: false);
 
-      expect(controller.isPendingDeletion("x"), isFalse,
-          reason: "moveNode must clear pending-deletion on the moved subtree");
-      expect(controller.isExiting("x"), isFalse,
-          reason: "moveNode must clear exit animation on the moved subtree");
-      expect(controller.getParent("x"), "p2",
-          reason: "Move took effect");
+      expect(
+        controller.isPendingDeletion("x"),
+        isFalse,
+        reason: "moveNode must clear pending-deletion on the moved subtree",
+      );
+      expect(
+        controller.isExiting("x"),
+        isFalse,
+        reason: "moveNode must clear exit animation on the moved subtree",
+      );
+      expect(controller.getParent("x"), "p2", reason: "Move took effect");
 
       for (var i = 0; i < 30; i++) {
         await tester.pump(const Duration(milliseconds: 16));
@@ -563,7 +673,12 @@ void main() {
         "leak op-groups or corrupt state", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -590,7 +705,12 @@ void main() {
         "consistent", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 

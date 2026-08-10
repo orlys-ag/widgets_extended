@@ -66,9 +66,8 @@ void main() {
                 SliverReorderableTree<String, String>(
                   controller: tree,
                   reorderController: reorder,
-                  nodeBuilder: (context, key, depth, wrap) {
-                    return wrap(
-                      longPressToDrag: true,
+                  nodeBuilder: (context, key, depth) {
+                    return TreeDelayedDragHandle(
                       child: SizedBox(
                         key: ValueKey("row-$key"),
                         height: 50,
@@ -86,25 +85,32 @@ void main() {
 
       // Scroll deep into the list so autoscroll toward the top edge has
       // >1000 px of runway before hitting minScrollExtent.
-      final scrollable = tester.state<ScrollableState>(
-        find.byType(Scrollable),
-      );
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
       scrollable.position.jumpTo(2000.0);
       await tester.pump();
 
       // Row r42 sits at structural y=2100..2150 => viewport-local y=100..150.
       final sourceRow = find.byKey(const ValueKey("row-r42"));
-      expect(sourceRow, findsOneWidget,
-          reason: "setup: source row must be visible before the drag");
+      expect(
+        sourceRow,
+        findsOneWidget,
+        reason: "setup: source row must be visible before the drag",
+      );
 
       // Long-press to start the drag.
       final gesture = await tester.startGesture(tester.getCenter(sourceRow));
       await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
 
-      expect(reorder.isDragging, isTrue,
-          reason: "setup: long press must have started the drag session");
-      expect(reorder.draggedKey, "r42",
-          reason: "setup: the drag session must be for the pressed row");
+      expect(
+        reorder.isDragging,
+        isTrue,
+        reason: "setup: long press must have started the drag session",
+      );
+      expect(
+        reorder.draggedKey,
+        "r42",
+        reason: "setup: the drag session must be for the pressed row",
+      );
 
       // Move the pointer into the top autoscroll edge zone (y=10 is inside
       // the default 48 px autoScrollEdgeZone) and hold it there.
@@ -121,31 +127,43 @@ void main() {
       }
 
       final scrolled = 2000.0 - scrollable.position.pixels;
-      expect(scrolled, greaterThan(300.0),
-          reason: "setup: the autoscroll ticker must have actually scrolled "
-              "the viewport away from the source row "
-              "(pixels=${scrollable.position.pixels})");
+      expect(
+        scrolled,
+        greaterThan(300.0),
+        reason:
+            "setup: the autoscroll ticker must have actually scrolled "
+            "the viewport away from the source row "
+            "(pixels=${scrollable.position.pixels})",
+      );
 
       final sourceRowMounted = tester.any(sourceRow);
 
       // (1) Core f41 invariant: an evicted source row must never leave an
       // active drag session behind — the row's GestureDetector was the only
       // thing that could ever call endDrag()/cancelDrag().
-      expect(sourceRowMounted || !reorder.isDragging, isTrue,
-          reason: "the dragged row's element was evicted by the stale "
-              "eviction sweep (find.byKey(row-r42) found nothing) while "
-              "reorder.isDragging is still true — the drag session is "
-              "orphaned: no gesture callback can ever end it");
+      expect(
+        sourceRowMounted || !reorder.isDragging,
+        isTrue,
+        reason:
+            "the dragged row's element was evicted by the stale "
+            "eviction sweep (find.byKey(row-r42) found nothing) while "
+            "reorder.isDragging is still true — the drag session is "
+            "orphaned: no gesture callback can ever end it",
+      );
 
       // (2) Lifting the finger must end the session.
       await gesture.up();
       await tester.pump();
 
-      expect(reorder.isDragging, isFalse,
-          reason: "lifting the finger must end the drag session; if the "
-              "source row's element (mounted=$sourceRowMounted) was "
-              "evicted mid-drag, its recognizer was disposed and "
-              "onLongPressEnd never fires, so endDrag() is never called");
+      expect(
+        reorder.isDragging,
+        isFalse,
+        reason:
+            "lifting the finger must end the drag session; if the "
+            "source row's element (mounted=$sourceRowMounted) was "
+            "evicted mid-drag, its recognizer was disposed and "
+            "onLongPressEnd never fires, so endDrag() is never called",
+      );
 
       // (3) The autoscroll ticker must be stopped: the scroll offset must
       // not keep drifting after the pointer is gone.
@@ -153,10 +171,14 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
-      expect(scrollable.position.pixels, closeTo(pixelsAfterUp, 0.5),
-          reason: "the autoscroll ticker must stop when the drag ends; a "
-              "drifting offset means the orphaned ticker is still jumping "
-              "the position toward the stale edge-zone pointer every frame");
+      expect(
+        scrollable.position.pixels,
+        closeTo(pixelsAfterUp, 0.5),
+        reason:
+            "the autoscroll ticker must stop when the drag ends; a "
+            "drifting offset means the orphaned ticker is still jumping "
+            "the position toward the stale edge-zone pointer every frame",
+      );
 
       // Drain any commit slide with a bounded pump loop (no pumpAndSettle:
       // on buggy code the orphaned ticker would make it spin forever).

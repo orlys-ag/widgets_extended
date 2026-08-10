@@ -27,11 +27,8 @@ const int kNoParentNid = -1;
 ///
 /// Fires unconditionally — including the no-op `oldParent == newParent`
 /// case. Subscribers are responsible for short-circuiting no-ops.
-typedef ParentChangedCallback = void Function(
-  int nid,
-  int oldParent,
-  int newParent,
-);
+typedef ParentChangedCallback =
+    void Function(int nid, int oldParent, int newParent);
 
 /// Dense ECS-style storage for the tree's structural state.
 ///
@@ -421,8 +418,33 @@ class NodeStore<TKey, TData> {
   /// Clears the expanded flag for every registered node whose depth is less
   /// than [maxDepth] (or for every node when [maxDepth] is null), then
   /// rebuilds the ancestors-expanded cache from [roots].
-  void collapseAllInRegistry(int? maxDepth, List<TKey> roots) {
+  ///
+  /// When [collectFlipped] is true, returns the keys whose flag actually
+  /// went from expanded to collapsed; otherwise returns null. The flag
+  /// exists for the expansion-listener channel: this is the ONLY site that
+  /// clears expansion in bulk, so it is the only place those keys can be
+  /// observed, but the `maxDepth == null` case is otherwise a single
+  /// `fillRange` and must stay that way when nobody is subscribed.
+  ///
+  /// The returned set is wider than the caller's own "collapse these roots"
+  /// list: it includes interior nodes and expansion recorded under
+  /// collapsed ancestors, which is exactly what a listener persisting
+  /// expansion state needs to hear about.
+  List<TKey>? collapseAllInRegistry(
+    int? maxDepth,
+    List<TKey> roots, {
+    bool collectFlipped = false,
+  }) {
+    final List<TKey>? flipped = collectFlipped ? <TKey>[] : null;
     if (maxDepth == null) {
+      if (flipped != null) {
+        final n = nids.length;
+        for (int nid = 0; nid < n; nid++) {
+          if (nids.isFree(nid)) continue;
+          if (_expandedByNid[nid] == 0) continue;
+          flipped.add(nids.keyOfUnchecked(nid));
+        }
+      }
       _expandedByNid.fillRange(0, _expandedByNid.length, 0);
     } else {
       final n = nids.length;
@@ -431,10 +453,12 @@ class NodeStore<TKey, TData> {
         if (_expandedByNid[nid] == 0) continue;
         if (_depthByNid[nid] < maxDepth) {
           _expandedByNid[nid] = 0;
+          flipped?.add(nids.keyOfUnchecked(nid));
         }
       }
     }
     rebuildAllAncestorsExpanded(roots);
+    return flipped;
   }
 
   // ────────────────────────────────────────────────────────────────────────

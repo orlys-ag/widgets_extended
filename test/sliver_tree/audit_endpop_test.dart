@@ -38,13 +38,15 @@ const double _kPlaceholder = 60.0;
 /// coarse step short of settle. See the file-level MEASURE note.
 const Duration _kStep = Duration(milliseconds: 4);
 
-SyncedTreeNode<String, String> _n(String k,
-        [List<SyncedTreeNode<String, String>>? c]) =>
-    SyncedTreeNode(key: k, data: k, children: c ?? const []);
+SyncedTreeNode<String, String> _n(
+  String k, [
+  List<SyncedTreeNode<String, String>>? c,
+]) => SyncedTreeNode(key: k, data: k, children: c ?? const []);
 
 RenderSliverTree<String, String> _render(WidgetTester t) =>
     t.renderObject<RenderSliverTree<String, String>>(
-        find.byType(SliverTree<String, String>));
+      find.byType(SliverTree<String, String>),
+    );
 
 class _Harness extends StatefulWidget {
   const _Harness({required this.builder, required this.cardHeight});
@@ -65,23 +67,31 @@ class _HarnessState extends State<_Harness> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        home: Scaffold(
-          body: CustomScrollView(slivers: [
-            SyncedSliverTree<String, String>(
-              tree: widget.builder(),
-              maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
-              itemBuilder: (context, node) {
-                controller ??= node.controller;
-                return SizedBox(
-                    key: ValueKey("row-${node.key}"),
-                    height: _heightFor(node.key),
-                    child: Text(node.key));
-              },
+    home: Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SyncedSliverTree<String, String>(
+            tree: widget.builder(),
+            maxStickyDepth: 1,
+            animationStyle: const TreeAnimationStyle(
+              expandCollapse: TreeAnimationSpec(
+                duration: Duration(milliseconds: 400),
+                curve: Curves.linear,
+              ),
             ),
-          ]),
-        ),
-      );
+            itemBuilder: (context, node) {
+              controller ??= node.controller;
+              return SizedBox(
+                key: ValueKey("row-${node.key}"),
+                height: _heightFor(node.key),
+                child: Text(node.key),
+              );
+            },
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 /// User-visible card extent this frame = (ghostRect ∩ clipRect) with the
@@ -109,10 +119,14 @@ double _userVisible(RenderSliverTree<String, String> r) {
 void _expectNoPop(List<double> vis) {
   for (int i = 1; i < vis.length; i++) {
     final jump = vis[i] - vis[i - 1];
-    expect(jump, lessThan(2.0),
-        reason: "end-pop: visible residual jumped UP by ${jump}px at frame $i "
-            "(sequence ...${vis.sublist((i - 2).clamp(0, vis.length), i + 1)}) "
-            "— the trailing region was re-exposed");
+    expect(
+      jump,
+      lessThan(2.0),
+      reason:
+          "end-pop: visible residual jumped UP by ${jump}px at frame $i "
+          "(sequence ...${vis.sublist((i - 2).clamp(0, vis.length), i + 1)}) "
+          "— the trailing region was re-exposed",
+    );
   }
 }
 
@@ -130,24 +144,34 @@ Future<List<double>> _drive(
   List<SyncedTreeNode<String, String>> build() {
     if (favorite) {
       return moved
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])];
+          ? [
+              _n("fav", [_n("x")]),
+              _n("others", [_n("o1")]),
+            ]
+          : [
+              _n("fav", [_n("fav_ph")]),
+              _n("others", [_n("x"), _n("o1")]),
+            ];
     } else {
       return moved
-          ? [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])]
-          : [_n("fav", [_n("x")]), _n("others", [_n("o1")])];
+          ? [
+              _n("fav", [_n("fav_ph")]),
+              _n("others", [_n("x"), _n("o1")]),
+            ]
+          : [
+              _n("fav", [_n("x")]),
+              _n("others", [_n("o1")]),
+            ];
     }
   }
 
-  await tester
-      .pumpWidget(_Harness(builder: build, cardHeight: cardHeight));
+  await tester.pumpWidget(_Harness(builder: build, cardHeight: cardHeight));
   await tester.pumpAndSettle();
   final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
   c.collapse(key: favorite ? "fav" : "others", animate: false);
   await tester.pump();
   moved = true;
-  await tester
-      .pumpWidget(_Harness(builder: build, cardHeight: cardHeight));
+  await tester.pumpWidget(_Harness(builder: build, cardHeight: cardHeight));
   await tester.pump();
   final r = _render(tester);
   final vis = <double>[];
@@ -167,16 +191,23 @@ void main() {
     "FAVORITE/up: last sliding frame visible-outside-band < 2px (both sides)",
     (tester) async {
       final vis = await _drive(tester, favorite: true);
-      expect(vis, isNotEmpty,
-          reason: "ghost must have actually slid (capture populated)");
+      expect(
+        vis,
+        isNotEmpty,
+        reason: "ghost must have actually slid (capture populated)",
+      );
       // No END-POP: the visible residual converges to ~0 with no upward jump.
       // Pre-fix the trailing region was never clipped, so the residual stayed
       // ~32px (= cardExtent − headerExtent) on the final sliding frames.
       _expectNoPop(vis);
       final lastVisible = vis.last;
-      expect(lastVisible, lessThan(2.0),
-          reason: "tall card left ${lastVisible}px visible OUTSIDE the band on "
-              "the last sliding frame — the end-pop the audit measured at ~36px");
+      expect(
+        lastVisible,
+        lessThan(2.0),
+        reason:
+            "tall card left ${lastVisible}px visible OUTSIDE the band on "
+            "the last sliding frame — the end-pop the audit measured at ~36px",
+      );
     },
   );
 
@@ -184,157 +215,202 @@ void main() {
     "UNFAVORITE/down: last sliding frame visible-outside-band stays < 2px",
     (tester) async {
       final vis = await _drive(tester, favorite: false);
-      expect(vis, isNotEmpty,
-          reason: "ghost must have actually slid (capture populated)");
+      expect(
+        vis,
+        isNotEmpty,
+        reason: "ghost must have actually slid (capture populated)",
+      );
       _expectNoPop(vis);
       final lastVisible = vis.last;
-      expect(lastVisible, lessThan(2.0),
-          reason: "DOWNWARD must not regress (today ~1.9px); got ${lastVisible}px");
+      expect(
+        lastVisible,
+        lessThan(2.0),
+        reason:
+            "DOWNWARD must not regress (today ~1.9px); got ${lastVisible}px",
+      );
     },
   );
 
-  testWidgets(
-    "FAVORITE/up: card bottom reaches band bottom before prune",
-    (tester) async {
-      var moved = false;
-      List<SyncedTreeNode<String, String>> build() => moved
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])];
+  testWidgets("FAVORITE/up: card bottom reaches band bottom before prune", (
+    tester,
+  ) async {
+    var moved = false;
+    List<SyncedTreeNode<String, String>> build() => moved
+        ? [
+            _n("fav", [_n("x")]),
+            _n("others", [_n("o1")]),
+          ]
+        : [
+            _n("fav", [_n("fav_ph")]),
+            _n("others", [_n("x"), _n("o1")]),
+          ];
 
-      await tester
-          .pumpWidget(_Harness(builder: build, cardHeight: _kCard));
-      await tester.pumpAndSettle();
-      final c =
-          tester.state<_HarnessState>(find.byType(_Harness)).controller!;
-      c.collapse(key: "fav", animate: false);
-      await tester.pump();
-      moved = true;
-      await tester
-          .pumpWidget(_Harness(builder: build, cardHeight: _kCard));
-      await tester.pump();
+    await tester.pumpWidget(_Harness(builder: build, cardHeight: _kCard));
+    await tester.pumpAndSettle();
+    final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
+    c.collapse(key: "fav", animate: false);
+    await tester.pump();
+    moved = true;
+    await tester.pumpWidget(_Harness(builder: build, cardHeight: _kCard));
+    await tester.pump();
 
-      final r = _render(tester);
-      // Capture the LAST sliding frame's clipped-ghost bottom vs band bottom.
-      double? lastBottomDelta;
-      for (int i = 0; i < 200; i++) {
-        if (r.debugLastPhantomGhostPaint.containsKey("x")) {
-          final cap = r.debugLastPhantomGhostPaint["x"]!;
-          final clipped = cap.clipRect == null
-              ? cap.ghostRect
-              : cap.ghostRect.intersect(cap.clipRect!);
-          // The clipped ghost's bottom must converge on the band bottom: the
-          // card has fully tucked behind the header.
-          lastBottomDelta = (clipped.bottom - cap.anchorBand.bottom).abs();
-        }
-        if (!c.hasActiveSlides) break;
-        await tester.pump(_kStep);
+    final r = _render(tester);
+    // Capture the LAST sliding frame's clipped-ghost bottom vs band bottom.
+    double? lastBottomDelta;
+    for (int i = 0; i < 200; i++) {
+      if (r.debugLastPhantomGhostPaint.containsKey("x")) {
+        final cap = r.debugLastPhantomGhostPaint["x"]!;
+        final clipped = cap.clipRect == null
+            ? cap.ghostRect
+            : cap.ghostRect.intersect(cap.clipRect!);
+        // The clipped ghost's bottom must converge on the band bottom: the
+        // card has fully tucked behind the header.
+        lastBottomDelta = (clipped.bottom - cap.anchorBand.bottom).abs();
       }
-      expect(lastBottomDelta, isNotNull,
-          reason: "ghost must have slid (capture populated)");
-      expect(lastBottomDelta!, lessThan(2.0),
-          reason: "clipped ghost bottom must reach the band bottom (full "
-              "convergence) before prune; off by ${lastBottomDelta}px");
+      if (!c.hasActiveSlides) break;
+      await tester.pump(_kStep);
+    }
+    expect(
+      lastBottomDelta,
+      isNotNull,
+      reason: "ghost must have slid (capture populated)",
+    );
+    expect(
+      lastBottomDelta!,
+      lessThan(2.0),
+      reason:
+          "clipped ghost bottom must reach the band bottom (full "
+          "convergence) before prune; off by ${lastBottomDelta}px",
+    );
 
-      // After settle the ghost is pruned (Invariant 8) and x is hidden.
-      await tester.pumpAndSettle();
-      expect(r.debugLastPhantomGhostPaint.containsKey("x"), isFalse,
-          reason: "capture must be gone at settle (ghost pruned)");
-      expect(c.visibleNodes.contains("x"), isFalse,
-          reason: "card must be fully hidden inside the collapsed section");
-    },
-  );
+    // After settle the ghost is pruned (Invariant 8) and x is hidden.
+    await tester.pumpAndSettle();
+    expect(
+      r.debugLastPhantomGhostPaint.containsKey("x"),
+      isFalse,
+      reason: "capture must be gone at settle (ghost pruned)",
+    );
+    expect(
+      c.visibleNodes.contains("x"),
+      isFalse,
+      reason: "card must be fully hidden inside the collapsed section",
+    );
+  });
 
   testWidgets(
     "FAVORITE/up: no t=0 jump — first painted top equals pre-move baseline",
     (tester) async {
       var moved = false;
       List<SyncedTreeNode<String, String>> build() => moved
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])];
+          ? [
+              _n("fav", [_n("x")]),
+              _n("others", [_n("o1")]),
+            ]
+          : [
+              _n("fav", [_n("fav_ph")]),
+              _n("others", [_n("x"), _n("o1")]),
+            ];
 
-      await tester
-          .pumpWidget(_Harness(builder: build, cardHeight: _kCard));
+      await tester.pumpWidget(_Harness(builder: build, cardHeight: _kCard));
       await tester.pumpAndSettle();
-      final c =
-          tester.state<_HarnessState>(find.byType(_Harness)).controller!;
+      final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
       c.collapse(key: "fav", animate: false);
       await tester.pump();
 
       // Pre-move: x is visible in `others`. Record its painted top — the FLIP
       // "before". Visible order (fav collapsed): fav(48), others(48), x(80).
-      final preMoveTop = tester.getTopLeft(find.byKey(const ValueKey("row-x"))).dy;
+      final preMoveTop = tester
+          .getTopLeft(find.byKey(const ValueKey("row-x")))
+          .dy;
 
       moved = true;
-      await tester
-          .pumpWidget(_Harness(builder: build, cardHeight: _kCard));
+      await tester.pumpWidget(_Harness(builder: build, cardHeight: _kCard));
       await tester.pump();
 
       // FIRST sliding frame: the ghost's painted top must equal the pre-move
       // baseline (no t=0 jump). If only ONE of the two tuck sites was changed
       // (I-AGREE / the TRAP violated), paintedY != baseline.y and this fails.
       final r = _render(tester);
-      expect(r.debugLastPhantomGhostPaint.containsKey("x"), isTrue,
-          reason: "ghost should be sliding on the first post-move frame");
+      expect(
+        r.debugLastPhantomGhostPaint.containsKey("x"),
+        isTrue,
+        reason: "ghost should be sliding on the first post-move frame",
+      );
       final firstTop = r.debugLastPhantomGhostPaint["x"]!.ghostRect.top;
-      expect((firstTop - preMoveTop).abs(), lessThan(2.0),
-          reason: "first sliding frame ghost top $firstTop diverged from the "
-              "pre-move baseline $preMoveTop — a t=0 jump (one tuck site "
-              "missing the other)");
+      expect(
+        (firstTop - preMoveTop).abs(),
+        lessThan(2.0),
+        reason:
+            "first sliding frame ghost top $firstTop diverged from the "
+            "pre-move baseline $preMoveTop — a t=0 jump (one tuck site "
+            "missing the other)",
+      );
 
       await tester.pumpAndSettle();
     },
   );
 
-  testWidgets(
-    "EQUAL-height up: tuck is zero, slide distance unchanged",
-    (tester) async {
-      // card == header == 48 ⇒ tuck = max(0, 48 − 48) = 0. The installed
-      // slide delta must equal the pure geometric distance with NO extra.
-      var moved = false;
-      List<SyncedTreeNode<String, String>> build() => moved
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])];
+  testWidgets("EQUAL-height up: tuck is zero, slide distance unchanged", (
+    tester,
+  ) async {
+    // card == header == 48 ⇒ tuck = max(0, 48 − 48) = 0. The installed
+    // slide delta must equal the pure geometric distance with NO extra.
+    var moved = false;
+    List<SyncedTreeNode<String, String>> build() => moved
+        ? [
+            _n("fav", [_n("x")]),
+            _n("others", [_n("o1")]),
+          ]
+        : [
+            _n("fav", [_n("fav_ph")]),
+            _n("others", [_n("x"), _n("o1")]),
+          ];
 
-      await tester
-          .pumpWidget(_Harness(builder: build, cardHeight: _kHeader));
-      await tester.pumpAndSettle();
-      final c =
-          tester.state<_HarnessState>(find.byType(_Harness)).controller!;
-      c.collapse(key: "fav", animate: false);
-      await tester.pump();
+    await tester.pumpWidget(_Harness(builder: build, cardHeight: _kHeader));
+    await tester.pumpAndSettle();
+    final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
+    c.collapse(key: "fav", animate: false);
+    await tester.pump();
 
-      // Pre-move baseline top of x and the settled destination header (fav)
-      // top. fav is the TOP section ⇒ settled top = 0. The no-tuck distance
-      // is `preMoveTop − 0`; `getSlideDelta` for an UPWARD slide is the
-      // positive magnitude `baseline.y − settledAnchorY`.
-      final preMoveTop = tester.getTopLeft(find.byKey(const ValueKey("row-x"))).dy;
+    // Pre-move baseline top of x and the settled destination header (fav)
+    // top. fav is the TOP section ⇒ settled top = 0. The no-tuck distance
+    // is `preMoveTop − 0`; `getSlideDelta` for an UPWARD slide is the
+    // positive magnitude `baseline.y − settledAnchorY`.
+    final preMoveTop = tester
+        .getTopLeft(find.byKey(const ValueKey("row-x")))
+        .dy;
 
-      moved = true;
-      await tester
-          .pumpWidget(_Harness(builder: build, cardHeight: _kHeader));
-      await tester.pump();
+    moved = true;
+    await tester.pumpWidget(_Harness(builder: build, cardHeight: _kHeader));
+    await tester.pump();
 
-      expect(c.hasActiveSlides, isTrue);
-      // tuck == 0 ⇒ installed delta is exactly the geometric distance (no
-      // +32 over-travel). If a tuck were wrongly applied at equal height the
-      // delta would be off by the tuck amount.
-      expect(c.getSlideDelta("x"), moreOrLessEquals(preMoveTop, epsilon: 0.5),
-          reason: "equal-height slide distance must be the pure geometric "
-              "distance $preMoveTop (tuck 0)");
+    expect(c.hasActiveSlides, isTrue);
+    // tuck == 0 ⇒ installed delta is exactly the geometric distance (no
+    // +32 over-travel). If a tuck were wrongly applied at equal height the
+    // delta would be off by the tuck amount.
+    expect(
+      c.getSlideDelta("x"),
+      moreOrLessEquals(preMoveTop, epsilon: 0.5),
+      reason:
+          "equal-height slide distance must be the pure geometric "
+          "distance $preMoveTop (tuck 0)",
+    );
 
-      // And the slide still converges with nothing left outside the band.
-      final r = _render(tester);
-      double last = -1;
-      for (int i = 0; i < 200; i++) {
-        final v = _userVisible(r);
-        if (v >= 0) last = v;
-        if (!c.hasActiveSlides) break;
-        await tester.pump(_kStep);
-      }
-      expect(last, lessThan(2.0),
-          reason: "equal-height card must converge fully (got ${last}px)");
-      await tester.pumpAndSettle();
-      expect(c.visibleNodes.contains("x"), isFalse);
-    },
-  );
+    // And the slide still converges with nothing left outside the band.
+    final r = _render(tester);
+    double last = -1;
+    for (int i = 0; i < 200; i++) {
+      final v = _userVisible(r);
+      if (v >= 0) last = v;
+      if (!c.hasActiveSlides) break;
+      await tester.pump(_kStep);
+    }
+    expect(
+      last,
+      lessThan(2.0),
+      reason: "equal-height card must converge fully (got ${last}px)",
+    );
+    await tester.pumpAndSettle();
+    expect(c.visibleNodes.contains("x"), isFalse);
+  });
 }

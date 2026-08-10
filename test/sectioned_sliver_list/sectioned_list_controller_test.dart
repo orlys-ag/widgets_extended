@@ -28,10 +28,7 @@ void main() {
         "a": ["a1", "a2"],
         "b": ["b1"],
       };
-      controller.setSections(
-        ["a", "b"],
-        itemsOf: (s) => byKey[s] ?? const [],
-      );
+      controller.setSections(["a", "b"], itemsOf: (s) => byKey[s] ?? const []);
 
       expect(controller.sectionKeys(), equals(["a", "b"]));
       expect(controller.sections(), equals(["a", "b"]));
@@ -96,10 +93,7 @@ void main() {
       final controller = _make(tester);
       addTearDown(controller.dispose);
 
-      controller.setSections(
-        ["a"],
-        itemsOf: (_) => ["x", "y"],
-      );
+      controller.setSections(["a"], itemsOf: (_) => ["x", "y"]);
 
       controller.setItems("a", ["y", "z"]);
       expect(controller.itemKeysOf("a"), equals(["y", "z"]));
@@ -109,10 +103,7 @@ void main() {
       final controller = _make(tester);
       addTearDown(controller.dispose);
 
-      controller.setSections(
-        ["a", "b", "c", "d"],
-        itemsOf: (_) => const [],
-      );
+      controller.setSections(["a", "b", "c", "d"], itemsOf: (_) => const []);
 
       controller.reorderSections(["d", "c", "b", "a"]);
       expect(controller.sectionKeys(), equals(["d", "c", "b", "a"]));
@@ -128,10 +119,7 @@ void main() {
       final controller = _make(tester);
       addTearDown(controller.dispose);
 
-      controller.setSections(
-        ["a"],
-        itemsOf: (_) => ["1", "2", "3"],
-      );
+      controller.setSections(["a"], itemsOf: (_) => ["1", "2", "3"]);
 
       controller.reorderItems("a", ["3", "2", "1"]);
       expect(controller.itemKeysOf("a"), equals(["3", "2", "1"]));
@@ -283,7 +271,8 @@ void main() {
         expect(
           structuralFires,
           equals(0),
-          reason: "Listenable.addListener fires on STRUCTURAL changes only. "
+          reason:
+              "Listenable.addListener fires on STRUCTURAL changes only. "
               "updateSection / updateItem are payload-only — they go "
               "through the typed payload listeners.",
         );
@@ -323,10 +312,10 @@ void main() {
         // own items (the old `(_) => const ["x", "y"]` claimed the same
         // items under both sections, which sync-time validation now
         // rejects as a repeated key).
-        controller.setSections(
-          ["a", "b"],
-          itemsOf: (s) => s == "a" ? const ["x", "y"] : const <String>[],
-        );
+        controller.setSections([
+          "a",
+          "b",
+        ], itemsOf: (s) => s == "a" ? const ["x", "y"] : const <String>[]);
 
         final itemFires = <String>[];
         controller.addItemPayloadListener(itemFires.add);
@@ -341,83 +330,86 @@ void main() {
         expect(
           itemFires.where((k) => k == "x").length,
           equals(1),
-          reason: "Three updateItem calls for 'x' inside runBatch should "
+          reason:
+              "Three updateItem calls for 'x' inside runBatch should "
               "fire the listener exactly once at batch exit.",
         );
-        expect(
-          itemFires.where((k) => k == "y").length,
-          equals(1),
-        );
+        expect(itemFires.where((k) => k == "y").length, equals(1));
       },
     );
 
-    testWidgets(
-      "structural firings precede payload firings at runBatch exit",
-      (tester) async {
-        final controller = _make(tester);
-        addTearDown(controller.dispose);
-        controller.setSections(["a"], itemsOf: (_) => ["x"]);
+    testWidgets("structural firings precede payload firings at runBatch exit", (
+      tester,
+    ) async {
+      final controller = _make(tester);
+      addTearDown(controller.dispose);
+      controller.setSections(["a"], itemsOf: (_) => ["x"]);
 
-        final order = <String>[];
-        controller.addListener(() {
-          order.add("structural");
-        });
-        controller.addItemPayloadListener((_) {
-          order.add("item-payload");
-        });
+      final order = <String>[];
+      controller.addListener(() {
+        order.add("structural");
+      });
+      controller.addItemPayloadListener((_) {
+        order.add("item-payload");
+      });
 
-        controller.runBatch(() {
-          controller.addItem("y", toSection: "a"); // structural
-          controller.updateItem("x", "x"); // payload
-        });
+      controller.runBatch(() {
+        controller.addItem("y", toSection: "a"); // structural
+        controller.updateItem("x", "x"); // payload
+      });
 
-        expect(
-          order,
-          equals(["structural", "item-payload"]),
-          reason: "TreeController.runBatch fires structural listeners "
-              "before payload listeners at batch exit.",
-        );
-      },
-    );
+      expect(
+        order,
+        equals(["structural", "item-payload"]),
+        reason:
+            "TreeController.runBatch fires structural listeners "
+            "before payload listeners at batch exit.",
+      );
+    });
 
-    testWidgets(
-      "live-by-default queries: sections / itemsOf / sectionKeys / "
-      "itemKeysOf exclude pending-deletion, all* include them",
-      (tester) async {
-        final controller = SectionedListController<String, String, String>(
-          vsync: tester,
-          sectionKeyOf: (s) => s,
-          itemKeyOf: (i) => i,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("live-by-default queries: sections / itemsOf / sectionKeys / "
+        "itemKeysOf exclude pending-deletion, all* include them", (
+      tester,
+    ) async {
+      final controller = SectionedListController<String, String, String>(
+        vsync: tester,
+        sectionKeyOf: (s) => s,
+        itemKeyOf: (i) => i,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setSections(
-          ["a", "b", "c"],
-          itemsOf: (s) => s == "a" ? ["a1", "a2", "a3"] : const [],
-        );
-        controller.expandSection("a", animate: false);
+      controller.setSections([
+        "a",
+        "b",
+        "c",
+      ], itemsOf: (s) => s == "a" ? ["a1", "a2", "a3"] : const []);
+      controller.expandSection("a", animate: false);
 
-        controller.removeItem("a2", animate: true);
-        controller.removeSection("b", animate: true);
+      controller.removeItem("a2", animate: true);
+      controller.removeSection("b", animate: true);
 
-        // Mid-animation: pending entries excluded from default queries.
-        expect(controller.sectionKeys(), equals(["a", "c"]));
-        expect(controller.itemKeysOf("a"), equals(["a1", "a3"]));
+      // Mid-animation: pending entries excluded from default queries.
+      expect(controller.sectionKeys(), equals(["a", "c"]));
+      expect(controller.itemKeysOf("a"), equals(["a1", "a3"]));
 
-        // includeExiting:true includes pending-deletion.
-        expect(
-          controller.sectionKeys(includeExiting: true),
-          equals(["a", "b", "c"]),
-        );
-        expect(
-          controller.itemKeysOf("a", includeExiting: true),
-          equals(["a1", "a2", "a3"]),
-        );
+      // includeExiting:true includes pending-deletion.
+      expect(
+        controller.sectionKeys(includeExiting: true),
+        equals(["a", "b", "c"]),
+      );
+      expect(
+        controller.itemKeysOf("a", includeExiting: true),
+        equals(["a1", "a2", "a3"]),
+      );
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
 
     testWidgets(
       "sync-after-drift: imperative addItem between two setSections doesn't "
@@ -443,15 +435,17 @@ void main() {
         expect(
           controller.itemKeysOf("a"),
           equals(["a1"]),
-          reason: "Without _sync.initializeTracking() before syncRoots, "
+          reason:
+              "Without _sync.initializeTracking() before syncRoots, "
               "the second setSections diffs against a stale baseline (no "
               "a2) and fails to remove the drifted a2.",
         );
       },
     );
 
-    testWidgets("itemIndent forwards to TreeController.indentWidth",
-        (tester) async {
+    testWidgets("itemIndent forwards to TreeController.indentWidth", (
+      tester,
+    ) async {
       final controller = SectionedListController<String, String, String>(
         vsync: tester,
         sectionKeyOf: (s) => s,

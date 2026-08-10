@@ -122,7 +122,12 @@ void main() {
       // defeats the test (an unmounted row obviously can't rebuild).
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -157,45 +162,47 @@ void main() {
     },
   );
 
-  testWidgets(
-    "animated collapse of a large subtree does not spike siblings on "
-    "completion",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([
-        TreeNode(key: "siblingTop", data: "ST"),
-        TreeNode(key: "parent", data: "P"),
-      ]);
-      controller.setChildren("parent", [
-        for (int i = 0; i < 40; i++) TreeNode(key: "c$i", data: "C$i"),
-      ]);
-      controller.expand(key: "parent", animate: false);
-
-      final counts = <String, int>{};
-      await tester.pumpWidget(
-        _harness(
-          controller: controller,
-          nodeBuilder: (context, key, depth) {
-            counts[key] = (counts[key] ?? 0) + 1;
-            return SizedBox(height: 48, child: Text(key));
-          },
+  testWidgets("animated collapse of a large subtree does not spike siblings on "
+      "completion", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
         ),
-      );
-      final siblingTopBefore = counts["siblingTop"]!;
+      ),
+    );
+    addTearDown(controller.dispose);
+    controller.setRoots([
+      TreeNode(key: "siblingTop", data: "ST"),
+      TreeNode(key: "parent", data: "P"),
+    ]);
+    controller.setChildren("parent", [
+      for (int i = 0; i < 40; i++) TreeNode(key: "c$i", data: "C$i"),
+    ]);
+    controller.expand(key: "parent", animate: false);
 
-      controller.collapse(key: "parent");
-      await tester.pumpAndSettle();
+    final counts = <String, int>{};
+    await tester.pumpWidget(
+      _harness(
+        controller: controller,
+        nodeBuilder: (context, key, depth) {
+          counts[key] = (counts[key] ?? 0) + 1;
+          return SizedBox(height: 48, child: Text(key));
+        },
+      ),
+    );
+    final siblingTopBefore = counts["siblingTop"]!;
 
-      expect(counts["siblingTop"], siblingTopBefore);
-    },
-  );
+    controller.collapse(key: "parent");
+    await tester.pumpAndSettle();
+
+    expect(counts["siblingTop"], siblingTopBefore);
+  });
 
   testWidgets(
-    "insert to an already-populated parent does not rebuild siblings",
+    "insert rebuilds the parent and its sibling list, and nothing outside it",
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
@@ -231,11 +238,26 @@ void main() {
       expect(
         counts["p"]!,
         greaterThan(before["p"]!),
-        reason: "parent's child count changed (1 to 2); its builder may "
+        reason:
+            "parent's child count changed (1 to 2); its builder may "
             "render the count, so the row must refresh",
       );
-      expect(counts["existing"], before["existing"]);
-      expect(counts["other"], before["other"]);
+      expect(
+        counts["existing"]!,
+        greaterThan(before["existing"]!),
+        reason:
+            "a sibling's own position is a builder input: 'existing' was "
+            "the last child and is not any more, and the sibling count it "
+            "can render changed. See sibling_position_freshness_test.dart, "
+            "which fails without this refresh.",
+      );
+      expect(
+        counts["other"],
+        before["other"],
+        reason:
+            "the budget guarantee that matters: rows outside the mutated "
+            "sibling list are untouched",
+      );
     },
   );
 
@@ -276,7 +298,8 @@ void main() {
       expect(
         counts["p"]!,
         greaterThan(before["p"]!),
-        reason: "parent's hasChildren flipped false → true; its chevron row "
+        reason:
+            "parent's hasChildren flipped false → true; its chevron row "
             "needs to rebuild",
       );
       expect(
@@ -287,57 +310,20 @@ void main() {
     },
   );
 
-  testWidgets(
-    "removing the last child rebuilds the parent but no siblings",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([
-        TreeNode(key: "p", data: "P"),
-        TreeNode(key: "other", data: "O"),
-      ]);
-      controller.setChildren("p", [TreeNode(key: "only", data: "ONLY")]);
-      controller.expand(key: "p");
-
-      final counts = <String, int>{};
-      await tester.pumpWidget(
-        _harness(
-          controller: controller,
-          nodeBuilder: (context, key, depth) {
-            counts[key] = (counts[key] ?? 0) + 1;
-            return SizedBox(height: 48, child: Text(key));
-          },
-        ),
-      );
-      final before = Map<String, int>.from(counts);
-
-      controller.remove(key: "only", animate: false);
-      await tester.pump();
-
-      expect(
-        counts["p"]!,
-        greaterThan(before["p"]!),
-        reason:
-            "parent lost its last child — hasChildren flipped true → false",
-      );
-      expect(counts["other"], before["other"]);
-    },
-  );
-
-  testWidgets("reorderRoots does not rebuild any row", (tester) async {
+  testWidgets("removing the last child rebuilds the parent but no siblings", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
       animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
     controller.setRoots([
-      TreeNode(key: "a", data: "A"),
-      TreeNode(key: "b", data: "B"),
-      TreeNode(key: "c", data: "C"),
+      TreeNode(key: "p", data: "P"),
+      TreeNode(key: "other", data: "O"),
     ]);
+    controller.setChildren("p", [TreeNode(key: "only", data: "ONLY")]);
+    controller.expand(key: "p");
 
     final counts = <String, int>{};
     await tester.pumpWidget(
@@ -351,13 +337,64 @@ void main() {
     );
     final before = Map<String, int>.from(counts);
 
-    controller.reorderRoots(["c", "a", "b"]);
+    controller.remove(key: "only", animate: false);
     await tester.pump();
 
-    expect(counts["a"], before["a"]);
-    expect(counts["b"], before["b"]);
-    expect(counts["c"], before["c"]);
+    expect(
+      counts["p"]!,
+      greaterThan(before["p"]!),
+      reason: "parent lost its last child — hasChildren flipped true → false",
+    );
+    expect(counts["other"], before["other"]);
   });
+
+  testWidgets(
+    "reorderRoots rebuilds the reordered rows but not rows below them",
+    (tester) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+        TreeNode(key: "c", data: "C"),
+      ]);
+      // A child, to pin that the refresh stops at the reordered list.
+      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+      controller.expand(key: "a");
+
+      final counts = <String, int>{};
+      await tester.pumpWidget(
+        _harness(
+          controller: controller,
+          nodeBuilder: (context, key, depth) {
+            counts[key] = (counts[key] ?? 0) + 1;
+            return SizedBox(height: 48, child: Text(key));
+          },
+        ),
+      );
+      final before = Map<String, int>.from(counts);
+
+      controller.reorderRoots(["c", "a", "b"]);
+      await tester.pump();
+
+      // Every root's index changed, and a row can render its own position
+      // (see sibling_position_freshness_test.dart), so "pure reorder means
+      // no builder output changes" does not hold.
+      expect(counts["a"]!, greaterThan(before["a"]!));
+      expect(counts["b"]!, greaterThan(before["b"]!));
+      expect(counts["c"]!, greaterThan(before["c"]!));
+      expect(
+        counts["a1"],
+        before["a1"],
+        reason:
+            "a child's position among ITS siblings did not change, so the "
+            "root reorder must not reach it",
+      );
+    },
+  );
 
   testWidgets(
     "single-node expand does not build every entering child on frame 1",
@@ -373,7 +410,12 @@ void main() {
       // fast path's rationale.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([TreeNode(key: "parent", data: "P")]);
@@ -448,69 +490,68 @@ void main() {
     expect(find.text("B-updated"), findsOneWidget);
   });
 
-  testWidgets(
-    "rows scrolled far outside the cache region are evicted",
-    (tester) async {
-      // Without stale eviction, every row the user ever scrolled past stays
-      // mounted forever. A parent rebuild (or anything else that walks
-      // _children) then pays O(everythingEverMounted) instead of
-      // O(cacheRegionSize). This test pins the eviction contract: scroll
-      // a row well outside the cache band, and when we come back, it must
-      // have been re-created (not just reused).
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([
-        for (int i = 0; i < 200; i++) TreeNode(key: "r$i", data: "R$i"),
-      ]);
+  testWidgets("rows scrolled far outside the cache region are evicted", (
+    tester,
+  ) async {
+    // Without stale eviction, every row the user ever scrolled past stays
+    // mounted forever. A parent rebuild (or anything else that walks
+    // _children) then pays O(everythingEverMounted) instead of
+    // O(cacheRegionSize). This test pins the eviction contract: scroll
+    // a row well outside the cache band, and when we come back, it must
+    // have been re-created (not just reused).
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
+    controller.setRoots([
+      for (int i = 0; i < 200; i++) TreeNode(key: "r$i", data: "R$i"),
+    ]);
 
-      final builds = <String, int>{};
-      final scrollController = ScrollController();
-      addTearDown(scrollController.dispose);
+    final builds = <String, int>{};
+    final scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CustomScrollView(
-              controller: scrollController,
-              slivers: [
-                SliverTree<String, String>(
-                  controller: controller,
-                  nodeBuilder: (context, key, depth) {
-                    builds[key] = (builds[key] ?? 0) + 1;
-                    return SizedBox(height: 48, child: Text(key));
-                  },
-                ),
-              ],
-            ),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            controller: scrollController,
+            slivers: [
+              SliverTree<String, String>(
+                controller: controller,
+                nodeBuilder: (context, key, depth) {
+                  builds[key] = (builds[key] ?? 0) + 1;
+                  return SizedBox(height: 48, child: Text(key));
+                },
+              ),
+            ],
           ),
         ),
-      );
+      ),
+    );
 
-      // r5 is at offset ~240 — inside the initial viewport.
-      expect(builds["r5"], 1);
+    // r5 is at offset ~240 — inside the initial viewport.
+    expect(builds["r5"], 1);
 
-      // Scroll far past r5. At 48px/row the default cache band (~250px
-      // leading + viewport + ~250px trailing) can't possibly cover offset
-      // ~240 from scrollOffset 5000 — r5 is unambiguously stale.
-      scrollController.jumpTo(5000);
-      await tester.pump();
-      await tester.pump(); // let the post-frame eviction callback drain
+    // Scroll far past r5. At 48px/row the default cache band (~250px
+    // leading + viewport + ~250px trailing) can't possibly cover offset
+    // ~240 from scrollOffset 5000 — r5 is unambiguously stale.
+    scrollController.jumpTo(5000);
+    await tester.pump();
+    await tester.pump(); // let the post-frame eviction callback drain
 
-      // Scroll back — r5 must re-enter the cache region from scratch,
-      // proving it was evicted rather than held mounted the whole time.
-      scrollController.jumpTo(0);
-      await tester.pump();
+    // Scroll back — r5 must re-enter the cache region from scratch,
+    // proving it was evicted rather than held mounted the whole time.
+    scrollController.jumpTo(0);
+    await tester.pump();
 
-      expect(
-        builds["r5"]!,
-        greaterThan(1),
-        reason:
-            "r5 should have been evicted when scrolled far out of cache, "
-            "and rebuilt on return",
-      );
-    },
-  );
+    expect(
+      builds["r5"]!,
+      greaterThan(1),
+      reason:
+          "r5 should have been evicted when scrolled far out of cache, "
+          "and rebuilt on return",
+    );
+  });
 }

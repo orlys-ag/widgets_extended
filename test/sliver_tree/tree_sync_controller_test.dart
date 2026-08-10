@@ -328,7 +328,12 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       sync = TreeSyncController(treeController: controller);
 
@@ -501,7 +506,12 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       sync = TreeSyncController(treeController: controller);
 
@@ -565,7 +575,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         sync = TreeSyncController(treeController: controller);
 
@@ -625,7 +640,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         sync = TreeSyncController(treeController: controller);
 
@@ -681,7 +701,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         sync = TreeSyncController(treeController: controller);
 
@@ -749,15 +774,17 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         sync = TreeSyncController(treeController: controller);
 
         sync.syncRoots(
-          [
-            TreeNode(key: "a", data: "A"),
-            TreeNode(key: "b", data: "B"),
-          ],
+          [TreeNode(key: "a", data: "A"), TreeNode(key: "b", data: "B")],
           childrenOf: (key) => switch (key) {
             "a" => [TreeNode(key: "x", data: "X")],
             "b" => [TreeNode(key: "b1", data: "B1")],
@@ -770,10 +797,7 @@ void main() {
         controller.setFullExtent("x", 48.0);
 
         sync.syncRoots(
-          [
-            TreeNode(key: "a", data: "A"),
-            TreeNode(key: "b", data: "B"),
-          ],
+          [TreeNode(key: "a", data: "A"), TreeNode(key: "b", data: "B")],
           childrenOf: (key) => switch (key) {
             "b" => [TreeNode(key: "b1", data: "B1")],
             _ => <TreeNode<String, String>>[],
@@ -789,10 +813,7 @@ void main() {
         expect(extentDuringRemoval, lessThan(48.0));
 
         sync.syncRoots(
-          [
-            TreeNode(key: "a", data: "A"),
-            TreeNode(key: "b", data: "B"),
-          ],
+          [TreeNode(key: "a", data: "A"), TreeNode(key: "b", data: "B")],
           childrenOf: (key) => switch (key) {
             "b" => [
               TreeNode(key: "x", data: "X"),
@@ -918,51 +939,55 @@ void main() {
   });
 
   group("syncRoots — deep reparenting of former root", () {
-    testWidgets(
-      "root demoted to grandchild survives exit animation",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-        );
-        sync = TreeSyncController(treeController: controller);
+    testWidgets("root demoted to grandchild survives exit animation", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      sync = TreeSyncController(treeController: controller);
 
-        // Initial: two roots 'a' and 'b'. 'b' has a child 'b1'.
-        sync.syncRoots(
-          [TreeNode(key: "a", data: "A"), TreeNode(key: "b", data: "B")],
-          childrenOf: (key) =>
-              key == "b" ? [TreeNode(key: "b1", data: "B1")] : [],
-          animate: false,
-        );
-        controller.expand(key: "b");
+      // Initial: two roots 'a' and 'b'. 'b' has a child 'b1'.
+      sync.syncRoots(
+        [TreeNode(key: "a", data: "A"), TreeNode(key: "b", data: "B")],
+        childrenOf: (key) =>
+            key == "b" ? [TreeNode(key: "b1", data: "B1")] : [],
+        animate: false,
+      );
+      controller.expand(key: "b");
 
-        // Reparent: 'b' becomes a grandchild under 'a' -> 'mid'.
-        // The buggy code path treated 'b' as a deletion because it was not
-        // a direct child of any new root, scheduled an exit animation, then
-        // moved it — and _finalizeAnimation would later purge the subtree.
-        sync.syncRoots(
-          [TreeNode(key: "a", data: "A")],
-          childrenOf: (key) => switch (key) {
-            "a" => [TreeNode(key: "mid", data: "Mid")],
-            "mid" => [TreeNode(key: "b", data: "B")],
-            "b" => [TreeNode(key: "b1", data: "B1")],
-            _ => <TreeNode<String, String>>[],
-          },
-          animate: true,
-        );
+      // Reparent: 'b' becomes a grandchild under 'a' -> 'mid'.
+      // The buggy code path treated 'b' as a deletion because it was not
+      // a direct child of any new root, scheduled an exit animation, then
+      // moved it — and _finalizeAnimation would later purge the subtree.
+      sync.syncRoots(
+        [TreeNode(key: "a", data: "A")],
+        childrenOf: (key) => switch (key) {
+          "a" => [TreeNode(key: "mid", data: "Mid")],
+          "mid" => [TreeNode(key: "b", data: "B")],
+          "b" => [TreeNode(key: "b1", data: "B1")],
+          _ => <TreeNode<String, String>>[],
+        },
+        animate: true,
+      );
 
-        await tester.pumpAndSettle();
+      await tester.pumpAndSettle();
 
-        expect(controller.getNodeData("b"), isNotNull);
-        expect(controller.getNodeData("b1"), isNotNull);
-        expect(controller.getParent("b"), "mid");
-        expect(controller.getParent("mid"), "a");
-        expect(controller.getParent("b1"), "b");
+      expect(controller.getNodeData("b"), isNotNull);
+      expect(controller.getNodeData("b1"), isNotNull);
+      expect(controller.getParent("b"), "mid");
+      expect(controller.getParent("mid"), "a");
+      expect(controller.getParent("b1"), "b");
 
-        sync.dispose();
-        controller.dispose();
-      },
-    );
+      sync.dispose();
+      controller.dispose();
+    });
   });
 
   group("syncMultipleChildren — tracking after partial reparent", () {
@@ -982,7 +1007,8 @@ void main() {
         // a has child x, b is empty.
         sync.syncRoots(
           [TreeNode(key: "a", data: "A"), TreeNode(key: "b", data: "B")],
-          childrenOf: (key) => key == "a" ? [TreeNode(key: "x", data: "X")] : [],
+          childrenOf: (key) =>
+              key == "a" ? [TreeNode(key: "x", data: "X")] : [],
           animate: false,
         );
 
@@ -995,11 +1021,7 @@ void main() {
         // Now sync x back under 'a'. Previously this was a no-op because
         // _currentChildren['a'] was stale and still contained 'x', so
         // syncChildren saw nothing to add.
-        sync.syncChildren(
-          "a",
-          [TreeNode(key: "x", data: "X")],
-          animate: false,
-        );
+        sync.syncChildren("a", [TreeNode(key: "x", data: "X")], animate: false);
         expect(controller.getParent("x"), "a");
       },
     );
@@ -1021,11 +1043,7 @@ void main() {
 
         // Seed: parent with a child, parent expanded.
         sync.syncRoots([TreeNode(key: "p", data: "P")], animate: false);
-        sync.syncChildren(
-          "p",
-          [TreeNode(key: "c", data: "C")],
-          animate: false,
-        );
+        sync.syncChildren("p", [TreeNode(key: "c", data: "C")], animate: false);
         controller.expand(key: "p", animate: false);
         expect(controller.isExpanded("p"), true);
 
@@ -1041,11 +1059,7 @@ void main() {
         sync.syncRoots([TreeNode(key: "p", data: "P")], animate: false);
 
         // Children arrive in a later direct syncChildren call.
-        sync.syncChildren(
-          "p",
-          [TreeNode(key: "c", data: "C")],
-          animate: false,
-        );
+        sync.syncChildren("p", [TreeNode(key: "c", data: "C")], animate: false);
 
         expect(
           controller.isExpanded("p"),
@@ -1061,54 +1075,49 @@ void main() {
   });
 
   group("maxExpansionMemorySize == 0 disables expansion memory", () {
-    testWidgets(
-      "memory does not grow when capacity is 0",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: TreeAnimationStyle.disabled,
-        );
-        sync = TreeSyncController(
-          treeController: controller,
-          maxExpansionMemorySize: 0,
-        );
-        addTearDown(() {
-          sync.dispose();
-          controller.dispose();
-        });
+    testWidgets("memory does not grow when capacity is 0", (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      sync = TreeSyncController(
+        treeController: controller,
+        maxExpansionMemorySize: 0,
+      );
+      addTearDown(() {
+        sync.dispose();
+        controller.dispose();
+      });
 
-        sync.syncRoots(
-          [TreeNode(key: "p", data: "P")],
-          childrenOf: (k) =>
-              k == "p" ? [TreeNode(key: "c", data: "C")] : [],
-          animate: false,
-        );
-        controller.expand(key: "p", animate: false);
-        expect(controller.isExpanded("p"), true);
+      sync.syncRoots(
+        [TreeNode(key: "p", data: "P")],
+        childrenOf: (k) => k == "p" ? [TreeNode(key: "c", data: "C")] : [],
+        animate: false,
+      );
+      controller.expand(key: "p", animate: false);
+      expect(controller.isExpanded("p"), true);
 
-        // Remove the parent. Pre-fix, _rememberExpansion still populated
-        // _expansionMemory (the eviction loop was gated by > 0, so 0 just
-        // disabled eviction — not storage). Post-fix, capacity <= 0 bails
-        // out of remembrance entirely.
-        sync.syncRoots([], animate: false);
+      // Remove the parent. Pre-fix, _rememberExpansion still populated
+      // _expansionMemory (the eviction loop was gated by > 0, so 0 just
+      // disabled eviction — not storage). Post-fix, capacity <= 0 bails
+      // out of remembrance entirely.
+      sync.syncRoots([], animate: false);
 
-        // Re-add. With memory disabled, the re-added parent must NOT auto-
-        // expand — there's no remembered state to restore from.
-        sync.syncRoots(
-          [TreeNode(key: "p", data: "P")],
-          childrenOf: (k) =>
-              k == "p" ? [TreeNode(key: "c", data: "C")] : [],
-          animate: false,
-        );
-        expect(
-          controller.isExpanded("p"),
-          false,
-          reason:
-              "With maxExpansionMemorySize=0, expansion state must not be "
-              "remembered across remove/re-add per the documented contract.",
-        );
-      },
-    );
+      // Re-add. With memory disabled, the re-added parent must NOT auto-
+      // expand — there's no remembered state to restore from.
+      sync.syncRoots(
+        [TreeNode(key: "p", data: "P")],
+        childrenOf: (k) => k == "p" ? [TreeNode(key: "c", data: "C")] : [],
+        animate: false,
+      );
+      expect(
+        controller.isExpanded("p"),
+        false,
+        reason:
+            "With maxExpansionMemorySize=0, expansion state must not be "
+            "remembered across remove/re-add per the documented contract.",
+      );
+    });
   });
 
   // Reparent-through-removed-root: a child that reparents while its old
@@ -1123,7 +1132,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1133,8 +1147,10 @@ void main() {
 
         // Initial: today=[taskA], comingUp=[taskC]. Both sections present.
         sync.syncRoots(
-          [TreeNode(key: "today", data: "Today"),
-           TreeNode(key: "comingUp", data: "Coming Up")],
+          [
+            TreeNode(key: "today", data: "Today"),
+            TreeNode(key: "comingUp", data: "Coming Up"),
+          ],
           childrenOf: (k) {
             switch (k) {
               case "today":
@@ -1149,8 +1165,12 @@ void main() {
         );
         controller.expand(key: "today", animate: false);
         controller.expand(key: "comingUp", animate: false);
-        expect(controller.visibleNodes,
-            ["today", "taskA", "comingUp", "taskC"]);
+        expect(controller.visibleNodes, [
+          "today",
+          "taskA",
+          "comingUp",
+          "taskC",
+        ]);
 
         final fullExtent = controller.getCurrentExtent("taskA");
         expect(fullExtent, greaterThan(0.0));
@@ -1174,8 +1194,11 @@ void main() {
 
         // After the first post-sync pump: taskA must NOT be pending-deletion.
         await tester.pump();
-        expect(controller.isPendingDeletion("taskA"), isFalse,
-            reason: "taskA was reparented, not removed");
+        expect(
+          controller.isPendingDeletion("taskA"),
+          isFalse,
+          reason: "taskA was reparented, not removed",
+        );
         expect(controller.getParent("taskA"), "comingUp");
 
         // Extent invariance — the primary signal that the fix works.
@@ -1185,15 +1208,19 @@ void main() {
           expect(
             controller.getCurrentExtent("taskA"),
             closeTo(fullExtent, 1.0),
-            reason: "taskA's extent must stay full throughout the slide "
+            reason:
+                "taskA's extent must stay full throughout the slide "
                 "(not shrink with today's exit)",
           );
         }
 
         // After settle: today purged, taskA under comingUp.
         await tester.pumpAndSettle();
-        expect(controller.getNodeData("today"), isNull,
-            reason: "today was removed and its exit completed");
+        expect(
+          controller.getNodeData("today"),
+          isNull,
+          reason: "today was removed and its exit completed",
+        );
         expect(controller.getParent("taskA"), "comingUp");
         expect(controller.visibleNodes, ["comingUp", "taskA", "taskC"]);
       },
@@ -1205,7 +1232,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1216,8 +1248,9 @@ void main() {
         // Initial: only today exists, with taskA.
         sync.syncRoots(
           [TreeNode(key: "today", data: "Today")],
-          childrenOf: (k) =>
-              k == "today" ? [TreeNode(key: "taskA", data: "Task A")] : const [],
+          childrenOf: (k) => k == "today"
+              ? [TreeNode(key: "taskA", data: "Task A")]
+              : const [],
           animate: false,
         );
         controller.expand(key: "today", animate: false);
@@ -1282,9 +1315,11 @@ void main() {
 
         // Initial: roots A, B, C — all bare.
         sync.syncRoots(
-          [TreeNode(key: "A", data: "A"),
-           TreeNode(key: "B", data: "B"),
-           TreeNode(key: "C", data: "C")],
+          [
+            TreeNode(key: "A", data: "A"),
+            TreeNode(key: "B", data: "B"),
+            TreeNode(key: "C", data: "C"),
+          ],
           childrenOf: (k) => const [],
           animate: false,
         );
@@ -1297,56 +1332,59 @@ void main() {
           animate: false,
         );
 
-        expect(controller.getNodeData("C"), isNull,
-            reason: "C had no descendants in desired tree — removed");
-        expect(controller.getParent("B"), "A",
-            reason: "B was reparented under A, not removed");
+        expect(
+          controller.getNodeData("C"),
+          isNull,
+          reason: "C had no descendants in desired tree — removed",
+        );
+        expect(
+          controller.getParent("B"),
+          "A",
+          reason: "B was reparented under A, not removed",
+        );
         expect(controller.getNodeData("B"), isNotNull);
       },
     );
 
-    testWidgets(
-      "all roots removed with no desired descendants — clean exits",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: TreeAnimationStyle.disabled,
-        );
-        sync = TreeSyncController(treeController: controller);
-        addTearDown(() {
-          sync.dispose();
-          controller.dispose();
-        });
+    testWidgets("all roots removed with no desired descendants — clean exits", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      sync = TreeSyncController(treeController: controller);
+      addTearDown(() {
+        sync.dispose();
+        controller.dispose();
+      });
 
-        sync.syncRoots(
-          [TreeNode(key: "a", data: "A"),
-           TreeNode(key: "b", data: "B")],
-          childrenOf: (k) {
-            switch (k) {
-              case "a":
-                return [TreeNode(key: "a1", data: "A1")];
-              case "b":
-                return [TreeNode(key: "b1", data: "B1")];
-              default:
-                return const [];
-            }
-          },
-          animate: false,
-        );
-        expect(controller.getNodeData("a"), isNotNull);
-        expect(controller.getNodeData("b"), isNotNull);
+      sync.syncRoots(
+        [TreeNode(key: "a", data: "A"), TreeNode(key: "b", data: "B")],
+        childrenOf: (k) {
+          switch (k) {
+            case "a":
+              return [TreeNode(key: "a1", data: "A1")];
+            case "b":
+              return [TreeNode(key: "b1", data: "B1")];
+            default:
+              return const [];
+          }
+        },
+        animate: false,
+      );
+      expect(controller.getNodeData("a"), isNotNull);
+      expect(controller.getNodeData("b"), isNotNull);
 
-        // Empty desired tree — both roots and their subtrees should go.
-        sync.syncRoots(const [],
-            childrenOf: (k) => const [], animate: false);
+      // Empty desired tree — both roots and their subtrees should go.
+      sync.syncRoots(const [], childrenOf: (k) => const [], animate: false);
 
-        expect(controller.getNodeData("a"), isNull);
-        expect(controller.getNodeData("b"), isNull);
-        expect(controller.getNodeData("a1"), isNull);
-        expect(controller.getNodeData("b1"), isNull);
-        expect(controller.visibleNodes, isEmpty);
-      },
-    );
+      expect(controller.getNodeData("a"), isNull);
+      expect(controller.getNodeData("b"), isNull);
+      expect(controller.getNodeData("a1"), isNull);
+      expect(controller.getNodeData("b1"), isNull);
+      expect(controller.visibleNodes, isEmpty);
+    });
 
     testWidgets(
       "insertRoot index correctness while pending removals are in flight",
@@ -1357,7 +1395,12 @@ void main() {
         // current _roots length matching the desired view.
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1366,16 +1409,17 @@ void main() {
         });
 
         sync.syncRoots(
-          [TreeNode(key: "a", data: "A"),
-           TreeNode(key: "b", data: "B"),
-           TreeNode(key: "c", data: "C")],
+          [
+            TreeNode(key: "a", data: "A"),
+            TreeNode(key: "b", data: "B"),
+            TreeNode(key: "c", data: "C"),
+          ],
           childrenOf: (k) => const [],
           animate: false,
         );
 
         sync.syncRoots(
-          [TreeNode(key: "c", data: "C"),
-           TreeNode(key: "d", data: "D")],
+          [TreeNode(key: "c", data: "C"), TreeNode(key: "d", data: "D")],
           childrenOf: (k) => const [],
           animate: true,
         );
@@ -1404,8 +1448,10 @@ void main() {
 
         // Initial: today=[taskA=[grand1]], comingUp=[taskC]. Expand taskA.
         sync.syncRoots(
-          [TreeNode(key: "today", data: "Today"),
-           TreeNode(key: "comingUp", data: "Coming Up")],
+          [
+            TreeNode(key: "today", data: "Today"),
+            TreeNode(key: "comingUp", data: "Coming Up"),
+          ],
           childrenOf: (k) {
             switch (k) {
               case "today":
@@ -1424,8 +1470,13 @@ void main() {
         controller.expand(key: "comingUp", animate: false);
         controller.expand(key: "taskA", animate: false);
         expect(controller.isExpanded("taskA"), isTrue);
-        expect(controller.visibleNodes,
-            ["today", "taskA", "grand1", "comingUp", "taskC"]);
+        expect(controller.visibleNodes, [
+          "today",
+          "taskA",
+          "grand1",
+          "comingUp",
+          "taskC",
+        ]);
 
         // Pre-sync: expansion memory is empty (no removals happened).
         expect(sync.snapshotRememberedKeys(), isEmpty);
@@ -1451,10 +1502,17 @@ void main() {
         );
 
         // Expansion is preserved natively by moveNode, not via memory.
-        expect(controller.isExpanded("taskA"), isTrue,
-            reason: "moveNode preserves the moved subtree's expanded flag");
-        expect(controller.visibleNodes,
-            ["comingUp", "taskA", "grand1", "taskC"]);
+        expect(
+          controller.isExpanded("taskA"),
+          isTrue,
+          reason: "moveNode preserves the moved subtree's expanded flag",
+        );
+        expect(controller.visibleNodes, [
+          "comingUp",
+          "taskA",
+          "grand1",
+          "taskC",
+        ]);
         expect(controller.getParent("taskA"), "comingUp");
         expect(controller.getParent("grand1"), "taskA");
 
@@ -1464,10 +1522,16 @@ void main() {
         // accidentally walking reparented descendants through
         // _rememberExpansion) would surface here.
         final remembered = sync.snapshotRememberedKeys();
-        expect(remembered.contains("taskA"), isFalse,
-            reason: "taskA was reparented, not removed");
-        expect(remembered.contains("grand1"), isFalse,
-            reason: "grand1 rode along with taskA via moveNode");
+        expect(
+          remembered.contains("taskA"),
+          isFalse,
+          reason: "taskA was reparented, not removed",
+        );
+        expect(
+          remembered.contains("grand1"),
+          isFalse,
+          reason: "grand1 rode along with taskA via moveNode",
+        );
       },
     );
 
@@ -1477,7 +1541,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         sync = TreeSyncController(treeController: controller);
         addTearDown(() {
@@ -1513,8 +1582,10 @@ void main() {
         }
 
         sync.syncRoots(
-          [TreeNode(key: "today", data: "Today"),
-           TreeNode(key: "comingUp", data: "Coming Up")],
+          [
+            TreeNode(key: "today", data: "Today"),
+            TreeNode(key: "comingUp", data: "Coming Up"),
+          ],
           childrenOf: (k) {
             switch (k) {
               case "today":
@@ -1561,9 +1632,13 @@ void main() {
         // committing to a specific trajectory.
         for (int i = 0; i < 5; i++) {
           await tester.pump(const Duration(milliseconds: 70));
-          expect(taskARowFinder, findsOneWidget,
-              reason: "taskA must remain mounted across the slide — the "
-                  "old bug would unmount it as part of today's exit");
+          expect(
+            taskARowFinder,
+            findsOneWidget,
+            reason:
+                "taskA must remain mounted across the slide — the "
+                "old bug would unmount it as part of today's exit",
+          );
         }
 
         await tester.pumpAndSettle();

@@ -346,8 +346,7 @@ class ScrollOrchestrator<TKey, TData> {
         position.minScrollExtent,
         position.maxScrollExtent,
       );
-      final scroll =
-          initialPixels + (desiredClamped - initialPixels) * tCurved;
+      final scroll = initialPixels + (desiredClamped - initialPixels) * tCurved;
       position.jumpTo(
         scroll.clamp(position.minScrollExtent, position.maxScrollExtent),
       );

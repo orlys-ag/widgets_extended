@@ -3,7 +3,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/synced_sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
-import 'package:widgets_extended/sliver_tree/types.dart';
+import 'package:widgets_extended/sliver_tree/synced_tree_node.dart';
+import 'tree_input_helpers.dart';
+
+/// Section list to tree input: each section owns one child, `${section}_1`.
+/// Rebuilt per build so a changed section list re-syncs, matching the
+/// per-build roots list this fixture used before.
+List<SyncedTreeNode<String, String>> _treeFor(List<String> sections) {
+  return treeFrom(
+    roots: sections,
+    dataByKey: <String, String>{
+      for (final s in sections) ...<String, String>{s: s, "${s}_1": "${s}_1"},
+    },
+    childrenByParent: <String, List<String>>{
+      for (final s in sections) s: <String>["${s}_1"],
+    },
+  );
+}
 
 class _Harness extends StatefulWidget {
   const _Harness({required this.sections});
@@ -18,21 +34,19 @@ class _HarnessState extends State<_Harness> {
 
   @override
   Widget build(BuildContext context) {
-    final roots = <TreeNode<String, String>>[
-      for (final s in widget.sections) TreeNode(key: s, data: s),
-    ];
     return MaterialApp(
       home: Scaffold(
         body: CustomScrollView(
           slivers: [
-            SyncedSliverTree<String, String>.nodes(
-              roots: roots,
-              childrenOf: (key) {
-                if (key.endsWith("_1")) return const [];
-                return [TreeNode(key: "${key}_1", data: "${key}_1")];
-              },
+            SyncedSliverTree<String, String>(
+              tree: _treeFor(widget.sections),
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 300),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 _controller ??= node.controller;
                 return SizedBox(

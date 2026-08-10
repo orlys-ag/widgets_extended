@@ -22,8 +22,8 @@ import 'tree_controller.dart';
 
 class SlideComposer<TKey, TData> implements GhostBaseResolver<TKey> {
   SlideComposer({required TreeController<TKey, TData> controller})
-      : baselineSlot = SlideBaselineSlot<TKey>(),
-        ghosts = GhostRegistry<TKey, TData>(controller: controller);
+    : baselineSlot = SlideBaselineSlot<TKey>(),
+      ghosts = GhostRegistry<TKey, TData>(controller: controller);
 
   final SlideBaselineSlot<TKey> baselineSlot;
   final GhostRegistry<TKey, TData> ghosts;
@@ -58,7 +58,8 @@ class SlideComposer<TKey, TData> implements GhostBaseResolver<TKey> {
     ViewportSnapshot viewport,
     Duration duration,
     Curve curve,
-  })? consumeBaseline() => baselineSlot.consume();
+  })?
+  consumeBaseline() => baselineSlot.consume();
 
   bool get isBaselineStaged => baselineSlot.isStaged;
 

@@ -7,10 +7,12 @@ import 'package:widgets_extended/sliver_tree/types.dart';
 /// Pumps a minimal widget tree so the test binding's scheduler drives
 /// attached tickers (needed for AnimationController-backed slide animations).
 Future<void> _primeScheduler(WidgetTester tester) async {
-  await tester.pumpWidget(const Directionality(
-    textDirection: TextDirection.ltr,
-    child: SizedBox.expand(),
-  ));
+  await tester.pumpWidget(
+    const Directionality(
+      textDirection: TextDirection.ltr,
+      child: SizedBox.expand(),
+    ),
+  );
 }
 
 void main() {
@@ -23,7 +25,12 @@ void main() {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -62,7 +69,12 @@ void main() {
     testWidgets("zero rawDelta entries are skipped", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -79,7 +91,12 @@ void main() {
     testWidgets("getSlideDelta returns 0 for non-sliding keys", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -89,8 +106,9 @@ void main() {
       expect(controller.getSlideDelta("nonexistent"), 0.0);
     });
 
-    testWidgets("no-animation mode clears slides without animating",
-        (tester) async {
+    testWidgets("no-animation mode clears slides without animating", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -109,12 +127,18 @@ void main() {
   });
 
   group("slide interruption and composition", () {
-    testWidgets("mid-slide cancel preserves current rendered delta",
-        (tester) async {
+    testWidgets("mid-slide cancel preserves current rendered delta", (
+      tester,
+    ) async {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -141,23 +165,25 @@ void main() {
         curve: Curves.linear,
       );
       // Composed start should be approximately midDelta + 30.
-      expect(
-        controller.getSlideDelta("a"),
-        closeTo(midDelta + 30, 2.0),
-      );
+      expect(controller.getSlideDelta("a"), closeTo(midDelta + 30, 2.0));
       // Let the ticker settle before the test binding checks for leaks.
       await tester.pumpAndSettle();
     });
   });
 
   group("flag independence", () {
-    testWidgets(
-        "hasActiveSlides is independent of hasActiveAnimations",
-        (tester) async {
+    testWidgets("hasActiveSlides is independent of hasActiveAnimations", (
+      tester,
+    ) async {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -192,55 +218,63 @@ void main() {
 
   group("slide settle ordering", () {
     testWidgets(
-        "on completion tick, animation listener fires with hasActiveSlides "
-        "still true, map cleared after", (tester) async {
-      await _primeScheduler(tester);
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 60), curve: Curves.linear)),
-      );
-      addTearDown(controller.dispose);
-
-      controller.setRoots([TreeNode(key: "a", data: "A")]);
-
-      final observations = <({bool hasSlides, double delta})>[];
-      controller.addAnimationListener(() {
-        observations.add(
-          (
-            hasSlides: controller.hasActiveSlides,
-            delta: controller.getSlideDelta("a"),
+      "on completion tick, animation listener fires with hasActiveSlides "
+      "still true, map cleared after",
+      (tester) async {
+        await _primeScheduler(tester);
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 60),
+              curve: Curves.linear,
+            ),
           ),
         );
-      });
+        addTearDown(controller.dispose);
 
-      controller.animateSlideFromOffsets(
-        {"a": (y: 60.0, x: 0.0)},
-        {"a": (y: 0.0, x: 0.0)},
-        duration: const Duration(milliseconds: 60),
-        curve: Curves.linear,
-      );
+        controller.setRoots([TreeNode(key: "a", data: "A")]);
 
-      // Run all ticks until the slide settles.
-      await tester.pumpAndSettle();
+        final observations = <({bool hasSlides, double delta})>[];
+        controller.addAnimationListener(() {
+          observations.add((
+            hasSlides: controller.hasActiveSlides,
+            delta: controller.getSlideDelta("a"),
+          ));
+        });
 
-      // At least one observation happened.
-      expect(observations.isNotEmpty, true);
-      // The final notification must capture hasActiveSlides=true with
-      // delta snapped to exactly 0.0 (the paint-this-frame-at-zero guarantee).
-      final settlement = observations.lastWhere(
-        (o) => o.hasSlides && o.delta == 0.0,
-        orElse: () => (hasSlides: false, delta: -1),
-      );
-      expect(settlement.hasSlides, true,
+        controller.animateSlideFromOffsets(
+          {"a": (y: 60.0, x: 0.0)},
+          {"a": (y: 0.0, x: 0.0)},
+          duration: const Duration(milliseconds: 60),
+          curve: Curves.linear,
+        );
+
+        // Run all ticks until the slide settles.
+        await tester.pumpAndSettle();
+
+        // At least one observation happened.
+        expect(observations.isNotEmpty, true);
+        // The final notification must capture hasActiveSlides=true with
+        // delta snapped to exactly 0.0 (the paint-this-frame-at-zero guarantee).
+        final settlement = observations.lastWhere(
+          (o) => o.hasSlides && o.delta == 0.0,
+          orElse: () => (hasSlides: false, delta: -1),
+        );
+        expect(
+          settlement.hasSlides,
+          true,
           reason:
               "Completion tick must fire listener while hasActiveSlides is "
               "still true so the sliver element schedules a final zero-delta "
-              "paint. Observations: $observations");
-      expect(settlement.delta, 0.0);
+              "paint. Observations: $observations",
+        );
+        expect(settlement.delta, 0.0);
 
-      // After completion, the map is cleared.
-      expect(controller.hasActiveSlides, false);
-      expect(controller.getSlideDelta("a"), 0.0);
-    });
+        // After completion, the map is cleared.
+        expect(controller.hasActiveSlides, false);
+        expect(controller.getSlideDelta("a"), 0.0);
+      },
+    );
   });
 }

@@ -92,112 +92,126 @@ TreeController<String, int> _newController(
 
 void main() {
   group("mid-flight FLIP slide retention across re-moveTo", () {
-    testWidgets(
-      "row whose painted Y is just past one viewport edge and whose "
-      "new structural Y is past the OPPOSITE edge gets a slide whose "
-      "visible trajectory crosses the viewport (was: jumped silently)",
-      (tester) async {
-        final scroll = ScrollController();
-        addTearDown(scroll.dispose);
-        final controller = _newController(tester);
-        addTearDown(controller.dispose);
-        controller.setRoots([
-          for (var i = 0; i < 100; i++) TreeNode(key: "r$i", data: i),
-        ]);
+    testWidgets("row whose painted Y is just past one viewport edge and whose "
+        "new structural Y is past the OPPOSITE edge gets a slide whose "
+        "visible trajectory crosses the viewport (was: jumped silently)", (
+      tester,
+    ) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final controller = _newController(tester);
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        for (var i = 0; i < 100; i++) TreeNode(key: "r$i", data: i),
+      ]);
 
-        await tester.pumpWidget(_harness(
-          controller,
-          scrollController: scroll,
-          cacheExtent: 0.0,
-        ));
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        _harness(controller, scrollController: scroll, cacheExtent: 0.0),
+      );
+      await tester.pumpAndSettle();
 
-        // Scroll so r0's structural Y (= 0) is far above the viewport.
-        // Viewport = [2000, 2500] in scroll-space; cache extent is 0.
-        scroll.jumpTo(2000);
-        await tester.pump();
-        await tester.pumpAndSettle();
-        expect(find.byKey(const ValueKey("row-r0")), findsNothing,
-            reason: "r0 must be evicted before the test starts");
+      // Scroll so r0's structural Y (= 0) is far above the viewport.
+      // Viewport = [2000, 2500] in scroll-space; cache extent is 0.
+      scroll.jumpTo(2000);
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey("row-r0")),
+        findsNothing,
+        reason: "r0 must be evicted before the test starts",
+      );
 
-        // Move r0 to position 44 (structural y = 2200, inside viewport).
-        // Slide-IN: baseline clamped to top edgeY = 1950. Initial
-        // currentDelta = 1950 - 2200 = -250. Painted at t=0 ≈ 1950
-        // (just past top edge — `priorOn` will be false on the next
-        // re-move snapshot).
-        controller.moveNode(
-          "r0",
-          null,
-          index: 44,
-          animate: true,
-          slideDuration: const Duration(milliseconds: 600),
-          slideCurve: Curves.linear,
-        );
-        await tester.pump();
-        // Advance the slide a tiny amount so painted is still close to
-        // edgeY (off-screen above viewport).
-        await tester.pump(const Duration(microseconds: 100));
+      // Move r0 to position 44 (structural y = 2200, inside viewport).
+      // Slide-IN: baseline clamped to top edgeY = 1950. Initial
+      // currentDelta = 1950 - 2200 = -250. Painted at t=0 ≈ 1950
+      // (just past top edge — `priorOn` will be false on the next
+      // re-move snapshot).
+      controller.moveNode(
+        "r0",
+        null,
+        index: 44,
+        animate: true,
+        slideDuration: const Duration(milliseconds: 600),
+        slideCurve: Curves.linear,
+      );
+      await tester.pump();
+      // Advance the slide a tiny amount so painted is still close to
+      // edgeY (off-screen above viewport).
+      await tester.pump(const Duration(microseconds: 100));
 
-        expect(controller.hasActiveSlides, true,
-            reason: "slide-IN must be in flight");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "slide-IN must be in flight",
+      );
 
-        // Re-move r0 to position 99 (structural y = 4950, far below
-        // viewport). The painted-at-stage (≈1950) is past the TOP
-        // edge; the new structural (4950) is past the BOTTOM edge.
-        // Their trajectory crosses the visible viewport [2000, 2500].
-        // The fix re-installs a slide whose visible transit shows the
-        // row crossing the viewport.
-        controller.moveNode(
-          "r0",
-          null,
-          index: 99,
-          animate: true,
-          slideDuration: const Duration(milliseconds: 600),
-          slideCurve: Curves.linear,
-        );
-        await tester.pump();
+      // Re-move r0 to position 99 (structural y = 4950, far below
+      // viewport). The painted-at-stage (≈1950) is past the TOP
+      // edge; the new structural (4950) is past the BOTTOM edge.
+      // Their trajectory crosses the visible viewport [2000, 2500].
+      // The fix re-installs a slide whose visible transit shows the
+      // row crossing the viewport.
+      controller.moveNode(
+        "r0",
+        null,
+        index: 99,
+        animate: true,
+        slideDuration: const Duration(milliseconds: 600),
+        slideCurve: Curves.linear,
+      );
+      await tester.pump();
 
-        // A slide MUST install for the cross-viewport re-moveTo. The
-        // original bug was that no slide installed at all (slideDelta=0,
-        // row jumped silently); any non-trivial slideDelta proves the
-        // row is animating.
-        //
-        // Note on magnitude: under the meaningfully-visible predicate
-        // (`_kMinMeaningfulVisiblePx = 4`), prior painted Y (≈1956 — 6 px
-        // visible at the top of the viewport after the brief tap-1 tick)
-        // is classified as on-screen, so tap-2 routes through the
-        // edge-ghost slide-OUT branch. The engine slide goes from prior
-        // to viewport-bottom + overhang (≈2550) instead of the full
-        // trajectory to structural (4950). User-visible painted is
-        // identical (= edge_y + slideDelta = old painted at t=0), but
-        // the engine's |slideDelta| is bounded by the prior-to-edge
-        // distance (≈600), not the full ≈3000 trajectory the pre-fix
-        // off-screen-classification would have produced.
-        expect(controller.hasActiveSlides, true,
-            reason: "the cross-viewport re-moveTo must install a slide");
-        expect(controller.getSlideDelta("r0").abs(), greaterThan(100.0),
-            reason: "engine slide must be non-trivial (proving the row "
-                "was not suppressed). Got ${controller.getSlideDelta('r0')}.");
+      // A slide MUST install for the cross-viewport re-moveTo. The
+      // original bug was that no slide installed at all (slideDelta=0,
+      // row jumped silently); any non-trivial slideDelta proves the
+      // row is animating.
+      //
+      // Note on magnitude: under the meaningfully-visible predicate
+      // (`_kMinMeaningfulVisiblePx = 4`), prior painted Y (≈1956 — 6 px
+      // visible at the top of the viewport after the brief tap-1 tick)
+      // is classified as on-screen, so tap-2 routes through the
+      // edge-ghost slide-OUT branch. The engine slide goes from prior
+      // to viewport-bottom + overhang (≈2550) instead of the full
+      // trajectory to structural (4950). User-visible painted is
+      // identical (= edge_y + slideDelta = old painted at t=0), but
+      // the engine's |slideDelta| is bounded by the prior-to-edge
+      // distance (≈600), not the full ≈3000 trajectory the pre-fix
+      // off-screen-classification would have produced.
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "the cross-viewport re-moveTo must install a slide",
+      );
+      expect(
+        controller.getSlideDelta("r0").abs(),
+        greaterThan(100.0),
+        reason:
+            "engine slide must be non-trivial (proving the row "
+            "was not suppressed). Got ${controller.getSlideDelta('r0')}.",
+      );
 
-        // Pump enough to reach the visible-transit window. With duration
-        // 600 ms and linear curve, the row crosses the viewport between
-        // ~10 ms (painted enters at top) and ~120 ms (painted exits at
-        // bottom).
-        await tester.pump(const Duration(milliseconds: 16));
-        await tester.pump(const Duration(milliseconds: 16));
+      // Pump enough to reach the visible-transit window. With duration
+      // 600 ms and linear curve, the row crosses the viewport between
+      // ~10 ms (painted enters at top) and ~120 ms (painted exits at
+      // bottom).
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 16));
 
-        // r0's render box must remain mounted while its FLIP slide is
-        // still in flight. Without the retention fix, stale-eviction
-        // could drop the render box mid-transit even though the slide
-        // is still ticking.
-        expect(find.byKey(const ValueKey("row-r0")), findsOneWidget,
-            reason: "r0 must remain mounted while its FLIP slide is "
-                "still in flight, even when both old painted Y and new "
-                "structural Y sit outside the viewport.");
+      // r0's render box must remain mounted while its FLIP slide is
+      // still in flight. Without the retention fix, stale-eviction
+      // could drop the render box mid-transit even though the slide
+      // is still ticking.
+      expect(
+        find.byKey(const ValueKey("row-r0")),
+        findsOneWidget,
+        reason:
+            "r0 must remain mounted while its FLIP slide is "
+            "still in flight, even when both old painted Y and new "
+            "structural Y sit outside the viewport.",
+      );
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
 
     testWidgets(
       "engine slide for re-moveTo with off-screen → off-screen-opposite "
@@ -206,18 +220,18 @@ void main() {
       (tester) async {
         final scroll = ScrollController();
         addTearDown(scroll.dispose);
-        final controller = _newController(tester,
-            duration: const Duration(milliseconds: 1000));
+        final controller = _newController(
+          tester,
+          duration: const Duration(milliseconds: 1000),
+        );
         addTearDown(controller.dispose);
         controller.setRoots([
           for (var i = 0; i < 100; i++) TreeNode(key: "r$i", data: i),
         ]);
 
-        await tester.pumpWidget(_harness(
-          controller,
-          scrollController: scroll,
-          cacheExtent: 0.0,
-        ));
+        await tester.pumpWidget(
+          _harness(controller, scrollController: scroll, cacheExtent: 0.0),
+        );
         await tester.pumpAndSettle();
         scroll.jumpTo(2000);
         await tester.pump();
@@ -258,10 +272,14 @@ void main() {
         // edge-ghost variant is just more efficient because painted is
         // computed from edge_y, not structural.
         final initialDelta = controller.getSlideDelta("r0");
-        expect(initialDelta.abs(), greaterThan(100.0),
-            reason: "the freshly installed slide must carry meaningful "
-                "motion (proves the row was not suppressed). Got "
-                "${initialDelta.abs()}.");
+        expect(
+          initialDelta.abs(),
+          greaterThan(100.0),
+          reason:
+              "the freshly installed slide must carry meaningful "
+              "motion (proves the row was not suppressed). Got "
+              "${initialDelta.abs()}.",
+        );
 
         await tester.pumpAndSettle();
         // After settle: slide delta = 0.

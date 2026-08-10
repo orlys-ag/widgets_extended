@@ -73,7 +73,12 @@ void main() {
         addTearDown(scroll.dispose);
         final controller = TreeController<String, int>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 600), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 600),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -107,14 +112,18 @@ void main() {
         // should still be near edge_y (above viewport top).
         await tester.pump(const Duration(milliseconds: 16));
 
-        expect(controller.hasActiveSlides, true,
-            reason: "tap-1 slide-IN must still be in flight");
+        expect(
+          controller.hasActiveSlides,
+          true,
+          reason: "tap-1 slide-IN must still be in flight",
+        );
 
         final paintedAfterTap1 = 2200.0 + controller.getSlideDelta("r0");
         expect(
           paintedAfterTap1 < viewportTop,
           isTrue,
-          reason: "after tap-1's brief tick, the row's painted top edge "
+          reason:
+              "after tap-1's brief tick, the row's painted top edge "
               "($paintedAfterTap1) must still be above viewport top "
               "($viewportTop) — i.e., most of the row is above the "
               "viewport with only a few pixels intruding at the top.",
@@ -154,14 +163,16 @@ void main() {
         // the slide — is excluded by both branches.
         final paintedAfterTap2 = 2300.0 + controller.getSlideDelta("r0");
         final visibleTopAfterTap2 = math.max(paintedAfterTap2, viewportTop);
-        final visibleBottomAfterTap2 =
-            math.min(paintedAfterTap2 + _kRowHeight, viewportBottom);
-        final visiblePxAfterTap2 =
-            visibleBottomAfterTap2 - visibleTopAfterTap2;
+        final visibleBottomAfterTap2 = math.min(
+          paintedAfterTap2 + _kRowHeight,
+          viewportBottom,
+        );
+        final visiblePxAfterTap2 = visibleBottomAfterTap2 - visibleTopAfterTap2;
         expect(
           visiblePxAfterTap2,
           greaterThanOrEqualTo(4.0),
-          reason: "tap-2 must keep the row meaningfully visible at t=0 "
+          reason:
+              "tap-2 must keep the row meaningfully visible at t=0 "
               "(≥ 4 px in viewport [$viewportTop, $viewportBottom]). "
               "Got painted=$paintedAfterTap2, visible=$visiblePxAfterTap2 "
               "px (slideDelta=${controller.getSlideDelta('r0')}).",
@@ -171,7 +182,8 @@ void main() {
         expect(
           find.byKey(const ValueKey("row-r0")),
           findsOneWidget,
-          reason: "r0 should be rendered while its slide is in flight "
+          reason:
+              "r0 should be rendered while its slide is in flight "
               "and its painted Y is inside the viewport.",
         );
 
@@ -191,7 +203,12 @@ void main() {
         addTearDown(scroll.dispose);
         final controller = TreeController<String, int>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 800), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 800),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -227,8 +244,11 @@ void main() {
         // next stage's snapshot.
         await tester.pump(const Duration(milliseconds: 750));
 
-        expect(controller.hasActiveSlides, true,
-            reason: "tap-1 slide-OUT must still be in flight");
+        expect(
+          controller.hasActiveSlides,
+          true,
+          reason: "tap-1 slide-OUT must still be in flight",
+        );
 
         // Tap 2: move r0 BACK to struct=100 (well inside viewport).
         // Re-promote — the edge ghost is removed; with the snapshot
@@ -251,7 +271,8 @@ void main() {
         expect(
           paintedAfterTap2,
           inInclusiveRange(viewportTop, viewportBottom),
-          reason: "post-fix: re-promoted ghost whose snapshot baseline "
+          reason:
+              "post-fix: re-promoted ghost whose snapshot baseline "
               "sits past the viewport edge must still land painted at "
               "t=0 of the new slide INSIDE the viewport. Got "
               "painted=$paintedAfterTap2, slideDelta="
@@ -271,7 +292,12 @@ void main() {
         addTearDown(scroll.dispose);
         final controller = TreeController<String, int>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 800), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 800),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -314,7 +340,8 @@ void main() {
             expect(
               painted,
               inInclusiveRange(viewportTop, viewportBottom),
-              reason: "tap ${i + 1} (composition): painted=$painted must "
+              reason:
+                  "tap ${i + 1} (composition): painted=$painted must "
                   "be inside [$viewportTop, $viewportBottom]. "
                   "structY=$structY, slideDelta="
                   "${controller.getSlideDelta('r0')}.",

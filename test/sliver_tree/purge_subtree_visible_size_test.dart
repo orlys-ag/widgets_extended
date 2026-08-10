@@ -25,11 +25,17 @@ void main() {
   // run the full consistency sweep after every mutation (audit 5.11).
   TreeController.debugFullConsistencyChecks = true;
   testWidgets("removing a subtree with multiple visible descendants keeps "
-      "_visibleSubtreeSizeByNid consistent across exit-animation finalize",
-      (tester) async {
+      "_visibleSubtreeSizeByNid consistent across exit-animation finalize", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 100),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -46,17 +52,21 @@ void main() {
     controller.expand(key: "root", animate: false);
     controller.expand(key: "branch", animate: false);
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: CustomScrollView(slivers: [
-          SliverTree<String, String>(
-            controller: controller,
-            nodeBuilder: (_, key, _) =>
-                SizedBox(height: 40, child: Text(key)),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              SliverTree<String, String>(
+                controller: controller,
+                nodeBuilder: (_, key, _) =>
+                    SizedBox(height: 40, child: Text(key)),
+              ),
+            ],
           ),
-        ]),
+        ),
       ),
-    ));
+    );
     await tester.pump();
 
     // Sanity: 6 visible (root, branch, 3 leaves, sibling).
@@ -95,11 +105,17 @@ void main() {
   });
 
   testWidgets("removing a deeply nested subtree where every level has its "
-      "own standalone exit animation keeps the cache consistent",
-      (tester) async {
+      "own standalone exit animation keeps the cache consistent", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 100),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -113,17 +129,21 @@ void main() {
       controller.expand(key: k, animate: false);
     }
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: CustomScrollView(slivers: [
-          SliverTree<String, String>(
-            controller: controller,
-            nodeBuilder: (_, key, _) =>
-                SizedBox(height: 40, child: Text(key)),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              SliverTree<String, String>(
+                controller: controller,
+                nodeBuilder: (_, key, _) =>
+                    SizedBox(height: 40, child: Text(key)),
+              ),
+            ],
           ),
-        ]),
+        ),
       ),
-    ));
+    );
     await tester.pump();
 
     expect(controller.visibleNodeCount, 5);

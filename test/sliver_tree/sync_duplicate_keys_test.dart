@@ -21,9 +21,7 @@ void main() {
       animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
-    final sync = TreeSyncController<String, String>(
-      treeController: controller,
-    );
+    final sync = TreeSyncController<String, String>(treeController: controller);
     addTearDown(sync.dispose);
 
     expect(
@@ -32,7 +30,8 @@ void main() {
         TreeNode(key: "a", data: "2"),
       ]),
       throwsArgumentError,
-      reason: "syncRoots must reject duplicate keys — silently accepting "
+      reason:
+          "syncRoots must reject duplicate keys — silently accepting "
           "them leaves _currentRoots with stale duplicate entries.",
     );
   });
@@ -43,9 +42,7 @@ void main() {
       animationStyle: TreeAnimationStyle.disabled,
     );
     addTearDown(controller.dispose);
-    final sync = TreeSyncController<String, String>(
-      treeController: controller,
-    );
+    final sync = TreeSyncController<String, String>(treeController: controller);
     addTearDown(sync.dispose);
 
     sync.syncRoots([TreeNode(key: "p", data: "p")]);
@@ -56,7 +53,8 @@ void main() {
         TreeNode(key: "x", data: "2"),
       ]),
       throwsArgumentError,
-      reason: "syncChildren must reject duplicate keys — same rationale as "
+      reason:
+          "syncChildren must reject duplicate keys — same rationale as "
           "syncRoots.",
     );
   });

@@ -29,9 +29,13 @@ void main() {
 
     // initializeTracking walks the tree recursively. On a 20k-deep chain
     // this would overflow with one stack frame per node.
-    expect(sync.initializeTracking, returnsNormally,
-        reason: "initializeTracking stack-overflowed on a 20k-deep chain — "
-            "trackChildren needs to be iterative.");
+    expect(
+      sync.initializeTracking,
+      returnsNormally,
+      reason:
+          "initializeTracking stack-overflowed on a 20k-deep chain — "
+          "trackChildren needs to be iterative.",
+    );
   });
 
   testWidgets("TreeSyncController.syncRoots removal of a 20k-deep chain "
@@ -59,7 +63,8 @@ void main() {
     expect(
       () => sync.syncRoots(<TreeNode<int, int>>[], animate: false),
       returnsNormally,
-      reason: "syncRoots removal of a 20k-deep chain stack-overflowed in "
+      reason:
+          "syncRoots removal of a 20k-deep chain stack-overflowed in "
           "_rememberExpansionRecursive or _clearChildrenTracking.",
     );
   });

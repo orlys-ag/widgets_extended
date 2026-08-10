@@ -41,7 +41,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 100),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -71,7 +76,8 @@ void main() {
             node: TreeNode(key: "x", data: "X"),
           ),
           throwsRuntimeGuardError,
-          reason: "insert() under a pending-deletion parent must throw a "
+          reason:
+              "insert() under a pending-deletion parent must throw a "
               "runtime StateError/ArgumentError in all build modes, as "
               "moveNode's guard comment claims it already does; an "
               "assert-only guard silently corrupts state in release",
@@ -85,44 +91,48 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
 
-    testWidgets(
-      "setChildren() on a mid-exit parent throws StateError (not a "
-      "debug-only assert), matching moveNode's all-build-modes policy",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("setChildren() on a mid-exit parent throws StateError (not a "
+        "debug-only assert), matching moveNode's all-build-modes policy", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: "a", data: "A")]);
-        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
-        controller.expand(key: "a", animate: false);
-        await tester.pump();
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+      controller.expand(key: "a", animate: false);
+      await tester.pump();
 
-        controller.remove(key: "a", animate: true);
-        await tester.pump(const Duration(milliseconds: 20));
+      controller.remove(key: "a", animate: true);
+      await tester.pump(const Duration(milliseconds: 20));
 
-        expect(
-          controller.isPendingDeletion("a"),
-          isTrue,
-          reason: "test setup must place 'a' in its animated exit window",
-        );
+      expect(
+        controller.isPendingDeletion("a"),
+        isTrue,
+        reason: "test setup must place 'a' in its animated exit window",
+      );
 
-        expect(
-          () => controller.setChildren("a", [TreeNode(key: "x", data: "X")]),
-          throwsRuntimeGuardError,
-          reason: "setChildren() on a pending-deletion parent must throw a "
-              "runtime StateError/ArgumentError in all build modes; an "
-              "assert-only guard silently orphans the new children and "
-              "leaks their registry entries in release",
-        );
+      expect(
+        () => controller.setChildren("a", [TreeNode(key: "x", data: "X")]),
+        throwsRuntimeGuardError,
+        reason:
+            "setChildren() on a pending-deletion parent must throw a "
+            "runtime StateError/ArgumentError in all build modes; an "
+            "assert-only guard silently orphans the new children and "
+            "leaks their registry entries in release",
+      );
 
-        for (int i = 0; i < 6; i++) {
-          await tester.pump(const Duration(milliseconds: 50));
-        }
-      },
-      timeout: const Timeout(Duration(seconds: 60)),
-    );
+      for (int i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }, timeout: const Timeout(Duration(seconds: 60)));
   });
 }

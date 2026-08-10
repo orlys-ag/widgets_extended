@@ -13,7 +13,8 @@
 /// forwards the event with the operation key.
 library;
 
-import 'package:flutter/animation.dart' show AnimationController, AnimationStatus, Curve;
+import 'package:flutter/animation.dart'
+    show AnimationController, AnimationStatus, Curve;
 import 'package:flutter/scheduler.dart' show TickerProvider;
 
 import '_node_id_registry.dart';
@@ -40,7 +41,8 @@ class OperationGroupRegistry<TKey> {
 
   /// Live groups keyed by their `operationKey` (the node whose
   /// expand/collapse created the group).
-  final Map<TKey, OperationGroup<TKey>> _groups = <TKey, OperationGroup<TKey>>{};
+  final Map<TKey, OperationGroup<TKey>> _groups =
+      <TKey, OperationGroup<TKey>>{};
 
   /// Per-nid reverse index: `[nid]` → the operation key whose group
   /// contains this node as a member, or null. Sized to the registry's
@@ -118,8 +120,7 @@ class OperationGroupRegistry<TKey> {
 
   /// Iterate live groups. Used by the coordinator's `ensureAnimatingKeys`
   /// to add member contributions to the union mirrors.
-  Iterable<MapEntry<TKey, OperationGroup<TKey>>> get groups =>
-      _groups.entries;
+  Iterable<MapEntry<TKey, OperationGroup<TKey>>> get groups => _groups.entries;
 
   /// Creates an OperationGroup whose AnimationController starts at
   /// [initialValue] (0.0 for fresh expand / forward, 1.0 for fresh

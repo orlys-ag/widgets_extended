@@ -42,7 +42,12 @@ void main() {
     testWidgets("default (animate: true) slides shifted roots", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -58,8 +63,11 @@ void main() {
       controller.reorderRoots(["b", "c", "a"]);
       await tester.pump();
 
-      expect(controller.hasActiveSlides, true,
-          reason: "reorderRoots default must stage a FLIP slide");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "reorderRoots default must stage a FLIP slide",
+      );
       expect(controller.getSlideDelta("a"), closeTo(-96.0, 1.0));
 
       await tester.pumpAndSettle();
@@ -70,7 +78,12 @@ void main() {
     testWidgets("animate: false snaps (no slide)", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -91,42 +104,57 @@ void main() {
 
   group("reorderChildren animation", () {
     testWidgets(
-        "default (animate: true) slides shifted children under an expanded parent",
-        (tester) async {
+      "default (animate: true) slides shifted children under an expanded parent",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.linear,
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
+        controller.setRoots([const TreeNode(key: "root", data: "R")]);
+        controller.setChildren("root", [
+          const TreeNode(key: "c1", data: "C1"),
+          const TreeNode(key: "c2", data: "C2"),
+          const TreeNode(key: "c3", data: "C3"),
+        ]);
+        controller.expand(key: "root", animate: false);
+        await tester.pumpWidget(_buildHarness(controller));
+        await tester.pumpAndSettle();
+
+        // Rows: root(0), c1(48), c2(96), c3(144). Reorder children to
+        // [c3, c1, c2]: c3 moves 144 → 48, slide delta = +96.
+        controller.reorderChildren("root", ["c3", "c1", "c2"]);
+        await tester.pump();
+
+        expect(
+          controller.hasActiveSlides,
+          true,
+          reason: "reorderChildren default must stage a FLIP slide",
+        );
+        expect(controller.getSlideDelta("c3"), closeTo(96.0, 1.0));
+
+        await tester.pumpAndSettle();
+        expect(controller.hasActiveSlides, false);
+        expect(controller.getIndexInParent("c3"), 0);
+      },
+    );
+
+    testWidgets("collapsed parent installs no slide (visibility gate)", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([const TreeNode(key: "root", data: "R")]);
-      controller.setChildren("root", [
-        const TreeNode(key: "c1", data: "C1"),
-        const TreeNode(key: "c2", data: "C2"),
-        const TreeNode(key: "c3", data: "C3"),
-      ]);
-      controller.expand(key: "root", animate: false);
-      await tester.pumpWidget(_buildHarness(controller));
-      await tester.pumpAndSettle();
-
-      // Rows: root(0), c1(48), c2(96), c3(144). Reorder children to
-      // [c3, c1, c2]: c3 moves 144 → 48, slide delta = +96.
-      controller.reorderChildren("root", ["c3", "c1", "c2"]);
-      await tester.pump();
-
-      expect(controller.hasActiveSlides, true,
-          reason: "reorderChildren default must stage a FLIP slide");
-      expect(controller.getSlideDelta("c3"), closeTo(96.0, 1.0));
-
-      await tester.pumpAndSettle();
-      expect(controller.hasActiveSlides, false);
-      expect(controller.getIndexInParent("c3"), 0);
-    });
-
-    testWidgets("collapsed parent installs no slide (visibility gate)",
-        (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "root", data: "R")]);
@@ -141,8 +169,11 @@ void main() {
       controller.reorderChildren("root", ["c2", "c1"]);
       await tester.pump();
 
-      expect(controller.hasActiveSlides, false,
-          reason: "a collapsed (invisible) reorder must not stage a baseline");
+      expect(
+        controller.hasActiveSlides,
+        false,
+        reason: "a collapsed (invisible) reorder must not stage a baseline",
+      );
       // Structural reorder is still applied.
       expect(controller.getIndexInParent("c2"), 0);
     });
@@ -150,7 +181,12 @@ void main() {
     testWidgets("animate: false snaps (no slide)", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([const TreeNode(key: "root", data: "R")]);

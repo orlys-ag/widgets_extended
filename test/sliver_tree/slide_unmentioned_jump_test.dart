@@ -21,7 +21,12 @@ void main() {
       "startDelta when the ticker is reset", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 1000),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
     controller.setRoots([
@@ -48,13 +53,15 @@ void main() {
     expect(
       aDeltaBeforeSecondCall,
       lessThan(100.0),
-      reason: "Sanity: 'a' should have progressed from startDelta=100 toward 0 "
+      reason:
+          "Sanity: 'a' should have progressed from startDelta=100 toward 0 "
           "after 6 frames. Got $aDeltaBeforeSecondCall",
     );
     expect(
       aDeltaBeforeSecondCall,
       greaterThan(0.0),
-      reason: "Sanity: 'a' shouldn't have settled yet. Got $aDeltaBeforeSecondCall",
+      reason:
+          "Sanity: 'a' shouldn't have settled yet. Got $aDeltaBeforeSecondCall",
     );
 
     // Now call animateSlideFromOffsets a second time WITHOUT mentioning `a`.

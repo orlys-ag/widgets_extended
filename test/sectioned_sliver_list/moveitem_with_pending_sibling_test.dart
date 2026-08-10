@@ -18,14 +18,16 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
-    controller.setSections(
-      ["s"],
-      itemsOf: (_) => const ["a", "b", "c"],
-    );
+    controller.setSections(["s"], itemsOf: (_) => const ["a", "b", "c"]);
     controller.expandSection("s", animate: false);
 
     controller.removeItem("b", animate: true);
@@ -33,36 +35,37 @@ void main() {
 
     // 'b' is still present with includeExiting:true during exit, but
     // excluded from the live itemKeysOf.
-    expect(
-      controller.itemKeysOf("s", includeExiting: true),
-      contains("b"),
-    );
+    expect(controller.itemKeysOf("s", includeExiting: true), contains("b"));
     expect(controller.itemKeysOf("s"), isNot(contains("b")));
 
     expect(
       () => controller.moveItem("c", index: 0),
       returnsNormally,
-      reason: "moveItem must filter pending-deletion siblings out of the "
+      reason:
+          "moveItem must filter pending-deletion siblings out of the "
           "proposed order — itemKeysOf is live-by-default.",
     );
 
     await tester.pumpAndSettle();
   });
 
-  testWidgets("moveSection works with a pending-deletion sibling section",
-      (tester) async {
+  testWidgets("moveSection works with a pending-deletion sibling section", (
+    tester,
+  ) async {
     final controller = SectionedListController<String, String, String>(
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
-    controller.setSections(
-      ["a", "b", "c"],
-      itemsOf: (_) => const [],
-    );
+    controller.setSections(["a", "b", "c"], itemsOf: (_) => const []);
 
     controller.removeSection("b", animate: true);
     await tester.pump(const Duration(milliseconds: 80));
@@ -73,7 +76,8 @@ void main() {
     expect(
       () => controller.moveSection("c", 0),
       returnsNormally,
-      reason: "moveSection must filter pending-deletion sibling sections "
+      reason:
+          "moveSection must filter pending-deletion sibling sections "
           "out of the proposed order.",
     );
 

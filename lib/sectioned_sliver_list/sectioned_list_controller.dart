@@ -396,18 +396,25 @@ class SectionedListController<K extends Object, Section, Item>
   ///     its current section to [index].
   ///   • both null → no-op.
   ///
-  /// When [animate] is true (the default), a cross-section reparent runs
-  /// a paint-only FLIP slide on the moved row from its old painted
-  /// position to its new one, using [slideDuration] / [slideCurve].
-  /// Both default to the controller's expand/collapse animation spec
-  /// (`animationStyle.expandCollapse`) so the slide stays in sync with
-  /// the inserts / removes / expands / collapses that may compose with
-  /// it inside the same [runBatch].
+  /// Both forms animate when [animate] is true (the default), and both
+  /// animate the same way: a paint-only FLIP slide from each affected
+  /// row's old painted position to its new one. Nothing enters or leaves
+  /// on either path, so neither produces per-row enter/exit animations.
   ///
-  /// In-section reorders are pure repositioning ops that never animate
-  /// regardless of [animate] — neighbouring rows shift in place, the
-  /// underlying [TreeController.reorderChildren] does not produce
-  /// per-row enter/exit animations.
+  ///   - A cross-section reparent slides the moved row, timed by
+  ///     [slideDuration] / [slideCurve].
+  ///   - An in-section reorder slides every row whose position changed,
+  ///     and only while the section is expanded: a reorder inside a
+  ///     collapsed section has nothing on screen to slide. It does not
+  ///     read [slideDuration] / [slideCurve], which name the moved row's
+  ///     own glide and have no single subject here.
+  ///
+  /// Timing comes from the controller's expand/collapse spec
+  /// (`animationStyle.expandCollapse`) on both paths, so a move stays in
+  /// sync with the inserts, removes, expands and collapses it may compose
+  /// with inside one [runBatch]. Note the asymmetry the in-section path
+  /// inherits from [reorderItems]: zeroing `reorderSlide` disables its
+  /// slide even though the duration comes from `expandCollapse`.
   void moveItem(
     K itemKey, {
     K? toSection,
@@ -447,18 +454,37 @@ class SectionedListController<K extends Object, Section, Item>
     final siblings = itemKeysOf(parentKey)..remove(itemKey);
     final clamped = index.clamp(0, siblings.length);
     siblings.insert(clamped, itemKey);
-    reorderItems(parentKey, siblings);
+    // Forward [animate]. Dropping it here made `animate: false` slide
+    // anyway on this path only, which is what let the old doc claim this
+    // form "never animates regardless of animate" and stay unchallenged.
+    reorderItems(parentKey, siblings, animate: animate);
   }
 
-  void reorderItems(K sectionKey, List<K> orderedKeys) {
+  /// Reorders [sectionKey]'s items to match [orderedKeys].
+  ///
+  /// When [animate] is true (the default) and the section is expanded,
+  /// rows whose position changed get a paint-only FLIP slide from their
+  /// old painted position to their new one. Nothing enters or leaves, so
+  /// there are no per-row enter/exit animations either way.
+  ///
+  /// The slide is timed with `animationStyle.expandCollapse` rather than
+  /// `reorderSlide`, so a sectioned reorder stays in lockstep with the
+  /// inserts, removes, expands and collapses it may compose with inside
+  /// one [runBatch]. Note the asymmetry that follows from riding the
+  /// tree's reorder machinery with another family's timing: zeroing
+  /// `reorderSlide` disables this slide even though its duration comes
+  /// from `expandCollapse`.
+  void reorderItems(
+    K sectionKey,
+    List<K> orderedKeys, {
+    bool animate = true,
+  }) {
     _checkNotDisposed();
     _requireSection(sectionKey, "reorderItems");
-    // Explicit expandCollapse timing: sectioned reorders stay in
-    // lockstep with the extent animations they may compose with,
-    // independent of the tree's reorderSlide default.
     _tree.reorderChildren(
       SectionKey<K>(sectionKey),
       <SecKey<K>>[for (final k in orderedKeys) ItemKey<K>(k)],
+      animate: animate,
       slideDuration: _tree.animationStyle.expandCollapse.duration,
       slideCurve: _tree.animationStyle.expandCollapse.curve,
     );

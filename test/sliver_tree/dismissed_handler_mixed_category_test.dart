@@ -21,7 +21,12 @@ void main() {
     (tester) async {
       final c = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 80), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 80),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(c.dispose);
 
@@ -73,43 +78,43 @@ void main() {
     },
   );
 
-  testWidgets(
-    "dismissed handler: pending-deletion sibling and pending-hide "
-    "sibling under same parent both clear correctly",
-    (tester) async {
-      final c = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 60), curve: Curves.easeInOut)),
-      );
-      addTearDown(c.dispose);
+  testWidgets("dismissed handler: pending-deletion sibling and pending-hide "
+      "sibling under same parent both clear correctly", (tester) async {
+    final c = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 60),
+          curve: Curves.easeInOut,
+        ),
+      ),
+    );
+    addTearDown(c.dispose);
 
-      c.setRoots([const TreeNode(key: "r", data: "r")]);
-      c.setChildren("r", [
-        const TreeNode(key: "p", data: "p"),
-      ]);
-      c.setChildren("p", [
-        const TreeNode(key: "x", data: "x"),
-        const TreeNode(key: "y", data: "y"),
-        const TreeNode(key: "z", data: "z"),
-      ]);
-      c.expand(key: "r", animate: false);
-      c.expand(key: "p", animate: false);
-      await tester.pump();
+    c.setRoots([const TreeNode(key: "r", data: "r")]);
+    c.setChildren("r", [const TreeNode(key: "p", data: "p")]);
+    c.setChildren("p", [
+      const TreeNode(key: "x", data: "x"),
+      const TreeNode(key: "y", data: "y"),
+      const TreeNode(key: "z", data: "z"),
+    ]);
+    c.expand(key: "r", animate: false);
+    c.expand(key: "p", animate: false);
+    await tester.pump();
 
-      // Collapse p (pending-hide for x, y, z) and remove y (pending-deletion).
-      c.collapse(key: "p", animate: true);
-      c.remove(key: "y", animate: true);
-      await tester.pumpAndSettle();
+    // Collapse p (pending-hide for x, y, z) and remove y (pending-deletion).
+    c.collapse(key: "p", animate: true);
+    c.remove(key: "y", animate: true);
+    await tester.pumpAndSettle();
 
-      // After settle: p collapsed, x and z still children of p, y gone.
-      expect(c.getChildren("p"), equals(["x", "z"]));
-      c.debugAssertVisibleSubtreeSizeConsistency();
+    // After settle: p collapsed, x and z still children of p, y gone.
+    expect(c.getChildren("p"), equals(["x", "z"]));
+    c.debugAssertVisibleSubtreeSizeConsistency();
 
-      // Re-expand p and verify x, z are visible.
-      c.expand(key: "p", animate: false);
-      await tester.pump();
-      expect(c.visibleNodes, equals(["r", "p", "x", "z"]));
-      c.debugAssertVisibleSubtreeSizeConsistency();
-    },
-  );
+    // Re-expand p and verify x, z are visible.
+    c.expand(key: "p", animate: false);
+    await tester.pump();
+    expect(c.visibleNodes, equals(["r", "p", "x", "z"]));
+    c.debugAssertVisibleSubtreeSizeConsistency();
+  });
 }

@@ -93,7 +93,8 @@ void main() {
       expect(
         controller.isExitingNid(aNid),
         isTrue,
-        reason: "setup: a is a pendingRemoval bulk member mid-collapseAll, "
+        reason:
+            "setup: a is a pendingRemoval bulk member mid-collapseAll, "
             "so the exiting mirror must see it",
       );
       expect(
@@ -106,28 +107,29 @@ void main() {
 
       // Collapse hides but does not purge: the nid stays alive, so the
       // mirror reads below are meaningful (not dead-slot reads).
-      expect(
-        controller.visibleNodes,
-        ["r"],
-        reason: "setup: collapseAll must have completed",
-      );
+      expect(controller.visibleNodes, [
+        "r",
+      ], reason: "setup: collapseAll must have completed");
 
       expect(
         controller.currentlyAnimatingKeys,
         isEmpty,
-        reason: "bulk completion disposed the group; no key may still "
+        reason:
+            "bulk completion disposed the group; no key may still "
             "report as animating",
       );
       expect(
         controller.isAnimatingNid(aNid),
         isFalse,
-        reason: "the animating mirror must be invalidated when the bulk "
+        reason:
+            "the animating mirror must be invalidated when the bulk "
             "group is disposed",
       );
       expect(
         controller.isExitingNid(aNid),
         isFalse,
-        reason: "the exiting mirror must be invalidated when the bulk "
+        reason:
+            "the exiting mirror must be invalidated when the bulk "
             "group is disposed — a stale true here misroutes render "
             "clip/retention guards indefinitely",
       );
@@ -168,22 +170,24 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      expect(
-        controller.visibleNodes,
-        ["r", "a", "b"],
-        reason: "setup: expandAll must have completed",
-      );
+      expect(controller.visibleNodes, [
+        "r",
+        "a",
+        "b",
+      ], reason: "setup: expandAll must have completed");
 
       expect(
         controller.currentlyAnimatingKeys,
         isEmpty,
-        reason: "bulk completion disposed the group; no key may still "
+        reason:
+            "bulk completion disposed the group; no key may still "
             "report as animating",
       );
       expect(
         controller.isAnimatingNid(aNid),
         isFalse,
-        reason: "the animating mirror must be invalidated when the bulk "
+        reason:
+            "the animating mirror must be invalidated when the bulk "
             "group is disposed",
       );
     },

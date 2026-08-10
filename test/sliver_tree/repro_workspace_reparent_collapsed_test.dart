@@ -19,9 +19,10 @@ import 'package:widgets_extended/sliver_tree/synced_sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/synced_tree_node.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 
-SyncedTreeNode<String, String> _n(String k,
-        [List<SyncedTreeNode<String, String>>? c]) =>
-    SyncedTreeNode(key: k, data: k, children: c ?? const []);
+SyncedTreeNode<String, String> _n(
+  String k, [
+  List<SyncedTreeNode<String, String>>? c,
+]) => SyncedTreeNode(key: k, data: k, children: c ?? const []);
 
 class _Harness extends StatefulWidget {
   const _Harness({required this.builder});
@@ -43,7 +44,12 @@ class _HarnessState extends State<_Harness> {
             SyncedSliverTree<String, String>(
               tree: widget.builder(),
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 400),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 controller ??= node.controller;
                 return SizedBox(
@@ -76,17 +82,32 @@ void main() {
     "A: fav->placeholder, x slides settled -48 into collapsed others",
     (tester) async {
       var fav = true;
-      final c = await _pump(tester, () => fav
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])]);
+      final c = await _pump(
+        tester,
+        () => fav
+            ? [
+                _n("fav", [_n("x")]),
+                _n("others", [_n("o1")]),
+              ]
+            : [
+                _n("fav", [_n("fav_ph")]),
+                _n("others", [_n("x"), _n("o1")]),
+              ],
+      );
       await tester.pumpAndSettle();
 
       c.collapse(key: "others", animate: false);
       await tester.pump();
 
       fav = false;
-      await tester.pumpWidget(_Harness(builder: () =>
-          [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])]));
+      await tester.pumpWidget(
+        _Harness(
+          builder: () => [
+            _n("fav", [_n("fav_ph")]),
+            _n("others", [_n("x"), _n("o1")]),
+          ],
+        ),
+      );
       await tester.pump();
 
       // At t=0 the exit slide must install the full settled distance.
@@ -111,63 +132,89 @@ void main() {
   // (no placeholder, `keep` shifts instantly), x into collapsed others. The
   // settled distance is unchanged at -48; this guards against regressing the
   // already-working non-placeholder path.
-  testWidgets(
-    "B: fav stays non-empty, x slides -48 into collapsed others",
-    (tester) async {
-      var fav = true;
-      final c = await _pump(tester, () => fav
-          ? [_n("fav", [_n("x"), _n("keep")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]);
-      await tester.pumpAndSettle();
+  testWidgets("B: fav stays non-empty, x slides -48 into collapsed others", (
+    tester,
+  ) async {
+    var fav = true;
+    final c = await _pump(
+      tester,
+      () => fav
+          ? [
+              _n("fav", [_n("x"), _n("keep")]),
+              _n("others", [_n("o1")]),
+            ]
+          : [
+              _n("fav", [_n("keep")]),
+              _n("others", [_n("x"), _n("o1")]),
+            ],
+    );
+    await tester.pumpAndSettle();
 
-      c.collapse(key: "others", animate: false);
-      await tester.pump();
+    c.collapse(key: "others", animate: false);
+    await tester.pump();
 
-      fav = false;
-      await tester.pumpWidget(_Harness(builder: () =>
-          [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]));
-      await tester.pump();
+    fav = false;
+    await tester.pumpWidget(
+      _Harness(
+        builder: () => [
+          _n("fav", [_n("keep")]),
+          _n("others", [_n("x"), _n("o1")]),
+        ],
+      ),
+    );
+    await tester.pump();
 
-      expect(c.hasActiveSlides, true);
-      expect(c.getSlideDelta("x"), moreOrLessEquals(-48.0, epsilon: 0.5));
+    expect(c.hasActiveSlides, true);
+    expect(c.getSlideDelta("x"), moreOrLessEquals(-48.0, epsilon: 0.5));
 
-      await tester.pumpAndSettle();
-      expect(c.getSlideDelta("x"), moreOrLessEquals(0.0, epsilon: 0.5));
-      expect(c.visibleNodes.contains("x"), false);
-    },
-  );
+    await tester.pumpAndSettle();
+    expect(c.getSlideDelta("x"), moreOrLessEquals(0.0, epsilon: 0.5));
+    expect(c.visibleNodes.contains("x"), false);
+  });
 
   // CASE C — fav empties to NOTHING (header-only, no placeholder child). The
   // genuine settled distance is ~0, so NO slide must be fabricated. This is a
   // hard guard, not a heuristic: the settled-destination fix must not invent
   // motion here.
-  testWidgets(
-    "C: fav->empty header-only, no fabricated slide",
-    (tester) async {
-      var fav = true;
-      final c = await _pump(tester, () => fav
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav"), _n("others", [_n("x"), _n("o1")])]);
-      await tester.pumpAndSettle();
+  testWidgets("C: fav->empty header-only, no fabricated slide", (tester) async {
+    var fav = true;
+    final c = await _pump(
+      tester,
+      () => fav
+          ? [
+              _n("fav", [_n("x")]),
+              _n("others", [_n("o1")]),
+            ]
+          : [
+              _n("fav"),
+              _n("others", [_n("x"), _n("o1")]),
+            ],
+    );
+    await tester.pumpAndSettle();
 
-      c.collapse(key: "others", animate: false);
-      await tester.pump();
+    c.collapse(key: "others", animate: false);
+    await tester.pump();
 
-      fav = false;
-      await tester.pumpWidget(_Harness(builder: () =>
-          [_n("fav"), _n("others", [_n("x"), _n("o1")])]));
-      await tester.pump();
+    fav = false;
+    await tester.pumpWidget(
+      _Harness(
+        builder: () => [
+          _n("fav"),
+          _n("others", [_n("x"), _n("o1")]),
+        ],
+      ),
+    );
+    await tester.pump();
 
-      // No fabricated slide at t=0.
-      expect(c.getSlideDelta("x").abs(), lessThan(0.5));
+    // No fabricated slide at t=0.
+    expect(c.getSlideDelta("x").abs(), lessThan(0.5));
 
-      // And no ghost motion fabricated during the animation window.
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(c.getSlideDelta("x").abs(), lessThan(0.5));
+    // And no ghost motion fabricated during the animation window.
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(c.getSlideDelta("x").abs(), lessThan(0.5));
 
-      await tester.pumpAndSettle();
-      expect(c.getSlideDelta("x").abs(), lessThan(0.5));
-      expect(c.visibleNodes.contains("x"), false);
-    },
-  );
+    await tester.pumpAndSettle();
+    expect(c.getSlideDelta("x").abs(), lessThan(0.5));
+    expect(c.visibleNodes.contains("x"), false);
+  });
 }

@@ -46,7 +46,8 @@ void main() {
       expect(
         structuralNotifyCount,
         before,
-        reason: "Explicit-but-matching-index moveNode must be a no-op "
+        reason:
+            "Explicit-but-matching-index moveNode must be a no-op "
             "(no notification, no baseline staging, no layout churn)",
       );
     });
@@ -100,7 +101,9 @@ void main() {
       );
       addTearDown(controller.dispose);
 
-      final sync = TreeSyncController<String, String>(treeController: controller);
+      final sync = TreeSyncController<String, String>(
+        treeController: controller,
+      );
       addTearDown(sync.dispose);
 
       controller.setRoots([
@@ -119,33 +122,34 @@ void main() {
       );
     });
 
-    testWidgets(
-      "different keys under different parents work normally",
-      (tester) async {
-        // Sanity: the assert must not over-trigger. Distinct keys per
-        // parent should sync without complaint.
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: TreeAnimationStyle.disabled,
-        );
-        addTearDown(controller.dispose);
+    testWidgets("different keys under different parents work normally", (
+      tester,
+    ) async {
+      // Sanity: the assert must not over-trigger. Distinct keys per
+      // parent should sync without complaint.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
 
-        final sync = TreeSyncController<String, String>(treeController: controller);
-        addTearDown(sync.dispose);
+      final sync = TreeSyncController<String, String>(
+        treeController: controller,
+      );
+      addTearDown(sync.dispose);
 
-        controller.setRoots([
-          const TreeNode(key: "p1", data: "P1"),
-          const TreeNode(key: "p2", data: "P2"),
-        ]);
+      controller.setRoots([
+        const TreeNode(key: "p1", data: "P1"),
+        const TreeNode(key: "p2", data: "P2"),
+      ]);
 
-        expect(
-          () => sync.syncMultipleChildren({
-            "p1": [const TreeNode(key: "x1", data: "X1")],
-            "p2": [const TreeNode(key: "x2", data: "X2")],
-          }),
-          returnsNormally,
-        );
-      },
-    );
+      expect(
+        () => sync.syncMultipleChildren({
+          "p1": [const TreeNode(key: "x1", data: "X1")],
+          "p2": [const TreeNode(key: "x2", data: "X2")],
+        }),
+        returnsNormally,
+      );
+    });
   });
 }

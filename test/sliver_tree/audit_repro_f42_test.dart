@@ -100,7 +100,8 @@ void main() {
       expect(
         rowACenter.dy,
         225.0,
-        reason: "row a (50px tall) must paint directly below the 200px "
+        reason:
+            "row a (50px tall) must paint directly below the 200px "
             "header, so its painted center sits at viewport y=225",
       );
 
@@ -127,7 +128,8 @@ void main() {
       expect(
         reorder.currentTarget?.targetKey,
         "a",
-        reason: "the pointer hovers the painted center of row 'a'; the "
+        reason:
+            "the pointer hovers the painted center of row 'a'; the "
             "resolved drop target must be 'a', not a row "
             "precedingScrollExtent (200px) lower",
       );
@@ -139,26 +141,33 @@ void main() {
       // edge by adding the port's precedingScrollExtent back: the `into`
       // indicator sits at the row's bottom edge, 200px header + 50px row
       // = 250 in viewport scroll space.
-      expect(reorder.currentTarget?.zone, TreeDropZone.into,
-          reason: "row center resolves the into zone for a valid target");
+      expect(
+        reorder.currentTarget?.zone,
+        TreeDropZone.into,
+        reason: "row center resolves the into zone for a valid target",
+      );
       expect(
         reorder.currentTarget?.targetPaintedY,
         0.0,
-        reason: "targetPaintedY is sliver-local: row a is the first tree "
+        reason:
+            "targetPaintedY is sliver-local: row a is the first tree "
             "row regardless of the 200px preceding sliver",
       );
       expect(
         reorder.renderPort?.precedingScrollExtent,
         200.0,
-        reason: "the port must expose the preceding sliver's extent — the "
+        reason:
+            "the port must expose the preceding sliver's extent — the "
             "widget layer's indicator derivation depends on it",
       );
       final t = reorder.currentTarget!;
       expect(
-        t.targetPaintedY + t.targetExtent +
+        t.targetPaintedY +
+            t.targetExtent +
             reorder.renderPort!.precedingScrollExtent,
         250.0,
-        reason: "derived indicator edge must account for the 200px "
+        reason:
+            "derived indicator edge must account for the 200px "
             "preceding sliver (row a's bottom edge in viewport scroll "
             "space)",
       );

@@ -21,90 +21,94 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
 void main() {
-  testWidgets(
-    "expandAll does not throw ConcurrentModificationError when a "
-    "collapsing op-group's controller is at upperBound",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
-      );
-      addTearDown(controller.dispose);
+  testWidgets("expandAll does not throw ConcurrentModificationError when a "
+      "collapsing op-group's controller is at upperBound", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.linear,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
 
-      // Two independent subtrees so we get two operation groups.
-      controller.setRoots([
-        const TreeNode(key: "a", data: "A"),
-        const TreeNode(key: "b", data: "B"),
-      ]);
-      controller.setChildren("a", [const TreeNode(key: "a1", data: "a1")]);
-      controller.setChildren("b", [const TreeNode(key: "b1", data: "b1")]);
+    // Two independent subtrees so we get two operation groups.
+    controller.setRoots([
+      const TreeNode(key: "a", data: "A"),
+      const TreeNode(key: "b", data: "B"),
+    ]);
+    controller.setChildren("a", [const TreeNode(key: "a1", data: "a1")]);
+    controller.setChildren("b", [const TreeNode(key: "b1", data: "b1")]);
 
-      // Expand both first (sync, no animation), so collapse(animate:true)
-      // installs a fresh op-group with controller starting at value=1.0.
-      controller.expand(key: "a", animate: false);
-      controller.expand(key: "b", animate: false);
+    // Expand both first (sync, no animation), so collapse(animate:true)
+    // installs a fresh op-group with controller starting at value=1.0.
+    controller.expand(key: "a", animate: false);
+    controller.expand(key: "b", animate: false);
 
-      // Collapse both with animation. Each installs an op-group whose
-      // controller is at value=1.0 (the starting state before reverse()
-      // ticks). The animation duration hasn't elapsed yet so the
-      // controllers are still at upperBound when expandAll fires next.
-      controller.collapse(key: "a", animate: true);
-      controller.collapse(key: "b", animate: true);
+    // Collapse both with animation. Each installs an op-group whose
+    // controller is at value=1.0 (the starting state before reverse()
+    // ticks). The animation duration hasn't elapsed yet so the
+    // controllers are still at upperBound when expandAll fires next.
+    controller.collapse(key: "a", animate: true);
+    controller.collapse(key: "b", animate: true);
 
-      // expandAll(animate:true) iterates op-groups and calls forward()
-      // on each. forward() on a controller at value=1.0 has
-      // simulationDuration=0 → synchronously fires `completed` status
-      // → status listener removes the group from _groups, mutating the
-      // map. Without the snapshot, this would throw
-      // ConcurrentModificationError on the iteration.
-      expect(
-        () => controller.expandAll(animate: true),
-        returnsNormally,
-        reason: "expandAll must snapshot _opGroupEntries before iterating",
-      );
+    // expandAll(animate:true) iterates op-groups and calls forward()
+    // on each. forward() on a controller at value=1.0 has
+    // simulationDuration=0 → synchronously fires `completed` status
+    // → status listener removes the group from _groups, mutating the
+    // map. Without the snapshot, this would throw
+    // ConcurrentModificationError on the iteration.
+    expect(
+      () => controller.expandAll(animate: true),
+      returnsNormally,
+      reason: "expandAll must snapshot _opGroupEntries before iterating",
+    );
 
-      // Settle so the test's ticker-disposal verification passes.
-      await tester.pumpAndSettle();
-    },
-  );
+    // Settle so the test's ticker-disposal verification passes.
+    await tester.pumpAndSettle();
+  });
 
-  testWidgets(
-    "collapseAll does not throw ConcurrentModificationError when an "
-    "expanding op-group's controller is at lowerBound",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
-      );
-      addTearDown(controller.dispose);
+  testWidgets("collapseAll does not throw ConcurrentModificationError when an "
+      "expanding op-group's controller is at lowerBound", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.linear,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
 
-      controller.setRoots([
-        const TreeNode(key: "a", data: "A"),
-        const TreeNode(key: "b", data: "B"),
-      ]);
-      controller.setChildren("a", [const TreeNode(key: "a1", data: "a1")]);
-      controller.setChildren("b", [const TreeNode(key: "b1", data: "b1")]);
+    controller.setRoots([
+      const TreeNode(key: "a", data: "A"),
+      const TreeNode(key: "b", data: "B"),
+    ]);
+    controller.setChildren("a", [const TreeNode(key: "a1", data: "a1")]);
+    controller.setChildren("b", [const TreeNode(key: "b1", data: "b1")]);
 
-      // Expand both with animation. Each installs an op-group whose
-      // controller is at value=0.0 (the starting state before forward()
-      // ticks).
-      controller.expand(key: "a", animate: true);
-      controller.expand(key: "b", animate: true);
+    // Expand both with animation. Each installs an op-group whose
+    // controller is at value=0.0 (the starting state before forward()
+    // ticks).
+    controller.expand(key: "a", animate: true);
+    controller.expand(key: "b", animate: true);
 
-      // collapseAll(animate:true) iterates op-groups and calls reverse()
-      // on each. reverse() on a controller at value=0.0 has
-      // simulationDuration=0 → synchronously fires `dismissed` status
-      // → status listener removes the group, mutating the map. Without
-      // the snapshot, this throws ConcurrentModificationError.
-      expect(
-        () => controller.collapseAll(animate: true),
-        returnsNormally,
-        reason: "collapseAll must snapshot _opGroupEntries before iterating",
-      );
+    // collapseAll(animate:true) iterates op-groups and calls reverse()
+    // on each. reverse() on a controller at value=0.0 has
+    // simulationDuration=0 → synchronously fires `dismissed` status
+    // → status listener removes the group, mutating the map. Without
+    // the snapshot, this throws ConcurrentModificationError.
+    expect(
+      () => controller.collapseAll(animate: true),
+      returnsNormally,
+      reason: "collapseAll must snapshot _opGroupEntries before iterating",
+    );
 
-      await tester.pumpAndSettle();
-    },
-  );
+    await tester.pumpAndSettle();
+  });
 
   testWidgets(
     "expandAll completes correctly when multiple collapsing op-groups "
@@ -112,7 +116,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -124,10 +133,9 @@ void main() {
         const TreeNode(key: "d", data: "D"),
       ]);
       for (final root in ["a", "b", "c", "d"]) {
-        controller.setChildren(
-          root,
-          [TreeNode(key: "${root}1", data: "${root}1")],
-        );
+        controller.setChildren(root, [
+          TreeNode(key: "${root}1", data: "${root}1"),
+        ]);
         controller.expand(key: root, animate: false);
       }
 

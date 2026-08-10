@@ -55,32 +55,29 @@ void main() {
       controller.dispose();
     });
 
-    test(
-      'pure-scrolling: admits exactly the rows up to effectiveCacheEnd',
-      () {
-        seedSteadyState();
-        // Cache budget: 200px from offset 0 → admits indices [0, 4) (4 rows × 50px).
-        final end = policy.admit(
-          cacheStartIndex: 0,
-          visibleNodes: controller.visibleNodes,
-          nodeOffsetsByNid: offsets,
-          nodeExtentsByNid: extents,
-          inCacheRegionByNid: inRegion,
-          onCacheRegionAdmit: writtenNids.add,
-          effectiveCacheEnd: 200.0,
-          slideOverreach: 0.0,
-          remainingCacheExtent: 200.0,
-        );
-        expect(end, 4);
-        expect(writtenNids.length, 4);
-        for (int i = 0; i < 4; i++) {
-          expect(inRegion[controller.visibleNidAt(i)], 1);
-        }
-        for (int i = 4; i < 10; i++) {
-          expect(inRegion[controller.visibleNidAt(i)], 0);
-        }
-      },
-    );
+    test('pure-scrolling: admits exactly the rows up to effectiveCacheEnd', () {
+      seedSteadyState();
+      // Cache budget: 200px from offset 0 → admits indices [0, 4) (4 rows × 50px).
+      final end = policy.admit(
+        cacheStartIndex: 0,
+        visibleNodes: controller.visibleNodes,
+        nodeOffsetsByNid: offsets,
+        nodeExtentsByNid: extents,
+        inCacheRegionByNid: inRegion,
+        onCacheRegionAdmit: writtenNids.add,
+        effectiveCacheEnd: 200.0,
+        slideOverreach: 0.0,
+        remainingCacheExtent: 200.0,
+      );
+      expect(end, 4);
+      expect(writtenNids.length, 4);
+      for (int i = 0; i < 4; i++) {
+        expect(inRegion[controller.visibleNidAt(i)], 1);
+      }
+      for (int i = 4; i < 10; i++) {
+        expect(inRegion[controller.visibleNidAt(i)], 0);
+      }
+    });
 
     test('cacheStartIndex > 0 admits the trailing slice', () {
       seedSteadyState();

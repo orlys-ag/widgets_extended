@@ -21,7 +21,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -44,9 +49,13 @@ void main() {
       );
 
       final entering = controller.getAnimationState("X");
-      expect(entering, isNotNull,
-          reason: "fresh insert(animate: true) should start a standalone "
-              "enter animation");
+      expect(
+        entering,
+        isNotNull,
+        reason:
+            "fresh insert(animate: true) should start a standalone "
+            "enter animation",
+      );
       expect(entering!.type, AnimationType.entering);
 
       // Now reparent X to B while its enter animation is still running.
@@ -58,10 +67,14 @@ void main() {
       controller.moveNode("X", "B");
 
       final afterMove = controller.getAnimationState("X");
-      expect(afterMove, isNotNull,
-          reason: "moveNode must NOT kill an in-flight standalone enter — "
-              "the row would otherwise snap to full extent at the new "
-              "structural position");
+      expect(
+        afterMove,
+        isNotNull,
+        reason:
+            "moveNode must NOT kill an in-flight standalone enter — "
+            "the row would otherwise snap to full extent at the new "
+            "structural position",
+      );
       expect(afterMove!.type, AnimationType.entering);
 
       // Drain the standalone ticker so the test doesn't leak it.

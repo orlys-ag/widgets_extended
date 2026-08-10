@@ -106,24 +106,42 @@ Future<TreeReorderController<String>> _setUpStaleDragSession(
 
   // Sanity: the drop target actually resolved — endDrag must take the
   // commit path, not the null-target cancel path.
-  expect(reorder.currentTarget, isNotNull,
-      reason: "setup: drop target below 'c' must resolve");
-  expect(reorder.currentTarget?.zone, TreeDropZone.below,
-      reason: "setup: expected below-'c' zone");
-  expect(reorder.currentTarget?.targetKey, "c",
-      reason: "setup: expected target row 'c'");
-  expect(reorder.currentTarget?.parentKey, isNull,
-      reason: "setup: same-parent root reorder expected");
+  expect(
+    reorder.currentTarget,
+    isNotNull,
+    reason: "setup: drop target below 'c' must resolve",
+  );
+  expect(
+    reorder.currentTarget?.zone,
+    TreeDropZone.below,
+    reason: "setup: expected below-'c' zone",
+  );
+  expect(
+    reorder.currentTarget?.targetKey,
+    "c",
+    reason: "setup: expected target row 'c'",
+  );
+  expect(
+    reorder.currentTarget?.parentKey,
+    isNull,
+    reason: "setup: same-parent root reorder expected",
+  );
 
   // Mid-drag, the app removes the dragged node with an animated exit
   // (300ms controller duration): "a" becomes pending-deletion, so
   // liveRootKeys excludes it, while the session retains its stale target.
   controller.remove(key: "a");
   await tester.pump(const Duration(milliseconds: 50));
-  expect(controller.isPendingDeletion("a"), isTrue,
-      reason: "setup: dragged key must be pending-deletion mid-drag");
-  expect(reorder.isDragging, isTrue,
-      reason: "setup: the drag session must still be active");
+  expect(
+    controller.isPendingDeletion("a"),
+    isTrue,
+    reason: "setup: dragged key must be pending-deletion mid-drag",
+  );
+  expect(
+    reorder.isDragging,
+    isTrue,
+    reason: "setup: the drag session must still be active",
+  );
 
   return reorder;
 }
@@ -148,7 +166,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -164,7 +187,8 @@ void main() {
             reorder.endDrag();
           },
           returnsNormally,
-          reason: "endDrag must not throw when the dragged node was removed "
+          reason:
+              "endDrag must not throw when the dragged node was removed "
               "mid-drag; it should degrade to a cancel",
         );
 
@@ -179,7 +203,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -195,12 +224,19 @@ void main() {
           // Ignored: the sibling test asserts the no-throw contract.
         }
 
-        expect(reorder.isDragging, isFalse,
-            reason: "endDrag must clear the session even on a stale drag; "
-                "a stuck session leaves the UI dimmed with the indicator "
-                "overlay mounted");
-        expect(reorder.draggedKey, isNull,
-            reason: "no dragged key should remain after endDrag returns");
+        expect(
+          reorder.isDragging,
+          isFalse,
+          reason:
+              "endDrag must clear the session even on a stale drag; "
+              "a stuck session leaves the UI dimmed with the indicator "
+              "overlay mounted",
+        );
+        expect(
+          reorder.draggedKey,
+          isNull,
+          reason: "no dragged key should remain after endDrag returns",
+        );
 
         await _drainAnimations(tester);
       },

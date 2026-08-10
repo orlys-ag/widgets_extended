@@ -86,7 +86,8 @@ class SlideBaselineSlot<TKey> {
     ViewportSnapshot viewport,
     Duration duration,
     Curve curve,
-  })? consume() {
+  })?
+  consume() {
     final pending = _pending;
     if (pending == null) return null;
     _pending = null;

@@ -44,10 +44,10 @@ class VisibleOrderBuffer<TKey> {
     required int Function(int nid) parentByNid,
     required List<TKey>? Function(TKey key) childKeysOf,
     required void Function() onOrderMutated,
-  })  : _nids = registry,
-        _parentByNidLookup = parentByNid,
-        _childKeysOf = childKeysOf,
-        _onMutated = onOrderMutated;
+  }) : _nids = registry,
+       _parentByNidLookup = parentByNid,
+       _childKeysOf = childKeysOf,
+       _onMutated = onOrderMutated;
 
   final NodeIdRegistry<TKey> _nids;
   final int Function(int nid) _parentByNidLookup;
@@ -257,9 +257,7 @@ class VisibleOrderBuffer<TKey> {
   void bumpFromSelf(int startNid, int delta) {
     if (delta == 0) return;
     int cur = startNid;
-    while (cur != kNoParentNid &&
-        cur >= 0 &&
-        cur < _subtreeSizeByNid.length) {
+    while (cur != kNoParentNid && cur >= 0 && cur < _subtreeSizeByNid.length) {
       // Refuse to mutate a freed slot. In debug, surface the violation;
       // in release, bail out — corrupting a freed slot causes downstream
       // visibility-cache bugs once the nid is recycled.

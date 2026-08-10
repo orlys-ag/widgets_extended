@@ -46,24 +46,26 @@ void main() {
     final scrollController = ScrollController();
     addTearDown(scrollController.dispose);
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SizedBox(
-          height: 200,
-          child: CustomScrollView(
-            controller: scrollController,
-            slivers: [
-              SliverTree<String, String>(
-                controller: controller,
-                maxStickyDepth: 2,
-                nodeBuilder: (_, key, _) =>
-                    SizedBox(height: 40, child: Text(key)),
-              ),
-            ],
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 200,
+            child: CustomScrollView(
+              controller: scrollController,
+              slivers: [
+                SliverTree<String, String>(
+                  controller: controller,
+                  maxStickyDepth: 2,
+                  nodeBuilder: (_, key, _) =>
+                      SizedBox(height: 40, child: Text(key)),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ));
+    );
     await tester.pumpAndSettle();
 
     // Scroll so "parent" becomes pinned.
@@ -113,12 +115,16 @@ void main() {
 
     // Identify which fresh node landed on parent's old nid.
     final occupant = controller.keyOfNid(parentNidBefore);
-    expect(occupant, isNotNull,
-        reason: "Expected parent's freed nid to be recycled by an insert");
+    expect(
+      occupant,
+      isNotNull,
+      reason: "Expected parent's freed nid to be recycled by an insert",
+    );
     expect(
       const ["fillA", "fillB", "fillC", "fillD"].contains(occupant),
       isTrue,
-      reason: "Recycled occupant must be one of the inserted fillers; got $occupant",
+      reason:
+          "Recycled occupant must be one of the inserted fillers; got $occupant",
     );
 
     // Critical: the recycled occupant must NOT be reported as a sticky
@@ -139,7 +145,8 @@ void main() {
     expect(
       renderObject.isNodeRetained(occupant),
       isFalse,
-      reason: "Recycled-nid occupant '$occupant' is incorrectly reported "
+      reason:
+          "Recycled-nid occupant '$occupant' is incorrectly reported "
           "as retained — stale StickyHeaderInfo at nid=$parentNidBefore "
           "is leaking from the freed prior occupant.",
     );

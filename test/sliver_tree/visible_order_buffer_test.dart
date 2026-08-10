@@ -85,32 +85,31 @@ void main() {
       expect(c.visibleNodes.length, 6);
     });
 
-    testWidgets(
-      "reparent shifts subtree-size cache between ancestor chains",
-      (tester) async {
-        final c = buildSeedTree(tester);
-        addTearDown(c.dispose);
+    testWidgets("reparent shifts subtree-size cache between ancestor chains", (
+      tester,
+    ) async {
+      final c = buildSeedTree(tester);
+      addTearDown(c.dispose);
 
-        // Seed r2 with a placeholder child so we can expand it (expand
-        // is a no-op on a childless node).
-        c.setChildren("r2", [const TreeNode(key: "ph", data: "ph")]);
-        c.expand(key: "r1", animate: false);
-        c.expand(key: "a", animate: false);
-        c.expand(key: "r2", animate: false);
-        c.debugAssertVisibleSubtreeSizeConsistency();
-        expect(c.visibleNodes.length, 7); // r1, a, a1, a2, b, r2, ph
+      // Seed r2 with a placeholder child so we can expand it (expand
+      // is a no-op on a childless node).
+      c.setChildren("r2", [const TreeNode(key: "ph", data: "ph")]);
+      c.expand(key: "r1", animate: false);
+      c.expand(key: "a", animate: false);
+      c.expand(key: "r2", animate: false);
+      c.debugAssertVisibleSubtreeSizeConsistency();
+      expect(c.visibleNodes.length, 7); // r1, a, a1, a2, b, r2, ph
 
-        // Reparent: move "a" (with subtree a1, a2) from r1 to r2.
-        // The Observer-driven cache shift must:
-        //   - decrement r1's chain by 3 (a + a1 + a2)
-        //   - increment r2's chain by 3
-        // and debugAssert must pass.
-        c.moveNode("a", "r2");
-        c.debugAssertVisibleSubtreeSizeConsistency();
-        // r1, b, r2, a, a1, a2, ph — total 7.
-        expect(c.visibleNodes.length, 7);
-      },
-    );
+      // Reparent: move "a" (with subtree a1, a2) from r1 to r2.
+      // The Observer-driven cache shift must:
+      //   - decrement r1's chain by 3 (a + a1 + a2)
+      //   - increment r2's chain by 3
+      // and debugAssert must pass.
+      c.moveNode("a", "r2");
+      c.debugAssertVisibleSubtreeSizeConsistency();
+      // r1, b, r2, a, a1, a2, ph — total 7.
+      expect(c.visibleNodes.length, 7);
+    });
 
     testWidgets("rebuild closure populates and rebuilds derived state", (
       tester,
@@ -170,32 +169,31 @@ void main() {
       expect(c.visibleNodes.length, 7);
     });
 
-    testWidgets(
-      "remove of a deeply-nested subtree keeps cache consistent",
-      (tester) async {
-        final c = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: TreeAnimationStyle.disabled,
-        );
-        addTearDown(c.dispose);
+    testWidgets("remove of a deeply-nested subtree keeps cache consistent", (
+      tester,
+    ) async {
+      final c = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(c.dispose);
 
-        // 3-deep chain.
-        c.setRoots([const TreeNode(key: "r", data: "r")]);
-        c.setChildren("r", [const TreeNode(key: "x", data: "x")]);
-        c.setChildren("x", [const TreeNode(key: "y", data: "y")]);
-        c.setChildren("y", [const TreeNode(key: "z", data: "z")]);
-        c.expand(key: "r", animate: false);
-        c.expand(key: "x", animate: false);
-        c.expand(key: "y", animate: false);
-        c.debugAssertVisibleSubtreeSizeConsistency();
-        expect(c.visibleNodes.length, 4);
+      // 3-deep chain.
+      c.setRoots([const TreeNode(key: "r", data: "r")]);
+      c.setChildren("r", [const TreeNode(key: "x", data: "x")]);
+      c.setChildren("x", [const TreeNode(key: "y", data: "y")]);
+      c.setChildren("y", [const TreeNode(key: "z", data: "z")]);
+      c.expand(key: "r", animate: false);
+      c.expand(key: "x", animate: false);
+      c.expand(key: "y", animate: false);
+      c.debugAssertVisibleSubtreeSizeConsistency();
+      expect(c.visibleNodes.length, 4);
 
-        // Remove the chain root — every descendant's cache contribution
-        // must collapse to 0 after the eventual rebuild.
-        c.remove(key: "x", animate: false);
-        c.debugAssertVisibleSubtreeSizeConsistency();
-        expect(c.visibleNodes.length, 1);
-      },
-    );
+      // Remove the chain root — every descendant's cache contribution
+      // must collapse to 0 after the eventual rebuild.
+      c.remove(key: "x", animate: false);
+      c.debugAssertVisibleSubtreeSizeConsistency();
+      expect(c.visibleNodes.length, 1);
+    });
   });
 }

@@ -108,8 +108,11 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 32));
 
-        expect(controller.hasActiveSlides, true,
-            reason: "slide-OUT must be in flight");
+        expect(
+          controller.hasActiveSlides,
+          true,
+          reason: "slide-OUT must be in flight",
+        );
 
         // Settle without further scroll — the slide must complete
         // without throwing or producing inconsistent state.
@@ -121,65 +124,64 @@ void main() {
       },
     );
 
-    testWidgets(
-      "scroll change during pending baseline runs normalize WITHOUT "
-      "installing standalone slides (single-batch invariant)",
-      (tester) async {
-        // The plan §5.3 invariant: when a pending mutation baseline
-        // exists, scroll-induced normalization must NOT install its
-        // own slide batch. The upcoming consume owns the single
-        // animation batch for the layout. We verify this by checking
-        // that the slide active count after the layout matches what
-        // consume installs (one batch worth) rather than two stacked
-        // batches.
-        final scroll = ScrollController();
-        addTearDown(scroll.dispose);
-        final controller = _newController(tester);
-        addTearDown(controller.dispose);
+    testWidgets("scroll change during pending baseline runs normalize WITHOUT "
+        "installing standalone slides (single-batch invariant)", (
+      tester,
+    ) async {
+      // The plan §5.3 invariant: when a pending mutation baseline
+      // exists, scroll-induced normalization must NOT install its
+      // own slide batch. The upcoming consume owns the single
+      // animation batch for the layout. We verify this by checking
+      // that the slide active count after the layout matches what
+      // consume installs (one batch worth) rather than two stacked
+      // batches.
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final controller = _newController(tester);
+      addTearDown(controller.dispose);
 
-        controller.setRoots([
-          for (var i = 0; i < 100; i++) TreeNode(key: "r$i", data: i),
-        ]);
-        await tester.pumpWidget(_harness(controller, scroll));
-        await tester.pumpAndSettle();
+      controller.setRoots([
+        for (var i = 0; i < 100; i++) TreeNode(key: "r$i", data: i),
+      ]);
+      await tester.pumpWidget(_harness(controller, scroll));
+      await tester.pumpAndSettle();
 
-        scroll.jumpTo(2000);
-        await tester.pump();
-        await tester.pumpAndSettle();
+      scroll.jumpTo(2000);
+      await tester.pump();
+      await tester.pumpAndSettle();
 
-        // Install an edge ghost via slide-OUT.
-        controller.moveNode(
-          "r45",
-          null,
-          index: 95,
-          animate: true,
-          slideDuration: const Duration(seconds: 2),
-          slideCurve: Curves.linear,
-        );
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 16));
-        expect(controller.hasActiveSlides, true);
+      // Install an edge ghost via slide-OUT.
+      controller.moveNode(
+        "r45",
+        null,
+        index: 95,
+        animate: true,
+        slideDuration: const Duration(seconds: 2),
+        slideCurve: Curves.linear,
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(controller.hasActiveSlides, true);
 
-        // Now: scroll change AND a new mutation in the same frame.
-        // This forces the normalize-then-consume ordering with
-        // installStandaloneSlides=false on the normalize pass.
-        scroll.jumpTo(2200);
-        controller.moveNode(
-          "r10",
-          null,
-          index: 90,
-          animate: true,
-          slideDuration: const Duration(seconds: 2),
-          slideCurve: Curves.linear,
-        );
-        await tester.pump();
+      // Now: scroll change AND a new mutation in the same frame.
+      // This forces the normalize-then-consume ordering with
+      // installStandaloneSlides=false on the normalize pass.
+      scroll.jumpTo(2200);
+      controller.moveNode(
+        "r10",
+        null,
+        index: 90,
+        animate: true,
+        slideDuration: const Duration(seconds: 2),
+        slideCurve: Curves.linear,
+      );
+      await tester.pump();
 
-        // No assertion-thrown, no engine inconsistency. Slides remain
-        // active and settle cleanly.
-        await tester.pumpAndSettle();
-        expect(controller.hasActiveSlides, false);
-      },
-    );
+      // No assertion-thrown, no engine inconsistency. Slides remain
+      // active and settle cleanly.
+      await tester.pumpAndSettle();
+      expect(controller.hasActiveSlides, false);
+    });
 
     testWidgets(
       "scroll-driven ghost re-promotion installs single slide when no "
@@ -228,52 +230,49 @@ void main() {
       },
     );
 
-    testWidgets(
-      "rapid reparent during auto-scroll: viewport changes mid-batch "
-      "do not corrupt slide composition",
-      (tester) async {
-        // Smoke test for the intersection of scroll change + rapid
-        // mutations. Each iteration moves a different row while the
-        // scroll controller is on a different position. The pipeline
-        // must remain consistent (no stuck slides, no crashes).
-        final scroll = ScrollController();
-        addTearDown(scroll.dispose);
-        final controller = _newController(tester);
-        addTearDown(controller.dispose);
+    testWidgets("rapid reparent during auto-scroll: viewport changes mid-batch "
+        "do not corrupt slide composition", (tester) async {
+      // Smoke test for the intersection of scroll change + rapid
+      // mutations. Each iteration moves a different row while the
+      // scroll controller is on a different position. The pipeline
+      // must remain consistent (no stuck slides, no crashes).
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final controller = _newController(tester);
+      addTearDown(controller.dispose);
 
-        controller.setRoots([
-          for (var i = 0; i < 200; i++) TreeNode(key: "r$i", data: i),
-        ]);
-        await tester.pumpWidget(_harness(controller, scroll));
-        await tester.pumpAndSettle();
+      controller.setRoots([
+        for (var i = 0; i < 200; i++) TreeNode(key: "r$i", data: i),
+      ]);
+      await tester.pumpWidget(_harness(controller, scroll));
+      await tester.pumpAndSettle();
 
-        scroll.jumpTo(3000);
+      scroll.jumpTo(3000);
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      for (int i = 0; i < 5; i++) {
+        controller.moveNode(
+          "r${60 + i}",
+          null,
+          index: 150 + i,
+          animate: true,
+          slideDuration: const Duration(milliseconds: 400),
+          slideCurve: Curves.linear,
+        );
+        scroll.jumpTo(3000.0 + i * 100);
         await tester.pump();
-        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 16));
+      }
 
-        for (int i = 0; i < 5; i++) {
-          controller.moveNode(
-            "r${60 + i}",
-            null,
-            index: 150 + i,
-            animate: true,
-            slideDuration: const Duration(milliseconds: 400),
-            slideCurve: Curves.linear,
-          );
-          scroll.jumpTo(3000.0 + i * 100);
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 16));
-        }
+      // Settle.
+      await tester.pumpAndSettle();
+      expect(controller.hasActiveSlides, false);
 
-        // Settle.
-        await tester.pumpAndSettle();
-        expect(controller.hasActiveSlides, false);
-
-        // Final structural state matches expectations.
-        for (int i = 0; i < 5; i++) {
-          expect(controller.getParent("r${60 + i}"), isNull);
-        }
-      },
-    );
+      // Final structural state matches expectations.
+      for (int i = 0; i < 5; i++) {
+        expect(controller.getParent("r${60 + i}"), isNull);
+      }
+    });
   });
 }

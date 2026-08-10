@@ -18,7 +18,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -38,7 +43,8 @@ void main() {
       expect(
         controller.takePendingPhantomAnchors(),
         isNull,
-        reason: "no render host participated in the slide cycle, so no "
+        reason:
+            "no render host participated in the slide cycle, so no "
             "phantom anchors may be left staged for a later cycle",
       );
       await tester.pumpAndSettle();
@@ -50,7 +56,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -68,7 +79,8 @@ void main() {
       expect(
         controller.takePendingExitPhantomAnchors(),
         isNull,
-        reason: "no render host participated in the slide cycle, so no "
+        reason:
+            "no render host participated in the slide cycle, so no "
             "exit-phantom anchors may be left staged for a later cycle",
       );
       await tester.pumpAndSettle();

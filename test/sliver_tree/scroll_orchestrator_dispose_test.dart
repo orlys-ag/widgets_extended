@@ -42,7 +42,12 @@ class _HostState extends State<_Host> with TickerProviderStateMixin {
     super.initState();
     controller = TreeController<String, String>(
       vsync: this,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     scrollController = ScrollController();
     controller.setRoots([
@@ -86,85 +91,92 @@ class _HostState extends State<_Host> with TickerProviderStateMixin {
 }
 
 void main() {
-  testWidgets(
-    "disposing the controller mid animated-concurrent scroll cancels "
-    "cleanly (no active ticker, future completes false)",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-      );
-      final scrollController = ScrollController();
-      addTearDown(scrollController.dispose);
+  testWidgets("disposing the controller mid animated-concurrent scroll cancels "
+      "cleanly (no active ticker, future completes false)", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        ),
+      ),
+    );
+    final scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
 
-      controller.setRoots([
-        for (int i = 0; i < 20; i++) TreeNode(key: "r$i", data: "R$i"),
-      ]);
-      // Deep collapsed chain under the last root so the animated
-      // ancestor-expansion path is exercised.
-      controller.setChildren("r19", [const TreeNode(key: "mid", data: "M")]);
-      controller.setChildren("mid", [
-        const TreeNode(key: "target", data: "T"),
-      ]);
+    controller.setRoots([
+      for (int i = 0; i < 20; i++) TreeNode(key: "r$i", data: "R$i"),
+    ]);
+    // Deep collapsed chain under the last root so the animated
+    // ancestor-expansion path is exercised.
+    controller.setChildren("r19", [const TreeNode(key: "mid", data: "M")]);
+    controller.setChildren("mid", [const TreeNode(key: "target", data: "T")]);
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CustomScrollView(
-              controller: scrollController,
-              slivers: [
-                SliverTree<String, String>(
-                  controller: controller,
-                  nodeBuilder: (context, key, depth) {
-                    return SizedBox(height: 50, child: Text(key));
-                  },
-                ),
-              ],
-            ),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            controller: scrollController,
+            slivers: [
+              SliverTree<String, String>(
+                controller: controller,
+                nodeBuilder: (context, key, depth) {
+                  return SizedBox(height: 50, child: Text(key));
+                },
+              ),
+            ],
           ),
         ),
-      );
-      await tester.pumpAndSettle();
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      bool completed = false;
-      bool? result;
-      controller
-          .animateScrollToKey(
-            "target",
-            scrollController: scrollController,
-            duration: const Duration(milliseconds: 300),
-            ancestorExpansion: AncestorExpansionMode.animated,
-          )
-          .then((v) {
-        completed = true;
-        result = v;
-      });
+    bool completed = false;
+    bool? result;
+    controller
+        .animateScrollToKey(
+          "target",
+          scrollController: scrollController,
+          duration: const Duration(milliseconds: 300),
+          ancestorExpansion: AncestorExpansionMode.animated,
+        )
+        .then((v) {
+          completed = true;
+          result = v;
+        });
 
-      // Let the concurrent expand+scroll get genuinely mid-flight.
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 50));
-      expect(completed, isFalse,
-          reason: "setup: the animated scroll must still be in flight");
+    // Let the concurrent expand+scroll get genuinely mid-flight.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(
+      completed,
+      isFalse,
+      reason: "setup: the animated scroll must still be in flight",
+    );
 
-      // Dispose the controller mid-flight — the scrollable is still
-      // mounted (hasClients stays true), so only the cancellation path
-      // can end the loop.
-      controller.dispose();
-      await tester.pump();
+    // Dispose the controller mid-flight — the scrollable is still
+    // mounted (hasClients stays true), so only the cancellation path
+    // can end the loop.
+    controller.dispose();
+    await tester.pump();
 
-      expect(
-        completed,
-        isTrue,
-        reason: "the in-flight animateScrollToKey future must complete "
-            "when the controller is disposed (cancellation), not keep "
-            "awaiting endOfFrame forever",
-      );
-      expect(result, isFalse,
-          reason: "a cancelled scroll reports false (did not complete)");
-      // The framework's end-of-test ticker check enforces that the
-      // internal scroll-progress AnimationController was disposed.
-    },
-  );
+    expect(
+      completed,
+      isTrue,
+      reason:
+          "the in-flight animateScrollToKey future must complete "
+          "when the controller is disposed (cancellation), not keep "
+          "awaiting endOfFrame forever",
+    );
+    expect(
+      result,
+      isFalse,
+      reason: "a cancelled scroll reports false (did not complete)",
+    );
+    // The framework's end-of-test ticker check enforces that the
+    // internal scroll-progress AnimationController was disposed.
+  });
 
   testWidgets(
     "two concurrent animated scrolls + unmount: no active-Ticker assert, "
@@ -172,7 +184,9 @@ void main() {
     (tester) async {
       final hostKey = GlobalKey<State<_Host>>();
       await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: _Host(key: hostKey))),
+        MaterialApp(
+          home: Scaffold(body: _Host(key: hostKey)),
+        ),
       );
       await tester.pumpAndSettle();
       final host = hostKey.currentState! as _HostState;
@@ -187,13 +201,16 @@ void main() {
             ancestorExpansion: AncestorExpansionMode.animated,
           )
           .then((v) {
-        done1 = true;
-        result1 = v;
-      });
+            done1 = true;
+            result1 = v;
+          });
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(done1, isFalse,
-          reason: "setup: scroll #1 must still be in flight");
+      expect(
+        done1,
+        isFalse,
+        reason: "setup: scroll #1 must still be in flight",
+      );
 
       // Scroll #2 starts while #1 is mid-flight. Single-flight contract:
       // #2 supersedes #1, which must be torn down synchronously here —
@@ -208,9 +225,9 @@ void main() {
             ancestorExpansion: AncestorExpansionMode.animated,
           )
           .then((v) {
-        done2 = true;
-        result2 = v;
-      });
+            done2 = true;
+            result2 = v;
+          });
       await tester.pump(const Duration(milliseconds: 16));
 
       // Unmount the host mid-flight. Its State.dispose() runs
@@ -224,15 +241,28 @@ void main() {
       );
       await tester.pump();
 
-      expect(done1, isTrue,
-          reason: "superseded scroll #1's future must resolve");
-      expect(result1, isFalse,
-          reason: "superseded scroll #1 was cancelled, not completed");
-      expect(done2, isTrue,
-          reason: "scroll #2's future must resolve on dispose "
-              "(cancellation), not keep awaiting endOfFrame forever");
-      expect(result2, isFalse,
-          reason: "a dispose-cancelled scroll reports false");
+      expect(
+        done1,
+        isTrue,
+        reason: "superseded scroll #1's future must resolve",
+      );
+      expect(
+        result1,
+        isFalse,
+        reason: "superseded scroll #1 was cancelled, not completed",
+      );
+      expect(
+        done2,
+        isTrue,
+        reason:
+            "scroll #2's future must resolve on dispose "
+            "(cancellation), not keep awaiting endOfFrame forever",
+      );
+      expect(
+        result2,
+        isFalse,
+        reason: "a dispose-cancelled scroll reports false",
+      );
     },
   );
 
@@ -242,7 +272,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       final scrollController = ScrollController();
@@ -295,13 +330,16 @@ void main() {
             ancestorExpansion: AncestorExpansionMode.animated,
           )
           .then((v) {
-        done1 = true;
-        result1 = v;
-      });
+            done1 = true;
+            result1 = v;
+          });
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(done1, isFalse,
-          reason: "setup: scroll #1 must still be in flight");
+      expect(
+        done1,
+        isFalse,
+        reason: "setup: scroll #1 must still be in flight",
+      );
 
       bool done2 = false;
       bool? result2;
@@ -313,22 +351,26 @@ void main() {
             ancestorExpansion: AncestorExpansionMode.animated,
           )
           .then((v) {
-        done2 = true;
-        result2 = v;
-      });
+            done2 = true;
+            result2 = v;
+          });
       await tester.pumpAndSettle();
 
       expect(done1, isTrue);
       expect(
         result1,
         isFalse,
-        reason: "the superseded scroll must resolve false (cancelled) — "
+        reason:
+            "the superseded scroll must resolve false (cancelled) — "
             "on the unfixed tree both scrolls run concurrently, fighting "
             "over jumpTo, and #1 resolves true",
       );
       expect(done2, isTrue);
-      expect(result2, isTrue,
-          reason: "the newer scroll wins and completes normally");
+      expect(
+        result2,
+        isTrue,
+        reason: "the newer scroll wins and completes normally",
+      );
 
       final position = scrollController.position;
       final expected = controller

@@ -18,19 +18,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
-  testWidgets(
-    "horizontal axis trips the axis assert",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([
-        const TreeNode(key: "a", data: "a"),
-      ]);
+  testWidgets("horizontal axis trips the axis assert", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
+    controller.setRoots([const TreeNode(key: "a", data: "a")]);
 
-      await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(
+      MaterialApp(
         home: Scaffold(
           body: SizedBox(
             height: 400,
@@ -39,28 +36,25 @@ void main() {
               slivers: [
                 SliverTree<String, String>(
                   controller: controller,
-                  nodeBuilder: (_, key, _) => SizedBox(
-                    height: 40,
-                    width: 100,
-                    child: Text(key),
-                  ),
+                  nodeBuilder: (_, key, _) =>
+                      SizedBox(height: 40, width: 100, child: Text(key)),
                 ),
               ],
             ),
           ),
         ),
-      ));
+      ),
+    );
 
-      final exception = tester.takeException();
-      expect(
-        exception,
-        isAssertionError,
-        reason: "Debug build should trip the axis assert",
-      );
-      expect(
-        exception.toString(),
-        contains("SliverTree currently supports only vertical"),
-      );
-    },
-  );
+    final exception = tester.takeException();
+    expect(
+      exception,
+      isAssertionError,
+      reason: "Debug build should trip the axis assert",
+    );
+    expect(
+      exception.toString(),
+      contains("SliverTree currently supports only vertical"),
+    );
+  });
 }

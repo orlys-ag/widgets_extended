@@ -55,10 +55,31 @@ abstract interface class ReorderRenderPort<TKey> {
     double scrollY,
   );
 
+  /// Where [key] is painted right now, in the same sliver-local space
+  /// [findRowAtPaintedY] speaks. Returns `null` when the row is not
+  /// mounted.
+  ///
+  /// The INVERSE of [findRowAtPaintedY], and the two are NOT
+  /// interchangeable at a sticky header. A pinned header paints at its
+  /// pinned band while its structural offset has scrolled away above;
+  /// this member substitutes the pinned band, and [findRowAtPaintedY]
+  /// does not (it answers with whatever content is scrolled beneath the
+  /// pinned strip).
+  ///
+  /// So ask THIS when you know the key and want its geometry, and
+  /// [findRowAtPaintedY] only when the position is the question. Grab
+  /// capture knows the key, which is why it uses this: resolving grab
+  /// geometry positionally silently produced a top-anchored proxy of the
+  /// wrong height whenever a drag began on a pinned header.
+  ///
+  /// Includes any active FLIP slide delta, matching [findRowAtPaintedY].
+  ({double paintedOffset, double extent})? paintedRowBounds(TKey key);
+
   /// Pins [key] against stale eviction until [unpinNode]. Idempotent.
   ///
   /// The reorder controller pins the dragged row for the session's
-  /// lifetime: the drag gesture lives on the row's own detector, so
+  /// lifetime: the drag gesture's recognizer lives on the row's own
+  /// `State`, so
   /// evicting the row would orphan the session.
   void pinNode(TKey key);
 
@@ -69,12 +90,16 @@ abstract interface class ReorderRenderPort<TKey> {
   /// install a FLIP slide from them to the post-mutation offsets. No-op
   /// when [isLaidOut] is false.
   ///
-  /// [baselineYOverrides] replaces the captured sliver-local y for the
-  /// given keys before staging. The reorder controller uses it for the
-  /// proxy drop-settle: overriding the dragged row's entry to the RELEASE
-  /// position makes the commit FLIP carry the row from where the floating
-  /// proxy was let go into its new slot, instead of from its pre-drag
-  /// slot. Keys absent from the snapshot are ignored.
+  /// [baselineOverrides] replaces the captured sliver-local y (and,
+  /// when the record's `x` is non-null, the captured cross offset) for
+  /// the given keys before staging. The reorder controller uses it for
+  /// the proxy drop-settle: overriding the dragged row's entry to the
+  /// RELEASE position makes the commit FLIP carry the row from where
+  /// the floating proxy was let go into its new slot, instead of from
+  /// its pre-drag slot. A null `x` preserves the snapshot's captured
+  /// cross offset (the classic y-only override); sessions without a
+  /// proxy cross-offset source pass null there. Keys absent from the
+  /// snapshot are ignored.
   ///
   /// Caller contract (first-wins staging): every successful stage MUST be
   /// followed by a structural mutation that triggers a layout in the same
@@ -83,7 +108,6 @@ abstract interface class ReorderRenderPort<TKey> {
   void beginSlideBaseline({
     required Duration duration,
     required Curve curve,
-    Map<TKey, double>? baselineYOverrides,
+    Map<TKey, ({double y, double? x})>? baselineOverrides,
   });
-
 }

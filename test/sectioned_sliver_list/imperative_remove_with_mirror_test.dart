@@ -21,14 +21,16 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
-    controller.setSections(
-      ["s"],
-      itemsOf: (_) => const ["a", "b", "c"],
-    );
+    controller.setSections(["s"], itemsOf: (_) => const ["a", "b", "c"]);
     controller.expandSection("s", animate: false);
     expect(controller.hasItem("b"), isTrue);
 
@@ -50,9 +52,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
 
-    expect(controller.hasItem("b"), isFalse,
-        reason: "Imperative removeItem followed by a live-mirror setSections "
-            "must purge 'b'.");
+    expect(
+      controller.hasItem("b"),
+      isFalse,
+      reason:
+          "Imperative removeItem followed by a live-mirror setSections "
+          "must purge 'b'.",
+    );
     expect(controller.itemKeysOf("s"), equals(["a", "c"]));
   });
 
@@ -62,21 +68,20 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
-    controller.setSections(
-      ["a", "b", "c"],
-      itemsOf: (_) => const [],
-    );
+    controller.setSections(["a", "b", "c"], itemsOf: (_) => const []);
 
     controller.removeSection("b", animate: true);
     final liveSections = controller.sectionKeys();
-    controller.setSections(
-      liveSections,
-      itemsOf: (_) => const [],
-    );
+    controller.setSections(liveSections, itemsOf: (_) => const []);
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }

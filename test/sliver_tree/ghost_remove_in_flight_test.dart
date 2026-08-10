@@ -46,7 +46,12 @@ void main() {
   testWidgets("ghost re-moved to visible parent does NOT snap", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 1000),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -86,8 +91,11 @@ void main() {
     );
     await tester.pump();
     expect(controller.hasActiveSlides, true);
-    expect(controller.isVisible("Y"), false,
-        reason: "Y is now structurally under collapsed B → hidden");
+    expect(
+      controller.isVisible("Y"),
+      false,
+      reason: "Y is now structurally under collapsed B → hidden",
+    );
     final initialDelta = controller.getSlideDelta("Y");
     expect(initialDelta, closeTo(-48.0, 1.0));
 
@@ -95,10 +103,16 @@ void main() {
     // pump 200ms → progress ≈ 20% → currentDelta ≈ -38.4.
     await tester.pump(const Duration(milliseconds: 200));
     final midGhostDelta = controller.getSlideDelta("Y");
-    expect(midGhostDelta, lessThan(0.0),
-        reason: "Y is mid-exit-slide — currentDelta is still negative");
-    expect(midGhostDelta, greaterThan(-48.0),
-        reason: "Y has progressed toward 0 from -48");
+    expect(
+      midGhostDelta,
+      lessThan(0.0),
+      reason: "Y is mid-exit-slide — currentDelta is still negative",
+    );
+    expect(
+      midGhostDelta,
+      greaterThan(-48.0),
+      reason: "Y has progressed toward 0 from -48",
+    );
     // Y's CURRENT painted position (Pass A.5 paint truth) =
     // B.SETTLED top + Y.slideDelta. The ghost converges on the anchor's
     // settled position (96), NOT the live sliding band (96 + B.slide):
@@ -108,9 +122,13 @@ void main() {
     // drives the EXIT clip, not the ghost's convergence top.
     // Y.painted = 96 + (-38.4) = 57.6.
     final bMidSlide = controller.getSlideDelta("B");
-    expect(bMidSlide, greaterThan(0.0),
-        reason: "B was structurally at y=144, shifted to y=96, so its "
-            "slide delta is positive (currently +38.4 ≈)");
+    expect(
+      bMidSlide,
+      greaterThan(0.0),
+      reason:
+          "B was structurally at y=144, shifted to y=96, so its "
+          "slide delta is positive (currently +38.4 ≈)",
+    );
     final yPaintedBeforeRemove = 96.0 + midGhostDelta;
 
     // SECOND move (mid-ghost): Y → C (visible, expanded).
@@ -135,26 +153,39 @@ void main() {
     );
     await tester.pump();
 
-    expect(controller.isVisible("Y"), true,
-        reason: "Y was moved to expanded C → now visible");
+    expect(
+      controller.isVisible("Y"),
+      true,
+      reason: "Y was moved to expanded C → now visible",
+    );
     final newDelta = controller.getSlideDelta("Y");
     // Y's structural position under C is 192 (last row).
     // Y painted = 192 + newDelta. The fix guarantees this equals
     // yPaintedBeforeRemove (no snap).
     final yPaintedAfterRemove = 192.0 + newDelta;
-    expect(yPaintedAfterRemove, closeTo(yPaintedBeforeRemove, 2.0),
-        reason: "Y's painted position must be visually continuous across "
-            "the re-move. Before: $yPaintedBeforeRemove, "
-            "after: $yPaintedAfterRemove");
+    expect(
+      yPaintedAfterRemove,
+      closeTo(yPaintedBeforeRemove, 2.0),
+      reason:
+          "Y's painted position must be visually continuous across "
+          "the re-move. Before: $yPaintedBeforeRemove, "
+          "after: $yPaintedAfterRemove",
+    );
 
     await tester.pumpAndSettle();
   });
 
-  testWidgets("unrelated moveNode does not drop in-flight ghost",
-      (tester) async {
+  testWidgets("unrelated moveNode does not drop in-flight ghost", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 1000),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -190,13 +221,19 @@ void main() {
     );
     await tester.pump();
     expect(controller.hasActiveSlides, true);
-    expect(controller.getSlideDelta("Y"), isNot(0.0),
-        reason: "Y has ghost slide installed");
+    expect(
+      controller.getSlideDelta("Y"),
+      isNot(0.0),
+      reason: "Y has ghost slide installed",
+    );
 
     // Tick part-way through.
     await tester.pump(const Duration(milliseconds: 200));
-    expect(controller.getSlideDelta("Y"), isNot(0.0),
-        reason: "Y is still mid-ghost-slide");
+    expect(
+      controller.getSlideDelta("Y"),
+      isNot(0.0),
+      reason: "Y is still mid-ghost-slide",
+    );
 
     // SECOND move: an unrelated row (c1) → c2's slot. Y is NOT touched.
     //
@@ -219,9 +256,13 @@ void main() {
 
     // Y must still have an active slide (its ghost survives the
     // unrelated mutation).
-    expect(controller.getSlideDelta("Y"), isNot(0.0),
-        reason: "Y's ghost slide must survive an unrelated moveNode "
-            "(was previously dropped because consume cleared the ghost map)");
+    expect(
+      controller.getSlideDelta("Y"),
+      isNot(0.0),
+      reason:
+          "Y's ghost slide must survive an unrelated moveNode "
+          "(was previously dropped because consume cleared the ghost map)",
+    );
 
     await tester.pumpAndSettle();
     expect(controller.hasActiveSlides, false);

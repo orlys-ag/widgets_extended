@@ -18,14 +18,14 @@ import 'package:widgets_extended/sliver_tree/synced_tree_node.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
 
-SyncedTreeNode<String, String> _n(String k,
-        [List<SyncedTreeNode<String, String>>? c]) =>
-    SyncedTreeNode(key: k, data: k, children: c ?? const []);
+SyncedTreeNode<String, String> _n(
+  String k, [
+  List<SyncedTreeNode<String, String>>? c,
+]) => SyncedTreeNode(key: k, data: k, children: c ?? const []);
 
 /// painted Y = layoutOffset (+ slide delta if the row is mounted) — but we
 /// read layoutOffset for visible rows and fall back to slide delta for ghosts.
-({double? offset, double? extent}) _probe(
-    WidgetTester tester, String key) {
+({double? offset, double? extent}) _probe(WidgetTester tester, String key) {
   final render = tester.renderObject<RenderSliverTree<String, String>>(
     find.byType(SliverTree<String, String>),
   );
@@ -60,7 +60,12 @@ class _HarnessState extends State<_Harness> {
             SyncedSliverTree<String, String>(
               tree: widget.builder(),
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 400),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 controller ??= node.controller;
                 return SizedBox(
@@ -80,23 +85,35 @@ class _HarnessState extends State<_Harness> {
 void _log(WidgetTester t, TreeController c, String tag) {
   final x = _probe(t, "x");
   // ignore: avoid_print
-  print("$tag visible(x)=${c.visibleNodes.contains("x")} "
-      "slideDelta(x)=${c.getSlideDelta("x").toStringAsFixed(1)} "
-      "offset=${x.offset?.toStringAsFixed(1)} "
-      "extent=${x.extent?.toStringAsFixed(1)} "
-      "paintedY=${x.offset == null ? "?" : (x.offset! + c.getSlideDelta("x")).toStringAsFixed(1)}");
+  print(
+    "$tag visible(x)=${c.visibleNodes.contains("x")} "
+    "slideDelta(x)=${c.getSlideDelta("x").toStringAsFixed(1)} "
+    "offset=${x.offset?.toStringAsFixed(1)} "
+    "extent=${x.extent?.toStringAsFixed(1)} "
+    "paintedY=${x.offset == null ? "?" : (x.offset! + c.getSlideDelta("x")).toStringAsFixed(1)}",
+  );
 }
 
 void main() {
-  testWidgets("expand collapsed section WHILE exit-slide is in flight",
-      (tester) async {
+  testWidgets("expand collapsed section WHILE exit-slide is in flight", (
+    tester,
+  ) async {
     var fav = true;
-    await tester.pumpWidget(_Harness(builder: () => fav
-        ? [_n("fav", [_n("x"), _n("keep")]), _n("others", [_n("o1")])]
-        : [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]));
+    await tester.pumpWidget(
+      _Harness(
+        builder: () => fav
+            ? [
+                _n("fav", [_n("x"), _n("keep")]),
+                _n("others", [_n("o1")]),
+              ]
+            : [
+                _n("fav", [_n("keep")]),
+                _n("others", [_n("x"), _n("o1")]),
+              ],
+      ),
+    );
     await tester.pumpAndSettle();
-    final c =
-        tester.state<_HarnessState>(find.byType(_Harness)).controller!;
+    final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
 
     // Collapse others.
     c.collapse(key: "others", animate: false);
@@ -105,8 +122,14 @@ void main() {
 
     // Un-favorite x -> exit-slide into collapsed others (Case B: delta works).
     fav = false;
-    await tester.pumpWidget(_Harness(builder: () =>
-        [_n("fav", [_n("keep")]), _n("others", [_n("x"), _n("o1")])]));
+    await tester.pumpWidget(
+      _Harness(
+        builder: () => [
+          _n("fav", [_n("keep")]),
+          _n("others", [_n("x"), _n("o1")]),
+        ],
+      ),
+    );
     await tester.pump();
     _log(tester, c, "[move t=0]");
 
@@ -129,15 +152,27 @@ void main() {
     expect(c.visibleNodes.contains("x"), true);
   });
 
-  testWidgets("move + expand in the SAME batch (controller level)",
-      (tester) async {
+  testWidgets("move + expand in the SAME batch (controller level)", (
+    tester,
+  ) async {
     final c = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 400),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(c.dispose);
-    c.setRoots([const TreeNode(key: "A", data: "A"), const TreeNode(key: "B", data: "B")]);
-    c.setChildren("A", [const TreeNode(key: "x", data: "x"), const TreeNode(key: "keep", data: "keep")]);
+    c.setRoots([
+      const TreeNode(key: "A", data: "A"),
+      const TreeNode(key: "B", data: "B"),
+    ]);
+    c.setChildren("A", [
+      const TreeNode(key: "x", data: "x"),
+      const TreeNode(key: "keep", data: "keep"),
+    ]);
     c.setChildren("B", [const TreeNode(key: "o1", data: "o1")]);
     c.expand(key: "A", animate: false);
     // B collapsed.
@@ -145,13 +180,18 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: CustomScrollView(slivers: [
-            SliverTree<String, String>(
-              controller: c,
-              nodeBuilder: (context, key, depth) =>
-                  SizedBox(key: ValueKey("row-$key"), height: 48, child: Text(key)),
-            ),
-          ]),
+          body: CustomScrollView(
+            slivers: [
+              SliverTree<String, String>(
+                controller: c,
+                nodeBuilder: (context, key, depth) => SizedBox(
+                  key: ValueKey("row-$key"),
+                  height: 48,
+                  child: Text(key),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

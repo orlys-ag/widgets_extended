@@ -49,7 +49,7 @@ typedef GhostEntry = ({ViewportEdge edge, Duration duration, Curve curve});
 
 class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
   GhostRegistry({required TreeController<TKey, TData> controller})
-      : _controller = controller;
+    : _controller = controller;
 
   TreeController<TKey, TData> _controller;
 
@@ -219,10 +219,7 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
         extent: _controller.getCurrentExtentNid(nid),
       )) {
         // Re-promote.
-        current[key] = (
-          y: trueStructuralY + slideY,
-          x: indent + slideX,
-        );
+        current[key] = (y: trueStructuralY + slideY, x: indent + slideX);
         exits.remove(key);
         ghostKeysTouchedThisCycle.add(key);
       } else {
@@ -280,8 +277,7 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
       final slideY = nid >= 0 ? _controller.getSlideDeltaNid(nid) : 0.0;
       final slideX = nid >= 0 ? _controller.getSlideDeltaXNid(nid) : 0.0;
       final hasInFlightSlide = slideY != 0.0 || slideX != 0.0;
-      final rowExtent =
-          nid >= 0 ? _controller.getCurrentExtentNid(nid) : 0.0;
+      final rowExtent = nid >= 0 ? _controller.getCurrentExtentNid(nid) : 0.0;
 
       // `curr` includes the existing slide delta so the engine can
       // compose from the currently painted position. Viewport admission
@@ -377,13 +373,14 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
     final exits = _entries;
     if (exits == null) return;
     final keys = exits.keys.toList();
-    final groups = <
-      (Duration duration, Curve curve),
-      ({
-        Map<TKey, ({double y, double x})> baseline,
-        Map<TKey, ({double y, double x})> current,
-      })
-    >{};
+    final groups =
+        <
+          (Duration duration, Curve curve),
+          ({
+            Map<TKey, ({double y, double x})> baseline,
+            Map<TKey, ({double y, double x})> current,
+          })
+        >{};
     for (final key in keys) {
       final trueStructuralY = _computeTrueStructuralAt(key);
       if (trueStructuralY < 0) continue;
@@ -432,10 +429,8 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
           );
           final oldBaseY = viewport.baseForEdge(entry.edge);
           final newBaseY = viewport.baseForEdge(newEdge);
-          group.baseline[key] =
-              (y: oldBaseY + slideY, x: indent + slideX);
-          group.current[key] =
-              (y: newBaseY + slideY, x: indent + slideX);
+          group.baseline[key] = (y: oldBaseY + slideY, x: indent + slideX);
+          group.current[key] = (y: newBaseY + slideY, x: indent + slideX);
         }
         exits[key] = (
           edge: newEdge,

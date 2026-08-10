@@ -41,9 +41,10 @@ double _heightFor(String key) {
   return _kCard;
 }
 
-SyncedTreeNode<String, String> _n(String k,
-        [List<SyncedTreeNode<String, String>>? c]) =>
-    SyncedTreeNode(key: k, data: k, children: c ?? const []);
+SyncedTreeNode<String, String> _n(
+  String k, [
+  List<SyncedTreeNode<String, String>>? c,
+]) => SyncedTreeNode(key: k, data: k, children: c ?? const []);
 
 RenderSliverTree<String, String> _render(WidgetTester tester) =>
     tester.renderObject<RenderSliverTree<String, String>>(
@@ -68,7 +69,12 @@ class _HarnessState extends State<_Harness> {
             SyncedSliverTree<String, String>(
               tree: widget.builder(),
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 400),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 controller ??= node.controller;
                 return SizedBox(
@@ -97,119 +103,164 @@ class _HarnessState extends State<_Harness> {
 /// MUST be called only inside a `containsKey` guard (Invariant 8 — the
 /// capture is empty at settle).
 double _farSideVisible(
-    RenderSliverTree<String, String> render, String key, bool slidUp) {
+  RenderSliverTree<String, String> render,
+  String key,
+  bool slidUp,
+) {
   final cap = render.debugLastPhantomGhostPaint[key]!; // safe: key checked
-  final clipped =
-      cap.clipRect == null ? cap.ghostRect : cap.ghostRect.intersect(cap.clipRect!);
+  final clipped = cap.clipRect == null
+      ? cap.ghostRect
+      : cap.ghostRect.intersect(cap.clipRect!);
   if (clipped.height <= 0) return 0.0;
   final bandTop = cap.anchorBand.top;
   final bandBottom = cap.anchorBand.bottom;
   final residualAbove = (bandTop - clipped.top).clamp(0.0, clipped.height);
-  final residualBelow = (clipped.bottom - bandBottom).clamp(0.0, clipped.height);
+  final residualBelow = (clipped.bottom - bandBottom).clamp(
+    0.0,
+    clipped.height,
+  );
   return slidUp ? residualAbove : residualBelow;
 }
 
 void main() {
-  testWidgets(
-    "FAVORITE: tall card slides UP, FAR side occluded per-frame, "
-    "fully occluded at settle",
-    (tester) async {
-      var fav = false; // false = x in others; true = x favorited (in fav)
-      List<SyncedTreeNode<String, String>> build() => fav
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])];
+  testWidgets("FAVORITE: tall card slides UP, FAR side occluded per-frame, "
+      "fully occluded at settle", (tester) async {
+    var fav = false; // false = x in others; true = x favorited (in fav)
+    List<SyncedTreeNode<String, String>> build() => fav
+        ? [
+            _n("fav", [_n("x")]),
+            _n("others", [_n("o1")]),
+          ]
+        : [
+            _n("fav", [_n("fav_ph")]),
+            _n("others", [_n("x"), _n("o1")]),
+          ];
 
-      await tester.pumpWidget(_Harness(builder: build));
-      await tester.pumpAndSettle();
-      final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
+    await tester.pumpWidget(_Harness(builder: build));
+    await tester.pumpAndSettle();
+    final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
 
-      // Collapse favorites (the destination), keep others expanded with x.
-      c.collapse(key: "fav", animate: false);
-      await tester.pump();
+    // Collapse favorites (the destination), keep others expanded with x.
+    c.collapse(key: "fav", animate: false);
+    await tester.pump();
 
-      // Favorite x: x moves from others (visible) UP into collapsed fav (top).
-      fav = true;
-      await tester.pumpWidget(_Harness(builder: build));
-      await tester.pump();
+    // Favorite x: x moves from others (visible) UP into collapsed fav (top).
+    fav = true;
+    await tester.pumpWidget(_Harness(builder: build));
+    await tester.pump();
 
-      final render = _render(tester);
-      double? lastFarSide;
+    final render = _render(tester);
+    double? lastFarSide;
 
-      // PER-FRAME loop: pump in 16ms steps, assert FAR side == 0 while the
-      // ghost is sliding (capture key present), remember the last residual.
-      for (int i = 0; i < 30; i++) {
-        if (render.debugLastPhantomGhostPaint.containsKey("x")) {
-          final farSide = _farSideVisible(render, "x", true);
-          expect(farSide, lessThan(0.5),
-              reason: "[fav frame $i] tall card leaked $farSide px ABOVE the "
-                  "destination header band (FAR side) — far overhang not clipped");
-          lastFarSide = farSide;
-        }
-        if (!c.hasActiveSlides) break;
-        await tester.pump(const Duration(milliseconds: 16));
+    // PER-FRAME loop: pump in 16ms steps, assert FAR side == 0 while the
+    // ghost is sliding (capture key present), remember the last residual.
+    for (int i = 0; i < 30; i++) {
+      if (render.debugLastPhantomGhostPaint.containsKey("x")) {
+        final farSide = _farSideVisible(render, "x", true);
+        expect(
+          farSide,
+          lessThan(0.5),
+          reason:
+              "[fav frame $i] tall card leaked $farSide px ABOVE the "
+              "destination header band (FAR side) — far overhang not clipped",
+        );
+        lastFarSide = farSide;
       }
+      if (!c.hasActiveSlides) break;
+      await tester.pump(const Duration(milliseconds: 16));
+    }
 
-      // The ghost must have actually slid (so the per-frame oracle ran).
-      expect(lastFarSide, isNotNull,
-          reason: "Test setup: ghost should have slid (capture populated)");
+    // The ghost must have actually slid (so the per-frame oracle ran).
+    expect(
+      lastFarSide,
+      isNotNull,
+      reason: "Test setup: ghost should have slid (capture populated)",
+    );
 
-      // SETTLE — capture is empty (ghost pruned; Invariant 8). Do NOT deref.
-      await tester.pumpAndSettle();
-      expect(render.debugLastPhantomGhostPaint.containsKey("x"), isFalse,
-          reason: "Capture must be gone at settle (ghost pruned)");
-      expect(lastFarSide!, lessThan(0.5),
-          reason: "FAR side must have converged on the final sliding frame");
-      expect(c.visibleNodes.contains("x"), isFalse,
-          reason: "Card must be fully hidden inside the collapsed section");
-    },
-  );
+    // SETTLE — capture is empty (ghost pruned; Invariant 8). Do NOT deref.
+    await tester.pumpAndSettle();
+    expect(
+      render.debugLastPhantomGhostPaint.containsKey("x"),
+      isFalse,
+      reason: "Capture must be gone at settle (ghost pruned)",
+    );
+    expect(
+      lastFarSide!,
+      lessThan(0.5),
+      reason: "FAR side must have converged on the final sliding frame",
+    );
+    expect(
+      c.visibleNodes.contains("x"),
+      isFalse,
+      reason: "Card must be fully hidden inside the collapsed section",
+    );
+  });
 
-  testWidgets(
-    "UNFAVORITE: tall card slides DOWN, FAR side occluded per-frame, "
-    "fully occluded at settle",
-    (tester) async {
-      var fav = true; // true = x in favorites
-      List<SyncedTreeNode<String, String>> build() => fav
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])];
+  testWidgets("UNFAVORITE: tall card slides DOWN, FAR side occluded per-frame, "
+      "fully occluded at settle", (tester) async {
+    var fav = true; // true = x in favorites
+    List<SyncedTreeNode<String, String>> build() => fav
+        ? [
+            _n("fav", [_n("x")]),
+            _n("others", [_n("o1")]),
+          ]
+        : [
+            _n("fav", [_n("fav_ph")]),
+            _n("others", [_n("x"), _n("o1")]),
+          ];
 
-      await tester.pumpWidget(_Harness(builder: build));
-      await tester.pumpAndSettle();
-      final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
+    await tester.pumpWidget(_Harness(builder: build));
+    await tester.pumpAndSettle();
+    final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
 
-      c.collapse(key: "others", animate: false);
-      await tester.pump();
+    c.collapse(key: "others", animate: false);
+    await tester.pump();
 
-      // Unfavorite: x moves DOWN into collapsed others; fav -> placeholder.
-      fav = false;
-      await tester.pumpWidget(_Harness(builder: build));
-      await tester.pump();
+    // Unfavorite: x moves DOWN into collapsed others; fav -> placeholder.
+    fav = false;
+    await tester.pumpWidget(_Harness(builder: build));
+    await tester.pump();
 
-      final render = _render(tester);
-      double? lastFarSide;
+    final render = _render(tester);
+    double? lastFarSide;
 
-      for (int i = 0; i < 30; i++) {
-        if (render.debugLastPhantomGhostPaint.containsKey("x")) {
-          final farSide = _farSideVisible(render, "x", false);
-          expect(farSide, lessThan(0.5),
-              reason: "[unfav frame $i] tall card leaked $farSide px BELOW the "
-                  "destination header band (FAR side) — far overhang not clipped");
-          lastFarSide = farSide;
-        }
-        if (!c.hasActiveSlides) break;
-        await tester.pump(const Duration(milliseconds: 16));
+    for (int i = 0; i < 30; i++) {
+      if (render.debugLastPhantomGhostPaint.containsKey("x")) {
+        final farSide = _farSideVisible(render, "x", false);
+        expect(
+          farSide,
+          lessThan(0.5),
+          reason:
+              "[unfav frame $i] tall card leaked $farSide px BELOW the "
+              "destination header band (FAR side) — far overhang not clipped",
+        );
+        lastFarSide = farSide;
       }
+      if (!c.hasActiveSlides) break;
+      await tester.pump(const Duration(milliseconds: 16));
+    }
 
-      expect(lastFarSide, isNotNull,
-          reason: "Test setup: ghost should have slid (capture populated)");
+    expect(
+      lastFarSide,
+      isNotNull,
+      reason: "Test setup: ghost should have slid (capture populated)",
+    );
 
-      await tester.pumpAndSettle();
-      expect(render.debugLastPhantomGhostPaint.containsKey("x"), isFalse,
-          reason: "Capture must be gone at settle (ghost pruned)");
-      expect(lastFarSide!, lessThan(0.5),
-          reason: "FAR side must have converged on the final sliding frame");
-      expect(c.visibleNodes.contains("x"), isFalse,
-          reason: "Card must be fully hidden inside the collapsed section");
-    },
-  );
+    await tester.pumpAndSettle();
+    expect(
+      render.debugLastPhantomGhostPaint.containsKey("x"),
+      isFalse,
+      reason: "Capture must be gone at settle (ghost pruned)",
+    );
+    expect(
+      lastFarSide!,
+      lessThan(0.5),
+      reason: "FAR side must have converged on the final sliding frame",
+    );
+    expect(
+      c.visibleNodes.contains("x"),
+      isFalse,
+      reason: "Card must be fully hidden inside the collapsed section",
+    );
+  });
 }

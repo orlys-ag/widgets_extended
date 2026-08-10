@@ -43,68 +43,78 @@ Widget _harness(TreeController<String, String> controller) {
 }
 
 void main() {
-  testWidgets(
-    "second collapseAll mid-flight continues the bulk collapse — no "
-    "member's extent increases frame-over-frame",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
-      );
-      addTearDown(controller.dispose);
+  testWidgets("second collapseAll mid-flight continues the bulk collapse — no "
+      "member's extent increases frame-over-frame", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
 
-      controller.setRoots([TreeNode(key: "r", data: "R")]);
-      controller.setChildren("r", [
-        TreeNode(key: "a", data: "A"),
-        TreeNode(key: "b", data: "B"),
-      ]);
-      controller.expand(key: "r", animate: false);
+    controller.setRoots([TreeNode(key: "r", data: "R")]);
+    controller.setChildren("r", [
+      TreeNode(key: "a", data: "A"),
+      TreeNode(key: "b", data: "B"),
+    ]);
+    controller.expand(key: "r", animate: false);
 
-      await tester.pumpWidget(_harness(controller));
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(_harness(controller));
+    await tester.pumpAndSettle();
 
-      controller.collapseAll();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 150));
+    controller.collapseAll();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
 
-      final midExtent = controller.getAnimatedExtent("a", kRowExtent);
-      expect(midExtent, lessThan(kRowExtent),
-          reason: "setup: a must be mid-collapse (partial extent)");
-      expect(midExtent, greaterThan(0.0),
-          reason: "setup: a must not have finished collapsing yet");
+    final midExtent = controller.getAnimatedExtent("a", kRowExtent);
+    expect(
+      midExtent,
+      lessThan(kRowExtent),
+      reason: "setup: a must be mid-collapse (partial extent)",
+    );
+    expect(
+      midExtent,
+      greaterThan(0.0),
+      reason: "setup: a must not have finished collapsing yet",
+    );
 
-      // Double-tap "collapse all": must continue, not restart.
-      controller.collapseAll();
+    // Double-tap "collapse all": must continue, not restart.
+    controller.collapseAll();
 
-      double prev = controller.getAnimatedExtent("a", kRowExtent);
-      expect(
-        prev,
-        lessThanOrEqualTo(midExtent + 0.001),
-        reason: "the second collapseAll must not snap a's extent back up "
-            "(fresh group at value 1.0 would repaint it at full extent)",
-      );
-      for (int i = 0; i < 12; i++) {
-        await tester.pump(const Duration(milliseconds: 16));
-        if (!controller.visibleNodes.contains("a")) {
-          // Collapse finished (on the ORIGINAL timeline — continuation
-          // does not restart the clock); getAnimatedExtent now falls
-          // back to the full extent of the hidden row.
-          break;
-        }
-        final now = controller.getAnimatedExtent("a", kRowExtent);
-        expect(
-          now,
-          lessThanOrEqualTo(prev + 0.001),
-          reason: "collapse extent must be monotonically non-increasing "
-              "frame-over-frame (frame $i: $prev -> $now)",
-        );
-        prev = now;
+    double prev = controller.getAnimatedExtent("a", kRowExtent);
+    expect(
+      prev,
+      lessThanOrEqualTo(midExtent + 0.001),
+      reason:
+          "the second collapseAll must not snap a's extent back up "
+          "(fresh group at value 1.0 would repaint it at full extent)",
+    );
+    for (int i = 0; i < 12; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (!controller.visibleNodes.contains("a")) {
+        // Collapse finished (on the ORIGINAL timeline — continuation
+        // does not restart the clock); getAnimatedExtent now falls
+        // back to the full extent of the hidden row.
+        break;
       }
+      final now = controller.getAnimatedExtent("a", kRowExtent);
+      expect(
+        now,
+        lessThanOrEqualTo(prev + 0.001),
+        reason:
+            "collapse extent must be monotonically non-increasing "
+            "frame-over-frame (frame $i: $prev -> $now)",
+      );
+      prev = now;
+    }
 
-      await tester.pumpAndSettle();
-      expect(controller.visibleNodes, ["r"]);
-    },
-  );
+    await tester.pumpAndSettle();
+    expect(controller.visibleNodes, ["r"]);
+  });
 
   testWidgets(
     "second expandAll mid-flight continues the bulk expand — existing "
@@ -112,7 +122,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -130,10 +145,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 150));
 
       final midExtent = controller.getAnimatedExtent("a", kRowExtent);
-      expect(midExtent, greaterThan(0.0),
-          reason: "setup: a must be mid-expand");
-      expect(midExtent, lessThan(kRowExtent),
-          reason: "setup: a must not have finished expanding yet");
+      expect(
+        midExtent,
+        greaterThan(0.0),
+        reason: "setup: a must be mid-expand",
+      );
+      expect(
+        midExtent,
+        lessThan(kRowExtent),
+        reason: "setup: a must not have finished expanding yet",
+      );
 
       // A new collapsed parent appears mid-flight; the user hits
       // "expand all" again.
@@ -145,7 +166,8 @@ void main() {
       expect(
         afterReentry,
         lessThan(kRowExtent * 0.9),
-        reason: "the second expandAll must not dispose the in-flight group "
+        reason:
+            "the second expandAll must not dispose the in-flight group "
             "(which would pop half-expanded a to full extent instantly)",
       );
 
@@ -156,7 +178,8 @@ void main() {
         expect(
           now,
           greaterThanOrEqualTo(prev - 0.001),
-          reason: "expand extent must be monotonically non-decreasing "
+          reason:
+              "expand extent must be monotonically non-decreasing "
               "frame-over-frame (frame $i: $prev -> $now)",
         );
         prev = now;
@@ -167,10 +190,7 @@ void main() {
       expect(controller.hasActiveAnimations, isTrue);
 
       await tester.pumpAndSettle();
-      expect(
-        controller.visibleNodes,
-        containsAll(["r", "a", "b", "n", "m"]),
-      );
+      expect(controller.visibleNodes, containsAll(["r", "a", "b", "n", "m"]));
       expect(controller.getAnimatedExtent("m", kRowExtent), kRowExtent);
     },
   );

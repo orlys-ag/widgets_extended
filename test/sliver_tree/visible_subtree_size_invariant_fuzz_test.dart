@@ -38,8 +38,7 @@ void main() {
     controller.setRoots(seedRoots);
     for (final root in seedRoots) {
       controller.setChildren(root.key, [
-        for (var c = 0; c < 3; c++)
-          TreeNode(key: mintKey(), data: "child"),
+        for (var c = 0; c < 3; c++) TreeNode(key: mintKey(), data: "child"),
       ]);
     }
 

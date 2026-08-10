@@ -39,7 +39,8 @@ void main() {
       expect(
         !(aItems.contains("x") && bItems.contains("x")),
         isTrue,
-        reason: "Item 'x' was registered under BOTH sections — the "
+        reason:
+            "Item 'x' was registered under BOTH sections — the "
             "underlying TreeController has a single node per key, so this "
             "state is impossible. Either setSections corrupted the tree "
             "or the validation is missing.",

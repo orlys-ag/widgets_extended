@@ -21,7 +21,12 @@ import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 Future<TreeController<String, String>> _mount(WidgetTester tester) async {
   final controller = TreeController<String, String>(
     vsync: tester,
-    animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+    animationStyle: const TreeAnimationStyle(
+      expandCollapse: TreeAnimationSpec(
+        duration: Duration(milliseconds: 200),
+        curve: Curves.linear,
+      ),
+    ),
   );
   addTearDown(controller.dispose);
   controller.setRoots([
@@ -69,8 +74,11 @@ void main() {
         duration: const Duration(milliseconds: 120),
         curve: Curves.linear,
       );
-      expect(render.debugSlideBaselineStaged, isTrue,
-          reason: "setup: the stage must have been accepted");
+      expect(
+        render.debugSlideBaselineStaged,
+        isTrue,
+        reason: "setup: the stage must have been accepted",
+      );
 
       // Next frame: no layout consumed it → the backstop must discard it
       // and report the violation in debug builds.
@@ -78,12 +86,16 @@ void main() {
       expect(
         render.debugSlideBaselineStaged,
         isFalse,
-        reason: "an unconsumed baseline must not outlive the next frame — "
+        reason:
+            "an unconsumed baseline must not outlive the next frame — "
             "first-wins staging would otherwise block every later slide",
       );
       final reported = tester.takeException();
-      expect(reported, isA<FlutterError>(),
-          reason: "the protocol violation must be loud in debug builds");
+      expect(
+        reported,
+        isA<FlutterError>(),
+        reason: "the protocol violation must be loud in debug builds",
+      );
 
       // A subsequent REAL reorder must still slide: the discarded
       // baseline must not have poisoned the pipeline.
@@ -96,32 +108,40 @@ void main() {
           sawActiveSlide = true;
         }
       }
-      expect(sawActiveSlide, isTrue,
-          reason: "the animated reorder after the discard must still "
-              "install its FLIP slide");
+      expect(
+        sawActiveSlide,
+        isTrue,
+        reason:
+            "the animated reorder after the discard must still "
+            "install its FLIP slide",
+      );
       await tester.pumpAndSettle();
     },
   );
 
-  testWidgets(
-    "the legitimate stage → mutate → consume flow does not trip the "
-    "backstop",
-    (tester) async {
-      final controller = await _mount(tester);
-      final render = _render(tester);
+  testWidgets("the legitimate stage → mutate → consume flow does not trip the "
+      "backstop", (tester) async {
+    final controller = await _mount(tester);
+    final render = _render(tester);
 
-      // reorderRoots(animate: true) stages via the render-host fan-out and
-      // mutates in the same call; the next frame's layout consumes the
-      // baseline before the post-frame check runs.
-      controller.reorderRoots(["b", "c", "a"]);
-      await tester.pump();
+    // reorderRoots(animate: true) stages via the render-host fan-out and
+    // mutates in the same call; the next frame's layout consumes the
+    // baseline before the post-frame check runs.
+    controller.reorderRoots(["b", "c", "a"]);
+    await tester.pump();
 
-      expect(render.debugSlideBaselineStaged, isFalse,
-          reason: "the layout pass consumed the baseline");
-      expect(tester.takeException(), isNull,
-          reason: "a consumed baseline is not a violation — the backstop "
-              "must not false-positive on the normal flow");
-      await tester.pumpAndSettle();
-    },
-  );
+    expect(
+      render.debugSlideBaselineStaged,
+      isFalse,
+      reason: "the layout pass consumed the baseline",
+    );
+    expect(
+      tester.takeException(),
+      isNull,
+      reason:
+          "a consumed baseline is not a violation — the backstop "
+          "must not false-positive on the normal flow",
+    );
+    await tester.pumpAndSettle();
+  });
 }

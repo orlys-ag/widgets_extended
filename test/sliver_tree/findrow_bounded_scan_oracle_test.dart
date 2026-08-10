@@ -186,8 +186,7 @@ TreeController<String, String> _controller(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets("oracle equivalence across composed drag states",
-      (tester) async {
+  testWidgets("oracle equivalence across composed drag states", (tester) async {
     final controller = _controller(tester);
     addTearDown(controller.dispose);
     await tester.pumpWidget(_harness(controller));
@@ -207,9 +206,13 @@ void main() {
     // Self-check: the sweep above must have exercised the BOUNDED path,
     // not fallen back (no ghosts, no staleness in this state).
     sliver.findRowAtPaintedY(100.0);
-    expect(sliver.debugLastFindRowUsedFullScan, isFalse,
-        reason: "setup: the steady preview state must route to the "
-            "bounded scan");
+    expect(
+      sliver.debugLastFindRowUsedFullScan,
+      isFalse,
+      reason:
+          "setup: the steady preview state must route to the "
+          "bounded scan",
+    );
 
     // S1b: held preview, settled hold.
     await tester.pump(const Duration(milliseconds: 250));
@@ -242,15 +245,20 @@ void main() {
     expect(
       _maxComposedAbsDelta(controller),
       greaterThan(controller.maxActiveSlideAbsDelta + 5.0),
-      reason: "setup: some row must carry same-sign FLIP + preview deltas "
+      reason:
+          "setup: some row must carry same-sign FLIP + preview deltas "
           "whose sum exceeds the max of the engine maxima — re-engineer "
           "the overlap if this fails",
     );
     sliver.findRowAtPaintedY(100.0);
-    expect(sliver.debugLastFindRowUsedFullScan, isFalse,
-        reason: "setup: the FLIP+preview overlap must still route to the "
-            "bounded scan (no ghosts in a fully-visible tree) — this is "
-            "the state the summed bound exists for");
+    expect(
+      sliver.debugLastFindRowUsedFullScan,
+      isFalse,
+      reason:
+          "setup: the FLIP+preview overlap must still route to the "
+          "bounded scan (no ghosts in a fully-visible tree) — this is "
+          "the state the summed bound exists for",
+    );
     _expectOracleEquivalence(sliver, controller, "FLIP+preview overlap");
     await tester.pumpAndSettle();
 
@@ -271,8 +279,14 @@ void main() {
     controller.remove(key: "n3", animate: true);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    _expectOracleEquivalence(sliver, controller, "dead trailing row",
-        from: 250.0, to: 5000.0, step: 50.0);
+    _expectOracleEquivalence(
+      sliver,
+      controller,
+      "dead trailing row",
+      from: 250.0,
+      to: 5000.0,
+      step: 50.0,
+    );
     await tester.pumpAndSettle();
 
     controller.clearReorderPreview(animate: false);
@@ -280,51 +294,62 @@ void main() {
   });
 
   testWidgets(
-      "routing pins: bounded in steady state, full scan while a mutation "
-      "is un-laid-out, bounded again after the pump", (tester) async {
-    final controller = _controller(tester);
-    addTearDown(controller.dispose);
-    await tester.pumpWidget(_harness(controller));
-    await tester.pumpAndSettle();
-    final sliver = _sliver(tester);
+    "routing pins: bounded in steady state, full scan while a mutation "
+    "is un-laid-out, bounded again after the pump",
+    (tester) async {
+      final controller = _controller(tester);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(_harness(controller));
+      await tester.pumpAndSettle();
+      final sliver = _sliver(tester);
 
-    controller.setReorderPreview(
-      draggedKey: "n1",
-      targetKey: "n3",
-      gapBelowTarget: true,
-    );
-    await tester.pumpAndSettle();
+      controller.setReorderPreview(
+        draggedKey: "n1",
+        targetKey: "n3",
+        gapBelowTarget: true,
+      );
+      await tester.pumpAndSettle();
 
-    sliver.findRowAtPaintedY(100.0);
-    expect(sliver.debugLastFindRowUsedFullScan, isFalse,
-        reason: "settled preview, no ghosts, offsets fresh → bounded scan");
+      sliver.findRowAtPaintedY(100.0);
+      expect(
+        sliver.debugLastFindRowUsedFullScan,
+        isFalse,
+        reason: "settled preview, no ghosts, offsets fresh → bounded scan",
+      );
 
-    // Structural mutation with NO pump: layout-stamped offsets are stale,
-    // the routing must take the exact full scan (which reads controller
-    // truth) — and its result must still match the oracle trivially.
-    controller.insertRoot(
-      TreeNode(key: "n99", data: "N99"),
-      index: 0,
-      animate: false,
-    );
-    final duringStale = sliver.findRowAtPaintedY(100.0);
-    expect(sliver.debugLastFindRowUsedFullScan, isTrue,
-        reason: "un-laid-out structural mutation → full-scan route");
-    final oracle = sliver.debugFindRowFullScan(100.0);
-    expect(duringStale!.key, oracle!.key);
+      // Structural mutation with NO pump: layout-stamped offsets are stale,
+      // the routing must take the exact full scan (which reads controller
+      // truth) — and its result must still match the oracle trivially.
+      controller.insertRoot(
+        TreeNode(key: "n99", data: "N99"),
+        index: 0,
+        animate: false,
+      );
+      final duringStale = sliver.findRowAtPaintedY(100.0);
+      expect(
+        sliver.debugLastFindRowUsedFullScan,
+        isTrue,
+        reason: "un-laid-out structural mutation → full-scan route",
+      );
+      final oracle = sliver.debugFindRowFullScan(100.0);
+      expect(duringStale!.key, oracle!.key);
 
-    await tester.pump();
-    sliver.findRowAtPaintedY(100.0);
-    expect(sliver.debugLastFindRowUsedFullScan, isFalse,
-        reason: "after the mutation is laid out, the bounded scan "
-            "resumes");
+      await tester.pump();
+      sliver.findRowAtPaintedY(100.0);
+      expect(
+        sliver.debugLastFindRowUsedFullScan,
+        isFalse,
+        reason:
+            "after the mutation is laid out, the bounded scan "
+            "resumes",
+      );
 
-    controller.clearReorderPreview(animate: false);
-    await tester.pumpAndSettle();
-  });
+      controller.clearReorderPreview(animate: false);
+      await tester.pumpAndSettle();
+    },
+  );
 
-  testWidgets(
-      "window-size pin: steady drag over a 1000-row order examines "
+  testWidgets("window-size pin: steady drag over a 1000-row order examines "
       "O(window) rows, not O(N)", (tester) async {
     // Ghost-free by construction: no commit precedes the drag, so no
     // FLIP slides and no edge ghosts exist (a held preview RETAINS
@@ -352,12 +377,16 @@ void main() {
 
     final hit = sliver.findRowAtPaintedY(100.0);
     expect(hit, isNotNull);
-    expect(sliver.debugLastFindRowUsedFullScan, isFalse,
-        reason: "setup: the pin is only meaningful on the bounded route");
+    expect(
+      sliver.debugLastFindRowUsedFullScan,
+      isFalse,
+      reason: "setup: the pin is only meaningful on the bounded route",
+    );
     expect(
       sliver.debugLastFindRowIterationCount,
       lessThanOrEqualTo(10),
-      reason: "the bounded scan must examine only the ±lift window "
+      reason:
+          "the bounded scan must examine only the ±lift window "
           "around the probe (a ~40px lift over ~30-48px rows), not the "
           "1000-row order — a larger count means the routing or the "
           "window bound regressed",

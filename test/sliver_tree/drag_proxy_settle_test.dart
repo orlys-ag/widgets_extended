@@ -18,8 +18,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
-Future<({TreeController<String, String> tree, TreeReorderController<String> reorder})>
-    _mount(WidgetTester tester) async {
+Future<
+  ({TreeController<String, String> tree, TreeReorderController<String> reorder})
+>
+_mount(WidgetTester tester) async {
   final tree = TreeController<String, String>(
     vsync: tester,
     animationStyle: TreeAnimationStyle.uniform(
@@ -51,9 +53,8 @@ Future<({TreeController<String, String> tree, TreeReorderController<String> reor
               controller: tree,
               reorderController: reorder,
               showDragProxy: true,
-              nodeBuilder: (context, key, depth, wrap) {
-                return wrap(
-                  longPressToDrag: true,
+              nodeBuilder: (context, key, depth) {
+                return TreeDelayedDragHandle(
                   child: SizedBox(
                     key: ValueKey("row-$key"),
                     height: 50,
@@ -85,14 +86,20 @@ void main() {
       await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
       await gesture.moveTo(const Offset(400, 295));
       await tester.pump();
-      expect(h.reorder.currentTarget?.indexInFinalList, 5,
-          reason: "setup: below-r5 is final index 5 for dragged r0");
+      expect(
+        h.reorder.currentTarget?.indexInFinalList,
+        5,
+        reason: "setup: below-r5 is final index 5 for dragged r0",
+      );
 
       await gesture.up();
       await tester.pump();
 
-      expect(h.tree.liveRootKeys.last, "r0",
-          reason: "setup: the drop committed r0 to the last slot");
+      expect(
+        h.tree.liveRootKeys.last,
+        "r0",
+        reason: "setup: the drop committed r0 to the last slot",
+      );
 
       // The release position was pointer 295 − grab 25 = 270. The new
       // structural slot is 250. The commit slide must start the row at
@@ -102,53 +109,58 @@ void main() {
       expect(
         delta,
         closeTo(20.0, 1.0),
-        reason: "the dragged row must take over exactly where the proxy "
+        reason:
+            "the dragged row must take over exactly where the proxy "
             "was released (270) and glide to its slot (250); a delta of "
             "≈−250 means it is running the old-slot reparent slide",
       );
 
       await tester.pumpAndSettle();
-      expect(h.tree.getSlideDelta("r0"), 0.0,
-          reason: "the settle completes at the structural slot");
-    },
-  );
-
-  testWidgets(
-    "cancelled drag slides the dragged row from the release position "
-    "back to its original slot",
-    (tester) async {
-      final h = await _mount(tester);
-
-      final gesture = await tester.startGesture(const Offset(400, 25));
-      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
-      await gesture.moveTo(const Offset(400, 295));
-      await tester.pump();
-      expect(h.reorder.isDragging, isTrue, reason: "setup: session active");
-
-      h.reorder.cancelDrag();
-      await tester.pump();
-
-      expect(h.tree.liveRootKeys.first, "r0",
-          reason: "setup: cancel commits nothing");
-
-      // Release position 270, original slot 0 → the return glide starts
-      // the row at 270 (delta +270). Pre-fix: no slide at all (0.0) — the
-      // proxy vanishes at the pointer and the row pops back in place.
-      final delta = h.tree.getSlideDelta("r0");
       expect(
-        delta,
-        closeTo(270.0, 1.0),
-        reason: "the cancelled row must glide back from the proxy's "
-            "release position instead of popping into place",
+        h.tree.getSlideDelta("r0"),
+        0.0,
+        reason: "the settle completes at the structural slot",
       );
-
-      await tester.pumpAndSettle();
-      expect(h.tree.getSlideDelta("r0"), 0.0);
-
-      await gesture.up();
-      await tester.pump();
     },
   );
+
+  testWidgets("cancelled drag slides the dragged row from the release position "
+      "back to its original slot", (tester) async {
+    final h = await _mount(tester);
+
+    final gesture = await tester.startGesture(const Offset(400, 25));
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await gesture.moveTo(const Offset(400, 295));
+    await tester.pump();
+    expect(h.reorder.isDragging, isTrue, reason: "setup: session active");
+
+    h.reorder.cancelDrag();
+    await tester.pump();
+
+    expect(
+      h.tree.liveRootKeys.first,
+      "r0",
+      reason: "setup: cancel commits nothing",
+    );
+
+    // Release position 270, original slot 0 → the return glide starts
+    // the row at 270 (delta +270). Pre-fix: no slide at all (0.0) — the
+    // proxy vanishes at the pointer and the row pops back in place.
+    final delta = h.tree.getSlideDelta("r0");
+    expect(
+      delta,
+      closeTo(270.0, 1.0),
+      reason:
+          "the cancelled row must glide back from the proxy's "
+          "release position instead of popping into place",
+    );
+
+    await tester.pumpAndSettle();
+    expect(h.tree.getSlideDelta("r0"), 0.0);
+
+    await gesture.up();
+    await tester.pump();
+  });
 
   testWidgets(
     "unmounting the whole scrollable mid-drag must not throw from the "
@@ -195,9 +207,8 @@ void main() {
                           controller: tree,
                           reorderController: reorder,
                           showDragProxy: true,
-                          nodeBuilder: (context, key, depth, wrap) {
-                            return wrap(
-                              longPressToDrag: true,
+                          nodeBuilder: (context, key, depth) {
+                            return TreeDelayedDragHandle(
                               child: SizedBox(
                                 key: ValueKey("row-$key"),
                                 height: 50,
@@ -227,11 +238,18 @@ void main() {
       // Post-frame backstop fires here.
       await tester.pump();
 
-      expect(tester.takeException(), isNull,
-          reason: "the settle glide must be skipped against a defunct "
-              "scrollable, not thrown from the post-frame backstop");
-      expect(reorder.isDragging, isFalse,
-          reason: "the session must still be cancelled cleanly");
+      expect(
+        tester.takeException(),
+        isNull,
+        reason:
+            "the settle glide must be skipped against a defunct "
+            "scrollable, not thrown from the post-frame backstop",
+      );
+      expect(
+        reorder.isDragging,
+        isFalse,
+        reason: "the session must still be cancelled cleanly",
+      );
 
       await gesture.up();
       await tester.pump();
@@ -273,9 +291,8 @@ void main() {
                   controller: tree,
                   reorderController: reorder,
                   showDragProxy: false,
-                  nodeBuilder: (context, key, depth, wrap) {
-                    return wrap(
-                      longPressToDrag: true,
+                  nodeBuilder: (context, key, depth) {
+                    return TreeDelayedDragHandle(
                       child: SizedBox(
                         key: ValueKey("row-$key"),
                         height: 50,
@@ -302,7 +319,8 @@ void main() {
       expect(
         tree.getSlideDelta("r0"),
         closeTo(-250.0, 1.0),
-        reason: "proxy-less drops keep the classic FLIP from the old slot "
+        reason:
+            "proxy-less drops keep the classic FLIP from the old slot "
             "(0 → 250 ⇒ start delta −250)",
       );
       await tester.pumpAndSettle();

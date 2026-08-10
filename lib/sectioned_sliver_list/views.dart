@@ -1,8 +1,10 @@
-/// Views handed to `headerBuilder` / `itemBuilder` callbacks, plus the
-/// selective-rebuild helpers (`SectionView.watch`, `ItemView.watch`).
+/// Views handed to `headerBuilder` / `itemBuilder` callbacks.
+///
+/// Read these properties directly in your builder: a row is rebuilt
+/// whenever its own rendered inputs change (expansion, payload, item
+/// count, sibling position), so no wrapper widget or extra subscription
+/// is needed to keep them fresh.
 library;
-
-import 'package:flutter/widgets.dart';
 
 import 'sectioned_list_controller.dart';
 
@@ -74,30 +76,6 @@ class SectionView<K extends Object, Section, Item> {
   void addItem(Item item, {int? index, bool animate = true}) {
     controller.addItem(item, toSection: key, index: index, animate: animate);
   }
-
-  /// Selectively rebuilds [builder] when this section's state changes:
-  ///   - expand/collapse
-  ///   - section payload (via `controller.updateSection`)
-  ///   - item count (items added or removed under this section)
-  ///
-  /// The most common reason to use [watch] in a header is to keep a
-  /// "X items" badge in sync as items churn under the section.
-  Widget watch({
-    required Widget Function(
-      BuildContext context,
-      SectionView<K, Section, Item> view,
-    )
-    builder,
-    Key? widgetKey,
-  }) {
-    return _SectionViewListener<K, Section, Item>(
-      key: widgetKey,
-      controller: controller,
-      sectionKey: key,
-      isCollapsible: isCollapsible,
-      builder: builder,
-    );
-  }
 }
 
 /// Rich view of a visible item passed to an item builder.
@@ -143,227 +121,21 @@ class ItemView<K extends Object, Section, Item> {
   /// Moves this item to [section] and/or [index]. Forwards directly to
   /// [SectionedListController.moveItem]:
   ///
-  ///   • [section] non-null → reparents under that section (at [index],
-  ///     or appended when [index] is null)
-  ///   • [section] null, [index] non-null → reorders within the current
+  ///   - [section] non-null: reparents under that section (at [index], or
+  ///     appended when [index] is null)
+  ///   - [section] null, [index] non-null: reorders within the current
   ///     section
-  ///   • both null → no-op
+  ///   - both null: no-op
   ///
-  /// No `animate` parameter: the underlying repositioning ops do not
-  /// animate.
-  void moveTo({K? section, int? index}) {
-    controller.moveItem(key, toSection: section, index: index);
-  }
-
-  /// Selectively rebuilds [builder] when this item's payload changes
-  /// via `controller.updateItem`. Does NOT trigger on indexInSection
-  /// changes (e.g., a sibling moves) or on reparenting — those are
-  /// structural and the row is rebuilt by the underlying SliverTree
-  /// as part of normal layout.
-  Widget watch({
-    required Widget Function(
-      BuildContext context,
-      ItemView<K, Section, Item> view,
-    )
-    builder,
-    Key? widgetKey,
-  }) {
-    return _ItemViewListener<K, Section, Item>(
-      key: widgetKey,
-      controller: controller,
-      itemKey: key,
-      sectionKey: sectionKey,
-      builder: builder,
+  /// Both forms run a paint-only FLIP slide when [animate] is true (the
+  /// default). See [SectionedListController.moveItem] for exactly what
+  /// slides on each path.
+  void moveTo({K? section, int? index, bool animate = true}) {
+    controller.moveItem(
+      key,
+      toSection: section,
+      index: index,
+      animate: animate,
     );
-  }
-}
-
-/// Listener widget for [SectionView.watch]. Subscribes to the
-/// controller's structural channel for expand/collapse + item-count
-/// changes, and to the typed section-payload channel for payload
-/// updates. Filters by [sectionKey] so only the watched section
-/// triggers a rebuild.
-class _SectionViewListener<K extends Object, Section, Item>
-    extends StatefulWidget {
-  const _SectionViewListener({
-    required this.controller,
-    required this.sectionKey,
-    required this.isCollapsible,
-    required this.builder,
-    super.key,
-  });
-
-  final SectionedListController<K, Section, Item> controller;
-  final K sectionKey;
-  final bool isCollapsible;
-  final Widget Function(
-    BuildContext context,
-    SectionView<K, Section, Item> view,
-  )
-  builder;
-
-  @override
-  State<_SectionViewListener<K, Section, Item>> createState() {
-    return _SectionViewListenerState<K, Section, Item>();
-  }
-}
-
-class _SectionViewListenerState<K extends Object, Section, Item>
-    extends State<_SectionViewListener<K, Section, Item>> {
-  late bool _isExpanded;
-  late int _itemCount;
-
-  void _onStructural() {
-    final nextExpanded = widget.controller.isExpanded(widget.sectionKey);
-    final nextCount = widget.controller.itemCount(widget.sectionKey);
-    if (nextExpanded != _isExpanded || nextCount != _itemCount) {
-      setState(() {
-        _isExpanded = nextExpanded;
-        _itemCount = nextCount;
-      });
-    }
-  }
-
-  void _onSectionPayload(K key) {
-    if (key != widget.sectionKey) {
-      return;
-    }
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  void _resnapshot() {
-    _isExpanded = widget.controller.isExpanded(widget.sectionKey);
-    _itemCount = widget.controller.itemCount(widget.sectionKey);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _resnapshot();
-    widget.controller.addListener(_onStructural);
-    widget.controller.addSectionPayloadListener(_onSectionPayload);
-  }
-
-  @override
-  void didUpdateWidget(
-    _SectionViewListener<K, Section, Item> oldWidget,
-  ) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_onStructural);
-      oldWidget.controller.removeSectionPayloadListener(_onSectionPayload);
-      widget.controller.addListener(_onStructural);
-      widget.controller.addSectionPayloadListener(_onSectionPayload);
-      _resnapshot();
-    } else if (oldWidget.sectionKey != widget.sectionKey) {
-      _resnapshot();
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_onStructural);
-    widget.controller.removeSectionPayloadListener(_onSectionPayload);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final section = widget.controller.getSection(widget.sectionKey);
-    if (section == null) {
-      return const SizedBox.shrink();
-    }
-    final view = SectionView<K, Section, Item>(
-      key: widget.sectionKey,
-      section: section,
-      itemCount: _itemCount,
-      isExpanded: _isExpanded,
-      isCollapsible: widget.isCollapsible,
-      controller: widget.controller,
-    );
-    return widget.builder(context, view);
-  }
-}
-
-/// Listener widget for [ItemView.watch]. Subscribes only to the typed
-/// item-payload channel and filters by [itemKey].
-class _ItemViewListener<K extends Object, Section, Item>
-    extends StatefulWidget {
-  const _ItemViewListener({
-    required this.controller,
-    required this.itemKey,
-    required this.sectionKey,
-    required this.builder,
-    super.key,
-  });
-
-  final SectionedListController<K, Section, Item> controller;
-  final K itemKey;
-  final K sectionKey;
-  final Widget Function(
-    BuildContext context,
-    ItemView<K, Section, Item> view,
-  )
-  builder;
-
-  @override
-  State<_ItemViewListener<K, Section, Item>> createState() {
-    return _ItemViewListenerState<K, Section, Item>();
-  }
-}
-
-class _ItemViewListenerState<K extends Object, Section, Item>
-    extends State<_ItemViewListener<K, Section, Item>> {
-  void _onItemPayload(K key) {
-    if (key != widget.itemKey) {
-      return;
-    }
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addItemPayloadListener(_onItemPayload);
-  }
-
-  @override
-  void didUpdateWidget(_ItemViewListener<K, Section, Item> oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeItemPayloadListener(_onItemPayload);
-      widget.controller.addItemPayloadListener(_onItemPayload);
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeItemPayloadListener(_onItemPayload);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final item = widget.controller.getItem(widget.itemKey);
-    final section = widget.controller.getSection(widget.sectionKey);
-    if (item == null || section == null) {
-      return const SizedBox.shrink();
-    }
-    // Use the controller's LIVE-list index (mirrors what _buildItem
-    // passes to the outer itemBuilder).
-    final indexInSection = widget.controller.indexOfItem(widget.itemKey);
-    final view = ItemView<K, Section, Item>(
-      key: widget.itemKey,
-      item: item,
-      sectionKey: widget.sectionKey,
-      section: section,
-      indexInSection: indexInSection,
-      controller: widget.controller,
-    );
-    return widget.builder(context, view);
   }
 }

@@ -160,10 +160,9 @@ class StandaloneAnimator<TKey> {
       return state.currentExtent;
     }
     final nid = _nids[key];
-    final full = (nid != null ? _fullExtentGetter(nid) : null)
-        ?? _defaultExtent;
-    final t = _enterExitCurveGetter()
-        .transform(state.progress.clamp(0.0, 1.0));
+    final full =
+        (nid != null ? _fullExtentGetter(nid) : null) ?? _defaultExtent;
+    final t = _enterExitCurveGetter().transform(state.progress.clamp(0.0, 1.0));
     return state.type == AnimationType.entering ? full * t : full * (1.0 - t);
   }
 

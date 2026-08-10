@@ -123,7 +123,12 @@ Future<TreeController<String, String>> _pumpOffscreenBelow(
 ) async {
   final controller = TreeController<String, String>(
     vsync: tester,
-    animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+    animationStyle: const TreeAnimationStyle(
+      expandCollapse: TreeAnimationSpec(
+        duration: Duration(milliseconds: 400),
+        curve: Curves.linear,
+      ),
+    ),
   );
   addTearDown(controller.dispose);
 
@@ -143,72 +148,88 @@ Future<TreeController<String, String>> _pumpOffscreenBelow(
 
 void main() {
   testWidgets(
-      "offscreen-below anchor: ghost paints on-screen toward bottom edge "
-      "during slide", (tester) async {
-    final controller = await _pumpOffscreenBelow(tester);
-    final render = _render(tester);
+    "offscreen-below anchor: ghost paints on-screen toward bottom edge "
+    "during slide",
+    (tester) async {
+      final controller = await _pumpOffscreenBelow(tester);
+      final render = _render(tester);
 
-    // Sanity: Y visible, b1 hidden.
-    expect(controller.visibleNodes.contains("Y"), isTrue);
-    expect(controller.visibleNodes.contains("b1"), isFalse);
+      // Sanity: Y visible, b1 hidden.
+      expect(controller.visibleNodes.contains("Y"), isTrue);
+      expect(controller.visibleNodes.contains("b1"), isFalse);
 
-    // Reparent Y into collapsed, off-screen B.
-    controller.moveNode(
-      "Y",
-      "B",
-      index: 0,
-      animate: true,
-      slideDuration: const Duration(milliseconds: 400),
-      slideCurve: Curves.linear,
-    );
-    await tester.pump();
+      // Reparent Y into collapsed, off-screen B.
+      controller.moveNode(
+        "Y",
+        "B",
+        index: 0,
+        animate: true,
+        slideDuration: const Duration(milliseconds: 400),
+        slideCurve: Curves.linear,
+      );
+      await tester.pump();
 
-    // PRECONDITION: the destination anchor (B) is UNMOUNTED — off-screen
-    // and beyond the cache — so Pass A.5 takes the edge fallback.
-    expect(render.getChildForNode("B"), isNull,
-        reason: "B must be unmounted (off-screen, beyond cache) so the "
+      // PRECONDITION: the destination anchor (B) is UNMOUNTED — off-screen
+      // and beyond the cache — so Pass A.5 takes the edge fallback.
+      expect(
+        render.getChildForNode("B"),
+        isNull,
+        reason:
+            "B must be unmounted (off-screen, beyond cache) so the "
             "edge-fallback path is exercised — not the anchor-relative "
-            "tail.");
-    expect(controller.visibleNodes.contains("Y"), isFalse);
-    expect(controller.hasActiveSlides, isTrue);
+            "tail.",
+      );
+      expect(controller.visibleNodes.contains("Y"), isFalse);
+      expect(controller.hasActiveSlides, isTrue);
 
-    final paintExtent = render.geometry!.paintExtent;
+      final paintExtent = render.geometry!.paintExtent;
 
-    // Advance to a sliding frame and assert the ghost RenderBox is painted
-    // on-screen. The static rows (A, sp-0..sp-9) paint at fixed structural
-    // tops (0,48,..,480 clamped to the viewport); the GHOST paints at a
-    // distinct sliding top. We compute the ghost's expected painted top
-    // from the slide delta and the bottom-edge destination and assert a
-    // recorded paint matches it AND lies on-screen.
-    await tester.pump(const Duration(milliseconds: 120));
-    expect(controller.getSlideDelta("Y"), isNot(0.0),
-        reason: "Y must still be sliding at +120ms");
+      // Advance to a sliding frame and assert the ghost RenderBox is painted
+      // on-screen. The static rows (A, sp-0..sp-9) paint at fixed structural
+      // tops (0,48,..,480 clamped to the viewport); the GHOST paints at a
+      // distinct sliding top. We compute the ghost's expected painted top
+      // from the slide delta and the bottom-edge destination and assert a
+      // recorded paint matches it AND lies on-screen.
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(
+        controller.getSlideDelta("Y"),
+        isNot(0.0),
+        reason: "Y must still be sliding at +120ms",
+      );
 
-    // Destination y (scroll-space) = bottom edge + overhang = 400 + 40.
-    // paintedY = destination + slideDelta (slideDelta is negative,
-    // shrinking toward 0 as the slide settles).
-    final delta = controller.getSlideDelta("Y");
-    final expectedGhostTop = 440.0 + delta;
+      // Destination y (scroll-space) = bottom edge + overhang = 400 + 40.
+      // paintedY = destination + slideDelta (slideDelta is negative,
+      // shrinking toward 0 as the slide settles).
+      final delta = controller.getSlideDelta("Y");
+      final expectedGhostTop = 440.0 + delta;
 
-    final paints = _recordPaints(render);
-    final ghostPaints = paints
-        .where((p) => (p.top - expectedGhostTop).abs() < 2.0)
-        .toList();
-    expect(ghostPaints, isNotEmpty,
-        reason: "The ghost RenderBox must be painted at ~$expectedGhostTop "
+      final paints = _recordPaints(render);
+      final ghostPaints = paints
+          .where((p) => (p.top - expectedGhostTop).abs() < 2.0)
+          .toList();
+      expect(
+        ghostPaints,
+        isNotEmpty,
+        reason:
+            "The ghost RenderBox must be painted at ~$expectedGhostTop "
             "(bottom edge 440 + slideDelta $delta). Recorded tops: "
-            "${paints.map((p) => p.top).toList()}");
-    // The ghost must paint ON-SCREEN during the slide.
-    expect(expectedGhostTop, greaterThanOrEqualTo(0.0));
-    expect(expectedGhostTop, lessThan(paintExtent),
-        reason: "Ghost top $expectedGhostTop must be on-screen "
-            "(0 <= top < $paintExtent).");
+            "${paints.map((p) => p.top).toList()}",
+      );
+      // The ghost must paint ON-SCREEN during the slide.
+      expect(expectedGhostTop, greaterThanOrEqualTo(0.0));
+      expect(
+        expectedGhostTop,
+        lessThan(paintExtent),
+        reason:
+            "Ghost top $expectedGhostTop must be on-screen "
+            "(0 <= top < $paintExtent).",
+      );
 
-    await tester.pumpAndSettle();
-  });
+      await tester.pumpAndSettle();
+    },
+  );
 
-  testWidgets(
-      "offscreen-below anchor: snap is gone — ghost recorded on every "
+  testWidgets("offscreen-below anchor: snap is gone — ghost recorded on every "
       "sliding frame", (tester) async {
     final controller = await _pumpOffscreenBelow(tester);
     final render = _render(tester);
@@ -238,28 +259,38 @@ void main() {
       if (expectedGhostTop >= 0.0 &&
           expectedGhostTop < render.geometry!.paintExtent) {
         final paints = _recordPaints(render);
-        final hit = paints
-            .any((p) => (p.top - expectedGhostTop).abs() < 2.0);
-        expect(hit, isTrue,
-            reason: "Frame $i: ghost must be painted at ~$expectedGhostTop "
-                "(no snap). Recorded: ${paints.map((p) => p.top).toList()}");
+        final hit = paints.any((p) => (p.top - expectedGhostTop).abs() < 2.0);
+        expect(
+          hit,
+          isTrue,
+          reason:
+              "Frame $i: ghost must be painted at ~$expectedGhostTop "
+              "(no snap). Recorded: ${paints.map((p) => p.top).toList()}",
+        );
       }
     }
-    expect(slidingFrames, greaterThan(0),
-        reason: "Y must have actually slid for several frames");
+    expect(
+      slidingFrames,
+      greaterThan(0),
+      reason: "Y must have actually slid for several frames",
+    );
 
     await tester.pumpAndSettle();
   });
 
-  testWidgets(
-      "offscreen-above anchor: ghost paints on-screen toward top edge "
+  testWidgets("offscreen-above anchor: ghost paints on-screen toward top edge "
       "during slide", (tester) async {
     final scrollController = ScrollController();
     addTearDown(scrollController.dispose);
 
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 400),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -302,9 +333,13 @@ void main() {
     await tester.pump();
 
     // PRECONDITION: B is unmounted (above viewport, beyond cache).
-    expect(render.getChildForNode("B"), isNull,
-        reason: "B must be unmounted above the viewport so the edge "
-            "fallback (top edge) fires.");
+    expect(
+      render.getChildForNode("B"),
+      isNull,
+      reason:
+          "B must be unmounted above the viewport so the edge "
+          "fallback (top edge) fires.",
+    );
     expect(controller.hasActiveSlides, isTrue);
 
     // Destination y (scroll-space, sliver-local) = top edge - overhang =
@@ -315,23 +350,29 @@ void main() {
     final expectedGhostTop = -40.0 + delta;
 
     final paints = _recordPaints(render);
-    final hit =
-        paints.any((p) => (p.top - expectedGhostTop).abs() < 2.0);
-    expect(hit, isTrue,
-        reason: "Ghost must paint at ~$expectedGhostTop (top edge -40 + "
-            "slideDelta $delta). Recorded: "
-            "${paints.map((p) => p.top).toList()}");
+    final hit = paints.any((p) => (p.top - expectedGhostTop).abs() < 2.0);
+    expect(
+      hit,
+      isTrue,
+      reason:
+          "Ghost must paint at ~$expectedGhostTop (top edge -40 + "
+          "slideDelta $delta). Recorded: "
+          "${paints.map((p) => p.top).toList()}",
+    );
     // Mid-travel the ghost paints some on-screen pixels as it slides UP
     // toward / just above the top edge.
-    expect(expectedGhostTop + _kRow, greaterThan(0.0),
-        reason: "Ghost (top=$expectedGhostTop, h=$_kRow) must still show "
-            "on-screen pixels mid-travel.");
+    expect(
+      expectedGhostTop + _kRow,
+      greaterThan(0.0),
+      reason:
+          "Ghost (top=$expectedGhostTop, h=$_kRow) must still show "
+          "on-screen pixels mid-travel.",
+    );
 
     await tester.pumpAndSettle();
   });
 
-  testWidgets(
-      "offscreen anchor: ghost converges on the viewport edge, not the "
+  testWidgets("offscreen anchor: ghost converges on the viewport edge, not the "
       "unmounted anchor", (tester) async {
     final controller = await _pumpOffscreenBelow(tester);
     final render = _render(tester);
@@ -365,10 +406,14 @@ void main() {
       }
       final distance = (440.0 - expectedGhostTop).abs();
       if (prevDistanceToEdge != null) {
-        expect(distance, lessThanOrEqualTo(prevDistanceToEdge! + 0.5),
-            reason: "Frame $i: ghost must converge toward the bottom edge "
-                "(distance $distance must not grow past previous "
-                "$prevDistanceToEdge).");
+        expect(
+          distance,
+          lessThanOrEqualTo(prevDistanceToEdge! + 0.5),
+          reason:
+              "Frame $i: ghost must converge toward the bottom edge "
+              "(distance $distance must not grow past previous "
+              "$prevDistanceToEdge).",
+        );
       }
       prevDistanceToEdge = distance;
       checked++;
@@ -379,51 +424,58 @@ void main() {
   });
 
   testWidgets(
-      "offscreen anchor: settles hidden, ghost pruned, no residual paint",
-      (tester) async {
-    final controller = await _pumpOffscreenBelow(tester);
-    final render = _render(tester);
+    "offscreen anchor: settles hidden, ghost pruned, no residual paint",
+    (tester) async {
+      final controller = await _pumpOffscreenBelow(tester);
+      final render = _render(tester);
 
-    controller.moveNode(
-      "Y",
-      "B",
-      index: 0,
-      animate: true,
-      slideDuration: const Duration(milliseconds: 400),
-      slideCurve: Curves.linear,
-    );
-    await tester.pump();
-    expect(render.getChildForNode("B"), isNull);
+      controller.moveNode(
+        "Y",
+        "B",
+        index: 0,
+        animate: true,
+        slideDuration: const Duration(milliseconds: 400),
+        slideCurve: Curves.linear,
+      );
+      await tester.pump();
+      expect(render.getChildForNode("B"), isNull);
 
-    await tester.pumpAndSettle();
+      await tester.pumpAndSettle();
 
-    // Settle: Y is hidden (under collapsed B), the ghost is pruned, and a
-    // final repaint records NO ghost paint at the (former) sliding band.
-    expect(controller.visibleNodes.contains("Y"), isFalse);
-    expect(controller.hasActiveSlides, isFalse);
-    expect(render.debugPhantomExitGhostCount, 0,
-        reason: "Ghost must be pruned at settle.");
+      // Settle: Y is hidden (under collapsed B), the ghost is pruned, and a
+      // final repaint records NO ghost paint at the (former) sliding band.
+      expect(controller.visibleNodes.contains("Y"), isFalse);
+      expect(controller.hasActiveSlides, isFalse);
+      expect(
+        render.debugPhantomExitGhostCount,
+        0,
+        reason: "Ghost must be pruned at settle.",
+      );
 
-    final paints = _recordPaints(render);
-    // No paint at a sliding top in the (0, 440) on-screen band attributable
-    // to the ghost — the only on-screen rows now are the static ones.
-    // The static rows are A=0, sp-0..sp-9 (48..480 clamped). The ghost, if
-    // leaked, would paint somewhere distinct; assert nothing paints below
-    // the last static visible row's slot that isn't a static row. We assert
-    // the simpler invariant: ghost count is zero (above) and the recorded
-    // tops match the static structural grid (multiples of 48, within the
-    // viewport), i.e. no stray fractional sliding top.
-    for (final p in paints) {
-      final nearestGrid = (p.top / _kRow).round() * _kRow;
-      expect((p.top - nearestGrid).abs(), lessThan(1.0),
-          reason: "After settle every painted row must sit on the static "
+      final paints = _recordPaints(render);
+      // No paint at a sliding top in the (0, 440) on-screen band attributable
+      // to the ghost — the only on-screen rows now are the static ones.
+      // The static rows are A=0, sp-0..sp-9 (48..480 clamped). The ghost, if
+      // leaked, would paint somewhere distinct; assert nothing paints below
+      // the last static visible row's slot that isn't a static row. We assert
+      // the simpler invariant: ghost count is zero (above) and the recorded
+      // tops match the static structural grid (multiples of 48, within the
+      // viewport), i.e. no stray fractional sliding top.
+      for (final p in paints) {
+        final nearestGrid = (p.top / _kRow).round() * _kRow;
+        expect(
+          (p.top - nearestGrid).abs(),
+          lessThan(1.0),
+          reason:
+              "After settle every painted row must sit on the static "
               "48px grid — a stray top (${p.top}) would mean a residual "
-              "ghost paint.");
-    }
-  });
+              "ghost paint.",
+        );
+      }
+    },
+  );
 
-  testWidgets(
-      "offscreen anchor: no t=0 jump — first sliding frame paints at "
+  testWidgets("offscreen anchor: no t=0 jump — first sliding frame paints at "
       "pre-move baseline", (tester) async {
     final controller = await _pumpOffscreenBelow(tester);
     final render = _render(tester);
@@ -433,8 +485,11 @@ void main() {
     final preMovePaints = _recordPaints(render);
     // Y is at structural y=48 (A=0, Y=48).
     const preMoveTop = 48.0;
-    expect(preMovePaints.any((p) => (p.top - preMoveTop).abs() < 1.0), isTrue,
-        reason: "Y must be painting at its structural top (48) pre-move.");
+    expect(
+      preMovePaints.any((p) => (p.top - preMoveTop).abs() < 1.0),
+      isTrue,
+      reason: "Y must be painting at its structural top (48) pre-move.",
+    );
 
     controller.moveNode(
       "Y",
@@ -454,13 +509,20 @@ void main() {
     // (= baseline.y - current.y) composes so paintedY == baseline.y at t=0.
     final delta = controller.getSlideDelta("Y");
     final firstGhostTop = 440.0 + delta;
-    expect(firstGhostTop, moreOrLessEquals(preMoveTop, epsilon: 2.0),
-        reason: "First sliding frame must paint at the pre-move baseline "
-            "(48), not jump. Got $firstGhostTop (delta=$delta).");
+    expect(
+      firstGhostTop,
+      moreOrLessEquals(preMoveTop, epsilon: 2.0),
+      reason:
+          "First sliding frame must paint at the pre-move baseline "
+          "(48), not jump. Got $firstGhostTop (delta=$delta).",
+    );
 
     final paints = _recordPaints(render);
-    expect(paints.any((p) => (p.top - firstGhostTop).abs() < 2.0), isTrue,
-        reason: "Ghost paint at the baseline must be recorded on frame 0.");
+    expect(
+      paints.any((p) => (p.top - firstGhostTop).abs() < 2.0),
+      isTrue,
+      reason: "Ghost paint at the baseline must be recorded on frame 0.",
+    );
 
     await tester.pumpAndSettle();
   });

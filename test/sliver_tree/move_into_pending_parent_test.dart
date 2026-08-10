@@ -16,11 +16,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
-  testWidgets("moveNode into a pending-deletion parent asserts in debug",
-      (tester) async {
+  testWidgets("moveNode into a pending-deletion parent asserts in debug", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 100),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -41,7 +47,8 @@ void main() {
     expect(
       () => controller.moveNode("x", "B"),
       throwsA(anyOf(isA<AssertionError>(), isA<StateError>())),
-      reason: "moveNode must refuse a pending-deletion newParent — same "
+      reason:
+          "moveNode must refuse a pending-deletion newParent — same "
           "policy as insert(parentKey:).",
     );
 

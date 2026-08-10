@@ -17,10 +17,7 @@ import 'dart:math' as math;
 /// derived live from the current viewport via
 /// [ViewportSnapshot.baseForEdge], so the ghost stays pinned to the live
 /// edge under concurrent scrolling.
-enum ViewportEdge {
-  top,
-  bottom,
-}
+enum ViewportEdge { top, bottom }
 
 /// Minimum number of visible pixels a row must show inside the viewport
 /// for the slide pipeline to consider it "on-screen" when classifying
@@ -82,10 +79,7 @@ final class ViewportSnapshot {
   /// admission, ghost re-evaluation, and re-promotion decisions where
   /// the question is "does this row's bounding box intersect the
   /// viewport rect at all."
-  bool intersects({
-    required double y,
-    required double extent,
-  }) {
+  bool intersects({required double y, required double extent}) {
     if (extent <= 0.0) {
       return y >= top && y < bottom;
     }
@@ -118,10 +112,7 @@ final class ViewportSnapshot {
   /// Resolution: require a small ABSOLUTE-pixel overlap, capped by
   /// `extent * 0.5` so very-small rows (smaller than the threshold)
   /// only need to be majority visible. See [_kMinMeaningfulVisiblePx].
-  bool meaningfullyVisible({
-    required double y,
-    required double extent,
-  }) {
+  bool meaningfullyVisible({required double y, required double extent}) {
     if (extent <= 0.0) {
       return y >= top && y < bottom;
     }

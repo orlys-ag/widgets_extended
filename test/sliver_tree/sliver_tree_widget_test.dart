@@ -388,7 +388,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -465,7 +470,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -531,7 +541,12 @@ void main() {
       // ticks that only call markNeedsLayout must not trigger rebuilds.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 600), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 600),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -592,75 +607,80 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets(
-      "DIAGNOSTIC: builder invocations across a collapse lifecycle",
-      (tester) async {
-        // Measures how many times nodeBuilder is invoked for each key across
-        // start-of-collapse, mid-animation, and end-of-collapse (settle tick
-        // + post-frame) WITHOUT any external subscription to the controller.
-        // If the hypothesis "external subscription amplifies an empty-set
-        // notifyListeners into a full refresh" is correct, this test should
-        // show NO rebuilds of descendants at settle time.
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
-        );
-        addTearDown(controller.dispose);
-
-        controller.setRoots([TreeNode(key: "x", data: "X")]);
-        controller.setChildren("x", [
-          for (int i = 0; i < 5; i++) TreeNode(key: "y$i", data: "Y$i"),
-        ]);
-        controller.expand(key: "x", animate: false);
-
-        final buildCounts = <String, int>{};
-
-        await tester.pumpWidget(
-          buildTestTree(
-            controller: controller,
-            nodeBuilder: (context, key, depth) {
-              buildCounts[key] = (buildCounts[key] ?? 0) + 1;
-              return SizedBox(height: 48, child: Text(key));
-            },
+    testWidgets("DIAGNOSTIC: builder invocations across a collapse lifecycle", (
+      tester,
+    ) async {
+      // Measures how many times nodeBuilder is invoked for each key across
+      // start-of-collapse, mid-animation, and end-of-collapse (settle tick
+      // + post-frame) WITHOUT any external subscription to the controller.
+      // If the hypothesis "external subscription amplifies an empty-set
+      // notifyListeners into a full refresh" is correct, this test should
+      // show NO rebuilds of descendants at settle time.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
           ),
+        ),
+      );
+      addTearDown(controller.dispose);
+
+      controller.setRoots([TreeNode(key: "x", data: "X")]);
+      controller.setChildren("x", [
+        for (int i = 0; i < 5; i++) TreeNode(key: "y$i", data: "Y$i"),
+      ]);
+      controller.expand(key: "x", animate: false);
+
+      final buildCounts = <String, int>{};
+
+      await tester.pumpWidget(
+        buildTestTree(
+          controller: controller,
+          nodeBuilder: (context, key, depth) {
+            buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+            return SizedBox(height: 48, child: Text(key));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Record baseline after mount + initial layout.
+      final baseline = Map<String, int>.from(buildCounts);
+
+      // Start the collapse. Only 'x' should rebuild (its isExpanded
+      // flipped). Descendants should not.
+      controller.collapse(key: "x");
+      await tester.pump(const Duration(milliseconds: 1));
+      final afterStart = Map<String, int>.from(buildCounts);
+      final xDeltaStart = (afterStart["x"] ?? 0) - (baseline["x"] ?? 0);
+
+      // Pump well into the animation (but before settle).
+      await tester.pump(const Duration(milliseconds: 100));
+      final mid = Map<String, int>.from(buildCounts);
+
+      // Run to completion and beyond (post-frame stale-eviction).
+      await tester.pumpAndSettle();
+      final afterSettle = Map<String, int>.from(buildCounts);
+
+      // Expectations: only 'x' rebuilds on the start (isExpanded flip);
+      // descendants y0..y4 are NOT rebuilt at any phase.
+      for (int i = 0; i < 5; i++) {
+        final k = "y$i";
+        expect(
+          afterSettle[k],
+          baseline[k],
+          reason:
+              "descendant $k should not rebuild during collapse "
+              "(baseline=${baseline[k]}, afterSettle=${afterSettle[k]})",
         );
-        await tester.pumpAndSettle();
-
-        // Record baseline after mount + initial layout.
-        final baseline = Map<String, int>.from(buildCounts);
-
-        // Start the collapse. Only 'x' should rebuild (its isExpanded
-        // flipped). Descendants should not.
-        controller.collapse(key: "x");
-        await tester.pump(const Duration(milliseconds: 1));
-        final afterStart = Map<String, int>.from(buildCounts);
-        final xDeltaStart = (afterStart["x"] ?? 0) - (baseline["x"] ?? 0);
-
-        // Pump well into the animation (but before settle).
-        await tester.pump(const Duration(milliseconds: 100));
-        final mid = Map<String, int>.from(buildCounts);
-
-        // Run to completion and beyond (post-frame stale-eviction).
-        await tester.pumpAndSettle();
-        final afterSettle = Map<String, int>.from(buildCounts);
-
-        // Expectations: only 'x' rebuilds on the start (isExpanded flip);
-        // descendants y0..y4 are NOT rebuilt at any phase.
-        for (int i = 0; i < 5; i++) {
-          final k = "y$i";
-          expect(
-            afterSettle[k],
-            baseline[k],
-            reason: "descendant $k should not rebuild during collapse "
-                "(baseline=${baseline[k]}, afterSettle=${afterSettle[k]})",
-          );
-        }
-        // Mid-animation ticks must not rebuild anything past what the start
-        // already triggered.
-        expect(mid["x"], afterStart["x"], reason: "'x' rebuilt mid-anim");
-        expect(xDeltaStart, greaterThanOrEqualTo(1));
-      },
-    );
+      }
+      // Mid-animation ticks must not rebuild anything past what the start
+      // already triggered.
+      expect(mid["x"], afterStart["x"], reason: "'x' rebuilt mid-anim");
+      expect(xDeltaStart, greaterThanOrEqualTo(1));
+    });
 
     testWidgets(
       "external ChangeNotifier subscriber does not amplify collapse dismiss "
@@ -685,7 +705,12 @@ void main() {
         // descendant gets a fresh `nodeBuilder` invocation in that window.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -708,8 +733,7 @@ void main() {
                       SliverTree<String, String>(
                         controller: controller,
                         nodeBuilder: (context, key, depth) {
-                          buildCounts[key] =
-                              (buildCounts[key] ?? 0) + 1;
+                          buildCounts[key] = (buildCounts[key] ?? 0) + 1;
                           return SizedBox(height: 48, child: Text(key));
                         },
                       ),
@@ -749,7 +773,8 @@ void main() {
           expect(
             delta,
             0,
-            reason: "descendant $k was rebuilt $delta time(s) between "
+            reason:
+                "descendant $k was rebuilt $delta time(s) between "
                 "mid-animation and settle — the external ListenableBuilder "
                 "notify at dismiss amplified into a full-refresh. Option "
                 "C deferral to createChild should have skipped it because "
@@ -780,7 +805,12 @@ void main() {
         // animation.
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -844,7 +874,8 @@ void main() {
         expect(
           rebuiltCount,
           lessThan(50),
-          reason: "collapsing a subtree mass-mounted $rebuiltCount of "
+          reason:
+              "collapsing a subtree mass-mounted $rebuiltCount of "
               "$childCount rows — the cache-region admission cap is "
               "scaling with the shrinking live extent instead of the "
               "full extent.",
@@ -852,121 +883,125 @@ void main() {
       },
     );
 
-    testWidgets(
-      "collapsing a subtree pre-mounts following rows so they do not "
-      "pop in at dismiss (flicker-as-they-appear regression)",
-      (tester) async {
-        // Regression for the flicker visible when collapsing a node with
-        // many children whose subtree pushes following rows past the
-        // cache region.
-        //
-        // Pre-fix: the admission cap (using FULL extent for exits)
-        // matched the pre-collapse admission set throughout the entire
-        // animation. Following non-descendant rows — which were OUTSIDE
-        // the cache region pre-collapse because the collapsing subtree's
-        // height pushed them past the cache extent — remained outside
-        // the cache region for every animation frame, then got mounted
-        // in one shot at dismiss.
-        //
-        // Fix: dual-view admission tracks a post-animation accumulator
-        // where exits contribute 0 toward the budget. Non-exit following
-        // rows admit via the post view once the loop has iterated past
-        // the exits, so they are mounted DURING the collapse. At dismiss
-        // they are already present — no pop.
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("collapsing a subtree pre-mounts following rows so they do not "
+        "pop in at dismiss (flicker-as-they-appear regression)", (
+      tester,
+    ) async {
+      // Regression for the flicker visible when collapsing a node with
+      // many children whose subtree pushes following rows past the
+      // cache region.
+      //
+      // Pre-fix: the admission cap (using FULL extent for exits)
+      // matched the pre-collapse admission set throughout the entire
+      // animation. Following non-descendant rows — which were OUTSIDE
+      // the cache region pre-collapse because the collapsing subtree's
+      // height pushed them past the cache extent — remained outside
+      // the cache region for every animation frame, then got mounted
+      // in one shot at dismiss.
+      //
+      // Fix: dual-view admission tracks a post-animation accumulator
+      // where exits contribute 0 toward the budget. Non-exit following
+      // rows admit via the post view once the loop has iterated past
+      // the exits, so they are mounted DURING the collapse. At dismiss
+      // they are already present — no pop.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        const childCount = 200;
-        const followerCount = 10;
-        controller.setRoots([
-          TreeNode(key: "p", data: "P"),
-          for (int i = 0; i < followerCount; i++)
-            TreeNode(key: "f$i", data: "F$i"),
-        ]);
-        controller.setChildren("p", [
-          for (int i = 0; i < childCount; i++)
-            TreeNode(key: "c$i", data: "C$i"),
-        ]);
-        controller.expand(key: "p", animate: false);
+      const childCount = 200;
+      const followerCount = 10;
+      controller.setRoots([
+        TreeNode(key: "p", data: "P"),
+        for (int i = 0; i < followerCount; i++)
+          TreeNode(key: "f$i", data: "F$i"),
+      ]);
+      controller.setChildren("p", [
+        for (int i = 0; i < childCount; i++) TreeNode(key: "c$i", data: "C$i"),
+      ]);
+      controller.expand(key: "p", animate: false);
 
-        final buildCounts = <String, int>{};
+      final buildCounts = <String, int>{};
 
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: SizedBox(
-                height: 600,
-                child: CustomScrollView(
-                  slivers: [
-                    SliverTree<String, String>(
-                      controller: controller,
-                      nodeBuilder: (context, key, depth) {
-                        buildCounts[key] = (buildCounts[key] ?? 0) + 1;
-                        return SizedBox(height: 48, child: Text(key));
-                      },
-                    ),
-                  ],
-                ),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 600,
+              child: CustomScrollView(
+                slivers: [
+                  SliverTree<String, String>(
+                    controller: controller,
+                    nodeBuilder: (context, key, depth) {
+                      buildCounts[key] = (buildCounts[key] ?? 0) + 1;
+                      return SizedBox(height: 48, child: Text(key));
+                    },
+                  ),
+                ],
               ),
             ),
           ),
-        );
-        await tester.pumpAndSettle();
+        ),
+      );
+      await tester.pumpAndSettle();
 
-        // Baseline: with 200 children of 'p' expanded at the top of a
-        // 600px viewport + cache extent, the followers are well past
-        // the cache region and have never been built.
-        final followerBuildsBefore = <String, int>{
-          for (int i = 0; i < followerCount; i++)
-            "f$i": buildCounts["f$i"] ?? 0,
-        };
-        expect(
-          followerBuildsBefore.values.every((c) => c == 0),
-          isTrue,
-          reason: "test pre-condition: followers must be outside the "
-              "pre-collapse cache region so the scenario exercises the "
-              "fix, not just steady-state admission. "
-              "Actual: $followerBuildsBefore",
-        );
+      // Baseline: with 200 children of 'p' expanded at the top of a
+      // 600px viewport + cache extent, the followers are well past
+      // the cache region and have never been built.
+      final followerBuildsBefore = <String, int>{
+        for (int i = 0; i < followerCount; i++) "f$i": buildCounts["f$i"] ?? 0,
+      };
+      expect(
+        followerBuildsBefore.values.every((c) => c == 0),
+        isTrue,
+        reason:
+            "test pre-condition: followers must be outside the "
+            "pre-collapse cache region so the scenario exercises the "
+            "fix, not just steady-state admission. "
+            "Actual: $followerBuildsBefore",
+      );
 
-        // Kick off the collapse and step through the animation. At each
-        // mid-animation frame, check whether any follower has been
-        // built. We expect at least one follower to be mounted BEFORE
-        // dismiss — the dual-view admission should have pulled them in
-        // via the post view.
-        controller.collapse(key: "p");
+      // Kick off the collapse and step through the animation. At each
+      // mid-animation frame, check whether any follower has been
+      // built. We expect at least one follower to be mounted BEFORE
+      // dismiss — the dual-view admission should have pulled them in
+      // via the post view.
+      controller.collapse(key: "p");
 
-        bool anyFollowerBuiltMidAnimation = false;
-        // Animation is 300 ms; sample roughly every 50 ms.
-        for (int step = 0; step < 5; step++) {
-          await tester.pump(const Duration(milliseconds: 50));
-          for (int i = 0; i < followerCount; i++) {
-            if ((buildCounts["f$i"] ?? 0) > 0) {
-              anyFollowerBuiltMidAnimation = true;
-              break;
-            }
+      bool anyFollowerBuiltMidAnimation = false;
+      // Animation is 300 ms; sample roughly every 50 ms.
+      for (int step = 0; step < 5; step++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        for (int i = 0; i < followerCount; i++) {
+          if ((buildCounts["f$i"] ?? 0) > 0) {
+            anyFollowerBuiltMidAnimation = true;
+            break;
           }
-          if (anyFollowerBuiltMidAnimation) break;
         }
+        if (anyFollowerBuiltMidAnimation) break;
+      }
 
-        expect(
-          anyFollowerBuiltMidAnimation,
-          isTrue,
-          reason: "following rows must be pre-mounted during the collapse "
-              "animation; otherwise they pop in at dismiss and the user "
-              "sees the flicker this fix targets.",
-        );
+      expect(
+        anyFollowerBuiltMidAnimation,
+        isTrue,
+        reason:
+            "following rows must be pre-mounted during the collapse "
+            "animation; otherwise they pop in at dismiss and the user "
+            "sees the flicker this fix targets.",
+      );
 
-        // Drain the remainder of the animation — structural correctness
-        // check, not the primary assertion.
-        await tester.pumpAndSettle();
-        expect(controller.isExpanded("p"), isFalse);
-        expect(controller.visibleNodes.first, "p");
-      },
-    );
+      // Drain the remainder of the animation — structural correctness
+      // check, not the primary assertion.
+      await tester.pumpAndSettle();
+      expect(controller.isExpanded("p"), isFalse);
+      expect(controller.visibleNodes.first, "p");
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -984,7 +1019,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1654,121 +1694,122 @@ void main() {
   // ══════════════════════════════════════════════════════════════════════════
 
   group("expansion animation", () {
-    testWidgets(
-      "siblings below a parent with many children interpolate their "
-      "position each frame (no snap-on-settle regression)",
-      (tester) async {
-        // Regression: RenderSliverTree.performLayout Pass 2 caps cache-region
-        // admission at `steadyAccum >= remainingCacheExtent` to prevent
-        // mass-mounting when a node with a huge fanout expands. Pass 2 then
-        // only writes `parentData.layoutOffset` for admitted nodes, so a
-        // sibling that was mounted BEFORE the expand() but now falls outside
-        // the post-expand admission window keeps its pre-expand
-        // parentData.layoutOffset across every animation frame. The sibling
-        // appears pinned at its old Y until the settle frame, when Pass 1's
-        // "Transitional frame" branch re-walks all visible nodes and
-        // rewrites offsets — producing a visible snap.
-        //
-        // Pre-fix: the sibling's Y is constant through the animation and
-        // jumps on the last frame.
-        // Post-fix: the sibling's Y advances smoothly each frame.
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("siblings below a parent with many children interpolate their "
+        "position each frame (no snap-on-settle regression)", (tester) async {
+      // Regression: RenderSliverTree.performLayout Pass 2 caps cache-region
+      // admission at `steadyAccum >= remainingCacheExtent` to prevent
+      // mass-mounting when a node with a huge fanout expands. Pass 2 then
+      // only writes `parentData.layoutOffset` for admitted nodes, so a
+      // sibling that was mounted BEFORE the expand() but now falls outside
+      // the post-expand admission window keeps its pre-expand
+      // parentData.layoutOffset across every animation frame. The sibling
+      // appears pinned at its old Y until the settle frame, when Pass 1's
+      // "Transitional frame" branch re-walks all visible nodes and
+      // rewrites offsets — producing a visible snap.
+      //
+      // Pre-fix: the sibling's Y is constant through the animation and
+      // jumps on the last frame.
+      // Post-fix: the sibling's Y advances smoothly each frame.
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        const rowHeight = 30.0;
-        // Enough children that their combined full extent (30 * 60 = 1800px)
-        // overflows the 300px-viewport + 250px-cache admission budget and
-        // triggers the steadyAccum cap before reaching the sibling "S".
-        const childCount = 60;
+      const rowHeight = 30.0;
+      // Enough children that their combined full extent (30 * 60 = 1800px)
+      // overflows the 300px-viewport + 250px-cache admission budget and
+      // triggers the steadyAccum cap before reaching the sibling "S".
+      const childCount = 60;
 
-        controller.setRoots([
-          TreeNode(key: "P", data: "P"),
-          TreeNode(key: "S", data: "S"),
-        ]);
-        controller.setChildren("P", [
-          for (int i = 0; i < childCount; i++)
-            TreeNode(key: "c$i", data: "c$i"),
-        ]);
+      controller.setRoots([
+        TreeNode(key: "P", data: "P"),
+        TreeNode(key: "S", data: "S"),
+      ]);
+      controller.setChildren("P", [
+        for (int i = 0; i < childCount; i++) TreeNode(key: "c$i", data: "c$i"),
+      ]);
 
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: SizedBox(
-                height: 300,
-                child: CustomScrollView(
-                  slivers: [
-                    SliverTree<String, String>(
-                      controller: controller,
-                      nodeBuilder: (context, key, depth) {
-                        return SizedBox(height: rowHeight, child: Text(key));
-                      },
-                    ),
-                  ],
-                ),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 300,
+              child: CustomScrollView(
+                slivers: [
+                  SliverTree<String, String>(
+                    controller: controller,
+                    nodeBuilder: (context, key, depth) {
+                      return SizedBox(height: rowHeight, child: Text(key));
+                    },
+                  ),
+                ],
               ),
             ),
           ),
-        );
-        await tester.pump();
+        ),
+      );
+      await tester.pump();
 
-        // Pre-expand: P at y=0, S at y=rowHeight.
-        final yBefore = tester.getTopLeft(find.text("S")).dy;
-        expect(yBefore, rowHeight);
+      // Pre-expand: P at y=0, S at y=rowHeight.
+      final yBefore = tester.getTopLeft(find.text("S")).dy;
+      expect(yBefore, rowHeight);
 
-        controller.expand(key: "P");
+      controller.expand(key: "P");
 
-        // Sample S's Y position across the animation window. S may be pushed
-        // off the viewport by the expansion — that's fine, it stays mounted
-        // throughout the animation because stale-node eviction is gated on
-        // hasActiveAnimations in the SliverTreeElement.
-        final samples = <double>[];
-        for (int i = 0; i < 20; i++) {
-          await tester.pump(const Duration(milliseconds: 16));
-          final finder = find.text("S");
-          if (finder.evaluate().isEmpty) {
-            samples.add(double.nan);
-          } else {
-            samples.add(tester.getTopLeft(finder).dy);
-          }
+      // Sample S's Y position across the animation window. S may be pushed
+      // off the viewport by the expansion — that's fine, it stays mounted
+      // throughout the animation because stale-node eviction is gated on
+      // hasActiveAnimations in the SliverTreeElement.
+      final samples = <double>[];
+      for (int i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        final finder = find.text("S");
+        if (finder.evaluate().isEmpty) {
+          samples.add(double.nan);
+        } else {
+          samples.add(tester.getTopLeft(finder).dy);
         }
-        await tester.pumpAndSettle();
+      }
+      await tester.pumpAndSettle();
 
-        // Find the first frame where S actually moved.
-        int firstMovedFrame = -1;
-        for (int i = 0; i < samples.length; i++) {
-          if (samples[i].isNaN) continue;
-          if ((samples[i] - yBefore).abs() > 1.0) {
-            firstMovedFrame = i;
-            break;
-          }
+      // Find the first frame where S actually moved.
+      int firstMovedFrame = -1;
+      for (int i = 0; i < samples.length; i++) {
+        if (samples[i].isNaN) continue;
+        if ((samples[i] - yBefore).abs() > 1.0) {
+          firstMovedFrame = i;
+          break;
         }
-        expect(
-          firstMovedFrame,
-          isNot(-1),
-          reason:
-              "sibling 'S' never moved from its pre-expand Y=$yBefore during "
-              "any of the 20 animation-window frames. samples=$samples. "
-              "This is the siblings-snap-on-settle regression: the admission "
-              "cap excluded 'S' from [cacheStartIndex, cacheEndIndex), and "
-              "Pass 2 didn't refresh parentData.layoutOffset for already-"
-              "mounted out-of-band children during the animation.",
-        );
-        // At 400ms / 16ms-per-frame the animation spans ~25 frames; any
-        // movement within the first 8 samples confirms smooth progression
-        // rather than a settle-only snap.
-        expect(
-          firstMovedFrame,
-          lessThan(8),
-          reason:
-              "sibling 'S' didn't start moving until frame $firstMovedFrame "
-              "of the 20-sample animation window. samples=$samples. "
-              "Expansion is not pushing the sibling smoothly each frame.",
-        );
-      },
-    );
+      }
+      expect(
+        firstMovedFrame,
+        isNot(-1),
+        reason:
+            "sibling 'S' never moved from its pre-expand Y=$yBefore during "
+            "any of the 20 animation-window frames. samples=$samples. "
+            "This is the siblings-snap-on-settle regression: the admission "
+            "cap excluded 'S' from [cacheStartIndex, cacheEndIndex), and "
+            "Pass 2 didn't refresh parentData.layoutOffset for already-"
+            "mounted out-of-band children during the animation.",
+      );
+      // At 400ms / 16ms-per-frame the animation spans ~25 frames; any
+      // movement within the first 8 samples confirms smooth progression
+      // rather than a settle-only snap.
+      expect(
+        firstMovedFrame,
+        lessThan(8),
+        reason:
+            "sibling 'S' didn't start moving until frame $firstMovedFrame "
+            "of the 20-sample animation window. samples=$samples. "
+            "Expansion is not pushing the sibling smoothly each frame.",
+      );
+    });
   });
 }
 

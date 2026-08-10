@@ -15,34 +15,32 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
-  testWidgets(
-    "single-leaf non-animated remove does not trigger a full "
-    "reverse-index reset",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
+  testWidgets("single-leaf non-animated remove does not trigger a full "
+      "reverse-index reset", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
 
-      controller.setRoots([
-        for (int i = 0; i < 50; i++) TreeNode(key: "r$i", data: "R$i"),
-      ]);
+    controller.setRoots([
+      for (int i = 0; i < 50; i++) TreeNode(key: "r$i", data: "R$i"),
+    ]);
 
-      final before = controller.debugOrderResetIndexAllCount;
-      controller.remove(key: "r25", animate: false);
-      expect(
-        controller.debugOrderResetIndexAllCount,
-        before,
-        reason: "a single visible leaf is trivially contiguous — its "
-            "removal must use the range fast path, not the full sweep "
-            "with an O(nidCapacity) reverse-index memset",
-      );
-      expect(controller.visibleNodes.length, 49);
-      expect(controller.getNodeData("r25"), isNull);
-      controller.debugAssertVisibleSubtreeSizeConsistency();
-    },
-  );
+    final before = controller.debugOrderResetIndexAllCount;
+    controller.remove(key: "r25", animate: false);
+    expect(
+      controller.debugOrderResetIndexAllCount,
+      before,
+      reason:
+          "a single visible leaf is trivially contiguous — its "
+          "removal must use the range fast path, not the full sweep "
+          "with an O(nidCapacity) reverse-index memset",
+    );
+    expect(controller.visibleNodes.length, 49);
+    expect(controller.getNodeData("r25"), isNull);
+    controller.debugAssertVisibleSubtreeSizeConsistency();
+  });
 
   testWidgets(
     "expanded-subtree non-animated remove uses the contiguous fast path "
@@ -62,9 +60,7 @@ void main() {
       controller.setChildren("p", [
         for (int i = 0; i < 10; i++) TreeNode(key: "c$i", data: "C$i"),
       ]);
-      controller.setChildren("c3", [
-        const TreeNode(key: "g", data: "G"),
-      ]);
+      controller.setChildren("c3", [const TreeNode(key: "g", data: "G")]);
       controller.expand(key: "p", animate: false);
       controller.expand(key: "c3", animate: false);
       expect(controller.visibleNodes.length, 14);
@@ -76,7 +72,8 @@ void main() {
       expect(
         controller.debugOrderResetIndexAllCount,
         before,
-        reason: "an expanded subtree is contiguous in the visible order — "
+        reason:
+            "an expanded subtree is contiguous in the visible order — "
             "its removal must use the range fast path",
       );
       expect(controller.visibleNodes, ["a", "z"]);

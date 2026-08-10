@@ -17,63 +17,64 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
-  testWidgets(
-    "setReorderPreview scans visibleNodeCount slots, not the order "
-    "buffer's high-water capacity",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
+  testWidgets("setReorderPreview scans visibleNodeCount slots, not the order "
+      "buffer's high-water capacity", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
 
-      // Five roots; the first carries a large collapsed subtree used only
-      // to push the order buffer's high-water mark far above the final
-      // visible count.
-      controller.setRoots([
-        for (int r = 0; r < 5; r++) TreeNode(key: "r$r", data: "R$r"),
-      ]);
-      controller.setChildren("r0", [
-        for (int i = 0; i < 400; i++) TreeNode(key: "c$i", data: "C$i"),
-      ]);
+    // Five roots; the first carries a large collapsed subtree used only
+    // to push the order buffer's high-water mark far above the final
+    // visible count.
+    controller.setRoots([
+      for (int r = 0; r < 5; r++) TreeNode(key: "r$r", data: "R$r"),
+    ]);
+    controller.setChildren("r0", [
+      for (int i = 0; i < 400; i++) TreeNode(key: "c$i", data: "C$i"),
+    ]);
 
-      controller.expandAll();
-      expect(
-        controller.visibleNodeCount,
-        405,
-        reason: "setup: expandAll must have grown the order buffer's "
-            "high-water mark to 405",
-      );
+    controller.expandAll();
+    expect(
+      controller.visibleNodeCount,
+      405,
+      reason:
+          "setup: expandAll must have grown the order buffer's "
+          "high-water mark to 405",
+    );
 
-      controller.collapseAll();
-      expect(
-        controller.visibleNodeCount,
-        5,
-        reason: "setup: collapseAll must have shrunk the VISIBLE count "
-            "while the buffer capacity stays at the high-water mark",
-      );
+    controller.collapseAll();
+    expect(
+      controller.visibleNodeCount,
+      5,
+      reason:
+          "setup: collapseAll must have shrunk the VISIBLE count "
+          "while the buffer capacity stays at the high-water mark",
+    );
 
-      controller.setReorderPreview(
-        draggedKey: "r1",
-        targetKey: "r3",
-        gapBelowTarget: true,
-      );
+    controller.setReorderPreview(
+      draggedKey: "r1",
+      targetKey: "r3",
+      gapBelowTarget: true,
+    );
 
-      expect(
-        controller.hasActiveSlides,
-        isTrue,
-        reason: "setup: the preview must actually have installed held "
-            "offsets (proves the target loop ran)",
-      );
-      expect(
-        controller.debugLastPreviewTargetIterationCount,
-        controller.visibleNodeCount,
-        reason: "the target loop must examine exactly the valid prefix of "
-            "the order buffer; anything larger means it is scanning the "
-            "stale capacity tail beyond visibleNodeCount",
-      );
+    expect(
+      controller.hasActiveSlides,
+      isTrue,
+      reason:
+          "setup: the preview must actually have installed held "
+          "offsets (proves the target loop ran)",
+    );
+    expect(
+      controller.debugLastPreviewTargetIterationCount,
+      controller.visibleNodeCount,
+      reason:
+          "the target loop must examine exactly the valid prefix of "
+          "the order buffer; anything larger means it is scanning the "
+          "stale capacity tail beyond visibleNodeCount",
+    );
 
-      controller.clearReorderPreview(animate: false);
-    },
-  );
+    controller.clearReorderPreview(animate: false);
+  });
 }

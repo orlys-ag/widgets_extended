@@ -65,7 +65,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 1000),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -105,8 +110,11 @@ void main() {
       );
       await tester.pump();
       expect(controller.hasActiveSlides, true);
-      expect(controller.isVisible("Y"), false,
-          reason: "Y is now structurally under collapsed B -> hidden (ghost)");
+      expect(
+        controller.isVisible("Y"),
+        false,
+        reason: "Y is now structurally under collapsed B -> hidden (ghost)",
+      );
 
       // Tick to 20% of the 1000ms linear slide.
       await tester.pump(const Duration(milliseconds: 200));
@@ -116,20 +124,31 @@ void main() {
       // and Pass A.5 would coincide (modulo tuck, which is 0 here since ghost
       // and anchor rows are the same height) and the test would prove nothing.
       final bMidSlide = controller.getSlideDelta("B");
-      expect(bMidSlide, greaterThan(10.0),
-          reason: "precondition: anchor B must have a substantial in-flight "
-              "slide delta for the divergence to be observable");
+      expect(
+        bMidSlide,
+        greaterThan(10.0),
+        reason:
+            "precondition: anchor B must have a substantial in-flight "
+            "slide delta for the divergence to be observable",
+      );
       final midGhostDelta = controller.getSlideDelta("Y");
-      expect(midGhostDelta, lessThan(0.0),
-          reason: "precondition: Y's own ghost slide is still in flight");
+      expect(
+        midGhostDelta,
+        lessThan(0.0),
+        reason: "precondition: Y's own ghost slide is still in flight",
+      );
 
       // Capture Y's TRUE painted position from the Pass A.5 paint-time
       // oracle. Sliver-local coordinates; scrollOffset is 0 and the tree is
       // the only sliver, so this equals scroll-space y.
       final render = _render(tester);
-      expect(render.debugLastPhantomGhostPaint.containsKey("Y"), isTrue,
-          reason: "precondition: Y must be painted as a sliding exit ghost "
-              "this frame (Pass A.5 debug capture)");
+      expect(
+        render.debugLastPhantomGhostPaint.containsKey("Y"),
+        isTrue,
+        reason:
+            "precondition: Y must be painted as a sliding exit ghost "
+            "this frame (Pass A.5 debug capture)",
+      );
       final double actualPaintedY =
           render.debugLastPhantomGhostPaint["Y"]!.ghostRect.top;
 
@@ -150,15 +169,19 @@ void main() {
       );
       await tester.pump();
 
-      expect(controller.isVisible("Y"), true,
-          reason: "Y was moved to expanded C -> now visible");
+      expect(
+        controller.isVisible("Y"),
+        true,
+        reason: "Y was moved to expanded C -> now visible",
+      );
       final newDelta = controller.getSlideDelta("Y");
       final double paintedAfterRemove = 192.0 + newDelta;
 
       expect(
         paintedAfterRemove,
         closeTo(actualPaintedY, 2.0),
-        reason: "Y's painted position must be visually continuous across the "
+        reason:
+            "Y's painted position must be visually continuous across the "
             "re-move. Pass A.5 actually painted Y at $actualPaintedY "
             "(settled anchor top 96 - tuck + ghostSlide $midGhostDelta), but "
             "the new slide installs Y at $paintedAfterRemove. The "

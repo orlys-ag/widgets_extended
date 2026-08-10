@@ -22,7 +22,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       final scrollController = ScrollController();
@@ -112,7 +117,8 @@ void main() {
         expect(
           render.geometry!.scrollExtent,
           moreOrLessEquals(expected, epsilon: 0.5),
-          reason: "frame $i: geometry.scrollExtent must track the "
+          reason:
+              "frame $i: geometry.scrollExtent must track the "
               "controller's current extents — a full-order offset "
               "recompute over stale per-nid extents corrupts it while "
               "the bulk fast path is active",

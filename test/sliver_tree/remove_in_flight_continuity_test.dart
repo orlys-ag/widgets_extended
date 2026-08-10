@@ -43,11 +43,17 @@ Widget _harness(TreeController<String, String> controller) {
 }
 
 void main() {
-  testWidgets("entry-phantom row re-moved mid-slide preserves clip",
-      (tester) async {
+  testWidgets("entry-phantom row re-moved mid-slide preserves clip", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 1000),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -81,8 +87,11 @@ void main() {
     expect(controller.hasActiveSlides, true);
     expect(controller.isVisible("Y"), true);
     final entryDelta = controller.getSlideDelta("Y");
-    expect(entryDelta, isNot(0.0),
-        reason: "Y has an entry-phantom slide installed");
+    expect(
+      entryDelta,
+      isNot(0.0),
+      reason: "Y has an entry-phantom slide installed",
+    );
 
     // Tick mid-slide.
     await tester.pump(const Duration(milliseconds: 200));
@@ -109,20 +118,30 @@ void main() {
     await tester.pump();
 
     final yPaintedAfter = _yPaintedScrollSpace(controller, "Y");
-    expect(yPaintedAfter, closeTo(yPaintedBefore, 2.0),
-        reason: "Y's painted position must be visually continuous "
-            "across the re-move (no snap). Before: $yPaintedBefore, "
-            "after: $yPaintedAfter");
+    expect(
+      yPaintedAfter,
+      closeTo(yPaintedBefore, 2.0),
+      reason:
+          "Y's painted position must be visually continuous "
+          "across the re-move (no snap). Before: $yPaintedBefore, "
+          "after: $yPaintedAfter",
+    );
 
     await tester.pumpAndSettle();
     expect(controller.hasActiveSlides, false);
   });
 
-  testWidgets("ghost re-moved to ANOTHER collapsed parent keeps sliding",
-      (tester) async {
+  testWidgets("ghost re-moved to ANOTHER collapsed parent keeps sliding", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 1000),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
@@ -157,14 +176,20 @@ void main() {
     );
     await tester.pump();
     expect(controller.hasActiveSlides, true);
-    expect(controller.isVisible("Y"), false,
-        reason: "Y is now ghost (under collapsed B)");
+    expect(
+      controller.isVisible("Y"),
+      false,
+      reason: "Y is now ghost (under collapsed B)",
+    );
 
     // Tick mid-ghost-slide.
     await tester.pump(const Duration(milliseconds: 200));
     final yGhostDelta = controller.getSlideDelta("Y");
-    expect(yGhostDelta, isNot(0.0),
-        reason: "Y's ghost slide is still in flight");
+    expect(
+      yGhostDelta,
+      isNot(0.0),
+      reason: "Y's ghost slide is still in flight",
+    );
 
     // SECOND move: Y → C (also collapsed). Ghost re-moved to ANOTHER
     // hidden parent.
@@ -188,12 +213,21 @@ void main() {
     );
     await tester.pump();
 
-    expect(controller.isVisible("Y"), false,
-        reason: "Y is still ghost (under collapsed C now)");
-    expect(controller.hasActiveSlides, true,
-        reason: "Y's ghost slide must continue toward the NEW exit anchor C");
-    expect(controller.getSlideDelta("Y"), isNot(0.0),
-        reason: "A new slide must be installed for the re-moved ghost");
+    expect(
+      controller.isVisible("Y"),
+      false,
+      reason: "Y is still ghost (under collapsed C now)",
+    );
+    expect(
+      controller.hasActiveSlides,
+      true,
+      reason: "Y's ghost slide must continue toward the NEW exit anchor C",
+    );
+    expect(
+      controller.getSlideDelta("Y"),
+      isNot(0.0),
+      reason: "A new slide must be installed for the re-moved ghost",
+    );
 
     await tester.pumpAndSettle();
     expect(controller.hasActiveSlides, false);

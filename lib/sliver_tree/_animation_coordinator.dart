@@ -85,10 +85,10 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     required Curve Function() enterExitCurveGetter,
     required Duration Function() expandCollapseDurationGetter,
     required void Function(TKey opKey, AnimationStatus status)
-        onOperationGroupStatus,
+    onOperationGroupStatus,
     required void Function(AnimationStatus status) onBulkAnimationStatus,
     required void Function(Iterable<TKey> completedKeys)
-        onStandaloneTickComplete,
+    onStandaloneTickComplete,
     required double defaultExtent,
   }) : _vsync = vsync,
        _nids = nids,
@@ -102,6 +102,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
 
   final TickerProvider _vsync;
   final NodeIdRegistry<TKey> _nids;
+
   /// Enter/exit (standalone) timing — the style's `effectiveEnterExit`.
   final Duration Function() _enterExitDurationGetter;
   final Curve Function() _enterExitCurveGetter;
@@ -110,7 +111,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   /// per-operation group registry's controller durations.
   final Duration Function() _expandCollapseDurationGetter;
   final void Function(TKey opKey, AnimationStatus status)
-      _onOperationGroupStatus;
+  _onOperationGroupStatus;
   final void Function(AnimationStatus status) _onBulkAnimationStatus;
   final void Function(Iterable<TKey> completedKeys) _onStandaloneTickComplete;
 
@@ -144,12 +145,12 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
 
   late final OperationGroupRegistry<TKey> opGroups =
       OperationGroupRegistry<TKey>(
-    nids: _nids,
-    vsync: _vsync,
-    durationGetter: _expandCollapseDurationGetter,
-    onTick: notifyListeners,
-    onStatusChanged: _onOperationGroupStatus,
-  );
+        nids: _nids,
+        vsync: _vsync,
+        durationGetter: _expandCollapseDurationGetter,
+        onTick: notifyListeners,
+        onStatusChanged: _onOperationGroupStatus,
+      );
 
   late final BulkAnimator<TKey> bulk = BulkAnimator<TKey>(
     nids: _nids,
@@ -359,7 +360,11 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     }
     if (newCapacity > _isPendingDeletionByNid.length) {
       final grown = Uint8List(newCapacity);
-      grown.setRange(0, _isPendingDeletionByNid.length, _isPendingDeletionByNid);
+      grown.setRange(
+        0,
+        _isPendingDeletionByNid.length,
+        _isPendingDeletionByNid,
+      );
       _isPendingDeletionByNid = grown;
     }
     if (newCapacity > _isAnimatingByNid.length) {
@@ -401,7 +406,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     bulk.clearForNid(nid);
     slide.clearForNid(nid);
     preview.clearForNid(nid);
-    if (nid >= 0 && nid < _isPendingDeletionByNid.length &&
+    if (nid >= 0 &&
+        nid < _isPendingDeletionByNid.length &&
         _isPendingDeletionByNid[nid] != 0) {
       _isPendingDeletionByNid[nid] = 0;
       _pendingDeletionCount--;
@@ -715,8 +721,9 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     // 3. Standalone
     final animation = standalone.at(key);
     if (animation == null) return fullExtent;
-    final t = _enterExitCurveGetter()
-        .transform(animation.progress.clamp(0.0, 1.0));
+    final t = _enterExitCurveGetter().transform(
+      animation.progress.clamp(0.0, 1.0),
+    );
     if (animation.targetExtent == _kUnknownExtent) {
       return animation.type == AnimationType.entering
           ? fullExtent * t
@@ -773,7 +780,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
           _writtenAnimatingNids.add(nid);
         }
         final state = standalone.slotAtNid(nid);
-        if (state != null && state.type == AnimationType.exiting &&
+        if (state != null &&
+            state.type == AnimationType.exiting &&
             _isExitingByNid[nid] == 0) {
           _isExitingByNid[nid] = 1;
           _writtenExitingNids.add(nid);
@@ -860,8 +868,9 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     // 3. Standalone
     final animation = standalone.slotAtNid(nid);
     if (animation == null) return full;
-    final t = _enterExitCurveGetter()
-        .transform(animation.progress.clamp(0.0, 1.0));
+    final t = _enterExitCurveGetter().transform(
+      animation.progress.clamp(0.0, 1.0),
+    );
     if (animation.targetExtent == _kUnknownExtent) {
       return animation.type == AnimationType.entering
           ? full * t
@@ -873,14 +882,16 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   @override
   bool isAnimatingNid(int nid) {
     ensureAnimatingKeys();
-    return nid >= 0 && nid < _isAnimatingByNid.length &&
+    return nid >= 0 &&
+        nid < _isAnimatingByNid.length &&
         _isAnimatingByNid[nid] != 0;
   }
 
   @override
   bool isExitingNid(int nid) {
     ensureAnimatingKeys();
-    return nid >= 0 && nid < _isExitingByNid.length &&
+    return nid >= 0 &&
+        nid < _isExitingByNid.length &&
         _isExitingByNid[nid] != 0;
   }
 

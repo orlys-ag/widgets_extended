@@ -71,10 +71,7 @@ void main() {
     _Item(id: "c1", parentId: "p"),
     _Item(id: "q"),
   ];
-  const filteredTree = <_Item>[
-    _Item(id: "p"),
-    _Item(id: "q"),
-  ];
+  const filteredTree = <_Item>[_Item(id: "p"), _Item(id: "q")];
 
   testWidgets(
     "collapse -> filter empties children -> unfilter: the parent stays "
@@ -85,8 +82,11 @@ void main() {
 
       final harness = tester.state<_HarnessState>(find.byType(_Harness));
       final controller = harness.treeController;
-      expect(controller.isExpanded("p"), isTrue,
-          reason: "setup: initiallyExpanded opens p");
+      expect(
+        controller.isExpanded("p"),
+        isTrue,
+        reason: "setup: initiallyExpanded opens p",
+      );
       expect(find.text("c1"), findsOneWidget);
 
       // The user deliberately collapses p.
@@ -97,8 +97,11 @@ void main() {
       // A filter-sync empties p's children (p itself survives).
       await tester.pumpWidget(const _Harness(items: filteredTree));
       await tester.pumpAndSettle();
-      expect(controller.getNodeData("p"), isNotNull,
-          reason: "setup: p must survive the filter");
+      expect(
+        controller.getNodeData("p"),
+        isNotNull,
+        reason: "setup: p must survive the filter",
+      );
       expect(controller.isExpanded("p"), isFalse);
 
       // Filter cleared — children return.
@@ -108,7 +111,8 @@ void main() {
       expect(
         controller.isExpanded("p"),
         isFalse,
-        reason: "the auto-expand heuristic must not override the user's "
+        reason:
+            "the auto-expand heuristic must not override the user's "
             "deliberate collapse of a parent that stayed in the tree "
             "through the filter cycle",
       );
@@ -133,9 +137,13 @@ void main() {
       await tester.pumpWidget(const _Harness(items: fullTree));
       await tester.pumpAndSettle();
 
-      expect(controller.isExpanded("p"), isTrue,
-          reason: "p was expanded the whole time — children must be "
-              "visible again after the filter cycle");
+      expect(
+        controller.isExpanded("p"),
+        isTrue,
+        reason:
+            "p was expanded the whole time — children must be "
+            "visible again after the filter cycle",
+      );
       expect(find.text("c1"), findsOneWidget);
     },
   );

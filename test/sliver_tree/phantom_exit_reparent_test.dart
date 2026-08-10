@@ -48,11 +48,17 @@ Widget _harness(
 
 void main() {
   group("visible → hidden reparenting", () {
-    testWidgets("visible row reparented to collapsed parent gets exit slide",
-        (tester) async {
+    testWidgets("visible row reparented to collapsed parent gets exit slide", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -92,15 +98,25 @@ void main() {
       await tester.pump();
 
       // Y is now structurally under B but B is collapsed → Y is hidden.
-      expect(controller.visibleNodes.contains("Y"), false,
-          reason: "After move, B is still collapsed → Y is structurally "
-              "under B but not in visibleNodes");
+      expect(
+        controller.visibleNodes.contains("Y"),
+        false,
+        reason:
+            "After move, B is still collapsed → Y is structurally "
+            "under B but not in visibleNodes",
+      );
       // The exit-phantom path should have installed a slide for Y so it
       // visually slides into B's row before disappearing.
-      expect(controller.hasActiveSlides, true,
-          reason: "Exit phantom should install a slide for Y");
-      expect(controller.getSlideDelta("Y"), isNot(0.0),
-          reason: "Y should have a non-zero exit slide delta");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "Exit phantom should install a slide for Y",
+      );
+      expect(
+        controller.getSlideDelta("Y"),
+        isNot(0.0),
+        reason: "Y should have a non-zero exit slide delta",
+      );
 
       // After the slide settles, Y is no longer in active slides AND
       // Y stays out of visibleNodes (B is still collapsed). Y's render
@@ -110,11 +126,17 @@ void main() {
       expect(controller.visibleNodes.contains("Y"), false);
     });
 
-    testWidgets("exit slide delta = baseline_Y - new_anchor_position",
-        (tester) async {
+    testWidgets("exit slide delta = baseline_Y - new_anchor_position", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -156,18 +178,28 @@ void main() {
 
       // Y baseline = 48. New B position (after Y2 takes Y's slot) = 96.
       // Slide delta = 48 - 96 = -48.
-      expect(controller.getSlideDelta("Y"), closeTo(-48.0, 1.0),
-          reason: "Y slides from old position (y=48) toward new anchor B "
-              "(y=96). delta = 48 - 96 = -48.");
+      expect(
+        controller.getSlideDelta("Y"),
+        closeTo(-48.0, 1.0),
+        reason:
+            "Y slides from old position (y=48) toward new anchor B "
+            "(y=96). delta = 48 - 96 = -48.",
+      );
 
       await tester.pumpAndSettle();
     });
 
-    testWidgets("nested-collapsed reparent uses deepest visible new ancestor",
-        (tester) async {
+    testWidgets("nested-collapsed reparent uses deepest visible new ancestor", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -209,18 +241,28 @@ void main() {
       // visible new ancestor). Y baseline = 48. Slide = 48 - 96 = -48.
       expect(controller.visibleNodes.contains("Y"), false);
       expect(controller.hasActiveSlides, true);
-      expect(controller.getSlideDelta("Y"), closeTo(-48.0, 1.0),
-          reason: "Y slides toward E (deepest visible new ancestor). "
-              "Y baseline=48, E new position=96. delta = -48.");
+      expect(
+        controller.getSlideDelta("Y"),
+        closeTo(-48.0, 1.0),
+        reason:
+            "Y slides toward E (deepest visible new ancestor). "
+            "Y baseline=48, E new position=96. delta = -48.",
+      );
 
       await tester.pumpAndSettle();
     });
 
-    testWidgets("hidden → hidden reparent does NOT install a slide",
-        (tester) async {
+    testWidgets("hidden → hidden reparent does NOT install a slide", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -250,26 +292,35 @@ void main() {
 
       // Neither entry-phantom nor exit-phantom should fire — Y was
       // hidden before AND is hidden after. No slide visible to the user.
-      expect(controller.hasActiveSlides, false,
-          reason: "hidden→hidden moves can't be animated meaningfully — "
-              "the user can't see Y at either endpoint");
+      expect(
+        controller.hasActiveSlides,
+        false,
+        reason:
+            "hidden→hidden moves can't be animated meaningfully — "
+            "the user can't see Y at either endpoint",
+      );
     });
 
-    testWidgets("exit anchor off-screen falls back to viewport edge",
-        (tester) async {
+    testWidgets("exit anchor off-screen falls back to viewport edge", (
+      tester,
+    ) async {
       final scrollController = ScrollController();
       addTearDown(scrollController.dispose);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
       // Tree: A (expanded) [Y]; spacers; B (collapsed) far below.
       controller.setRoots([
         const TreeNode(key: "A", data: "A"),
-        for (int i = 0; i < 10; i++)
-          TreeNode(key: "sp-$i", data: "sp-$i"),
+        for (int i = 0; i < 10; i++) TreeNode(key: "sp-$i", data: "sp-$i"),
         const TreeNode(key: "B", data: "B"),
       ]);
       controller.setChildren("A", [const TreeNode(key: "Y", data: "Y")]);
@@ -301,10 +352,14 @@ void main() {
       await tester.pump();
 
       expect(controller.hasActiveSlides, true);
-      expect(controller.getSlideDelta("Y"), closeTo(-392.0, 1.0),
-          reason: "B is off-screen → fallback to viewport bottom plus "
-              "overhang (y=400+40=440). Y baseline=48. delta = 48 - 440 "
-              "= -392.");
+      expect(
+        controller.getSlideDelta("Y"),
+        closeTo(-392.0, 1.0),
+        reason:
+            "B is off-screen → fallback to viewport bottom plus "
+            "overhang (y=400+40=440). Y baseline=48. delta = 48 - 440 "
+            "= -392.",
+      );
 
       await tester.pumpAndSettle();
     });

@@ -69,8 +69,7 @@ bool _hasRowBoundaryInsideSliver(WidgetTester tester, Key rowKey) {
 }
 
 void main() {
-  testWidgets("rows are wrapped in RepaintBoundary by default",
-      (tester) async {
+  testWidgets("rows are wrapped in RepaintBoundary by default", (tester) async {
     final controller = TreeController<String, String>(
       vsync: tester,
       animationStyle: TreeAnimationStyle.disabled,
@@ -87,7 +86,8 @@ void main() {
     expect(
       _hasRowBoundaryInsideSliver(tester, const ValueKey("row-a")),
       isTrue,
-      reason: "each row must be wrapped in a RepaintBoundary INSIDE the "
+      reason:
+          "each row must be wrapped in a RepaintBoundary INSIDE the "
           "sliver by default — a boundary above the sliver is the "
           "route/viewport's own and proves nothing (R6)",
     );
@@ -98,8 +98,9 @@ void main() {
     );
   });
 
-  testWidgets("addRepaintBoundaries: false leaves rows unwrapped",
-      (tester) async {
+  testWidgets("addRepaintBoundaries: false leaves rows unwrapped", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
       animationStyle: TreeAnimationStyle.disabled,
@@ -107,15 +108,14 @@ void main() {
     addTearDown(controller.dispose);
     controller.setRoots([const TreeNode(key: "a", data: "A")]);
 
-    await tester.pumpWidget(
-      _harness(controller, addRepaintBoundaries: false),
-    );
+    await tester.pumpWidget(_harness(controller, addRepaintBoundaries: false));
     await tester.pumpAndSettle();
 
     expect(
       _hasRowBoundaryInsideSliver(tester, const ValueKey("row-a")),
       isFalse,
-      reason: "with addRepaintBoundaries: false no per-row boundary may "
+      reason:
+          "with addRepaintBoundaries: false no per-row boundary may "
           "be inserted inside the sliver (the nearest boundary ancestor "
           "must be the viewport's own, outside the sliver)",
     );

@@ -41,7 +41,6 @@ double _computeAnimationSpeedMultiplier(
 /// bulk-group lifecycle lives in [OperationGroupRegistry] / [BulkAnimator].
 extension _TreeControllerAnimationOps<TKey, TData>
     on TreeController<TKey, TData> {
-
   /// Prepares [key]'s subtree for reparenting. Clears in-flight slide
   /// animations (their deltas were computed against the prior position and
   /// would paint at the wrong offset post-move) and pending-deletion state,
@@ -82,10 +81,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// Iterative (heap worklist) so deep dragged subtrees cannot
   /// stack-overflow. Children are pushed in reverse so pops preserve
   /// left-to-right visit order.
-  void _cancelAnimationStateForSubtree(
-    TKey key, {
-    bool cancelSlides = true,
-  }) {
+  void _cancelAnimationStateForSubtree(TKey key, {bool cancelSlides = true}) {
     final preservedOpKeys = <TKey>{};
     final stack = <TKey>[key];
     while (stack.isNotEmpty) {
@@ -162,9 +158,9 @@ extension _TreeControllerAnimationOps<TKey, TData>
         // appearing without any growth animation. Mirrors the
         // pending-deletion `defer` path: preserve type-entering state,
         // clear external sources.
-        final activeStandalone =
-            !cancelSlides ? _standaloneAt(nodeId) : null;
-        final preserveEntering = activeStandalone != null &&
+        final activeStandalone = !cancelSlides ? _standaloneAt(nodeId) : null;
+        final preserveEntering =
+            activeStandalone != null &&
             activeStandalone.type == AnimationType.entering;
         if (preserveEntering) {
           final opGroupKey = _operationGroupOf(nodeId);
@@ -205,7 +201,6 @@ extension _TreeControllerAnimationOps<TKey, TData>
       _anim.standalone.stop();
     }
   }
-
 
   /// Called when the bulk animation completes or is dismissed. The
   /// [_unusedStatus] parameter matches the BulkAnimator's onStatusChanged

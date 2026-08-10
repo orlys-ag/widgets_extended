@@ -80,10 +80,7 @@ void _populateExampleTree(TreeController<String, int> controller) {
   });
 }
 
-void _reparentAll(
-  TreeController<String, int> controller,
-  Random random,
-) {
+void _reparentAll(TreeController<String, int> controller, Random random) {
   final allItems = <String>[];
   for (int p = 0; p < 8; p++) {
     allItems.addAll(controller.getChildren("parent-$p"));
@@ -119,15 +116,12 @@ void _reparentAll(
 ) {
   final occupied = <int>{};
   final diag = <int, String>{};
-  final allRows = find.byWidgetPredicate(
-    (w) {
-      final k = w.key;
-      if (k is! ValueKey) return false;
-      final v = k.value;
-      return v is String && v.startsWith("row-");
-    },
-    skipOffstage: false,
-  );
+  final allRows = find.byWidgetPredicate((w) {
+    final k = w.key;
+    if (k is! ValueKey) return false;
+    final v = k.value;
+    return v is String && v.startsWith("row-");
+  }, skipOffstage: false);
   for (final element in allRows.evaluate()) {
     final widget = element.widget;
     final dy = tester.getTopLeft(find.byWidget(widget)).dy;
@@ -154,10 +148,14 @@ void _assertNoViewportGaps(
   for (int b = 0; b < totalBuckets; b++) {
     if (!occupied.contains(b)) missingBuckets.add(b);
   }
-  expect(missingBuckets.length, lessThanOrEqualTo(allowedMissing),
-      reason: "[$label] Found ${missingBuckets.length} viewport buckets "
-          "(50-px each) with NO row painted: $missingBuckets. Total "
-          "buckets: $totalBuckets. Occupied: ${result.diag}.");
+  expect(
+    missingBuckets.length,
+    lessThanOrEqualTo(allowedMissing),
+    reason:
+        "[$label] Found ${missingBuckets.length} viewport buckets "
+        "(50-px each) with NO row painted: $missingBuckets. Total "
+        "buckets: $totalBuckets. Occupied: ${result.diag}.",
+  );
 }
 
 void main() {
@@ -182,38 +180,43 @@ void main() {
         await tester.pumpAndSettle();
 
         // After settle, every viewport bucket should have a row painted.
-        _assertNoViewportGaps(tester, controller, "settled-single",
-            allowedMissing: 0);
+        _assertNoViewportGaps(
+          tester,
+          controller,
+          "settled-single",
+          allowedMissing: 0,
+        );
       },
     );
 
-    testWidgets(
-      "AFTER SETTLE: 3 cascaded Reparent ALL clicks, viewport fully "
-      "populated (no persistent gaps)",
-      (tester) async {
-        final scroll = ScrollController();
-        addTearDown(scroll.dispose);
-        final controller = _newController(tester);
-        addTearDown(controller.dispose);
-        _populateExampleTree(controller);
-        await tester.pumpWidget(_harness(controller, scrollController: scroll));
-        await tester.pumpAndSettle();
-        scroll.jumpTo(5000);
+    testWidgets("AFTER SETTLE: 3 cascaded Reparent ALL clicks, viewport fully "
+        "populated (no persistent gaps)", (tester) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final controller = _newController(tester);
+      addTearDown(controller.dispose);
+      _populateExampleTree(controller);
+      await tester.pumpWidget(_harness(controller, scrollController: scroll));
+      await tester.pumpAndSettle();
+      scroll.jumpTo(5000);
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      final random = Random(42);
+      for (int batch = 0; batch < 3; batch++) {
+        _reparentAll(controller, random);
         await tester.pump();
-        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 250));
+      }
+      await tester.pumpAndSettle();
 
-        final random = Random(42);
-        for (int batch = 0; batch < 3; batch++) {
-          _reparentAll(controller, random);
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 250));
-        }
-        await tester.pumpAndSettle();
-
-        _assertNoViewportGaps(tester, controller, "settled-cascade",
-            allowedMissing: 0);
-      },
-    );
+      _assertNoViewportGaps(
+        tester,
+        controller,
+        "settled-cascade",
+        allowedMissing: 0,
+      );
+    });
 
     testWidgets(
       "single Reparent ALL click, scrolled mid-tree, viewport always full "
@@ -278,7 +281,10 @@ void main() {
           for (int p = 0; p < 5; p++) {
             await tester.pump(const Duration(milliseconds: 50));
             _assertNoViewportGaps(
-              tester, controller, "mid-batch-$batch-pump-$p");
+              tester,
+              controller,
+              "mid-batch-$batch-pump-$p",
+            );
           }
         }
         await tester.pumpAndSettle();
@@ -301,8 +307,7 @@ void main() {
           _reparentAll(controller, random);
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 100));
-          _assertNoViewportGaps(
-            tester, controller, "stress-batch-$batch");
+          _assertNoViewportGaps(tester, controller, "stress-batch-$batch");
         }
         await tester.pumpAndSettle();
         _assertNoViewportGaps(tester, controller, "stress-settled");
@@ -311,59 +316,60 @@ void main() {
   });
 
   group("Reparent ALL: every visible-area structural position has a row", () {
-    testWidgets(
-      "for every row whose structural position is in viewport, that "
-      "row's widget is mounted (no missing widgets at structural "
-      "positions inside the viewport)",
-      (tester) async {
-        final scroll = ScrollController();
-        addTearDown(scroll.dispose);
-        final controller = _newController(tester);
-        addTearDown(controller.dispose);
-        _populateExampleTree(controller);
-        await tester.pumpWidget(_harness(controller, scrollController: scroll));
-        await tester.pumpAndSettle();
-        scroll.jumpTo(5000);
+    testWidgets("for every row whose structural position is in viewport, that "
+        "row's widget is mounted (no missing widgets at structural "
+        "positions inside the viewport)", (tester) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final controller = _newController(tester);
+      addTearDown(controller.dispose);
+      _populateExampleTree(controller);
+      await tester.pumpWidget(_harness(controller, scrollController: scroll));
+      await tester.pumpAndSettle();
+      scroll.jumpTo(5000);
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      final random = Random(55);
+      for (int batch = 0; batch < 3; batch++) {
+        _reparentAll(controller, random);
         await tester.pump();
-        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 200));
+      }
 
-        final random = Random(55);
-        for (int batch = 0; batch < 3; batch++) {
-          _reparentAll(controller, random);
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 200));
-        }
-
-        // Check at multiple time points.
-        for (int t = 0; t < 5; t++) {
-          // Compute true structural per row by walking visibleNodes
-          // (matches `_computeTrueStructuralAt`).
-          final visible = controller.visibleNodes;
-          final scrollOffset = scroll.offset;
-          final viewportTop = scrollOffset;
-          final viewportBottom = scrollOffset + _kViewportHeight;
-          double structural = 0.0;
-          final missing = <String>[];
-          for (final key in visible) {
-            if (structural >= viewportTop && structural < viewportBottom) {
-              final finder = find.byKey(ValueKey("row-$key"));
-              if (finder.evaluate().isEmpty) {
-                missing.add("$key (structural=$structural)");
-              }
+      // Check at multiple time points.
+      for (int t = 0; t < 5; t++) {
+        // Compute true structural per row by walking visibleNodes
+        // (matches `_computeTrueStructuralAt`).
+        final visible = controller.visibleNodes;
+        final scrollOffset = scroll.offset;
+        final viewportTop = scrollOffset;
+        final viewportBottom = scrollOffset + _kViewportHeight;
+        double structural = 0.0;
+        final missing = <String>[];
+        for (final key in visible) {
+          if (structural >= viewportTop && structural < viewportBottom) {
+            final finder = find.byKey(ValueKey("row-$key"));
+            if (finder.evaluate().isEmpty) {
+              missing.add("$key (structural=$structural)");
             }
-            structural += _kRowHeight;
           }
-          // Allow up to a few "missing" for ghosts whose structural is
-          // technically in viewport but they're animating elsewhere
-          // (legitimate ghost rows). >5 indicates real bug.
-          expect(missing.length, lessThanOrEqualTo(5),
-              reason: "[t=$t] Many rows whose structural is in viewport "
-                  "are NOT mounted in the widget tree: $missing");
-          await tester.pump(const Duration(milliseconds: 100));
+          structural += _kRowHeight;
         }
+        // Allow up to a few "missing" for ghosts whose structural is
+        // technically in viewport but they're animating elsewhere
+        // (legitimate ghost rows). >5 indicates real bug.
+        expect(
+          missing.length,
+          lessThanOrEqualTo(5),
+          reason:
+              "[t=$t] Many rows whose structural is in viewport "
+              "are NOT mounted in the widget tree: $missing",
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+      }
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
   });
 }

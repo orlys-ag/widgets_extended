@@ -54,7 +54,12 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -93,11 +98,7 @@ void main() {
       expect(exitState, isNotNull);
       expect(exitState!.type, AnimationType.exiting);
       final extentDuringExit = controller.getCurrentExtent("x");
-      expect(
-        extentDuringExit,
-        lessThan(fullExtent),
-        reason: "x is mid-shrink",
-      );
+      expect(extentDuringExit, lessThan(fullExtent), reason: "x is mid-shrink");
       expect(
         extentDuringExit,
         greaterThan(0.0),
@@ -179,7 +180,12 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -201,10 +207,7 @@ void main() {
       controller.remove(key: "x", animate: true);
       await tester.pump(const Duration(milliseconds: 1));
       await tester.pump(const Duration(milliseconds: 199));
-      expect(
-        controller.getAnimationState("x")?.type,
-        AnimationType.exiting,
-      );
+      expect(controller.getAnimationState("x")?.type, AnimationType.exiting);
 
       // Reparent x to A (which is collapsed). x is now structurally
       // hidden, so case 2 applies: keep the standalone exit running so
@@ -250,7 +253,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -280,10 +288,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 199));
         for (final k in <String>["P", "c", "d"]) {
           expect(controller.isPendingDeletion(k), isTrue);
-          expect(
-            controller.getAnimationState(k)?.type,
-            AnimationType.exiting,
-          );
+          expect(controller.getAnimationState(k)?.type, AnimationType.exiting);
         }
         final extentMidExit = <String, double>{
           "P": controller.getCurrentExtent("P"),
@@ -343,7 +348,12 @@ void main() {
     ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -374,10 +384,7 @@ void main() {
       await tester.pump();
 
       expect(controller.isPendingDeletion("x"), isFalse);
-      expect(
-        controller.getAnimationState("x")?.type,
-        AnimationType.entering,
-      );
+      expect(controller.getAnimationState("x")?.type, AnimationType.entering);
       expect(
         controller.getAnimationState("x")!.startExtent,
         closeTo(extentMidExit, 1.0),
@@ -401,7 +408,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
         final sync = TreeSyncController<String, String>(

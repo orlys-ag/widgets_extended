@@ -41,7 +41,8 @@ void main() {
       expect(
         structuralFires,
         0,
-        reason: "no relocation happened — the node-data channel already "
+        reason:
+            "no relocation happened — the node-data channel already "
             "refreshed the row; a structural notification would refresh "
             "it a second time (audit 6.6)",
       );
@@ -49,72 +50,83 @@ void main() {
 
       // Relocation still notifies structurally.
       controller.insertRoot(const TreeNode(key: "a", data: "A3"), index: 1);
-      expect(structuralFires, greaterThan(0),
-          reason: "an actual relocation changes row positions");
+      expect(
+        structuralFires,
+        greaterThan(0),
+        reason: "an actual relocation changes row positions",
+      );
       expect(controller.liveRootKeys, ["b", "a"]);
       expect(
         dataFires,
         1,
-        reason: "the relocation's structural notification carries the key "
+        reason:
+            "the relocation's structural notification carries the key "
             "in affectedKeys and subsumes the data channel's row refresh "
             "— firing both refreshes the same row twice (R3)",
       );
-      expect(controller.getNodeData("a")!.data, "A3",
-          reason: "the overwritten payload must land via the structural "
-              "refresh alone");
-
-      await tester.pumpAndSettle();
-    },
-  );
-
-  testWidgets(
-    "data-only insert re-insert fires the node-data channel only",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([const TreeNode(key: "p", data: "P")]);
-      controller.setChildren("p", [
-        const TreeNode(key: "c1", data: "C1"),
-        const TreeNode(key: "c2", data: "C2"),
-      ]);
-      controller.expand(key: "p", animate: false);
-
-      int structuralFires = 0;
-      int dataFires = 0;
-      controller.addStructuralListener((_) => structuralFires++);
-      controller.addNodeDataListener((_) => dataFires++);
-
-      controller.insert(
-        parentKey: "p",
-        node: const TreeNode(key: "c1", data: "C1-v2"),
-        index: 0,
-      );
-      expect(dataFires, 1);
-      expect(structuralFires, 0,
-          reason: "no relocation — data channel only (audit 6.6)");
-      expect(controller.getNodeData("c1")!.data, "C1-v2");
-
-      controller.insert(
-        parentKey: "p",
-        node: const TreeNode(key: "c1", data: "C1-v3"),
-        index: 1,
-      );
-      expect(structuralFires, greaterThan(0));
-      expect(controller.getLiveChildren("p"), ["c2", "c1"]);
       expect(
-        dataFires,
-        1,
-        reason: "same-parent relocation is structural-only — the data "
-            "channel firing too refreshes the same row twice (R3)",
+        controller.getNodeData("a")!.data,
+        "A3",
+        reason:
+            "the overwritten payload must land via the structural "
+            "refresh alone",
       );
-      expect(controller.getNodeData("c1")!.data, "C1-v3");
 
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets("data-only insert re-insert fires the node-data channel only", (
+    tester,
+  ) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
+    controller.setRoots([const TreeNode(key: "p", data: "P")]);
+    controller.setChildren("p", [
+      const TreeNode(key: "c1", data: "C1"),
+      const TreeNode(key: "c2", data: "C2"),
+    ]);
+    controller.expand(key: "p", animate: false);
+
+    int structuralFires = 0;
+    int dataFires = 0;
+    controller.addStructuralListener((_) => structuralFires++);
+    controller.addNodeDataListener((_) => dataFires++);
+
+    controller.insert(
+      parentKey: "p",
+      node: const TreeNode(key: "c1", data: "C1-v2"),
+      index: 0,
+    );
+    expect(dataFires, 1);
+    expect(
+      structuralFires,
+      0,
+      reason: "no relocation — data channel only (audit 6.6)",
+    );
+    expect(controller.getNodeData("c1")!.data, "C1-v2");
+
+    controller.insert(
+      parentKey: "p",
+      node: const TreeNode(key: "c1", data: "C1-v3"),
+      index: 1,
+    );
+    expect(structuralFires, greaterThan(0));
+    expect(controller.getLiveChildren("p"), ["c2", "c1"]);
+    expect(
+      dataFires,
+      1,
+      reason:
+          "same-parent relocation is structural-only — the data "
+          "channel firing too refreshes the same row twice (R3)",
+    );
+    expect(controller.getNodeData("c1")!.data, "C1-v3");
+
+    await tester.pumpAndSettle();
+  });
 
   testWidgets(
     "cross-parent re-insert at equal depth (moveNode delegation) keeps "
@@ -129,15 +141,11 @@ void main() {
         const TreeNode(key: "p1", data: "P1"),
         const TreeNode(key: "p2", data: "P2"),
       ]);
-      controller.setChildren("p1", [
-        const TreeNode(key: "x", data: "X-old"),
-      ]);
+      controller.setChildren("p1", [const TreeNode(key: "x", data: "X-old")]);
       // p2 needs a pre-existing child: expanding a childless parent does
       // not stick, and the moved row must land VISIBLE for the
       // widget-level assertion below to mean anything.
-      controller.setChildren("p2", [
-        const TreeNode(key: "y", data: "Y"),
-      ]);
+      controller.setChildren("p2", [const TreeNode(key: "y", data: "Y")]);
       controller.expand(key: "p1", animate: false);
       controller.expand(key: "p2", animate: false);
 
@@ -179,19 +187,33 @@ void main() {
       // omits the moved key, leaving the data channel as the only refresh
       // path for the overwritten payload.
       expect(controller.getParent("x"), "p2");
-      expect(controller.getDepth("x"), depthBefore,
-          reason: "setup: the move must be depth-preserving");
-      expect(controller.visibleNodes, contains("x"),
-          reason: "setup: the moved row must stay visible — otherwise the "
-              "widget-level payload assertion below is vacuous");
+      expect(
+        controller.getDepth("x"),
+        depthBefore,
+        reason: "setup: the move must be depth-preserving",
+      );
+      expect(
+        controller.visibleNodes,
+        contains("x"),
+        reason:
+            "setup: the moved row must stay visible — otherwise the "
+            "widget-level payload assertion below is vacuous",
+      );
 
-      expect(dataFires, greaterThan(0),
-          reason: "the moveNode-delegation branch must keep its data fire "
-              "(R3 moves the fire AFTER the relocate decision on the "
-              "same-parent paths only)");
+      expect(
+        dataFires,
+        greaterThan(0),
+        reason:
+            "the moveNode-delegation branch must keep its data fire "
+            "(R3 moves the fire AFTER the relocate decision on the "
+            "same-parent paths only)",
+      );
       await tester.pumpAndSettle();
-      expect(find.text("X-new"), findsOneWidget,
-          reason: "the mounted row must rebuild with the new payload");
+      expect(
+        find.text("X-new"),
+        findsOneWidget,
+        reason: "the mounted row must rebuild with the new payload",
+      );
       expect(find.text("X-old"), findsNothing);
     },
   );

@@ -14,10 +14,12 @@ import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
 
 Future<void> _primeScheduler(WidgetTester tester) async {
-  await tester.pumpWidget(const Directionality(
-    textDirection: TextDirection.ltr,
-    child: SizedBox.expand(),
-  ));
+  await tester.pumpWidget(
+    const Directionality(
+      textDirection: TextDirection.ltr,
+      child: SizedBox.expand(),
+    ),
+  );
 }
 
 void main() {
@@ -32,7 +34,12 @@ void main() {
         await _primeScheduler(tester);
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 1000),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
         controller.setRoots([
@@ -77,12 +84,16 @@ void main() {
         final aLate = controller.getSlideDelta("a");
         // After ~900ms total (200+700), a (preserved) should be near
         // settled (~10% remaining → currentDelta ~100).
-        expect(aLate, lessThan(200.0),
-            reason: "Preserved slide a should be near settled after "
-                "~900ms (originally installed at 1000ms duration). "
-                "If re-baselined, a would have only progressed "
-                "~700ms after the b-install reset → ~30% done → "
-                "currentDelta ~560. Got $aLate.");
+        expect(
+          aLate,
+          lessThan(200.0),
+          reason:
+              "Preserved slide a should be near settled after "
+              "~900ms (originally installed at 1000ms duration). "
+              "If re-baselined, a would have only progressed "
+              "~700ms after the b-install reset → ~30% done → "
+              "currentDelta ~560. Got $aLate.",
+        );
 
         await tester.pumpAndSettle();
       },
@@ -94,7 +105,12 @@ void main() {
         await _primeScheduler(tester);
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 1000),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
         controller.setRoots([
@@ -132,9 +148,13 @@ void main() {
         // ≈ 240. Significantly larger than the preserved case.
         await tester.pump(const Duration(milliseconds: 700));
         final aLate = controller.getSlideDelta("a");
-        expect(aLate, greaterThan(150.0),
-            reason: "Re-baselined slide should still have meaningful "
-                "delta ~aMid * 0.3 ≈ 240. Got $aLate.");
+        expect(
+          aLate,
+          greaterThan(150.0),
+          reason:
+              "Re-baselined slide should still have meaningful "
+              "delta ~aMid * 0.3 ≈ 240. Got $aLate.",
+        );
 
         await tester.pumpAndSettle();
       },
@@ -144,7 +164,12 @@ void main() {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 1000),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -194,8 +219,11 @@ void main() {
       );
       await tester.pump();
       final aAfter = controller.getSlideDelta("a");
-      expect(aAfter, closeTo(aBefore, 30.0),
-          reason: "Re-baseline preserves currentDelta visually.");
+      expect(
+        aAfter,
+        closeTo(aBefore, 30.0),
+        reason: "Re-baseline preserves currentDelta visually.",
+      );
 
       await tester.pumpAndSettle();
     });
@@ -206,7 +234,12 @@ void main() {
         await _primeScheduler(tester);
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 100),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -226,7 +259,12 @@ void main() {
         await _primeScheduler(tester);
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
         controller.setRoots([
@@ -257,9 +295,13 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
         final aDelta = controller.getSlideDelta("a");
         final bDelta = controller.getSlideDelta("b");
-        expect(aDelta, lessThan(bDelta),
-            reason: "Faster slide a should be closer to 0 than slower b. "
-                "a=$aDelta b=$bDelta");
+        expect(
+          aDelta,
+          lessThan(bDelta),
+          reason:
+              "Faster slide a should be closer to 0 than slower b. "
+              "a=$aDelta b=$bDelta",
+        );
         expect(aDelta, lessThan(150.0));
         expect(bDelta, greaterThan(150.0));
 
@@ -267,52 +309,61 @@ void main() {
       },
     );
 
-    testWidgets(
-      "first preserved slide settles per its own duration; "
-      "later slides continue independently",
-      (tester) async {
-        await _primeScheduler(tester);
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 500), curve: Curves.linear)),
-        );
-        addTearDown(controller.dispose);
-        controller.setRoots([
-          TreeNode(key: "a", data: "A"),
-          TreeNode(key: "b", data: "B"),
-        ]);
+    testWidgets("first preserved slide settles per its own duration; "
+        "later slides continue independently", (tester) async {
+      await _primeScheduler(tester);
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 500),
+            curve: Curves.linear,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        TreeNode(key: "a", data: "A"),
+        TreeNode(key: "b", data: "B"),
+      ]);
 
-        controller.animateSlideFromOffsets(
-          const {"a": (y: 100.0, x: 0.0)},
-          const {"a": (y: 0.0, x: 0.0)},
-          duration: const Duration(milliseconds: 100),
-          curve: Curves.linear,
-        );
-        await tester.pump();
-        controller.markSlidePreserveProgress("a");
+      controller.animateSlideFromOffsets(
+        const {"a": (y: 100.0, x: 0.0)},
+        const {"a": (y: 0.0, x: 0.0)},
+        duration: const Duration(milliseconds: 100),
+        curve: Curves.linear,
+      );
+      await tester.pump();
+      controller.markSlidePreserveProgress("a");
 
-        // After 50ms install b (500ms duration).
-        await tester.pump(const Duration(milliseconds: 50));
-        controller.animateSlideFromOffsets(
-          const {"b": (y: 100.0, x: 0.0)},
-          const {"b": (y: 0.0, x: 0.0)},
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.linear,
-        );
-        await tester.pump();
-        controller.markSlidePreserveProgress("b");
+      // After 50ms install b (500ms duration).
+      await tester.pump(const Duration(milliseconds: 50));
+      controller.animateSlideFromOffsets(
+        const {"b": (y: 100.0, x: 0.0)},
+        const {"b": (y: 0.0, x: 0.0)},
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.linear,
+      );
+      await tester.pump();
+      controller.markSlidePreserveProgress("b");
 
-        // After another 100ms (a is ~150ms in, well past 100ms duration).
-        await tester.pump(const Duration(milliseconds: 100));
-        expect(controller.getSlideDelta("a"), closeTo(0.0, 5.0),
-            reason: "a (100ms) should have settled by 150ms total.");
-        // b is ~100ms into its 500ms slide → ~20% done → delta ~80.
-        expect(controller.getSlideDelta("b"), greaterThan(60.0),
-            reason: "b (500ms) should still have substantial delta after "
-                "100ms in flight.");
+      // After another 100ms (a is ~150ms in, well past 100ms duration).
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        controller.getSlideDelta("a"),
+        closeTo(0.0, 5.0),
+        reason: "a (100ms) should have settled by 150ms total.",
+      );
+      // b is ~100ms into its 500ms slide → ~20% done → delta ~80.
+      expect(
+        controller.getSlideDelta("b"),
+        greaterThan(60.0),
+        reason:
+            "b (500ms) should still have substantial delta after "
+            "100ms in flight.",
+      );
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
   });
 }

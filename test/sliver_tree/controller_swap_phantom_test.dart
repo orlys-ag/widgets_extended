@@ -40,7 +40,12 @@ void main() {
       // collapsed parent, populating _phantomExitGhosts mid-animation.
       final controllerA = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controllerA.dispose);
 
@@ -69,11 +74,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
 
       final sliver = tester.renderObject<RenderSliverTree<String, String>>(
-          find.byType(SliverTree<String, String>));
+        find.byType(SliverTree<String, String>),
+      );
       expect(
         sliver.debugPhantomExitGhostCount,
         greaterThan(0),
-        reason: "Test setup: exit-phantom ghost should be populated "
+        reason:
+            "Test setup: exit-phantom ghost should be populated "
             "during the reparent slide",
       );
 
@@ -96,7 +103,8 @@ void main() {
       // would be applied to controller B's "Y" (which has different
       // semantics) and produce wrong paint geometry.
       final sliverAfter = tester.renderObject<RenderSliverTree<String, String>>(
-          find.byType(SliverTree<String, String>));
+        find.byType(SliverTree<String, String>),
+      );
       expect(
         sliverAfter.debugPhantomExitGhostCount,
         0,

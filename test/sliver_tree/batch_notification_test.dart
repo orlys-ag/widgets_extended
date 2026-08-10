@@ -130,7 +130,12 @@ void main() {
     testWidgets("does not suppress animation tick listeners", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -242,36 +247,39 @@ void main() {
       );
     });
 
-    testWidgets(
-      "insertRoot updating data on a pending-deletion node fires "
-      "node-data listener (C022)",
-      (tester) async {
-        final controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("insertRoot updating data on a pending-deletion node fires "
+        "node-data listener (C022)", (tester) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([const TreeNode(key: "X", data: "A")]);
+      controller.setRoots([const TreeNode(key: "X", data: "A")]);
 
-        final dataFires = <String>[];
-        controller.addNodeDataListener(dataFires.add);
+      final dataFires = <String>[];
+      controller.addNodeDataListener(dataFires.add);
 
-        // Start removal (puts X in pending-deletion).
-        controller.remove(key: "X");
-        // Cancel deletion via insertRoot with new data.
-        controller.insertRoot(const TreeNode(key: "X", data: "B"));
+      // Start removal (puts X in pending-deletion).
+      controller.remove(key: "X");
+      // Cancel deletion via insertRoot with new data.
+      controller.insertRoot(const TreeNode(key: "X", data: "B"));
 
-        expect(
-          dataFires,
-          ["X"],
-          reason: "node-data listener must fire when insertRoot updates "
-              "a pending-deletion node",
-        );
+      expect(
+        dataFires,
+        ["X"],
+        reason:
+            "node-data listener must fire when insertRoot updates "
+            "a pending-deletion node",
+      );
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
 
     testWidgets(
       "insertRoot on already-present node fires node-data listener (C022)",
@@ -294,7 +302,8 @@ void main() {
         expect(
           dataFires,
           ["X"],
-          reason: "node-data listener must fire when insertRoot updates "
+          reason:
+              "node-data listener must fire when insertRoot updates "
               "an existing root node's data",
         );
       },
@@ -326,7 +335,8 @@ void main() {
         expect(
           dataFires,
           ["child"],
-          reason: "node-data listener must fire when insert updates "
+          reason:
+              "node-data listener must fire when insert updates "
               "an existing child's data",
         );
       },

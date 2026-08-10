@@ -35,7 +35,9 @@ void main() {
       expect(controller.visibleNodes, ['a', 'b']);
     });
 
-    testWidgets('fires node-data listener with the changed key', (tester) async {
+    testWidgets('fires node-data listener with the changed key', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -297,7 +299,12 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
 
       controller.setRoots([
@@ -328,7 +335,12 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
 
       controller.setRoots([
@@ -353,7 +365,12 @@ void main() {
     testWidgets('reorderChildren during animation is safe', (tester) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
 
       controller.setRoots([TreeNode(key: 'root', data: 'Root')]);
@@ -550,7 +567,12 @@ void main() {
       (tester) async {
         sorted = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
           comparator: (a, b) => a.data.compareTo(b.data),
         );
         addTearDown(sorted.dispose);
@@ -580,7 +602,12 @@ void main() {
       (tester) async {
         sorted = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
           comparator: (a, b) => a.data.compareTo(b.data),
         );
         addTearDown(sorted.dispose);
@@ -712,7 +739,12 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
 
       controller.setRoots([
@@ -751,7 +783,12 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
 
       controller.setRoots([
@@ -792,7 +829,12 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
 
       controller.setRoots([
@@ -834,7 +876,12 @@ void main() {
     ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
 
       // Build a 3-level tree: A → B → C
@@ -867,7 +914,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
 
         // A → B → C, all expanded.
@@ -897,7 +949,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
 
         // A → B → [C, D], all expanded.
@@ -933,7 +990,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
 
         // A → B → C → D
@@ -1017,7 +1079,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
 
         controller.setRoots([TreeNode(key: "a", data: "A")]);
@@ -1045,7 +1112,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
 
         // Build tree: root 'a' with child 'a1', expanded.
@@ -1088,7 +1160,12 @@ void main() {
         // collapsed parent after the reversed animations complete.
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1125,7 +1202,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1149,37 +1231,41 @@ void main() {
   });
 
   group("reorderChildren during collapse animation", () {
-    testWidgets(
-      "reorders visible order for children still animating out",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("reorders visible order for children still animating out", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: "root", data: "R")]);
-        controller.setChildren("root", [
-          TreeNode(key: "x", data: "X"),
-          TreeNode(key: "y", data: "Y"),
-        ]);
-        controller.expand(key: "root", animate: false);
-        expect(controller.visibleNodes, ["root", "x", "y"]);
+      controller.setRoots([TreeNode(key: "root", data: "R")]);
+      controller.setChildren("root", [
+        TreeNode(key: "x", data: "X"),
+        TreeNode(key: "y", data: "Y"),
+      ]);
+      controller.expand(key: "root", animate: false);
+      expect(controller.visibleNodes, ["root", "x", "y"]);
 
-        // Begin an animated collapse. Children remain in visibleOrder until
-        // the collapse animation finishes.
-        controller.collapse(key: "root");
-        await tester.pump(const Duration(milliseconds: 50));
-        expect(controller.visibleNodes, ["root", "x", "y"]);
+      // Begin an animated collapse. Children remain in visibleOrder until
+      // the collapse animation finishes.
+      controller.collapse(key: "root");
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(controller.visibleNodes, ["root", "x", "y"]);
 
-        // Reorder mid-collapse. Pre-fix this was a no-op because
-        // _expanded['root'] is already false at this point.
-        controller.reorderChildren("root", ["y", "x"]);
-        expect(controller.visibleNodes, ["root", "y", "x"]);
+      // Reorder mid-collapse. Pre-fix this was a no-op because
+      // _expanded['root'] is already false at this point.
+      controller.reorderChildren("root", ["y", "x"]);
+      expect(controller.visibleNodes, ["root", "y", "x"]);
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
   });
 
   group("moveNode during exit animation", () {
@@ -1188,7 +1274,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1221,7 +1312,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1284,7 +1380,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1322,7 +1423,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1353,35 +1459,39 @@ void main() {
   });
 
   group("insertRoot with pending-deletion node", () {
-    testWidgets(
-      "promotes a pending-deletion child back to the roots list",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("promotes a pending-deletion child back to the roots list", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: "p", data: "P")]);
-        controller.setChildren("p", [TreeNode(key: "c", data: "C-old")]);
-        controller.expand(key: "p", animate: false);
+      controller.setRoots([TreeNode(key: "p", data: "P")]);
+      controller.setChildren("p", [TreeNode(key: "c", data: "C-old")]);
+      controller.expand(key: "p", animate: false);
 
-        controller.remove(key: "c");
-        await tester.pump(const Duration(milliseconds: 50));
-        expect(controller.getParent("c"), "p");
+      controller.remove(key: "c");
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(controller.getParent("c"), "p");
 
-        // Promote 'c' to a root. Pre-fix, cancelDeletion left 'c' under
-        // 'p' and 'c' never appeared in the roots list.
-        controller.insertRoot(TreeNode(key: "c", data: "C-new"));
-        await tester.pumpAndSettle();
+      // Promote 'c' to a root. Pre-fix, cancelDeletion left 'c' under
+      // 'p' and 'c' never appeared in the roots list.
+      controller.insertRoot(TreeNode(key: "c", data: "C-new"));
+      await tester.pumpAndSettle();
 
-        expect(controller.getParent("c"), isNull);
-        expect(controller.getDepth("c"), 0);
-        expect(controller.getChildren("p"), isEmpty);
-        expect(controller.rootKeys, containsAll(["p", "c"]));
-        expect(controller.getNodeData("c")!.data, "C-new");
-      },
-    );
+      expect(controller.getParent("c"), isNull);
+      expect(controller.getDepth("c"), 0);
+      expect(controller.getChildren("p"), isEmpty);
+      expect(controller.rootKeys, containsAll(["p", "c"]));
+      expect(controller.getNodeData("c")!.data, "C-new");
+    });
   });
 
   group("setFullExtent during collapse animation", () {
@@ -1390,7 +1500,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1435,7 +1550,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1480,7 +1600,8 @@ void main() {
         expect(
           controller.getCurrentExtent("c"),
           closeTo(cExtentAtReversal, 1.5),
-          reason: "Path 1 smooth reversal must preserve the visual "
+          reason:
+              "Path 1 smooth reversal must preserve the visual "
               "position; first frame after reversal should be ≈ "
               "$cExtentAtReversal, not 0 and not the captured ≈24.",
         );
@@ -1495,7 +1616,8 @@ void main() {
         expect(
           controller.getCurrentExtent("c"),
           48,
-          reason: "C's own animation reaches full on its own clock — "
+          reason:
+              "C's own animation reaches full on its own clock — "
               "not retimed by the parent collapse + re-expand.",
         );
 
@@ -1504,7 +1626,8 @@ void main() {
         expect(
           controller.getCurrentExtent("c"),
           48,
-          reason: "After settling, C reaches its full 48-pixel extent — "
+          reason:
+              "After settling, C reaches its full 48-pixel extent — "
               "Ga.member[c].targetExtent was correctly restored to full, "
               "not capped at the captured ≈24.",
         );
@@ -1517,7 +1640,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1580,59 +1708,64 @@ void main() {
   });
 
   group("bulk reversal of captured mid-flight members", () {
-    testWidgets(
-      "expandAll reversing an in-flight collapse group restores each "
-      "member's targetExtent to full, not the captured mid-flight value",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("expandAll reversing an in-flight collapse group restores each "
+        "member's targetExtent to full, not the captured mid-flight value", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        // A → B → C. Only A starts expanded.
-        controller.setRoots([TreeNode(key: "a", data: "A")]);
-        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
-        controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
-        controller.setFullExtent("a", 48);
-        controller.setFullExtent("b", 48);
-        controller.setFullExtent("c", 48);
-        controller.expand(key: "a", animate: false);
+      // A → B → C. Only A starts expanded.
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+      controller.setChildren("b", [TreeNode(key: "c", data: "C")]);
+      controller.setFullExtent("a", 48);
+      controller.setFullExtent("b", 48);
+      controller.setFullExtent("c", 48);
+      controller.expand(key: "a", animate: false);
 
-        // Expand B mid-flight. C joins Gb with target = 48.
-        controller.expand(key: "b");
-        await tester.pump(const Duration(milliseconds: 1));
-        await tester.pump(const Duration(milliseconds: 200));
-        expect(controller.getCurrentExtent("c"), closeTo(24, 5));
+      // Expand B mid-flight. C joins Gb with target = 48.
+      controller.expand(key: "b");
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(controller.getCurrentExtent("c"), closeTo(24, 5));
 
-        // Collapse A. Path-2 fresh collapse captures C from Gb at ≈24
-        // into Ga with members[c].targetExtent ≈ 24.
-        controller.collapse(key: "a");
-        await tester.pump(const Duration(milliseconds: 1));
-        await tester.pump(const Duration(milliseconds: 100));
+      // Collapse A. Path-2 fresh collapse captures C from Gb at ≈24
+      // into Ga with members[c].targetExtent ≈ 24.
+      controller.collapse(key: "a");
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 100));
 
-        // expandAll reverses Ga via controller.forward(). The fix must
-        // normalize Ga.members[c].targetExtent back to 48 so the forward
-        // reversal terminates at the full natural extent. Without the
-        // fix, the lerp tops out at the captured ≈24 and snaps to 48
-        // when the group disposes.
-        controller.expandAll();
-        await tester.pump(const Duration(milliseconds: 1));
-        await tester.pump(const Duration(milliseconds: 50));
+      // expandAll reverses Ga via controller.forward(). The fix must
+      // normalize Ga.members[c].targetExtent back to 48 so the forward
+      // reversal terminates at the full natural extent. Without the
+      // fix, the lerp tops out at the captured ≈24 and snaps to 48
+      // when the group disposes.
+      controller.expandAll();
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 50));
 
-        expect(
-          controller.getCurrentExtent("c"),
-          greaterThan(28),
-          reason: "C should be animating toward its full 48-pixel extent "
-              "during expandAll's reversal of the collapsing Ga, not "
-              "capped at its captured mid-flight value.",
-        );
+      expect(
+        controller.getCurrentExtent("c"),
+        greaterThan(28),
+        reason:
+            "C should be animating toward its full 48-pixel extent "
+            "during expandAll's reversal of the collapsing Ga, not "
+            "capped at its captured mid-flight value.",
+      );
 
-        await tester.pumpAndSettle();
-        expect(controller.visibleNodes, ["a", "b", "c"]);
-        expect(controller.getCurrentExtent("c"), 48);
-      },
-    );
+      await tester.pumpAndSettle();
+      expect(controller.visibleNodes, ["a", "b", "c"]);
+      expect(controller.getCurrentExtent("c"), 48);
+    });
 
     testWidgets(
       "collapseAll reversing an in-flight expand group normalizes each "
@@ -1640,7 +1773,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1685,7 +1823,8 @@ void main() {
         expect(
           controller.getCurrentExtent("b"),
           lessThan(bExtentBeforeBulkReverse),
-          reason: "B should be collapsing — extent must decrease after "
+          reason:
+              "B should be collapsing — extent must decrease after "
               "collapseAll, not anchor at its captured mid-flight start.",
         );
 
@@ -1737,41 +1876,45 @@ void main() {
   });
 
   group("getAnimationState for bulk group members", () {
-    testWidgets(
-      "returns synthetic entering state for forward bulk members",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("returns synthetic entering state for forward bulk members", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: "r", data: "R")]);
-        controller.setChildren("r", [
-          TreeNode(key: "c1", data: "C1"),
-          TreeNode(key: "c2", data: "C2"),
-        ]);
+      controller.setRoots([TreeNode(key: "r", data: "R")]);
+      controller.setChildren("r", [
+        TreeNode(key: "c1", data: "C1"),
+        TreeNode(key: "c2", data: "C2"),
+      ]);
 
-        // expandAll drives a bulk animation group. Pre-fix, members in that
-        // group had no standalone AnimationState, so getAnimationState
-        // returned null — callers (sticky header anchoring) couldn't see
-        // them as entering and computed the wrong subtree bottom.
-        controller.expandAll();
-        await tester.pump(const Duration(milliseconds: 50));
+      // expandAll drives a bulk animation group. Pre-fix, members in that
+      // group had no standalone AnimationState, so getAnimationState
+      // returned null — callers (sticky header anchoring) couldn't see
+      // them as entering and computed the wrong subtree bottom.
+      controller.expandAll();
+      await tester.pump(const Duration(milliseconds: 50));
 
-        final state = controller.getAnimationState("c1");
-        expect(
-          state,
-          isNotNull,
-          reason:
-              "Bulk-group members advancing forward must report a synthetic "
-              "entering state so render-layer code can detect them.",
-        );
-        expect(state!.type, AnimationType.entering);
+      final state = controller.getAnimationState("c1");
+      expect(
+        state,
+        isNotNull,
+        reason:
+            "Bulk-group members advancing forward must report a synthetic "
+            "entering state so render-layer code can detect them.",
+      );
+      expect(state!.type, AnimationType.entering);
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
   });
 
   group("insertRoot / insert re-insert honors index", () {
@@ -1792,10 +1935,7 @@ void main() {
         expect(controller.rootKeys, ["a", "b", "c"]);
 
         // Pre-fix, this silently returned without honoring index=0.
-        controller.insertRoot(
-          TreeNode(key: "c", data: "C-updated"),
-          index: 0,
-        );
+        controller.insertRoot(TreeNode(key: "c", data: "C-updated"), index: 0);
 
         expect(controller.rootKeys, ["c", "a", "b"]);
         expect(controller.getNodeData("c")!.data, "C-updated");
@@ -1857,68 +1997,82 @@ void main() {
   });
 
   group("getAnimationState returns fresh instances", () {
-    testWidgets(
-      "two synthetic entering states are not the same instance",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("two synthetic entering states are not the same instance", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: "r", data: "R")]);
-        controller.setChildren("r", [
-          TreeNode(key: "c1", data: "C1"),
-          TreeNode(key: "c2", data: "C2"),
-        ]);
-        controller.expandAll();
-        await tester.pump(const Duration(milliseconds: 50));
+      controller.setRoots([TreeNode(key: "r", data: "R")]);
+      controller.setChildren("r", [
+        TreeNode(key: "c1", data: "C1"),
+        TreeNode(key: "c2", data: "C2"),
+      ]);
+      controller.expandAll();
+      await tester.pump(const Duration(milliseconds: 50));
 
-        final a = controller.getAnimationState("c1");
-        final b = controller.getAnimationState("c2");
-        expect(a, isNotNull);
-        expect(b, isNotNull);
-        // Pre-fix these were the same static singleton; mutating [a] would
-        // have corrupted [b]. Post-fix each call yields a fresh instance.
-        expect(identical(a, b), isFalse,
-            reason: "Synthetic entering state must not be a shared singleton.");
-        a!.progress = 0.42;
-        expect(b!.progress, 0.0,
-            reason: "Mutating one synthetic state must not affect another.");
+      final a = controller.getAnimationState("c1");
+      final b = controller.getAnimationState("c2");
+      expect(a, isNotNull);
+      expect(b, isNotNull);
+      // Pre-fix these were the same static singleton; mutating [a] would
+      // have corrupted [b]. Post-fix each call yields a fresh instance.
+      expect(
+        identical(a, b),
+        isFalse,
+        reason: "Synthetic entering state must not be a shared singleton.",
+      );
+      a!.progress = 0.42;
+      expect(
+        b!.progress,
+        0.0,
+        reason: "Mutating one synthetic state must not affect another.",
+      );
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
   });
 
   group("bulk animation group disposal", () {
-    testWidgets(
-      "bulk group is disposed after expandAll completes",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("bulk group is disposed after expandAll completes", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: "r", data: "R")]);
-        controller.setChildren("r", [
-          TreeNode(key: "c1", data: "C1"),
-          TreeNode(key: "c2", data: "C2"),
-        ]);
+      controller.setRoots([TreeNode(key: "r", data: "R")]);
+      controller.setChildren("r", [
+        TreeNode(key: "c1", data: "C1"),
+        TreeNode(key: "c2", data: "C2"),
+      ]);
 
-        expect(controller.hasActiveAnimations, isFalse);
-        controller.expandAll();
-        expect(controller.hasActiveAnimations, isTrue);
+      expect(controller.hasActiveAnimations, isFalse);
+      controller.expandAll();
+      expect(controller.hasActiveAnimations, isTrue);
 
-        await tester.pumpAndSettle();
-        // Pre-fix, the bulk group's AnimationController stayed alive even
-        // after completion (held a ticker registration for the life of the
-        // controller). Post-fix it is disposed and hasActiveAnimations is
-        // false without any lingering non-empty group.
-        expect(controller.hasActiveAnimations, isFalse);
-      },
-    );
+      await tester.pumpAndSettle();
+      // Pre-fix, the bulk group's AnimationController stayed alive even
+      // after completion (held a ticker registration for the life of the
+      // controller). Post-fix it is disposed and hasActiveAnimations is
+      // false without any lingering non-empty group.
+      expect(controller.hasActiveAnimations, isFalse);
+    });
 
     testWidgets(
       "expandAll inside runBatch still registers bulk-animated members",
@@ -1932,7 +2086,12 @@ void main() {
         // `_markVisibleOrderDirty()` inside expandAll itself.
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 100),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -1954,7 +2113,8 @@ void main() {
         expect(
           controller.hasActiveAnimations,
           isTrue,
-          reason: "bulk group should hold the newly-visible children even "
+          reason:
+              "bulk group should hold the newly-visible children even "
               "when expandAll runs inside an outer runBatch",
         );
 
@@ -1966,35 +2126,37 @@ void main() {
   });
 
   group("setChildren on pending-deletion parent", () {
-    testWidgets(
-      "throws to prevent orphaned state",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
-        );
-        addTearDown(controller.dispose);
+    testWidgets("throws to prevent orphaned state", (tester) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 100),
+            curve: Curves.easeInOut,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: "a", data: "A")]);
-        controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
-        controller.expand(key: "a", animate: false);
+      controller.setRoots([TreeNode(key: "a", data: "A")]);
+      controller.setChildren("a", [TreeNode(key: "b", data: "B")]);
+      controller.expand(key: "a", animate: false);
 
-        // Start an animated remove. 'a' is now pending deletion.
-        controller.remove(key: "a", animate: true);
-        await tester.pump(const Duration(milliseconds: 20));
+      // Start an animated remove. 'a' is now pending deletion.
+      controller.remove(key: "a", animate: true);
+      await tester.pump(const Duration(milliseconds: 20));
 
-        // Attaching children to a pending-deletion parent would leak state
-        // once the parent's exit animation finalizes and purges only
-        // pending-deletion descendants. Runtime StateError (present in
-        // release builds too) prevents it.
-        expect(
-          () => controller.setChildren("a", [TreeNode(key: "x", data: "X")]),
-          throwsA(isA<StateError>()),
-        );
+      // Attaching children to a pending-deletion parent would leak state
+      // once the parent's exit animation finalizes and purges only
+      // pending-deletion descendants. Runtime StateError (present in
+      // release builds too) prevents it.
+      expect(
+        () => controller.setChildren("a", [TreeNode(key: "x", data: "X")]),
+        throwsA(isA<StateError>()),
+      );
 
-        await tester.pumpAndSettle();
-      },
-    );
+      await tester.pumpAndSettle();
+    });
   });
 
   group("orphaned operation group cleanup", () {
@@ -2004,7 +2166,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -2058,7 +2225,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -2114,7 +2286,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -2200,7 +2377,8 @@ void main() {
       expect(
         controller.visibleNodes,
         ["root", "c3", "c1", "c2"],
-        reason: "moveNode with explicit index must honor it even when the "
+        reason:
+            "moveNode with explicit index must honor it even when the "
             "old and new parent are the same",
       );
     });
@@ -2272,10 +2450,7 @@ void main() {
         TreeNode(key: "b", data: "B"),
       ]);
 
-      expect(
-        () => controller.reorderRoots(["a", "a"]),
-        throwsArgumentError,
-      );
+      expect(() => controller.reorderRoots(["a", "a"]), throwsArgumentError);
     });
 
     testWidgets("reorderRoots throws ArgumentError on missing key", (
@@ -2310,23 +2485,22 @@ void main() {
       expect(() => controller.reorderRoots(["x"]), throwsArgumentError);
     });
 
-    testWidgets(
-      "reorderChildren throws ArgumentError on unknown parent",
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: TreeAnimationStyle.disabled,
-        );
-        addTearDown(controller.dispose);
+    testWidgets("reorderChildren throws ArgumentError on unknown parent", (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: "root", data: "R")]);
+      controller.setRoots([TreeNode(key: "root", data: "R")]);
 
-        expect(
-          () => controller.reorderChildren("missing", const []),
-          throwsArgumentError,
-        );
-      },
-    );
+      expect(
+        () => controller.reorderChildren("missing", const []),
+        throwsArgumentError,
+      );
+    });
 
     testWidgets("reorderChildren throws ArgumentError on duplicate keys", (
       tester,
@@ -2390,8 +2564,9 @@ void main() {
   });
 
   group("computeFirstAnimatingVisibleIndex", () {
-    testWidgets("returns visibleNodeCount when no animations are active",
-        (tester) async {
+    testWidgets("returns visibleNodeCount when no animations are active", (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2403,15 +2578,23 @@ void main() {
       ]);
 
       expect(controller.hasActiveAnimations, isFalse);
-      expect(controller.computeFirstAnimatingVisibleIndex(),
-          controller.visibleNodeCount);
+      expect(
+        controller.computeFirstAnimatingVisibleIndex(),
+        controller.visibleNodeCount,
+      );
     });
 
-    testWidgets("returns smallest visible index among active operation groups",
-        (tester) async {
+    testWidgets("returns smallest visible index among active operation groups", (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -2431,45 +2614,60 @@ void main() {
       expect(controller.hasActiveAnimations, isTrue);
 
       final idx = controller.computeFirstAnimatingVisibleIndex();
-      expect(idx, 2,
-          reason: "b1 at index 2 is the first animating visible node");
+      expect(
+        idx,
+        2,
+        reason: "b1 at index 2 is the first animating visible node",
+      );
 
       await tester.pumpAndSettle();
     });
 
     testWidgets(
-        "returns visibleNodeCount when animating members are not in visible order",
-        (tester) async {
+      "returns visibleNodeCount when animating members are not in visible order",
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
+        controller.setRoots([
+          TreeNode(key: "a", data: "A"),
+          TreeNode(key: "b", data: "B"),
+        ]);
+        controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
+
+        // Expanding then immediately removing the parent leaves the group
+        // momentarily populated but the members no longer in _visibleOrder.
+        controller.expand(key: "a");
+        controller.remove(key: "a");
+        await tester.pump(const Duration(milliseconds: 10));
+
+        final idx = controller.computeFirstAnimatingVisibleIndex();
+        // Any animating member still in visible order counts; any not in
+        // visible order is ignored. The result must always be ≤ visibleNodeCount.
+        expect(idx, lessThanOrEqualTo(controller.visibleNodeCount));
+
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets("scales with smallest of multiple concurrent groups", (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([
-        TreeNode(key: "a", data: "A"),
-        TreeNode(key: "b", data: "B"),
-      ]);
-      controller.setChildren("a", [TreeNode(key: "a1", data: "A1")]);
-
-      // Expanding then immediately removing the parent leaves the group
-      // momentarily populated but the members no longer in _visibleOrder.
-      controller.expand(key: "a");
-      controller.remove(key: "a");
-      await tester.pump(const Duration(milliseconds: 10));
-
-      final idx = controller.computeFirstAnimatingVisibleIndex();
-      // Any animating member still in visible order counts; any not in
-      // visible order is ignored. The result must always be ≤ visibleNodeCount.
-      expect(idx, lessThanOrEqualTo(controller.visibleNodeCount));
-
-      await tester.pumpAndSettle();
-    });
-
-    testWidgets("scales with smallest of multiple concurrent groups",
-        (tester) async {
-      controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
       controller.setRoots([
@@ -2497,7 +2695,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -2559,8 +2762,9 @@ void main() {
   });
 
   group('scroll-to-key', () {
-    testWidgets('scrollOffsetOf returns null for unregistered key',
-        (tester) async {
+    testWidgets('scrollOffsetOf returns null for unregistered key', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2572,23 +2776,26 @@ void main() {
       expect(controller.scrollOffsetOf('ghost'), isNull);
     });
 
-    testWidgets('scrollOffsetOf returns null for key under collapsed ancestor',
-        (tester) async {
-      controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
+    testWidgets(
+      'scrollOffsetOf returns null for key under collapsed ancestor',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: TreeAnimationStyle.disabled,
+        );
+        addTearDown(controller.dispose);
 
-      controller.setRoots([TreeNode(key: 'a', data: 'A')]);
-      controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
+        controller.setRoots([TreeNode(key: 'a', data: 'A')]);
+        controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
 
-      // 'a' is collapsed, so 'a1' is not in the visible order.
-      expect(controller.scrollOffsetOf('a1'), isNull);
-    });
+        // 'a' is collapsed, so 'a1' is not in the visible order.
+        expect(controller.scrollOffsetOf('a1'), isNull);
+      },
+    );
 
-    testWidgets('scrollOffsetOf sums default extents when nothing measured',
-        (tester) async {
+    testWidgets('scrollOffsetOf sums default extents when nothing measured', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2608,8 +2815,9 @@ void main() {
       expect(controller.scrollOffsetOf('c'), 96.0);
     });
 
-    testWidgets('scrollOffsetOf honors extentEstimator override',
-        (tester) async {
+    testWidgets('scrollOffsetOf honors extentEstimator override', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2628,8 +2836,9 @@ void main() {
       expect(controller.scrollOffsetOf('c', extentEstimator: estimator), 120.0);
     });
 
-    testWidgets('scrollOffsetOf prefers measured extent over estimator',
-        (tester) async {
+    testWidgets('scrollOffsetOf prefers measured extent over estimator', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2650,8 +2859,9 @@ void main() {
       expect(controller.scrollOffsetOf('b', extentEstimator: estimator), 72.0);
     });
 
-    testWidgets('extentOf fallback chain: measured → estimator → default',
-        (tester) async {
+    testWidgets('extentOf fallback chain: measured → estimator → default', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2676,49 +2886,52 @@ void main() {
     });
 
     testWidgets(
-        'ensureAncestorsExpanded expands chain root-first, returns count',
-        (tester) async {
-      controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
+      'ensureAncestorsExpanded expands chain root-first, returns count',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: TreeAnimationStyle.disabled,
+        );
+        addTearDown(controller.dispose);
 
-      controller.setRoots([TreeNode(key: 'a', data: 'A')]);
-      controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
-      controller.setChildren('a1', [TreeNode(key: 'a1x', data: 'A1X')]);
+        controller.setRoots([TreeNode(key: 'a', data: 'A')]);
+        controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
+        controller.setChildren('a1', [TreeNode(key: 'a1x', data: 'A1X')]);
 
-      // Nothing expanded yet: 'a1x' is not visible.
-      expect(controller.getVisibleIndex('a1x'), -1);
+        // Nothing expanded yet: 'a1x' is not visible.
+        expect(controller.getVisibleIndex('a1x'), -1);
 
-      final expandedCount = controller.ensureAncestorsExpanded('a1x');
+        final expandedCount = controller.ensureAncestorsExpanded('a1x');
 
-      expect(expandedCount, 2); // 'a' and 'a1'
-      expect(controller.isExpanded('a'), true);
-      expect(controller.isExpanded('a1'), true);
-      expect(controller.visibleNodes, ['a', 'a1', 'a1x']);
-    });
+        expect(expandedCount, 2); // 'a' and 'a1'
+        expect(controller.isExpanded('a'), true);
+        expect(controller.isExpanded('a1'), true);
+        expect(controller.visibleNodes, ['a', 'a1', 'a1x']);
+      },
+    );
 
-    testWidgets('ensureAncestorsExpanded is a no-op for roots and already-open',
-        (tester) async {
-      controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
+    testWidgets(
+      'ensureAncestorsExpanded is a no-op for roots and already-open',
+      (tester) async {
+        controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: TreeAnimationStyle.disabled,
+        );
+        addTearDown(controller.dispose);
 
-      controller.setRoots([
-        TreeNode(key: 'a', data: 'A'),
-        TreeNode(key: 'b', data: 'B'),
-      ]);
-      controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
-      controller.expand(key: 'a', animate: false);
+        controller.setRoots([
+          TreeNode(key: 'a', data: 'A'),
+          TreeNode(key: 'b', data: 'B'),
+        ]);
+        controller.setChildren('a', [TreeNode(key: 'a1', data: 'A1')]);
+        controller.expand(key: 'a', animate: false);
 
-      // Root: nothing to expand.
-      expect(controller.ensureAncestorsExpanded('a'), 0);
-      // Descendant of already-expanded parent: nothing to expand.
-      expect(controller.ensureAncestorsExpanded('a1'), 0);
-    });
+        // Root: nothing to expand.
+        expect(controller.ensureAncestorsExpanded('a'), 0);
+        // Descendant of already-expanded parent: nothing to expand.
+        expect(controller.ensureAncestorsExpanded('a1'), 0);
+      },
+    );
   });
 
   group('ancestorsExpanded cache', () {
@@ -2734,7 +2947,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -2807,7 +3025,12 @@ void main() {
 
         controller.expandAll(animate: false);
         expect(controller.visibleNodes, [
-          'r1', 'r1a', 'r1a1', 'r1b', 'r2', 'r2a',
+          'r1',
+          'r1a',
+          'r1a1',
+          'r1b',
+          'r2',
+          'r2a',
         ]);
 
         controller.collapseAll(animate: false);
@@ -2821,9 +3044,7 @@ void main() {
 
         controller.expand(key: 'r1', animate: false);
         // Now r1a's ancestors are fully expanded and its own children appear.
-        expect(controller.visibleNodes, [
-          'r1', 'r1a', 'r1a1', 'r1b', 'r2',
-        ]);
+        expect(controller.visibleNodes, ['r1', 'r1a', 'r1a1', 'r1b', 'r2']);
       },
     );
   });
@@ -2852,8 +3073,9 @@ void main() {
       }
     }
 
-    testWidgets('expandAll over a 20k-deep chain does not stack-overflow',
-        (tester) async {
+    testWidgets('expandAll over a 20k-deep chain does not stack-overflow', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2868,8 +3090,9 @@ void main() {
       expect(controller.visibleNodes.last, 'n${chainDepth - 1}');
     });
 
-    testWidgets('targeted expand at the root of a deep chain propagates',
-        (tester) async {
+    testWidgets('targeted expand at the root of a deep chain propagates', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2891,8 +3114,9 @@ void main() {
       expect(controller.visibleNodes.length, chainDepth);
     });
 
-    testWidgets('collapseAll then expandAll on a deep chain stays consistent',
-        (tester) async {
+    testWidgets('collapseAll then expandAll on a deep chain stays consistent', (
+      tester,
+    ) async {
       controller = TreeController<String, String>(
         vsync: tester,
         animationStyle: TreeAnimationStyle.disabled,
@@ -2929,7 +3153,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -2988,7 +3217,12 @@ void main() {
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -3107,50 +3341,49 @@ void main() {
       },
     );
 
-    testWidgets(
-      'head-insert of 200 children maintains correct visible order',
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: TreeAnimationStyle.disabled,
-        );
-        addTearDown(controller.dispose);
+    testWidgets('head-insert of 200 children maintains correct visible order', (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
 
-        controller.setRoots([TreeNode(key: 'root', data: 'R')]);
+      controller.setRoots([TreeNode(key: 'root', data: 'R')]);
 
-        const int n = 200;
-        // Bootstrap: insert h0 while root is collapsed, expand root,
-        // then insert the rest at index 0 so each insert runs against
-        // an already-expanded parent.
+      const int n = 200;
+      // Bootstrap: insert h0 while root is collapsed, expand root,
+      // then insert the rest at index 0 so each insert runs against
+      // an already-expanded parent.
+      controller.insert(
+        parentKey: 'root',
+        node: TreeNode(key: 'h0', data: 'h0'),
+        animate: false,
+      );
+      controller.expand(key: 'root', animate: false);
+
+      // Insert at index 0 each time (reverse-order head insertion).
+      // This exercises the cache because each prior sibling that gets
+      // skipped over has its visible-subtree-size read once, not
+      // walked. A regression in the cache would yield a scrambled
+      // order.
+      for (int i = 1; i < n; i++) {
         controller.insert(
           parentKey: 'root',
-          node: TreeNode(key: 'h0', data: 'h0'),
+          node: TreeNode(key: 'h$i', data: 'h$i'),
+          index: 0,
           animate: false,
         );
-        controller.expand(key: 'root', animate: false);
+      }
 
-        // Insert at index 0 each time (reverse-order head insertion).
-        // This exercises the cache because each prior sibling that gets
-        // skipped over has its visible-subtree-size read once, not
-        // walked. A regression in the cache would yield a scrambled
-        // order.
-        for (int i = 1; i < n; i++) {
-          controller.insert(
-            parentKey: 'root',
-            node: TreeNode(key: 'h$i', data: 'h$i'),
-            index: 0,
-            animate: false,
-          );
-        }
-
-        // Head inserts produce reverse order: h${n-1} first, ..., h0 last.
-        final expected = <String>['root'];
-        for (int i = n - 1; i >= 0; i--) {
-          expected.add('h$i');
-        }
-        expect(controller.visibleNodes, expected);
-      },
-    );
+      // Head inserts produce reverse order: h${n-1} first, ..., h0 last.
+      final expected = <String>['root'];
+      for (int i = n - 1; i >= 0; i--) {
+        expected.add('h$i');
+      }
+      expect(controller.visibleNodes, expected);
+    });
 
     testWidgets(
       'interleaved insert + expand + collapse keeps cache consistent',
@@ -3215,9 +3448,7 @@ void main() {
           TreeNode(key: 'p1', data: 'P1'),
           TreeNode(key: 'p2', data: 'P2'),
         ]);
-        controller.setChildren('p1', [
-          TreeNode(key: 's', data: 'S'),
-        ]);
+        controller.setChildren('p1', [TreeNode(key: 's', data: 'S')]);
         controller.setChildren('s', [
           TreeNode(key: 's1', data: 'S1'),
           TreeNode(key: 's2', data: 'S2'),
@@ -3230,7 +3461,13 @@ void main() {
         controller.expand(key: 's', animate: false);
         controller.expand(key: 'p2', animate: false);
         expect(controller.visibleNodes, [
-          'p1', 's', 's1', 's2', 's3', 'p2', 'p2c',
+          'p1',
+          's',
+          's1',
+          's2',
+          's3',
+          'p2',
+          'p2c',
         ]);
 
         // Move 's' (size = 4: itself + 3 descendants) from p1 to p2.
@@ -3240,7 +3477,13 @@ void main() {
         // slot because the insert math reads the parent's cached size.
         controller.moveNode('s', 'p2');
         expect(controller.visibleNodes, [
-          'p1', 'p2', 'p2c', 's', 's1', 's2', 's3',
+          'p1',
+          'p2',
+          'p2c',
+          's',
+          's1',
+          's2',
+          's3',
         ]);
 
         // Tail-insert under p1 — p1 is childless + collapsed now
@@ -3255,7 +3498,14 @@ void main() {
         );
         controller.expand(key: 'p1', animate: false);
         expect(controller.visibleNodes, [
-          'p1', 'new1', 'p2', 'p2c', 's', 's1', 's2', 's3',
+          'p1',
+          'new1',
+          'p2',
+          'p2c',
+          's',
+          's1',
+          's2',
+          's3',
         ]);
 
         // Tail-insert under p2 — should land after the entire 's'
@@ -3267,7 +3517,15 @@ void main() {
           animate: false,
         );
         expect(controller.visibleNodes, [
-          'p1', 'new1', 'p2', 'p2c', 's', 's1', 's2', 's3', 'new2',
+          'p1',
+          'new1',
+          'p2',
+          'p2c',
+          's',
+          's1',
+          's2',
+          's3',
+          'new2',
         ]);
       },
     );
@@ -3284,52 +3542,56 @@ void main() {
   // ════════════════════════════════════════════════════════════════════════════
 
   group('moveNode on a deep subtree', () {
-    testWidgets(
-      'reparenting a 5000-deep chain does not stack-overflow',
-      (tester) async {
-        controller = TreeController<String, String>(
-          vsync: tester,
-          animationStyle: TreeAnimationStyle.disabled,
+    testWidgets('reparenting a 5000-deep chain does not stack-overflow', (
+      tester,
+    ) async {
+      controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+
+      // Build: root 'host' (destination for the move) and a chain
+      // 'n0 → n1 → ... → n4999' that we will reparent under 'host'
+      // in one call. _cancelAnimationStateForSubtree walks the
+      // entire chain; a recursive implementation overflows here.
+      const chainDepth = 5000;
+      controller.setRoots([
+        TreeNode(key: 'host', data: 'H'),
+        TreeNode(key: 'n0', data: 'n0'),
+      ]);
+      for (int i = 1; i < chainDepth; i++) {
+        controller.insert(
+          parentKey: 'n${i - 1}',
+          node: TreeNode(key: 'n$i', data: 'n$i'),
+          animate: false,
         );
-        addTearDown(controller.dispose);
+      }
 
-        // Build: root 'host' (destination for the move) and a chain
-        // 'n0 → n1 → ... → n4999' that we will reparent under 'host'
-        // in one call. _cancelAnimationStateForSubtree walks the
-        // entire chain; a recursive implementation overflows here.
-        const chainDepth = 5000;
-        controller.setRoots([
-          TreeNode(key: 'host', data: 'H'),
-          TreeNode(key: 'n0', data: 'n0'),
-        ]);
-        for (int i = 1; i < chainDepth; i++) {
-          controller.insert(
-            parentKey: 'n${i - 1}',
-            node: TreeNode(key: 'n$i', data: 'n$i'),
-            animate: false,
-          );
-        }
+      // Reparent the whole chain. The iterative walker must visit
+      // every one of the 5000 nodes to purge per-node animation
+      // state; a recursive implementation would stack-overflow
+      // before returning.
+      controller.moveNode('n0', 'host');
 
-        // Reparent the whole chain. The iterative walker must visit
-        // every one of the 5000 nodes to purge per-node animation
-        // state; a recursive implementation would stack-overflow
-        // before returning.
-        controller.moveNode('n0', 'host');
-
-        expect(controller.getParent('n0'), 'host');
-        expect(controller.getDepth('n0'), 1);
-        // Depth of the deepest node should be old depth + 1 (chain was
-        // rooted at depth 0, now at depth 1 under 'host').
-        expect(controller.getDepth('n${chainDepth - 1}'), chainDepth);
-      },
-    );
+      expect(controller.getParent('n0'), 'host');
+      expect(controller.getDepth('n0'), 1);
+      // Depth of the deepest node should be old depth + 1 (chain was
+      // rooted at depth 0, now at depth 1 under 'host').
+      expect(controller.getDepth('n${chainDepth - 1}'), chainDepth);
+    });
 
     testWidgets(
       'reparenting preserves in-flight op-group animation inside the moved subtree',
       (tester) async {
         controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 300),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -3341,9 +3603,7 @@ void main() {
           TreeNode(key: 'host', data: 'H'),
           TreeNode(key: 'p', data: 'P'),
         ]);
-        controller.setChildren('p', [
-          TreeNode(key: 'inner', data: 'I'),
-        ]);
+        controller.setChildren('p', [TreeNode(key: 'inner', data: 'I')]);
         controller.setChildren('inner', [
           TreeNode(key: 'x', data: 'X'),
           TreeNode(key: 'y', data: 'Y'),

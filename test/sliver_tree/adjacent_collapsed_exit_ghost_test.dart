@@ -104,7 +104,12 @@ RenderSliverTree<String, String> _render(WidgetTester tester) =>
 Future<TreeController<String, String>> _pumpTree(WidgetTester tester) async {
   final controller = TreeController<String, String>(
     vsync: tester,
-    animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+    animationStyle: const TreeAnimationStyle(
+      expandCollapse: TreeAnimationSpec(
+        duration: Duration(milliseconds: 400),
+        curve: Curves.linear,
+      ),
+    ),
   );
   addTearDown(controller.dispose);
 
@@ -198,129 +203,195 @@ int _longestVisibleRun(List<_Sample> s, {double floor = 2.0}) {
 }
 
 void main() {
-  testWidgets(
-      "adjacent exit ghost is VISIBLY absorbed, not vanished in place",
-      (tester) async {
+  testWidgets("adjacent exit ghost is VISIBLY absorbed, not vanished in place", (
+    tester,
+  ) async {
     final controller = await _pumpTree(tester);
     final render = _render(tester);
 
     // Preconditions: a2 visible & directly above the MOUNTED collapsed B.
     expect(controller.visibleNodes.contains("a2"), isTrue);
     expect(controller.visibleNodes.contains("b0"), isFalse);
-    expect(render.getChildForNode("B"), isNotNull,
-        reason: "destination header B must be on-screen & mounted "
-            "(adjacent, anchor-relative path — NOT the off-screen edge path)");
+    expect(
+      render.getChildForNode("B"),
+      isNotNull,
+      reason:
+          "destination header B must be on-screen & mounted "
+          "(adjacent, anchor-relative path — NOT the off-screen edge path)",
+    );
 
-    final samples = await _sampleExit(tester, controller, render,
-        moveKey: "a2", dest: "B");
+    final samples = await _sampleExit(
+      tester,
+      controller,
+      render,
+      moveKey: "a2",
+      dest: "B",
+    );
 
     // The defining symptom of THIS bug is a ZERO own-slide ghost (its baseline
     // already equals the settled header position) — confirm we exercised it.
-    expect(samples.every((s) => s.delta.abs() < 0.5), isTrue,
-        reason: "adjacent ghost must have ~zero own FLIP delta "
-            "(this is the degenerate case the bug mishandled)");
+    expect(
+      samples.every((s) => s.delta.abs() < 0.5),
+      isTrue,
+      reason:
+          "adjacent ghost must have ~zero own FLIP delta "
+          "(this is the degenerate case the bug mishandled)",
+    );
 
-    expect(_maxVisible(samples), greaterThan(10.0),
-        reason: "the stationary ghost must be VISIBLY on screen (absorbed by "
-            "the rising header) at some frame — the bug clips it to 0 every "
-            "frame. Visible heights: ${samples.map((s) => s.visible).toList()}");
-
-    await tester.pumpAndSettle();
-  });
-
-  testWidgets(
-      "adjacent exit ghost is SUSTAINED >= 5 consecutive frames (no 1-frame blip)",
-      (tester) async {
-    final controller = await _pumpTree(tester);
-    final render = _render(tester);
-
-    final samples = await _sampleExit(tester, controller, render,
-        moveKey: "a2", dest: "B");
-
-    expect(_longestVisibleRun(samples), greaterThanOrEqualTo(5),
-        reason: "absorption must be a SUSTAINED slide, not a single-frame "
-            "flash. Visible heights: ${samples.map((s) => s.visible).toList()}");
+    expect(
+      _maxVisible(samples),
+      greaterThan(10.0),
+      reason:
+          "the stationary ghost must be VISIBLY on screen (absorbed by "
+          "the rising header) at some frame — the bug clips it to 0 every "
+          "frame. Visible heights: ${samples.map((s) => s.visible).toList()}",
+    );
 
     await tester.pumpAndSettle();
   });
 
   testWidgets(
-      "adjacent exit ghost stays at its baseline — does NOT chase the live header",
-      (tester) async {
-    final controller = await _pumpTree(tester);
-    final render = _render(tester);
+    "adjacent exit ghost is SUSTAINED >= 5 consecutive frames (no 1-frame blip)",
+    (tester) async {
+      final controller = await _pumpTree(tester);
+      final render = _render(tester);
 
-    final samples = await _sampleExit(tester, controller, render,
-        moveKey: "a2", dest: "B");
+      final samples = await _sampleExit(
+        tester,
+        controller,
+        render,
+        moveKey: "a2",
+        dest: "B",
+      );
 
-    // Only frames where the ghost is actually on screen (the bug yields none,
-    // so this also fails-red under the regression).
-    final tops = samples
-        .where((s) => s.visible > 2.0 && !s.top.isNaN)
-        .map((s) => s.top)
-        .toList();
-    expect(tops, isNotEmpty,
-        reason: "ghost must be visible on some frame (else it vanished)");
+      expect(
+        _longestVisibleRun(samples),
+        greaterThanOrEqualTo(5),
+        reason:
+            "absorption must be a SUSTAINED slide, not a single-frame "
+            "flash. Visible heights: ${samples.map((s) => s.visible).toList()}",
+      );
 
-    // a2's pre-move structural top is 144 (A=0,a0=48,a1=96,a2=144). The fix
-    // paints the ghost STATIONARY there while the header rises to absorb it.
-    // The bug would paint it chasing the live band top (192 -> 144), a moving
-    // top with a large spread (and clipped to nothing anyway).
-    final spread = tops.reduce(math.max) - tops.reduce(math.min);
-    expect(spread, lessThan(8.0),
-        reason: "stationary ghost (header rises onto it), not chasing it. "
-            "Tops: $tops");
-    expect(tops.first, moreOrLessEquals(144.0, epsilon: 4.0),
-        reason: "ghost sits at a2's pre-move baseline (144), no t=0 jump");
-
-    await tester.pumpAndSettle();
-  });
+      await tester.pumpAndSettle();
+    },
+  );
 
   testWidgets(
-      "FAR row still slides visibly into the collapsed header (discrimination)",
-      (tester) async {
-    final controller = await _pumpTree(tester);
-    final render = _render(tester);
+    "adjacent exit ghost stays at its baseline — does NOT chase the live header",
+    (tester) async {
+      final controller = await _pumpTree(tester);
+      final render = _render(tester);
 
-    // a0 is the FIRST child (far from B): it has a real, large FLIP delta and
-    // must slide DOWN into the header. This proves the oracle distinguishes a
-    // genuine slide from a vanish — the adjacent assertions are not trivially
-    // green.
-    final samples = await _sampleExit(tester, controller, render,
-        moveKey: "a0", dest: "B");
+      final samples = await _sampleExit(
+        tester,
+        controller,
+        render,
+        moveKey: "a2",
+        dest: "B",
+      );
 
-    expect(samples.any((s) => s.delta.abs() > 1.0), isTrue,
-        reason: "far row must have a real (non-zero) exit slide");
-    expect(_maxVisible(samples), greaterThan(10.0),
-        reason: "far row's ghost must be visibly on screen during its slide");
+      // Only frames where the ghost is actually on screen (the bug yields none,
+      // so this also fails-red under the regression).
+      final tops = samples
+          .where((s) => s.visible > 2.0 && !s.top.isNaN)
+          .map((s) => s.top)
+          .toList();
+      expect(
+        tops,
+        isNotEmpty,
+        reason: "ghost must be visible on some frame (else it vanished)",
+      );
 
-    await tester.pumpAndSettle();
-  });
+      // a2's pre-move structural top is 144 (A=0,a0=48,a1=96,a2=144). The fix
+      // paints the ghost STATIONARY there while the header rises to absorb it.
+      // The bug would paint it chasing the live band top (192 -> 144), a moving
+      // top with a large spread (and clipped to nothing anyway).
+      final spread = tops.reduce(math.max) - tops.reduce(math.min);
+      expect(
+        spread,
+        lessThan(8.0),
+        reason:
+            "stationary ghost (header rises onto it), not chasing it. "
+            "Tops: $tops",
+      );
+      expect(
+        tops.first,
+        moreOrLessEquals(144.0, epsilon: 4.0),
+        reason: "ghost sits at a2's pre-move baseline (144), no t=0 jump",
+      );
+
+      await tester.pumpAndSettle();
+    },
+  );
 
   testWidgets(
-      "adjacent exit ghost settles hidden, ghost pruned, no residual paint",
-      (tester) async {
-    final controller = await _pumpTree(tester);
-    final render = _render(tester);
+    "FAR row still slides visibly into the collapsed header (discrimination)",
+    (tester) async {
+      final controller = await _pumpTree(tester);
+      final render = _render(tester);
 
-    await _sampleExit(tester, controller, render, moveKey: "a2", dest: "B");
-    await tester.pumpAndSettle();
+      // a0 is the FIRST child (far from B): it has a real, large FLIP delta and
+      // must slide DOWN into the header. This proves the oracle distinguishes a
+      // genuine slide from a vanish — the adjacent assertions are not trivially
+      // green.
+      final samples = await _sampleExit(
+        tester,
+        controller,
+        render,
+        moveKey: "a0",
+        dest: "B",
+      );
 
-    expect(controller.visibleNodes.contains("a2"), isFalse,
-        reason: "a2 ends hidden under collapsed B");
-    expect(controller.hasActiveSlides, isFalse);
-    expect(render.debugPhantomExitGhostCount, 0,
-        reason: "ghost must be pruned once BOTH it and its anchor settle "
-            "(the relaxed prune must not leak it)");
+      expect(
+        samples.any((s) => s.delta.abs() > 1.0),
+        isTrue,
+        reason: "far row must have a real (non-zero) exit slide",
+      );
+      expect(
+        _maxVisible(samples),
+        greaterThan(10.0),
+        reason: "far row's ghost must be visibly on screen during its slide",
+      );
 
-    // Final repaint: every painted row sits on the static 48px grid — no stray
-    // residual ghost paint.
-    final recorder = _Recorder(ContainerLayer(), Offset.zero & _kSurface);
-    render.paint(recorder, Offset.zero);
-    for (final p in recorder.painted) {
-      final nearestGrid = (p.rect.top / _kRow).round() * _kRow;
-      expect((p.rect.top - nearestGrid).abs(), lessThan(1.0),
-          reason: "stray top ${p.rect.top} after settle ⇒ residual ghost");
-    }
-  });
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    "adjacent exit ghost settles hidden, ghost pruned, no residual paint",
+    (tester) async {
+      final controller = await _pumpTree(tester);
+      final render = _render(tester);
+
+      await _sampleExit(tester, controller, render, moveKey: "a2", dest: "B");
+      await tester.pumpAndSettle();
+
+      expect(
+        controller.visibleNodes.contains("a2"),
+        isFalse,
+        reason: "a2 ends hidden under collapsed B",
+      );
+      expect(controller.hasActiveSlides, isFalse);
+      expect(
+        render.debugPhantomExitGhostCount,
+        0,
+        reason:
+            "ghost must be pruned once BOTH it and its anchor settle "
+            "(the relaxed prune must not leak it)",
+      );
+
+      // Final repaint: every painted row sits on the static 48px grid — no stray
+      // residual ghost paint.
+      final recorder = _Recorder(ContainerLayer(), Offset.zero & _kSurface);
+      render.paint(recorder, Offset.zero);
+      for (final p in recorder.painted) {
+        final nearestGrid = (p.rect.top / _kRow).round() * _kRow;
+        expect(
+          (p.rect.top - nearestGrid).abs(),
+          lessThan(1.0),
+          reason: "stray top ${p.rect.top} after settle ⇒ residual ghost",
+        );
+      }
+    },
+  );
 }

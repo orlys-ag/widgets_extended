@@ -41,7 +41,12 @@ void main() {
     testWidgets("installs a slide for the moved row", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -67,10 +72,16 @@ void main() {
       );
       await tester.pump();
 
-      expect(controller.hasActiveSlides, true,
-          reason: "animate: true must install a slide");
-      expect(controller.getSlideDelta("a"), closeTo(-96.0, 1.0),
-          reason: "a moved from y=0 to y=96, delta = 0 - 96 = -96");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "animate: true must install a slide",
+      );
+      expect(
+        controller.getSlideDelta("a"),
+        closeTo(-96.0, 1.0),
+        reason: "a moved from y=0 to y=96, delta = 0 - 96 = -96",
+      );
 
       // Settle.
       await tester.pumpAndSettle();
@@ -81,7 +92,12 @@ void main() {
     testWidgets("explicit animate: false installs no slide", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -95,15 +111,23 @@ void main() {
       controller.moveNode("a", null, index: 1, animate: false);
       await tester.pump();
 
-      expect(controller.hasActiveSlides, false,
-          reason: "animate: false must not stage a baseline");
+      expect(
+        controller.hasActiveSlides,
+        false,
+        reason: "animate: false must not stage a baseline",
+      );
       expect(controller.getSlideDelta("a"), 0.0);
     });
 
     testWidgets("default (no animate arg) installs a slide", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -118,75 +142,95 @@ void main() {
       controller.moveNode("a", null, index: 1);
       await tester.pump();
 
-      expect(controller.hasActiveSlides, true,
-          reason: "default animate: true must stage a baseline");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "default animate: true must stage a baseline",
+      );
       await tester.pumpAndSettle();
     });
   });
 
   group("moveNode(animate: true) edge cases", () {
-    testWidgets("no-op move (same parent, no index) does not stage a baseline",
-        (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
-      );
-      addTearDown(controller.dispose);
+    testWidgets(
+      "no-op move (same parent, no index) does not stage a baseline",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
 
-      controller.setRoots([const TreeNode(key: "a", data: "A")]);
-      await tester.pumpWidget(_buildHarness(controller));
-      await tester.pumpAndSettle();
+        controller.setRoots([const TreeNode(key: "a", data: "A")]);
+        await tester.pumpWidget(_buildHarness(controller));
+        await tester.pumpAndSettle();
 
-      // Move "a" to its own current parent (root, since it's already a root)
-      // with no index — the no-op early return must fire.
-      controller.moveNode("a", null, animate: true);
-      await tester.pump();
+        // Move "a" to its own current parent (root, since it's already a root)
+        // with no index — the no-op early return must fire.
+        controller.moveNode("a", null, animate: true);
+        await tester.pump();
 
-      // No slide installed (mutation was a no-op).
-      expect(controller.hasActiveSlides, false);
+        // No slide installed (mutation was a no-op).
+        expect(controller.hasActiveSlides, false);
 
-      // Critical: a SUBSEQUENT animated move must succeed (the no-op path
-      // must not have left a stuck pending baseline that blocks future
-      // stages under first-wins).
-      controller.setChildren("a", [const TreeNode(key: "a1", data: "A1")]);
-      controller.expand(key: "a");
-      await tester.pumpAndSettle();
+        // Critical: a SUBSEQUENT animated move must succeed (the no-op path
+        // must not have left a stuck pending baseline that blocks future
+        // stages under first-wins).
+        controller.setChildren("a", [const TreeNode(key: "a1", data: "A1")]);
+        controller.expand(key: "a");
+        await tester.pumpAndSettle();
 
-      controller.moveNode(
-        "a1",
-        null,
-        index: 0,
-        animate: true,
-        slideDuration: const Duration(milliseconds: 200),
-        slideCurve: Curves.linear,
-      );
-      await tester.pump();
-      expect(controller.hasActiveSlides, true,
-          reason: "the prior no-op move must not have left a stuck baseline");
+        controller.moveNode(
+          "a1",
+          null,
+          index: 0,
+          animate: true,
+          slideDuration: const Duration(milliseconds: 200),
+          slideCurve: Curves.linear,
+        );
+        await tester.pump();
+        expect(
+          controller.hasActiveSlides,
+          true,
+          reason: "the prior no-op move must not have left a stuck baseline",
+        );
 
-      await tester.pumpAndSettle();
-    });
+        await tester.pumpAndSettle();
+      },
+    );
 
-    testWidgets("animate: true with no mounted sliver is a no-op (no exception)",
-        (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
-      );
-      addTearDown(controller.dispose);
+    testWidgets(
+      "animate: true with no mounted sliver is a no-op (no exception)",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
 
-      controller.setRoots([
-        const TreeNode(key: "a", data: "A"),
-        const TreeNode(key: "b", data: "B"),
-      ]);
+        controller.setRoots([
+          const TreeNode(key: "a", data: "A"),
+          const TreeNode(key: "b", data: "B"),
+        ]);
 
-      // No SliverTree mounted → no render hosts registered.
-      controller.moveNode("a", null, index: 1, animate: true);
+        // No SliverTree mounted → no render hosts registered.
+        controller.moveNode("a", null, index: 1, animate: true);
 
-      // Mutation still applied; no slide installed; no exception.
-      expect(controller.getIndexInParent("a"), 1);
-      expect(controller.hasActiveSlides, false);
-    });
+        // Mutation still applied; no slide installed; no exception.
+        expect(controller.getIndexInParent("a"), 1);
+        expect(controller.hasActiveSlides, false);
+      },
+    );
   });
 
   group("moveNode(animate: true) same-frame coherence (first-wins)", () {
@@ -195,7 +239,12 @@ void main() {
       (tester) async {
         final controller = TreeController<String, String>(
           vsync: tester,
-          animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 1000), curve: Curves.linear)),
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 1000),
+              curve: Curves.linear,
+            ),
+          ),
         );
         addTearDown(controller.dispose);
 
@@ -240,28 +289,43 @@ void main() {
         await tester.pump();
 
         // Both moved rows have slides matching their full pre→post deltas.
-        expect(controller.getSlideDelta("a"), closeTo(-144.0, 1.0),
-            reason: "first-wins baseline must reflect pre-anything position");
-        expect(controller.getSlideDelta("d"), closeTo(144.0, 1.0),
-            reason: "first-wins baseline must reflect pre-anything position");
+        expect(
+          controller.getSlideDelta("a"),
+          closeTo(-144.0, 1.0),
+          reason: "first-wins baseline must reflect pre-anything position",
+        );
+        expect(
+          controller.getSlideDelta("d"),
+          closeTo(144.0, 1.0),
+          reason: "first-wins baseline must reflect pre-anything position",
+        );
 
         // First call's 1000ms duration wins. Pump 100ms — slide is ~10%
         // through, must still be active. (Under "latest wins" with 50ms,
         // the slide would have completed by now.)
         await tester.pump(const Duration(milliseconds: 100));
-        expect(controller.hasActiveSlides, true,
-            reason: "first call's 1000ms duration must win, not second's 50ms");
+        expect(
+          controller.hasActiveSlides,
+          true,
+          reason: "first call's 1000ms duration must win, not second's 50ms",
+        );
 
         await tester.pumpAndSettle();
         expect(controller.hasActiveSlides, false);
       },
     );
 
-    testWidgets("two animated moves inside runBatch coalesce coherently",
-        (tester) async {
+    testWidgets("two animated moves inside runBatch coalesce coherently", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 500), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 500),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -280,8 +344,11 @@ void main() {
       });
       await tester.pump();
 
-      expect(controller.hasActiveSlides, true,
-          reason: "runBatch with animated moves still installs slides");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "runBatch with animated moves still installs slides",
+      );
       // After both moves: order is [c, b, a]. a went from 0→96, c went
       // from 96→0. Slide deltas reflect full pre→post movement.
       expect(controller.getSlideDelta("a"), closeTo(-96.0, 1.0));
@@ -292,11 +359,17 @@ void main() {
   });
 
   group("moveNode(animate: true) controller disposal safety", () {
-    testWidgets("controller disposed before render-object detach is safe",
-        (tester) async {
+    testWidgets("controller disposed before render-object detach is safe", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
 
       controller.setRoots([

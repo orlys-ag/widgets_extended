@@ -47,11 +47,17 @@ Widget _harness(
 
 void main() {
   group("collapsed → visible reparenting", () {
-    testWidgets("hidden child reparented to visible parent gets a slide",
-        (tester) async {
+    testWidgets("hidden child reparented to visible parent gets a slide", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -64,9 +70,7 @@ void main() {
         const TreeNode(key: "Y", data: "Y"),
         const TreeNode(key: "Z", data: "Z"),
       ]);
-      controller.setChildren("B", [
-        const TreeNode(key: "b1", data: "b1"),
-      ]);
+      controller.setChildren("B", [const TreeNode(key: "b1", data: "b1")]);
       // A stays collapsed (default). B explicitly expanded.
       controller.expand(key: "B", animate: false);
 
@@ -91,21 +95,33 @@ void main() {
       // Y is now visible AND has an active slide installed via the
       // phantom anchor (A's painted position).
       expect(controller.visibleNodes.contains("Y"), true);
-      expect(controller.hasActiveSlides, true,
-          reason: "Phantom anchor should have installed a slide for Y");
-      expect(controller.getSlideDelta("Y"), isNot(0.0),
-          reason: "Y's slide delta should be non-zero (anchor.y - destination.y)");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason: "Phantom anchor should have installed a slide for Y",
+      );
+      expect(
+        controller.getSlideDelta("Y"),
+        isNot(0.0),
+        reason: "Y's slide delta should be non-zero (anchor.y - destination.y)",
+      );
 
       await tester.pumpAndSettle();
       expect(controller.hasActiveSlides, false);
       expect(controller.getSlideDelta("Y"), 0.0);
     });
 
-    testWidgets("deeply-nested hidden reparent uses deepest visible ancestor",
-        (tester) async {
+    testWidgets("deeply-nested hidden reparent uses deepest visible ancestor", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -117,18 +133,10 @@ void main() {
         const TreeNode(key: "A", data: "A"),
         const TreeNode(key: "D", data: "D"),
       ]);
-      controller.setChildren("A", [
-        const TreeNode(key: "B", data: "B"),
-      ]);
-      controller.setChildren("B", [
-        const TreeNode(key: "C", data: "C"),
-      ]);
-      controller.setChildren("C", [
-        const TreeNode(key: "Y", data: "Y"),
-      ]);
-      controller.setChildren("D", [
-        const TreeNode(key: "d1", data: "d1"),
-      ]);
+      controller.setChildren("A", [const TreeNode(key: "B", data: "B")]);
+      controller.setChildren("B", [const TreeNode(key: "C", data: "C")]);
+      controller.setChildren("C", [const TreeNode(key: "Y", data: "Y")]);
+      controller.setChildren("D", [const TreeNode(key: "d1", data: "d1")]);
       controller.expand(key: "A", animate: false);
       controller.expand(key: "B", animate: false);
       controller.expand(key: "D", animate: false);
@@ -159,17 +167,26 @@ void main() {
       // Y's slide delta = C's painted Y - Y's new structural Y.
       // After move: order is [A, B, C, D, Y, d1]. C is at y=2*48=96
       // (A at 0, B at 48). Y is at y=4*48=192. Slide = 96 - 192 = -96.
-      expect(controller.getSlideDelta("Y"), closeTo(-96.0, 1.0),
-          reason: "Phantom anchor should be C (deepest visible) at y=96");
+      expect(
+        controller.getSlideDelta("Y"),
+        closeTo(-96.0, 1.0),
+        reason: "Phantom anchor should be C (deepest visible) at y=96",
+      );
 
       await tester.pumpAndSettle();
     });
 
-    testWidgets("fully-visible reparent does NOT use phantom anchor",
-        (tester) async {
+    testWidgets("fully-visible reparent does NOT use phantom anchor", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -204,13 +221,19 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets("anchor-off-screen falls back to viewport edge",
-        (tester) async {
+    testWidgets("anchor-off-screen falls back to viewport edge", (
+      tester,
+    ) async {
       final scrollController = ScrollController();
       addTearDown(scrollController.dispose);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -262,23 +285,37 @@ void main() {
       );
       await tester.pump();
 
-      expect(controller.hasActiveSlides, true,
-          reason: "Off-screen-anchor path must install a slide via the "
-              "viewport-edge fallback");
-      expect(controller.getSlideDelta("Y"), closeTo(-276.0, 1.0),
-          reason: "Slide should anchor at viewport top minus overhang "
-              "(y=100-40=60), NOT at A's structural y (=0). delta = "
-              "60 - 336 = -276. (If anchor was used directly: delta would "
-              "be 0 - 336 = -336.)");
+      expect(
+        controller.hasActiveSlides,
+        true,
+        reason:
+            "Off-screen-anchor path must install a slide via the "
+            "viewport-edge fallback",
+      );
+      expect(
+        controller.getSlideDelta("Y"),
+        closeTo(-276.0, 1.0),
+        reason:
+            "Slide should anchor at viewport top minus overhang "
+            "(y=100-40=60), NOT at A's structural y (=0). delta = "
+            "60 - 336 = -276. (If anchor was used directly: delta would "
+            "be 0 - 336 = -336.)",
+      );
 
       await tester.pumpAndSettle();
     });
 
-    testWidgets("hidden subtree reparent — children also slide",
-        (tester) async {
+    testWidgets("hidden subtree reparent — children also slide", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 

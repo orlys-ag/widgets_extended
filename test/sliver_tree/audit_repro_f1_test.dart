@@ -32,7 +32,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -53,10 +58,16 @@ void main() {
 
       // Sanity: the claimed precondition holds — X is mid-exit and the
       // live list is [A, B] while the full list still leads with X.
-      expect(controller.isPendingDeletion("X"), isTrue,
-          reason: "Setup: X must be pending-deletion (exit in flight).");
-      expect(controller.getLiveChildren("P"), ["A", "B"],
-          reason: "Setup: live children of P must exclude pending X.");
+      expect(
+        controller.isPendingDeletion("X"),
+        isTrue,
+        reason: "Setup: X must be pending-deletion (exit in flight).",
+      );
+      expect(
+        controller.getLiveChildren("P"),
+        ["A", "B"],
+        reason: "Setup: live children of P must exclude pending X.",
+      );
 
       // Drop D "below A": live-space index 1 (this is exactly what
       // TreeReorderController.endDrag passes as indexInFinalList).
@@ -65,7 +76,8 @@ void main() {
       expect(
         controller.getLiveChildren("P"),
         ["A", "D", "B"],
-        reason: "index: 1 is live-space (the documented contract of "
+        reason:
+            "index: 1 is live-space (the documented contract of "
             "getIndexInParent/getLiveChildren and the space the drag flow "
             "computes indexInFinalList in), so D must land between A and B. "
             "Buggy full-list insertion at raw index 1 slots D before A "
@@ -83,56 +95,66 @@ void main() {
     timeout: const Timeout(Duration(seconds: 60)),
   );
 
-  testWidgets(
-    "same-parent moveNode with a live-space index actually reorders "
-    "despite a pending-deletion sibling",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
-      );
-      addTearDown(controller.dispose);
+  testWidgets("same-parent moveNode with a live-space index actually reorders "
+      "despite a pending-deletion sibling", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
 
-      controller.setRoots([
-        TreeNode(key: "P", data: "P"),
-      ]);
-      controller.setChildren("P", [
-        TreeNode(key: "X", data: "X"),
-        TreeNode(key: "A", data: "A"),
-        TreeNode(key: "B", data: "B"),
-      ]);
-      controller.expand(key: "P", animate: false);
+    controller.setRoots([TreeNode(key: "P", data: "P")]);
+    controller.setChildren("P", [
+      TreeNode(key: "X", data: "X"),
+      TreeNode(key: "A", data: "A"),
+      TreeNode(key: "B", data: "B"),
+    ]);
+    controller.expand(key: "P", animate: false);
 
-      controller.remove(key: "X", animate: true);
+    controller.remove(key: "X", animate: true);
 
-      // Sanity: X mid-exit; live list [A, B]; A's live index is 0, so the
-      // live-space no-op check (index == getIndexInParent) does not trip
-      // for index: 1 — the mutation path is exercised.
-      expect(controller.isPendingDeletion("X"), isTrue,
-          reason: "Setup: X must be pending-deletion (exit in flight).");
-      expect(controller.getLiveChildren("P"), ["A", "B"],
-          reason: "Setup: live children of P must exclude pending X.");
-      expect(controller.getIndexInParent("A"), 0,
-          reason: "Setup: A's live index must be 0 so index: 1 is not "
-              "rejected by the no-op check.");
+    // Sanity: X mid-exit; live list [A, B]; A's live index is 0, so the
+    // live-space no-op check (index == getIndexInParent) does not trip
+    // for index: 1 — the mutation path is exercised.
+    expect(
+      controller.isPendingDeletion("X"),
+      isTrue,
+      reason: "Setup: X must be pending-deletion (exit in flight).",
+    );
+    expect(
+      controller.getLiveChildren("P"),
+      ["A", "B"],
+      reason: "Setup: live children of P must exclude pending X.",
+    );
+    expect(
+      controller.getIndexInParent("A"),
+      0,
+      reason:
+          "Setup: A's live index must be 0 so index: 1 is not "
+          "rejected by the no-op check.",
+    );
 
-      // Move A to live index 1: requested live order [B, A].
-      controller.moveNode("A", "P", index: 1);
+    // Move A to live index 1: requested live order [B, A].
+    controller.moveNode("A", "P", index: 1);
 
-      expect(
-        controller.getLiveChildren("P"),
-        ["B", "A"],
-        reason: "moveNode(A, P, index: 1) with live [A, B] must produce "
-            "live [B, A]. Buggy full-list insertion removes A from raw "
-            "[X, A, B] -> [X, B], reinserts at raw index 1 -> [X, A, B]: "
-            "a silent no-op that leaves live order [A, B].",
-      );
+    expect(
+      controller.getLiveChildren("P"),
+      ["B", "A"],
+      reason:
+          "moveNode(A, P, index: 1) with live [A, B] must produce "
+          "live [B, A]. Buggy full-list insertion removes A from raw "
+          "[X, A, B] -> [X, B], reinserts at raw index 1 -> [X, A, B]: "
+          "a silent no-op that leaves live order [A, B].",
+    );
 
-      for (var i = 0; i < 30; i++) {
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      expect(controller.isPendingDeletion("X"), isFalse);
-    },
-    timeout: const Timeout(Duration(seconds: 60)),
-  );
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(controller.isPendingDeletion("X"), isFalse);
+  }, timeout: const Timeout(Duration(seconds: 60)));
 }

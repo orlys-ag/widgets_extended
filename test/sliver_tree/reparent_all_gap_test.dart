@@ -78,10 +78,7 @@ void _populateExampleTree(TreeController<String, int> controller) {
 }
 
 /// Mirrors `_randomReparent(_allItemKeys().length)` — moves ALL items.
-void _reparentAll(
-  TreeController<String, int> controller,
-  Random random,
-) {
+void _reparentAll(TreeController<String, int> controller, Random random) {
   final allItems = <String>[];
   for (int p = 0; p < 8; p++) {
     allItems.addAll(controller.getChildren("parent-$p"));
@@ -134,13 +131,18 @@ Map<String, double> _assertViewportConsistent(
     if (dy < 0 || dy >= _kViewportHeight) continue;
     // Widget identity check.
     final textWidgets = find.descendant(
-      of: finder, matching: find.byType(Text),
+      of: finder,
+      matching: find.byType(Text),
     );
     if (textWidgets.evaluate().isEmpty) continue;
     final text = tester.widget<Text>(textWidgets);
-    expect(text.data, key,
-        reason: "[$label] Row $key at viewport-y=$dy must show its own "
-            "key. Got '${text.data}'.");
+    expect(
+      text.data,
+      key,
+      reason:
+          "[$label] Row $key at viewport-y=$dy must show its own "
+          "key. Got '${text.data}'.",
+    );
   }
   return positions;
 }
@@ -200,30 +202,29 @@ void main() {
     },
   );
 
-  testWidgets(
-    "Reparent ALL × 3 rapid clicks at top of tree (no scroll)",
-    (tester) async {
-      final controller = _newController(tester);
-      addTearDown(controller.dispose);
-      _populateExampleTree(controller);
-      await tester.pumpWidget(_harness(controller));
-      await tester.pumpAndSettle();
+  testWidgets("Reparent ALL × 3 rapid clicks at top of tree (no scroll)", (
+    tester,
+  ) async {
+    final controller = _newController(tester);
+    addTearDown(controller.dispose);
+    _populateExampleTree(controller);
+    await tester.pumpWidget(_harness(controller));
+    await tester.pumpAndSettle();
 
-      _assertViewportConsistent(tester, controller, "initial");
+    _assertViewportConsistent(tester, controller, "initial");
 
-      final random = Random(99);
-      for (int batch = 0; batch < 3; batch++) {
-        _reparentAll(controller, random);
-        await tester.pump();
-        _assertViewportConsistent(tester, controller, "post-batch-$batch");
-        await tester.pump(const Duration(milliseconds: 400));
-        _assertViewportConsistent(tester, controller, "mid-batch-$batch");
-      }
+    final random = Random(99);
+    for (int batch = 0; batch < 3; batch++) {
+      _reparentAll(controller, random);
+      await tester.pump();
+      _assertViewportConsistent(tester, controller, "post-batch-$batch");
+      await tester.pump(const Duration(milliseconds: 400));
+      _assertViewportConsistent(tester, controller, "mid-batch-$batch");
+    }
 
-      await tester.pumpAndSettle();
-      _assertViewportConsistent(tester, controller, "settled");
-    },
-  );
+    await tester.pumpAndSettle();
+    _assertViewportConsistent(tester, controller, "settled");
+  });
 
   testWidgets(
     "Reparent ALL × 3 rapid clicks: rows should not cluster at viewport "
@@ -259,10 +260,14 @@ void main() {
       }
       // After settle in a 500-px viewport with 50-px rows, expect ~10
       // rows visible (full viewport).
-      expect(rowsInViewport, greaterThanOrEqualTo(8),
-          reason: "Only $rowsInViewport rows visible in 500-px "
-              "viewport after settle — expected ~10. Indicates "
-              "viewport gap bug.");
+      expect(
+        rowsInViewport,
+        greaterThanOrEqualTo(8),
+        reason:
+            "Only $rowsInViewport rows visible in 500-px "
+            "viewport after settle — expected ~10. Indicates "
+            "viewport gap bug.",
+      );
 
       await tester.pumpAndSettle();
     },
@@ -319,9 +324,13 @@ void main() {
       // Allow a few "missing" rows for edge ghosts (their structural
       // shifted into viewport but they're still _phantomEdgeExits;
       // rare but legitimate). >5 indicates a real bug.
-      expect(missingInViewport.length, lessThanOrEqualTo(5),
-          reason: "Many rows whose structural is in viewport are NOT "
-              "mounted (gaps). Missing: $missingInViewport");
+      expect(
+        missingInViewport.length,
+        lessThanOrEqualTo(5),
+        reason:
+            "Many rows whose structural is in viewport are NOT "
+            "mounted (gaps). Missing: $missingInViewport",
+      );
 
       await tester.pumpAndSettle();
     },

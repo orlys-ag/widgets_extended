@@ -48,111 +48,116 @@ void main() {
         TreeNode(key: "b", data: "B"),
       ], animate: false);
 
-      expect(controller.visibleNodes, ["a", "b"],
-          reason: "b was externally removed; the sync desiring b must "
-              "re-insert it (external mutations are the new baseline)");
+      expect(
+        controller.visibleNodes,
+        ["a", "b"],
+        reason:
+            "b was externally removed; the sync desiring b must "
+            "re-insert it (external mutations are the new baseline)",
+      );
       expect(controller.getNodeData("b"), isNotNull);
     },
   );
 
-  testWidgets(
-    "externally added root is removed by the next sync that does not "
-    "desire it",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      final sync = TreeSyncController<String, String>(
-        treeController: controller,
-      );
-      addTearDown(() {
-        sync.dispose();
-        controller.dispose();
-      });
+  testWidgets("externally added root is removed by the next sync that does not "
+      "desire it", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    final sync = TreeSyncController<String, String>(treeController: controller);
+    addTearDown(() {
+      sync.dispose();
+      controller.dispose();
+    });
 
-      sync.syncRoots([TreeNode(key: "a", data: "A")], animate: false);
+    sync.syncRoots([TreeNode(key: "a", data: "A")], animate: false);
 
-      // External insert through the escape hatch.
-      controller.insertRoot(
-        const TreeNode(key: "ext", data: "EXT"),
-        animate: false,
-      );
-      expect(controller.visibleNodes, ["a", "ext"]);
+    // External insert through the escape hatch.
+    controller.insertRoot(
+      const TreeNode(key: "ext", data: "EXT"),
+      animate: false,
+    );
+    expect(controller.visibleNodes, ["a", "ext"]);
 
-      // The next sync does not desire ext: it must be removed. A
-      // mirror-based diff never sees ext (it is not in the mirror) and
-      // leaves it in the tree forever.
-      sync.syncRoots([TreeNode(key: "a", data: "A")], animate: false);
+    // The next sync does not desire ext: it must be removed. A
+    // mirror-based diff never sees ext (it is not in the mirror) and
+    // leaves it in the tree forever.
+    sync.syncRoots([TreeNode(key: "a", data: "A")], animate: false);
 
-      expect(controller.visibleNodes, ["a"],
-          reason: "ext is not desired; the sync must remove it");
-      expect(controller.getNodeData("ext"), isNull);
-    },
-  );
+    expect(
+      controller.visibleNodes,
+      ["a"],
+      reason: "ext is not desired; the sync must remove it",
+    );
+    expect(controller.getNodeData("ext"), isNull);
+  });
 
-  testWidgets(
-    "drag-commit reorder (moveNode, as TreeReorderController.endDrag "
-    "issues) followed by a sync reflecting the new order is a clean no-op",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      final sync = TreeSyncController<String, String>(
-        treeController: controller,
-      );
-      addTearDown(() {
-        sync.dispose();
-        controller.dispose();
-      });
+  testWidgets("drag-commit reorder (moveNode, as TreeReorderController.endDrag "
+      "issues) followed by a sync reflecting the new order is a clean no-op", (
+    tester,
+  ) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    final sync = TreeSyncController<String, String>(treeController: controller);
+    addTearDown(() {
+      sync.dispose();
+      controller.dispose();
+    });
 
-      List<TreeNode<String, String>> childrenOf(String key) {
-        return key == "p"
-            ? const [
-                TreeNode(key: "x", data: "X"),
-                TreeNode(key: "y", data: "Y"),
-                TreeNode(key: "z", data: "Z"),
-              ]
-            : const <TreeNode<String, String>>[];
-      }
+    List<TreeNode<String, String>> childrenOf(String key) {
+      return key == "p"
+          ? const [
+              TreeNode(key: "x", data: "X"),
+              TreeNode(key: "y", data: "Y"),
+              TreeNode(key: "z", data: "Z"),
+            ]
+          : const <TreeNode<String, String>>[];
+    }
 
-      sync.syncRoots(
-        [const TreeNode(key: "p", data: "P")],
-        childrenOf: childrenOf,
-        animate: false,
-      );
-      controller.expand(key: "p", animate: false);
-      expect(controller.getLiveChildren("p"), ["x", "y", "z"]);
+    sync.syncRoots(
+      [const TreeNode(key: "p", data: "P")],
+      childrenOf: childrenOf,
+      animate: false,
+    );
+    controller.expand(key: "p", animate: false);
+    expect(controller.getLiveChildren("p"), ["x", "y", "z"]);
 
-      // Drag-commit: the user drags z above x. This is exactly what
-      // TreeReorderController.endDrag issues on a same-parent drop.
-      controller.moveNode("z", "p", index: 0, animate: false);
-      expect(controller.getLiveChildren("p"), ["z", "x", "y"]);
+    // Drag-commit: the user drags z above x. This is exactly what
+    // TreeReorderController.endDrag issues on a same-parent drop.
+    controller.moveNode("z", "p", index: 0, animate: false);
+    expect(controller.getLiveChildren("p"), ["z", "x", "y"]);
 
-      // Server state now reflects the new order; the app re-syncs.
-      List<TreeNode<String, String>> newChildrenOf(String key) {
-        return key == "p"
-            ? const [
-                TreeNode(key: "z", data: "Z"),
-                TreeNode(key: "x", data: "X"),
-                TreeNode(key: "y", data: "Y"),
-              ]
-            : const <TreeNode<String, String>>[];
-      }
+    // Server state now reflects the new order; the app re-syncs.
+    List<TreeNode<String, String>> newChildrenOf(String key) {
+      return key == "p"
+          ? const [
+              TreeNode(key: "z", data: "Z"),
+              TreeNode(key: "x", data: "X"),
+              TreeNode(key: "y", data: "Y"),
+            ]
+          : const <TreeNode<String, String>>[];
+    }
 
-      sync.syncRoots(
-        [const TreeNode(key: "p", data: "P")],
-        childrenOf: newChildrenOf,
-        animate: false,
-      );
+    sync.syncRoots(
+      [const TreeNode(key: "p", data: "P")],
+      childrenOf: newChildrenOf,
+      animate: false,
+    );
 
-      expect(controller.getLiveChildren("p"), ["z", "x", "y"],
-          reason: "the sync mirrors the committed order — no mis-diff");
-      expect(controller.visibleNodes, ["p", "z", "x", "y"],
-          reason: "no duplicate or lost rows after drop + re-sync");
-    },
-  );
+    expect(
+      controller.getLiveChildren("p"),
+      ["z", "x", "y"],
+      reason: "the sync mirrors the committed order — no mis-diff",
+    );
+    expect(
+      controller.visibleNodes,
+      ["p", "z", "x", "y"],
+      reason: "no duplicate or lost rows after drop + re-sync",
+    );
+  });
 
   testWidgets(
     "external cross-parent moveNode composes with a later syncChildren "
@@ -187,14 +192,16 @@ void main() {
 
       // A later sync wants x back under a. A mirror-based diff sees x
       // still tracked under a, judges it retained, and never moves it.
-      sync.syncChildren(
+      sync.syncChildren("a", const [
+        TreeNode(key: "x", data: "X"),
+      ], animate: false);
+      expect(
+        controller.getParent("x"),
         "a",
-        const [TreeNode(key: "x", data: "X")],
-        animate: false,
+        reason:
+            "x must move back under a — the mirror's stale view of "
+            "a's children must not mask the externally-moved child",
       );
-      expect(controller.getParent("x"), "a",
-          reason: "x must move back under a — the mirror's stale view of "
-              "a's children must not mask the externally-moved child");
     },
   );
 }

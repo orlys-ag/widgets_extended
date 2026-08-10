@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/sliver_tree/_synced_input_normalizer.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
 sealed class _WorkNode {
@@ -55,8 +56,8 @@ String _workLabel(_WorkNode node) {
 }
 
 void main() {
-  group("TreeSnapshot", () {
-    test("fromHierarchy preserves deep nesting and validates reachability", () {
+  group("input normalization", () {
+    test("normalizeHierarchy preserves deep nesting", () {
       const roots = <_WorkNode>[
         _SectionNode(
           id: "today",
@@ -72,25 +73,24 @@ void main() {
         ),
       ];
 
-      final snapshot = TreeSnapshot<String, _WorkNode>.fromHierarchy(
+      final normalized = normalizeHierarchy<String, _WorkNode>(
         roots: roots,
         keyOf: _workKey,
         childrenOf: _workChildren,
       );
 
-      expect(snapshot.roots, <String>["section:today"]);
-      expect(snapshot.childrenByParent["section:today"], <String>[
-        "item:a",
-        "section:nested",
-      ]);
-      expect(snapshot.childrenByParent["section:nested"], <String>["item:b"]);
-      expect(() {
-        TreeSnapshot<String, String>(
-          roots: <String>["root"],
-          dataByKey: <String, String>{"root": "Root", "orphan": "Orphan"},
-          childrenByParent: const <String, Iterable<String>>{},
-        );
-      }, throwsArgumentError);
+      expect(
+        [for (final n in normalized.roots) n.key],
+        <String>["section:today"],
+      );
+      expect(
+        [for (final n in normalized.childrenByParent["section:today"]!) n.key],
+        <String>["item:a", "section:nested"],
+      );
+      expect(
+        [for (final n in normalized.childrenByParent["section:nested"]!) n.key],
+        <String>["item:b"],
+      );
     });
   });
 
@@ -135,50 +135,47 @@ void main() {
       expect(find.text("1|root|Child"), findsOneWidget);
     });
 
-    testWidgets(
-      "preserves input order for multiple roots (regression: 0.0.14 "
-      "iterative DFS reversed roots)",
-      (tester) async {
-        final tree = <SyncedTreeNode<String, String>>[
-          SyncedTreeNode<String, String>(key: "favorites", data: "Favorites"),
-          SyncedTreeNode<String, String>(key: "workspaces", data: "MyWorkspaces"),
-          SyncedTreeNode<String, String>(key: "shared", data: "Shared"),
-        ];
+    testWidgets("preserves input order for multiple roots (regression: 0.0.14 "
+        "iterative DFS reversed roots)", (tester) async {
+      final tree = <SyncedTreeNode<String, String>>[
+        SyncedTreeNode<String, String>(key: "favorites", data: "Favorites"),
+        SyncedTreeNode<String, String>(key: "workspaces", data: "MyWorkspaces"),
+        SyncedTreeNode<String, String>(key: "shared", data: "Shared"),
+      ];
 
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: CustomScrollView(
-                slivers: <Widget>[
-                  SyncedSliverTree<String, String>(
-                    tree: tree,
-                    initiallyExpanded: true,
-                    animationStyle: TreeAnimationStyle.disabled,
-                    itemBuilder: (context, node) {
-                      return SizedBox(height: 48, child: Text(node.item));
-                    },
-                  ),
-                ],
-              ),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: <Widget>[
+                SyncedSliverTree<String, String>(
+                  tree: tree,
+                  initiallyExpanded: true,
+                  animationStyle: TreeAnimationStyle.disabled,
+                  itemBuilder: (context, node) {
+                    return SizedBox(height: 48, child: Text(node.item));
+                  },
+                ),
+              ],
             ),
           ),
-        );
-        await tester.pump();
+        ),
+      );
+      await tester.pump();
 
-        final favoritesY = tester.getTopLeft(find.text("Favorites")).dy;
-        final workspacesY = tester.getTopLeft(find.text("MyWorkspaces")).dy;
-        final sharedY = tester.getTopLeft(find.text("Shared")).dy;
+      final favoritesY = tester.getTopLeft(find.text("Favorites")).dy;
+      final workspacesY = tester.getTopLeft(find.text("MyWorkspaces")).dy;
+      final sharedY = tester.getTopLeft(find.text("Shared")).dy;
 
-        expect(
-          favoritesY < workspacesY && workspacesY < sharedY,
-          isTrue,
-          reason:
-              "Roots must render in input order. The 0.0.14 iterative "
-              "_normalizeTree pushed roots forward but popped LIFO, "
-              "reversing them on screen.",
-        );
-      },
-    );
+      expect(
+        favoritesY < workspacesY && workspacesY < sharedY,
+        isTrue,
+        reason:
+            "Roots must render in input order. The 0.0.14 iterative "
+            "_normalizeTree pushed roots forward but popped LIFO, "
+            "reversing them on screen.",
+      );
+    });
 
     testWidgets("throws on duplicate keys", (tester) async {
       final tree = <SyncedTreeNode<String, String>>[
@@ -264,7 +261,7 @@ void main() {
       );
     });
 
-    testWidgets("watch rebuilds on expand and collapse", (tester) async {
+    testWidgets("a row rebuilds on expand and collapse", (tester) async {
       final tree = <SyncedTreeNode<String, String>>[
         SyncedTreeNode<String, String>(
           key: "root",
@@ -286,18 +283,17 @@ void main() {
                   animationStyle: TreeAnimationStyle.disabled,
                   itemBuilder: (context, node) {
                     if (node.hasChildren) {
-                      return node.watch(
-                        builder: (context, currentNode) {
-                          return GestureDetector(
-                            onTap: () => currentNode.toggle(),
-                            child: SizedBox(
-                              height: 48,
-                              child: Text(
-                                "${currentNode.item}|${currentNode.isExpanded}",
-                              ),
-                            ),
-                          );
+                      // Direct property reads: the row is rebuilt whenever
+                      // its own rendered inputs change. See
+                      // row_freshness_without_watch_test.dart.
+                      return GestureDetector(
+                        onTap: () {
+                          node.toggle();
                         },
+                        child: SizedBox(
+                          height: 48,
+                          child: Text("${node.item}|${node.isExpanded}"),
+                        ),
                       );
                     }
 
@@ -320,53 +316,6 @@ void main() {
       expect(find.text("Root|true"), findsOneWidget);
       expect(find.text("Child"), findsOneWidget);
     });
-  });
-
-  group("SyncedSliverTree.nodes", () {
-    testWidgets(
-      "renders roots and lazy children without snapshot boilerplate",
-      (tester) async {
-        final roots = <TreeNode<String, String>>[
-          const TreeNode<String, String>(key: "root", data: "Root"),
-        ];
-        final childrenByParent = <String, List<TreeNode<String, String>>>{
-          "root": <TreeNode<String, String>>[
-            const TreeNode<String, String>(key: "child", data: "Child"),
-          ],
-        };
-
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: CustomScrollView(
-                slivers: <Widget>[
-                  SyncedSliverTree<String, String>.nodes(
-                    roots: roots,
-                    childrenOf: (key) =>
-                        childrenByParent[key] ??
-                        const <TreeNode<String, String>>[],
-                    initiallyExpanded: true,
-                    animationStyle: TreeAnimationStyle.disabled,
-                    itemBuilder: (context, node) {
-                      return SizedBox(
-                        height: 48,
-                        child: Text(
-                          "${node.depth}|${node.parentKey}|${node.item}",
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-        await tester.pump();
-
-        expect(find.text("0|null|Root"), findsOneWidget);
-        expect(find.text("1|root|Child"), findsOneWidget);
-      },
-    );
   });
 
   group("SyncedSliverTree.hierarchy", () {
@@ -486,48 +435,6 @@ void main() {
     });
   });
 
-  group("SyncedSliverTree.snapshot", () {
-    testWidgets("renders a precomputed snapshot with rich node metadata", (
-      tester,
-    ) async {
-      final snapshot = TreeSnapshot<String, String>(
-        roots: const <String>["root"],
-        dataByKey: const <String, String>{"root": "Root", "child": "Child"},
-        childrenByParent: const <String, Iterable<String>>{
-          "root": <String>["child"],
-        },
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CustomScrollView(
-              slivers: <Widget>[
-                SyncedSliverTree<String, String>.snapshot(
-                  snapshot: snapshot,
-                  initiallyExpanded: true,
-                  animationStyle: TreeAnimationStyle.disabled,
-                  itemBuilder: (context, node) {
-                    return SizedBox(
-                      height: 48,
-                      child: Text(
-                        "${node.depth}|${node.parentKey}|${node.item}",
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-      await tester.pump();
-
-      expect(find.text("0|null|Root"), findsOneWidget);
-      expect(find.text("1|root|Child"), findsOneWidget);
-    });
-  });
-
   // ══════════════════════════════════════════════════════════════════════════
   // preserveExpansion runtime flip: didUpdateWidget must detect a change to
   // the prop, dispose the old sync controller, and reinitialise tracking
@@ -548,10 +455,7 @@ void main() {
         ];
 
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(
-            items: items,
-            preserveExpansion: true,
-          ),
+          _PreserveExpansionFlipHarness(items: items, preserveExpansion: true),
         );
         await tester.pump();
 
@@ -564,10 +468,7 @@ void main() {
         // Flip preserveExpansion at runtime. The widget swaps its sync
         // controller in didUpdateWidget.
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(
-            items: items,
-            preserveExpansion: false,
-          ),
+          _PreserveExpansionFlipHarness(items: items, preserveExpansion: false),
         );
         await tester.pump();
 
@@ -616,9 +517,7 @@ void main() {
         // "Parent gone" state — removes 'a' entirely so the controller
         // purges its expansion state. Only the memoization inside
         // TreeSyncController can bring it back on re-add.
-        const parentGone = <_FlatItem>[
-          _FlatItem(id: "other", label: "Other"),
-        ];
+        const parentGone = <_FlatItem>[_FlatItem(id: "other", label: "Other")];
 
         await tester.pumpWidget(
           _PreserveExpansionFlipHarness(
@@ -697,9 +596,7 @@ void main() {
           _FlatItem(id: "t1", label: "Task 1", parentId: "today"),
         ];
 
-        await tester.pumpWidget(
-          _MidAnimationFilterHarness(items: fullTree),
-        );
+        await tester.pumpWidget(_MidAnimationFilterHarness(items: fullTree));
         await tester.pump();
 
         final harness = tester.state<_MidAnimationFilterHarnessState>(
@@ -722,9 +619,7 @@ void main() {
         expect(extentDuringRemoval, greaterThan(0.0));
         expect(extentDuringRemoval, lessThan(48.0));
 
-        await tester.pumpWidget(
-          _MidAnimationFilterHarness(items: fullTree),
-        );
+        await tester.pumpWidget(_MidAnimationFilterHarness(items: fullTree));
         await tester.pump();
 
         final extentAfterReadd = controller.getCurrentExtent("o1");
@@ -762,9 +657,7 @@ void main() {
           _FlatItem(id: "o1", label: "Task 2", parentId: "overdue"),
         ];
 
-        await tester.pumpWidget(
-          _MidAnimationFilterHarness(items: fullTree),
-        );
+        await tester.pumpWidget(_MidAnimationFilterHarness(items: fullTree));
         await tester.pump();
 
         final harness = tester.state<_MidAnimationFilterHarnessState>(
@@ -772,9 +665,7 @@ void main() {
         );
         final controller = harness.treeController;
 
-        await tester.pumpWidget(
-          _MidAnimationFilterHarness(items: todayOnly),
-        );
+        await tester.pumpWidget(_MidAnimationFilterHarness(items: todayOnly));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 120));
 
@@ -785,9 +676,7 @@ void main() {
         expect(extentDuringRemoval, greaterThan(0.0));
         expect(extentDuringRemoval, lessThan(48.0));
 
-        await tester.pumpWidget(
-          _MidAnimationFilterHarness(items: overdueOnly),
-        );
+        await tester.pumpWidget(_MidAnimationFilterHarness(items: overdueOnly));
         await tester.pump();
 
         final rootExtentAfterSwitch = controller.getCurrentExtent("overdue");
@@ -850,9 +739,7 @@ void main() {
           _FlatItem(id: "o1", label: "Task 2", parentId: "overdue"),
         ];
 
-        await tester.pumpWidget(
-          _MidAnimationNodesHarness(items: fullTree),
-        );
+        await tester.pumpWidget(_MidAnimationNodesHarness(items: fullTree));
         await tester.pump();
 
         final harness = tester.state<_MidAnimationNodesHarnessState>(
@@ -860,9 +747,7 @@ void main() {
         );
         final controller = harness.treeController;
 
-        await tester.pumpWidget(
-          _MidAnimationNodesHarness(items: todayOnly),
-        );
+        await tester.pumpWidget(_MidAnimationNodesHarness(items: todayOnly));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 120));
 
@@ -873,9 +758,7 @@ void main() {
         expect(childExtentDuringRemoval, greaterThan(0.0));
         expect(childExtentDuringRemoval, lessThan(48.0));
 
-        await tester.pumpWidget(
-          _MidAnimationNodesHarness(items: overdueOnly),
-        );
+        await tester.pumpWidget(_MidAnimationNodesHarness(items: overdueOnly));
         await tester.pump();
 
         final rootExtentAfterSwitch = controller.getCurrentExtent("overdue");
@@ -926,8 +809,7 @@ class _PreserveExpansionFlipHarness extends StatefulWidget {
       _PreserveExpansionFlipState();
 }
 
-class _PreserveExpansionFlipState
-    extends State<_PreserveExpansionFlipHarness> {
+class _PreserveExpansionFlipState extends State<_PreserveExpansionFlipHarness> {
   TreeController<String, _FlatItem>? _capturedController;
 
   TreeController<String, _FlatItem> get treeController {
@@ -996,7 +878,12 @@ class _MidAnimationFilterHarnessState
                 return item.parentId;
               },
               initiallyExpanded: true,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                ),
+              ),
               itemBuilder: (context, node) {
                 _capturedController = node.controller;
                 return SizedBox(height: 48, child: Text(node.item.label));
@@ -1019,8 +906,7 @@ class _MidAnimationNodesHarness extends StatefulWidget {
       _MidAnimationNodesHarnessState();
 }
 
-class _MidAnimationNodesHarnessState
-    extends State<_MidAnimationNodesHarness> {
+class _MidAnimationNodesHarnessState extends State<_MidAnimationNodesHarness> {
   TreeController<String, _FlatItem>? _capturedController;
 
   TreeController<String, _FlatItem> get treeController {
@@ -1029,26 +915,26 @@ class _MidAnimationNodesHarnessState
 
   @override
   Widget build(BuildContext context) {
-    final snapshot = TreeSnapshot<String, _FlatItem>.fromFlat(
-      items: widget.items,
-      keyOf: (item) {
-        return item.id;
-      },
-      parentOf: (item) {
-        return item.parentId;
-      },
-    );
-
     return MaterialApp(
       home: Scaffold(
         body: CustomScrollView(
           slivers: <Widget>[
-            SyncedSliverTree<String, _FlatItem>.nodes(
-              roots: snapshot.buildRoots(),
-              childrenOf: snapshot.buildChildren,
+            SyncedSliverTree<String, _FlatItem>.flat(
+              items: widget.items,
+              keyOf: (item) {
+                return item.id;
+              },
+              parentOf: (item) {
+                return item.parentId;
+              },
               initiallyExpanded: true,
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                ),
+              ),
               itemBuilder: (context, node) {
                 _capturedController = node.controller;
                 return SizedBox(height: 48, child: Text(node.item.label));

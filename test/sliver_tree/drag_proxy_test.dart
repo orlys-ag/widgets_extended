@@ -45,6 +45,19 @@ class _FakePort implements ReorderRenderPort<String> {
   }
 
   // Rows a/b/c at 50px each.
+  // Key-addressed inverse of the script above. Grab capture asks
+  // this, not findRowAtPaintedY, so a pinned header reports its
+  // painted band rather than whatever sits structurally beneath it.
+  @override
+  ({double paintedOffset, double extent})? paintedRowBounds(String key) {
+    return switch (key) {
+      "a" => (paintedOffset: 0.0, extent: 50.0),
+      "b" => (paintedOffset: 50.0, extent: 50.0),
+      "c" => (paintedOffset: 100.0, extent: 50.0),
+      _ => null,
+    };
+  }
+
   @override
   ({String key, double paintedOffset, double extent})? findRowAtPaintedY(
     double scrollY,
@@ -68,92 +81,105 @@ class _FakePort implements ReorderRenderPort<String> {
   void beginSlideBaseline({
     required Duration duration,
     required Curve curve,
-    Map<String, double>? baselineYOverrides,
+    Map<String, ({double y, double? x})>? baselineOverrides,
   }) {}
 }
 
 void main() {
-  testWidgets(
-    "pointerPosition fires per move (uncoalesced) while the semantic "
-    "channel stays coalesced; grab geometry captured at start",
-    (tester) async {
-      final controller = TreeController<String, String>(
-        vsync: tester,
-        animationStyle: TreeAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
-      controller.setRoots([
-        const TreeNode(key: "a", data: "A"),
-        const TreeNode(key: "b", data: "B"),
-        const TreeNode(key: "c", data: "C"),
-      ]);
-      final port = _FakePort(controller: controller);
-      final reorder = TreeReorderController<String>(
-        treeController: controller,
-        vsync: tester,
-      );
-      addTearDown(reorder.dispose);
+  testWidgets("pointerPosition fires per move (uncoalesced) while the semantic "
+      "channel stays coalesced; grab geometry captured at start", (
+    tester,
+  ) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: TreeAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
+    controller.setRoots([
+      const TreeNode(key: "a", data: "A"),
+      const TreeNode(key: "b", data: "B"),
+      const TreeNode(key: "c", data: "C"),
+    ]);
+    final port = _FakePort(controller: controller);
+    final reorder = TreeReorderController<String>(
+      treeController: controller,
+      vsync: tester,
+    );
+    addTearDown(reorder.dispose);
 
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(child: SizedBox(height: 2000)),
-              ],
-            ),
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [SliverToBoxAdapter(child: SizedBox(height: 2000))],
           ),
         ),
-      );
-      final scrollable = tester.state<ScrollableState>(
-        find.byType(Scrollable),
-      );
+      ),
+    );
+    final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
 
-      var pointerEvents = 0;
-      reorder.pointerPosition.addListener(() {
-        pointerEvents++;
-      });
-      var semanticEvents = 0;
-      reorder.addListener(() {
-        semanticEvents++;
-      });
+    var pointerEvents = 0;
+    reorder.pointerPosition.addListener(() {
+      pointerEvents++;
+    });
+    var semanticEvents = 0;
+    reorder.addListener(() {
+      semanticEvents++;
+    });
 
-      expect(reorder.pointerPosition.value, isNull,
-          reason: "no session, no pointer");
+    expect(
+      reorder.pointerPosition.value,
+      isNull,
+      reason: "no session, no pointer",
+    );
 
-      // Grab row "a" at y=30 → grab offset 30 within the 50px row.
-      reorder.startDrag(
-        key: "a",
-        renderPort: port,
-        scrollable: scrollable,
-        pointerGlobal: const Offset(200, 30),
-      );
-      expect(reorder.pointerPosition.value, const Offset(200, 30));
-      expect(reorder.dragProxyGeometry?.grabDy, 30.0,
-          reason: "the proxy must not jump: the grab point within the "
-              "dragged row is captured at start");
-      expect(reorder.dragProxyGeometry?.rowExtent, 50.0);
+    // Grab row "a" at y=30 → grab offset 30 within the 50px row.
+    reorder.startDrag(
+      key: "a",
+      renderPort: port,
+      scrollable: scrollable,
+      pointerGlobal: const Offset(200, 30),
+    );
+    expect(reorder.pointerPosition.value, const Offset(200, 30));
+    expect(
+      reorder.dragProxyGeometry?.grabDy,
+      30.0,
+      reason:
+          "the proxy must not jump: the grab point within the "
+          "dragged row is captured at start",
+    );
+    expect(reorder.dragProxyGeometry?.rowExtent, 50.0);
 
-      // Micro-moves within the same zone: the SEMANTIC channel must stay
-      // quiet (coalesced), the POINTER channel must fire every time.
-      reorder.updateDrag(const Offset(200, 145));
-      final semanticAfterFirstMove = semanticEvents;
-      final pointerAfterFirstMove = pointerEvents;
-      reorder.updateDrag(const Offset(200, 146));
-      reorder.updateDrag(const Offset(200, 147));
-      expect(semanticEvents, semanticAfterFirstMove,
-          reason: "micro-moves within the same zone must not re-notify "
-              "the semantic channel");
-      expect(pointerEvents, pointerAfterFirstMove + 2,
-          reason: "the pointer channel fires on EVERY move — that is its "
-              "reason to exist");
+    // Micro-moves within the same zone: the SEMANTIC channel must stay
+    // quiet (coalesced), the POINTER channel must fire every time.
+    reorder.updateDrag(const Offset(200, 145));
+    final semanticAfterFirstMove = semanticEvents;
+    final pointerAfterFirstMove = pointerEvents;
+    reorder.updateDrag(const Offset(200, 146));
+    reorder.updateDrag(const Offset(200, 147));
+    expect(
+      semanticEvents,
+      semanticAfterFirstMove,
+      reason:
+          "micro-moves within the same zone must not re-notify "
+          "the semantic channel",
+    );
+    expect(
+      pointerEvents,
+      pointerAfterFirstMove + 2,
+      reason:
+          "the pointer channel fires on EVERY move — that is its "
+          "reason to exist",
+    );
 
-      reorder.cancelDrag();
-      expect(reorder.pointerPosition.value, isNull,
-          reason: "session teardown clears the pointer channel");
-      expect(reorder.dragProxyGeometry, isNull);
-    },
-  );
+    reorder.cancelDrag();
+    expect(
+      reorder.pointerPosition.value,
+      isNull,
+      reason: "session teardown clears the pointer channel",
+    );
+    expect(reorder.dragProxyGeometry, isNull);
+  });
 
   testWidgets(
     "a custom drag proxy follows the pointer at pointer − grab offset and "
@@ -191,9 +217,8 @@ void main() {
                   dragProxyBuilder: (context, key, child) {
                     return const ColoredBox(color: _kProxyColor);
                   },
-                  nodeBuilder: (context, key, depth, wrap) {
-                    return wrap(
-                      longPressToDrag: true,
+                  nodeBuilder: (context, key, depth) {
+                    return TreeDelayedDragHandle(
                       child: SizedBox(
                         key: ValueKey("row-$key"),
                         height: 50,
@@ -209,24 +234,30 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(_proxyFinder(), findsNothing,
-          reason: "no proxy before any drag");
+      expect(_proxyFinder(), findsNothing, reason: "no proxy before any drag");
 
       // Long-press the center of row a: grab point y=25 within the row.
       final gesture = await tester.startGesture(const Offset(400, 25));
       await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
       expect(reorder.isDragging, isTrue, reason: "setup: session started");
-      expect(_proxyFinder(), findsOneWidget,
-          reason: "the proxy appears as soon as the drag starts");
+      expect(
+        _proxyFinder(),
+        findsOneWidget,
+        reason: "the proxy appears as soon as the drag starts",
+      );
 
       // Move to y=300: proxy top must sit at 300 − 25 = 275 (pointer
       // minus grab offset), i.e. the row appears held where it was
       // grabbed.
       await gesture.moveTo(const Offset(400, 300));
       await tester.pump();
-      expect(tester.getTopLeft(_proxyFinder()).dy, 275.0,
-          reason: "the proxy follows the pointer, anchored at the grab "
-              "point");
+      expect(
+        tester.getTopLeft(_proxyFinder()).dy,
+        275.0,
+        reason:
+            "the proxy follows the pointer, anchored at the grab "
+            "point",
+      );
 
       // And keeps following.
       await gesture.moveTo(const Offset(400, 320));
@@ -236,8 +267,11 @@ void main() {
       await gesture.up();
       await tester.pump();
       await tester.pumpAndSettle();
-      expect(_proxyFinder(), findsNothing,
-          reason: "the proxy is torn down with the session");
+      expect(
+        _proxyFinder(),
+        findsNothing,
+        reason: "the proxy is torn down with the session",
+      );
     },
   );
 
@@ -273,9 +307,8 @@ void main() {
                   controller: tree,
                   reorderController: reorder,
                   showDragProxy: true,
-                  nodeBuilder: (context, key, depth, wrap) {
-                    return wrap(
-                      longPressToDrag: true,
+                  nodeBuilder: (context, key, depth) {
+                    return TreeDelayedDragHandle(
                       child: SizedBox(
                         key: ValueKey("row-$key"),
                         height: 50,
@@ -296,15 +329,22 @@ void main() {
       final gesture = await tester.startGesture(const Offset(400, 25));
       await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
 
-      expect(find.text("a"), findsNWidgets(2),
-          reason: "the default proxy clones the dragged row's child into "
-              "the overlay (in-tree dimmed copy + floating copy)");
+      expect(
+        find.text("a"),
+        findsNWidgets(2),
+        reason:
+            "the default proxy clones the dragged row's child into "
+            "the overlay (in-tree dimmed copy + floating copy)",
+      );
 
       await gesture.up();
       await tester.pump();
       await tester.pumpAndSettle();
-      expect(find.text("a"), findsOneWidget,
-          reason: "the clone disappears with the session");
+      expect(
+        find.text("a"),
+        findsOneWidget,
+        reason: "the clone disappears with the session",
+      );
     },
   );
 }

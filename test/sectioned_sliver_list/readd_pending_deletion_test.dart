@@ -26,29 +26,32 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 100),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
-    controller.setSections(
-      ["a", "b"],
-      itemsOf: (_) => const [],
-    );
+    controller.setSections(["a", "b"], itemsOf: (_) => const []);
 
     controller.removeSection("b", animate: true);
     // Live mirror immediately — excludes pending 'b'.
-    controller.setSections(
-      ["a"],
-      itemsOf: (_) => const [],
-    );
+    controller.setSections(["a"], itemsOf: (_) => const []);
 
     for (var i = 0; i < 30; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
 
-    expect(controller.hasSection("b"), isFalse,
-        reason: "After remove + live-mirror sync + animation, 'b' should "
-            "be purged.");
+    expect(
+      controller.hasSection("b"),
+      isFalse,
+      reason:
+          "After remove + live-mirror sync + animation, 'b' should "
+          "be purged.",
+    );
     expect(controller.sectionKeys(), equals(["a"]));
   });
 
@@ -58,19 +61,18 @@ void main() {
       vsync: tester,
       sectionKeyOf: (s) => s,
       itemKeyOf: (i) => i,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 100), curve: Curves.easeInOut)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 100),
+          curve: Curves.easeInOut,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
 
-    controller.setSections(
-      ["a", "b"],
-      itemsOf: (_) => const [],
-    );
+    controller.setSections(["a", "b"], itemsOf: (_) => const []);
 
-    controller.setSections(
-      ["a"],
-      itemsOf: (_) => const [],
-    );
+    controller.setSections(["a"], itemsOf: (_) => const []);
     for (var i = 0; i < 3; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
@@ -81,8 +83,12 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
 
-    expect(controller.hasSection("b"), isTrue,
-        reason: "addSection on a pending-deletion key cancels the "
-            "deletion via insertRoot's existing logic.");
+    expect(
+      controller.hasSection("b"),
+      isTrue,
+      reason:
+          "addSection on a pending-deletion key cancels the "
+          "deletion via insertRoot's existing logic.",
+    );
   });
 }

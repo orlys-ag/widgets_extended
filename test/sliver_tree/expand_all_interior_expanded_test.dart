@@ -23,7 +23,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -36,22 +41,32 @@ void main() {
       // Collapse A — B keeps expanded == true (state deliberately
       // preserved by collapse()).
       controller.collapse(key: "a", animate: false);
-      expect(controller.isExpanded("b"), isTrue,
-          reason: "setup: collapse(a) must preserve b's expansion flag");
-      expect(controller.visibleNodes, ["a"],
-          reason: "setup: only the collapsed root is visible");
+      expect(
+        controller.isExpanded("b"),
+        isTrue,
+        reason: "setup: collapse(a) must preserve b's expansion flag",
+      );
+      expect(
+        controller.visibleNodes,
+        ["a"],
+        reason: "setup: only the collapsed root is visible",
+      );
 
       controller.expandAll();
 
       // B and C become visible together (B was already expanded); both
       // must join the bulk enter animation on frame 1.
       expect(controller.visibleNodes, containsAll(["a", "b", "c"]));
-      expect(controller.isBulkMember("b"), isTrue,
-          reason: "b is a direct child of the flipped node a");
+      expect(
+        controller.isBulkMember("b"),
+        isTrue,
+        reason: "b is a direct child of the flipped node a",
+      );
       expect(
         controller.isBulkMember("c"),
         isTrue,
-        reason: "c is revealed through the already-expanded b and must "
+        reason:
+            "c is revealed through the already-expanded b and must "
             "animate in with the rest of the revealed subtree — "
             "expand(key: a) on the identical structure animates it",
       );
@@ -67,7 +82,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -90,7 +110,8 @@ void main() {
       expect(
         controller.isBulkMember("c"),
         isTrue,
-        reason: "c is visible through b's own (preserved) expansion even "
+        reason:
+            "c is visible through b's own (preserved) expansion even "
             "though the DFS stops descending at the maxDepth boundary",
       );
 

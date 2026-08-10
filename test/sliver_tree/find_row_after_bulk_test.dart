@@ -65,7 +65,8 @@ void main() {
       await tester.pumpAndSettle();
 
       final sliver = tester.renderObject<RenderSliverTree<String, String>>(
-          find.byType(SliverTree<String, String>));
+        find.byType(SliverTree<String, String>),
+      );
 
       // Probe inside the cache region (rows are measured here) — must
       // return a correct in-cache row.
@@ -89,7 +90,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -106,7 +112,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 30));
 
       final sliver = tester.renderObject<RenderSliverTree<String, String>>(
-          find.byType(SliverTree<String, String>));
+        find.byType(SliverTree<String, String>),
+      );
 
       // Multiple probes mid-animation must not crash, even though the
       // bulk fast path's cumulative may reflect the current frame's

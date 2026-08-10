@@ -5,7 +5,39 @@ import 'package:widgets_extended/sliver_tree/render_sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree_widget.dart';
 import 'package:widgets_extended/sliver_tree/synced_sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
+import 'package:widgets_extended/sliver_tree/synced_tree_node.dart';
+import 'tree_input_helpers.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
+
+/// Sections-with-items map to tree input, preserving map iteration order for
+/// sections and list order for items.
+List<SyncedTreeNode<Object, Object>> _treeOf(
+  Map<String, List<String>> sectionsWithItems,
+) {
+  final roots = <Object>[];
+  final dataByKey = <Object, Object>{};
+  final childrenByParent = <Object, List<Object>>{};
+  for (final entry in sectionsWithItems.entries) {
+    final sectionKey = _Section(entry.key);
+    roots.add(sectionKey);
+    dataByKey[sectionKey] = _SectionData(entry.key);
+    final items = entry.value;
+    if (items.isEmpty) {
+      continue;
+    }
+    childrenByParent[sectionKey] = <Object>[
+      for (final item in items) _Item(item),
+    ];
+    for (int i = 0; i < items.length; i++) {
+      dataByKey[_Item(items[i])] = _ItemData(items[i], i == items.length - 1);
+    }
+  }
+  return treeFrom(
+    roots: roots,
+    dataByKey: dataByKey,
+    childrenByParent: childrenByParent,
+  );
+}
 
 /// Inspects actual rendered layout, not just controller state.
 Map<Object, ({double offset, double visibleExtent, double measuredHeight})>
@@ -87,32 +119,19 @@ class _HarnessState extends State<_Harness> {
 
   @override
   Widget build(BuildContext context) {
-    final roots = <TreeNode<Object, Object>>[
-      for (final s in widget.sectionsWithItems.keys)
-        TreeNode<Object, Object>(key: _Section(s), data: _SectionData(s)),
-    ];
     return MaterialApp(
       home: Scaffold(
         body: CustomScrollView(
           slivers: [
-            SyncedSliverTree<Object, Object>.nodes(
-              roots: roots,
-              childrenOf: (key) {
-                if (key is _Section) {
-                  final items =
-                      widget.sectionsWithItems[key.id] ?? const <String>[];
-                  return [
-                    for (int i = 0; i < items.length; i++)
-                      TreeNode<Object, Object>(
-                        key: _Item(items[i]),
-                        data: _ItemData(items[i], i == items.length - 1),
-                      ),
-                  ];
-                }
-                return const [];
-              },
+            SyncedSliverTree<Object, Object>(
+              tree: _treeOf(widget.sectionsWithItems),
               maxStickyDepth: 1,
-              animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+              animationStyle: const TreeAnimationStyle(
+                expandCollapse: TreeAnimationSpec(
+                  duration: Duration(milliseconds: 300),
+                  curve: Curves.linear,
+                ),
+              ),
               itemBuilder: (context, node) {
                 _controller ??= node.controller;
                 return SizedBox(

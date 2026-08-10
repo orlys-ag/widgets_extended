@@ -29,10 +29,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
 Future<
-  ({
-    TreeController<String, String> tree,
-    TreeReorderController<String> reorder,
-  })
+  ({TreeController<String, String> tree, TreeReorderController<String> reorder})
 >
 _mount(WidgetTester tester) async {
   final tree = TreeController<String, String>(
@@ -59,9 +56,8 @@ _mount(WidgetTester tester) async {
             SliverReorderableTree<String, String>(
               controller: tree,
               reorderController: reorder,
-              nodeBuilder: (context, key, depth, wrap) {
-                return wrap(
-                  longPressToDrag: true,
+              nodeBuilder: (context, key, depth) {
+                return TreeDelayedDragHandle(
                   child: SizedBox(
                     key: ValueKey("row-$key"),
                     height: 50,
@@ -105,8 +101,11 @@ void main() {
       final gesture = await _startDragOn(tester, "a");
 
       // Setup sanity: the drag session is genuinely active on row "a".
-      expect(h.reorder.isDragging, isTrue,
-          reason: "setup: long-press drag must have started");
+      expect(
+        h.reorder.isDragging,
+        isTrue,
+        reason: "setup: long-press drag must have started",
+      );
       expect(h.reorder.draggedKey, "a");
 
       // Remove the dragged row AND a sibling with animate: false — both
@@ -118,9 +117,13 @@ void main() {
 
       // Setup sanity: purge really happened (this is the GC path, not the
       // pin-protected stale-eviction path).
-      expect(h.tree.getNodeData("a"), isNull,
-          reason: "setup: removed row must be purged so dead-node GC — "
-              "not pin-respecting stale eviction — evicts its element");
+      expect(
+        h.tree.getNodeData("a"),
+        isNull,
+        reason:
+            "setup: removed row must be purged so dead-node GC — "
+            "not pin-respecting stale eviction — evicts its element",
+      );
       expect(h.tree.getNodeData("b"), isNull);
 
       // Frame 1: relayout; its post-frame GC pass deactivates both rows.
@@ -134,15 +137,22 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(h.reorder.isDragging, isFalse,
-          reason: "backstop must end the orphaned session (its gesture "
-              "callbacks can never fire again)");
+      expect(
+        h.reorder.isDragging,
+        isFalse,
+        reason:
+            "backstop must end the orphaned session (its gesture "
+            "callbacks can never fire again)",
+      );
 
       // The sibling dead row evicted in the SAME GC pass must actually be
       // unmounted — proves the pass wasn't aborted by an uncaught throw
       // from row \"a\"'s deactivate.
-      expect(find.byKey(const ValueKey("row-b")), findsNothing,
-          reason: "sibling eviction in the same GC pass must complete");
+      expect(
+        find.byKey(const ValueKey("row-b")),
+        findsNothing,
+        reason: "sibling eviction in the same GC pass must complete",
+      );
       expect(find.byKey(const ValueKey("row-a")), findsNothing);
       expect(find.byKey(const ValueKey("row-c")), findsOneWidget);
 
@@ -170,13 +180,18 @@ void main() {
       // Setup sanity: active session with the proxy clone mounted in the
       // root overlay (it survives the home swap below).
       expect(h.reorder.isDragging, isTrue);
-      expect(h.reorder.currentTarget, isNotNull,
-          reason: "setup: a resolved drop target is required for the drag "
-              "UI to be live");
+      expect(
+        h.reorder.currentTarget,
+        isNotNull,
+        reason:
+            "setup: a resolved drop target is required for the drag "
+            "UI to be live",
+      );
       expect(
         find.text("a"),
         findsNWidgets(2),
-        reason: "setup: the proxy clones the dragged row's child into the "
+        reason:
+            "setup: the proxy clones the dragged row's child into the "
             "overlay (hidden in-place copy + floating copy)",
       );
 
@@ -194,13 +209,18 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(h.reorder.isDragging, isFalse,
-          reason: "backstop must cancel the session when its row unmounts "
-              "with the tree");
+      expect(
+        h.reorder.isDragging,
+        isFalse,
+        reason:
+            "backstop must cancel the session when its row unmounts "
+            "with the tree",
+      );
       expect(
         find.text("a"),
         findsNothing,
-        reason: "the overlay proxy entry must be removed, not leaked — the "
+        reason:
+            "the overlay proxy entry must be removed, not leaked — the "
             "tree itself is gone, so the in-place copy is gone too",
       );
 

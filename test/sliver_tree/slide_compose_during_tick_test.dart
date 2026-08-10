@@ -14,10 +14,12 @@ import 'package:widgets_extended/sliver_tree/tree_controller.dart';
 import 'package:widgets_extended/sliver_tree/types.dart';
 
 Future<void> _primeScheduler(WidgetTester tester) async {
-  await tester.pumpWidget(const Directionality(
-    textDirection: TextDirection.ltr,
-    child: SizedBox.expand(),
-  ));
+  await tester.pumpWidget(
+    const Directionality(
+      textDirection: TextDirection.ltr,
+      child: SizedBox.expand(),
+    ),
+  );
 }
 
 void main() {
@@ -28,7 +30,12 @@ void main() {
       await _primeScheduler(tester);
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 60), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 60),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -64,19 +71,27 @@ void main() {
       for (int i = 0; i < 12 && !retargeted; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
-      expect(retargeted, isTrue,
-          reason: "setup: the completion-tick notify must have fired with "
-              "delta snapped to 0");
+      expect(
+        retargeted,
+        isTrue,
+        reason:
+            "setup: the completion-tick notify must have fired with "
+            "delta snapped to 0",
+      );
 
       expect(
         controller.hasActiveSlides,
         isTrue,
-        reason: "the freshly retargeted slide must survive the completion "
+        reason:
+            "the freshly retargeted slide must survive the completion "
             "tick's cleanup — in-place composition must not be mistaken "
             "for the entry that just completed",
       );
-      expect(controller.getSlideDelta("a"), isNot(0.0),
-          reason: "the retargeted slide carries the new 40px delta");
+      expect(
+        controller.getSlideDelta("a"),
+        isNot(0.0),
+        reason: "the retargeted slide carries the new 40px delta",
+      );
 
       await tester.pumpAndSettle();
       expect(controller.hasActiveSlides, isFalse);

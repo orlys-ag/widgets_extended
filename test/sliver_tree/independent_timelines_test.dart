@@ -28,20 +28,27 @@ SliverTreeParentData _treeParentDataOf(RenderBox renderBox) {
   while (ro != null && ro.parentData is! SliverTreeParentData) {
     ro = ro.parent;
   }
-  expect(ro, isNotNull,
-      reason: "no ancestor with SliverTreeParentData found for $renderBox");
+  expect(
+    ro,
+    isNotNull,
+    reason: "no ancestor with SliverTreeParentData found for $renderBox",
+  );
   return ro!.parentData! as SliverTreeParentData;
 }
 
 void main() {
   group("capture / collapse / re-expand visual regressions", () {
-    testWidgets(
-        "descendant mid-collapse follows parent's collapse visually, "
+    testWidgets("descendant mid-collapse follows parent's collapse visually, "
         "resumes its own collapse on parent re-expand", (tester) async {
       // Setup: P → C → c1, all expanded, c1 visible at full extent.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -76,7 +83,8 @@ void main() {
       expect(
         controller.getCurrentExtent("c1"),
         closeTo(27, 4),
-        reason: "While captured in Gp, c1's visual must follow Gp's "
+        reason:
+            "While captured in Gp, c1's visual must follow Gp's "
             "collapse — NOT advance on its own preserved clock.",
       );
 
@@ -93,7 +101,8 @@ void main() {
       expect(
         c1AfterReversal,
         closeTo(27, 4),
-        reason: "Re-expand must preserve visual position; got "
+        reason:
+            "Re-expand must preserve visual position; got "
             "c1AfterReversal=$c1AfterReversal",
       );
 
@@ -107,18 +116,23 @@ void main() {
       expect(
         controller.visibleNodes.toList(),
         equals(["p", "c"]),
-        reason: "C is re-expanded (visible) but c1 finished its exit "
+        reason:
+            "C is re-expanded (visible) but c1 finished its exit "
             "on its own preserved clock and was removed from order.",
       );
     });
 
-    testWidgets(
-        "descendant mid-expand follows parent's collapse visually, "
+    testWidgets("descendant mid-expand follows parent's collapse visually, "
         "resumes its own enter on parent re-expand", (tester) async {
       // Setup: P → C → c1. P expanded, C collapsed, c1 not yet visible.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -147,7 +161,8 @@ void main() {
       expect(
         controller.getCurrentExtent("c1"),
         closeTo(9, 4),
-        reason: "While captured in Gp, c1 visually shrinks together "
+        reason:
+            "While captured in Gp, c1 visually shrinks together "
             "with the parent's collapse — not still entering.",
       );
 
@@ -172,8 +187,7 @@ void main() {
       expect(controller.visibleNodes.toList(), equals(["p", "c", "c1"]));
     });
 
-    testWidgets(
-        "child entering while parent collapses: descendants reach 0 "
+    testWidgets("child entering while parent collapses: descendants reach 0 "
         "in lockstep with parent — no leftover rows visible after the "
         "parent's collapse finishes", (tester) async {
       // Regression for the visual bug reported as "child's nodes keep
@@ -185,7 +199,12 @@ void main() {
       // visible jump.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -221,7 +240,8 @@ void main() {
         expect(
           c1Extent,
           lessThanOrEqualTo(prevExtent + 0.01),
-          reason: "c1 must shrink monotonically while Gp collapses; "
+          reason:
+              "c1 must shrink monotonically while Gp collapses; "
               "frame $i: $c1Extent (was $prevExtent)",
         );
         prevExtent = c1Extent;
@@ -234,8 +254,7 @@ void main() {
       expect(controller.visibleNodes.toList(), equals(["p"]));
     });
 
-    testWidgets(
-        "inserted children + parent collapse: children shrink with "
+    testWidgets("inserted children + parent collapse: children shrink with "
         "parent, no jump to full extent", (tester) async {
       // Regression: user reported that inserting children, then
       // collapsing the parent above, made the inserted children
@@ -245,7 +264,12 @@ void main() {
       // the correct visual extent, then shrink to 0 with the parent.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -253,10 +277,7 @@ void main() {
       controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
       // Seed c with one existing child so expand(c) takes effect
       // (expand returns early when the node has no children).
-      controller.setChildren(
-        "c",
-        [const TreeNode(key: "seed", data: "seed")],
-      );
+      controller.setChildren("c", [const TreeNode(key: "seed", data: "seed")]);
       controller.expand(key: "p", animate: false);
       controller.expand(key: "c", animate: false);
       controller.setFullExtent("c", 48.0);
@@ -290,7 +311,8 @@ void main() {
       expect(
         c1AfterStart,
         lessThanOrEqualTo(c1Before + 0.5),
-        reason: "c1 must not jump up to full when P collapses; "
+        reason:
+            "c1 must not jump up to full when P collapses; "
             "got $c1AfterStart, was $c1Before",
       );
 
@@ -308,7 +330,8 @@ void main() {
         expect(
           extent,
           lessThanOrEqualTo(prev + 0.01),
-          reason: "c1 must shrink monotonically while P collapses; "
+          reason:
+              "c1 must shrink monotonically while P collapses; "
               "frame $i: $extent (prev $prev)",
         );
         prev = extent;
@@ -318,11 +341,9 @@ void main() {
       expect(controller.visibleNodes.toList(), equals(["p"]));
     });
 
-    testWidgets(
-        "example-app insertChildren flow: insert N + expand parent "
+    testWidgets("example-app insertChildren flow: insert N + expand parent "
         "+ collapse grandparent mid-flight: children shrink with "
-        "grandparent, never jump to full",
-        (tester) async {
+        "grandparent, never jump to full", (tester) async {
       // Mirrors examples/lib/concurrent_ops_example.dart's
       // _executeInsertChildren: insert several children under a
       // parent, then expand the parent if it isn't already. This
@@ -331,7 +352,12 @@ void main() {
       // reported scenario.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -375,7 +401,8 @@ void main() {
       expect(
         prev,
         lessThanOrEqualTo(c1Mid + 0.5),
-        reason: "c1 must not jump up when grandparent collapses; "
+        reason:
+            "c1 must not jump up when grandparent collapses; "
             "got $prev, was $c1Mid",
       );
       for (var i = 0; i < 14; i++) {
@@ -385,7 +412,8 @@ void main() {
         expect(
           extent,
           lessThanOrEqualTo(prev + 0.01),
-          reason: "c1 must shrink monotonically while grandparent "
+          reason:
+              "c1 must shrink monotonically while grandparent "
               "collapses; frame $i: $extent (prev $prev)",
         );
         // Also assert it never reaches the full extent (would
@@ -393,7 +421,8 @@ void main() {
         expect(
           extent,
           lessThan(48.0),
-          reason: "c1 must never read as full extent during the "
+          reason:
+              "c1 must never read as full extent during the "
               "grandparent collapse; frame $i: $extent",
         );
         prev = extent;
@@ -403,22 +432,24 @@ void main() {
       expect(controller.visibleNodes.toList(), equals(["p"]));
     });
 
-    testWidgets(
-        "insert + immediate collapse (no pump): freshly-inserted "
-        "children must still animate out with the parent's collapse",
-        (tester) async {
+    testWidgets("insert + immediate collapse (no pump): freshly-inserted "
+        "children must still animate out with the parent's collapse", (
+      tester,
+    ) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
       controller.setRoots([const TreeNode(key: "p", data: "P")]);
       controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
-      controller.setChildren(
-        "c",
-        [const TreeNode(key: "seed", data: "seed")],
-      );
+      controller.setChildren("c", [const TreeNode(key: "seed", data: "seed")]);
       controller.expand(key: "p", animate: false);
       controller.expand(key: "c", animate: false);
       controller.setFullExtent("c", 48.0);
@@ -450,13 +481,15 @@ void main() {
         expect(
           extent,
           lessThan(48.0),
-          reason: "c1 must never read as full extent during the "
+          reason:
+              "c1 must never read as full extent during the "
               "grandparent collapse; frame $i: $extent",
         );
         expect(
           extent,
           lessThanOrEqualTo(prev + 0.01),
-          reason: "c1 must shrink monotonically; frame $i: $extent "
+          reason:
+              "c1 must shrink monotonically; frame $i: $extent "
               "(prev $prev)",
         );
         prev = extent;
@@ -466,23 +499,23 @@ void main() {
       expect(controller.visibleNodes.toList(), equals(["p"]));
     });
 
-    testWidgets(
-        "insert without pre-set full extent + collapse parent: "
+    testWidgets("insert without pre-set full extent + collapse parent: "
         "freshly inserted children with unknown extent still follow "
-        "the parent's collapse (no jump to default extent)",
-        (tester) async {
+        "the parent's collapse (no jump to default extent)", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
       controller.setRoots([const TreeNode(key: "p", data: "P")]);
       controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
-      controller.setChildren(
-        "c",
-        [const TreeNode(key: "seed", data: "seed")],
-      );
+      controller.setChildren("c", [const TreeNode(key: "seed", data: "seed")]);
       controller.expand(key: "p", animate: false);
       controller.expand(key: "c", animate: false);
       controller.setFullExtent("c", 48.0);
@@ -513,7 +546,8 @@ void main() {
       expect(
         c1AfterStart,
         lessThanOrEqualTo(c1Mid + 0.5),
-        reason: "c1 must not jump up when grandparent collapses; "
+        reason:
+            "c1 must not jump up when grandparent collapses; "
             "got $c1AfterStart, was $c1Mid",
       );
 
@@ -535,11 +569,9 @@ void main() {
       expect(controller.visibleNodes.toList(), equals(["p"]));
     });
 
-    testWidgets(
-        "regression: insert + immediate parent collapse — "
+    testWidgets("regression: insert + immediate parent collapse — "
         "freshly-inserted row must NOT jump to full extent during "
-        "the parent's collapse",
-        (tester) async {
+        "the parent's collapse", (tester) async {
       // Bug: when a child was inserted at progress=0 (entering
       // animation just started, target=_unknownExtent — renderer
       // hadn't measured yet), then the parent was collapsed in the
@@ -554,16 +586,18 @@ void main() {
       // members so setFullExtent leaves their target alone.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
       controller.setRoots([const TreeNode(key: "p", data: "P")]);
       controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
-      controller.setChildren(
-        "c",
-        [const TreeNode(key: "seed", data: "seed")],
-      );
+      controller.setChildren("c", [const TreeNode(key: "seed", data: "seed")]);
       controller.expand(key: "p", animate: false);
       controller.expand(key: "c", animate: false);
 
@@ -600,13 +634,13 @@ void main() {
       // (~0) must survive setFullExtent's resize update.
       final c1Element = find.byKey(const ValueKey("c1"));
       if (c1Element.evaluate().isNotEmpty) {
-        final renderBox =
-            c1Element.evaluate().single.renderObject as RenderBox;
+        final renderBox = c1Element.evaluate().single.renderObject as RenderBox;
         final pd = _treeParentDataOf(renderBox);
         expect(
           pd.visibleExtent,
           lessThan(2.0),
-          reason: "c1's visibleExtent must stay near the captured "
+          reason:
+              "c1's visibleExtent must stay near the captured "
               "value (~0) during the parent's collapse; got "
               "${pd.visibleExtent}",
         );
@@ -617,26 +651,26 @@ void main() {
       expect(controller.visibleNodes.toList(), equals(["p"]));
     });
 
-    testWidgets(
-        "rendered insert animation: row's painted height grows from "
-        "0 to full over the configured duration",
-        (tester) async {
+    testWidgets("rendered insert animation: row's painted height grows from "
+        "0 to full over the configured duration", (tester) async {
       // Mounts a real SliverTree, inserts a child under a visible
       // expanded parent, and inspects the row's painted height
       // across frames. The painted height comes from the render
       // sliver's animated extent — exactly what the user sees.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
       controller.setRoots([const TreeNode(key: "p", data: "P")]);
       controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
-      controller.setChildren(
-        "c",
-        [const TreeNode(key: "seed", data: "seed")],
-      );
+      controller.setChildren("c", [const TreeNode(key: "seed", data: "seed")]);
       controller.expand(key: "p", animate: false);
       controller.expand(key: "c", animate: false);
 
@@ -689,17 +723,22 @@ void main() {
       expect(controller.getCurrentExtent("c1"), 48.0);
     });
 
-    testWidgets(
-        "insert N children at once + collapse parent: all children "
-        "register their enter and follow the parent's collapse",
-        (tester) async {
+    testWidgets("insert N children at once + collapse parent: all children "
+        "register their enter and follow the parent's collapse", (
+      tester,
+    ) async {
       // Mirrors the example app's _executeInsertChildren flow:
       // insert N at once into a parent (which may or may not be
       // expanded), expand parent if needed, then collapse the
       // grandparent.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -753,7 +792,8 @@ void main() {
           expect(
             extent,
             lessThan(48.0),
-            reason: "$key must not jump to full during the parent's "
+            reason:
+                "$key must not jump to full during the parent's "
                 "collapse; frame $f: $extent",
           );
         }
@@ -763,11 +803,9 @@ void main() {
       expect(controller.visibleNodes.toList(), equals(["p"]));
     });
 
-    testWidgets(
-        "regression: insert children + collapse parent + re-expand "
+    testWidgets("regression: insert children + collapse parent + re-expand "
         "parent — children must grow back to full extent, not stay "
-        "stacked at 0",
-        (tester) async {
+        "stacked at 0", (tester) async {
       // Bug: after inserts + parent-collapse + re-expand, the
       // freshly-inserted children appear stacked at the same y
       // because their `targetExtent` stayed at the captured value 0
@@ -775,16 +813,18 @@ void main() {
       // somehow being defeated.
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
       controller.setRoots([const TreeNode(key: "p", data: "P")]);
       controller.setChildren("p", [const TreeNode(key: "c", data: "C")]);
-      controller.setChildren(
-        "c",
-        [const TreeNode(key: "seed", data: "seed")],
-      );
+      controller.setChildren("c", [const TreeNode(key: "seed", data: "seed")]);
       controller.expand(key: "p", animate: false);
       controller.expand(key: "c", animate: false);
 
@@ -834,13 +874,13 @@ void main() {
         if (element.evaluate().isEmpty) {
           fail("Row $id is missing from the rendered output");
         }
-        final renderBox =
-            element.evaluate().single.renderObject as RenderBox;
+        final renderBox = element.evaluate().single.renderObject as RenderBox;
         final pd = _treeParentDataOf(renderBox);
         expect(
           pd.visibleExtent,
           greaterThan(0.0),
-          reason: "Row $id must have non-zero visibleExtent during "
+          reason:
+              "Row $id must have non-zero visibleExtent during "
               "re-expand; got ${pd.visibleExtent}",
         );
       }
@@ -851,27 +891,30 @@ void main() {
       for (final id in ["c", "seed", "c1", "c2", "c3"]) {
         final element = find.byKey(ValueKey(id));
         if (element.evaluate().isEmpty) continue;
-        final renderBox =
-            element.evaluate().single.renderObject as RenderBox;
+        final renderBox = element.evaluate().single.renderObject as RenderBox;
         final pd = _treeParentDataOf(renderBox);
         expect(
           pd.layoutOffset,
           greaterThan(prevOffset),
-          reason: "Row $id must have a layoutOffset greater than the "
+          reason:
+              "Row $id must have a layoutOffset greater than the "
               "previous row; got ${pd.layoutOffset} (prev $prevOffset)",
         );
         prevOffset = pd.layoutOffset;
       }
     });
 
-    testWidgets(
-        "regression: c is a leaf, insert + expand(c) + collapse(p) "
+    testWidgets("regression: c is a leaf, insert + expand(c) + collapse(p) "
         "+ expand(p) — c's children must lay out in distinct y "
-        "positions, not stacked",
-        (tester) async {
+        "positions, not stacked", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 200), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 200),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -934,8 +977,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 16));
         final element = find.byKey(const ValueKey("c1"));
         if (element.evaluate().isEmpty) continue;
-        final renderBox =
-            element.evaluate().single.renderObject as RenderBox;
+        final renderBox = element.evaluate().single.renderObject as RenderBox;
         final pd = _treeParentDataOf(renderBox);
         if (pd.visibleExtent > peakExtent) peakExtent = pd.visibleExtent;
         // Once we've climbed past 80% of full, we're past the
@@ -945,7 +987,8 @@ void main() {
           expect(
             pd.visibleExtent,
             greaterThanOrEqualTo(peakExtent - 0.5),
-            reason: "Frame $i: c1.visibleExtent=${pd.visibleExtent} "
+            reason:
+                "Frame $i: c1.visibleExtent=${pd.visibleExtent} "
                 "dropped below peak=$peakExtent — the captured-record "
                 "replay regression returned.",
           );
@@ -960,13 +1003,13 @@ void main() {
       for (final id in ["p", "c", "c1", "c2", "c3"]) {
         final element = find.byKey(ValueKey(id));
         if (element.evaluate().isEmpty) continue;
-        final renderBox =
-            element.evaluate().single.renderObject as RenderBox;
+        final renderBox = element.evaluate().single.renderObject as RenderBox;
         final pd = _treeParentDataOf(renderBox);
         expect(
           pd.layoutOffset,
           greaterThanOrEqualTo(prevOffset + prevExtent - 0.01),
-          reason: "Row $id must lay out below prev row "
+          reason:
+              "Row $id must lay out below prev row "
               "(prevOffset=$prevOffset, prevExtent=$prevExtent), "
               "got ${pd.layoutOffset}",
         );
@@ -978,24 +1021,28 @@ void main() {
       for (final id in ["c1", "c2", "c3"]) {
         final element = find.byKey(ValueKey(id));
         if (element.evaluate().isEmpty) continue;
-        final renderBox =
-            element.evaluate().single.renderObject as RenderBox;
+        final renderBox = element.evaluate().single.renderObject as RenderBox;
         final pd = _treeParentDataOf(renderBox);
         expect(
           pd.visibleExtent,
           48.0,
-          reason: "Row $id must be at full extent after settle; "
+          reason:
+              "Row $id must be at full extent after settle; "
               "got ${pd.visibleExtent}",
         );
       }
     });
 
-    testWidgets(
-        "synchronous parent collapse → expand round-trip preserves "
+    testWidgets("synchronous parent collapse → expand round-trip preserves "
         "the captured descendant's visual continuity", (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 400),
+            curve: Curves.linear,
+          ),
+        ),
       );
       addTearDown(controller.dispose);
 
@@ -1020,8 +1067,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1));
       // c1's visual should stay near 36 across the round-trip — no
       // jump up or down.
-      expect(controller.getCurrentExtent("c1"), closeTo(36, 4),
-          reason: "Round-trip must not jolt visual position.");
+      expect(
+        controller.getCurrentExtent("c1"),
+        closeTo(36, 4),
+        reason: "Round-trip must not jolt visual position.",
+      );
 
       // Settle. C is still in collapsed state (collapse(C) at t=0
       // is still in effect; the P round-trip didn't change C's

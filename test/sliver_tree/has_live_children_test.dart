@@ -19,19 +19,31 @@ void main() {
 
     expect(controller.hasLiveChildren("missing"), isFalse);
     expect(controller.hasLiveChildren("leaf"), isFalse);
-    expect(controller.getLiveChildren("leaf").isNotEmpty, isFalse,
-        reason: "agreement with the allocating form");
+    expect(
+      controller.getLiveChildren("leaf").isNotEmpty,
+      isFalse,
+      reason: "agreement with the allocating form",
+    );
     expect(controller.liveChildCount("missing"), 0);
     expect(controller.liveChildCount("leaf"), 0);
-    expect(controller.liveRootCount, controller.liveRootKeys.length,
-        reason: "count agreement with the allocating form");
+    expect(
+      controller.liveRootCount,
+      controller.liveRootKeys.length,
+      reason: "count agreement with the allocating form",
+    );
   });
 
-  testWidgets("true with live children, false once all are mid-exit",
-      (tester) async {
+  testWidgets("true with live children, false once all are mid-exit", (
+    tester,
+  ) async {
     final controller = TreeController<String, String>(
       vsync: tester,
-      animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.linear)),
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+      ),
     );
     addTearDown(controller.dispose);
     controller.setRoots([const TreeNode(key: "p", data: "P")]);
@@ -64,28 +76,47 @@ void main() {
     // Remove c1 — mixed live/pending state must still report true.
     controller.remove(key: "c1");
     await tester.pump(const Duration(milliseconds: 50));
-    expect(controller.isPendingDeletion("c1"), isTrue,
-        reason: "setup: c1 must be mid-exit");
-    expect(controller.hasLiveChildren("p"), isTrue,
-        reason: "c2 is still live");
-    expect(controller.getLiveChildren("p").isNotEmpty, isTrue,
-        reason: "agreement with the allocating form");
-    expect(controller.liveChildCount("p"), 1,
-        reason: "mixed live/pending: only c2 counts");
-    expect(controller.liveChildCount("p"),
-        controller.getLiveChildren("p").length,
-        reason: "count agreement with the allocating form");
+    expect(
+      controller.isPendingDeletion("c1"),
+      isTrue,
+      reason: "setup: c1 must be mid-exit",
+    );
+    expect(controller.hasLiveChildren("p"), isTrue, reason: "c2 is still live");
+    expect(
+      controller.getLiveChildren("p").isNotEmpty,
+      isTrue,
+      reason: "agreement with the allocating form",
+    );
+    expect(
+      controller.liveChildCount("p"),
+      1,
+      reason: "mixed live/pending: only c2 counts",
+    );
+    expect(
+      controller.liveChildCount("p"),
+      controller.getLiveChildren("p").length,
+      reason: "count agreement with the allocating form",
+    );
 
     // Remove c2 too — all children pending-deletion: the FULL list is
     // non-empty but there are no LIVE children.
     controller.remove(key: "c2");
     await tester.pump(const Duration(milliseconds: 50));
-    expect(controller.getChildren("p").isNotEmpty, isTrue,
-        reason: "setup: the full list still holds the mid-exit children");
-    expect(controller.hasLiveChildren("p"), isFalse,
-        reason: "every child is pending-deletion");
-    expect(controller.getLiveChildren("p").isNotEmpty, isFalse,
-        reason: "agreement with the allocating form");
+    expect(
+      controller.getChildren("p").isNotEmpty,
+      isTrue,
+      reason: "setup: the full list still holds the mid-exit children",
+    );
+    expect(
+      controller.hasLiveChildren("p"),
+      isFalse,
+      reason: "every child is pending-deletion",
+    );
+    expect(
+      controller.getLiveChildren("p").isNotEmpty,
+      isFalse,
+      reason: "agreement with the allocating form",
+    );
 
     // After the exits settle and the children purge, still false.
     await tester.pumpAndSettle();

@@ -22,7 +22,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       final sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -35,7 +40,10 @@ void main() {
         [TreeNode(key: "r1", data: "R1")],
         childrenOf: (key) {
           if (key == "r1") {
-            return [TreeNode(key: "x", data: "X"), TreeNode(key: "b", data: "B")];
+            return [
+              TreeNode(key: "x", data: "X"),
+              TreeNode(key: "b", data: "B"),
+            ];
           }
           return [];
         },
@@ -95,7 +103,12 @@ void main() {
     (tester) async {
       final controller = TreeController<String, String>(
         vsync: tester,
-        animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 300), curve: Curves.easeInOut)),
+        animationStyle: const TreeAnimationStyle(
+          expandCollapse: TreeAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        ),
       );
       final sync = TreeSyncController(treeController: controller);
       addTearDown(() {
@@ -107,7 +120,10 @@ void main() {
         [TreeNode(key: "r1", data: "R1")],
         childrenOf: (key) {
           if (key == "r1") {
-            return [TreeNode(key: "x", data: "X"), TreeNode(key: "b", data: "B")];
+            return [
+              TreeNode(key: "x", data: "X"),
+              TreeNode(key: "b", data: "B"),
+            ];
           }
           return [];
         },

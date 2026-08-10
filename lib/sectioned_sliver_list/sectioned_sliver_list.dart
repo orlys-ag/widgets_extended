@@ -6,4 +6,6 @@ export '../sliver_tree/animation_style.dart'
 export 'sectioned_list_controller.dart' show SectionedListController;
 export 'sectioned_sliver_list_widget.dart'
     show SectionHeaderBuilder, SectionItemBuilder, SectionedSliverList;
+export 'sectioned_reorder_config.dart'
+    show ItemDragProxyBuilder, SectionDragProxyBuilder, SectionedReorderConfig;
 export 'views.dart' show ItemView, SectionView;

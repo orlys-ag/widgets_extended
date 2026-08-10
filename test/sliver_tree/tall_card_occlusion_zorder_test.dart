@@ -39,9 +39,10 @@ double _heightFor(String key) {
   return _kCard;
 }
 
-SyncedTreeNode<String, String> _n(String k,
-        [List<SyncedTreeNode<String, String>>? c]) =>
-    SyncedTreeNode(key: k, data: k, children: c ?? const []);
+SyncedTreeNode<String, String> _n(
+  String k, [
+  List<SyncedTreeNode<String, String>>? c,
+]) => SyncedTreeNode(key: k, data: k, children: c ?? const []);
 
 RenderSliverTree<String, String> _render(WidgetTester tester) =>
     tester.renderObject<RenderSliverTree<String, String>>(
@@ -79,7 +80,11 @@ class _Recorder extends PaintingContext {
 }
 
 class _Harness extends StatefulWidget {
-  const _Harness({required this.builder, required this.maxStickyDepth, this.scrollController});
+  const _Harness({
+    required this.builder,
+    required this.maxStickyDepth,
+    this.scrollController,
+  });
   final List<SyncedTreeNode<String, String>> Function() builder;
   final int maxStickyDepth;
   final ScrollController? scrollController;
@@ -101,7 +106,12 @@ class _HarnessState extends State<_Harness> {
               SyncedSliverTree<String, String>(
                 tree: widget.builder(),
                 maxStickyDepth: widget.maxStickyDepth,
-                animationStyle: const TreeAnimationStyle(expandCollapse: TreeAnimationSpec(duration: Duration(milliseconds: 400), curve: Curves.linear)),
+                animationStyle: const TreeAnimationStyle(
+                  expandCollapse: TreeAnimationSpec(
+                    duration: Duration(milliseconds: 400),
+                    curve: Curves.linear,
+                  ),
+                ),
                 itemBuilder: (context, node) {
                   controller ??= node.controller;
                   return SizedBox(
@@ -123,9 +133,15 @@ class _HarnessState extends State<_Harness> {
 /// painted AFTER (on top of) the ghost. Reads the ghost rect + header band
 /// from the live `debugLastPhantomGhostPaint` capture.
 void _expectHeaderOverGhost(
-    WidgetTester tester, RenderSliverTree<String, String> render, String tag) {
-  expect(render.debugLastPhantomGhostPaint.containsKey("x"), isTrue,
-      reason: "[$tag] ghost capture must be present mid-slide");
+  WidgetTester tester,
+  RenderSliverTree<String, String> render,
+  String tag,
+) {
+  expect(
+    render.debugLastPhantomGhostPaint.containsKey("x"),
+    isTrue,
+    reason: "[$tag] ghost capture must be present mid-slide",
+  );
   final cap = render.debugLastPhantomGhostPaint["x"]!;
   final ghostTop = cap.ghostRect.top;
   final bandTop = cap.anchorBand.top;
@@ -145,53 +161,72 @@ void _expectHeaderOverGhost(
     if ((rec.top - ghostTop).abs() < 1.0) ghostIdx = i;
     if ((rec.top - bandTop).abs() < 1.0) headerIdx = i;
   }
-  expect(ghostIdx, greaterThanOrEqualTo(0),
-      reason: "[$tag] ghost paint not recorded");
-  expect(headerIdx, greaterThanOrEqualTo(0),
-      reason: "[$tag] destination header paint not recorded");
-  expect(headerIdx, greaterThan(ghostIdx),
-      reason: "[$tag] destination header must paint AFTER (on top of) the "
-          "ghost. ghostIdx=$ghostIdx headerIdx=$headerIdx order=${recorder.order}");
+  expect(
+    ghostIdx,
+    greaterThanOrEqualTo(0),
+    reason: "[$tag] ghost paint not recorded",
+  );
+  expect(
+    headerIdx,
+    greaterThanOrEqualTo(0),
+    reason: "[$tag] destination header paint not recorded",
+  );
+  expect(
+    headerIdx,
+    greaterThan(ghostIdx),
+    reason:
+        "[$tag] destination header must paint AFTER (on top of) the "
+        "ghost. ghostIdx=$ghostIdx headerIdx=$headerIdx order=${recorder.order}",
+  );
 }
 
 void main() {
-  testWidgets(
-    "non-sticky destination header occludes the crossing card "
-    "(maxStickyDepth 0)",
-    (tester) async {
-      var fav = false;
-      List<SyncedTreeNode<String, String>> build() => fav
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])];
+  testWidgets("non-sticky destination header occludes the crossing card "
+      "(maxStickyDepth 0)", (tester) async {
+    var fav = false;
+    List<SyncedTreeNode<String, String>> build() => fav
+        ? [
+            _n("fav", [_n("x")]),
+            _n("others", [_n("o1")]),
+          ]
+        : [
+            _n("fav", [_n("fav_ph")]),
+            _n("others", [_n("x"), _n("o1")]),
+          ];
 
-      await tester.pumpWidget(_Harness(builder: build, maxStickyDepth: 0));
-      await tester.pumpAndSettle();
-      final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
-      c.collapse(key: "fav", animate: false);
-      await tester.pump();
+    await tester.pumpWidget(_Harness(builder: build, maxStickyDepth: 0));
+    await tester.pumpAndSettle();
+    final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
+    c.collapse(key: "fav", animate: false);
+    await tester.pump();
 
-      fav = true;
-      await tester.pumpWidget(_Harness(builder: build, maxStickyDepth: 0));
-      await tester.pump();
+    fav = true;
+    await tester.pumpWidget(_Harness(builder: build, maxStickyDepth: 0));
+    await tester.pump();
 
-      final render = _render(tester);
-      // Sample mid-slide (header is never sticky here, so only Pass A.7
-      // can put it over the ghost).
-      await tester.pump(const Duration(milliseconds: 120));
-      _expectHeaderOverGhost(tester, render, "maxStickyDepth0");
+    final render = _render(tester);
+    // Sample mid-slide (header is never sticky here, so only Pass A.7
+    // can put it over the ghost).
+    await tester.pump(const Duration(milliseconds: 120));
+    _expectHeaderOverGhost(tester, render, "maxStickyDepth0");
 
-      await tester.pumpAndSettle();
-      expect(c.visibleNodes.contains("x"), isFalse);
-    },
-  );
+    await tester.pumpAndSettle();
+    expect(c.visibleNodes.contains("x"), isFalse);
+  });
 
   testWidgets(
     "header dropped from sticky set while animating still occludes the card",
     (tester) async {
       var fav = false;
       List<SyncedTreeNode<String, String>> build() => fav
-          ? [_n("fav", [_n("x")]), _n("others", [_n("o1")])]
-          : [_n("fav", [_n("fav_ph")]), _n("others", [_n("x"), _n("o1")])];
+          ? [
+              _n("fav", [_n("x")]),
+              _n("others", [_n("o1")]),
+            ]
+          : [
+              _n("fav", [_n("fav_ph")]),
+              _n("others", [_n("x"), _n("o1")]),
+            ];
 
       // maxStickyDepth: 1 — but during the first frames after the reparent
       // the destination header is animating, so it is dropped from the
@@ -216,8 +251,11 @@ void main() {
           checked = true;
         }
       }
-      expect(checked, isTrue,
-          reason: "Ghost should have been sliding in the early frames");
+      expect(
+        checked,
+        isTrue,
+        reason: "Ghost should have been sliding in the early frames",
+      );
 
       await tester.pumpAndSettle();
       expect(c.visibleNodes.contains("x"), isFalse);
@@ -254,8 +292,9 @@ void main() {
               _n("others", [_n("x"), _n("o1")]),
             ];
 
-      await tester.pumpWidget(_Harness(
-          builder: build, maxStickyDepth: 1, scrollController: scroll));
+      await tester.pumpWidget(
+        _Harness(builder: build, maxStickyDepth: 1, scrollController: scroll),
+      );
       await tester.pumpAndSettle();
       final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
 
@@ -267,8 +306,9 @@ void main() {
 
       // Favorite x: it moves UP into the sticky-pinned `fav` header.
       fav = true;
-      await tester.pumpWidget(_Harness(
-          builder: build, maxStickyDepth: 1, scrollController: scroll));
+      await tester.pumpWidget(
+        _Harness(builder: build, maxStickyDepth: 1, scrollController: scroll),
+      );
       await tester.pump();
 
       final render = _render(tester);
@@ -279,18 +319,25 @@ void main() {
           // The `fav` header is pinned at the viewport top (pinnedY ≈ 0).
           // The ghost's anchor band must read the PAINTED (pinned) band,
           // not the structural (off-screen, negative) offset.
-          expect(cap.anchorBand.top, moreOrLessEquals(0.0, epsilon: 0.5),
-              reason: "Anchor band must be the PAINTED pinned position "
-                  "(~0), not the structural off-screen offset. Got "
-                  "${cap.anchorBand.top}.");
+          expect(
+            cap.anchorBand.top,
+            moreOrLessEquals(0.0, epsilon: 0.5),
+            reason:
+                "Anchor band must be the PAINTED pinned position "
+                "(~0), not the structural off-screen offset. Got "
+                "${cap.anchorBand.top}.",
+          );
           sampled = true;
           break;
         }
         if (!c.hasActiveSlides) break;
         await tester.pump(const Duration(milliseconds: 16));
       }
-      expect(sampled, isTrue,
-          reason: "Ghost should have slid into the pinned header");
+      expect(
+        sampled,
+        isTrue,
+        reason: "Ghost should have slid into the pinned header",
+      );
 
       await tester.pumpAndSettle();
       expect(c.visibleNodes.contains("x"), isFalse);

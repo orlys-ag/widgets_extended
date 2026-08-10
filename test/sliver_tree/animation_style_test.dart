@@ -159,10 +159,11 @@ void main() {
         curve: Curves.linear,
       );
       expect(
-        () => const TreeAnimationStyle(expandCollapse: negative)
-            .debugValidate(),
+        () =>
+            const TreeAnimationStyle(expandCollapse: negative).debugValidate(),
         throwsAssertionError,
-        reason: "a negative duration strands animations — it must be "
+        reason:
+            "a negative duration strands animations — it must be "
             "rejected at the injection boundary, the one configuration "
             "that is genuinely invalid rather than merely unusual",
       );

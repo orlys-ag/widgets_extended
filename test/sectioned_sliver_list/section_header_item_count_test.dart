@@ -27,10 +27,9 @@ void main() {
         ),
       );
       addTearDown(controller.dispose);
-      controller.setSections(
-        ["s1"],
-        itemsOf: (_) => [for (int i = 0; i < 12; i++) "i$i"],
-      );
+      controller.setSections([
+        "s1",
+      ], itemsOf: (_) => [for (int i = 0; i < 12; i++) "i$i"]);
       controller.expandSection("s1", animate: false);
 
       await tester.pumpWidget(
@@ -63,11 +62,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.text("items:12"), findsOneWidget);
 
-      controller.setItems(
-        "s1",
-        [for (int i = 0; i < 3; i++) "i$i"],
-        animate: true,
-      );
+      controller.setItems("s1", [
+        for (int i = 0; i < 3; i++) "i$i",
+      ], animate: true);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
@@ -77,13 +74,15 @@ void main() {
       expect(
         find.text("i5"),
         findsOneWidget,
-        reason: "setup sanity: removed item must still be painted mid-exit, "
+        reason:
+            "setup sanity: removed item must still be painted mid-exit, "
             "proving the animated path is exercised",
       );
       expect(
         find.text("items:12"),
         findsOneWidget,
-        reason: "itemCount includes items animating out; the header must "
+        reason:
+            "itemCount includes items animating out; the header must "
             "match the rows still visible",
       );
 
@@ -92,7 +91,8 @@ void main() {
       expect(
         find.text("items:3"),
         findsOneWidget,
-        reason: "after the exit animations purge the removed items, the "
+        reason:
+            "after the exit animations purge the removed items, the "
             "header must refresh to the new count, not keep showing the "
             "pre-removal number forever",
       );

@@ -54,15 +54,16 @@ Future<_Harness> _mount(
               // dragged row's child into the overlay — making those
               // finders ambiguous mid-drag.
               showDragProxy: showDragProxy,
-              nodeBuilder: (context, key, depth, wrap) {
-                return wrap(
-                  longPressToDrag: longPressToDrag,
-                  child: SizedBox(
-                    key: ValueKey("row-$key"),
-                    height: 50,
-                    child: Text(key),
-                  ),
+              nodeBuilder: (context, key, depth) {
+                final row = SizedBox(
+                  key: ValueKey("row-$key"),
+                  height: 50,
+                  child: Text(key),
                 );
+                if (!longPressToDrag) {
+                  return row;
+                }
+                return TreeDelayedDragHandle(child: row);
               },
             ),
           ],
@@ -97,8 +98,9 @@ void main() {
   });
 
   group("SliverReorderableTree drag wiring", () {
-    testWidgets("long-press-drag downward past a row reorders the roots",
-        (tester) async {
+    testWidgets("long-press-drag downward past a row reorders the roots", (
+      tester,
+    ) async {
       final h = await _mount(tester);
 
       expect(h.tree.rootKeys, ["a", "b", "c"]);
@@ -116,19 +118,31 @@ void main() {
       await tester.pump();
       await tester.pumpAndSettle();
 
-      expect(h.tree.rootKeys, isNot(equals(["a", "b", "c"])),
-          reason: "drag past row b should have reordered the roots");
-      expect(h.tree.rootKeys.first, isNot("a"),
-          reason: "'a' must no longer be at index 0 after being dragged down");
-      expect(h.tree.rootKeys.toSet(), {"a", "b", "c"},
-          reason: "reorder must preserve the membership of the roots");
+      expect(
+        h.tree.rootKeys,
+        isNot(equals(["a", "b", "c"])),
+        reason: "drag past row b should have reordered the roots",
+      );
+      expect(
+        h.tree.rootKeys.first,
+        isNot("a"),
+        reason: "'a' must no longer be at index 0 after being dragged down",
+      );
+      expect(
+        h.tree.rootKeys.toSet(),
+        {"a", "b", "c"},
+        reason: "reorder must preserve the membership of the roots",
+      );
     });
 
     testWidgets("dragged source row is hidden in place", (tester) async {
       final h = await _mount(tester);
 
-      expect(_opacityOf(tester, "a"), 1.0,
-          reason: "pre-drag opacity must be full");
+      expect(
+        _opacityOf(tester, "a"),
+        1.0,
+        reason: "pre-drag opacity must be full",
+      );
 
       final rowACenter = tester.getCenter(find.byKey(const ValueKey("row-a")));
       final gesture = await tester.startGesture(rowACenter);
@@ -136,20 +150,30 @@ void main() {
       await gesture.moveBy(const Offset(0, 10));
       await tester.pump();
 
-      expect(_opacityOf(tester, "a"), 0.0,
-          reason: "mid-drag source row must be hidden — make-room closes "
-              "its slot underneath it, so residual paint would overlap "
-              "the rows shifting into that space");
-      expect(_opacityOf(tester, "b"), 1.0,
-          reason: "non-dragged siblings must remain fully opaque");
+      expect(
+        _opacityOf(tester, "a"),
+        0.0,
+        reason:
+            "mid-drag source row must be hidden — make-room closes "
+            "its slot underneath it, so residual paint would overlap "
+            "the rows shifting into that space",
+      );
+      expect(
+        _opacityOf(tester, "b"),
+        1.0,
+        reason: "non-dragged siblings must remain fully opaque",
+      );
 
       await gesture.up();
       await tester.pump();
       await tester.pumpAndSettle();
 
       expect(h.reorder.currentTarget, isNull);
-      expect(_opacityOf(tester, "a"), 1.0,
-          reason: "post-drop opacity must restore to full");
+      expect(
+        _opacityOf(tester, "a"),
+        1.0,
+        reason: "post-drop opacity must restore to full",
+      );
     });
 
     testWidgets(
@@ -186,9 +210,8 @@ void main() {
                     controller: tree,
                     reorderController: reorder,
                     showDragProxy: false,
-                    nodeBuilder: (context, key, depth, wrap) {
-                      return wrap(
-                        longPressToDrag: true,
+                    nodeBuilder: (context, key, depth) {
+                      return TreeDelayedDragHandle(
                         child: SizedBox(
                           key: ValueKey("row-$key"),
                           height: 50,
@@ -207,96 +230,124 @@ void main() {
         final gesture = await tester.startGesture(
           tester.getCenter(find.byKey(const ValueKey("row-a"))),
         );
-        await tester
-            .pump(kLongPressTimeout + const Duration(milliseconds: 100));
+        await tester.pump(
+          kLongPressTimeout + const Duration(milliseconds: 100),
+        );
 
-        expect(reorder.isDragging, isFalse,
-            reason: "canReorder=false must decline the session");
-        expect(_opacityOf(tester, "a"), 1.0,
-            reason: "a refused drag must not hide the row");
+        expect(
+          reorder.isDragging,
+          isFalse,
+          reason: "canReorder=false must decline the session",
+        );
+        expect(
+          _opacityOf(tester, "a"),
+          1.0,
+          reason: "a refused drag must not hide the row",
+        );
 
         await gesture.moveBy(const Offset(0, 60));
         await tester.pump();
-        expect(reorder.isDragging, isFalse,
-            reason: "moves after a refused start must not create a session");
+        expect(
+          reorder.isDragging,
+          isFalse,
+          reason: "moves after a refused start must not create a session",
+        );
 
         await gesture.up();
         await tester.pump();
       },
     );
 
-    testWidgets(
-      "drag proxy is mounted while dragging and torn down on drop",
-      (tester) async {
-        // The proxy overlay replaced the drop-indicator overlay as the
-        // widget-layer drag UI. Like the indicator before it, it must
-        // appear on pointer move — driven by the controller's
-        // notifyListeners, NOT by a per-frame poll waiting for an
-        // unrelated frame — and must be removed with the session.
-        final h = await _mount(tester, showDragProxy: true);
+    testWidgets("drag proxy is mounted while dragging and torn down on drop", (
+      tester,
+    ) async {
+      // The proxy overlay replaced the drop-indicator overlay as the
+      // widget-layer drag UI. Like the indicator before it, it must
+      // appear on pointer move — driven by the controller's
+      // notifyListeners, NOT by a per-frame poll waiting for an
+      // unrelated frame — and must be removed with the session.
+      final h = await _mount(tester, showDragProxy: true);
 
-        expect(find.text("a"), findsOneWidget,
-            reason: "no proxy clone before any drag");
+      expect(
+        find.text("a"),
+        findsOneWidget,
+        reason: "no proxy clone before any drag",
+      );
 
-        final rowACenter =
-            tester.getCenter(find.byKey(const ValueKey("row-a")));
-        final gesture = await tester.startGesture(rowACenter);
-        await tester
-            .pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      final rowACenter = tester.getCenter(find.byKey(const ValueKey("row-a")));
+      final gesture = await tester.startGesture(rowACenter);
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
 
-        // Move pointer onto row "c" (y≈100..150) — a valid, non-no-op target.
-        await gesture.moveBy(const Offset(0, 110));
-        await tester.pump();
+      // Move pointer onto row "c" (y≈100..150) — a valid, non-no-op target.
+      await gesture.moveBy(const Offset(0, 110));
+      await tester.pump();
 
-        expect(h.reorder.currentTarget, isNotNull,
-            reason: "pointer is over a valid target row");
-        expect(find.text("a"), findsNWidgets(2),
-            reason: "the default proxy clones the dragged row's child into "
-                "the overlay (hidden in-place copy + floating copy)");
+      expect(
+        h.reorder.currentTarget,
+        isNotNull,
+        reason: "pointer is over a valid target row",
+      );
+      expect(
+        find.text("a"),
+        findsNWidgets(2),
+        reason:
+            "the default proxy clones the dragged row's child into "
+            "the overlay (hidden in-place copy + floating copy)",
+      );
 
-        await gesture.up();
-        await tester.pump();
-        await tester.pumpAndSettle();
+      await gesture.up();
+      await tester.pump();
+      await tester.pumpAndSettle();
 
-        expect(find.text("a"), findsOneWidget,
-            reason: "proxy overlay removed after drop");
-        expect(h.reorder.currentTarget, isNull);
-        expect(h.reorder.isDragging, false);
-      },
-    );
+      expect(
+        find.text("a"),
+        findsOneWidget,
+        reason: "proxy overlay removed after drop",
+      );
+      expect(h.reorder.currentTarget, isNull);
+      expect(h.reorder.isDragging, false);
+    });
 
-    testWidgets("controller notifies listeners on target changes",
-        (tester) async {
+    testWidgets("controller notifies listeners on target changes", (
+      tester,
+    ) async {
       final h = await _mount(tester);
 
       var notifications = 0;
       h.reorder.addListener(() => notifications++);
 
-      final rowACenter =
-          tester.getCenter(find.byKey(const ValueKey("row-a")));
+      final rowACenter = tester.getCenter(find.byKey(const ValueKey("row-a")));
       final gesture = await tester.startGesture(rowACenter);
-      await tester
-          .pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
 
       // startDrag fires one notification (session begin / initial target).
-      expect(notifications, greaterThanOrEqualTo(1),
-          reason: "startDrag should emit at least one notification");
+      expect(
+        notifications,
+        greaterThanOrEqualTo(1),
+        reason: "startDrag should emit at least one notification",
+      );
 
       final before = notifications;
       // Move to a row that resolves a different drop target.
       await gesture.moveBy(const Offset(0, 110));
       await tester.pump();
 
-      expect(notifications, greaterThan(before),
-          reason: "moving to a new zone/row should emit a notification");
+      expect(
+        notifications,
+        greaterThan(before),
+        reason: "moving to a new zone/row should emit a notification",
+      );
 
       final mid = notifications;
       // Moving within the same third of the same row should NOT fire —
       // _targetsEqual suppresses duplicate notifications.
       await gesture.moveBy(const Offset(0, 1));
       await tester.pump();
-      expect(notifications, mid,
-          reason: "micro-move within same zone must not re-notify");
+      expect(
+        notifications,
+        mid,
+        reason: "micro-move within same zone must not re-notify",
+      );
 
       await gesture.up();
       await tester.pump();
@@ -321,11 +372,11 @@ void main() {
           reason: "pre-drag painted y must equal structural y",
         );
 
-        final rowACenter =
-            tester.getCenter(find.byKey(const ValueKey("row-a")));
+        final rowACenter = tester.getCenter(
+          find.byKey(const ValueKey("row-a")),
+        );
         final gesture = await tester.startGesture(rowACenter);
-        await tester
-            .pump(kLongPressTimeout + const Duration(milliseconds: 50));
+        await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
         await gesture.moveBy(const Offset(0, 120));
         await tester.pump();
 
@@ -335,17 +386,26 @@ void main() {
         // prior y (0), not its new structural y (≈100).
         await tester.pump();
 
-        expect(h.tree.hasActiveSlides, true,
-            reason: "slide must be installed in the same frame as the "
-                "structural mutation, not in a post-frame callback");
+        expect(
+          h.tree.hasActiveSlides,
+          true,
+          reason:
+              "slide must be installed in the same frame as the "
+              "structural mutation, not in a post-frame callback",
+        );
 
-        final paintedY =
-            tester.getTopLeft(find.byKey(const ValueKey("row-a"))).dy;
-        expect(paintedY, lessThan(10.0),
-            reason: "first frame after drop must paint 'a' near its PRIOR y "
-                "(≈0), not at its new structural y (≈100). A y>=50 indicates "
-                "the flicker regression: the mutation frame paints at the "
-                "new structural position with slideDelta=0.");
+        final paintedY = tester
+            .getTopLeft(find.byKey(const ValueKey("row-a")))
+            .dy;
+        expect(
+          paintedY,
+          lessThan(10.0),
+          reason:
+              "first frame after drop must paint 'a' near its PRIOR y "
+              "(≈0), not at its new structural y (≈100). A y>=50 indicates "
+              "the flicker regression: the mutation frame paints at the "
+              "new structural position with slideDelta=0.",
+        );
 
         await tester.pumpAndSettle();
         // After the slide settles, "a" lands at its new structural y.
@@ -419,9 +479,8 @@ void main() {
                     controller: tree,
                     reorderController: reorder,
                     showDragProxy: false,
-                    nodeBuilder: (context, key, depth, wrap) {
-                      return wrap(
-                        longPressToDrag: true,
+                    nodeBuilder: (context, key, depth) {
+                      return TreeDelayedDragHandle(
                         child: SizedBox(
                           key: ValueKey("row-$key"),
                           height: 50,
@@ -441,16 +500,20 @@ void main() {
         // enough for one frame of children to become visible.
         tree.expand(key: "b");
         await tester.pump(const Duration(milliseconds: 20));
-        expect(tree.hasActiveAnimations, true,
-            reason: "setup precondition: an extent animation must be in "
-                "flight when the drop is committed, so the element routes "
-                "through `markNeedsLayout` in the tick listener");
+        expect(
+          tree.hasActiveAnimations,
+          true,
+          reason:
+              "setup precondition: an extent animation must be in "
+              "flight when the drop is committed, so the element routes "
+              "through `markNeedsLayout` in the tick listener",
+        );
 
-        final rowACenter =
-            tester.getCenter(find.byKey(const ValueKey("row-a")));
+        final rowACenter = tester.getCenter(
+          find.byKey(const ValueKey("row-a")),
+        );
         final gesture = await tester.startGesture(rowACenter);
-        await tester
-            .pump(kLongPressTimeout + const Duration(milliseconds: 50));
+        await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
         await gesture.moveBy(const Offset(0, 120));
         await tester.pump();
 
@@ -458,9 +521,13 @@ void main() {
         // right before the drop commits. If this ever starts failing, the
         // test is not exercising the `markNeedsLayout` branch anymore and
         // needs its durations adjusted.
-        expect(tree.hasActiveAnimations, true,
-            reason: "expand animation must still be in flight at drop time "
-                "so the tick listener hits the `markNeedsLayout` branch");
+        expect(
+          tree.hasActiveAnimations,
+          true,
+          reason:
+              "expand animation must still be in flight at drop time "
+              "so the tick listener hits the `markNeedsLayout` branch",
+        );
 
         // Drop. The `await tester.pump()` below drives the frame that
         // consumes the FLIP baseline inside performLayout. Prior to the
@@ -475,13 +542,17 @@ void main() {
         // the exact landing position depends on animation progress at
         // drop time and isn't what this test is asserting.
         await tester.pumpAndSettle();
-        expect(tree.getNodeData("a"), isNotNull,
-            reason: "the drop must leave node 'a' somewhere in the tree");
+        expect(
+          tree.getNodeData("a"),
+          isNotNull,
+          reason: "the drop must leave node 'a' somewhere in the tree",
+        );
       },
     );
 
-    testWidgets("slide ticks fire after drop so final positions settle",
-        (tester) async {
+    testWidgets("slide ticks fire after drop so final positions settle", (
+      tester,
+    ) async {
       final h = await _mount(tester);
 
       final rowACenter = tester.getCenter(find.byKey(const ValueKey("row-a")));
@@ -502,11 +573,18 @@ void main() {
       }
       await tester.pumpAndSettle();
 
-      expect(sawActiveSlide, true,
-          reason: "a slide animation must run after the commit so rows glide "
-              "from their pre-commit painted y to their new structural y");
-      expect(h.tree.hasActiveSlides, false,
-          reason: "slides must clear after pumpAndSettle");
+      expect(
+        sawActiveSlide,
+        true,
+        reason:
+            "a slide animation must run after the commit so rows glide "
+            "from their pre-commit painted y to their new structural y",
+      );
+      expect(
+        h.tree.hasActiveSlides,
+        false,
+        reason: "slides must clear after pumpAndSettle",
+      );
     });
 
     testWidgets(
@@ -538,8 +616,7 @@ void main() {
           ),
         );
         tree.setRoots([
-          for (var i = 0; i < 30; i++)
-            TreeNode(key: "r$i", data: i),
+          for (var i = 0; i < 30; i++) TreeNode(key: "r$i", data: i),
         ]);
 
         final reorder = TreeReorderController<String>(
@@ -562,13 +639,11 @@ void main() {
                       controller: tree,
                       reorderController: reorder,
                       showDragProxy: false,
-                      nodeBuilder: (context, key, depth, wrap) {
-                        return wrap(
-                          child: SizedBox(
-                            key: ValueKey("row-$key"),
-                            height: 50,
-                            child: Text(key),
-                          ),
+                      nodeBuilder: (context, key, depth) {
+                        return SizedBox(
+                          key: ValueKey("row-$key"),
+                          height: 50,
+                          child: Text(key),
                         );
                       },
                     ),
@@ -583,12 +658,18 @@ void main() {
         // Precondition: with no slide active, row r0 is structurally at y=0
         // and row r25 is at y=1250 (well outside the 500px viewport plus
         // 250px default cacheExtent → not built).
-        expect(tester.getTopLeft(find.byKey(const ValueKey("row-r0"))).dy,
-            closeTo(0, 0.001));
-        expect(find.byKey(const ValueKey("row-r25")), findsNothing,
-            reason: "r25 at structural y=1250 must be outside the viewport "
-                "pre-slide so the test exercises the 'build from outside "
-                "cache region' path");
+        expect(
+          tester.getTopLeft(find.byKey(const ValueKey("row-r0"))).dy,
+          closeTo(0, 0.001),
+        );
+        expect(
+          find.byKey(const ValueKey("row-r25")),
+          findsNothing,
+          reason:
+              "r25 at structural y=1250 must be outside the viewport "
+              "pre-slide so the test exercises the 'build from outside "
+              "cache region' path",
+        );
 
         // Capture the FLIP baseline, then reorder r0 to the end. With
         // animationDuration > 0, this installs a slide entry for every row
@@ -602,10 +683,7 @@ void main() {
           duration: const Duration(milliseconds: 800),
           curve: Curves.linear,
         );
-        final newOrder = [
-          for (var i = 1; i < 30; i++) "r$i",
-          "r0",
-        ];
+        final newOrder = [for (var i = 1; i < 30; i++) "r$i", "r0"];
         tree.reorderRoots(newOrder);
         await tester.pump(); // drive the frame that installs the slide
 
@@ -614,23 +692,35 @@ void main() {
         // computed from scrollOffset alone (0 to 500 + cacheExtent). With
         // the fix, the build range widens by |startDelta|=1450 so r0 is
         // created, and its painted y sits at its prior position (y=0).
-        expect(tree.hasActiveSlides, true,
-            reason: "baseline + reorder must install a slide so this test "
-                "actually exercises the overreach path");
+        expect(
+          tree.hasActiveSlides,
+          true,
+          reason:
+              "baseline + reorder must install a slide so this test "
+              "actually exercises the overreach path",
+        );
 
         final r0Finder = find.byKey(const ValueKey("row-r0"));
-        expect(r0Finder, findsOneWidget,
-            reason: "r0 is structurally far below the viewport but its "
-                "painted y lies inside the viewport — the overreach widening "
-                "must build it, or a visual gap appears where it should "
-                "paint");
+        expect(
+          r0Finder,
+          findsOneWidget,
+          reason:
+              "r0 is structurally far below the viewport but its "
+              "painted y lies inside the viewport — the overreach widening "
+              "must build it, or a visual gap appears where it should "
+              "paint",
+        );
 
         // Its painted y should be near its prior position (y=0), not near
         // its new structural position (y=950).
         final r0Top = tester.getTopLeft(r0Finder).dy;
-        expect(r0Top, lessThan(100),
-            reason: "just after the slide install, r0 should paint at its "
-                "prior y≈0 (not its new structural y≈1450)");
+        expect(
+          r0Top,
+          lessThan(100),
+          reason:
+              "just after the slide install, r0 should paint at its "
+              "prior y≈0 (not its new structural y≈1450)",
+        );
 
         // Drain the slide animation so the framework's ticker-leak check
         // doesn't flag the in-flight slide ticker at test teardown.
