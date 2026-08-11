@@ -965,9 +965,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return base + _preview.deltaForNid(nid);
   }
 
-  /// FLIP-only Y slide delta for the live [nid], EXCLUDING any held
-  /// make-room preview offset. 0.0 when no FLIP slide is in flight for
-  /// [nid].
+  /// Internal-use-only: FLIP-only Y slide delta for the live [nid],
+  /// EXCLUDING any held make-room preview offset. 0.0 when no FLIP slide
+  /// is in flight for [nid].
   ///
   /// GHOST-LIFECYCLE READ. Not for painted positions: painted position is
   /// structural + FLIP + preview, which is [getSlideDeltaNid], and every
@@ -1196,8 +1196,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [RenderObject.markNeedsLayout] based on this flag.
   bool get hasActiveSlides => _slide.hasActive || _preview.hasActive;
 
-  /// Whether any FLIP slide is in flight, EXCLUDING a held make-room
-  /// preview.
+  /// Internal-use-only: whether any FLIP slide is in flight, EXCLUDING a
+  /// held make-room preview.
   ///
   /// GHOST-LIFECYCLE READ, the boolean companion to
   /// [getFlipSlideDeltaNid]. Because a preview offset is HELD rather than

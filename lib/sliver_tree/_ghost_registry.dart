@@ -162,16 +162,6 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
     _entries = null;
   }
 
-  /// Removes a single entry by key. Used by the ghost paint pass for
-  /// eager prune of freed/settled keys (cheaper than scanning the
-  /// whole map). No-op if [key] is not present.
-  void removeKey(TKey key) {
-    final exits = _entries;
-    if (exits == null) return;
-    exits.remove(key);
-    if (exits.isEmpty) _entries = null;
-  }
-
   /// Computes the row's true structural Y (no slideDelta), or -1 if
   /// the row is not in `visibleNodes`.
   ///
