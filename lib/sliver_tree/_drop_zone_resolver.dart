@@ -149,6 +149,11 @@ class DropZoneResolver<TKey> {
 
   /// If set, rejected drop targets resolve to `null`. Receives the dragged
   /// key, the candidate new parent, and the final-list index.
+  ///
+  /// Must NOT mutate [treeController]. It is invoked mid-resolution, per
+  /// pointer event, and [resolve] snapshots dragged-key state (parent and
+  /// live index) once per call, so a mutation from inside the callback
+  /// would be read inconsistently within the same resolve.
   final bool Function({required TKey movingKey, TKey? newParent, int? index})?
   canAcceptDrop;
 
@@ -179,6 +184,11 @@ class DropZoneResolver<TKey> {
   /// Returns `null` if the resolved target is invalid (cycle, no-op, or
   /// rejected by [canAcceptDrop]) at every legal level including that
   /// fallback, or if [targetKey] is not in the visible order.
+  ///
+  /// Dragged-key reads ([TreeController.getParent] and the live index in
+  /// its parent) are snapshotted once per call and reused across the
+  /// whole candidate chain, which is sound because [canAcceptDrop] must
+  /// not mutate the controller (see its doc).
   TreeDropTarget<TKey>? resolve({
     required TKey draggedKey,
     required TKey targetKey,
@@ -203,6 +213,22 @@ class DropZoneResolver<TKey> {
     final targetVisibleIndex = treeController.getVisibleIndex(targetKey);
     if (targetVisibleIndex < 0) {
       return null;
+    }
+
+    // Dragged-key state is snapshotted ONCE per resolve and threaded to
+    // every candidate attempt: both values are invariant for the whole
+    // call (resolution mutates nothing, and [canAcceptDrop] must not
+    // mutate the controller). The live index is LAZY as well as
+    // memoized: it is only consulted for same-parent candidates, and a
+    // cross-parent resolve (the steady state of hovering between
+    // containers) must not pay an O(siblings) scan of the dragged
+    // node's home list for a value it never reads.
+    final TKey? draggedParent = treeController.getParent(draggedKey);
+    int? draggedLiveIndexMemo;
+    int draggedLiveIndex() {
+      return draggedLiveIndexMemo ??= treeController.getIndexInParent(
+        draggedKey,
+      );
     }
 
     final localY = (pointerY - targetPaintedY).clamp(0.0, targetExtent);
@@ -362,6 +388,8 @@ class DropZoneResolver<TKey> {
         // reached by pointer x or by filter fallback.
         return _resolveCandidates(
           draggedKey: draggedKey,
+          draggedParent: draggedParent,
+          draggedLiveIndex: draggedLiveIndex,
           targetKey: targetKey,
           zone: zone,
           candidates: candidates,
@@ -376,6 +404,8 @@ class DropZoneResolver<TKey> {
         // whether or not the target is expanded.
         return _buildTarget(
           draggedKey: draggedKey,
+          draggedParent: draggedParent,
+          draggedLiveIndex: draggedLiveIndex,
           targetKey: targetKey,
           zone: zone,
           parentKey: targetKey,
@@ -398,6 +428,8 @@ class DropZoneResolver<TKey> {
             treeController.hasLiveChildren(targetKey)) {
           return _buildTarget(
             draggedKey: draggedKey,
+            draggedParent: draggedParent,
+            draggedLiveIndex: draggedLiveIndex,
             targetKey: targetKey,
             zone: zone,
             parentKey: targetKey,
@@ -421,37 +453,46 @@ class DropZoneResolver<TKey> {
         // so a target that is the last live child climbs past an exiting
         // sibling whose rows are still painted, and the ancestor's
         // visible tail includes them while the target's does not.
+        // Each level's live index is computed exactly once and carried
+        // through the climb: it serves both that level's candidate and
+        // the NEXT iteration's boundary check (the value cannot change
+        // mid-walk; the walk mutates nothing). Recomputing per check
+        // doubled the O(siblings) scans of this chain.
+        final targetIdx = treeController.getIndexInParent(targetKey);
         final candidates = <_Candidate<TKey>>[
           (
             parentKey: treeController.getParent(targetKey),
-            rawIndex: treeController.getIndexInParent(targetKey) + 1,
+            rawIndex: targetIdx + 1,
             depth: treeController.getDepth(targetKey),
             gapIndex: null,
             gapAnchor: targetKey,
           ),
         ];
         TKey node = targetKey;
+        int idxOfNode = targetIdx;
         while (true) {
           final parent = treeController.getParent(node);
           final liveCount = parent == null
               ? treeController.liveRootCount
               : treeController.liveChildCount(parent);
-          if (treeController.getIndexInParent(node) != liveCount - 1) {
-            // node has a later live sibling — the boundary ends here.
+          if (idxOfNode != liveCount - 1) {
+            // node has a later live sibling: the boundary ends here.
             break;
           }
           if (parent == null) {
             // node is the last root: no shallower level exists.
             break;
           }
+          final parentIdx = treeController.getIndexInParent(parent);
           candidates.add((
             parentKey: treeController.getParent(parent),
-            rawIndex: treeController.getIndexInParent(parent) + 1,
+            rawIndex: parentIdx + 1,
             depth: treeController.getDepth(parent),
             gapIndex: null,
             gapAnchor: parent,
           ));
           node = parent;
+          idxOfNode = parentIdx;
         }
 
         // Hidden-interior fallback, mirroring the above zone: reaching
@@ -492,6 +533,8 @@ class DropZoneResolver<TKey> {
         // handle-drag pointer at the row's right edge clamps to.
         return _resolveCandidates(
           draggedKey: draggedKey,
+          draggedParent: draggedParent,
+          draggedLiveIndex: draggedLiveIndex,
           targetKey: targetKey,
           zone: zone,
           candidates: candidates,
@@ -522,6 +565,8 @@ class DropZoneResolver<TKey> {
   /// would silently nest into that leaf.
   TreeDropTarget<TKey>? _resolveCandidates({
     required TKey draggedKey,
+    required TKey? draggedParent,
+    required int Function() draggedLiveIndex,
     required TKey targetKey,
     required TreeDropZone zone,
     required List<_Candidate<TKey>> candidates,
@@ -546,6 +591,8 @@ class DropZoneResolver<TKey> {
     for (final candidate in ordered) {
       final resolved = _buildTarget(
         draggedKey: draggedKey,
+        draggedParent: draggedParent,
+        draggedLiveIndex: draggedLiveIndex,
         targetKey: targetKey,
         zone: zone,
         parentKey: candidate.parentKey,
@@ -563,6 +610,8 @@ class DropZoneResolver<TKey> {
     if (lastResort != null) {
       return _buildTarget(
         draggedKey: draggedKey,
+        draggedParent: draggedParent,
+        draggedLiveIndex: draggedLiveIndex,
         targetKey: targetKey,
         zone: zone,
         parentKey: lastResort.parentKey,
@@ -584,6 +633,8 @@ class DropZoneResolver<TKey> {
   /// every zone and by each ancestor-chain candidate.
   TreeDropTarget<TKey>? _buildTarget({
     required TKey draggedKey,
+    required TKey? draggedParent,
+    required int Function() draggedLiveIndex,
     required TKey targetKey,
     required TreeDropZone zone,
     required TKey? parentKey,
@@ -617,11 +668,10 @@ class DropZoneResolver<TKey> {
     // live list with dragged removed and re-inserted. If dragged sits
     // before rawIndex in the live list, subtract 1 to account for the
     // implicit removal.
-    final currentParent = treeController.getParent(draggedKey);
-    final isSameParent = currentParent == parentKey;
+    final isSameParent = draggedParent == parentKey;
     int indexInFinalList = rawIndex;
     if (isSameParent) {
-      final currentIndex = treeController.getIndexInParent(draggedKey);
+      final currentIndex = draggedLiveIndex();
       if (currentIndex >= 0 && currentIndex < rawIndex) {
         indexInFinalList = rawIndex - 1;
       }
@@ -636,8 +686,7 @@ class DropZoneResolver<TKey> {
     // for two-thirds of the card. The commit path detects the case and
     // mutates nothing. The policy filter is deliberately skipped —
     // "not moving" is not a drop a policy can forbid.
-    if (isSameParent &&
-        indexInFinalList == treeController.getIndexInParent(draggedKey)) {
+    if (isSameParent && indexInFinalList == draggedLiveIndex()) {
       return TreeDropTarget<TKey>(
         targetKey: targetKey,
         zone: zone,

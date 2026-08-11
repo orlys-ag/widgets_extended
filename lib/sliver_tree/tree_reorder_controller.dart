@@ -96,6 +96,10 @@ class TreeReorderController<TKey> extends ChangeNotifier {
 
   /// If set, rejected drop targets are filtered out. Receives the dragged
   /// key, the candidate new parent, and the final-list index.
+  ///
+  /// Must NOT mutate [treeController]: drop resolution invokes it
+  /// mid-resolve, per pointer event, against dragged-key state
+  /// snapshotted once per resolve.
   final bool Function({required TKey movingKey, TKey? newParent, int? index})?
   canAcceptDrop;
 

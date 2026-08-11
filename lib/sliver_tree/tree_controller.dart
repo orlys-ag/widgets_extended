@@ -1127,6 +1127,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return count;
   }
 
+  /// Debug-only: cumulative count of sibling-probe loop iterations
+  /// performed by [getIndexInParent]. Counts iterations rather than calls
+  /// so tests can pin the exact scan budget of hot paths (the drop-zone
+  /// resolver performs several lookups per pointer move, each costing the
+  /// probed key's raw position). Never reset internally; tests zero it
+  /// directly.
+  int debugIndexInParentIterationCount = 0;
+
   /// Returns the zero-based index of [key] within the **live** sibling list
   /// of its parent (or the live root list, if [key] is a root). Returns -1
   /// if [key] is not present or is itself pending deletion.
@@ -1142,6 +1150,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         : (_childListOf(parent) ?? <TKey>[]);
     int liveIndex = 0;
     for (final k in full) {
+      debugIndexInParentIterationCount++;
       if (k == key) return liveIndex;
       if (!_isPendingDeletion(k)) liveIndex++;
     }

@@ -819,4 +819,164 @@ void main() {
       },
     );
   });
+
+  group("getIndexInParent scan budget (perf pin)", () {
+    // Budgets below are EXACT and derived from the scripted layouts: one
+    // counter increment per sibling-probe iteration, and a probe of a key
+    // at raw position p costs p + 1 iterations (the scan early-returns at
+    // the key). Wide lists with tail-positioned probe keys give the
+    // budgets teeth: a reintroduced duplicate scan, or an eager dragged
+    // read on a path that never needs it, overshoots by a wide margin.
+
+    testWidgets(
+      "same-parent above-zone resolve scans the dragged key exactly once",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: TreeAnimationStyle.disabled,
+        );
+        addTearDown(controller.dispose);
+        controller.setRoots([
+          const TreeNode(key: "s1", data: "S1"),
+          const TreeNode(key: "s2", data: "S2"),
+        ]);
+        controller.setChildren("s1", [
+          for (int i = 0; i < 30; i++) TreeNode(key: "i1_$i", data: "I1"),
+        ]);
+        controller.setChildren("s2", [
+          for (int i = 0; i < 30; i++) TreeNode(key: "i2_$i", data: "I2"),
+        ]);
+        controller.expand(key: "s1");
+        controller.expand(key: "s2");
+        final resolver = DropZoneResolver<String>(treeController: controller);
+
+        // Setup sanity: the dragged key sits at the TAIL of a 30-wide
+        // list, so its single scan costs exactly 30 iterations.
+        expect(controller.getIndexInParent("i1_29"), 29);
+
+        controller.debugIndexInParentIterationCount = 0;
+        final target = resolver.resolve(
+          draggedKey: "i1_29",
+          targetKey: "i1_0",
+          targetPaintedY: 0.0,
+          targetExtent: 50.0,
+          pointerY: 5.0,
+        );
+        expect(target?.zone, TreeDropZone.above);
+        expect(target?.parentKey, "s1");
+        expect(target?.indexInFinalList, 0);
+        // 1 iteration for the hovered target (raw position 0) plus 30
+        // for the dragged key, scanned ONCE and memoized across both
+        // _buildTarget reads (unmemoized code paid 30 twice: 61 total).
+        expect(controller.debugIndexInParentIterationCount, 31);
+      },
+    );
+
+    testWidgets("cross-parent resolves never scan the dragged key", (
+      tester,
+    ) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([
+        const TreeNode(key: "s1", data: "S1"),
+        const TreeNode(key: "s2", data: "S2"),
+      ]);
+      controller.setChildren("s1", [
+        for (int i = 0; i < 30; i++) TreeNode(key: "i1_$i", data: "I1"),
+      ]);
+      controller.setChildren("s2", [
+        for (int i = 0; i < 30; i++) TreeNode(key: "i2_$i", data: "I2"),
+      ]);
+      controller.expand(key: "s1");
+      controller.expand(key: "s2");
+      final resolver = DropZoneResolver<String>(treeController: controller);
+
+      // Setup sanity: the dragged key's home list is wide and the key is
+      // at its tail, so an eager or accidental dragged scan would add 30
+      // iterations to either budget below.
+      expect(controller.getIndexInParent("i1_29"), 29);
+
+      // Above zone over the other section's first item: only the hovered
+      // target is scanned (raw position 0 costs 1 iteration).
+      controller.debugIndexInParentIterationCount = 0;
+      final above = resolver.resolve(
+        draggedKey: "i1_29",
+        targetKey: "i2_0",
+        targetPaintedY: 0.0,
+        targetExtent: 50.0,
+        pointerY: 5.0,
+      );
+      expect(above?.zone, TreeDropZone.above);
+      expect(above?.parentKey, "s2");
+      expect(above?.indexInFinalList, 0);
+      expect(controller.debugIndexInParentIterationCount, 1);
+
+      // Into zone: rawIndex is the constant 0, no index is read at all.
+      controller.debugIndexInParentIterationCount = 0;
+      final into = resolver.resolve(
+        draggedKey: "i1_29",
+        targetKey: "i2_0",
+        targetPaintedY: 0.0,
+        targetExtent: 50.0,
+        pointerY: 25.0,
+      );
+      expect(into?.zone, TreeDropZone.into);
+      expect(into?.parentKey, "i2_0");
+      expect(controller.debugIndexInParentIterationCount, 0);
+    });
+
+    testWidgets("below-zone boundary chain scans each level exactly once", (
+      tester,
+    ) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+      // r0 > c0 > d0 > e_0..e_19, with e_19 a triple right-boundary: last
+      // child of d0, which is the only child of c0, which is the only
+      // child of r0. rx serves two purposes: r0 is not the last root, so
+      // the climb terminates on the later-live-sibling check, and rx is a
+      // cross-parent dragged key whose home list must not be scanned.
+      controller.setRoots([
+        const TreeNode(key: "r0", data: "R0"),
+        const TreeNode(key: "rx", data: "RX"),
+      ]);
+      controller.setChildren("r0", [const TreeNode(key: "c0", data: "C0")]);
+      controller.setChildren("c0", [const TreeNode(key: "d0", data: "D0")]);
+      controller.setChildren("d0", [
+        for (int i = 0; i < 20; i++) TreeNode(key: "e_$i", data: "E"),
+      ]);
+      controller.expand(key: "r0");
+      controller.expand(key: "c0");
+      controller.expand(key: "d0");
+      final resolver = DropZoneResolver<String>(treeController: controller);
+
+      // Setup sanity: e_19 is visible and last in its 20-wide list.
+      expect(controller.getVisibleIndex("e_19"), greaterThanOrEqualTo(0));
+      expect(controller.getIndexInParent("e_19"), 19);
+
+      controller.debugIndexInParentIterationCount = 0;
+      final target = resolver.resolve(
+        draggedKey: "rx",
+        targetKey: "e_19",
+        targetPaintedY: 0.0,
+        targetExtent: 50.0,
+        pointerY: 45.0,
+      );
+      // No depth hint: the deepest candidate (next sibling of e_19 under
+      // d0) wins.
+      expect(target?.zone, TreeDropZone.below);
+      expect(target?.parentKey, "d0");
+      expect(target?.indexInFinalList, 20);
+      // 20 iterations for e_19 (raw position 19) plus 1 each for d0, c0
+      // and r0: every boundary level scanned once. The pre-dedupe chain
+      // scanned e_19 and each climbed level twice (46 total), and an
+      // eager dragged read would add the roots scan on top.
+      expect(controller.debugIndexInParentIterationCount, 23);
+    });
+  });
 }
