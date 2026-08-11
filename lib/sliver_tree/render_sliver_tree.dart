@@ -1215,7 +1215,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
     // Step 9: clean up if engine has no slides remaining (Duration.zero
     // short-circuit, all installs were no-ops, etc.).
-    if (!controller.hasActiveSlides) {
+    //
+    // FLIP-only gate, not the composed `hasActiveSlides`: a held make-room
+    // preview keeps the composed flag true for an entire drag, and ghosts
+    // are FLIP artifacts. See `GhostRegistry.pruneSettled`.
+    if (!controller.hasActiveFlipSlides) {
       _composer.ghosts.clearAll();
     }
   }
@@ -2249,10 +2253,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
     // Step 0b — Same for the composer ghost registry. `pruneSettled`
     // handles both freed-key (nid < 0) and settled (both deltas == 0)
-    // entries. When all slides have settled, we additionally drop
+    // entries. When all FLIP slides have settled, we additionally drop
     // everything via `clearAll` so the map shrinks back to empty.
+    //
+    // Both branches are FLIP-only. A held make-room preview keeps the
+    // composed `hasActiveSlides` true for a whole drag, so gating on it
+    // sent every layout down the prune branch, where the composed
+    // criterion then retained any ghost the preview had shifted.
     if (_composer.hasGhosts) {
-      if (!controller.hasActiveSlides) {
+      if (!controller.hasActiveFlipSlides) {
         _composer.ghosts.clearAll();
       } else {
         _composer.ghosts.pruneSettled();

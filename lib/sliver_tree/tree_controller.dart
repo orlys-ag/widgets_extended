@@ -965,6 +965,26 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return base + _preview.deltaForNid(nid);
   }
 
+  /// FLIP-only Y slide delta for the live [nid], EXCLUDING any held
+  /// make-room preview offset. 0.0 when no FLIP slide is in flight for
+  /// [nid].
+  ///
+  /// GHOST-LIFECYCLE READ. Not for painted positions: painted position is
+  /// structural + FLIP + preview, which is [getSlideDeltaNid], and every
+  /// paint, hit-test, snapshot and overreach site must keep using that.
+  /// This exists for the one question that is genuinely FLIP-only:
+  /// whether an edge ghost still has a slide to animate. A ghost is an
+  /// artifact of a FLIP slide (`_ghost_registry.dart`), so a ghost whose
+  /// FLIP delta has reached zero is settled and must retire even while a
+  /// preview holds a non-zero offset on the same row. Reading the
+  /// composed delta there retained ghosts for the whole of a drag, which
+  /// forced every drop-target lookup onto the O(N) full scan
+  /// (`RenderSliverTree.findRowAtPaintedY`).
+  ///
+  /// No X counterpart is needed: [getSlideDeltaXNid] is already FLIP-only
+  /// because previews are Y offsets.
+  double getFlipSlideDeltaNid(int nid) => _slide.deltaForNid(nid);
+
   /// X-axis (cross-axis indent) slide delta for the live [nid], or 0.0
   /// when the node is not currently sliding. Hot-path equivalent of
   /// [getSlideDeltaX] — read on every paint, hit-test, and transform
@@ -1175,6 +1195,23 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// slide-only ticks to [RenderObject.markNeedsPaint] rather than
   /// [RenderObject.markNeedsLayout] based on this flag.
   bool get hasActiveSlides => _slide.hasActive || _preview.hasActive;
+
+  /// Whether any FLIP slide is in flight, EXCLUDING a held make-room
+  /// preview.
+  ///
+  /// GHOST-LIFECYCLE READ, the boolean companion to
+  /// [getFlipSlideDeltaNid]. Because a preview offset is HELD rather than
+  /// decaying, [hasActiveSlides] stays true from a drag's first resolve
+  /// to its release; anything that must observe "the FLIP slides have
+  /// finished" has to read this instead. Two consumers depend on it: the
+  /// render object's edge-ghost cleanup (`clearAll` when no FLIP slide
+  /// remains) and the sliver element's settle-transition layout, which is
+  /// the only thing that schedules that cleanup.
+  ///
+  /// Every OTHER consumer must keep reading [hasActiveSlides]: retention,
+  /// eviction deferral, paint, hit-testing and the painted-truth snapshot
+  /// all care about where rows are painted, and a preview moves them.
+  bool get hasActiveFlipSlides => _slide.hasActive;
 
   /// Whether any in-flight slide has a non-zero X-axis component
   /// (depth-changing reparent). Hot-path render code uses this to skip

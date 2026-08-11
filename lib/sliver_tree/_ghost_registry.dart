@@ -116,13 +116,26 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
 
   /// Lazy-prune entries whose slide has settled or whose key has been
   /// freed. Mirrors the `_phantomClipAnchors` prune pattern.
+  ///
+  /// "Settled" is FLIP-ONLY ([TreeController.getFlipSlideDeltaNid]), not
+  /// the composed delta. A ghost exists to animate a FLIP slide whose
+  /// destination is off-screen, so once that slide reaches zero the ghost
+  /// has nothing left to do; a make-room preview offset on the same row
+  /// is a separate, HELD displacement and must not keep it alive. Reading
+  /// the composed delta here retained settled ghosts for as long as a
+  /// drag held its preview, and a retained ghost forces every
+  /// drop-target lookup onto the O(N) full scan
+  /// (`RenderSliverTree.findRowAtPaintedY`).
+  ///
+  /// The X read needs no equivalent: it is already FLIP-only, because
+  /// previews are Y offsets.
   void pruneSettled() {
     final exits = _entries;
     if (exits == null) return;
     exits.removeWhere((key, _) {
       final nid = _controller.nidOf(key);
       if (nid < 0) return true;
-      return _controller.getSlideDeltaNid(nid) == 0.0 &&
+      return _controller.getFlipSlideDeltaNid(nid) == 0.0 &&
           _controller.getSlideDeltaXNid(nid) == 0.0;
     });
     if (exits.isEmpty) _entries = null;
@@ -141,7 +154,10 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
   }
 
   /// Clears all entries unconditionally. Used by the render layer's
-  /// Step 9 cleanup when `controller.hasActiveSlides` is false.
+  /// Step 9 and Step 0b cleanup when `controller.hasActiveFlipSlides` is
+  /// false. That gate is FLIP-only for the same reason [pruneSettled]'s
+  /// criterion is: a held preview keeps the COMPOSED `hasActiveSlides`
+  /// true for a whole drag, and ghosts belong to FLIP slides.
   void clearAll() {
     _entries = null;
   }

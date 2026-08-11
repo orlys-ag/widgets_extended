@@ -103,6 +103,16 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// layout (scroll, structural mutation, etc.).
   bool _priorTickHadSlides = false;
 
+  /// FLIP-only companion to [_priorTickHadSlides].
+  ///
+  /// The composed mirror above cannot see a FLIP settle that happens
+  /// while a make-room preview is held: a preview offset is HELD, so
+  /// `hasActiveSlides` stays true from a drag's first resolve to its
+  /// release, the composed transition never fires, and the ghost-cleanup
+  /// layout never runs for the whole drag. Ghosts are FLIP artifacts, so
+  /// their cleanup has to observe the FLIP transition specifically.
+  bool _priorTickHadFlipSlides = false;
+
   // ══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
   // ══════════════════════════════════════════════════════════════════════════
@@ -269,13 +279,32 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     final c = widget.controller;
     final active = c.hasActiveAnimations;
     final hasSlides = c.hasActiveSlides;
+    final hasFlipSlides = c.hasActiveFlipSlides;
     if (active || _priorTickHadAnimations) {
       // Extent animations (enter/exit/bulk/op-group) change structural
       // layout; _priorTickHadAnimations covers their settle tick, which
       // fires after the controller cleared its state.
       renderObject.markNeedsLayout();
-    } else if (_priorTickHadSlides && !hasSlides) {
-      // Slide settle transition — one final layout for ghost cleanup.
+    } else if ((_priorTickHadFlipSlides && !hasFlipSlides) ||
+        (_priorTickHadSlides && !hasSlides)) {
+      // Settle transition — one final layout for ghost cleanup.
+      //
+      // EITHER transition, deliberately, and this must stay a single
+      // branch with an OR rather than two markNeedsLayout sites:
+      //
+      // - The FLIP disjunct is the one ghost cleanup needs. Without it, a
+      //   FLIP settle under a held preview schedules nothing and settled
+      //   ghosts survive the entire drag.
+      // - The composed disjunct still covers a preview settling with no
+      //   FLIP active (a drag release with no commit). Dropping it would
+      //   leave that tick matching no branch at all, since the
+      //   paint-only branch below also requires `hasSlides`, and the
+      //   post-settle layout that `_scheduleStaleEviction` rides would
+      //   disappear.
+      //
+      // With no preview in play the two disjuncts flip on the same tick,
+      // so one branch means one layout and the exact per-slide layout
+      // counts stay unchanged (pinned by `slide_paint_only_test.dart`).
       renderObject.markNeedsLayout();
     } else if (hasSlides) {
       // Pure slide tick — paint-only.
@@ -283,6 +312,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     }
     _priorTickHadAnimations = active;
     _priorTickHadSlides = hasSlides;
+    _priorTickHadFlipSlides = hasFlipSlides;
   }
 
   /// Called when a single node's data changed (via [TreeController.updateNode])

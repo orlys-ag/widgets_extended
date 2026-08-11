@@ -113,6 +113,18 @@ mode's collection instance, not the extractor callbacks (`keyOf`,
 `childrenOf`, `parentOf`), which must now be pure functions of their input.
 Pass a new collection instance to signal change, the `ListView.children`
 convention.
+- Fix: starting a drag while a previous drop's slide animations were still
+running left the drag resolving drop targets with an O(rows) scan per pointer
+event, for the whole drag. Edge ghosts (rows whose slide destination is
+off-screen) are retired on FLIP-slide state instead of the composed
+slide-plus-preview state: because a make-room preview offset is HELD for the
+duration of a drag, the composed reads never reported the slide as finished,
+so the cleanup pass was never scheduled and the stale ghosts kept failing the
+fast path's precondition. Most visible on wide lists, where the scan is
+longest. `TreeController` gains `hasActiveFlipSlides` and
+`getFlipSlideDeltaNid` for this; painted positions, hit-testing, retention
+and overreach continue to read the composed `hasActiveSlides` /
+`getSlideDeltaNid` and are unchanged.
 
 ## 0.0.32
 

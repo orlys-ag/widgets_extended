@@ -352,9 +352,12 @@ void main() {
   testWidgets("window-size pin: steady drag over a 1000-row order examines "
       "O(window) rows, not O(N)", (tester) async {
     // Ghost-free by construction: no commit precedes the drag, so no
-    // FLIP slides and no edge ghosts exist (a held preview RETAINS
-    // settled ghosts — see the ghost-prune note in the routing doc — so
-    // starting ghost-free is a test requirement, not a nicety).
+    // FLIP slides and no edge ghosts exist. Starting ghost-free is a test
+    // requirement, not a nicety: any live ghost fails the bounded-scan
+    // precondition and routes to the full scan, which would void the
+    // window pin below. (Ghosts no longer OUTLIVE their slide under a
+    // held preview, fixed 2026-08-11 with backlog item B17, but they
+    // still force the full scan for as long as they are alive.)
     final controller = TreeController<String, String>(
       vsync: tester,
       animationStyle: TreeAnimationStyle.disabled,
