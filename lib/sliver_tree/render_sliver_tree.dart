@@ -3329,8 +3329,27 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         final ghostSlideX = hasXSlides
             ? controller.getSlideDeltaXNid(ghostNid)
             : 0.0;
-        if (ghostSlide == 0.0 && ghostSlideX == 0.0) {
-          // Settled — Step 0b reaps on next layout.
+        // Settled — Step 0b reaps on next layout.
+        //
+        // FLIP-only, and it MUST match `GhostRegistry.pruneSettled`'s
+        // criterion: that decides whether the row stays a ghost, this
+        // decides whether it paints as one, so two different deltas here
+        // let the pair disagree. Both directions are reachable:
+        //
+        //   - FLIP live, composed zero (a preview offset cancelling the
+        //     delta): the registry keeps the ghost, so paint must draw it
+        //     rather than drop the row for a frame. Composed zero puts it
+        //     at the edge base, which is exactly where it belongs.
+        //   - FLIP settled, composed non-zero (a preview offset on a
+        //     finished slide): the ghost is retiring, and painting it at
+        //     the edge displaced by a make-room offset would be wrong.
+        //     The reap lands on the next layout, which can be a frame
+        //     away while other slides keep ticking paint-only.
+        //
+        // The painted offset below stays COMPOSED: painted position is
+        // structural + FLIP + preview everywhere, without exception.
+        if (controller.getFlipSlideDeltaNid(ghostNid) == 0.0 &&
+            ghostSlideX == 0.0) {
           continue;
         }
         final ghostChild = getChildForNode(ghostKey);
