@@ -854,7 +854,7 @@ void main() {
         );
         sync = TreeSyncController(
           treeController: controller,
-          preserveExpansion: true,
+          expansionMemory: 1024,
         );
         addTearDown(() {
           sync.dispose();
@@ -877,12 +877,12 @@ void main() {
         expect(controller.visibleNodes, ["a", "a1", "b"]);
         expect(controller.isExpanded("a"), true);
 
-        // Simulate what SyncedSliverTree does on preserveExpansion change:
+        // Simulate what SyncedSliverTree does on expansionMemory change:
         // dispose old sync controller, create new one, re-sync.
         sync.dispose();
         sync = TreeSyncController(
           treeController: controller,
-          preserveExpansion: false,
+          expansionMemory: 0,
         );
         sync.initializeTracking();
 
@@ -905,7 +905,7 @@ void main() {
         );
         sync = TreeSyncController(
           treeController: controller,
-          preserveExpansion: true,
+          expansionMemory: 1024,
         );
         addTearDown(() {
           sync.dispose();
@@ -921,7 +921,7 @@ void main() {
         sync.dispose();
         sync = TreeSyncController(
           treeController: controller,
-          preserveExpansion: false,
+          expansionMemory: 0,
         );
         sync.initializeTracking();
 
@@ -1074,7 +1074,7 @@ void main() {
     );
   });
 
-  group("maxExpansionMemorySize == 0 disables expansion memory", () {
+  group("expansionMemory == 0 disables expansion memory", () {
     testWidgets("memory does not grow when capacity is 0", (tester) async {
       controller = TreeController<String, String>(
         vsync: tester,
@@ -1082,7 +1082,7 @@ void main() {
       );
       sync = TreeSyncController(
         treeController: controller,
-        maxExpansionMemorySize: 0,
+        expansionMemory: 0,
       );
       addTearDown(() {
         sync.dispose();
@@ -1114,9 +1114,18 @@ void main() {
         controller.isExpanded("p"),
         false,
         reason:
-            "With maxExpansionMemorySize=0, expansion state must not be "
+            "With expansionMemory=0, expansion state must not be "
             "remembered across remove/re-add per the documented contract.",
       );
+    });
+  });
+
+  group("defaultExpansionMemory", () {
+    test("is 1024", () {
+      // Literal pin, deliberately: the subject of this test IS the default
+      // value, which the widget layer forwards and the sectioned module's
+      // preserveExpansion bool maps onto.
+      expect(TreeSyncController.defaultExpansionMemory, 1024);
     });
   });
 

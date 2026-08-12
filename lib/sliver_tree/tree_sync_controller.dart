@@ -47,39 +47,37 @@ import 'types.dart';
 class TreeSyncController<TKey, TData> {
   /// Creates a sync controller.
   ///
-  /// If [preserveExpansion] is true (the default), the controller remembers
-  /// expansion state of removed nodes and restores it when they are re-added.
+  /// [expansionMemory] bounds how many removed nodes' expansion states
+  /// are remembered and restored when they are re-added; 0 disables the
+  /// memory entirely.
   TreeSyncController({
     required TreeController<TKey, TData> treeController,
-    this.preserveExpansion = true,
-    this.maxExpansionMemorySize = 1024,
+    this.expansionMemory = defaultExpansionMemory,
   }) : _controller = treeController;
+
+  /// The default [expansionMemory] capacity. Named so the layers that
+  /// forward it (`SyncedSliverTree.expansionMemory`, the sectioned
+  /// module's `preserveExpansion` bool) cannot drift from it silently.
+  static const int defaultExpansionMemory = 1024;
 
   final TreeController<TKey, TData> _controller;
 
-  /// Whether to remember and restore expansion state across remove/re-add
-  /// cycles.
-  final bool preserveExpansion;
+  /// Maximum number of entries in [_rememberedExpansion]. When exceeded,
+  /// the oldest entries are evicted (FIFO via [LinkedHashMap] insertion
+  /// order). 0 disables expansion memory entirely: nothing is remembered
+  /// or restored across remove/re-add cycles.
+  final int expansionMemory;
 
-  /// Maximum number of entries in [_expansionMemory]. When exceeded, the
-  /// oldest entries are evicted (FIFO via [LinkedHashMap] insertion order).
-  /// Set to 0 to disable expansion memory entirely; every observable
-  /// effect of [preserveExpansion] flows through the memory this bounds,
-  /// so 0 is equivalent to `preserveExpansion: false`.
-  final int maxExpansionMemorySize;
-
-  /// The single gate for expansion memory: both knobs agree it is on.
-  /// Every memory read and write site routes through this, so the two
-  /// flags can never answer differently at different sites. (The read
-  /// sides would no-op on the empty stores either way; routing them
-  /// through the same gate makes that a property of the code rather
-  /// than a consequence of emptiness.)
+  /// The single gate for expansion memory. Every memory read and write
+  /// site routes through this. (The read sides would no-op on the empty
+  /// stores either way; routing them through the same gate makes that a
+  /// property of the code rather than a consequence of emptiness.)
   bool get _memoryEnabled {
-    return preserveExpansion && maxExpansionMemorySize > 0;
+    return expansionMemory > 0;
   }
 
   /// Remembered expansion states for removed nodes.
-  final Map<TKey, bool> _expansionMemory = {};
+  final Map<TKey, bool> _rememberedExpansion = {};
 
   /// Parents whose child list was emptied by a sync while the parent
   /// itself survived **collapsed** (e.g. a filter-sync temporarily
@@ -88,10 +86,10 @@ class TreeSyncController<TKey, TData> {
   /// This is the suppress signal for the "gained first children"
   /// auto-expand heuristic (surfaced through [snapshotRememberedKeys]):
   /// when the children return in a later sync, the heuristic must not
-  /// override the user's deliberate collapse. [_expansionMemory] cannot
+  /// override the user's deliberate collapse. [_rememberedExpansion] cannot
   /// carry this — the parent is never removed, so a memory entry for it
   /// would be consumed by the restore/prune passes of the very sync that
-  /// recorded it. Bounded by [maxExpansionMemorySize] (FIFO eviction).
+  /// recorded it. Bounded by [expansionMemory] (FIFO eviction).
   final Set<TKey> _emptiedWhileCollapsed = <TKey>{};
 
   /// During a [syncRoots] call with [childrenOf], holds the union of all
@@ -120,7 +118,7 @@ class TreeSyncController<TKey, TData> {
   /// If [childrenOf] is provided, it is called recursively for every node
   /// in the desired tree — roots and their descendants — to sync children
   /// at all depths. Return an empty list for leaf nodes. If a re-added node
-  /// was previously expanded (and [preserveExpansion] is true), it is
+  /// was previously expanded (and [expansionMemory] is nonzero), it is
   /// automatically expanded after its children are set.
   ///
   /// [childrenOf] must be a PURE function of its argument. The desired
@@ -505,7 +503,7 @@ class TreeSyncController<TKey, TData> {
     if (_childrenExactMatch(parentKey, desired)) {
       if (_memoryEnabled &&
           !_deferExpansionRestore &&
-          _expansionMemory.containsKey(parentKey)) {
+          _rememberedExpansion.containsKey(parentKey)) {
         _restoreExpansion(parentKey, animate: animate);
       }
       return;
@@ -528,7 +526,7 @@ class TreeSyncController<TKey, TData> {
       if (desiredKeys.isEmpty && currentKeys.isNotEmpty) {
         if (!_controller.isExpanded(parentKey)) {
           _emptiedWhileCollapsed.add(parentKey);
-          while (_emptiedWhileCollapsed.length > maxExpansionMemorySize) {
+          while (_emptiedWhileCollapsed.length > expansionMemory) {
             _emptiedWhileCollapsed.remove(_emptiedWhileCollapsed.first);
           }
         }
@@ -697,7 +695,7 @@ class TreeSyncController<TKey, TData> {
     // in a later sync would remain silently collapsed.
     if (_memoryEnabled &&
         !_deferExpansionRestore &&
-        _expansionMemory.containsKey(parentKey)) {
+        _rememberedExpansion.containsKey(parentKey)) {
       _restoreExpansion(parentKey, animate: animate);
     }
   }
@@ -837,7 +835,7 @@ class TreeSyncController<TKey, TData> {
 
   /// Clears all remembered expansion state.
   void clearExpansionMemory() {
-    _expansionMemory.clear();
+    _rememberedExpansion.clear();
     _emptiedWhileCollapsed.clear();
   }
 
@@ -853,12 +851,12 @@ class TreeSyncController<TKey, TData> {
   /// [SyncedSliverTree]) that need to distinguish a genuinely new key
   /// from one that is being re-added after having been filtered out.
   Set<TKey> snapshotRememberedKeys() {
-    return {..._expansionMemory.keys, ..._emptiedWhileCollapsed};
+    return {..._rememberedExpansion.keys, ..._emptiedWhileCollapsed};
   }
 
   /// Releases resources. Call before disposing the underlying [TreeController].
   void dispose() {
-    _expansionMemory.clear();
+    _rememberedExpansion.clear();
     _emptiedWhileCollapsed.clear();
   }
 
@@ -1031,18 +1029,18 @@ class TreeSyncController<TKey, TData> {
     final stack = <TKey>[key];
     while (stack.isNotEmpty) {
       final current = stack.removeLast();
-      _expansionMemory[current] = _controller.isExpanded(current);
+      _rememberedExpansion[current] = _controller.isExpanded(current);
       for (final childKey in _controller.getChildren(current)) {
         stack.add(childKey);
       }
     }
     // Evict oldest entries if over capacity.
-    while (_expansionMemory.length > maxExpansionMemorySize) {
-      _expansionMemory.remove(_expansionMemory.keys.first);
+    while (_rememberedExpansion.length > expansionMemory) {
+      _rememberedExpansion.remove(_rememberedExpansion.keys.first);
     }
   }
 
-  /// Removes [_expansionMemory] entries for keys that are currently live
+  /// Removes [_rememberedExpansion] entries for keys that are currently live
   /// in the tree controller. Their expansion state is already live in the
   /// controller, so remembering it is redundant.
   ///
@@ -1050,8 +1048,8 @@ class TreeSyncController<TKey, TData> {
   /// considered live — their data still exists in the controller but will
   /// be purged when the animation completes.
   void _pruneExpansionMemory() {
-    if (_expansionMemory.isEmpty) return;
-    _expansionMemory.removeWhere((key, wasExpanded) {
+    if (_rememberedExpansion.isEmpty) return;
+    _rememberedExpansion.removeWhere((key, wasExpanded) {
       if (_controller.getNodeData(key) == null) return false;
       if (_controller.isExiting(key)) return false;
       // If the remembered state says expanded but the node currently has
@@ -1076,16 +1074,16 @@ class TreeSyncController<TKey, TData> {
   /// permanently collapsed on re-add.
   void _restoreExpansion(TKey key, {required bool animate}) {
     if (!_memoryEnabled) return;
-    final wasExpanded = _expansionMemory[key];
+    final wasExpanded = _rememberedExpansion[key];
     if (wasExpanded != true) {
-      _expansionMemory.remove(key);
+      _rememberedExpansion.remove(key);
       return;
     }
     if (!_controller.hasChildren(key)) {
       // Keep memory for the next sync — expand() now would be a no-op.
       return;
     }
-    _expansionMemory.remove(key);
+    _rememberedExpansion.remove(key);
     _controller.expand(key: key, animate: animate);
   }
 

@@ -147,9 +147,9 @@ same `onReorder`.
 - `initiallyExpanded: true` (the default) opens the whole tree on first
   sync; `initialNodeExpansion: (key, item) => bool?` overrides it per node
   (return null to defer).
-- `preserveExpansion: true` (the default) remembers expansion across
-  remove/re-add cycles, and a user's deliberate collapse is never
-  overridden by later syncs.
+- `expansionMemory` (default 1024) remembers up to that many removed
+  nodes' expansion states across remove/re-add cycles (0 disables it),
+  and a user's deliberate collapse is never overridden by later syncs.
 - `onExpansionChanged: (key, isExpanded) { ... }` is the hook for
   persisting expansion state.
 

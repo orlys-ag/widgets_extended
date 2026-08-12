@@ -1,5 +1,5 @@
 /// Tests for plan item T5: `SyncedSliverTree` forwards
-/// `maxExpansionMemorySize` to its internal [TreeSyncController], so
+/// `expansionMemory` to its internal [TreeSyncController], so
 /// callers can bound (or disable) the expansion memory that survives
 /// remove/re-add cycles.
 ///
@@ -32,37 +32,59 @@ const List<_Node> _withoutA = <_Node>[_Node("b")];
 class _Harness extends StatelessWidget {
   const _Harness({
     required this.roots,
-    required this.maxExpansionMemorySize,
+    this.expansionMemory,
     this.onControllerCreated,
   });
 
   final List<_Node> roots;
-  final int maxExpansionMemorySize;
+
+  /// Null leaves the widget's own default in force, which is what the
+  /// default-forwarding test below is about; passing it explicitly would
+  /// test the harness instead of the widget.
+  final int? expansionMemory;
   final void Function(TreeController<String, _Node> controller)?
   onControllerCreated;
 
   @override
   Widget build(BuildContext context) {
+    final capacity = expansionMemory;
     return MaterialApp(
       home: Scaffold(
         body: CustomScrollView(
           slivers: [
-            SyncedSliverTree<String, _Node>.hierarchy(
-              roots: roots,
-              keyOf: (item) {
-                return item.id;
-              },
-              childrenOf: (item) {
-                return item.children;
-              },
-              initiallyExpanded: false,
-              maxExpansionMemorySize: maxExpansionMemorySize,
-              animationStyle: TreeAnimationStyle.disabled,
-              onControllerCreated: onControllerCreated,
-              itemBuilder: (context, node) {
-                return SizedBox(height: 48, child: Text(node.key));
-              },
-            ),
+            if (capacity == null)
+              SyncedSliverTree<String, _Node>.hierarchy(
+                roots: roots,
+                keyOf: (item) {
+                  return item.id;
+                },
+                childrenOf: (item) {
+                  return item.children;
+                },
+                initiallyExpanded: false,
+                animationStyle: TreeAnimationStyle.disabled,
+                onControllerCreated: onControllerCreated,
+                itemBuilder: (context, node) {
+                  return SizedBox(height: 48, child: Text(node.key));
+                },
+              )
+            else
+              SyncedSliverTree<String, _Node>.hierarchy(
+                roots: roots,
+                keyOf: (item) {
+                  return item.id;
+                },
+                childrenOf: (item) {
+                  return item.children;
+                },
+                initiallyExpanded: false,
+                expansionMemory: capacity,
+                animationStyle: TreeAnimationStyle.disabled,
+                onControllerCreated: onControllerCreated,
+                itemBuilder: (context, node) {
+                  return SizedBox(height: 48, child: Text(node.key));
+                },
+              ),
           ],
         ),
       ),
@@ -71,14 +93,14 @@ class _Harness extends StatelessWidget {
 }
 
 void main() {
-  testWidgets("maxExpansionMemorySize: 0 disables expansion memory across a "
+  testWidgets("expansionMemory: 0 disables expansion memory across a "
       "remove/re-add cycle", (tester) async {
     TreeController<String, _Node>? controller;
 
     await tester.pumpWidget(
       _Harness(
         roots: _withA,
-        maxExpansionMemorySize: 0,
+        expansionMemory: 0,
         onControllerCreated: (c) {
           controller = c;
         },
@@ -101,7 +123,7 @@ void main() {
 
     // Remove the expanded subtree, then bring it back.
     await tester.pumpWidget(
-      const _Harness(roots: _withoutA, maxExpansionMemorySize: 0),
+      const _Harness(roots: _withoutA, expansionMemory: 0),
     );
     await tester.pumpAndSettle();
     expect(
@@ -111,7 +133,7 @@ void main() {
     );
 
     await tester.pumpWidget(
-      const _Harness(roots: _withA, maxExpansionMemorySize: 0),
+      const _Harness(roots: _withA, expansionMemory: 0),
     );
     await tester.pumpAndSettle();
 
@@ -124,7 +146,7 @@ void main() {
   });
 
   testWidgets(
-    "a nonzero maxExpansionMemorySize restores expansion across the same "
+    "a nonzero expansionMemory restores expansion across the same "
     "cycle",
     (tester) async {
       TreeController<String, _Node>? controller;
@@ -134,7 +156,7 @@ void main() {
       await tester.pumpWidget(
         _Harness(
           roots: _withA,
-          maxExpansionMemorySize: 1024,
+          expansionMemory: 1024,
           onControllerCreated: (c) {
             controller = c;
           },
@@ -147,13 +169,13 @@ void main() {
       expect(find.text("a1"), findsOneWidget);
 
       await tester.pumpWidget(
-        const _Harness(roots: _withoutA, maxExpansionMemorySize: 1024),
+        const _Harness(roots: _withoutA, expansionMemory: 1024),
       );
       await tester.pumpAndSettle();
       expect(find.text("a"), findsNothing);
 
       await tester.pumpWidget(
-        const _Harness(roots: _withA, maxExpansionMemorySize: 1024),
+        const _Harness(roots: _withA, expansionMemory: 1024),
       );
       await tester.pumpAndSettle();
 
@@ -166,14 +188,14 @@ void main() {
     },
   );
 
-  testWidgets("changing maxExpansionMemorySize at runtime rebuilds the sync "
+  testWidgets("changing expansionMemory at runtime rebuilds the sync "
       "controller and drops what it had remembered", (tester) async {
     TreeController<String, _Node>? controller;
 
     await tester.pumpWidget(
       _Harness(
         roots: _withA,
-        maxExpansionMemorySize: 1024,
+        expansionMemory: 1024,
         onControllerCreated: (c) {
           controller = c;
         },
@@ -188,7 +210,7 @@ void main() {
     // Flip the bound to 0 on a later build: the sync controller is
     // recreated, so nothing is remembered from here on.
     await tester.pumpWidget(
-      const _Harness(roots: _withA, maxExpansionMemorySize: 0),
+      const _Harness(roots: _withA, expansionMemory: 0),
     );
     await tester.pumpAndSettle();
     expect(
@@ -200,11 +222,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      const _Harness(roots: _withoutA, maxExpansionMemorySize: 0),
+      const _Harness(roots: _withoutA, expansionMemory: 0),
     );
     await tester.pumpAndSettle();
     await tester.pumpWidget(
-      const _Harness(roots: _withA, maxExpansionMemorySize: 0),
+      const _Harness(roots: _withA, expansionMemory: 0),
     );
     await tester.pumpAndSettle();
 
@@ -214,4 +236,41 @@ void main() {
       reason: "the new bound must govern the remove/re-add cycle",
     );
   });
+
+  testWidgets(
+    "the unset default forwards TreeSyncController.defaultExpansionMemory, "
+    "so memory is on without setting anything",
+    (tester) async {
+      TreeController<String, _Node>? controller;
+
+      await tester.pumpWidget(
+        _Harness(
+          roots: _withA,
+          onControllerCreated: (c) {
+            controller = c;
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      controller!.expand(key: "a", animate: false);
+      await tester.pumpAndSettle();
+      expect(find.text("a1"), findsOneWidget, reason: "sanity: expanded");
+
+      await tester.pumpWidget(const _Harness(roots: _withoutA));
+      await tester.pumpAndSettle();
+      expect(find.text("a"), findsNothing, reason: "sanity: removed");
+
+      await tester.pumpWidget(const _Harness(roots: _withA));
+      await tester.pumpAndSettle();
+
+      expect(
+        controller!.isExpanded("a"),
+        isTrue,
+        reason:
+            "the widget's default must forward a nonzero capacity, so the "
+            "controller and widget defaults cannot drift apart silently",
+      );
+    },
+  );
 }

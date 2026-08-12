@@ -202,8 +202,9 @@ Widget _buildRow(BuildContext context, TreeItemView<String, Task> view) {
 - `initialNodeExpansion: (key, item) => bool?` overrides it per node. Return
   null to defer to the blanket flag. It is an **initial** policy: a user's
   later toggle always wins.
-- `preserveExpansion` (default `true`) remembers expansion across
-  remove/re-add cycles, bounded by `maxExpansionMemorySize`.
+- `expansionMemory` (default `1024`) bounds how many removed nodes'
+  expansion states are remembered and restored on re-add; `0` disables
+  the memory.
 - `onExpansionChanged(key, isExpanded)` fires for user toggles, imperative
   calls and sync-driven expansion alike. It deliberately stays silent for the
   widget's own initial expansion pass, so restoring persisted state does not

@@ -242,13 +242,12 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   const SyncedSliverTree({
     required Iterable<SyncedTreeNode<TKey, TItem>> tree,
     required this.itemBuilder,
-    this.preserveExpansion = true,
+    this.expansionMemory = TreeSyncController.defaultExpansionMemory,
     this.initiallyExpanded = true,
     this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
-    this.maxExpansionMemorySize = 1024,
     this.initialNodeExpansion,
     this.onControllerCreated,
     this.onExpansionChanged,
@@ -272,13 +271,12 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required TKey Function(TItem item) keyOf,
     required Iterable<TItem> Function(TItem item) childrenOf,
     required this.itemBuilder,
-    this.preserveExpansion = true,
+    this.expansionMemory = TreeSyncController.defaultExpansionMemory,
     this.initiallyExpanded = true,
     this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
-    this.maxExpansionMemorySize = 1024,
     this.initialNodeExpansion,
     this.onControllerCreated,
     this.onExpansionChanged,
@@ -302,13 +300,12 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required TKey Function(TItem item) keyOf,
     required TKey? Function(TItem item) parentOf,
     required this.itemBuilder,
-    this.preserveExpansion = true,
+    this.expansionMemory = TreeSyncController.defaultExpansionMemory,
     this.initiallyExpanded = true,
     this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
-    this.maxExpansionMemorySize = 1024,
     this.initialNodeExpansion,
     this.onControllerCreated,
     this.onExpansionChanged,
@@ -333,8 +330,16 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// Builds the widget for each visible node.
   final TreeItemBuilder<TKey, TItem> itemBuilder;
 
-  /// Whether to preserve expansion state when nodes are removed and re-added.
-  final bool preserveExpansion;
+  /// Maximum number of nodes whose expansion state is remembered across
+  /// remove/re-add cycles, so a re-added node comes back with the
+  /// expansion the user gave it. Forwarded to
+  /// [TreeSyncController.expansionMemory].
+  ///
+  /// 0 disables expansion memory entirely: every node re-enters collapsed
+  /// (subject to the initial-expansion policy), exactly as if it had
+  /// never been seen. Changing the value at runtime rebuilds the internal
+  /// sync controller, which discards whatever it had remembered so far.
+  final int expansionMemory;
 
   /// Whether nodes should be expanded when they first appear.
   ///
@@ -354,8 +359,8 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// A node's own expansion state always wins over this policy once it
   /// exists: this is an INITIAL policy, so later user toggles are never
   /// overridden, and a node removed and re-added while
-  /// [preserveExpansion] is on comes back with its remembered state rather
-  /// than the policy's answer.
+  /// [expansionMemory] is nonzero comes back with its remembered state
+  /// rather than the policy's answer.
   ///
   /// Must be a pure function of its inputs. Like the other callbacks it is
   /// excluded from the rebuild identity check (see "Rebuild convention"),
@@ -378,18 +383,6 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// Whether to wrap each row in a [RepaintBoundary]. Forwarded to
   /// [SliverTree.addRepaintBoundaries].
   final bool addRepaintBoundaries;
-
-  /// Maximum number of nodes whose expansion state is remembered across
-  /// remove/re-add cycles. Forwarded to
-  /// [TreeSyncController.maxExpansionMemorySize].
-  ///
-  /// Only consulted when [preserveExpansion] is true. Setting 0 disables
-  /// expansion memory entirely; every observable effect of
-  /// [preserveExpansion] flows through that memory, so 0 is equivalent to
-  /// `preserveExpansion: false`. Changing this value rebuilds the
-  /// internal sync controller, which discards whatever it had remembered
-  /// so far.
-  final int maxExpansionMemorySize;
 
   /// Called once with the internal [TreeController], right after the first
   /// sync and the initial expansion pass, so the controller is already in
@@ -716,8 +709,7 @@ class _SyncedSliverTreeState<TKey, TItem>
   TreeSyncController<TKey, TItem> _createSyncController() {
     return TreeSyncController<TKey, TItem>(
       treeController: _treeController,
-      preserveExpansion: widget.preserveExpansion,
-      maxExpansionMemorySize: widget.maxExpansionMemorySize,
+      expansionMemory: widget.expansionMemory,
     );
   }
 
@@ -758,8 +750,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     // expression rather than a rule restated in three places.
     var needsSync = _syncGate?.isDeferred ?? false;
 
-    if (widget.preserveExpansion != oldWidget.preserveExpansion ||
-        widget.maxExpansionMemorySize != oldWidget.maxExpansionMemorySize) {
+    if (widget.expansionMemory != oldWidget.expansionMemory) {
       // Recreated EAGERLY, even mid-drag. The sync controller touches no
       // tree structure: `initializeTracking` is a no-op and `dispose`
       // only clears two memory maps. Only its trailing diff is deferred,

@@ -1,5 +1,20 @@
 ## Unreleased
 
+- **BREAKING** `preserveExpansion` and `maxExpansionMemorySize` are merged
+into one parameter, `expansionMemory`, on `TreeSyncController` and all three
+`SyncedSliverTree` constructors: the maximum number of removed nodes whose
+expansion state is remembered for restore on re-add, with 0 disabling the
+memory entirely. The pair expressed one axis behind a single internal gate,
+which left dead states (`preserveExpansion: false` with a capacity, or `true`
+with 0); the merge makes them unrepresentable. Migration:
+`preserveExpansion: false` becomes `expansionMemory: 0`;
+`maxExpansionMemorySize: N` becomes `expansionMemory: N`; both set become
+`expansionMemory: preserveExpansion ? N : 0`; untouched defaults need
+nothing. The default lives in `TreeSyncController.defaultExpansionMemory`
+(1024). `SectionedSliverList.preserveExpansion` and
+`SectionedListController.preserveExpansion` are unchanged: the sectioned
+module never exposed the capacity, so its bool has no dead state; it now maps
+onto the shared default internally.
 - Added `TreeReorderConfig.enabled` (default true): the tree-wide runtime
 reorder toggle. Config contents are live on rebuild, so flipping it with app
 state (an edit mode) disarms every handle, withdraws the reorder semantics
@@ -24,9 +39,6 @@ disabled and below-boundary drops resolve at the deepest legal level. Pass
 now live on rebuild instead of silently read once at construction. The
 backing `TreeReorderController` fields are mutable; each value is captured
 per drag session at `startDrag`, so a change applies from the next drag.
-- `TreeSyncController`'s expansion-memory gating is unified internally, and
-`maxExpansionMemorySize: 0` is documented as equivalent to
-`preserveExpansion: false`. No behavior change.
 - Fix: dragging an EXPANDED parent now carries its whole visible subtree: the
 in-place rows all hide, the floating proxy stacks a clone per visible
 descendant (captured frozen at lift; drawing capped at one viewport), and all
@@ -115,7 +127,7 @@ pass is deliberately silent), `initialNodeExpansion` (per-node initial
 policy `(key, item) -> bool?`, null defers to `initiallyExpanded`; never
 overrides a user toggle or remembered state), `onControllerCreated` (one-shot
 handover of the internal `TreeController` after the first sync; do not
-dispose it), and `maxExpansionMemorySize` (default 1024; 0 disables expansion
+dispose it), and `expansionMemory` (default 1024; 0 disables expansion
 memory).
 - **BREAKING (behavior)** the no-op rebuild fast path compares only the
 mode's collection instance, not the extractor callbacks (`keyOf`,
