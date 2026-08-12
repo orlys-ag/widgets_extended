@@ -179,7 +179,7 @@ parameters otherwise:
 SyncedSliverTree<String, Row>.flat(
   items: rows,
   keyOf: (r) => r.id,
-  parentOf: (r) => r.parentId, // null = root
+  parentOf: (r) => r.parentId, // null = root; unknown key = ArgumentError
   itemBuilder: ...,
 )
 

@@ -112,9 +112,13 @@ _TaskTree _model = _initialModel();
 late List<SyncedTreeNode<String, Task>> _treeInput = _buildTreeInput();
 ```
 
-Every mode validates at sync time: dangling keys, duplicate children, a node
-under two parents, cycles, and (in `.flat`) unreachable nodes all throw
-`ArgumentError` naming the offending key rather than misrendering later.
+Every mode validates at sync time: duplicate keys, duplicate children, a node
+under two parents, cycles, and (in `.flat`) missing parent keys and
+unreachable nodes all throw `ArgumentError` naming the offending keys rather
+than misrendering later. In `.flat`, returning null from `parentOf` is the
+explicit "this item is a root": a filter that removes a parent while keeping
+its children guards the stored parent key with a set of the live keys and
+returns null for filtered-out parents.
 
 ---
 

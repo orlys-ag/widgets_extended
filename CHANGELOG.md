@@ -1,5 +1,14 @@
 ## Unreleased
 
+- **BREAKING** `SyncedSliverTree.flat` now throws `ArgumentError` when
+`parentOf` returns a key that is absent from `items`, listing every offending
+(child, parent) pair; such items used to be silently treated as roots, which
+hid typo'd and stale parent keys. There is no bypass flag by design:
+returning null from `parentOf` is the explicit way to make an item a root,
+so a filter flow that removes a parent while keeping its children guards the
+stored parent key with a set of the live keys and returns null for
+filtered-out parents. Mutual parent cycles keep their existing "unreachable
+nodes" error.
 - **BREAKING** `preserveExpansion` and `maxExpansionMemorySize` are merged
 into one parameter, `expansionMemory`, on `TreeSyncController` and all three
 `SyncedSliverTree` constructors: the maximum number of removed nodes whose

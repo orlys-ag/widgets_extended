@@ -158,6 +158,78 @@ void main() {
       );
     });
 
+    test("rejects a parent key absent from items, naming child and parent", () {
+      // Promoted repro: this was the one silent forgiveness among the
+      // normalizers (the item used to be quietly treated as a root).
+      expect(
+        () => normalizeFlat<String, String>(
+          items: const ["orphaned", "a"],
+          keyOf: (item) => item,
+          parentOf: (item) => item == "orphaned" ? "not-in-items" : null,
+        ),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            "message",
+            allOf(contains("orphaned"), contains("not-in-items")),
+          ),
+        ),
+      );
+    });
+
+    test("rejects all missing-parent pairs in one error", () {
+      // A filtering bug typically orphans many items at once; naming only
+      // the first would hide the blast radius.
+      expect(
+        () => normalizeFlat<String, String>(
+          items: const ["c1", "c2", "r"],
+          keyOf: (item) => item,
+          parentOf: (item) {
+            return switch (item) {
+              "c1" => "m1",
+              "c2" => "m2",
+              _ => null,
+            };
+          },
+        ),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            "message",
+            allOf(
+              contains("c1"),
+              contains("m1"),
+              contains("c2"),
+              contains("m2"),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test("the live-key guard idiom re-roots filtered orphans deliberately", () {
+      // The migration recipe the error message teaches, pinned as working:
+      // a filter flow forgives exactly the orphans it created by returning
+      // null for parents it filtered out. Passes before and after the
+      // strictness change, deliberately; its value is the recipe.
+      const items = ["orphaned", "a"];
+      final liveKeys = items.toSet();
+      String? storedParentOf(String item) {
+        return item == "orphaned" ? "not-in-items" : null;
+      }
+
+      final normalized = normalizeFlat<String, String>(
+        items: items,
+        keyOf: (item) => item,
+        parentOf: (item) {
+          final parent = storedParentOf(item);
+          return parent != null && liveKeys.contains(parent) ? parent : null;
+        },
+      );
+      expect(_keys(normalized.roots), equals(["orphaned", "a"]));
+      expect(normalized.childrenByParent, isEmpty);
+    });
+
     test("accepts a well-formed flat list and preserves data", () {
       final normalized = normalizeFlat<String, String>(
         items: const ["r", "c"],

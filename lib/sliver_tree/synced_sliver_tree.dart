@@ -292,6 +292,12 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
 
   /// Creates a synced sliver tree from flat items with optional parent keys.
   ///
+  /// A [parentOf] result that names a key absent from [items] throws
+  /// [ArgumentError] at sync time; null is the explicit "this item is a
+  /// root". A filter flow that removes a parent while keeping its
+  /// children returns null for the filtered parent, guarding the stored
+  /// parent key with a set of the live keys.
+  ///
   /// Rebuilds re-diff only when [items] is a different instance than the
   /// previous build's; [keyOf] and [parentOf] must be pure functions of
   /// their input. See "Rebuild convention" on [SyncedSliverTree].

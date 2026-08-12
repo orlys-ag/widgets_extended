@@ -262,9 +262,13 @@ NormalizedTreeInput<TKey, TItem> normalizeHierarchy<TKey, TItem>({
 
 /// Normalizes flat items plus parent keys (the `.flat` input mode).
 ///
-/// Sibling order follows the iteration order of [items]. If [parentOf]
-/// returns a key that is not present in [items], the item is treated as a
-/// root.
+/// Sibling order follows the iteration order of [items]. A [parentOf]
+/// result that names a key absent from [items] is rejected with
+/// [ArgumentError], listing every offending (child, parent) pair.
+/// Returning null is the explicit way to make an item a root: a filter
+/// flow that removes a parent while keeping its children forgives
+/// exactly the orphans it created by guarding the stored parent key with
+/// a set of the live keys and returning null for filtered-out parents.
 NormalizedTreeInput<TKey, TItem> normalizeFlat<TKey, TItem>({
   required Iterable<TItem> items,
   required TKey Function(TItem item) keyOf,
@@ -285,23 +289,35 @@ NormalizedTreeInput<TKey, TItem> normalizeFlat<TKey, TItem>({
 
   final rootNodes = <TreeNode<TKey, TItem>>[];
   final childrenByParent = <TKey, List<TreeNode<TKey, TItem>>>{};
+  // child key -> the missing parent key it named. Collected across the
+  // whole pass and thrown as ONE error: a filtering bug typically
+  // orphans many items at once, and naming only the first would hide
+  // the blast radius. Same list-all shape as the reachability error.
+  final missingParents = <TKey, TKey>{};
   for (final item in orderedItems) {
     final key = keyOf(item);
     final parentKey = parentOf(item);
-    final TKey? effectiveParent =
-        parentKey != null && nodeByKey.containsKey(parentKey)
-        ? parentKey
-        : null;
 
-    if (effectiveParent == null) {
+    if (parentKey == null) {
       rootNodes.add(nodeByKey[key]!);
-    } else {
+    } else if (nodeByKey.containsKey(parentKey)) {
       final children = childrenByParent.putIfAbsent(
-        effectiveParent,
+        parentKey,
         () => <TreeNode<TKey, TItem>>[],
       );
       children.add(nodeByKey[key]!);
+    } else {
+      missingParents[key] = parentKey;
     }
+  }
+  if (missingParents.isNotEmpty) {
+    throw ArgumentError(
+      "SyncedSliverTree.flat: parentOf returned parent keys that are "
+      "absent from items: $missingParents. If this is intentional (a "
+      "filtered-out parent whose children should surface as roots), "
+      "return null from parentOf for those items instead; guard the "
+      "stored parent key with a set of the keys currently in items.",
+    );
   }
 
   // Reachability. Unlike the DFS-based normalizers, the two-pass build
