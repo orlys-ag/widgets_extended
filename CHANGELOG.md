@@ -141,6 +141,14 @@ materialization and the per-row slide probes run only while a slide or a
 held drag preview is actually active. `collapse()` also walks its visible
 descendants once instead of twice. Behavior is unchanged whenever slides
 are active.
+- Perf: `getIndexInParent` is now O(1) amortized instead of an O(siblings)
+scan per call. Drop-target resolution during a drag (several lookups per
+pointer move and per autoscroll tick) and the per-row semantics-action
+builders no longer rescan wide sibling lists: the first lookup after any
+mutation refreshes the touched list once, and every following lookup is a
+constant-time cache read until the next mutation. Most visible dragging
+over wide flat sections. The live-space contract and return values are
+unchanged, including for keys read by a user `comparator` mid-mutation.
 
 ## 0.0.32
 

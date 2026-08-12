@@ -529,6 +529,9 @@ extension _TreeControllerAnimationOps<TKey, TData>
         } else {
           _roots.remove(key);
         }
+        // Raw sibling-list write above (exit-unlink); invalidate cached
+        // live indices.
+        _liveIndexCache.bump();
         // Also purge descendants that were pending deletion but never got
         // their own exit animation (invisible children of a collapsed node).
         // Must collect before purging `key`, since _getDescendants reads

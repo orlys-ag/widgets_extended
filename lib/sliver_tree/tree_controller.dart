@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '_animation_coordinator.dart';
+import '_live_index_cache.dart';
 import '_node_id_registry.dart';
 import '_node_store.dart';
 import '_reorder_preview_engine.dart';
@@ -190,20 +191,38 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// per-nid array describing tree structure. See [NodeStore].
   late final NodeStore<TKey, TData> _store =
       NodeStore<TKey, TData>(onCapacityGrew: _onStoreCapacityGrew)
-        ..onParentChanged = (nid, oldParent, newParent) =>
-            _order.handleParentChanged(nid, oldParent, newParent);
+        ..onParentChanged = (nid, oldParent, newParent) {
+          _order.handleParentChanged(nid, oldParent, newParent);
+          // Live-index cache, defense-in-depth: every setParent today is
+          // accompanied by sibling-list writes that bump at their own
+          // sites; this covers a future setParent-without-list-write
+          // path (see the step 2 plan's channel 3).
+          _liveIndexCache.bump();
+        };
+
+  /// Lazy live-index-in-parent cache backing [getIndexInParent]. Pure
+  /// stamp algebra (see `_live_index_cache.dart` for the validity model);
+  /// the refresh loop lives in [getIndexInParent]. Invalidation protocol:
+  /// every mutating method calls `_liveIndexCache.bump()` immediately
+  /// AFTER each raw-sibling-list write cluster (exit placement is
+  /// load-bearing: a user comparator can read [getIndexInParent]
+  /// mid-mutation, and only a bump AFTER the writes discards that
+  /// refresh), and the pending-deletion forwarders bump on every flip.
+  final LiveIndexCache _liveIndexCache = LiveIndexCache();
 
   /// Shorthand for [NodeStore.nids], used throughout this file and its
   /// part files.
   NodeIdRegistry<TKey> get _nids => _store.nids;
 
   /// Wired into [_store] via [NodeStore.onCapacityGrew]. The controller owns
-  /// no per-nid arrays itself: [_anim] aggregates every sub-coordinator's
-  /// `resizeForCapacity`, and [_order] owns the visible-subtree-size cache
-  /// plus the reverse index.
+  /// no per-nid arrays directly: [_anim] aggregates every sub-coordinator's
+  /// `resizeForCapacity`, [_order] owns the visible-subtree-size cache
+  /// plus the reverse index, and [_liveIndexCache] owns the
+  /// live-index-in-parent arrays.
   void _onStoreCapacityGrew(int newCapacity) {
     _anim.resizeForCapacity(newCapacity);
     _order.resizeForCapacity(newCapacity);
+    _liveIndexCache.resizeForCapacity(newCapacity);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -499,8 +518,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   // Pending deletion
   bool _isPendingDeletion(TKey key) => _anim.isPendingDeletion(key);
-  void _markPendingDeletion(TKey key) => _anim.markPendingDeletion(key);
-  void _clearPendingDeletion(TKey key) => _anim.clearPendingDeletion(key);
+  // A pending-deletion flip changes LIVE indices with no raw-list change,
+  // and this forwarder pair is the chokepoint for every flip (the
+  // coordinator's mark/clear have no other callers; grep-verified in the
+  // step 2 plan), so the live-index cache invalidates here.
+  void _markPendingDeletion(TKey key) {
+    _liveIndexCache.bump();
+    _anim.markPendingDeletion(key);
+  }
+
+  void _clearPendingDeletion(TKey key) {
+    _liveIndexCache.bump();
+    _anim.clearPendingDeletion(key);
+  }
 
   // Full extent table
   double? _fullExtentOf(TKey key) => _anim.fullExtentOf(key);
@@ -1190,11 +1220,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   /// Debug-only: cumulative count of sibling-probe loop iterations
-  /// performed by [getIndexInParent]. Counts iterations rather than calls
-  /// so tests can pin the exact scan budget of hot paths (the drop-zone
-  /// resolver performs several lookups per pointer move, each costing the
-  /// probed key's raw position). Never reset internally; tests zero it
-  /// directly.
+  /// performed by the live-index cache refresh that backs
+  /// [getIndexInParent]. Counts iterations rather than calls so tests can
+  /// pin exact budgets: a cache-hit read costs ZERO iterations, and a
+  /// refresh costs the touched list's FULL raw length (it rebuilds every
+  /// live member's slot, not just the probed key's prefix). Never reset
+  /// internally; tests zero it directly.
   int debugIndexInParentIterationCount = 0;
 
   /// Returns the zero-based index of [key] within the **live** sibling list
@@ -1204,15 +1235,57 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Live-space — not full-list-space — so the returned index directly
   /// matches positions in [liveRootKeys] / [getLiveChildren] and the input
   /// space of [reorderRoots] / [reorderChildren].
+  ///
+  /// O(1) amortized: answers come from [_liveIndexCache]; the first read
+  /// against a list after any mutation refreshes that whole list in one
+  /// pass, and every subsequent read is a stamp check until the next
+  /// mutation anywhere. The slot-stamp check makes the read safe even
+  /// when a parent link and its sibling list transiently disagree
+  /// mid-mutation (the stale slot reads -1, same as the old scan's miss).
   int getIndexInParent(TKey key) {
     if (!_hasKey(key) || _isPendingDeletion(key)) return -1;
     final parent = _parentKeyOfKey(key);
+    final int parentNid = parent == null ? kRootListParentNid : nidOf(parent);
+    if (!_liveIndexCache.isParentFresh(parentNid)) {
+      final List<TKey> full = parent == null
+          ? _roots
+          : (_childListOf(parent) ?? const []);
+      _liveIndexCache.beginRefresh(parentNid);
+      int liveIndex = 0;
+      for (final k in full) {
+        debugIndexInParentIterationCount++;
+        if (_isPendingDeletion(k)) continue;
+        _liveIndexCache.writeSlot(nidOf(k), liveIndex);
+        liveIndex++;
+      }
+    }
+    final int result = _liveIndexCache.readSlot(nidOf(key));
+    assert(() {
+      if (debugFullConsistencyChecks) {
+        final int scanned = _debugScanIndexInParent(key);
+        assert(
+          result == scanned,
+          "live-index cache diverged for $key: cached $result, scan "
+          "$scanned (a mutation path is missing its bump)",
+        );
+      }
+      return true;
+    }());
+    return result;
+  }
+
+  /// Debug-only brute-force oracle for [getIndexInParent]: the pre-cache
+  /// scan, byte for byte minus the iteration counter. Consulted on every
+  /// read when [debugFullConsistencyChecks] is set, so the invariant
+  /// suites convert any missed cache invalidation into an assertion
+  /// failure at the first divergent read.
+  int _debugScanIndexInParent(TKey key) {
+    final parent = _parentKeyOfKey(key);
     final List<TKey> full = parent == null
         ? _roots
-        : (_childListOf(parent) ?? <TKey>[]);
+        : (_childListOf(parent) ?? const []);
     int liveIndex = 0;
     for (final k in full) {
-      debugIndexInParentIterationCount++;
       if (k == key) return liveIndex;
       if (!_isPendingDeletion(k)) liveIndex++;
     }
@@ -2286,6 +2359,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _roots.add(node.key);
       _order.addKey(node.key);
     }
+    // Raw sibling-list writes above; invalidate cached live indices.
+    _liveIndexCache.bump();
     _rebuildVisibleIndex();
     _structureGeneration++;
     // Bulk wholesale replacement: _clear() purged every prior key. Callers
@@ -2339,6 +2414,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           _roots.add(node.key);
         }
         _refreshSubtreeDepths(node.key, 0);
+        // Raw sibling-list writes above; invalidate cached live indices.
+        _liveIndexCache.bump();
       } else if (index != null) {
         // Already a root — honor an explicitly requested index by
         // relocating within _roots. The index is live-space; convert
@@ -2434,6 +2511,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             ? _liveIndexToFullInsertIndex(_roots, index)
             : sortedDesired!.clamp(0, _roots.length);
         _roots.insert(insertAt, node.key);
+        // Raw sibling-list writes above; invalidate cached live indices.
+        _liveIndexCache.bump();
         _markVisibleOrderDirty();
         // Relocation changes row positions (and the payload was
         // overwritten) — structural refresh, which subsumes the data
@@ -2472,6 +2551,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     } else {
       _roots.add(node.key);
     }
+    // Raw sibling-list writes above; invalidate cached live indices.
+    _liveIndexCache.bump();
 
     // Add to visible order (root nodes are always visible)
     final insertIndex = visibleInsertIndex;
@@ -2716,6 +2797,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     _setChildList(parentKey, childIds);
+    // Raw sibling-list writes above (the wholesale replacement IS the
+    // removed children's unlink); invalidate cached live indices.
+    _liveIndexCache.bump();
 
     // If parent is expanded and visible, insert new children into the
     // visible order so they render immediately.
@@ -2804,6 +2888,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
         final parentDepth = _depthOfKey(parentKey);
         _refreshSubtreeDepths(node.key, parentDepth + 1);
+        // Raw sibling-list writes above; invalidate cached live indices.
+        _liveIndexCache.bump();
       } else if (index != null) {
         // Same parent — honor an explicitly requested index by relocating
         // within the sibling list. The index is live-space; convert after
@@ -2896,6 +2982,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             ? _liveIndexToFullInsertIndex(siblings, index)
             : sortedDesired!.clamp(0, siblings.length);
         siblings.insert(insertAt, node.key);
+        // Raw sibling-list writes above; invalidate cached live indices.
+        _liveIndexCache.bump();
         _markVisibleOrderDirty();
         // Relocation changes row positions (and the payload was
         // overwritten) — structural refresh, which subsumes the data
@@ -2928,6 +3016,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     } else {
       siblings.add(node.key);
     }
+    // Raw sibling-list writes above; invalidate cached live indices.
+    _liveIndexCache.bump();
     // If parent is expanded, add to visible order
     if (_isExpandedKey(parentKey)) {
       final parentVisibleIndex = _order.indexOf(parentKey);
@@ -3094,6 +3184,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       ..clear()
       ..addAll(orderedKeys)
       ..addAll(pendingRoots);
+    // Raw sibling-list writes above; invalidate cached live indices.
+    _liveIndexCache.bump();
     _markVisibleOrderDirty();
     // `nodeBuilder` itself takes (context, key, depth) and so is unaffected
     // by order, but a row can read its own position among its siblings
@@ -3167,6 +3259,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     _setChildList(parentKey, [...orderedKeys, ...pendingChildren]);
+    // Raw sibling-list write above; invalidate cached live indices.
+    _liveIndexCache.bump();
     bool needsVisibleRebuild = visible;
     if (!needsVisibleRebuild) {
       // Even if the parent is not expanded, children may still be present
@@ -3437,6 +3531,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _roots.add(key);
       }
     }
+    // Raw sibling-list writes above (the unlink AND the re-insert; a
+    // comparator read between them refreshed against the half-mutated
+    // list, and this bump is what discards that refresh); invalidate
+    // cached live indices.
+    _liveIndexCache.bump();
 
     final newDepth = newParentKey != null ? (_depthOfKey(newParentKey)) + 1 : 0;
     _refreshSubtreeDepths(key, newDepth);

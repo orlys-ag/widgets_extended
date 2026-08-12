@@ -16,6 +16,11 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     _anim.clear();
     _store.clear();
     _order.reset();
+    // The live-index cache resets HERE because _order.reset() clears the
+    // roots list in place, a raw sibling-list write outside the mutating
+    // methods; the reset drops the stamp arrays without rewinding the
+    // generation (see LiveIndexCache.reset).
+    _liveIndexCache.reset();
     _keysToRemoveScratch.clear();
   }
 
@@ -445,6 +450,9 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       }
       _purgeNodeData(key);
     }
+    // Raw sibling-list writes above (the unlink loop); invalidate cached
+    // live indices.
+    _liveIndexCache.bump();
 
     // Step 3: order compaction. Suppress per-nid callbacks because the
     // cache was already decremented in Step 1.
