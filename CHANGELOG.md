@@ -222,7 +222,7 @@ mapping at subtree boundaries.
 
 - Internal refactor of the drag-and-drop reorder stack into per-session
 collaborators; no public API changes.
-- Fewer render-tree lookups per pointer move during drags.
+- Perf: fewer render-tree lookups per pointer move during drags.
 - `startDrag` against an already-unmounted scrollable now returns `false`
 instead of asserting.
 
@@ -230,10 +230,10 @@ instead of asserting.
 
 - Touch-first drag anchoring: slot selection follows the floating card's
 midpoint in make-room + proxy sessions (the finger hides under the card).
-- Fix handle-drag grab geometry skew caused by touch-slop acceptance.
+- Fix: handle-drag grab geometry skew caused by touch-slop acceptance.
 - Mid-drag gesture-mode swaps now cancel the session cleanly.
-- Fix throws when a drag ends after the scrollable was unmounted.
-- New opt-in `SliverReorderableTree.hapticsOnDrag`.
+- Fix: throw when a drag ends after the scrollable was unmounted.
+- Added opt-in `SliverReorderableTree.hapticsOnDrag`.
 - Workspaces example: handle-mode / touch-mode toggle.
 
 ## 0.0.28
@@ -251,7 +251,7 @@ at the prospective slot; the drop lands with zero jump.
 - Eliminate drop-zone dead zones ("returns here" targets, two-zone split
 under `into` vetoes) and section-boundary gap oscillation.
 - Discard FLIP baselines staged without a following mutation.
-- New `TreeController.liveChildCount` / `liveRootCount`.
+- Added `TreeController.liveChildCount` / `liveRootCount`.
 
 ## 0.0.27
 
@@ -259,10 +259,10 @@ under `into` vetoes) and section-boundary gap oscillation.
 is key-only (`<TKey>`), `startDrag` takes a `ReorderRenderPort` and
 returns `bool` for policy refusals, and `TreeDropTarget` is purely
 semantic (indicator geometry derived by the widget layer).
-- New `SliverReorderableTree.showDropIndicator` to disable the built-in
+- Added `SliverReorderableTree.showDropIndicator` to disable the built-in
 indicator line.
-- New `TreeController.hasLiveChildren` / `hasComparator`.
-- Fix double-invoked drag-UI teardown in `SliverReorderableTree`.
+- Added `TreeController.hasLiveChildren` / `hasComparator`.
+- Fix: double-invoked drag-UI teardown in `SliverReorderableTree`.
 
 ## 0.0.26
 
@@ -280,15 +280,15 @@ resolves false).
 
 ## 0.0.24
 
-- Fix reparenting between a non-collapsed and a collapsed node.
+- Fix: reparenting between a non-collapsed and a collapsed node.
 
 ## 0.0.23
 
-- Fix occlusion / z-order of a tall card reparented into a collapsed section.
+- Fix: occlusion / z-order of a tall card reparented into a collapsed section.
 
 ## 0.0.22
 
-- Fix reparenting into collapsed section.
+- Fix: reparenting into collapsed section.
 
 ## 0.0.21
 
@@ -301,12 +301,12 @@ resolves false).
 
 ## 0.0.19
 
-- Fix orphaned animation entry staying during quick filtering.
-- Minor optimizations.
+- Fix: orphaned animation entry staying during quick filtering.
+- Perf: minor optimizations.
 
 ## 0.0.18
 
-- `SyncedSliverTree` / `TreeSyncController`: fix reparent animation skip when
+- Fix: `SyncedSliverTree` / `TreeSyncController` reparent animation skip when
 parent is deleted.
 
 ## 0.0.17
@@ -321,45 +321,45 @@ engine; new ergonomics.
 
 ## 0.0.15
 
-- Fix root node ordering regression caused by switching from recursive to
+- Fix: root node ordering regression caused by switching from recursive to
 iterative. Root nodes were being reversed.
 
 ## 0.0.14
 
-- Fix animation of nested collapsing/expanding nodes when parent collapse or
+- Fix: animation of nested collapsing/expanding nodes when parent collapse or
 expand state is toggled mid-animation.
-- Fix animation collapse-expand-collapse behavior.
+- Fix: animation collapse-expand-collapse behavior.
 
 ## 0.0.13
 
-- Add `SectionedSliverList`: a header + items convenience sliver built
+- Added `SectionedSliverList`: a header + items convenience sliver built
 on top of `SliverTree`.
-- Fix animation issue when adding/removing many times quickly.
-- Fix visible-subtree-size cache desync across all node-purge paths.
-- Fix node removal desync.
+- Fix: animation issue when adding/removing many times quickly.
+- Fix: visible-subtree-size cache desync across all node-purge paths.
+- Fix: node removal desync.
 - Replace recursive code with iterative.
-- Add various tests.
+- Added various tests.
 
 ## 0.0.12
 
-- Fix missing case to clip content above viewport when at max extent.
-- Fix animation skip when drag and dropping a collapsing node.
-- Optimize collapsing of nodes with many children.
-- Fix visual flicker when collapsing a node with many children.
+- Fix: missing case to clip content above viewport when at max extent.
+- Fix: animation skip when drag and dropping a collapsing node.
+- Perf: optimized collapsing of nodes with many children.
+- Fix: visual flicker when collapsing a node with many children.
 
 ## 0.0.11
 
 - Stale node eviction.
-- Scroll to node jump fix.
+- Fix: scroll-to-node jump.
 
 ## 0.0.10
 
-- Optimized expansion of nodes with many children.
+- Perf: optimized expansion of nodes with many children.
 
 ## 0.0.9
 
-- Fix re-insert animation regression.
-- Fix expansion persistence regression.
+- Fix: re-insert animation regression.
+- Fix: expansion persistence regression.
 
 ## 0.0.8
 
@@ -368,7 +368,7 @@ on top of `SliverTree`.
 
 ## 0.0.7
 
-- Add `SyncedTreeNode` and new constructors.
+- Added `SyncedTreeNode` and new constructors.
 
 ## 0.0.6
 
@@ -376,23 +376,23 @@ on top of `SliverTree`.
 
 ## 0.0.5
 
-- Add test for expansion memory during animated removal and re-addition.
+- Added test for expansion memory during animated removal and re-addition.
 
 ## 0.0.4
 
-- Fix expansion state for multi-sync.
+- Fix: expansion state for multi-sync.
 
 ## 0.0.3
 
-- Fix expansion state history.
+- Fix: expansion state history.
 
 ## 0.0.2
 
-- Fix expanding a child node that has a collapsed parent (previously ignored
+- Fix: expanding a child node that has a collapsed parent (previously ignored
 expansion).
 - Made child sync recursive for `SyncedSliverTree` and `TreeSyncController`.
 
 ## 0.0.1
 
-- Adds `sliver_tree`: a node based sliver that supports tree-like nesting for
+- Added `sliver_tree`: a node based sliver that supports tree-like nesting for
 data.
