@@ -647,6 +647,27 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return any;
   }
 
+  /// Cumulative count of per-row slide-delta probes performed by
+  /// [_stageSlideBaselineForBaseChange]'s any-live scan. Perf pin for the
+  /// idle-tap contract: an expand/collapse with no composed slide activity
+  /// anywhere performs ZERO probes (the O(1) [hasActiveSlides] gate returns
+  /// first). Counts loop iterations, not calls. Tests reset it to 0 and
+  /// assert an exact budget.
+  int debugSlideBaselineStagingProbeCount = 0;
+
+  /// Cumulative count of structural-descendant walks ([_getDescendants]).
+  /// Perf pin companion to [debugSlideBaselineStagingProbeCount]: an idle
+  /// [expand] must not materialize the descendant list at all (the staging
+  /// row source is a thunk, invoked only past the gate), so the pair pins
+  /// both halves of the idle-tap contract.
+  int debugDescendantWalkCount = 0;
+
+  /// Cumulative count of visible-descendant walks
+  /// ([_getVisibleDescendants]). Perf pin for [collapse]'s single-walk
+  /// contract: one collapse performs exactly ONE walk, shared by baseline
+  /// staging and the removal logic.
+  int debugVisibleDescendantsWalkCount = 0;
+
   /// Whether [key] currently has a live (non-zero) FLIP slide delta — which,
   /// because exit ghosts slide toward their anchor's SETTLED y, is also true
   /// for any in-flight exit-ghost (its delta is non-zero for the whole
@@ -668,9 +689,30 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// install a FLIP slide for every descendant on every expand/collapse and
   /// double-animate against the op-group extent envelope. Only rows already
   /// mid-slide get rebased.
-  void _stageSlideBaselineForBaseChange(Iterable<TKey> rows) {
+  ///
+  /// [rows] is a THUNK, not a list: the O(1) [hasActiveSlides] gate on the
+  /// first line runs before it is invoked, so an idle call (no FLIP slide
+  /// and no held preview anywhere) performs neither the descendant walk nor
+  /// a single per-row probe. Idle taps are the common case, and they used
+  /// to pay an O(subtree) materialization plus a full probe loop for
+  /// nothing (item 8 of the 2026-07-29 review; pinned by
+  /// `expand_collapse_staging_gate_test.dart`).
+  ///
+  /// The gate is sound for exit ghosts too: a ghost is a FLIP-engine
+  /// artifact whose delta lives in the slide engine (the ghost registry's
+  /// own prune criterion reads the engine delta, `_ghost_registry.dart`),
+  /// and [hasActiveSlides] is the composed union
+  /// `_slide.hasActive || _preview.hasActive`, a superset of the FLIP
+  /// flag. A false gate therefore implies no engine slide and no held
+  /// preview anywhere, which implies no row could pass the per-row probe
+  /// below.
+  void _stageSlideBaselineForBaseChange(Iterable<TKey> Function() rows) {
+    if (!hasActiveSlides) {
+      return;
+    }
     var anyLive = false;
-    for (final row in rows) {
+    for (final row in rows()) {
+      debugSlideBaselineStagingProbeCount++;
       if (_hasLiveSlideOrExitGhost(row)) {
         anyLive = true;
         break;
@@ -3524,8 +3566,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // `_setExpandedKey`/op-group install so the baseline is the FLIP "before";
     // the downstream `_notifyStructural` consume composes the rebase against
     // the row's NEW structural offset, preserving painted position across the
-    // base change. The live-slide gate inside the helper makes idle expands a
-    // no-op.
+    // base change. The O(1) gate inside the helper makes idle expands
+    // allocation-free: the thunk is never invoked, so the descendant walk
+    // never runs.
     //
     // Use the FULL structural descendant set ([getDescendants]) rather than an
     // expansion-gated flatten: at this point [key] is still collapsed
@@ -3534,7 +3577,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // about to change. [getDescendants] walks the structural subtree
     // regardless of expansion state, so the moved exit-ghost (a structural
     // child of [key]) is included.
-    _stageSlideBaselineForBaseChange(getDescendants(key));
+    _stageSlideBaselineForBaseChange(() => getDescendants(key));
     // If ancestors are collapsed, just record the expansion state.
     // The node is not visible, so there is nothing to animate or
     // insert into the visible order. When ancestors are later expanded,
@@ -3753,17 +3796,23 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // rebuild so the descendant / index lookups below operate on fresh
     // state.
     _ensureVisibleOrder();
+    // Find all visible descendants (includes nodes currently entering).
+    // Computed ONCE and shared by baseline staging and the removal logic
+    // below. Walking here, BEFORE `_setExpandedKey` flips the node, returns
+    // the same list a post-flip walk would: `_getVisibleDescendantsInto`
+    // deliberately does not gate on [key]'s own expansion flag (see its
+    // declaration doc), and nothing between here and the removal logic
+    // mutates the visible order (`_setExpandedKey` is store-only).
+    final descendants = _getVisibleDescendants(key);
     // Symmetric case: if any visible descendant about to LEAVE visible
     // order currently has a live entry-slide/ghost, stage a slide baseline
-    // FIRST (first-wins), capturing pre-collapse painted positions. Computed
+    // FIRST (first-wins), capturing pre-collapse painted positions. Captured
     // from the still-current visible order BEFORE `_setExpandedKey` flips the
     // node, so the descendants are still visible here. Mirrors the expand
-    // path; the live-slide gate keeps idle collapses a no-op.
-    _stageSlideBaselineForBaseChange(_getVisibleDescendants(key));
+    // path; the O(1) gate inside the helper keeps idle collapses probe-free.
+    _stageSlideBaselineForBaseChange(() => descendants);
     _setExpandedKey(key, false);
     _recordExpansionChange(key, wasExpanded: true);
-    // Find all visible descendants (includes nodes currently entering)
-    final descendants = _getVisibleDescendants(key);
     if (descendants.isEmpty) {
       _notifyStructural(affectedKeys: <TKey>{key});
       return;

@@ -172,6 +172,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   }
 
   List<TKey> _getDescendants(TKey key) {
+    debugDescendantWalkCount++;
     final result = <TKey>[];
     _getDescendantsInto(key, result);
     return result;
@@ -205,6 +206,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   }
 
   List<TKey> _getVisibleDescendants(TKey key) {
+    debugVisibleDescendantsWalkCount++;
     final result = <TKey>[];
     _getVisibleDescendantsInto(key, result);
     return result;

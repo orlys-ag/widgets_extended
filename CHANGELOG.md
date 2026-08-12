@@ -134,6 +134,13 @@ inside the edge) instead of the initial-install clamp (edge plus overhang).
 The same misread also installed pointless slides for rows off-screen on both
 sides of such a mutation, which prolonged the FLIP-active window and with it
 the edge-ghost cleanup the previous fix keyed to it.
+- Perf: `expand()` and `collapse()` on an idle tree no longer pay an
+O(subtree) slide-baseline staging cost per call. Staging is now gated by the
+O(1) `hasActiveSlides` check before any per-row work, so the descendant
+materialization and the per-row slide probes run only while a slide or a
+held drag preview is actually active. `collapse()` also walks its visible
+descendants once instead of twice. Behavior is unchanged whenever slides
+are active.
 
 ## 0.0.32
 
