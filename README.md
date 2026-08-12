@@ -116,7 +116,9 @@ Rules your `onReorder` handler lives by:
 - **Async handlers record before awaiting**, then reconcile or roll back on
   the response.
 
-To gate dragging per row, pass `canReorder: (key) => ...`. On desktop,
+To switch reordering off and on with app state (an edit mode), flip
+`enabled:` on the config; to gate dragging per row, pass
+`canReorder: (key) => ...`. On desktop,
 long-press reads as lag, so turn the default handles off and place a
 visible grip anywhere inside the row (`TreeDragHandle` drags immediately,
 `TreeDelayedDragHandle` on press-and-hold; both draw nothing):

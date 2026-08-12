@@ -261,7 +261,7 @@ Two rules about the config object:
   and non-null changes the widget type at that slot, tearing down the sliver,
   its per-key child caches and its render object, and orphaning any live drag.
   A debug assert catches it. To disable reordering at runtime, keep the config
-  and return false from `canReorder`.
+  and set `enabled: false`; `canReorder` stays the per-row policy.
 - **Its contents are live on every rebuild.** The drag tunings
   (`autoExpandDelay`, `autoScrollEdgeZone`, `autoScrollMaxVelocity`) are
   captured once per drag session, so a changed value applies from the next

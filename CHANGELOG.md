@@ -1,5 +1,14 @@
 ## Unreleased
 
+- Added `TreeReorderConfig.enabled` (default true): the tree-wide runtime
+reorder toggle. Config contents are live on rebuild, so flipping it with app
+state (an edit mode) disarms every handle, withdraws the reorder semantics
+actions, refuses programmatic `TreeReorderController.moveTo`, and ends a drag
+already in flight at its next re-resolution, all with no change to any row's
+widget shape. It dominates `canReorder`, which stays the per-row policy; the
+documented runtime-toggle idiom "return false from `canReorder`" is replaced
+by this flag. The sectioned module already had the equivalent shape via
+`SectionedReorderConfig.reorderItems` / `reorderSections`.
 - **BREAKING** `SliverReorderableTree.indentPerDepth` and
 `TreeReorderConfig.indentPerDepth` are renamed `indentWidth`, matching the
 `TreeController` / `SyncedSliverTree` name for the same pixels-per-depth

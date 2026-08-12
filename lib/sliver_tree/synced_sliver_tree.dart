@@ -438,8 +438,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// between null and non-null would change the widget type at this slot,
   /// tearing down the sliver, its per-key child caches and its render
   /// object, and would orphan a live drag session. To toggle reorder at
-  /// runtime keep the config and return false from
-  /// [TreeReorderConfig.canReorder].
+  /// runtime keep the config and flip [TreeReorderConfig.enabled].
   final TreeReorderConfig<TKey>? reorder;
 
   @override
@@ -540,7 +539,8 @@ class _SyncedSliverTreeState<TKey, TItem>
     _treeController.addExpansionListener(_handleExpansionChanged);
   }
 
-  /// Refuses everything when reorder is absent, rather than defaulting to
+  /// Refuses everything when reorder is absent or disabled
+  /// ([TreeReorderConfig.enabled] false), rather than defaulting to
   /// "allowed".
   ///
   /// RAW `widget.reorder`, deliberately, NOT the construction-time
@@ -567,14 +567,18 @@ class _SyncedSliverTreeState<TKey, TItem>
   /// four of them vacuous.
   bool _handleCanReorder(TKey key) {
     final config = widget.reorder;
-    if (config == null) {
+    // `!enabled` refuses on the same fail-closed footing as absence.
+    // This ONE gate is what makes [TreeReorderConfig.enabled] cover
+    // drag start, mid-drag enforcement, commits, `moveTo` and the
+    // semantics actions alike: they all consult this tear-off.
+    if (config == null || !config.enabled) {
       return false;
     }
     return config.canReorder?.call(key) ?? true;
   }
 
-  /// Absent config refuses, on raw `widget.reorder`, for the reason
-  /// [_handleCanReorder] gives.
+  /// Absent or disabled config refuses, on raw `widget.reorder`, for the
+  /// reason [_handleCanReorder] gives.
   ///
   /// The two must agree: a null config that refused drags but permitted
   /// drops read as an accident rather than a policy, and left the pair
@@ -586,7 +590,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     int? index,
   }) {
     final config = widget.reorder;
-    if (config == null) {
+    if (config == null || !config.enabled) {
       return false;
     }
     final policy = config.canAcceptDrop;
@@ -726,8 +730,8 @@ class _SyncedSliverTreeState<TKey, TItem>
       "SyncedSliverTree.reorder cannot be added or removed after the "
       "widget is created: it changes the widget type at this slot, "
       "tearing down the sliver and its child caches, and would orphan a "
-      "live drag. Keep the config and return false from canReorder to "
-      "disable reordering at runtime.",
+      "live drag. Keep the config and set enabled: false to disable "
+      "reordering at runtime.",
     );
     if (oldWidget.animationStyle != widget.animationStyle) {
       _treeController.animationStyle = widget.animationStyle;
