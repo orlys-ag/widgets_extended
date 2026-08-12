@@ -125,6 +125,15 @@ longest. `TreeController` gains `hasActiveFlipSlides` and
 `getFlipSlideDeltaNid` for this; painted positions, hit-testing, retention
 and overreach continue to read the composed `hasActiveSlides` /
 `getSlideDeltaNid` and are unchanged.
+- Fix: a row sliding IN from off-screen during a drag (a mutation lands
+while the make-room preview is holding rows shifted, e.g. a dwell-expand or
+an app-driven update mid-drag) popped in at the viewport boundary instead of
+gliding in from beyond the edge. The slide-install path mistook the held
+preview offset for an in-flight slide and took the composition clamp (just
+inside the edge) instead of the initial-install clamp (edge plus overhang).
+The same misread also installed pointless slides for rows off-screen on both
+sides of such a mutation, which prolonged the FLIP-active window and with it
+the edge-ghost cleanup the previous fix keyed to it.
 
 ## 0.0.32
 

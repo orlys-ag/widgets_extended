@@ -282,7 +282,26 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
       final nid = _controller.nidOf(key);
       final slideY = nid >= 0 ? _controller.getSlideDeltaNid(nid) : 0.0;
       final slideX = nid >= 0 ? _controller.getSlideDeltaXNid(nid) : 0.0;
-      final hasInFlightSlide = slideY != 0.0 || slideX != 0.0;
+      // Two Y values, two roles; do not "simplify" them back into one.
+      //
+      // `slideY` is COMPOSED (FLIP + held make-room preview) and feeds
+      // the painted-position arithmetic: `targetY = curr.y - slideY`
+      // recovers the structural destination from a snapshot that bakes
+      // the composed delta in, and the ghost-install write below puts
+      // `edgeY + slideY` back into the same painted space. Painted
+      // position is structural + FLIP + preview everywhere, without
+      // exception.
+      //
+      // `flipY` answers the predicate: does the ENGINE hold a slide to
+      // compose against? A held preview offset is a paint-only
+      // displacement, not an engine slide. Reading the composed delta
+      // here installed slides for rows invisible before and after the
+      // mutation (extending the FLIP-active window, and with it ghost
+      // cleanup, for nothing) and routed slide-INs onto the
+      // just-inside-the-edge composition clamp instead of the
+      // edge-plus-overhang initial-install clamp.
+      final flipY = nid >= 0 ? _controller.getFlipSlideDeltaNid(nid) : 0.0;
+      final hasInFlightSlide = flipY != 0.0 || slideX != 0.0;
       final rowExtent = nid >= 0 ? _controller.getCurrentExtentNid(nid) : 0.0;
 
       // `curr` includes the existing slide delta so the engine can

@@ -26,6 +26,13 @@
 /// later change makes that trigger REPLACE the composed one rather than
 /// join it, this is the test that catches the lost layout (and with it the
 /// post-layout stale-eviction cadence, `sliver_tree_element.dart:364-366`).
+///
+/// The second group covers the INSTALL-side follow-up
+/// (`plans/2026-08-11-ghost-install-inflight-predicate.md`): the
+/// in-flight-slide predicate in
+/// `GhostRegistry.applyClampAndInstallNewGhosts` must ask the FLIP engine,
+/// not the composed delta, while the painted-position arithmetic around it
+/// stays composed.
 library;
 
 import 'package:flutter/material.dart';
@@ -485,6 +492,198 @@ void main() {
               "the preview settle transition must still schedule one "
               "layout so post-layout stale eviction keeps its cadence",
         );
+      },
+    );
+  });
+
+  group("ghost install predicate reads FLIP-only state", () {
+    // Repros for the INSTALL-side follow-up
+    // (`plans/2026-08-11-ghost-install-inflight-predicate.md`).
+    // `applyClampAndInstallNewGhosts` asks per row "is there an existing
+    // engine slide to compose against?" but derives the answer from the
+    // COMPOSED delta, so every row a held make-room preview has shifted
+    // answers yes even with no FLIP slide at all. Both tests hold a
+    // preview whose span covers off-screen rows (dragging n0 with the gap
+    // at index 45 shifts rows 1..44 up by one row height, and
+    // `snapshotVisibleOffsets` walks ALL visible rows, so off-screen rows
+    // are in the staged baseline), then trigger a staged mutation with
+    // `moveNode`, the simpler of the two verified reaching paths (the
+    // realistic one is a dwell-expand mid-drag).
+
+    testWidgets(
+      "no slide is installed for a preview-shifted row that is off-screen "
+      "before and after the mutation",
+      (tester) async {
+        final controller = _controller(tester);
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(_harness(controller));
+        await tester.pumpAndSettle();
+
+        controller.setReorderPreviewAtIndex(
+          draggedKey: "n0",
+          gapVisibleIndex: 45,
+        );
+        await tester.pump();
+        await tester.pump(_makeRoom);
+
+        final nid15 = controller.nidOf("n15");
+        expect(nid15, greaterThanOrEqualTo(0), reason: "setup: n15 is live");
+        expect(
+          controller.getFlipSlideDeltaNid(nid15),
+          0.0,
+          reason: "setup: n15 must carry no FLIP slide",
+        );
+        final composedBefore = controller.getSlideDelta("n15");
+        expect(
+          composedBefore,
+          isNot(0.0),
+          reason:
+              "setup: n15 must carry a held preview offset, so its "
+              "composed delta diverges from its FLIP delta",
+        );
+        // n15 sits at visible index 15 (structural y 600 against a 550px
+        // viewport); the preview shift leaves it past the bottom edge.
+        expect(
+          15 * _rowHeight + composedBefore,
+          greaterThan(_viewportHeight),
+          reason: "setup: n15 must be painted off-screen before the move",
+        );
+
+        // Staged mutation: moving n16 to index 2 shifts n2..n15 down one
+        // slot, so n15's structural base changes while the row stays
+        // off-screen on both sides of the mutation.
+        controller.moveNode(
+          "n16",
+          null,
+          index: 2,
+          animate: true,
+          slideDuration: _slide,
+          slideCurve: Curves.linear,
+        );
+        await tester.pump(); // install frame: consumes the baseline
+
+        expect(
+          controller.visibleNodes.indexOf("n15"),
+          16,
+          reason: "setup: the move must shift n15 down one slot",
+        );
+        expect(
+          16 * _rowHeight + controller.getSlideDelta("n15"),
+          greaterThan(_viewportHeight),
+          reason: "setup: n15 must be painted off-screen after the move too",
+        );
+        // Proof the consume genuinely ran and installed slides: a VISIBLE
+        // row the move shifted carries a real FLIP delta.
+        expect(
+          controller.getFlipSlideDeltaNid(controller.nidOf("n3")),
+          isNot(0.0),
+          reason: "setup: the mutation must install slides for visible rows",
+        );
+
+        expect(
+          controller.getFlipSlideDeltaNid(nid15),
+          0.0,
+          reason:
+              "a row that is off-screen before AND after the mutation and "
+              "has no engine slide to compose must be dropped from the "
+              "batch; a held preview offset is not an in-flight slide, "
+              "and installing one extends the FLIP-active window (and "
+              "with it ghost cleanup) for a row nobody can see",
+        );
+
+        controller.clearReorderPreview(animate: false);
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      "a preview-shifted row sliding IN starts beyond the viewport edge, "
+      "not just inside it",
+      (tester) async {
+        final controller = _controller(tester);
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(_harness(controller));
+        await tester.pumpAndSettle();
+
+        expect(
+          controller.slideClampOverhangViewports,
+          greaterThan(0.0),
+          reason:
+              "setup: with a zero overhang the two clamps differ by only "
+              "the 0.5px epsilon, which this test cannot discriminate",
+        );
+
+        controller.setReorderPreviewAtIndex(
+          draggedKey: "n0",
+          gapVisibleIndex: 45,
+        );
+        await tester.pump();
+        await tester.pump(_makeRoom);
+
+        final nid15 = controller.nidOf("n15");
+        expect(
+          controller.getFlipSlideDeltaNid(nid15),
+          0.0,
+          reason: "setup: n15 must carry no FLIP slide",
+        );
+        expect(
+          controller.getSlideDelta("n15"),
+          isNot(0.0),
+          reason: "setup: n15 must carry a held preview offset",
+        );
+        expect(
+          15 * _rowHeight + controller.getSlideDelta("n15"),
+          greaterThan(_viewportHeight),
+          reason: "setup: n15 must start painted off-screen",
+        );
+
+        // Slide-IN: n15 moves from off-screen to a visible slot. Both the
+        // buggy and the fixed predicate install a slide; what differs is
+        // the clamped start. The initial-install clamp starts at viewport
+        // bottom + overhang (off-screen); the composition clamp starts at
+        // viewport bottom - 0.5 (inside), and taking it here means the
+        // row pops in at the boundary instead of gliding in.
+        controller.moveNode(
+          "n15",
+          null,
+          index: 5,
+          animate: true,
+          slideDuration: _slide,
+          slideCurve: Curves.linear,
+        );
+        await tester.pump(); // install frame
+
+        expect(
+          controller.visibleNodes.indexOf("n15"),
+          5,
+          reason: "setup: n15 must land on the visible slot",
+        );
+        expect(
+          controller.getFlipSlideDeltaNid(nid15),
+          isNot(0.0),
+          reason: "setup: a slide-IN must install a real engine slide",
+        );
+
+        // Painted position at install = structural + FLIP + preview. The
+        // assertion is deliberately "outside the viewport", not a literal
+        // delta: `overhangPx` is a captured setting-derived value
+        // (`_viewport_snapshot.dart:69-73`), not a constant this test
+        // should hardcode.
+        final paintedAtInstall =
+            5 * _rowHeight + controller.getSlideDelta("n15");
+        expect(
+          paintedAtInstall,
+          greaterThanOrEqualTo(_viewportHeight),
+          reason:
+              "a slide-IN with no engine slide to compose must take the "
+              "initial-install clamp (edge plus overhang, off-screen); "
+              "the just-inside-the-edge clamp exists only to keep an "
+              "already painted row visible at the moment of "
+              "re-composition",
+        );
+
+        controller.clearReorderPreview(animate: false);
+        await tester.pumpAndSettle();
       },
     );
   });
