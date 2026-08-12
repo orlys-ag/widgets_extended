@@ -1,265 +1,227 @@
 # widgets_extended
 
-High-performance sliver widgets for Flutter: animated tree, sectioned list, and drag-and-drop reorder.
+A declarative, animated tree sliver for Flutter: **`SyncedSliverTree`**.
 
-- **`SectionedSliverList`**: header + items list with sticky headers, expand/collapse, and animated insert/remove.
-- **`SyncedSliverTree`**: declarative tree that diffs against a source-of-truth and animates the transitions.
-- **`SliverReorderableTree`**: drag-and-drop reorder layer on top of the tree.
-- **`SliverTree` + `TreeController`**: imperative escape hatch.
+Hand it your data on every build. It diffs against what is on screen and
+animates the difference: inserts grow in, removals shrink out, moves and
+reorders slide, reparenting glides across depths. No controller to manage,
+no imperative mutation calls, no manual keys bookkeeping. Drag-and-drop
+reorder is one parameter.
 
-All widgets are built on the same sliver/`TreeController` core: viewport-aware lazy layout, ECS-style state storage, animation finalization that doesn't relayout idle rows.
-
-## SectionedSliverList
-
-Header + items convenience sliver. Two constructor shapes:
+## Quick start
 
 ```dart
-// Declarative SectionInputs.
-SectionedSliverList<String, String, Folder, FileItem>(
-  sections: [
-    SectionInput(
-      key: folder.id,
-      section: folder,
-      items: [
-        for (final f in folder.files) ItemInput(key: f.id, item: f),
-      ],
-    ),
-    // ...
-  ],
-  headerBuilder: (context, view) => ListTile(
-    title: Text("${view.section.name} (${view.itemCount})"),
-    trailing: Icon(view.isExpanded ? Icons.expand_more : Icons.chevron_right),
-    onTap: view.toggle,
-  ),
-  itemBuilder: (context, view) => ListTile(title: Text(view.item.name)),
-  stickyHeaders: true,
-  hideEmptySections: false,
-  initiallyExpanded: true,
-)
+import 'package:widgets_extended/widgets_extended.dart';
+
+class Folder {
+  Folder(this.id, this.name, [this.children = const []]);
+  final String id;
+  final String name;
+  final List<Folder> children;
+}
 ```
 
-```dart
-// groupListsBy-shaped: pass a Map<Section, List<Item>>.
-SectionedSliverList<String, String, Folder, FileItem>.grouped(
-  sections: groupedFolders, // Map<Folder, List<FileItem>>
-  sectionKeyOf: (folder) => folder.id,
-  itemKeyOf: (file) => file.id,
-  headerBuilder: ...,
-  itemBuilder: ...,
-)
-```
-
-Pass a `SectionedListController` when you need imperative mutations (`addItem`, `removeSection`, `moveItem`, `runBatch`, ...). Without one, the widget owns its controller internally.
-
-## SyncedSliverTree
-
-Use `tree:` for the simplest entry point when you already have a nested immutable tree:
+Your model already has the structure, so point the tree at it:
 
 ```dart
-SyncedSliverTree<String, Folder>(
-  tree: <SyncedTreeNode<String, Folder>>[
-    SyncedTreeNode<String, Folder>(
-      key: root.id,
-      data: root,
-      children: <SyncedTreeNode<String, Folder>>[
-        SyncedTreeNode<String, Folder>(key: child.id, data: child),
-      ],
+CustomScrollView(
+  slivers: [
+    SyncedSliverTree<String, Folder>.hierarchy(
+      roots: folders,
+      keyOf: (f) => f.id,
+      childrenOf: (f) => f.children,
+      indentWidth: 24,
+      itemBuilder: (context, node) => ListTile(
+        title: Text(node.item.name),
+        leading: node.hasChildren
+            ? Icon(node.isExpanded ? Icons.expand_more : Icons.chevron_right)
+            : const Icon(Icons.insert_drive_file_outlined),
+        onTap: node.toggle,
+      ),
     ),
   ],
-  itemBuilder: (context, node) => ListTile(
-    title: Text(node.item.name),
-    leading: node.hasChildren
-        ? IconButton(
-            icon: Icon(node.isExpanded ? Icons.expand_more : Icons.chevron_right),
-            onPressed: node.toggle,
-          )
-        : null,
-  ),
 )
 ```
 
-There are three input modes, and they differ by where the tree's structure
-lives:
+That is a working animated tree: tapping a row expands or collapses it with
+animation, and rows indent by depth automatically (`indentWidth` pixels per
+level).
 
-- `.hierarchy(roots:, keyOf:, childrenOf:)` reads structure from your own
-nested objects, and `.flat(items:, keyOf:, parentOf:)` from your own flat items
-plus parent keys. Use these to display data you do not restructure in the UI:
-you pass the collection you already hold, so no conversion step is involved.
-- The default constructor keeps structure in a nested `SyncedTreeNode` tree.
-Use it when the UI edits structure: your model owns parents and sibling
-order, and you derive the tree input from it once per change.
+To change the tree, change your data and hand in a **new list instance**:
 
 ```dart
-SyncedSliverTree<String, RowData>(
-  tree: viewModel.treeInput,
-  itemBuilder: (context, node) => buildRow(node),
-)
+setState(() {
+  folders = folderStore.currentRoots(); // new instance = diff + animate
+});
 ```
 
-Every rebuild re-diffs against the mode's collection, and the diff is skipped
-when you pass the `identical` instance as last time (the `ListView.children`
-convention). Extractor callbacks are excluded from that check, so they must be
-pure functions of their input.
+The widget diffs the new input against the screen and animates every
+transition. Passing the `identical` instance as last time skips the diff
+entirely (the `ListView.children` convention), so a frequently rebuilding
+ancestor costs nothing. `keyOf` / `childrenOf` must be pure functions of
+their argument.
 
-## SliverReorderableTree
+## The row builder
 
-Wraps a `TreeController` with a `TreeReorderController` to add drag-and-drop reorder, including reparenting between branches:
+`itemBuilder` receives a `TreeItemView` with everything a row usually needs,
+all kept fresh automatically (rows rebuild when a sibling change shifts
+them):
 
-```dart
-SliverReorderableTree<String, RowData>(
-  controller: treeController,
-  reorderController: reorderController,
-  nodeBuilder: (context, key, depth) => TreeDelayedDragHandle(
-    child: ListTile(title: Text(treeController.getNodeData(key)!.data.label)),
-  ),
-)
-```
+| | |
+| --- | --- |
+| Data | `node.item`, `node.key`, `node.depth`, `node.parentKey`, `node.indent` |
+| Structure | `node.hasChildren`, `node.childCount`, `node.isFirst`, `node.isLast`, `node.indexInParent`, `node.siblingCount` |
+| Expansion | `node.isExpanded`, `node.toggle()`, `node.expand()`, `node.collapse()` |
 
-Every row is wrapped for you, exactly as `SliverReorderableList` wraps every item, so `nodeBuilder` keeps the plain `SliverTree` signature. To make a row draggable by a pointer, put a `TreeDragHandle` (immediate, for a dedicated grip) or a `TreeDelayedDragHandle` (press-and-hold, safe around a whole row) somewhere inside it. Anywhere: a 32px bar across the top of a card, a leading grip, two of them. The package draws nothing and reserves no space.
+`node.isFirst` / `node.isLast` make connector lines and rounded-group
+styling trivial. `node.controller` is the escape hatch to the full
+imperative API if you ever need it.
 
-A row with no handle cannot be lifted by a finger, but it is still a drop TARGET and still carries its reorder semantics actions.
+## Drag-and-drop reorder
 
-Drop feedback is the make-room preview: rows part to open a live gap at the prospective slot (paint-only, so the tree is not mutated until the drop commits), while a floating proxy of the dragged row follows the pointer. The proxy renders in the root `Overlay`, outside the row's ancestry, so rows built from Material widgets need a `dragProxyBuilder` that re-provides a `Material` ancestor, the same contract as `Draggable.feedback`.
-
-`indentWidth` maps the pointer's horizontal position to a drop depth at subtree boundaries. By default it reads the controller's own `indentWidth` (the constant rows actually render with), so the two agree with no configuration; set it explicitly when rows bake their own indent, or to `0` to always drop at the deepest legal level.
-
-## Declarative reordering
-
-`SyncedSliverTree` and `SectionedSliverList` reorder by configuring it. By default there is no change to your item builder: passing a config IS enabling the feature, and the package installs a long-press handle over each row, the way `ReorderableListView.buildDefaultDragHandles` does.
+Pass a `reorder:` config. That is the whole integration:
 
 ```dart
 SyncedSliverTree<String, Folder>.hierarchy(
-  roots: store.roots,
+  roots: folders,
   keyOf: (f) => f.id,
   childrenOf: (f) => f.children,
+  indentWidth: 24,
   reorder: TreeReorderConfig<String>(
     onReorder: (key, newParent, index) {
-      store.move(key, toParent: newParent, at: index);
+      setState(() {
+        folders = folderStore.move(key, toParent: newParent, at: index);
+      });
     },
   ),
-  itemBuilder: (context, view) => ListTile(title: Text(view.item.name)),
+  itemBuilder: (context, node) => ListTile(title: Text(node.item.name)),
 )
 ```
 
-Rows long-press to drag on every platform. Desktop-targeted apps should turn the default off and place their own grip, because without one there is no visible affordance and a mouse long-press reads as lag:
+Every row becomes draggable by long-press, with no change to your builder.
+While dragging, rows part to open a live gap at the prospective slot, a
+floating proxy follows the pointer, hovering a collapsed parent auto-expands
+it, the pointer's horizontal position picks the nesting depth at subtree
+boundaries, and the drop settles in place with no jump.
+
+Rules your `onReorder` handler lives by:
+
+- **`index` is a final-list position.** Remove `key` from its old parent
+  first, THEN insert at `index` in the new parent's children (`newParent`
+  null means the root list). Computing an index against the pre-removal
+  list puts same-parent downward moves one slot too far.
+- **Your data stays authoritative.** A move you do not record is reverted
+  by the next sync; that is also how you reject a drop. To roll back an
+  already-recorded move, emit a NEW collection instance.
+- **Async handlers record before awaiting**, then reconcile or roll back on
+  the response.
+
+To gate dragging per row, pass `canReorder: (key) => ...`. On desktop,
+long-press reads as lag, so turn the default handles off and place a
+visible grip anywhere inside the row (`TreeDragHandle` drags immediately,
+`TreeDelayedDragHandle` on press-and-hold; both draw nothing):
 
 ```dart
 reorder: TreeReorderConfig<String>(
   buildDefaultDragHandles: false,
   onReorder: ...,
 ),
-itemBuilder: (context, view) => Row(
+itemBuilder: (context, node) => Row(
   children: <Widget>[
-    Expanded(child: ListTile(title: Text(view.item.name))),
-    TreeDragHandle(
-      child: Icon(Icons.drag_indicator, color: Theme.of(context).hintColor),
-    ),
+    Expanded(child: ListTile(title: Text(node.item.name))),
+    TreeDragHandle(child: Icon(Icons.drag_indicator)),
   ],
 ),
 ```
 
-Turning the default off leaves the row wrapped: it still hides itself while dragged, is still a drop target, and still carries its semantics actions. What it loses is the gesture, which the handle puts back wherever you put the handle. The package ships no grip of its own, because choosing one means choosing a foreground colour from a widgets-layer package that cannot see your background. There is no platform-adaptive default either; branch on `Theme.of(context).platform` in your own config if you want one, which honours an app's deliberate platform override where a `defaultTargetPlatform` read inside the package could not.
+Rows built from Material widgets need a `dragProxyBuilder` that re-provides
+a `Material` ancestor (the proxy floats in the root `Overlay`, outside your
+row's ancestry), the same contract as `Draggable.feedback`. Screen readers
+get move up / down / out / into actions automatically, reported through the
+same `onReorder`.
 
-Pick one and keep it. `buildDefaultDragHandles` changes the row's widget shape, so flipping it at runtime re-inflates every row subtree and disposes the `State` your builder keeps there. `canReorder` is the runtime knob, and it is shaped to leave the row's structure untouched. For the same reason, prefer `TreeDragHandle(enabled: false)` to omitting a handle conditionally.
+## Expansion
 
-Something that must sit OUTSIDE the drag surface, such as a `Dismissible`, is now ordinary composition: `Dismissible(child: TreeDelayedDragHandle(child: row))`.
+- `initiallyExpanded: true` (the default) opens the whole tree on first
+  sync; `initialNodeExpansion: (key, item) => bool?` overrides it per node
+  (return null to defer).
+- `preserveExpansion: true` (the default) remembers expansion across
+  remove/re-add cycles, and a user's deliberate collapse is never
+  overridden by later syncs.
+- `onExpansionChanged: (key, isExpanded) { ... }` is the hook for
+  persisting expansion state.
 
-A refused row's handle stays visible and merely disarmed, because the package no longer decides what your grip looks like. To hide it while keeping its space and its inertness, read the policy back out of the scope:
+For capabilities no row can reach, such as toolbar buttons or deep links,
+grab the internal controller once:
 
 ```dart
-Builder(
-  builder: (context) {
-    final canDrag = TreeRowDragScope.maybeOf(context)?.canDrag ?? false;
-    return Visibility(
-      visible: canDrag,
-      maintainSize: true,
-      maintainAnimation: true,
-      maintainState: true,
-      child: TreeDragHandle(child: grip),
-    );
-  },
+SyncedSliverTree<String, Folder>.hierarchy(
+  // ...
+  onControllerCreated: (controller) => _tree = controller,
+)
+
+// Later:
+_tree.expandAll();
+_tree.animateScrollToKey(deepLinkedId, scrollController: scrollController);
+```
+
+Do not dispose it; the widget owns it.
+
+## Other input modes
+
+`.hierarchy` fits nested models. Two siblings cover the rest, with the same
+parameters otherwise:
+
+```dart
+// Flat rows with parent pointers (query results, adjacency lists).
+SyncedSliverTree<String, Row>.flat(
+  items: rows,
+  keyOf: (r) => r.id,
+  parentOf: (r) => r.parentId, // null = root
+  itemBuilder: ...,
+)
+
+// Explicit SyncedTreeNode tree, for when the UI itself edits structure.
+SyncedSliverTree<String, Folder>(
+  tree: [
+    SyncedTreeNode(key: "docs", data: docs, children: [
+      SyncedTreeNode(key: "taxes", data: taxes),
+    ]),
+  ],
+  itemBuilder: ...,
 )
 ```
 
-`Visibility`, not `Opacity(opacity: 0.0)`: `RenderOpacity` does not override `hitTest`, so a zero-alpha grip still swallows gestures.
-
-`SectionedSliverList` takes a `SectionedReorderConfig`, where everything pairs by kind, because section and item keys share one type parameter and a single callback could not say which it was asked about. Items reorder by default and sections do not, and the default handles are per-kind too (`buildDefaultItemDragHandles` / `buildDefaultSectionDragHandles`). The module enforces its own two-level invariant (items only under sections, sections only at root, nothing under an item); a `canAccept*` callback can narrow that but never widen it.
-
-### Four contracts that fail silently if you miss them
-
-**The index is live-space and final-list.** It names the position among the destination's children AFTER the moved node is removed. Remove first, then insert at the reported index:
-
-```dart
-void onReorder(String key, String? newParent, int index) {
-  // 1. Remove `key` from its old parent's child list (or the root list).
-  // 2. THEN insert it at `index` in the new parent's list.
-}
-```
-
-Computing your own index against the pre-removal list puts every same-parent downward move one slot too far, and cross-parent moves look fine, so it ships green.
-
-**Not recording the move reverts it.** Your input collection stays authoritative, so a drop your handler ignores is undone by the next sync. That is the rejection mechanism, not a bug.
-
-**Rollback needs a new collection instance.** Re-emitting the same reference is not observed, so a rejected move is never rolled back. Success is unaffected, which makes this an error-path-only trap.
-
-**An async handler must record before awaiting.** The commit is optimistic only until the next sync, and you do not control when that is. Record optimistically, then reconcile or roll back on the response.
-
-### Accessibility
-
-Rows expose reorder actions to assistive technology automatically: move up, move down, move out, and move into previous sibling. Sectioned items additionally get move to previous and next section, because the two-level invariant would otherwise leave a screen-reader user unable to do something a pointer user can. All of them report through `onReorder` exactly as a drop does. `semanticsActionsBuilder` lets you add, remove or relabel actions; labels must be `const`, since `CustomSemanticsAction` interns identifiers with no removal path.
-
-## SliverTree + TreeController (imperative)
-
-The lowest layer. Build it directly when you want full control over insert/remove/expand/collapse timing:
-
-```dart
-final controller = TreeController<String, RowData>(vsync: this);
-controller.setRoots([TreeNode(key: "root", data: root)]);
-controller.expand(key: "root", animate: true);
-
-CustomScrollView(slivers: [
-  SliverTree<String, RowData>(
-    controller: controller,
-    nodeBuilder: (context, key, depth) => buildRow(controller.getNodeData(key)!.data),
-  ),
-])
-```
-
-`TreeController` exposes `addListener` (structure changes), `addAnimationListener` (animation ticks, no relayout), and `runBatch(...)` (coalesce mutations into one notification).
-
 ## Animation styling
 
-One immutable `TreeAnimationStyle` configures timing and easing for every animation family, owned by the `TreeController` and inherited by everything downstream (the sync layer, the drag stack, and the declarative widgets via their `animationStyle` parameter):
-
-| Family | Drives | Fallback |
-| --- | --- | --- |
-| `expandCollapse` | expand/collapse groups, `expandAll`/`collapseAll`, sync-driven slide cohesion | none |
-| `enterExit` | insert/remove row animations | `expandCollapse` |
-| `reorderSlide` | FLIP slides: `moveNode`, `reorderRoots`/`reorderChildren`, drag-commit | none |
-| `makeRoom` | the drag make-room gap (open / re-target / release) | `reorderSlide` |
-| `dropSettle` | drag proxy settle glides (commit handoff, cancel return) | `reorderSlide` |
+One `TreeAnimationStyle` times every animation family (expand/collapse,
+enter/exit, reorder slides, the drag gap, drop settles). Defaults are 300ms
+linear across the board:
 
 ```dart
-final controller = TreeController<String, RowData>(
-  vsync: this,
-  animationStyle: const TreeAnimationStyle(
-    expandCollapse: TreeAnimationSpec(
-      duration: Duration(milliseconds: 250),
-      curve: Curves.easeInOut,
-    ),
-    reorderSlide: TreeAnimationSpec(
-      duration: Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
-    ),
-    // enterExit / makeRoom / dropSettle inherit when unset.
+SyncedSliverTree<String, Folder>.hierarchy(
+  // ...
+  animationStyle: TreeAnimationStyle.uniform(
+    duration: const Duration(milliseconds: 200),
+    curve: Curves.easeOutCubic,
   ),
-);
+)
 ```
 
-Rules of the system:
+Per-family specs are available (`TreeAnimationStyle(expandCollapse: ...,
+reorderSlide: ...)`), unset drag families inherit from `reorderSlide`, and
+`TreeAnimationStyle.disabled` snaps everything, which is also the
+synchronous-test configuration.
 
-- **Defaults are uniform**: every family defaults to 300ms / `Curves.linear` (`TreeAnimationStyle.defaultSpec`). `TreeAnimationStyle.uniform(duration:, curve:)` builds a one-spec-everywhere style.
-- **Per-call overrides win** for value selection: `moveNode`, `reorderRoots`/`reorderChildren`, `animateSlideFromOffsets`, and the preview methods take optional `Duration`/`Curve` params that beat the style when passed.
-- **Zero is a per-family kill switch**: a family whose resolved spec has `Duration.zero` duration snaps instead of animating, and that dominates explicit per-call durations. `TreeAnimationStyle.disabled` zeroes every family, which is the synchronous-test configuration.
-- **Runtime restyle** is a plain assignment (`controller.animationStyle = ...`). Duration changes rewrite in-flight expand/collapse groups (they finish at their old rate; the new duration applies from the next start), curves apply to newly started groups, and enter/exit animations re-read the style every tick. Drag sessions resolve the style once at `startDrag`, so a mid-drag restyle applies from the next drag.
-- Unset fallback families keep **inheriting**: `copyWith` preserves their unset-ness, so restyling `reorderSlide` also retimes an unset `makeRoom`/`dropSettle`.
+## Also in the box
+
+- `maxStickyDepth: 1` pins root rows as sticky headers while scrolling
+  through their children (higher values pin deeper levels too).
+- `SectionedSliverList`: a two-level header + items convenience built on
+  the same engine, with per-kind reorder config.
+- `SliverTree` + `TreeController`: the imperative lowest layer, for full
+  control over every mutation.
+
+All of it runs on one sliver core: viewport-aware lazy building, dense
+integer-indexed state storage, and reorder slides that are paint-only per
+frame, so rows glide without relayout.
