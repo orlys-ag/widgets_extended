@@ -3072,6 +3072,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (!_hasKey(key)) {
       return;
     }
+    // See [insert] for the rationale: flush any deferred visible-order
+    // rebuild so the `_order.contains(key)` path gate below reads fresh
+    // state. Inside a batch a prior mutation can leave the order dirty,
+    // and a stale containment read picks the wrong path in both
+    // directions — a row made visible earlier in the batch would degrade
+    // to an immediate purge, and a row hidden earlier in the batch would
+    // animate out where nobody can see it.
+    _ensureVisibleOrder();
     final descendants = _getDescendants(key);
     final nodesToRemove = [key, ...descendants];
     // Capture the parent BEFORE mutation; _removeNodesImmediate purges the
