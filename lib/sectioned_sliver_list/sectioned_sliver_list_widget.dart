@@ -470,11 +470,22 @@ class _DeclarativeSectionedSliverState<K extends Object, Section, Item>
         : <K>{};
 
     final desiredList = sections.toList(growable: false);
+    // Captured BEFORE the sync, which spends the memory it restores. A
+    // remembered section is one the user had already expanded or
+    // collapsed before it was filtered out, so it is NOT new and the
+    // initial-expansion policy must not be re-applied to it. Without
+    // this the policy overwrote every restore and `preserveExpansion`
+    // had no observable effect through this widget. Mirrors
+    // `SyncedSliverTree`'s `rememberedBeforeSync` pass.
+    final Set<K> rememberedBefore = widget.preserveExpansion
+        ? _controller.rememberedSectionKeys()
+        : const <Never>{};
     _controller.setSections(desiredList, itemsOf: itemsOf, animate: animate);
 
     if (widget.collapsible) {
       _applyInitialExpansion(
         knownSections,
+        rememberedBefore,
         desiredList,
         keyOf,
         animate: animate,
@@ -488,6 +499,7 @@ class _DeclarativeSectionedSliverState<K extends Object, Section, Item>
 
   void _applyInitialExpansion(
     Set<K> knownSections,
+    Set<K> rememberedBefore,
     List<Section> desired,
     K Function(Section) keyOf, {
     required bool animate,
@@ -495,7 +507,10 @@ class _DeclarativeSectionedSliverState<K extends Object, Section, Item>
     _controller.runBatch(() {
       for (final section in desired) {
         final k = keyOf(section);
-        if (knownSections.contains(k)) {
+        // Not new: either it was already here before this sync, or its
+        // state was remembered from a previous life and the sync just
+        // restored it.
+        if (knownSections.contains(k) || rememberedBefore.contains(k)) {
           continue;
         }
         if (!_controller.hasSection(k)) {

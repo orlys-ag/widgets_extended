@@ -1,3 +1,16 @@
+## Unreleased
+
+- Fix: `SectionedSliverList`'s `preserveExpansion` had no effect. Every
+sync re-applied the initial-expansion policy to any section that was not
+live before it, which is every re-added section, overwriting the state
+the memory had just restored. A section the user collapsed now comes
+back collapsed, and one they expanded comes back expanded, matching
+`SyncedSliverTree`. Callers who relied on the old behavior can set
+`preserveExpansion: false`.
+- Added `SectionedListController.rememberedSectionKeys()`, the section
+keys whose expansion state is held for a re-add. It replaces the
+undocumented `debugSnapshotRememberedSectionKeys()`.
+
 ## 0.0.33
 
 - Fix: removing a visible row that had never been laid out collapsed its

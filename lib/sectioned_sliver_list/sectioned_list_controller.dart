@@ -178,7 +178,21 @@ class SectionedListController<K extends Object, Section, Item>
     return out;
   }
 
-  Set<K> debugSnapshotRememberedSectionKeys() {
+  /// Section keys whose expansion state is currently REMEMBERED, meaning
+  /// the section is not in the tree right now but its expanded/collapsed
+  /// state is being held for a re-add. Empty when [preserveExpansion] is
+  /// off.
+  ///
+  /// A caller that applies its own initial-expansion policy must skip
+  /// these keys: a remembered section is not a new one, and forcing the
+  /// policy onto it discards the state the user set before it was
+  /// filtered out. That is exactly what the declarative widget does with
+  /// this, mirroring `SyncedSliverTree`'s `rememberedBeforeSync` pass.
+  ///
+  /// Snapshot the set BEFORE the sync that may re-add the section: the
+  /// sync spends the memory it restores.
+  Set<K> rememberedSectionKeys() {
+    _checkNotDisposed();
     final out = <K>{};
     for (final k in _sync.snapshotRememberedKeys()) {
       if (k is SectionKey<K>) {
