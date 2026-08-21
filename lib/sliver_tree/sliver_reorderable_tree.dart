@@ -523,6 +523,19 @@ class _SliverReorderableTreeState<TKey, TData>
     if (!identical(oldWidget.reorderController, widget.reorderController)) {
       oldWidget.reorderController.removeListener(_onControllerChanged);
       widget.reorderController.addListener(_onControllerChanged);
+      // Reconcile a session the OLD controller never reported ending.
+      // `TreeReorderController.dispose` tears its session down without
+      // notifying (a disposed ChangeNotifier cannot), so
+      // `_onControllerChanged`, the single owner of drag-UI teardown,
+      // never runs; the row-side orphan backstop also returns early
+      // because the disposed controller's `draggedKey` is already null.
+      // Without this the dragged row stays at opacity 0 and the proxy
+      // stays in the overlay until the next drag. The swap is the only
+      // event this state gets, and `_onDragEnd`'s setState and overlay
+      // removal are both legal here.
+      if (_draggedKey != null && !widget.reorderController.isDragging) {
+        _onDragEnd();
+      }
     }
     if (!widget.showDragProxy && widget.dragProxyBuilder == null) {
       _removeProxy();
