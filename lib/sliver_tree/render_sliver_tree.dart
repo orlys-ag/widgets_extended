@@ -532,6 +532,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// install and settle frames.
   int debugPerformLayoutCount = 0;
 
+  /// Lifetime count of [snapshotVisibleOffsets] calls. Perf oracle for
+  /// the first-wins baseline: K animated mutations in one frame must
+  /// produce exactly ONE staging snapshot, not K of them, because the
+  /// slot keeps only the first. The walk is O(visible) with a map entry
+  /// and a key hash per row, so the discarded ones were the dominant
+  /// cost of a batched reparent.
+  int debugSnapshotVisibleOffsetsCount = 0;
+
   /// Number of live entries in `_phantomExitGhosts`. Exposed for tests
   /// that verify phantom-exit cleanup (paint purity, controller swap,
   /// per-layout pruning). Zero when the map is null.
@@ -773,6 +781,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // those extents fall through to defaultExtent and the snapshot is
     // fictitious. Silently no-op rather than stage a garbage baseline.
     if (geometry == null) return;
+    // First-wins, asked BEFORE the snapshot rather than after it. The
+    // slot refuses a second stage in the same cycle, so the O(visible)
+    // walk and its map (one entry and one key hash per row) below would
+    // be computed only to be discarded. K animated mutations in one
+    // frame are routine (a batched reparent, a sync diff), and paying
+    // K snapshots for one baseline was the dominant cost of such a
+    // batch. Pinned by `slide_baseline_first_wins_cost_test.dart`.
+    if (_composer.isBaselineStaged) return;
     final offsets = snapshotVisibleOffsets();
     // Per-key overrides (proxy drop-settle): the consume path installs
     // the FLIP from these positions instead of the painted ones. Only
@@ -1515,6 +1531,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       geometry != null,
       "snapshotVisibleOffsets called before first layout",
     );
+    debugSnapshotVisibleOffsetsCount++;
     // Hoist per-axis activity checks. The common case is no slides at
     // all (idle) or Y-only slides (same-depth reorders). Skip the
     // per-row delta reads in those cases.
