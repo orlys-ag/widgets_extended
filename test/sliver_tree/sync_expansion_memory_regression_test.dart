@@ -19,7 +19,6 @@
 ///     `true` with `false` (a childless node cannot be expanded).
 library;
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
