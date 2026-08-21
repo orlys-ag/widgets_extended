@@ -997,7 +997,15 @@ class TreeSyncController<TKey, TData> {
       return true;
     }());
     final stack = <TreeNode<TKey, TData>>[];
-    final restoreOrder = <TKey>[];
+    // Seeded with the ROOTS, which the walk below never appends (it adds
+    // each visited node's CHILDREN). A retained root re-added childless
+    // keeps its remembered expansion for a later sync, and this loop is
+    // the only site that can spend it inside a recursive sync: step 7
+    // restores newly ADDED roots only, and both retry sites in
+    // `_syncChildrenImpl` are suppressed while `_deferExpansionRestore`
+    // is set. Roots go in first so the reverse iteration below still
+    // restores them LAST, preserving the bottom-up contract.
+    final restoreOrder = <TKey>[for (final node in nodes) node.key];
     for (int i = nodes.length - 1; i >= 0; i--) {
       stack.add(nodes[i]);
     }
@@ -1044,7 +1052,20 @@ class TreeSyncController<TKey, TData> {
     final stack = <TKey>[key];
     while (stack.isNotEmpty) {
       final current = stack.removeLast();
-      _rememberedExpansion[current] = _controller.isExpanded(current);
+      final expanded = _controller.isExpanded(current);
+      // A childless node cannot be expanded, so `false` here carries no
+      // information about what the user wanted. Overwriting a kept
+      // `true` with it is how a remove / re-add-childless / remove
+      // sequence lost the expansion that the childless-keep in
+      // [_restoreExpansion] and [_pruneExpansionMemory] exists to
+      // protect.
+      final keepPending =
+          !expanded &&
+          !_controller.hasChildren(current) &&
+          _rememberedExpansion[current] == true;
+      if (!keepPending) {
+        _rememberedExpansion[current] = expanded;
+      }
       for (final childKey in _controller.getChildren(current)) {
         stack.add(childKey);
       }
@@ -1066,7 +1087,17 @@ class TreeSyncController<TKey, TData> {
     if (_rememberedExpansion.isEmpty) return;
     _rememberedExpansion.removeWhere((key, wasExpanded) {
       if (_controller.getNodeData(key) == null) return false;
-      if (_controller.isExiting(key)) return false;
+      // Pending-deletion, NOT `isExiting`. The two differ for a
+      // descendant under a collapsed ancestor inside a removed subtree:
+      // `remove()` marks it for purge but installs an exit animation
+      // only for rows in the visible order, so `isExiting` is false
+      // while its data is still present, and pruning here would drop
+      // the expansion the user set before the removal. `isExiting`
+      // stays in the test for a collapse-driven exit, which is not a
+      // deletion and whose memory is equally worth keeping.
+      if (_controller.isPendingDeletion(key) || _controller.isExiting(key)) {
+        return false;
+      }
       // If the remembered state says expanded but the node currently has
       // no children in the controller, the restore couldn't complete yet
       // (children arrive in a later sync). Keep the memory so the next
