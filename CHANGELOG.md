@@ -7,6 +7,10 @@ the memory had just restored. A section the user collapsed now comes
 back collapsed, and one they expanded comes back expanded, matching
 `SyncedSliverTree`. Callers who relied on the old behavior can set
 `preserveExpansion: false`.
+- Fix: `TreeSyncController.syncMultipleChildren` destroyed a moved node's
+own children when `animate` was false and the node's old parent was
+removed in the same call. The old parent's removal is now deferred until
+every mover has been placed.
 - **BREAKING** `SectionedListController.addItem` and `setItems` now throw
 `ArgumentError` for an item key that belongs to another section, instead
 of silently moving the item out of it. Use `moveItem` to move an item

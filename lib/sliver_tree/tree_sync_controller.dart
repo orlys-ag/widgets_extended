@@ -103,6 +103,16 @@ class TreeSyncController<TKey, TData> {
   /// each node's full subtree is in place.
   bool _deferExpansionRestore = false;
 
+  /// Parents whose removal step 1 deferred because a DESCENDANT of theirs
+  /// is desired under another parent in the enclosing multi-parent call.
+  ///
+  /// Non-null only inside [syncMultipleChildren], which drains it after
+  /// every parent has synced. Step 1's own deferral covers a removed key
+  /// that is itself a mover; this covers the key whose SUBTREE holds one,
+  /// because removing it first purges the mover's children out from under
+  /// the later move.
+  List<TKey>? _deferredSubtreeRemovals;
+
   /// The underlying [TreeController] being driven.
   TreeController<TKey, TData> get treeController => _controller;
 
@@ -564,6 +574,21 @@ class TreeSyncController<TKey, TData> {
           _globallyDesiredChildren!.contains(key)) {
         continue;
       }
+      // Same, one level out: a node whose SUBTREE holds a mover cannot be
+      // removed yet either. `remove(animate: false)` purges the subtree
+      // immediately, so the mover would be re-created as a fresh leaf at
+      // its destination with its own children gone. Deferred to the end
+      // of the multi-parent call, by which time the destination parent's
+      // sync has moved the mover out and only the genuinely unwanted
+      // remainder is left. (With `animate: true` the purge is deferred by
+      // the exit animation and `moveNode` revives the subtree, which is
+      // why this only ever bit the non-animated path.)
+      if (_deferredSubtreeRemovals != null &&
+          _globallyDesiredChildren != null &&
+          _subtreeHoldsAnyOf(key, _globallyDesiredChildren!)) {
+        _deferredSubtreeRemovals!.add(key);
+        continue;
+      }
       _rememberExpansion(key);
       _controller.remove(key: key, animate: animate);
     }
@@ -731,6 +756,17 @@ class TreeSyncController<TKey, TData> {
   /// builds silently apply last-write-wins.
   ///
   /// Set [animate] to false to suppress animations.
+  /// Whether any descendant of [key] is in [keys]. O(subtree), and only
+  /// reached inside a multi-parent sync that has movers to place.
+  bool _subtreeHoldsAnyOf(TKey key, Set<TKey> keys) {
+    for (final descendant in _controller.getDescendants(key)) {
+      if (keys.contains(descendant)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void syncMultipleChildren(
     Map<TKey, List<TreeNode<TKey, TData>>> desiredByParent, {
     bool animate = true,
@@ -763,11 +799,32 @@ class TreeSyncController<TKey, TData> {
             _globallyDesiredChildren!.add(c.key);
           }
         }
+        _deferredSubtreeRemovals = <TKey>[];
         for (final entry in desiredByParent.entries) {
           syncChildren(entry.key, entry.value, animate: animate);
         }
+        // Every mover has been placed by its destination parent's sync,
+        // so what is left under a deferred key is the remainder nobody
+        // asked for. Skip a key that is already gone, that has since
+        // moved somewhere this call does not describe, or that turned out
+        // to be desired under its own current parent after all.
+        for (final key in _deferredSubtreeRemovals!) {
+          if (_controller.getNodeData(key) == null) {
+            continue;
+          }
+          final parent = _controller.getParent(key);
+          if (parent == null || !desiredByParent.containsKey(parent)) {
+            continue;
+          }
+          if (desiredByParent[parent]!.any((node) => node.key == key)) {
+            continue;
+          }
+          _rememberExpansion(key);
+          _controller.remove(key: key, animate: animate);
+        }
       } finally {
         _globallyDesiredChildren = null;
+        _deferredSubtreeRemovals = null;
       }
     });
   }
