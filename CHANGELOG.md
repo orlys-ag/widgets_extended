@@ -7,6 +7,11 @@ the memory had just restored. A section the user collapsed now comes
 back collapsed, and one they expanded comes back expanded, matching
 `SyncedSliverTree`. Callers who relied on the old behavior can set
 `preserveExpansion: false`.
+- Fix: a make-room drag suspended stale-row eviction for its whole
+duration, so every row an autoscroll drag passed stayed mounted until
+the drop (2000 rows over 200 frames: 18 mounted rows became 143).
+Eviction and retention now read the FLIP-slide state, which goes idle,
+rather than the composed state, which a held preview never lets go idle.
 - Fix: dragging a subtree taller than the scrollable's cache extent left
 blank space where the make-room preview had shifted rows into the
 viewport. Preview offsets are paint-only, so nothing widened the layout

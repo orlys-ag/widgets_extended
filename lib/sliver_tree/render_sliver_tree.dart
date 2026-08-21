@@ -1514,7 +1514,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // / vanishes during its visible transit through the viewport. Once
     // the slide settles (delta=0), this branch falls through and the
     // next eviction releases the box normally.
-    if (_controller.getSlideDeltaNid(nid) != 0.0 ||
+    // FLIP-only, for the reason spelled out in
+    // `SliverTreeElement._scheduleStaleEviction`: a held preview offset
+    // never decays, so the composed read retained every row a preview
+    // touched for the whole drag. A preview-shifted row is admitted by
+    // layout instead, so the cache-region check above already covers it.
+    if (_controller.getFlipSlideDeltaNid(nid) != 0.0 ||
         _controller.getSlideDeltaXNid(nid) != 0.0) {
       return true;
     }

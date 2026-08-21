@@ -428,6 +428,17 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// eviction is paused for the entire cascade and runs once after all
   /// slides have settled.
   ///
+  /// FLIP-ONLY, deliberately, not the composed `hasActiveSlides`. A
+  /// make-room preview offset is HELD rather than decaying, so the
+  /// composed flag stays true from a drag's first resolve to its
+  /// release and this gate would suspend eviction for the whole drag:
+  /// every row an autoscroll drag passed stayed mounted until the drop.
+  /// The cascade hazard above is specific to FLIP slides, whose ticks
+  /// are paint-only, and preview-shifted rows do not need the gate
+  /// because layout admits them (see
+  /// [RenderSliverTree.admittedSlideBound]), which leaves them retained
+  /// by the ordinary cache-region check.
+  ///
   /// The [_staleEvictionScheduled] flag dedupes across layout passes,
   /// continuous scroll fires `didFinishLayout` every frame, but we only
   /// want one post-frame eviction sweep per frame. The [_children] walk
@@ -436,7 +447,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   void _scheduleStaleEviction() {
     if (_staleEvictionScheduled) return;
     if (widget.controller.hasActiveAnimations) return;
-    if (widget.controller.hasActiveSlides) return;
+    if (widget.controller.hasActiveFlipSlides) return;
     _staleEvictionScheduled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -447,7 +458,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       // don't evict a row that's about to begin its enter/exit animation
       // OR its FLIP slide.
       if (widget.controller.hasActiveAnimations) return;
-      if (widget.controller.hasActiveSlides) return;
+      if (widget.controller.hasActiveFlipSlides) return;
 
       final render = renderObject;
       final staleNodes = <TKey>[];
