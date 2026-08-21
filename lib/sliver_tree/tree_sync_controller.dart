@@ -113,6 +113,23 @@ class TreeSyncController<TKey, TData> {
   /// the later move.
   List<TKey>? _deferredSubtreeRemovals;
 
+  /// Every ancestor of a mover, as of the start of the enclosing
+  /// multi-parent call. Non-null exactly when [_deferredSubtreeRemovals]
+  /// is, and the O(1) answer to "would removing this key purge a mover?".
+  ///
+  /// Built once by walking UP from each globally desired key that is
+  /// currently in the tree, which costs O(movers * depth) with an early
+  /// exit on an already-marked ancestor. The alternative, asking each
+  /// removal candidate whether its SUBTREE holds a mover, costs
+  /// O(removed subtree) per candidate and allocates a descendant list
+  /// every time.
+  ///
+  /// Computed pre-mutation, so it can name a parent whose mover has since
+  /// been moved out by an earlier parent's sync. That only defers a
+  /// removal the drain then performs anyway, inside the same
+  /// [TreeController.runBatch], so the outcome is unchanged.
+  Set<TKey>? _moverAncestors;
+
   /// The underlying [TreeController] being driven.
   TreeController<TKey, TData> get treeController => _controller;
 
@@ -584,8 +601,7 @@ class TreeSyncController<TKey, TData> {
       // the exit animation and `moveNode` revives the subtree, which is
       // why this only ever bit the non-animated path.)
       if (_deferredSubtreeRemovals != null &&
-          _globallyDesiredChildren != null &&
-          _subtreeHoldsAnyOf(key, _globallyDesiredChildren!)) {
+          _moverAncestors!.contains(key)) {
         _deferredSubtreeRemovals!.add(key);
         continue;
       }
@@ -756,17 +772,6 @@ class TreeSyncController<TKey, TData> {
   /// builds silently apply last-write-wins.
   ///
   /// Set [animate] to false to suppress animations.
-  /// Whether any descendant of [key] is in [keys]. O(subtree), and only
-  /// reached inside a multi-parent sync that has movers to place.
-  bool _subtreeHoldsAnyOf(TKey key, Set<TKey> keys) {
-    for (final descendant in _controller.getDescendants(key)) {
-      if (keys.contains(descendant)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   void syncMultipleChildren(
     Map<TKey, List<TreeNode<TKey, TData>>> desiredByParent, {
     bool animate = true,
@@ -800,6 +805,18 @@ class TreeSyncController<TKey, TData> {
           }
         }
         _deferredSubtreeRemovals = <TKey>[];
+        // See [_moverAncestors]: one upward pass per mover, rather than
+        // a downward subtree scan per removal candidate.
+        final moverAncestors = _moverAncestors = <TKey>{};
+        for (final moverKey in _globallyDesiredChildren!) {
+          if (_controller.getNodeData(moverKey) == null) {
+            continue;
+          }
+          var cursor = _controller.getParent(moverKey);
+          while (cursor != null && moverAncestors.add(cursor)) {
+            cursor = _controller.getParent(cursor);
+          }
+        }
         for (final entry in desiredByParent.entries) {
           syncChildren(entry.key, entry.value, animate: animate);
         }
@@ -825,6 +842,7 @@ class TreeSyncController<TKey, TData> {
       } finally {
         _globallyDesiredChildren = null;
         _deferredSubtreeRemovals = null;
+        _moverAncestors = null;
       }
     });
   }
