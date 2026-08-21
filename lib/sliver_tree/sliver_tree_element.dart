@@ -312,8 +312,20 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       // counts stay unchanged (pinned by `slide_paint_only_test.dart`).
       renderObject.markNeedsLayout();
     } else if (hasSlides) {
-      // Pure slide tick: paint-only.
-      renderObject.markNeedsPaint();
+      if (c.composedSlideAbsDeltaBound > renderObject.admittedSlideBound) {
+        // The composed offsets now reach further than the window the
+        // last layout admitted against, so a row may be painting inside
+        // the cache region from a structural position that was never
+        // built (a make-room preview whose lift exceeds the cache
+        // extent is the case that showed it: blank space where the
+        // shifted rows belong). One layout re-admits. The preview's
+        // contribution to the bound is TERMINAL, so a retarget costs
+        // exactly this one layout, not one per tick.
+        renderObject.markNeedsLayout();
+      } else {
+        // Pure slide tick: paint-only.
+        renderObject.markNeedsPaint();
+      }
     }
     _priorTickHadAnimations = active;
     _priorTickHadSlides = hasSlides;

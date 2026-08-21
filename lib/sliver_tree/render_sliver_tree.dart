@@ -532,6 +532,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// install and settle frames.
   int debugPerformLayoutCount = 0;
 
+  double _admittedSlideBound = 0.0;
+
+  /// The composed slide bound the last [performLayout] widened its
+  /// admission window by.
+  ///
+  /// **Internal contract**: read by [SliverTreeElement] on animation
+  /// ticks. A paint-only tick whose current bound exceeds this one may
+  /// be painting rows from structural positions the last layout did not
+  /// admit, so it needs a layout rather than a repaint; a tick within
+  /// it is genuinely paint-only. Same class of element-to-render
+  /// contract as [TreeController.takePendingPhantomAnchors]; external
+  /// callers should not depend on it.
+  double get admittedSlideBound => _admittedSlideBound;
+
   /// Lifetime count of [snapshotVisibleOffsets] calls. Perf oracle for
   /// the first-wins baseline: K animated mutations in one frame must
   /// produce exactly ONE staging snapshot, not K of them, because the
@@ -2512,6 +2526,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // displacement reaches the sum. Identical to the max whenever only
     // one engine is active.
     final slideOverreach = controller.composedSlideAbsDeltaBound;
+    _admittedSlideBound = slideOverreach;
     final effectiveCacheStart = cacheStart - slideOverreach;
     final effectiveCacheEnd = cacheEnd + slideOverreach;
 

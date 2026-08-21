@@ -7,6 +7,11 @@ the memory had just restored. A section the user collapsed now comes
 back collapsed, and one they expanded comes back expanded, matching
 `SyncedSliverTree`. Callers who relied on the old behavior can set
 `preserveExpansion: false`.
+- Fix: dragging a subtree taller than the scrollable's cache extent left
+blank space where the make-room preview had shifted rows into the
+viewport. Preview offsets are paint-only, so nothing widened the layout
+admission window until autoscroll or the drop forced a layout. The
+window now widens once per re-target.
 - Added `SectionedListController.rememberedSectionKeys()`, the section
 keys whose expansion state is held for a re-add. It replaces the
 undocumented `debugSnapshotRememberedSectionKeys()`.
