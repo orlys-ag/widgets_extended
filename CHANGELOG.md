@@ -7,6 +7,22 @@ the memory had just restored. A section the user collapsed now comes
 back collapsed, and one they expanded comes back expanded, matching
 `SyncedSliverTree`. Callers who relied on the old behavior can set
 `preserveExpansion: false`.
+- **BREAKING** `SectionedListController.addItem` and `setItems` now throw
+`ArgumentError` for an item key that belongs to another section, instead
+of silently moving the item out of it. Use `moveItem` to move an item
+between sections. Re-adding an item to its own section is unchanged
+(an upsert, or a cancel of a pending removal).
+- **BREAKING** `SectionedListController.addSection` now throws
+`ArgumentError` for a section key that already exists, and validates its
+`items` before mutating, so a rejected call no longer leaves an empty
+section behind. Re-adding a section that is animating out still cancels
+its removal.
+- Fix: `SectionedListController.moveItem` resurrected an item that was
+animating out when it was given a `toSection`; the in-section form
+already refused. Both forms now refuse.
+- Fix: `SectionedListController.moveItem(toSection:)` with no `index` is
+documented to append, but was a no-op when the item was already in that
+section.
 - Fix: the dragged row's hidden in-place copy was still hit-testable, so
 a second finger landing on it could kill the drag (a touch on one of the
 row's own handles ran the re-entry guard) or fire that row's tap
