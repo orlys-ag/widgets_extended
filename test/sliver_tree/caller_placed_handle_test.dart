@@ -235,16 +235,29 @@ void main() {
     });
 
     testWidgets(
-      "a second pointer-down on another handle cancels the live session",
+      "a second pointer-down on the DRAGGED row's other handle is ignored",
       (tester) async {
-        // Leg one of the row's re-entry guard, and the reason it cannot be
-        // dropped. `MultiDragGestureRecognizer.dispose` resolves its arena
-        // entries and never calls `cancel()` or `end()` on its client, and
-        // it removes the pointer's route, so the first finger's up can
-        // never reach the recognizer again. Without an explicit cancel the
-        // session is ORPHANED: its drag pin, its scroll listener and its
-        // autoscroll ticker outlive the gesture with nothing left to end
-        // them, and `isDragging` stays true forever.
+        // The dragged row's in-place copy is hidden AND non-interactive
+        // (issue 9 of the 2026-08-21 review: `Opacity(0)` alone left it
+        // hit-testable, so a second finger on its other grip ran the
+        // row's re-entry guard and cancelled the live drag, which the
+        // user experiences as the drag dying under a stray touch).
+        // The pointer no longer reaches the hidden row at all, so the
+        // session survives and the first finger still commits.
+        //
+        // This replaces a test that pinned the opposite outcome. That
+        // guard (`_ownsSession()` then `_cancelDrag()` on pointer-down)
+        // is deliberately kept: it answers a real hazard, because
+        // `MultiDragGestureRecognizer.dispose` resolves its arena
+        // entries without calling `cancel()` or `end()` on its client,
+        // so replacing a live row's recognizer would orphan the session
+        // with its pin, scroll listener and autoscroll ticker still
+        // installed. It is simply no longer REACHABLE from the public
+        // surface: it fires only for the row that owns the session
+        // (`_ownsSession` compares `draggedKey` to this row's key), and
+        // that row is hidden for the whole session, so no pointer can
+        // arrive. It stays as protection for any future path that
+        // un-hides a row mid-session.
         final h = await _mount(tester, _twoHandledRow);
 
         final left = tester.getCenter(
@@ -259,28 +272,30 @@ void main() {
         await first.moveBy(const Offset(0.0, 30.0));
         await tester.pump();
 
-        // Setup sanity: there really is a live session to orphan.
+        // Setup sanity: there really is a live session.
         expect(h.reorder.isDragging, isTrue);
         expect(h.reorder.draggedKey, "a");
 
         final second = await tester.startGesture(right, pointer: 2);
         await tester.pump();
-
         expect(
           h.reorder.isDragging,
-          isFalse,
-          reason:
-              "the superseded session must be cancelled, not left "
-              "installed with no recognizer able to end it",
+          isTrue,
+          reason: "the hidden row cannot receive the pointer, so nothing "
+              "supersedes the live session",
         );
-
-        await first.up();
         await second.up();
+        await tester.pump();
+
+        // The original finger still owns the drag and commits it.
+        await first.moveBy(const Offset(0.0, 140.0));
+        await tester.pump();
+        await first.up();
         await tester.pumpAndSettle();
 
         expect(h.reorder.isDragging, isFalse);
-        expect(h.reported, isEmpty, reason: "a cancel commits nothing");
-        expect(h.tree.rootKeys, ["a", "b", "c"]);
+        expect(h.reported.map((r) => r.key), ["a"]);
+        expect(h.tree.rootKeys, ["b", "c", "a"]);
       },
     );
 

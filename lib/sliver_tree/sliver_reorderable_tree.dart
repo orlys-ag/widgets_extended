@@ -1085,7 +1085,22 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // its subtree at zero alpha unless `alwaysIncludeSemantics` is set,
     // so hoisting this any further would silently strip the row's reorder
     // actions from the semantics tree for the length of every drag.
-    content = Opacity(opacity: hidden ? 0.0 : 1.0, child: content);
+    // IgnorePointer, not Opacity alone: `RenderOpacity` does not override
+    // `hitTest`, so an invisible row stayed hit-testable. While the drag
+    // rests in its own slot the preview holds no offsets, which leaves
+    // the hidden copy as the only thing under its band, and a second
+    // finger landing there hit content the user cannot see: on a grip it
+    // ran this row's re-entry guard and cancelled the live drag, on body
+    // content it fired that content's own callbacks. `ignoring` tracks
+    // `hidden`, so the widget shape is stable across the drag, and the
+    // in-flight pointer is unaffected (it is already routed to its
+    // recognizer; IgnorePointer only removes the subtree from NEW hit
+    // tests). Semantics are untouched, which is why the wrapper goes
+    // INSIDE the Semantics below.
+    content = IgnorePointer(
+      ignoring: hidden,
+      child: Opacity(opacity: hidden ? 0.0 : 1.0, child: content),
+    );
 
     // Expose the reorder capability to assistive technology. Pointer
     // drags are unusable with a screen reader; these actions commit the

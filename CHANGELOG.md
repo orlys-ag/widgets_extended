@@ -7,6 +7,11 @@ the memory had just restored. A section the user collapsed now comes
 back collapsed, and one they expanded comes back expanded, matching
 `SyncedSliverTree`. Callers who relied on the old behavior can set
 `preserveExpansion: false`.
+- Fix: the dragged row's hidden in-place copy was still hit-testable, so
+a second finger landing on it could kill the drag (a touch on one of the
+row's own handles ran the re-entry guard) or fire that row's tap
+handlers. The hidden copy now ignores pointers; every other row stays
+interactive.
 - Fix: a make-room drag suspended stale-row eviction for its whole
 duration, so every row an autoscroll drag passed stayed mounted until
 the drop (2000 rows over 200 frames: 18 mounted rows became 143).
