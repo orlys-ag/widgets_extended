@@ -1760,6 +1760,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   ///    controller truth during extent animations (extent ticks force
   ///    relayout every frame), the same staleness class [_liveRowAt]
   ///    already accepts.
+  /// Whether the per-nid offset/extent arrays and the bulk cumulatives
+  /// describe the CURRENT visible order.
+  ///
+  /// Both are written only by `performLayout` (the structure stamp and
+  /// the cumulative's element count are stamped there), so they go stale
+  /// for exactly one window: between a structural mutation and the next
+  /// layout. Nothing inside a frame can observe that window, but the
+  /// gesture-time readers below can, because a pointer event is
+  /// delivered between frames. Every reader that indexes those caches
+  /// has to ask this first and fall back to the cache-free full scan.
+  bool get _rowGeometryIsFresh {
+    return controller.structureGeneration == _lastStructureGeneration &&
+        !(_bulkCumulativesValid &&
+            _bulkCumulativesCount != controller.visibleNodeCount);
+  }
+
   @override
   ({TKey key, double paintedOffset, double extent})? findRowAtPaintedY(
     double scrollY,
@@ -1775,7 +1791,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       // generation bump, so the stamp comparison sees post-flush truth.
       if (_composer.hasGhosts ||
           _lastFrameUsedBulkCumulatives ||
-          controller.structureGeneration != _lastStructureGeneration) {
+          !_rowGeometryIsFresh) {
         debugLastFindRowUsedFullScan = true;
         return _findRowFullScan(scrollY, visible);
       }
@@ -1783,7 +1799,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       return _findRowBoundedScan(scrollY, visible);
     }
 
+    // Same staleness window as the slide branch above, and the same
+    // answer: the full scan reads extents and deltas from the controller
+    // rather than from the layout-stamped caches, so it is correct on a
+    // frame the caches do not describe. Without this the binary search
+    // in [_findFirstVisibleIndex] and the cumulative read in
+    // [_liveRowAt] index the PREVIOUS order: a bulk cumulative shorter
+    // than the new visible count throws, and a recycled nid's offset
+    // slot answers with its previous occupant's position.
+    if (!_rowGeometryIsFresh) {
+      debugLastFindRowUsedFullScan = true;
+      return _findRowFullScan(scrollY, visible);
+    }
+
     // Fast path: no composed deltas, painted offset == structural offset.
+    debugLastFindRowUsedFullScan = false;
     debugLastFindRowIterationCount = 0;
     final startIdx = _findFirstVisibleIndex(scrollY);
     for (int i = startIdx; i < visible.length; i++) {
