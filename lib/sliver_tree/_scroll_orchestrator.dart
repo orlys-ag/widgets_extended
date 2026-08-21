@@ -290,8 +290,14 @@ class ScrollOrchestrator<TKey, TData> {
     required double Function(TKey key)? extentEstimator,
     required double sliverBaseOffset,
   }) async {
-    final position = scrollController.position;
-    final initialPixels = position.pixels;
+    // Mutable, not captured: a [ScrollController] can detach from one
+    // [ScrollPosition] and attach to another while this scroll runs (the
+    // scrollable rebuilt with a fresh identity), and the old position is
+    // disposed on detach. The follower below re-reads the live position
+    // every tick and re-seeds this baseline when it changes; see its
+    // "position swap" note.
+    var lastPosition = scrollController.position;
+    var initialPixels = lastPosition.pixels;
 
     // Dedicated progress animation for the scroll curve. An
     // AnimationController rather than a raw Ticker: it rides the standard
@@ -322,6 +328,27 @@ class ScrollOrchestrator<TKey, TData> {
     scrollProgress.forward();
 
     void follower() {
+      // Position swap: `hasClients` stays true when a controller moves
+      // from one scrollable to another in the same frame, so the loop
+      // below cannot notice it and the captured position would already
+      // be disposed. Re-read the live one every tick, and skip a tick
+      // whose position has not been laid out yet (a fresh position has
+      // no pixels, viewport or content dimensions until its first
+      // layout, and every read below would throw on the null check).
+      if (!scrollController.hasClients) return;
+      final position = scrollController.position;
+      if (!position.hasPixels ||
+          !position.hasViewportDimension ||
+          !position.hasContentDimensions) {
+        return;
+      }
+      if (!identical(position, lastPosition)) {
+        // The lerp baseline belongs to the position that is now gone;
+        // measure the remaining curve distance from where the new one
+        // actually sits, so the swap does not jump.
+        lastPosition = position;
+        initialPixels = position.pixels;
+      }
       final targetIdx = _controller.getVisibleIndex(key);
       if (targetIdx < 0) return;
       final tCurved = curve.transform(scrollProgress.value);
