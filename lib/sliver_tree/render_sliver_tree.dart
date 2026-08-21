@@ -167,6 +167,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     _bulkCumulativesCount = 0;
     _lastBulkAnimationGeneration = -1;
     _lastFrameUsedBulkCumulatives = false;
+    _admittedSlideBound = 0.0;
     // The out-of-layout findRowAtPaintedY scratch is keyed by the old
     // controller's structureGeneration; invalidate so a post-swap
     // pointer poll re-materializes against the new controller.
@@ -2413,6 +2414,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       _lastObservedScrollOffset = double.nan;
       _structureChanged = true;
       _lastVisibleNodeCount = 0;
+      // Nothing was admitted, so no bound was honored either; leaving a
+      // stale one would let a later tick read "already admitted" for a
+      // window this layout never opened.
+      _admittedSlideBound = 0.0;
       geometry = SliverGeometry.zero;
       childManager?.didFinishLayout();
       return;
