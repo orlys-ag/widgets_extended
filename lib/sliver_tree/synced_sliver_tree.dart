@@ -242,13 +242,12 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   const SyncedSliverTree({
     required Iterable<SyncedTreeNode<TKey, TItem>> tree,
     required this.itemBuilder,
-    this.preserveExpansion = true,
+    this.expansionMemory = TreeSyncController.defaultExpansionMemory,
     this.initiallyExpanded = true,
     this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
-    this.maxExpansionMemorySize = 1024,
     this.initialNodeExpansion,
     this.onControllerCreated,
     this.onExpansionChanged,
@@ -272,13 +271,12 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required TKey Function(TItem item) keyOf,
     required Iterable<TItem> Function(TItem item) childrenOf,
     required this.itemBuilder,
-    this.preserveExpansion = true,
+    this.expansionMemory = TreeSyncController.defaultExpansionMemory,
     this.initiallyExpanded = true,
     this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
-    this.maxExpansionMemorySize = 1024,
     this.initialNodeExpansion,
     this.onControllerCreated,
     this.onExpansionChanged,
@@ -294,6 +292,12 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
 
   /// Creates a synced sliver tree from flat items with optional parent keys.
   ///
+  /// A [parentOf] result that names a key absent from [items] throws
+  /// [ArgumentError] at sync time; null is the explicit "this item is a
+  /// root". A filter flow that removes a parent while keeping its
+  /// children returns null for the filtered parent, guarding the stored
+  /// parent key with a set of the live keys.
+  ///
   /// Rebuilds re-diff only when [items] is a different instance than the
   /// previous build's; [keyOf] and [parentOf] must be pure functions of
   /// their input. See "Rebuild convention" on [SyncedSliverTree].
@@ -302,13 +306,12 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
     required TKey Function(TItem item) keyOf,
     required TKey? Function(TItem item) parentOf,
     required this.itemBuilder,
-    this.preserveExpansion = true,
+    this.expansionMemory = TreeSyncController.defaultExpansionMemory,
     this.initiallyExpanded = true,
     this.animationStyle = const TreeAnimationStyle(),
     this.indentWidth = 0.0,
     this.maxStickyDepth = 0,
     this.addRepaintBoundaries = true,
-    this.maxExpansionMemorySize = 1024,
     this.initialNodeExpansion,
     this.onControllerCreated,
     this.onExpansionChanged,
@@ -333,8 +336,16 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// Builds the widget for each visible node.
   final TreeItemBuilder<TKey, TItem> itemBuilder;
 
-  /// Whether to preserve expansion state when nodes are removed and re-added.
-  final bool preserveExpansion;
+  /// Maximum number of nodes whose expansion state is remembered across
+  /// remove/re-add cycles, so a re-added node comes back with the
+  /// expansion the user gave it. Forwarded to
+  /// [TreeSyncController.expansionMemory].
+  ///
+  /// 0 disables expansion memory entirely: every node re-enters collapsed
+  /// (subject to the initial-expansion policy), exactly as if it had
+  /// never been seen. Changing the value at runtime rebuilds the internal
+  /// sync controller, which discards whatever it had remembered so far.
+  final int expansionMemory;
 
   /// Whether nodes should be expanded when they first appear.
   ///
@@ -354,8 +365,8 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// A node's own expansion state always wins over this policy once it
   /// exists: this is an INITIAL policy, so later user toggles are never
   /// overridden, and a node removed and re-added while
-  /// [preserveExpansion] is on comes back with its remembered state rather
-  /// than the policy's answer.
+  /// [expansionMemory] is nonzero comes back with its remembered state
+  /// rather than the policy's answer.
   ///
   /// Must be a pure function of its inputs. Like the other callbacks it is
   /// excluded from the rebuild identity check (see "Rebuild convention"),
@@ -378,18 +389,6 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// Whether to wrap each row in a [RepaintBoundary]. Forwarded to
   /// [SliverTree.addRepaintBoundaries].
   final bool addRepaintBoundaries;
-
-  /// Maximum number of nodes whose expansion state is remembered across
-  /// remove/re-add cycles. Forwarded to
-  /// [TreeSyncController.maxExpansionMemorySize].
-  ///
-  /// Only consulted when [preserveExpansion] is true. Setting 0 disables
-  /// expansion memory entirely; every observable effect of
-  /// [preserveExpansion] flows through that memory, so 0 is equivalent to
-  /// `preserveExpansion: false`. Changing this value rebuilds the
-  /// internal sync controller, which discards whatever it had remembered
-  /// so far.
-  final int maxExpansionMemorySize;
 
   /// Called once with the internal [TreeController], right after the first
   /// sync and the initial expansion pass, so the controller is already in
@@ -438,8 +437,7 @@ class SyncedSliverTree<TKey, TItem> extends StatefulWidget {
   /// between null and non-null would change the widget type at this slot,
   /// tearing down the sliver, its per-key child caches and its render
   /// object, and would orphan a live drag session. To toggle reorder at
-  /// runtime keep the config and return false from
-  /// [TreeReorderConfig.canReorder].
+  /// runtime keep the config and flip [TreeReorderConfig.enabled].
   final TreeReorderConfig<TKey>? reorder;
 
   @override
@@ -452,6 +450,11 @@ class _SyncedSliverTreeState<TKey, TItem>
     with TickerProviderStateMixin {
   late TreeController<TKey, TItem> _treeController;
   late TreeSyncController<TKey, TItem> _syncController;
+
+  /// False until the first [_sync] completes. The gained-children
+  /// heuristic diffs against a previous child-presence snapshot, so it is
+  /// skipped on that first pass, where every parent would otherwise look
+  /// newly populated.
   bool _hasSyncedOnce = false;
 
   /// Reorder state, created iff reorder was enabled at construction.
@@ -459,17 +462,14 @@ class _SyncedSliverTreeState<TKey, TItem>
   /// The controller and the config it was built from live and die
   /// TOGETHER in one nullable field, which is the whole point: no code
   /// path can hold one without the other, so `build` needs no `!` on
-  /// either. The crash this replaced is not guarded against, it is
-  /// unrepresentable.
+  /// either. The hazard is not guarded against, it is unrepresentable.
   ///
-  /// What it replaced: `build` dispatched on the controller alone, which
-  /// only covers a null to non-null flip. In the other direction the
-  /// controller exists, so `build` went on to `widget.reorder!` and a
-  /// RELEASE build threw `Null check operator used on a null value` from
-  /// inside `build` -- debug being saved only by `didUpdateWidget`'s
-  /// presence assert firing first. Every forwarder's "a null config
-  /// degrades to refusing" reasoning was moot, because the widget had
-  /// already crashed before any of them could be asked.
+  /// Splitting the two back apart would let `build` reach a live
+  /// controller beside a null config and dereference it. Dispatching on
+  /// the controller alone catches only the null to non-null direction; in
+  /// the other direction a release build throws `Null check operator used
+  /// on a null value` from inside `build`, before any forwarder's "a null
+  /// config degrades to refusing" reasoning can apply.
   ///
   /// Worth saying plainly: no test pins this. `flutter_test` runs with
   /// asserts enabled, so `didUpdateWidget` aborts the subtree build first
@@ -540,7 +540,8 @@ class _SyncedSliverTreeState<TKey, TItem>
     _treeController.addExpansionListener(_handleExpansionChanged);
   }
 
-  /// Refuses everything when reorder is absent, rather than defaulting to
+  /// Refuses everything when reorder is absent or disabled
+  /// ([TreeReorderConfig.enabled] false), rather than defaulting to
   /// "allowed".
   ///
   /// RAW `widget.reorder`, deliberately, NOT the construction-time
@@ -567,14 +568,18 @@ class _SyncedSliverTreeState<TKey, TItem>
   /// four of them vacuous.
   bool _handleCanReorder(TKey key) {
     final config = widget.reorder;
-    if (config == null) {
+    // `!enabled` refuses on the same fail-closed footing as absence.
+    // This ONE gate is what makes [TreeReorderConfig.enabled] cover
+    // drag start, mid-drag enforcement, commits, `moveTo` and the
+    // semantics actions alike: they all consult this tear-off.
+    if (config == null || !config.enabled) {
       return false;
     }
     return config.canReorder?.call(key) ?? true;
   }
 
-  /// Absent config refuses, on raw `widget.reorder`, for the reason
-  /// [_handleCanReorder] gives.
+  /// Absent or disabled config refuses, on raw `widget.reorder`, for the
+  /// reason [_handleCanReorder] gives.
   ///
   /// The two must agree: a null config that refused drags but permitted
   /// drops read as an accident rather than a policy, and left the pair
@@ -586,7 +591,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     int? index,
   }) {
     final config = widget.reorder;
-    if (config == null) {
+    if (config == null || !config.enabled) {
       return false;
     }
     final policy = config.canAcceptDrop;
@@ -601,7 +606,7 @@ class _SyncedSliverTreeState<TKey, TItem>
   ///
   /// Every route here runs through `TreeReorderController._fireOnReorder`,
   /// which only runs after `_canCommit`, whose first question is
-  /// `canReorder` -- the always-non-null [_handleCanReorder] tear-off,
+  /// `canReorder`, the always-non-null [_handleCanReorder] tear-off,
   /// which refuses a null config. So a null config commits nothing and
   /// reports nothing, on the drag path and through `moveTo` alike.
   ///
@@ -620,6 +625,8 @@ class _SyncedSliverTreeState<TKey, TItem>
     config?.onReorder(key, newParent, index);
   }
 
+  /// Lets the app rewrite a row's reorder semantics actions. Returns the
+  /// built-in map untouched when no `semanticsActionsBuilder` is set.
   Map<CustomSemanticsAction, VoidCallback> _handleSemanticsActions(
     TKey key,
     Map<CustomSemanticsAction, VoidCallback> builtIn,
@@ -709,11 +716,14 @@ class _SyncedSliverTreeState<TKey, TItem>
     });
   }
 
+  /// Builds a sync controller bound to the current tree controller and
+  /// expansion-memory capacity. Called at construction, and again when
+  /// [SyncedSliverTree.expansionMemory] changes, since that capacity is
+  /// fixed for a controller's lifetime.
   TreeSyncController<TKey, TItem> _createSyncController() {
     return TreeSyncController<TKey, TItem>(
       treeController: _treeController,
-      preserveExpansion: widget.preserveExpansion,
-      maxExpansionMemorySize: widget.maxExpansionMemorySize,
+      expansionMemory: widget.expansionMemory,
     );
   }
 
@@ -726,8 +736,8 @@ class _SyncedSliverTreeState<TKey, TItem>
       "SyncedSliverTree.reorder cannot be added or removed after the "
       "widget is created: it changes the widget type at this slot, "
       "tearing down the sliver and its child caches, and would orphan a "
-      "live drag. Keep the config and return false from canReorder to "
-      "disable reordering at runtime.",
+      "live drag. Keep the config and set enabled: false to disable "
+      "reordering at runtime.",
     );
     if (oldWidget.animationStyle != widget.animationStyle) {
       _treeController.animationStyle = widget.animationStyle;
@@ -754,8 +764,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     // expression rather than a rule restated in three places.
     var needsSync = _syncGate?.isDeferred ?? false;
 
-    if (widget.preserveExpansion != oldWidget.preserveExpansion ||
-        widget.maxExpansionMemorySize != oldWidget.maxExpansionMemorySize) {
+    if (widget.expansionMemory != oldWidget.expansionMemory) {
       // Recreated EAGERLY, even mid-drag. The sync controller touches no
       // tree structure: `initializeTracking` is a no-op and `dispose`
       // only clears two memory maps. Only its trailing diff is deferred,
@@ -820,6 +829,11 @@ class _SyncedSliverTreeState<TKey, TItem>
     };
   }
 
+  /// Normalizes this build's input and diffs it into the controller, then
+  /// runs the post-sync expansion passes when the widget asked for any.
+  ///
+  /// [animate] is false for the construction-time sync, where there is no
+  /// prior state to animate from, and true for every later one.
   void _sync({required bool animate}) {
     // ONE decision point for the post-sync expansion work. Both passes
     // below, and every input they need, hang off this: without a per-node
@@ -836,7 +850,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     // sync. syncRoots will clear entries as part of _restoreExpansion /
     // _pruneExpansionMemory, so by the time expandParentsThatGainedChildren
     // runs below, the memory no longer reflects which keys were filtered
-    // out previously — and the heuristic would wrongly auto-expand a
+    // out previously, and the heuristic would wrongly auto-expand a
     // re-added, user-collapsed section.
     final Set<TKey> rememberedBeforeSync = needsExpansionPasses
         ? _syncController.snapshotRememberedKeys()
@@ -886,6 +900,9 @@ class _SyncedSliverTreeState<TKey, TItem>
     _hasSyncedOnce = true;
   }
 
+  /// Walks this build's mode input into a [NormalizedTreeInput]. The cast
+  /// in each arm is sound because a constructor sets the mode and its
+  /// backing fields together, so the mode selects which are non-null.
   NormalizedTreeInput<TKey, TItem> _normalizeInput() {
     return switch (widget._mode) {
       _SyncedSliverTreeMode.tree => normalizeSyncedNodes(
@@ -974,6 +991,9 @@ class _SyncedSliverTreeState<TKey, TItem>
     );
   }
 
+  /// Builds one row through [SyncedSliverTree.itemBuilder]. Yields an
+  /// empty box for a key carrying no data, which a row can transiently do
+  /// when its data was purged while it is still in the visible order.
   Widget _buildRow(BuildContext context, TKey key, int depth) {
     final nodeData = _treeController.getNodeData(key);
     if (nodeData == null) {

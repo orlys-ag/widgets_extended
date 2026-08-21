@@ -12,13 +12,13 @@ library;
 
 import 'package:flutter/animation.dart' show Curve;
 
-/// Render-layer contract consumed by [TreeReorderController].
+/// Render-layer contract consumed by `TreeReorderController`.
 ///
 /// All y-coordinates are **sliver-local**: distance from the start of the
 /// tree sliver's scroll extent (first tree row at 0). Viewport scroll space
 /// differs by [precedingScrollExtent].
 ///
-/// **Internal contract** — external code should not implement this
+/// **Internal contract**: external code should not implement this
 /// interface. Its shape follows the reorder controller's needs and may
 /// change without notice; it is public only so the production render object
 /// can implement it across library boundaries and tests can fake it.
@@ -49,8 +49,8 @@ abstract interface class ReorderRenderPort<TKey> {
   /// row when [scrollY] sits past the bottom of the tree. Returns `null`
   /// when no live row exists.
   ///
-  /// Painted offsets include any active FLIP slide delta — this is the
-  /// row under the pointer as the user sees it, not as the structure says.
+  /// Painted offsets include any active FLIP slide delta: this is the row
+  /// under the pointer as the user sees it, not as the structure says.
   ({TKey key, double paintedOffset, double extent})? findRowAtPaintedY(
     double scrollY,
   );
@@ -69,8 +69,8 @@ abstract interface class ReorderRenderPort<TKey> {
   /// So ask THIS when you know the key and want its geometry, and
   /// [findRowAtPaintedY] only when the position is the question. Grab
   /// capture knows the key, which is why it uses this: resolving grab
-  /// geometry positionally silently produced a top-anchored proxy of the
-  /// wrong height whenever a drag began on a pinned header.
+  /// geometry positionally yields a top-anchored proxy of the wrong
+  /// height whenever a drag begins on a pinned header.
   ///
   /// Includes any active FLIP slide delta, matching [findRowAtPaintedY].
   ({double paintedOffset, double extent})? paintedRowBounds(TKey key);
@@ -79,8 +79,7 @@ abstract interface class ReorderRenderPort<TKey> {
   ///
   /// The reorder controller pins the dragged row for the session's
   /// lifetime: the drag gesture's recognizer lives on the row's own
-  /// `State`, so
-  /// evicting the row would orphan the session.
+  /// `State`, so evicting the row would orphan the session.
   void pinNode(TKey key);
 
   /// Removes the eviction pin for [key]. Idempotent.
@@ -103,7 +102,7 @@ abstract interface class ReorderRenderPort<TKey> {
   ///
   /// Caller contract (first-wins staging): every successful stage MUST be
   /// followed by a structural mutation that triggers a layout in the same
-  /// frame — see `RenderSliverTree.beginSlideBaseline` for the full
+  /// frame. See `RenderSliverTree.beginSlideBaseline` for the full
   /// protocol.
   void beginSlideBaseline({
     required Duration duration,

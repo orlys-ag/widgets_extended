@@ -7,8 +7,8 @@
 /// itself while dragged, still exposes its reorder semantics actions,
 /// and is still a drop TARGET.
 ///
-/// Ownership follows Flutter's `ReorderableDragStartListener`
-/// (`widgets/reorderable_list.dart:1408`): the handle owns NO recognizer.
+/// Ownership follows Flutter's `ReorderableDragStartListener` in
+/// `widgets/reorderable_list.dart`: the handle owns NO recognizer.
 /// It reports a single pointer-down to the enclosing row through
 /// [TreeRowDragScope], and the ROW owns the recognizer, the per-pointer
 /// bookkeeping, and one `Drag` per gesture. That is what makes two
@@ -37,8 +37,8 @@ class TreeRowDragScope extends InheritedWidget {
   /// Whether the enclosing row is draggable at all: the reorder policy's
   /// `canReorder` answer for this row.
   ///
-  /// Public because it is how a caller reproduces the package's old
-  /// hidden-grip look without asking its own policy a second time:
+  /// Public because it is how a caller renders a hidden grip that still
+  /// reserves its cell, without asking its own policy a second time:
   ///
   /// ```dart
   /// Builder(
@@ -59,7 +59,7 @@ class TreeRowDragScope extends InheritedWidget {
   /// override `hitTest`, so a zero-alpha grip still swallows gestures.
   /// `Visibility`'s defaults (`maintainInteractivity: false`,
   /// `maintainSemantics: false`) wrap the hidden cell in `IgnorePointer`
-  /// and `ExcludeSemantics`, which is what made the old gutter inert.
+  /// and `ExcludeSemantics`, which is what keeps the reserved cell inert.
   final bool canDrag;
 
   /// A method TEAR-OFF of the publishing row's `State`, closing over its
@@ -161,9 +161,9 @@ class TreeDragHandle extends StatelessWidget {
         // does not hit-test itself (a bare `SizedBox`, a `Padding` around
         // nothing, a `CustomPaint` with no hit-test override) would
         // render, show no cursor, and silently never drag. That is
-        // exactly the footgun a caller-placed handle invites, and the
-        // old package-composed grip hid it behind
-        // `GestureDetector(behavior: opaque)`.
+        // exactly the footgun a caller-placed handle invites, so the
+        // behaviour is decided here rather than left to whatever the
+        // caller happens to pass as [child].
         //
         // TRANSPARENT while disarmed, which is the other half. An opaque
         // disarmed handle would swallow taps the app wants for its own
@@ -187,6 +187,9 @@ class TreeDragHandle extends StatelessWidget {
     );
   }
 
+  /// Builds a fresh recognizer, gives it the ambient gesture settings, and
+  /// hands it to the enclosing row along with the pointer-down. The row
+  /// takes ownership from there, disposing whatever it held before.
   void _start(
     BuildContext context,
     TreeRowDragScope scope,

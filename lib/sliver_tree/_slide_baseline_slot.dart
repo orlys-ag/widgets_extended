@@ -2,14 +2,14 @@
 ///
 /// `RenderSliverTree.beginSlideBaseline` captures the current painted
 /// offsets BEFORE a structural mutation; the next `performLayout`
-/// consumes that snapshot to install a FLIP slide. Only one baseline
-/// per frame is meaningful — first-wins (the first caller captured the
-/// truly-painted positions; later callers would read already-mutated
-/// state).
+/// consumes that snapshot to install a FLIP slide. Only one baseline per
+/// frame is meaningful, so staging is FIRST-WINS: the first caller
+/// captured the truly-painted positions, while a later one would read
+/// already-mutated state.
 ///
-/// This class owns the slot and the (offsets, viewport, duration,
-/// curve) tuple. It is one of the two collaborators composed by
-/// [SlideComposer] (the other is `GhostRegistry`).
+/// This class owns the slot and its (offsets, viewport, duration, curve)
+/// tuple. It is one of the two collaborators `SlideComposer` holds, the
+/// other being `GhostRegistry`.
 library;
 
 import 'package:flutter/animation.dart' show Curve;
@@ -33,15 +33,27 @@ final class _SlideBaseline<TKey> {
   final Curve curve;
 }
 
+/// Holds at most one staged baseline, plus a stamp letting a late expiry
+/// check tell whether the stage it was scheduled for is still pending.
+///
+/// The caller contract is that every successful [stage] is followed by a
+/// same-frame mutation that triggers layout, whose [consume] then takes
+/// the baseline. [discardIfStale] is the backstop for when that does not
+/// happen.
 class SlideBaselineSlot<TKey> {
+  /// The staged baseline, or null when the slot is empty.
   _SlideBaseline<TKey>? _pending;
 
-  /// Monotonic stamp of the currently-pending stage. Lets the
-  /// expiry backstop discard exactly the stage it was scheduled for:
-  /// consume/reset/re-stage all change the pending identity, so a stale
-  /// scheduled check becomes a no-op instead of discarding a newer
-  /// baseline.
+  /// Monotonic counter, incremented on every successful [stage] so that
+  /// no two stages ever share an identity.
   int _stamp = 0;
+
+  /// Stamp of the baseline currently in the slot.
+  ///
+  /// This is what lets the expiry backstop discard exactly the stage it
+  /// was scheduled for: consume, reset and re-stage all change the
+  /// pending identity, so a check that arrives late becomes a no-op
+  /// instead of discarding a newer baseline.
   int _pendingStamp = 0;
 
   /// Stamp of the pending baseline. Only meaningful while [isStaged].
@@ -67,11 +79,13 @@ class SlideBaselineSlot<TKey> {
     return true;
   }
 
-  /// Discards the pending baseline iff it is still the stage identified
-  /// by [stamp] — the expiry backstop. Returns `true` when a discard
-  /// happened — i.e. the caller-contract violation ("every successful
-  /// stage MUST be followed by a same-frame layout-triggering mutation")
-  /// actually occurred and the baseline was never consumed.
+  /// The expiry backstop: discards the pending baseline only when it is
+  /// still the stage identified by [stamp].
+  ///
+  /// Returns true when a discard actually happened, which means the
+  /// caller contract was violated. A successful [stage] was not followed
+  /// by a same-frame layout-triggering mutation, so its baseline was
+  /// never consumed.
   bool discardIfStale(int stamp) {
     if (_pending == null || _pendingStamp != stamp) {
       return false;
@@ -80,7 +94,8 @@ class SlideBaselineSlot<TKey> {
     return true;
   }
 
-  /// Consumes the staged baseline (if any) and clears the slot.
+  /// Takes the staged baseline, if any, and empties the slot so the next
+  /// frame's first [stage] can win it.
   ({
     Map<TKey, ({double y, double x})> offsets,
     ViewportSnapshot viewport,
@@ -99,6 +114,7 @@ class SlideBaselineSlot<TKey> {
     );
   }
 
+  /// Whether a baseline is currently staged and not yet consumed.
   bool get isStaged => _pending != null;
 
   /// Discards a staged baseline without consuming it. Used on

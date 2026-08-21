@@ -16,7 +16,7 @@
 ///   scrollable harmless, and an unmounted handle a non-event for a live
 ///   drag.
 /// - On drag start, starts a session on [reorderController] (a `false`
-///   return — `canReorder` refusal or not-yet-laid-out tree — quietly
+///   return, `canReorder` refusal or not-yet-laid-out tree, quietly
 ///   declines the gesture, and the row hands the recognizer a null
 ///   `Drag`), hides the source row, and shows the drag UI.
 /// - On drag update / end / cancel, forwards to the controller. Each
@@ -39,14 +39,14 @@
 ///
 /// Drop feedback is the **make-room preview**, always on: while dragging,
 /// rows part to open a live gap at the prospective slot. The gap is
-/// paint-only — structure is untouched until the drop commits, and no
+/// paint-only, structure is untouched until the drop commits, and no
 /// structural listeners or sync diffs fire from the preview. The dragged
 /// row's in-place copy is hidden entirely (its slot closes up under it),
 /// so the floating drag proxy is its only representation.
 ///
 /// Drag UI lives in one overlay entry owned by this widget's state: the
 /// drag proxy ([showDragProxy] / [dragProxyBuilder]) subscribes to
-/// [TreeReorderController.pointerPosition] — the per-move channel — and
+/// [TreeReorderController.pointerPosition], the per-move channel, and
 /// floats the dragged row's preview at the grab point.
 ///
 /// The pointer's horizontal position picks the drop depth at subtree
@@ -201,7 +201,7 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
   /// drawn in the band.
   ///
   /// The preview renders in the root [Overlay], OUTSIDE the row's original
-  /// ancestry — the same contract as `Draggable.feedback`. Rows using
+  /// ancestry, the same contract as `Draggable.feedback`. Rows using
   /// inherited-ancestor-dependent widgets (e.g. Material ink widgets,
   /// which assert on a `Material` ancestor) need a [dragProxyBuilder] that
   /// re-provides those ancestors (e.g. wrap in
@@ -229,10 +229,25 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
   ///
   /// The builder receives and styles the DRAGGED ROW's portion only.
   /// When an expanded parent is dragged, its visible descendants'
-  /// clones stack below the builder's output unchanged: fresh builds
-  /// of [nodeBuilder] against the overlay's context, each with the
+  /// clones stack below the builder's output unchanged: builds of
+  /// [nodeBuilder] against the overlay's context, each with the
   /// row's original depth and pinned to its extent at lift (see
   /// [showDragProxy] for the subtree stack contract).
+  ///
+  /// The builder is invoked ONCE PER DRAG SESSION (plus on
+  /// inherited-ancestry changes and hot reload), not per pointer move,
+  /// pointer moves only reposition the proxy. Do not rely on rebuild
+  /// cadence to refresh ambient reads; that cadence was never part of
+  /// the contract (a stationary pointer, e.g. a finger parked in the
+  /// autoscroll edge zone, fires no moves at all). Dynamic proxy
+  /// content self-drives instead, and works fully because the returned
+  /// subtree stays mounted for the whole session: use self-owned
+  /// animations (a mount-triggered `TweenAnimationBuilder` lift effect,
+  /// a repeating `AnimationController`) for motion, and listenable
+  /// subscriptions for drag-state reactivity (a `ListenableBuilder` on
+  /// the [TreeReorderController] rebuilds on every semantic target
+  /// change; [TreeReorderController.pointerPosition] serves
+  /// pointer-reactive parts).
   ///
   /// See [showDragProxy] for the overlay-ancestry contract (Material apps
   /// typically wrap the preview in a transparency `Material` here).
@@ -242,7 +257,7 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
   /// Opt-in drag haptics: [HapticFeedback.selectionClick] on lift and on
   /// each SEMANTIC SLOT change. Deliberately debounced on the slot identity
   /// `(parentKey, indexInFinalList)` rather than raw controller
-  /// notifications — the coalesced channel also fires on same-slot
+  /// notifications, the coalesced channel also fires on same-slot
   /// EXPRESSION changes (crossing between e.g. below-last-row and
   /// above-next-header, which are the same slot), and buzzing while the
   /// gap stands still would be noise. Default off.
@@ -273,7 +288,7 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
 ///
 /// The callbacks are method tear-offs of the owner state. Tear-off
 /// identity is NOT stable across rebuilds, so [updateShouldNotify]
-/// compares only the value fields — the callbacks always target the same
+/// compares only the value fields, the callbacks always target the same
 /// state object for the lifetime of the scope's element anyway.
 class _ReorderableScope<TKey> extends InheritedWidget {
   const _ReorderableScope({
@@ -291,7 +306,7 @@ class _ReorderableScope<TKey> extends InheritedWidget {
   final TreeReorderController<TKey> reorderController;
 
   /// The key whose row is currently dragged, or null. Drives hiding the
-  /// source row declaratively — make-room closes its slot underneath it.
+  /// source row declaratively, make-room closes its slot underneath it.
   final TKey? draggedKey;
 
   /// Indent per depth level; rows use it to build the default x to depth
@@ -304,7 +319,7 @@ class _ReorderableScope<TKey> extends InheritedWidget {
 
   /// Whether the floating drag proxy is enabled. Rows forward it as
   /// `startDrag(settleFromRelease:)` so the drop FLIP starts at the
-  /// proxy's release position — the proxy hands off to the real row
+  /// proxy's release position, the proxy hands off to the real row
   /// mid-flight instead of the row replaying the old-slot slide.
   final bool dragProxyEnabled;
 
@@ -322,7 +337,7 @@ class _ReorderableScope<TKey> extends InheritedWidget {
 
   /// Deactivate-backstop channel: the row owning [key]'s session unmounted
   /// mid-drag and its session was cancelled post-frame. The owner clears
-  /// the drag UI iff its UI still shows that session — the key guard
+  /// the drag UI iff its UI still shows that session, the key guard
   /// lives in the owner, next to the state it protects.
   final void Function(TKey key) onSessionInterrupted;
 
@@ -381,7 +396,7 @@ class _SliverReorderableTreeState<TKey, TData>
   /// RELATIVE to the dragged row. Drives the proxy's subtree stack;
   /// null for a leaf or collapsed drag (single-row proxy by
   /// construction). Bounded at capture to one viewport of cumulative
-  /// extent: a drawing cap only, the settle handoff is not capped.
+  /// extent: a drawing cap only; the settle handoff is not capped.
   /// Cleared with the session.
   List<({TKey key, int depth, double extent, double relativeIndent})>?
   _dragStack;
@@ -455,9 +470,13 @@ class _SliverReorderableTreeState<TKey, TData>
   /// convention; a zero family snaps (kill-switch rule).
   TreeAnimationSpec _proxyIndentSpec = TreeAnimationStyle.defaultSpec;
 
+  /// Endpoints the indent driver interpolates between. Re-based on every
+  /// re-target so the proxy continues from where it currently sits.
   double _proxyIndentFrom = 0.0;
   double _proxyIndentTo = 0.0;
 
+  /// Drives [_proxyIndent] from the raw driver value, applying the
+  /// family's curve so the proxy's horizontal travel eases like the gap.
   void _onProxyIndentTick() {
     final t = _proxyIndentSpec.curve.transform(_proxyIndentDriver.value);
     _proxyIndent.value =
@@ -523,10 +542,13 @@ class _SliverReorderableTreeState<TKey, TData>
   /// controller's session state. This is the SINGLE owner of drag-UI
   /// teardown for controller-driven session ends: the row wrappers'
   /// end/cancel handlers only forward to the controller, whose
-  /// `notifyListeners` lands here. The one exception is the
-  /// `deactivate()` backstop, which reaches this state via
-  /// [_ReorderableScope.onSessionInterrupted] for the
-  /// listener-moved-to-another-controller case.
+  /// `notifyListeners` lands here. The exceptions are the row-side
+  /// orphaned-session backstops, deactivate, policy flip, and the
+  /// reorder-controller-swap hook in the row's `didChangeDependencies`,
+  /// which reach this state via
+  /// [_ReorderableScope.onSessionInterrupted] because by the time their
+  /// deferred cancel notifies, this state no longer listens to the
+  /// controller that owned the session.
   void _onControllerChanged() {
     if (widget.hapticsOnDrag) {
       _syncHaptics();
@@ -553,6 +575,10 @@ class _SliverReorderableTreeState<TKey, TData>
   bool _hapticsDragging = false;
   (TKey?, int)? _lastHapticSlot;
 
+  /// Fires one selection click when a drag starts and one on every change
+  /// of resolved slot, and nothing while the pointer moves within a slot.
+  /// Tracks the last slot so a re-resolution to the same slot stays
+  /// silent.
   void _syncHaptics() {
     final reorder = widget.reorderController;
     final dragging = reorder.isDragging;
@@ -574,6 +600,8 @@ class _SliverReorderableTreeState<TKey, TData>
     _hapticsDragging = dragging;
   }
 
+  /// Tears the overlay entry down and drops the captured drawing, so a
+  /// later drag rebuilds both rather than reusing stale content.
   void _removeProxy() {
     _proxyEntry?.remove();
     _proxyEntry = null;
@@ -581,6 +609,9 @@ class _SliverReorderableTreeState<TKey, TData>
     _dragStack = null;
   }
 
+  /// Inserts the floating proxy into the root overlay, once per session.
+  /// A no-op when the row has no proxy configured, when one is already
+  /// mounted, or when no overlay is available.
   void _ensureProxy(BuildContext context) {
     if (!widget.showDragProxy && widget.dragProxyBuilder == null) {
       return;
@@ -645,6 +676,15 @@ class _SliverReorderableTreeState<TKey, TData>
   void _onDragEnd() {
     if (!mounted) return;
     _proxyIndentDriver.stop();
+    // Reset haptic state here as well as in [_syncHaptics]: on the
+    // interrupted-session paths (deactivate backstop, policy flip,
+    // reorder-controller swap) nothing notifies on the controller this
+    // state listens to, so [_syncHaptics] never observes the session end
+    // and a stale `_hapticsDragging = true` would swallow the next
+    // session's lift click. On the normal path [_syncHaptics] already ran
+    // with `dragging == false`, so this is a no-op there.
+    _hapticsDragging = false;
+    _lastHapticSlot = null;
     setState(() => _draggedKey = null);
     _removeProxy();
   }
@@ -693,7 +733,7 @@ class _SliverReorderableTreeState<TKey, TData>
         // Unconditional, matching `SliverReorderableList._itemBuilder`.
         // The wrapper is what publishes the drag scope a caller-placed
         // [TreeDragHandle] looks up, hides the dragged row so its slot
-        // can close, and carries the reorder semantics actions — none of
+        // can close, and carries the reorder semantics actions, none of
         // which a row can opt out of and still take part in a reorder.
         nodeBuilder: (context, key, depth) {
           return _ReorderableRow<TKey>(
@@ -712,7 +752,7 @@ class _SliverReorderableTreeState<TKey, TData>
 ///   arms itself from, and OWNING the recognizer those handles hand over.
 /// - Hiding the source row during a drag (make-room closes its slot).
 /// - Forwarding pointer events to the [TreeReorderController] (read from
-///   the inherited scope — no ancestor-State reference).
+///   the inherited scope, no ancestor-State reference).
 class _ReorderableRow<TKey> extends StatefulWidget {
   const _ReorderableRow({required this.nodeKey, required this.child});
 
@@ -805,10 +845,16 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
   /// `deactivate()` must not read the InheritedWidget (`dependOn*` is
   /// illegal outside build/didChangeDependencies), so they use these.
   ///
-  /// On a reorder-controller swap the cache intentionally lags until the
-  /// row's next dependency update: a session started under the old
-  /// controller keeps being forwarded/cancelled on the OLD controller —
-  /// the one that actually owns the session.
+  /// On a reorder-controller swap the scope notifies dependents
+  /// (`updateShouldNotify` compares controller identity) and the cache
+  /// re-points at the NEW controller in the swap frame. A session this
+  /// row owns cannot survive that re-pointing, every later gesture
+  /// callback would fail [_ownsSession] against the new controller, so
+  /// `didChangeDependencies` ends the orphaned session through
+  /// [_endOrphanedSessionAfterFrame] BEFORE re-caching, while [_reorder]
+  /// still names the session's owner. Within the swap frame itself
+  /// (before the dependency update runs) callbacks still reach the OLD
+  /// controller, which is the one that owns the session.
   late TreeReorderController<TKey> _reorder;
   double? _indentWidth;
   late bool _dragProxyEnabled;
@@ -826,6 +872,23 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
       "_ReorderableRow is created by SliverReorderableTree for every row, "
       "below its _ReorderableScope",
     );
+    // Reorder-controller swap while this row owns the live session: the
+    // session stays on the OLD controller (still cached in [_reorder]),
+    // but once the cache below re-points at the new controller every
+    // future gesture callback fails [_ownsSession] against it, the
+    // session would leak un-ended (pin, scroll listener, autoscroll
+    // ticker, held make-room preview) with the drag UI stuck. End it
+    // through the shared orphaned-session backstop BEFORE re-caching,
+    // while [_reorder] still names the session's owner; the ordering is
+    // load-bearing because the helper reads [_reorder]. The
+    // [_isDraggingThisRow] guard also short-circuits the `late` read on
+    // this State's first dependency update (no drag can have started),
+    // and same-controller notifications (draggedKey flips, indent
+    // changes) never trip the identity check.
+    if (_isDraggingThisRow &&
+        !identical(scope!.reorderController, _reorder)) {
+      _endOrphanedSessionAfterFrame();
+    }
     _reorder = scope!.reorderController;
     _indentWidth = scope.indentWidth;
     _dragProxyEnabled = scope.dragProxyEnabled;
@@ -835,11 +898,10 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     _semanticsActionsBuilder = scope.semanticsActionsBuilder;
   }
 
-  // No gesture-mode-swap backstop, and none is needed any more. The
-  // recognizer lives on this State rather than in the build output, so a
-  // handle appearing, disappearing or changing shape mid-drag cannot
-  // dispose the recognizer that owns the live pointer. That was the whole
-  // hazard the old backstop existed for.
+  // No gesture-mode-swap backstop, and none is needed: the recognizer
+  // lives on this State rather than in the build output, so a handle
+  // appearing, disappearing or changing shape mid-drag cannot dispose the
+  // recognizer that owns the live pointer.
 
   @override
   void dispose() {
@@ -886,48 +948,36 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
   void deactivate() {
     // Lifecycle backstop: if this row unmounts while it owns the drag
     // (node removed and purged mid-drag, tree swapped, ...), its gesture
-    // callbacks can never fire again — end the session instead of leaving
+    // callbacks can never fire again, end the session instead of leaving
     // it (and the autoscroll ticker) orphaned. Eviction of a LIVE dragged
     // row is prevented by the render object's drag pin; this covers the
-    // remaining unmount paths (dead-node GC deliberately ignores pins —
+    // remaining unmount paths (dead-node GC deliberately ignores pins,
     // a purged row has nothing left to build).
     //
-    // deactivate() only ever runs inside a BuildOwner.buildScope — for
+    // deactivate() only ever runs inside a BuildOwner.buildScope, for
     // the removed-and-purged case, the element's post-frame dead-node GC
     // pass. cancelDrag()'s notifyListeners and the ancestor's setState
     // must therefore NOT run synchronously here: they would throw
     // "setState() or markNeedsBuild() called during build" and abort the
     // rest of the GC pass. Only the local flag flip stays synchronous;
     // the teardown is deferred to a post-frame callback (the first point
-    // guaranteed outside every build scope — a microtask can still land
+    // guaranteed outside every build scope; a microtask can still land
     // inside this frame's build window). The callback re-validates
     // session ownership before acting: by the time it runs a new session
     // may have started, or the reorder controller may have been disposed
     // (after dispose, draggedKey is null, so the ownership check covers
     // both). Everything the callback needs is captured now from the
-    // cached scope values — `widget`/`context` are unreadable after this
+    // cached scope values, `widget`/`context` are unreadable after this
     // State unmounts.
+    // The mechanics live in _endOrphanedSessionAfterFrame, shared with
+    // the policy-flip backstop and the reorder-controller-swap hook in
+    // didChangeDependencies: flag flips stay synchronous, everything the
+    // deferred callback needs is captured from the cached scope values
+    // before super.deactivate() (widget/context are unreadable after this
+    // State unmounts), and the callback re-validates session ownership
+    // before acting.
     if (_isDraggingThisRow) {
-      _isDraggingThisRow = false;
-      _sessionGeneration = null;
-      final reorder = _reorder;
-      final onInterrupted = _onSessionInterruptedCallback;
-      final nodeKey = widget.nodeKey;
-      if (reorder.draggedKey == nodeKey) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (reorder.draggedKey != nodeKey) {
-            return;
-          }
-          reorder.cancelDrag();
-          // cancelDrag's notifyListeners already drives the ancestor's
-          // _onControllerChanged → _onDragEnd while it is listening; the
-          // scope callback covers the listener having moved to a
-          // different reorder controller (didUpdateWidget swap). The
-          // owner's key guard keeps it from clearing UI owned by another
-          // session.
-          onInterrupted(nodeKey);
-        });
-      }
+      _endOrphanedSessionAfterFrame();
     }
     super.deactivate();
   }
@@ -967,8 +1017,8 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // handles unconditionally would claim the gesture and then decline
     // it, so an app wanting that gesture for its own menu would never see
     // it. Asked ONCE and threaded into both the scope below and
-    // `_semanticsActions`, which used to repeat the call: a policy is app
-    // code on a per-row build path.
+    // `_semanticsActions`, rather than called again in each: a policy is
+    // app code sitting on a per-row build path.
     final policy = _reorder.canReorder;
     final canDrag = policy == null || policy(widget.nodeKey);
 
@@ -1009,8 +1059,7 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // The scope's `canDrag` is what disarms a refused row's handles, and
     // the shape stays identical across a `canReorder` flip because the
     // handle nulls its `onPointerDown` rather than being omitted. That
-    // property used to be defended by the `Visibility(maintainSize:)`
-    // apparatus this replaces; it now lives in `TreeDragHandle.build`.
+    // property is enforced in `TreeDragHandle.build`.
     content = TreeRowDragScope(
       canDrag: canDrag,
       startDrag: _startDragFromHandle,
@@ -1135,6 +1184,9 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     return actions;
   }
 
+  /// Whether the app's `canAcceptDrop` policy admits moving THIS row to
+  /// `(newParent, index)`. Used to decide which semantics actions the row
+  /// advertises; absence of a policy allows everything.
   bool _dropAllowed(TKey? newParent, int index) {
     final policy = _reorder.canAcceptDrop;
     if (policy == null) {
@@ -1178,7 +1230,7 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     _reorder.moveIntoPrevious(widget.nodeKey);
   }
 
-  /// Walks up from this row to the first [ReorderRenderPort] ancestor —
+  /// Walks up from this row to the first [ReorderRenderPort] ancestor,
   /// the tree sliver's render object. Interface-typed on purpose: the row
   /// needs the drag surface, not the concrete render class (and therefore
   /// carries no `TData` parameter at all).
@@ -1259,7 +1311,7 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
       return false;
     }
     // A false return is a policy refusal (canReorder) or a not-yet-laid-out
-    // tree — decline the gesture quietly. Genuine wiring misuse
+    // tree, decline the gesture quietly. Genuine wiring misuse
     // (cross-controller) still throws and should surface; the ancestor
     // widget's build assert catches it earlier in debug builds.
     //
@@ -1335,7 +1387,7 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
 
   // End/cancel do NOT call the owner's drag-UI teardown directly: the
   // controller's notifyListeners (fired by endDrag/cancelDrag) drives
-  // _onControllerChanged → _onDragEnd on the listening state. A second
+  // _onControllerChanged, then _onDragEnd on the listening state. A second
   // direct call would be a redundant no-op setState, and teardown must
   // stay single-owner. (_ownsSession guarantees the cached controller
   // holds THIS row's session, and the owner state always listens to its
@@ -1368,6 +1420,8 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     _cancelDrag();
   }
 
+  /// Cancels this row's session, if it still owns one. Teardown of the
+  /// drag UI follows from the controller's notification, not from here.
   void _cancelDrag() {
     if (!_ownsSession()) {
       return;
@@ -1381,11 +1435,21 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
 /// Overlay entry rendering the floating drag preview.
 ///
 /// Repositions on EVERY pointer move via
-/// [TreeReorderController.pointerPosition] — the per-move channel that
+/// [TreeReorderController.pointerPosition], the per-move channel that
 /// exists precisely because the controller's [ChangeNotifier] channel is
 /// coalesced to semantic target changes. Anchored at the grab point
 /// ([TreeReorderController.dragProxyGeometry]) so the preview stays
 /// "held" where the user picked the row up.
+///
+/// POSITION is per-move; CONTENT is session-frozen. The proxy content
+/// (custom builder output, the dragged row's captured child, the
+/// descendant clone stack) is derived once in [build]; the entry is
+/// created per session, after the session captures, and passed through
+/// the pointer builder's `child:` slot, so pointer moves reposition an
+/// identical subtree instead of rebuilding it. A [RepaintBoundary]
+/// around the content makes the reposition offset-only compositing.
+/// Dynamic proxy content self-drives: see
+/// [SliverReorderableTree.dragProxyBuilder].
 class _DragProxy<TKey> extends StatelessWidget {
   const _DragProxy({
     required this.reorderController,
@@ -1418,25 +1482,117 @@ class _DragProxy<TKey> extends StatelessWidget {
   stackResolver;
 
   /// Builds a descendant clone with the row's captured ORIGINAL depth.
-  /// Fresh builds against the overlay's context, unlike the dragged
-  /// row's captured widget instance; the
-  /// [SliverReorderableTree.showDragProxy] overlay-ancestry contract
-  /// covers both, and a handle inside a clone finds no
-  /// [TreeRowDragScope] and is inert.
+  /// Built ONCE PER DRAG SESSION against the overlay's context (the
+  /// content is hoisted out of the pointer builder, so pointer moves
+  /// never re-invoke it), unlike the dragged row's captured widget
+  /// instance; the [SliverReorderableTree.showDragProxy]
+  /// overlay-ancestry contract covers both, and a handle inside a clone
+  /// finds no [TreeRowDragScope] and is inert.
   final Widget Function(BuildContext context, TKey key, int depth) nodeBuilder;
 
   final ScrollableState? Function() scrollableFinder;
 
   @override
   Widget build(BuildContext context) {
+    // SESSION-CONSTANT capture + content derivation, ONCE per entry.
+    // The overlay entry is created per session (`_ensureProxy` only from
+    // `_onDragStart`, after the captures; `_removeProxy` on every session
+    // end path), so this build runs with the live session's frozen state.
+    // The pointer channel below only repositions; hoisting the content
+    // out of its builder, the same `child:` pattern the indent builder
+    // below already uses, is what keeps `proxyBuilder` and the
+    // per-descendant `nodeBuilder` clones from re-running on every
+    // pointer move (`drag_proxy_move_rebuild_test.dart`).
+    final capturedKey = reorderController.draggedKey;
+    final geometry = reorderController.dragProxyGeometry;
+    final rowChild = rowChildResolver();
+    if (capturedKey == null || geometry == null) {
+      // Defensive degenerate case (reassemble-window rebuild with no
+      // session): render nothing until the entry is removed.
+      return const SizedBox.shrink();
+    }
+    Widget content;
+    if (proxyBuilder != null) {
+      content = proxyBuilder!(context, capturedKey, rowChild);
+    } else if (rowChild != null) {
+      content = rowChild;
+    } else {
+      return const SizedBox.shrink();
+    }
+
+    // Subtree stack: the dragged row's clone first (pinned to its
+    // grab extent, exactly the band the single-row proxy used),
+    // then one fresh clone per captured descendant, height-pinned
+    // and padded by its RELATIVE indent. The stack sits inside the
+    // animated proxy indent below, so retargeting moves it as one
+    // unit and relative structure is preserved by construction.
+    final stack = stackResolver();
+    double bandHeight = geometry.rowExtent;
+    if (stack != null && geometry.rowExtent > 0) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(height: geometry.rowExtent, child: content),
+          for (final row in stack)
+            SizedBox(
+              height: row.extent,
+              child: Padding(
+                padding: EdgeInsets.only(left: row.relativeIndent),
+                child: nodeBuilder(context, row.key, row.depth),
+              ),
+            ),
+        ],
+      );
+      for (final row in stack) {
+        bandHeight += row.extent;
+      }
+    }
+    // The default proxy's 90% opacity covers the WHOLE stack (a
+    // custom proxyBuilder keeps styling only the dragged row's
+    // portion; descendant clones stack below its output unchanged).
+    if (proxyBuilder == null) {
+      content = Opacity(opacity: 0.9, child: content);
+    }
+
+    // The RepaintBoundary makes repositioning offset-only compositing:
+    // without it, every `Positioned` move re-rasterizes the whole proxy
+    // band with the parent picture; with it, a clean child's retained
+    // layer is just re-offset (`PaintingContext._compositeChild`).
+    // Indent-animation frames still re-raster inside the boundary,
+    // those pixels genuinely change. Matches the package's
+    // `addRepaintBoundaries` convention for rows.
+    final Widget positionedChild = IgnorePointer(
+      child: RepaintBoundary(
+        child: ValueListenableBuilder<double>(
+          valueListenable: proxyIndent,
+          builder: (context, indent, child) {
+            return Padding(
+              padding: EdgeInsets.only(left: indent),
+              child: child,
+            );
+          },
+          child: content,
+        ),
+      ),
+    );
+
     return ValueListenableBuilder<Offset?>(
       valueListenable: reorderController.pointerPosition,
-      builder: (context, pointer, _) {
+      builder: (context, pointer, child) {
         if (pointer == null) return const SizedBox.shrink();
-        final key = reorderController.draggedKey;
-        if (key == null) return const SizedBox.shrink();
-        final geometry = reorderController.dragProxyGeometry;
-        if (geometry == null) return const SizedBox.shrink();
+        // Session guard: the entry lifecycle is per-session, so a live
+        // key that differs from the captured one means this entry
+        // outlived its session, render nothing rather than another
+        // session's content. (Strictly stronger than the old
+        // `draggedKey == null` guard: same shrink on null, plus shrink
+        // on a foreign session.)
+        if (reorderController.draggedKey != capturedKey) {
+          return const SizedBox.shrink();
+        }
+        // The scrollable/viewport resolution stays PER MOVE on purpose:
+        // the viewport can shift mid-drag (keyboard inset, window
+        // resize), and a defunct scrollable must shrink the proxy.
         final scrollable = scrollableFinder();
         if (scrollable == null) return const SizedBox.shrink();
         final viewport = scrollable.context.findRenderObject() as RenderBox?;
@@ -1444,56 +1600,11 @@ class _DragProxy<TKey> extends StatelessWidget {
           return const SizedBox.shrink();
         }
 
-        final rowChild = rowChildResolver();
-        Widget content;
-        if (proxyBuilder != null) {
-          content = proxyBuilder!(context, key, rowChild);
-        } else if (rowChild != null) {
-          content = rowChild;
-        } else {
-          return const SizedBox.shrink();
-        }
-
-        // Subtree stack: the dragged row's clone first (pinned to its
-        // grab extent, exactly the band the single-row proxy used),
-        // then one fresh clone per captured descendant, height-pinned
-        // and padded by its RELATIVE indent. The stack sits inside the
-        // animated proxy indent below, so retargeting moves it as one
-        // unit and relative structure is preserved by construction.
-        final stack = stackResolver();
-        double bandHeight = geometry.rowExtent;
-        if (stack != null && geometry.rowExtent > 0) {
-          content = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(height: geometry.rowExtent, child: content),
-              for (final row in stack)
-                SizedBox(
-                  height: row.extent,
-                  child: Padding(
-                    padding: EdgeInsets.only(left: row.relativeIndent),
-                    child: nodeBuilder(context, row.key, row.depth),
-                  ),
-                ),
-            ],
-          );
-          for (final row in stack) {
-            bandHeight += row.extent;
-          }
-        }
-        // The default proxy's 90% opacity covers the WHOLE stack (a
-        // custom proxyBuilder keeps styling only the dragged row's
-        // portion; descendant clones stack below its output unchanged).
-        if (proxyBuilder == null) {
-          content = Opacity(opacity: 0.9, child: content);
-        }
-
         // Horizontal: span the viewport (the row's own width), with the
         // animated indent applied as left padding INSIDE the full-width
         // band, narrowing the content the same way the render layer
         // narrows the real row. Vertical: the pointer minus the grab
-        // offset, in global space — pixel distances survive the global
+        // offset, in global space, pixel distances survive the global
         // mapping unscaled.
         final viewportGlobalLeft = viewport.localToGlobal(Offset.zero).dx;
         return Stack(
@@ -1503,22 +1614,12 @@ class _DragProxy<TKey> extends StatelessWidget {
               top: pointer.dy - geometry.grabDy,
               width: viewport.size.width,
               height: bandHeight > 0 ? bandHeight : null,
-              child: IgnorePointer(
-                child: ValueListenableBuilder<double>(
-                  valueListenable: proxyIndent,
-                  builder: (context, indent, child) {
-                    return Padding(
-                      padding: EdgeInsets.only(left: indent),
-                      child: child,
-                    );
-                  },
-                  child: content,
-                ),
-              ),
+              child: child!,
             ),
           ],
         );
       },
+      child: positionedChild,
     );
   }
 }

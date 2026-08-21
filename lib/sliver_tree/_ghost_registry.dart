@@ -1,4 +1,4 @@
-/// Edge-ghost lifecycle registry — install, re-evaluate under scroll,
+/// Edge-ghost lifecycle registry: install, re-evaluate under scroll,
 /// re-promote when the true structural row re-enters the viewport,
 /// prune on settle, and resolve a ghost's painted base Y on demand.
 ///
@@ -10,8 +10,8 @@
 /// viewport via [GhostBaseResolver.baseFor], so the ghost stays pinned
 /// to the live edge under concurrent scrolling.
 ///
-/// This file also defines the [GhostBaseResolver] interface — the
-/// narrow paint-time read contract that `RenderSliverTree` holds.
+/// This file also defines the [GhostBaseResolver] interface, the narrow
+/// paint-time read contract that `RenderSliverTree` holds.
 library;
 
 import 'package:flutter/animation.dart' show Curve;
@@ -47,18 +47,32 @@ abstract class GhostBaseResolver<TKey> {
 /// signature.
 typedef GhostEntry = ({ViewportEdge edge, Duration duration, Curve curve});
 
+/// Owns the active edge-ghost set and its lifecycle.
+///
+/// The lifecycle methods run from `RenderSliverTree.performLayout`'s
+/// slide pipeline in a fixed step order, named per method below; the read
+/// API ([baseFor], [hasGhosts], [entryFor], [activeKeys]) is what paint
+/// and hit-testing consult.
+///
+/// Ghost lifecycle reads FLIP-ONLY slide state, never the composed
+/// FLIP-plus-preview delta, because a ghost exists to animate a FLIP
+/// slide while a make-room preview offset is a separate HELD
+/// displacement. [pruneSettled] and [applyClampAndInstallNewGhosts] are
+/// the two sites where that distinction bites, and both explain the
+/// consequence of getting it wrong.
 class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
   GhostRegistry({required TreeController<TKey, TData> controller})
     : _controller = controller;
 
   TreeController<TKey, TData> _controller;
 
-  /// Render-supplied structural-offset resolver: `(visibleIndex, nid) →
-  /// structural scroll-space y`. When set, [_computeTrueStructuralAt]
-  /// resolves in O(1) from the render layer's per-frame offsets instead
-  /// of a prefix-sum walk — worth it because `normalizeForViewport` runs
-  /// per scroll frame while ghosts exist. Optional so the registry stays
-  /// decoupled and standalone-testable.
+  /// Render-supplied structural-offset resolver, mapping a visible index
+  /// and nid to a structural scroll-space y. When set,
+  /// [_computeTrueStructuralAt] resolves in O(1) from the render layer's
+  /// per-frame offsets instead of a prefix-sum walk, which is worth it
+  /// because [normalizeForViewport] runs per scroll frame while ghosts
+  /// exist. Optional, so the registry stays decoupled and
+  /// standalone-testable.
   double Function(int index, int nid)? structuralYOf;
 
   /// Active edge ghosts keyed by emerging row key. The registry owns
@@ -79,7 +93,7 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Read API — GhostBaseResolver
+  // Read API: GhostBaseResolver
   // ──────────────────────────────────────────────────────────────────────
 
   @override
@@ -103,29 +117,31 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
   @override
   GhostEntry? entryFor(TKey key) => _entries?[key];
 
-  /// Iteration over the active ghosts. Used by render-side helpers
-  /// (e.g. `_syncPreserveProgressFlags`) that need to iterate keys
-  /// without modifying the map. Empty iterable when no ghosts active.
+  /// Iteration over the active ghost keys, consulted by the render
+  /// layer's consume-time baseline rewrite, its ghost paint pass and its
+  /// hit-test admission. Empty when no ghosts are active. A caller that
+  /// may mutate the registry while iterating must snapshot with
+  /// `toList()` first.
   Iterable<TKey> get activeKeys =>
       _entries?.keys ?? const Iterable<Never>.empty();
 
   // ──────────────────────────────────────────────────────────────────────
-  // Lifecycle — called from RenderSliverTree.performLayout's slide
+  // Lifecycle: called from RenderSliverTree.performLayout's slide
   // pipeline, in the step order documented there.
   // ──────────────────────────────────────────────────────────────────────
 
   /// Lazy-prune entries whose slide has settled or whose key has been
-  /// freed. Mirrors the `_phantomClipAnchors` prune pattern.
+  /// freed.
   ///
   /// "Settled" is FLIP-ONLY ([TreeController.getFlipSlideDeltaNid]), not
   /// the composed delta. A ghost exists to animate a FLIP slide whose
   /// destination is off-screen, so once that slide reaches zero the ghost
-  /// has nothing left to do; a make-room preview offset on the same row
-  /// is a separate, HELD displacement and must not keep it alive. Reading
-  /// the composed delta here retained settled ghosts for as long as a
-  /// drag held its preview, and a retained ghost forces every
-  /// drop-target lookup onto the O(N) full scan
-  /// (`RenderSliverTree.findRowAtPaintedY`).
+  /// has nothing left to do, while a make-room preview offset on the same
+  /// row is a separate HELD displacement that must not keep it alive.
+  /// Switching this to the composed delta retains settled ghosts for as
+  /// long as a drag holds its preview, and a retained ghost forces every
+  /// drop-target lookup onto the O(N) full scan in
+  /// `RenderSliverTree.findRowAtPaintedY`.
   ///
   /// The X read needs no equivalent: it is already FLIP-only, because
   /// previews are Y offsets.
@@ -141,9 +157,9 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
     if (exits.isEmpty) _entries = null;
   }
 
-  /// Drop entries that became `_phantomExitGhosts` this cycle (an
-  /// edge-ghost row was reparented under a hidden parent — the
-  /// exit-phantom mechanism takes over).
+  /// Drops entries that became exit phantoms this cycle, which happens
+  /// when an edge-ghost row is reparented under a hidden parent: the
+  /// exit-phantom mechanism takes that row over from here.
   void dropForKeysThatBecameAnchorGhosts(Iterable<TKey> anchorGhostKeys) {
     final exits = _entries;
     if (exits == null) return;
@@ -162,15 +178,14 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
     _entries = null;
   }
 
-  /// Computes the row's true structural Y (no slideDelta), or -1 if
+  /// The row's true structural Y, with no slide delta applied, or -1 when
   /// the row is not in `visibleNodes`.
   ///
-  /// The index resolves through the controller's O(1) reverse index —
-  /// worth it because [normalizeForViewport] runs this per ghost on EVERY
-  /// scroll frame while ghosts exist. The offset comes from the
-  /// render-supplied
-  /// [structuralYOf] when wired (O(1)); the fallback prefix-sums current
-  /// extents up to the index (exact, O(index)).
+  /// The index resolves through the controller's O(1) reverse index,
+  /// which is worth it because [normalizeForViewport] runs this per ghost
+  /// on EVERY scroll frame while ghosts exist. The offset comes from
+  /// [structuralYOf] when wired, also O(1); the fallback prefix-sums
+  /// current extents up to the index, exact but O(index).
   double _computeTrueStructuralAt(TKey key) {
     final nid = _controller.nidOf(key);
     if (nid < 0) return -1.0;
@@ -198,10 +213,9 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
   ///   the captured edge): update the entry's edge side (preserving
   ///   original duration/curve) and override `current[key]` with the
   ///   new live edge base.
-  /// - **Stays-same-edge**: don't touch — the existing slide already
-  ///   targets the right edge. NOT added to
-  ///   `ghostKeysTouchedThisCycle` so Step 6 will remove it from the
-  ///   batch.
+  /// - **Stays-same-edge**: left untouched, because the existing slide
+  ///   already targets the right edge. NOT added to
+  ///   `ghostKeysTouchedThisCycle`, so Step 6 removes it from the batch.
   void reEvaluateGhostStatus({
     required Map<TKey, ({double y, double x})> baseline,
     required Map<TKey, ({double y, double x})> current,
@@ -244,10 +258,11 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
           );
           ghostKeysTouchedThisCycle.add(key);
         }
-        // else: stays-same-edge — do NOT add to touched set. Step 6
-        // will remove from batch; the consume-time baseline rewrite +
-        // snapshotVisibleOffsets()'s live-base ghost rule means
-        // baseline.y == current.y, engine sees no delta, slide untouched.
+        // else: stays-same-edge, so do NOT add it to the touched set.
+        // Step 6 removes it from the batch; the consume-time baseline
+        // rewrite plus snapshotVisibleOffsets()'s live-base ghost rule
+        // leave baseline.y == current.y, so the engine sees no delta and
+        // the slide is left alone.
       }
     }
     if (exits.isEmpty) _entries = null;
@@ -272,10 +287,11 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
     }
     final exits = _entries;
     for (final key in keysToProcess) {
-      // Skip direction-flipped / stays-same ghosts — these are still in
-      // `exits` and `reEvaluateGhostStatus` set up their composition
-      // already (baseline = ghost-painted from snapshot; current =
-      // edge_y + slideY). Re-running the clamp would interfere.
+      // Skip direction-flipped and stays-same ghosts: they are still in
+      // `exits`, and `reEvaluateGhostStatus` already set up their
+      // composition (baseline is the ghost-painted value from the
+      // snapshot, current is edge_y + slideY). Re-running the clamp here
+      // would interfere.
       if (exits != null && exits.containsKey(key)) continue;
       final prior = baseline[key]!;
       final curr = current[key]!;
@@ -294,10 +310,10 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
       //
       // `flipY` answers the predicate: does the ENGINE hold a slide to
       // compose against? A held preview offset is a paint-only
-      // displacement, not an engine slide. Reading the composed delta
-      // here installed slides for rows invisible before and after the
-      // mutation (extending the FLIP-active window, and with it ghost
-      // cleanup, for nothing) and routed slide-INs onto the
+      // displacement, not an engine slide. Switching this to the composed
+      // delta installs slides for rows invisible both before and after
+      // the mutation, extending the FLIP-active window (and with it ghost
+      // cleanup) for nothing, and routes slide-INs onto the
       // just-inside-the-edge composition clamp instead of the
       // edge-plus-overhang initial-install clamp.
       final flipY = nid >= 0 ? _controller.getFlipSlideDeltaNid(nid) : 0.0;
@@ -322,15 +338,15 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
           baseline.remove(key);
           current.remove(key);
         }
-        // else: leave (baseline, current) as-is — engine composes the
-        // existing slide toward the new (off-screen) destination.
+        // else: leave (baseline, current) as-is, so the engine composes
+        // the existing slide toward the new off-screen destination.
         continue;
       }
       if (!priorOn && targetOn) {
         // SLIDE-IN. Two distinct cases:
         //
         // (a) Initial install (no existing engine slide): clamp baseline
-        //     to viewport edge ± overhang.
+        //     to the viewport edge plus or minus the overhang.
         // (b) Composition (existing slide active): clamp baseline to
         //     JUST INSIDE the viewport edge so painted at t=0 of the new
         //     slide is visible.
@@ -464,7 +480,7 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
         );
         continue;
       }
-      // Stays-same edge — no update needed.
+      // Stays-same edge: no update needed.
     }
     if (exits.isEmpty) _entries = null;
 
@@ -486,9 +502,9 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
     }
   }
 
-  /// Set the preserve-progress flag for every active edge ghost.
-  /// Set-only-true — the engine clears the flag implicitly when the
-  /// slide entry is destroyed.
+  /// Sets the preserve-progress flag for every active edge ghost. Only
+  /// ever sets it: the engine clears the flag implicitly when the slide
+  /// entry is destroyed.
   void syncPreserveProgressFlags() {
     final exits = _entries;
     if (exits == null) return;
@@ -497,6 +513,10 @@ class GhostRegistry<TKey, TData> implements GhostBaseResolver<TKey> {
     }
   }
 
+  /// Drops every entry. The teardown path, reached through
+  /// `SlideComposer.reset` on a controller swap or render-object reset,
+  /// where the whole set is void regardless of slide state. [clearAll] is
+  /// the per-frame counterpart and carries the FLIP-only gating contract.
   void reset() {
     _entries = null;
   }

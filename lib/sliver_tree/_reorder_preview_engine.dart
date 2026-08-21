@@ -3,14 +3,13 @@
 /// Holds per-nid Y offsets that open a gap at the prospective drop slot
 /// during a drag: rows after the vacated slot shift up, rows at/after the
 /// gap shift down, and the offsets are HELD until re-targeted or
-/// released. Deliberately a sibling of [SlideAnimationEngine] rather than
-/// an extension of it: the FLIP engine's model is "start at a delta,
-/// decay to zero, remove at settle", while a preview is the inverse —
-/// "start at zero, animate to a held non-zero target, persist". Grafting
-/// hold semantics onto the FLIP tick loop would entangle its composition
-/// / re-baseline / settle protocols (each documenting hard-won fixes);
-/// composing the two engines' deltas at the [TreeController] read surface
-/// keeps both simple.
+/// released. Deliberately a sibling of `SlideAnimationEngine` rather than
+/// an extension of it: the FLIP engine's model is "start at a delta, decay
+/// to zero, remove at settle", while a preview is the inverse, "start at
+/// zero, animate to a held non-zero target, persist". Grafting hold
+/// semantics onto the FLIP tick loop would entangle its composition,
+/// re-baseline and settle protocols; composing the two engines' deltas at
+/// the `TreeController` read surface keeps both simple.
 ///
 /// The render layer needs NO changes for previews to work: every painted
 /// position, painted-truth snapshot (FLIP baselines!), painted-space hit
@@ -20,8 +19,9 @@
 /// `slide + preview`. The free consequence is the seamless commit
 /// handoff: a FLIP baseline staged while a preview is held captures the
 /// SHIFTED painted positions; the commit clears the preview and mutates;
-/// the consume-time snapshot reads post-mutation structural positions —
-/// rows that were previewing at their destination get ~zero FLIP deltas.
+/// the consume-time snapshot reads post-mutation structural positions, so
+/// rows that were previewing at their destination get near-zero FLIP
+/// deltas.
 ///
 /// Same raw-[Ticker] rationale as the slide engine: ticks are the only
 /// place listeners fire, and [Ticker.start] never fires synchronously, so
@@ -38,9 +38,9 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart' show Curve;
 
-/// One previewing row: [current] lerps [start] → [target] on the shared
-/// ticker, then HOLDS at [target] ([done] = true) until re-targeted,
-/// released toward zero, or cleared.
+/// One previewing row: [current] lerps from [start] to [target] on the
+/// shared ticker, then HOLDS at [target] with [done] set, until it is
+/// re-targeted, released toward zero, or cleared.
 class _PreviewEntry {
   _PreviewEntry({
     required this.start,
@@ -61,7 +61,13 @@ class _PreviewEntry {
   bool done;
 }
 
-/// Paint-only held-offset engine. See library docs.
+/// Paint-only held-offset engine. See the library doc for how it composes
+/// with the FLIP engine.
+///
+/// Every entry is either animating toward its target or HELD at it, which
+/// [_PreviewEntry.done] records. The ticker runs only while at least one
+/// entry is still animating, so a fully held preview costs nothing per
+/// frame even though paint keeps reading its offsets.
 class ReorderPreviewEngine {
   ReorderPreviewEngine({
     required TickerProvider vsync,
@@ -80,15 +86,19 @@ class ReorderPreviewEngine {
 
   Ticker? _ticker;
 
-  /// Mirror of the ticker's elapsed value — same idiom as the slide
-  /// engine ([SlideAnimationEngine._lastTickElapsed]): reset to zero when
-  /// (re)starting from idle so per-entry progress never goes negative.
+  /// Mirror of the ticker's elapsed value, reset to zero whenever the
+  /// ticker restarts from idle. Without that reset an entry installed
+  /// after the restart would measure progress against a stale elapsed
+  /// base and run negative.
   Duration _lastTickElapsed = Duration.zero;
 
   // ──────────────────────────────────────────────────────────────────────
   // READ API (composed into TreeController's slide-delta delegators)
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Whether any row currently carries a preview offset, animating or
+  /// held. Composed into `TreeController.hasActiveSlides`, which is what
+  /// gates the render layer's slide-aware paths.
   bool get hasActive => _entries.isNotEmpty;
 
   /// Preview delta for [nid], or 0.0 when not previewing.
@@ -97,8 +107,8 @@ class ReorderPreviewEngine {
     return entry == null ? 0.0 : entry.current;
   }
 
-  /// Maximum |current| across every entry — composed into the layout
-  /// overreach bound so preview-shifted rows stay built.
+  /// Largest absolute current offset across every entry, composed into the
+  /// layout overreach bound so preview-shifted rows stay built.
   double get maxAbsDelta {
     double m = 0.0;
     for (final entry in _entries.values) {
@@ -114,10 +124,11 @@ class ReorderPreviewEngine {
   // WRITE API
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Re-targets the preview to exactly [targets] (nid → held offset).
+  /// Re-targets the preview to exactly [targets], mapping nid to held
+  /// offset.
   ///
   /// - A nid whose existing target equals its new target is left
-  ///   UNTOUCHED — its animation (or hold) continues; re-resolving to the
+  ///   UNTOUCHED, so its animation or hold continues. Re-resolving to the
   ///   same slot must not restart motion.
   /// - A nid with a different target re-baselines from its CURRENT value
   ///   (no visual jump).
@@ -263,6 +274,9 @@ class ReorderPreviewEngine {
     _lastTickElapsed = Duration.zero;
   }
 
+  /// Terminal teardown. Identical to [clearAll], which already disposes
+  /// the ticker, and kept as its own entry point so every engine tears
+  /// down through the same name.
   void dispose() {
     clearAll();
   }
@@ -271,9 +285,9 @@ class ReorderPreviewEngine {
   // TICK
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Same notify-before-cleanup contract as the slide engine: arrived
-  /// entries paint their exact final value in the tick that completes
-  /// them, and the active → idle transition fires one extra notify so
+  /// Notify-before-cleanup, matching the slide engine: arrived entries
+  /// paint their exact final value on the tick that completes them, and
+  /// the active-to-idle transition fires one extra notify afterwards so
   /// listeners can observe it.
   void _onPreviewTick(Duration elapsed) {
     _lastTickElapsed = elapsed;
@@ -315,8 +329,8 @@ class ReorderPreviewEngine {
     if (!anyAnimating) {
       _ticker?.stop();
       if (_entries.isEmpty) {
-        // Active → idle transition must be observable (mirrors the slide
-        // engine's post-cleanup settle notify).
+        // The active-to-idle transition must be observable; this mirrors
+        // the slide engine's post-cleanup settle notify.
         _onTick();
       }
     }

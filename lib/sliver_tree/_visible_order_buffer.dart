@@ -7,11 +7,11 @@ import '_node_id_registry.dart';
 import '_node_store.dart' show kNoParentNid;
 
 /// Maintains the tree's flattened visible order as a dense buffer of nids
-/// (not keys), plus a reverse nid → visible-index map for O(1) membership
-/// queries.
+/// (not keys), plus a reverse map from nid to visible index for O(1)
+/// membership queries.
 ///
 /// Also owns the **roots list** (with order) and the **visible-subtree-size
-/// cache** — both are pure functions of (structure × visible order), so they
+/// cache**, both pure functions of structure and visible order, so they
 /// belong inside this layer rather than on the controller. The cache satisfies
 /// the invariant
 ///
@@ -32,8 +32,9 @@ import '_node_store.dart' show kNoParentNid;
 /// `_depthByNid`, and friends.
 ///
 /// Does not own the registry; the registry is passed in and used to
-/// translate [TKey] ↔ nid on the public boundary. Reads `parentByNid` and
-/// `childKeysOf` via constructor callbacks so the buffer stays decoupled
+/// translate between [TKey] and nid on the public boundary. Reads
+/// `parentByNid` and `childKeysOf` via constructor callbacks so the buffer
+/// stays decoupled
 /// from [NodeStore].
 ///
 /// Mutating operations invoke the [onOrderMutated] callback so the
@@ -59,13 +60,24 @@ class VisibleOrderBuffer<TKey> {
   /// invisible.
   static const int kNotVisible = -1;
 
+  /// The visible order itself: nids in render order. Grown by doubling,
+  /// so entries past [_len] are stale rather than meaningful.
   Int32List _orderNids = Int32List(0);
+
+  /// How much of [_orderNids] is live. The buffer's own length is
+  /// capacity, never the visible count.
   int _len = 0;
+
+  /// Reverse map from nid to visible index, or [kNotVisible]. Per-nid, so
+  /// it grows in lockstep with the controller's other per-nid arrays.
   Int32List _indexByNid = Int32List(0);
+
+  /// Visible-subtree size per nid, held to the invariant stated in the
+  /// class doc. Also per-nid, grown alongside [_indexByNid].
   Int32List _subtreeSizeByNid = Int32List(0);
 
-  /// Roots (with order). Live, internally-owned `List<TKey>` — the reference
-  /// is stable for the lifetime of this buffer instance, so wrapping it with
+  /// Roots, in order. A live, internally-owned `List<TKey>` whose
+  /// reference is stable for this buffer's lifetime, so wrapping it with
   /// an [UnmodifiableListView] produces a view that reflects subsequent
   /// mutations.
   ///
@@ -84,8 +96,8 @@ class VisibleOrderBuffer<TKey> {
   /// Number of entries currently in the visible order.
   int get length => _len;
 
-  /// Underlying nid buffer. Read-only access for hot loops — do not
-  /// mutate directly; use the insert/remove methods. Entries beyond
+  /// Underlying nid buffer, for read-only access in hot loops. Do not
+  /// mutate it directly; use the insert and remove methods. Entries beyond
   /// [length] carry stale data from prior mutations.
   Int32List get orderNids => _orderNids;
 
@@ -103,13 +115,13 @@ class VisibleOrderBuffer<TKey> {
     return _subtreeSizeByNid[nid];
   }
 
-  /// Returns the nid at visible position [i]. Unchecked — [i] must satisfy
+  /// The nid at visible position [i]. Unchecked: [i] must satisfy
   /// `0 <= i < length`.
   int nidAt(int i) {
     return _orderNids[i];
   }
 
-  /// Returns the key at visible position [i]. Unchecked — [i] must satisfy
+  /// The key at visible position [i]. Unchecked: [i] must satisfy
   /// `0 <= i < length`.
   TKey keyAt(int i) {
     return _nids.keyOfUnchecked(_orderNids[i]);
@@ -154,7 +166,7 @@ class VisibleOrderBuffer<TKey> {
 
   /// Per-nid cache cleanup used by the controller's adopt/release paths.
   /// Zeros both the subtree-size slot and the reverse-index slot in one
-  /// call. Idempotent — safe to call on already-cleared slots. [nid] must
+  /// call. Idempotent, so it is safe on already-cleared slots. [nid] must
   /// be in range (callers that only have a key should resolve nid via the
   /// registry first).
   void clearForNid(int nid) {
@@ -220,7 +232,7 @@ class VisibleOrderBuffer<TKey> {
   }
 
   /// Debug-only: verifies order/reverse-index agreement over
-  /// `[fromIndex, length)` — the O(changed-range) inline check that
+  /// `[fromIndex, length)`: the O(changed-range) inline check that
   /// replaces the full consistency sweep on the incremental-mutation hot
   /// path. Live nids must index back to their position;
   /// zombie entries (freed nids awaiting a batched sweep) are skipped.
@@ -228,7 +240,7 @@ class VisibleOrderBuffer<TKey> {
     assert(() {
       for (int i = fromIndex; i < _len; i++) {
         final nid = _orderNids[i];
-        if (_nids.keyOf(nid) == null) continue; // zombie — swept later
+        if (_nids.keyOf(nid) == null) continue; // zombie: swept later
         assert(
           _indexByNid[nid] == i,
           "VisibleOrderBuffer: order/index disagreement at position $i "
@@ -247,7 +259,7 @@ class VisibleOrderBuffer<TKey> {
   /// ancestor. Stops at [kNoParentNid]. O(depth).
   ///
   /// Public so optimized callers (e.g. `_purgeAndRemoveFromOrder` Step 1)
-  /// can do their own batched cache maintenance — pre-bumping ancestors
+  /// can do their own batched cache maintenance, pre-bumping ancestors
   /// before a downstream removal that they wrap in
   /// [runWithSubtreeSizeUpdatesSuppressed]. Most callers should rely on
   /// the inlined cache updates that fire automatically from the order
@@ -259,7 +271,7 @@ class VisibleOrderBuffer<TKey> {
     int cur = startNid;
     while (cur != kNoParentNid && cur >= 0 && cur < _subtreeSizeByNid.length) {
       // Refuse to mutate a freed slot. In debug, surface the violation;
-      // in release, bail out — corrupting a freed slot causes downstream
+      // in release, bail out: corrupting a freed slot causes downstream
       // visibility-cache bugs once the nid is recycled.
       if (_nids.keyOf(cur) == null) {
         assert(
@@ -332,7 +344,7 @@ class VisibleOrderBuffer<TKey> {
 
   /// ADVANCED. Suppresses the inlined subtree-size cache callbacks for the
   /// closure body. Caller is fully responsible for keeping the
-  /// subtree-size cache consistent across the body — typically by
+  /// subtree-size cache consistent across the body, typically by
   /// pre-bumping via [bumpFromSelf] before the closure runs. Misuse
   /// silently corrupts the cache.
   ///
@@ -340,7 +352,7 @@ class VisibleOrderBuffer<TKey> {
   /// the cache on top of Step 1's pre-bump. Most callers should use
   /// [rebuild] instead.
   ///
-  /// Re-entrant safe — nested calls preserve the prior suppression state.
+  /// Re-entrant safe: nested calls preserve the prior suppression state.
   void runWithSubtreeSizeUpdatesSuppressed(void Function() body) {
     final wasSuppressed = _suppress;
     _suppress = true;
@@ -377,7 +389,7 @@ class VisibleOrderBuffer<TKey> {
   /// updates are currently suppressed (e.g. inside [rebuild]).
   ///
   /// Safe even though [NodeStore.setParent] has already written
-  /// `parentByNid[nid] = newParent` at call time — the walks start from
+  /// `parentByNid[nid] = newParent` at call time: the walks start from
   /// [oldParent] / [newParent] (not from [nid]) and traverse ancestor
   /// chains via the [parentByNid] callback; only the moved node's own
   /// slot was overwritten, ancestor slots are untouched.
@@ -399,6 +411,9 @@ class VisibleOrderBuffer<TKey> {
   // Order mutations
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Grows [_orderNids] to hold at least [needed] entries, doubling from
+  /// 16 so repeated inserts amortize to O(1). Copies only the live prefix,
+  /// since everything past [_len] is stale.
   void _ensureOrderCapacity(int needed) {
     if (needed <= _orderNids.length) {
       return;
@@ -416,8 +431,8 @@ class VisibleOrderBuffer<TKey> {
   /// [nid] must be live.
   void insertNid(int index, int nid) {
     _ensureOrderCapacity(_len + 1);
-    // Int32List.setRange uses memmove semantics — overlap-safe even when
-    // source and destination are the same buffer.
+    // Int32List.setRange uses memmove semantics, so it stays correct even
+    // when source and destination are the same buffer.
     _orderNids.setRange(index + 1, _len + 1, _orderNids, index);
     _orderNids[index] = nid;
     _len++;
@@ -493,8 +508,8 @@ class VisibleOrderBuffer<TKey> {
 
   /// Intention-revealing bulk removal of the contiguous range
   /// `[start, endExclusive)`: clears each removed entry's reverse-index
-  /// slot, removes the physical range, and reindexes the shifted suffix
-  /// — the full "contiguous removal" protocol in one owner. Subtree-size
+  /// slot, removes the physical range, and reindexes the shifted suffix.
+  /// That is the whole contiguous-removal protocol in one owner. Subtree-size
   /// cache decrements follow [removeRange]'s suppression contract.
   void removeContiguousRange(int start, int endExclusive) {
     final end = endExclusive < _len ? endExclusive : _len;
@@ -509,9 +524,9 @@ class VisibleOrderBuffer<TKey> {
   }
 
   /// Intention-revealing non-contiguous compaction: clears the removed
-  /// keys' reverse-index slots, sweeps the order — dropping [keys] AND
-  /// any zombie entries whose nid was already released (the zombie
-  /// protocol documented on [removeWhereKeyIn]) — then rebuilds the
+  /// keys' reverse-index slots, sweeps the order, dropping [keys] AND any
+  /// zombie entries whose nid was already released (the zombie protocol
+  /// documented on [removeWhereKeyIn]), then rebuilds the
   /// reverse index wholesale. The full "non-contiguous removal" protocol
   /// in one owner.
   void purgeCompact(Set<TKey> keys) {
@@ -554,9 +569,8 @@ class VisibleOrderBuffer<TKey> {
   /// Zeros [length] but keeps the order and reverse-index buffers
   /// allocated so follow-up inserts can reuse them without realloc.
   /// Callers that want the reverse map cleared too must call
-  /// [resetIndexAll] separately — this method does not touch it. Does NOT
-  /// touch the subtree-size cache or [roots]; for a full reset use
-  /// [reset].
+  /// [resetIndexAll] separately, since this method does not touch it, nor
+  /// the subtree-size cache, nor [roots]. For a full reset use [reset].
   void clear() {
     _len = 0;
     _onMutated();

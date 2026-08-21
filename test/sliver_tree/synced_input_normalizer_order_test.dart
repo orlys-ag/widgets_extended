@@ -90,17 +90,4 @@ void main() {
     expect(_keys(normalized.childrenByParent["a"]!), ["a1", "a2"]);
   });
 
-  test("normalizeFlat treats a parent key absent from items as root", () {
-    final normalized = normalizeFlat<String, String>(
-      items: const ["orphaned", "a"],
-      keyOf: (item) {
-        return item;
-      },
-      parentOf: (item) {
-        return item == "orphaned" ? "not-in-items" : null;
-      },
-    );
-    expect(_keys(normalized.roots), ["orphaned", "a"]);
-    expect(normalized.childrenByParent, isEmpty);
-  });
 }

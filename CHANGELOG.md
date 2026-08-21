@@ -1,154 +1,164 @@
-## Unreleased
+## 0.0.33
 
+- Fix: removing a visible row that had never been laid out collapsed its
+extent in one frame instead of animating out. The exit now starts from the
+same estimate fallback the collapse path uses.
+- Fix: a sticky header pinned while ENTERING snapped to full height instead of
+growing in. The band takes the animated extent while entering; exiting stays
+on the settled extent so the header retires by push-up.
+- Fix: an entering root that took the sticky band over at a scrolled offset
+popped in flush at the band top instead of sliding down into it.
+- Fix: the pinned header vanished or mispositioned for the whole duration of
+an `expandAll` / `collapseAll` that moved the offsets of a pinned section
+whose header row sits outside the cache region.
+- Fix: the sticky band went blank for the whole duration of a diff that added
+or removed a depth-0 root. Animation membership no longer affects candidate
+eligibility, and the 1-in-3 recompute throttle and the paint-time skip for
+exiting headers are gone with it.
+- Fix: a row that was both sticky and an exit-ghost anchor was painted by
+neither pass while exiting; the sticky pass now paints exiting headers.
+- Perf: sticky headers take one candidate walk per layout instead of two
+(`identifyPotentialStickyNodes` and `computeStickyHeaders` are merged).
+- Added `RenderSliverTree.debugLastPaintedStickyKeys`, the keys the sticky
+paint pass actually painted this frame; assert-guarded.
+- Fix: `TreeController.remove` did not flush a deferred visible-order rebuild
+before reading the order, so inside `runBatch` its animated-versus-immediate
+path gate read stale state. Only batched sequences were affected.
+- Perf: the floating drag proxy is built once per drag session and
+repositioned as a retained subtree instead of rebuilding on every pointer
+move. Proxy content that self-drives motion or drag-state reactivity still
+works, since the subtree stays mounted for the whole session.
+- Fix: rebuilding `SliverReorderableTree` with a different
+`TreeReorderController` mid-drag stranded the session, leaving rows shifted
+and leaking its eviction pin, scroll listener and autoscroll ticker.
+- Fix: a `TreeSyncController.syncRoots(childrenOf:)` that throws during
+desired-tree validation left the internal desired-descendants set populated,
+silently skipping removals in every later `syncChildren`.
+- **BREAKING** `SyncedSliverTree.flat` now throws `ArgumentError` when
+`parentOf` returns a key absent from `items`, listing every offending
+(child, parent) pair; such items used to be silently treated as roots.
+Returning null from `parentOf` is the explicit way to make an item a root.
+- **BREAKING** `preserveExpansion` and `maxExpansionMemorySize` merge into one
+`expansionMemory` parameter on `TreeSyncController` and all three
+`SyncedSliverTree` constructors: the maximum number of removed nodes whose
+expansion state is remembered for restore on re-add, 0 disabling the memory
+entirely (default `TreeSyncController.defaultExpansionMemory`, 1024).
+
+  Migration: `preserveExpansion: false` becomes `expansionMemory: 0`,
+  `maxExpansionMemorySize: N` becomes `expansionMemory: N`, and both set
+  becomes `expansionMemory: preserveExpansion ? N : 0`.
+  `SectionedSliverList.preserveExpansion` and
+  `SectionedListController.preserveExpansion` are unchanged.
+- Added `TreeReorderConfig.enabled` (default true), the tree-wide runtime
+reorder toggle: it disarms every handle, withdraws the reorder semantics
+actions, refuses programmatic `TreeReorderController.moveTo`, and ends a drag
+already in flight, with no change to any row's widget shape. It dominates
+`canReorder`, which stays the per-row policy.
 - **BREAKING** `SliverReorderableTree.indentPerDepth` and
 `TreeReorderConfig.indentPerDepth` are renamed `indentWidth`, matching the
-`TreeController` / `SyncedSliverTree` name for the same pixels-per-depth
-constant. `SliverReorderableTree.indentWidth` is now `double?` defaulting to
-null, which resolves to `TreeController.indentWidth` at drag start instead of
-a hardcoded `24.0`; set it explicitly only when rows bake their own indent.
-Behavior note: a tree rendering with the controller's default `indentWidth: 0`
-no longer gets a phantom 24 px hint column; x-aware depth selection is
-disabled and below-boundary drops resolve at the deepest legal level. Pass
+`TreeController` / `SyncedSliverTree` name for the same constant;
+`SliverReorderableTree.indentWidth` is now `double?` defaulting to null, which
+resolves to `TreeController.indentWidth` at drag start instead of a hardcoded
+24.0. Behavior note: a tree rendering with the controller's default
+`indentWidth: 0` no longer gets a phantom 24 px hint column, so pass
 `indentWidth: 24.0` to keep the old mapping.
 - Fix: the drag tunings (`autoExpandDelay`, `autoScrollEdgeZone`,
 `autoScrollMaxVelocity`) on `TreeReorderConfig` / `SectionedReorderConfig` are
-now live on rebuild instead of silently read once at construction. The
-backing `TreeReorderController` fields are mutable; each value is captured
-per drag session at `startDrag`, so a change applies from the next drag.
-- `TreeSyncController`'s expansion-memory gating is unified internally, and
-`maxExpansionMemorySize: 0` is documented as equivalent to
-`preserveExpansion: false`. No behavior change.
+now live on rebuild instead of read once at construction. Each value is
+captured per drag session, so a change applies from the next drag.
 - Fix: dragging an EXPANDED parent now carries its whole visible subtree: the
-in-place rows all hide, the floating proxy stacks a clone per visible
-descendant (captured frozen at lift; drawing capped at one viewport), and all
-three settle glide paths (commit, cancel, dead-commit) carry every subtree
-row. A custom `dragProxyBuilder` still receives and styles only the dragged
-row's portion; leaf and collapsed-parent drags are unchanged.
+in-place rows all hide, the proxy stacks a clone per visible descendant
+(frozen at lift, drawing capped at one viewport), and all three settle glide
+paths carry every subtree row. A custom `dragProxyBuilder` still styles only
+the dragged row's portion.
 - Fix: cross-depth drags are now seamless horizontally as well as vertically:
-the proxy carries an animated left padding from the source row's indent
-toward the drop target's column (riding the `makeRoom` family), and every
-proxy-to-row settle glide starts at the proxy's instantaneous visual cross
-offset instead of a structural x. Internal:
-`ReorderRenderPort.beginSlideBaseline` now takes
-`baselineOverrides: Map<TKey, ({double y, double? x})>?` (null x keeps the
-captured cross offset), and `startDrag` gained an optional
-`proxyCrossOffset` closure.
+the proxy carries an animated left padding toward the drop target's column,
+and every settle glide starts at the proxy's instantaneous visual cross offset
+instead of a structural x. Internal:
+`ReorderRenderPort.beginSlideBaseline` takes `baselineOverrides`, and
+`startDrag` gained an optional `proxyCrossOffset` closure.
 - **BREAKING** removed the `SyncedSliverTree.nodes` and `.snapshot`
-constructors and `TreeSnapshot`. The three remaining input modes cover the
-same ground: keep structure in nested `SyncedTreeNode`s (the default
-constructor), or project domain objects through `.hierarchy` / `.flat` (same
-validation, now run directly at sync time). `withMove` callers apply the move
-to their own model: remove the key from its old parent first, then insert at
-the reported index, which names a FINAL-list position (see the tutorial's
-section 9 for a worked implementation).
+constructors and `TreeSnapshot`; the three remaining input modes cover the
+same ground. `withMove` callers apply the move to their own model: remove the
+key from its old parent first, then insert at the reported index, which names
+a FINAL-list position.
 - Fix: `SectionedListController.moveItem(index:)` dropped `animate` on the
-in-section path, so `animate: false` slid anyway. It forwards now;
-`reorderItems` and `ItemView.moveTo` gained matching `animate` parameters,
-and the docs no longer claim in-section reorders never animate.
+in-section path, so `animate: false` slid anyway. `reorderItems` and
+`ItemView.moveTo` gained matching `animate` parameters.
 - The declarative `SectionedSliverList` now skips the diff when `sections` is
-the `identical` instance from the previous build (the `SyncedSliverTree` /
-`ListView.children` convention); `itemsOf` is excluded from the check and
-must be pure. `hideEmptySections` no longer evaluates `itemsOf` an extra time
-per section.
-- Perf: `childrenOf` is consulted exactly once per node per sync (both sync
-walks used to call it independently), and is now documented as required to be
-a pure function of its argument.
-- Added `TreeSyncController.snapshotChildPresence()`: every live key mapped
-to whether it has live children, with no per-node child-list copies.
-`SyncedSliverTree`'s expansion passes use it, and are skipped entirely when
-neither can do anything.
-- **BREAKING** drag handles are now placed by the CALLER. Removed
+the `identical` instance from the previous build; `itemsOf` is excluded from
+the check and must be pure.
+- Perf: `childrenOf` is consulted exactly once per node per sync, and is now
+documented as required to be a pure function of its argument.
+- Added `TreeSyncController.snapshotChildPresence()`: every live key mapped to
+whether it has live children, with no per-node child-list copies.
+- **BREAKING** drag handles are now placed by the CALLER: removed
 `TreeRowDragMode` (with `TreeRowLongPressDrag` / `TreeRowHandleDrag` /
 `TreeRowManualDrag`), `TreeDragHandleBuilder`, the `rowDragMode` /
 `itemDragMode` / `sectionDragMode` config fields, `ReorderableNodeWrapper`,
 the `wrap` parameter of `SliverReorderableTree.nodeBuilder`, and the
-`draggable` members of `TreeItemView` / `SectionView` / `ItemView`. New:
-`TreeDragHandle` and `TreeDelayedDragHandle` (draw nothing, only arm their
-child; any placement, size or count) plus `TreeRowDragScope`. `nodeBuilder`
-reverts to the plain `(context, key, depth)` signature and every row is
-wrapped unconditionally; a row with no handle cannot be lifted by a pointer
-but is still a drop target and keeps its reorder semantics actions.
-Migration: `nodeBuilder: (c, k, d, wrap) => wrap(longPressToDrag: true,
-child: row)` becomes `nodeBuilder: (c, k, d) =>
-TreeDelayedDragHandle(child: row)`.
+`draggable` members of `TreeItemView` / `SectionView` / `ItemView`, replaced
+by `TreeDragHandle` and `TreeDelayedDragHandle` plus `TreeRowDragScope`.
+`nodeBuilder` reverts to `(context, key, depth)` and every row is wrapped
+unconditionally, so a row with no handle cannot be lifted but is still a drop
+target with its reorder semantics actions.
+
+  Migration:
+  `nodeBuilder: (c, k, d, wrap) => wrap(longPressToDrag: true, child: row)`
+  becomes `nodeBuilder: (c, k, d) => TreeDelayedDragHandle(child: row)`.
 - **BREAKING** `TreeReorderConfig.rowDragMode` is replaced by
-`buildDefaultDragHandles` (default TRUE, matching `ReorderableListView`);
-`SectionedReorderConfig` gets the per-kind pair
-`buildDefaultItemDragHandles` / `buildDefaultSectionDragHandles`. Callers who
-never typed a drag mode need no migration; `.handle` / `.manual` callers set
-the flag false and place a `TreeDragHandle` / `TreeDelayedDragHandle` in
-their builder. Behavior notes: a `canReorder`-refused grip now renders
-visibly (disarmed) instead of hidden with reserved width; reproduce the old
-look with `TreeRowDragScope.maybeOf(context)?.canDrag` plus
-`Visibility(maintainSize: true)`. A handle drag accepts on distance in ANY
-direction, and an armed handle is hit-opaque while a disarmed one is not.
+`buildDefaultDragHandles` (default TRUE, matching `ReorderableListView`), and
+`SectionedReorderConfig` gets the per-kind pair `buildDefaultItemDragHandles`
+/ `buildDefaultSectionDragHandles`; callers who never typed a drag mode need
+no migration, while `.handle` / `.manual` callers set the flag false and place
+a handle in their builder. Behavior notes: a `canReorder`-refused grip now
+renders visibly (disarmed) instead of hidden with reserved width, and a handle
+drag accepts on distance in ANY direction.
 - Fix: grab geometry when a drag starts on a PINNED sticky header (the card
 jumped on pickup and the proxy rendered at the wrong height).
-`ReorderRenderPort` gained `paintedRowBounds(key)`, and the grab path asks
-where its own row is painted instead of what sits at the pointer's y.
+`ReorderRenderPort` gained `paintedRowBounds(key)`.
 - Fix: `.hierarchy` input reversed the ROOT order for multi-root input
 (`[a, b, c]` came out `[c, b, a]`); child order was unaffected.
 - `TreeItemView` gained `indexInParent`, `siblingCount`, `isFirst` and
 `isLast`, all live-space (siblings animating out are excluded).
-- Fix: rows now rebuild when a sibling insert, removal, reorder or move
-shifts their position; sibling mutations declare the whole sibling list as
-affected (previously only the parent, or nothing for pure reorders).
+- Fix: rows now rebuild when a sibling insert, removal, reorder or move shifts
+their position; sibling mutations declare the whole sibling list as affected.
 - **BREAKING** removed `TreeItemView.watch`, `SectionView.watch` and
 `ItemView.watch`: rows already rebuild when their own rendered inputs change,
 so read the properties inline. The controller payload listeners and
-`TreeNodeBuilder` (observation from outside the rows) are unaffected.
+`TreeNodeBuilder` are unaffected.
 - `TreeController` gained an expansion-listener channel:
 `addExpansionListener` / `removeExpansionListener` report `(key, isExpanded)`
 for every state flip, `expandAll` / `collapseAll` included. Node lifecycle
 resets are silent, and `runBatch` coalesces per key.
 - `SyncedSliverTree` gained `onExpansionChanged` (its own initial expansion
-pass is deliberately silent), `initialNodeExpansion` (per-node initial
-policy `(key, item) -> bool?`, null defers to `initiallyExpanded`; never
-overrides a user toggle or remembered state), `onControllerCreated` (one-shot
-handover of the internal `TreeController` after the first sync; do not
-dispose it), and `maxExpansionMemorySize` (default 1024; 0 disables expansion
-memory).
-- **BREAKING (behavior)** the no-op rebuild fast path compares only the
-mode's collection instance, not the extractor callbacks (`keyOf`,
-`childrenOf`, `parentOf`), which must now be pure functions of their input.
-Pass a new collection instance to signal change, the `ListView.children`
-convention.
-- Fix: starting a drag while a previous drop's slide animations were still
-running left the drag resolving drop targets with an O(rows) scan per pointer
-event, for the whole drag. Edge ghosts (rows whose slide destination is
-off-screen) are retired on FLIP-slide state instead of the composed
-slide-plus-preview state: because a make-room preview offset is HELD for the
-duration of a drag, the composed reads never reported the slide as finished,
-so the cleanup pass was never scheduled and the stale ghosts kept failing the
-fast path's precondition. Most visible on wide lists, where the scan is
-longest. `TreeController` gains `hasActiveFlipSlides` and
-`getFlipSlideDeltaNid` for this; painted positions, hit-testing, retention
-and overreach continue to read the composed `hasActiveSlides` /
-`getSlideDeltaNid` and are unchanged.
-- Fix: a row sliding IN from off-screen during a drag (a mutation lands
-while the make-room preview is holding rows shifted, e.g. a dwell-expand or
-an app-driven update mid-drag) popped in at the viewport boundary instead of
-gliding in from beyond the edge. The slide-install path mistook the held
-preview offset for an in-flight slide and took the composition clamp (just
-inside the edge) instead of the initial-install clamp (edge plus overhang).
+pass is silent), `initialNodeExpansion` (per-node initial policy
+`(key, item) -> bool?`, null defers to `initiallyExpanded`), and
+`onControllerCreated` (one-shot handover of the internal `TreeController`
+after the first sync; do not dispose it).
+- **BREAKING (behavior)** the no-op rebuild fast path compares only the mode's
+collection instance, not the extractor callbacks (`keyOf`, `childrenOf`,
+`parentOf`), which must now be pure functions of their input. Pass a new
+collection instance to signal change, the `ListView.children` convention.
+- Fix: starting a drag while a previous drop's slides were still running left
+drop-target resolution on an O(rows) scan per pointer event for the whole
+drag. Edge ghosts now retire on FLIP-slide state via the new
+`TreeController.hasActiveFlipSlides` / `getFlipSlideDeltaNid`; painted
+positions, hit-testing, retention and overreach still read the composed
+`hasActiveSlides` / `getSlideDeltaNid`.
+- Fix: a row sliding IN from off-screen during a drag popped in at the
+viewport boundary instead of gliding in from beyond the edge, because the
+slide-install path mistook a held make-room offset for an in-flight slide.
 The same misread also installed pointless slides for rows off-screen on both
-sides of such a mutation, which prolonged the FLIP-active window and with it
-the edge-ghost cleanup the previous fix keyed to it.
+sides of such a mutation.
 - Perf: `expand()` and `collapse()` on an idle tree no longer pay an
-O(subtree) slide-baseline staging cost per call. Staging is now gated by the
-O(1) `hasActiveSlides` check before any per-row work, so the descendant
-materialization and the per-row slide probes run only while a slide or a
-held drag preview is actually active. `collapse()` also walks its visible
-descendants once instead of twice. Behavior is unchanged whenever slides
-are active.
+O(subtree) slide-baseline staging cost per call, and `collapse()` walks its
+visible descendants once instead of twice. Behavior is unchanged whenever
+slides are active.
 - Perf: `getIndexInParent` is now O(1) amortized instead of an O(siblings)
-scan per call. Drop-target resolution during a drag (several lookups per
-pointer move and per autoscroll tick) and the per-row semantics-action
-builders no longer rescan wide sibling lists: the first lookup after any
-mutation refreshes the touched list once, and every following lookup is a
-constant-time cache read until the next mutation. Most visible dragging
-over wide flat sections. The live-space contract and return values are
-unchanged, including for keys read by a user `comparator` mid-mutation.
+scan per call, so drop-target resolution during a drag and the per-row
+semantics-action builders no longer rescan wide sibling lists. The live-space
+contract and return values are unchanged.
 
 ## 0.0.32
 

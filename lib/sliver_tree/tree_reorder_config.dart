@@ -2,8 +2,8 @@
 /// parameter per knob on every constructor.
 ///
 /// Passing a non-null [TreeReorderConfig] IS enabling reorder, and by
-/// default that is all the wiring a row needs: [
-/// TreeReorderConfig.buildDefaultDragHandles] installs a long-press drag
+/// default that is all the wiring a row needs:
+/// [TreeReorderConfig.buildDefaultDragHandles] installs a long-press drag
 /// over the whole row, the way `ReorderableListView` does. Set it false
 /// to place [TreeDragHandle]s yourself, anywhere in the row you like.
 library;
@@ -26,12 +26,13 @@ import 'tree_reorder_controller.dart';
 /// are captured once per drag session at drag start, so a changed value
 /// applies from the next drag rather than retuning a live one.
 ///
-/// To toggle reorder at runtime, keep the config and return false from
-/// [canReorder], which disarms each refused row's handles rather than
-/// leaving a grip that declines.
+/// To toggle reorder at runtime, keep the config and flip [enabled],
+/// which disarms every handle rather than leaving grips that decline.
+/// [canReorder] remains the per-row policy.
 class TreeReorderConfig<TKey> {
   const TreeReorderConfig({
     required this.onReorder,
+    this.enabled = true,
     this.canReorder,
     this.canAcceptDrop,
     this.semanticsActionsBuilder,
@@ -55,6 +56,25 @@ class TreeReorderConfig<TKey> {
   /// the rejection mechanism, not a bug. An async handler must record
   /// optimistically BEFORE awaiting.
   final void Function(TKey key, TKey? newParent, int index) onReorder;
+
+  /// Whether reordering is currently active. The runtime toggle.
+  ///
+  /// Config CONTENT, so it is live on rebuild: flip it with app state
+  /// (an edit mode) and the change is observed with no change to any
+  /// row's widget shape. False refuses every path a move could take:
+  /// drags do not start, a drag already in flight ends on its next
+  /// re-resolution (a pointer move, a scroll notification, or a row
+  /// rebuild), and programmatic and assistive-technology moves are
+  /// refused. Handles still render, disarmed, exactly as for a
+  /// [canReorder] refusal.
+  ///
+  /// Dominates [canReorder]: a per-row allow cannot switch a disabled
+  /// tree back on. Use [canReorder] for per-row policy and this flag for
+  /// the tree-wide switch.
+  ///
+  /// The config's PRESENCE still cannot change at runtime (see the class
+  /// doc); this flag exists precisely so it never needs to.
+  final bool enabled;
 
   /// Rows for which this returns false cannot be dragged.
   ///
@@ -108,8 +128,7 @@ class TreeReorderConfig<TKey> {
   /// A policy may therefore answer null without consulting the index. If
   /// a genuine shape-only query is ever wanted, it should get its own
   /// callback: overloading null onto a parameter whose entire meaning is
-  /// a position is what produced the dead-zone regression described
-  /// above.
+  /// a position is exactly what opens the dead zone described above.
   final bool Function({required TKey movingKey, TKey? newParent, int? index})?
   canAcceptDrop;
 
@@ -120,8 +139,7 @@ class TreeReorderConfig<TKey> {
   /// making the whole row draggable after a long press.
   ///
   /// Defaults to true, matching
-  /// `ReorderableListView.buildDefaultDragHandles` and preserving the
-  /// gesture this package has always installed. A uniform long-press
+  /// `ReorderableListView.buildDefaultDragHandles`. A uniform long-press
   /// default is predictable, needs no platform reasoning to understand,
   /// and does not change your layout as a side effect of turning reorder
   /// on. The cost is that desktop users get no visible affordance and a
@@ -203,8 +221,8 @@ class TreeReorderConfig<TKey> {
   ///
   /// The supported way to reach what the config cannot express: reading
   /// `isDragging` for chrome, `cancelDrag()`, subscribing to
-  /// `pointerPosition` for a custom overlay, or driving [
-  /// TreeReorderController.moveTo] programmatically. Do NOT dispose it.
+  /// `pointerPosition` for a custom overlay, or driving
+  /// [TreeReorderController.moveTo] programmatically. Do NOT dispose it.
   final void Function(TreeReorderController<TKey> controller)?
   onControllerCreated;
 }

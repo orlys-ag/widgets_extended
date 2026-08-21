@@ -116,7 +116,9 @@ Rules your `onReorder` handler lives by:
 - **Async handlers record before awaiting**, then reconcile or roll back on
   the response.
 
-To gate dragging per row, pass `canReorder: (key) => ...`. On desktop,
+To switch reordering off and on with app state (an edit mode), flip
+`enabled:` on the config; to gate dragging per row, pass
+`canReorder: (key) => ...`. On desktop,
 long-press reads as lag, so turn the default handles off and place a
 visible grip anywhere inside the row (`TreeDragHandle` drags immediately,
 `TreeDelayedDragHandle` on press-and-hold; both draw nothing):
@@ -145,9 +147,9 @@ same `onReorder`.
 - `initiallyExpanded: true` (the default) opens the whole tree on first
   sync; `initialNodeExpansion: (key, item) => bool?` overrides it per node
   (return null to defer).
-- `preserveExpansion: true` (the default) remembers expansion across
-  remove/re-add cycles, and a user's deliberate collapse is never
-  overridden by later syncs.
+- `expansionMemory` (default 1024) remembers up to that many removed
+  nodes' expansion states across remove/re-add cycles (0 disables it),
+  and a user's deliberate collapse is never overridden by later syncs.
 - `onExpansionChanged: (key, isExpanded) { ... }` is the hook for
   persisting expansion state.
 
@@ -177,7 +179,7 @@ parameters otherwise:
 SyncedSliverTree<String, Row>.flat(
   items: rows,
   keyOf: (r) => r.id,
-  parentOf: (r) => r.parentId, // null = root
+  parentOf: (r) => r.parentId, // null = root; unknown key = ArgumentError
   itemBuilder: ...,
 )
 

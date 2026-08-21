@@ -25,8 +25,8 @@ const int kNoParentNid = -1;
 /// `_ancestorsExpandedByNid` cache propagation. Both [oldParent] and
 /// [newParent] are nid values; either may be [kNoParentNid] (root).
 ///
-/// Fires unconditionally — including the no-op `oldParent == newParent`
-/// case. Subscribers are responsible for short-circuiting no-ops.
+/// Fires unconditionally, including the no-op `oldParent == newParent`
+/// case, so subscribers are responsible for short-circuiting no-ops.
 typedef ParentChangedCallback =
     void Function(int nid, int oldParent, int newParent);
 
@@ -58,7 +58,8 @@ class NodeStore<TKey, TData> {
   /// semantics.
   ParentChangedCallback? onParentChanged;
 
-  /// Bidirectional key↔nid registry with free-list recycling.
+  /// Bidirectional key-to-nid registry with free-list recycling. Owned
+  /// here, and injected into every component that keeps per-nid arrays.
   final NodeIdRegistry<TKey> nids = NodeIdRegistry<TKey>();
 
   /// Node data indexed by nid. Entries for freed nids are null.
@@ -232,19 +233,21 @@ class NodeStore<TKey, TData> {
     _dataByNid[nids[key]!] = node;
   }
 
-  /// Internal — used by debug consistency checks. Returns the data slot at
-  /// [nid] (which may be null for freed slots).
+  /// The raw data slot at [nid], null for a freed slot. Exists for the
+  /// debug consistency checks, which need to see freed slots rather than
+  /// have them filtered out.
   TreeNode<TKey, TData>? rawDataAtNid(int nid) => _dataByNid[nid];
 
-  /// Internal — used by debug consistency checks.
+  /// Length of the raw data list, for those same checks. Equals [capacity]
+  /// whenever the store is consistent.
   int get rawDataLength => _dataByNid.length;
 
   // ────────────────────────────────────────────────────────────────────────
   // Parent / children
   // ────────────────────────────────────────────────────────────────────────
 
-  /// Parent nid for [key], or [kNoParentNid] for roots / unregistered keys.
-  /// Hot path — no allocation, no exception.
+  /// Parent nid for [key], or [kNoParentNid] for roots and unregistered
+  /// keys. Hot path: no allocation, and never throws.
   int parentNidOf(TKey key) {
     final nid = nids[key];
     return nid == null ? kNoParentNid : _parentByNid[nid];
@@ -260,17 +263,15 @@ class NodeStore<TKey, TData> {
     return pNid == kNoParentNid ? null : nids.keyOf(pNid);
   }
 
-  /// Sets the parent of [key] to [parent] (or null for root) and refreshes
-  /// the cached [_ancestorsExpandedByNid] bit for [key], propagating the
+  /// Sets the parent of [key] to [parent], or null for a root, refreshes
+  /// the cached ancestors-expanded bit for [key], and propagates that
   /// change through [key]'s subtree.
   ///
-  /// After the parent write and the ancestors-expanded propagation, fires
-  /// [onParentChanged] with `(nid, oldParent, newParent)` for any subscriber
-  /// (e.g. the visible-subtree-size cache in the order buffer). Callers no
-  /// longer need to do the cache shift externally — subscribe to the
-  /// callback instead. Note: fires unconditionally, including when
-  /// `oldParent == newParent` — subscribers are responsible for
-  /// short-circuiting no-ops.
+  /// Fires [onParentChanged] with `(nid, oldParent, newParent)` LAST, after
+  /// both the parent write and the propagation, so a subscriber such as
+  /// the order buffer's visible-subtree-size cache observes settled state
+  /// and owns the shift itself rather than the caller doing it. See
+  /// [ParentChangedCallback] for the rest of the invocation contract.
   void setParent(TKey key, TKey? parent) {
     final nid = nids[key]!;
     final oldParentNid = _parentByNid[nid];
@@ -334,11 +335,11 @@ class NodeStore<TKey, TData> {
 
   /// Sets the expansion flag for [key]. [key] must be registered.
   ///
-  /// By default propagates the change through [_ancestorsExpandedByNid] for
-  /// descendants so ancestor-expansion queries stay O(1). Pass [propagate]
-  /// as `false` in bulk paths that rebuild the cache wholesale via
-  /// [rebuildAllAncestorsExpanded] — per-call propagation would compound to
-  /// O(N × subtree) across the batch.
+  /// By default propagates the change into descendants' ancestors-expanded
+  /// bits, which is what keeps [ancestorsExpandedFast] O(1). Pass
+  /// [propagate] as false in bulk paths that rebuild the cache wholesale
+  /// via [rebuildAllAncestorsExpanded]: per-call propagation there would
+  /// compound to O(N * subtree) across the batch.
   void setExpanded(TKey key, bool expanded, {bool propagate = true}) {
     final nid = nids[key]!;
     final newVal = expanded ? 1 : 0;
@@ -363,6 +364,10 @@ class NodeStore<TKey, TData> {
     return _ancestorsExpandedByNid[nid] != 0;
   }
 
+  /// The ancestors-expanded bit [nid] should carry, derived from its
+  /// parent alone: 1 for a root, otherwise the parent must be expanded AND
+  /// itself have every ancestor expanded. O(1) because the parent's own
+  /// bit is already maintained.
   int _computeAncestorsExpandedNid(int nid) {
     final parentNid = _parentByNid[nid];
     if (parentNid == kNoParentNid) return 1;

@@ -436,16 +436,16 @@ void main() {
   });
 
   // ══════════════════════════════════════════════════════════════════════════
-  // preserveExpansion runtime flip: didUpdateWidget must detect a change to
+  // expansionMemory runtime flip: didUpdateWidget must detect a change to
   // the prop, dispose the old sync controller, and reinitialise tracking
   // from the current tree. The first sync after the flip must diff against
   // fresh tracking, not a stale snapshot — otherwise nodes get double-
   // removed or ghosted.
   // ══════════════════════════════════════════════════════════════════════════
 
-  group("preserveExpansion runtime flip", () {
+  group("expansionMemory runtime flip", () {
     testWidgets(
-      "flipping preserveExpansion mid-lifetime keeps tree state intact",
+      "flipping expansionMemory mid-lifetime keeps tree state intact",
       (tester) async {
         const items = <_FlatItem>[
           _FlatItem(id: "a", label: "A"),
@@ -455,7 +455,7 @@ void main() {
         ];
 
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(items: items, preserveExpansion: true),
+          _ExpansionMemoryFlipHarness(items: items, expansionMemory: 1024),
         );
         await tester.pump();
 
@@ -465,10 +465,10 @@ void main() {
         expect(find.text("A.2"), findsOneWidget);
         expect(find.text("B"), findsOneWidget);
 
-        // Flip preserveExpansion at runtime. The widget swaps its sync
+        // Flip expansionMemory at runtime. The widget swaps its sync
         // controller in didUpdateWidget.
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(items: items, preserveExpansion: false),
+          _ExpansionMemoryFlipHarness(items: items, expansionMemory: 0),
         );
         await tester.pump();
 
@@ -488,9 +488,9 @@ void main() {
           _FlatItem(id: "a.1", label: "A.1", parentId: "a"),
         ];
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(
+          _ExpansionMemoryFlipHarness(
             items: reduced,
-            preserveExpansion: false,
+            expansionMemory: 0,
           ),
         );
         await tester.pumpAndSettle();
@@ -503,10 +503,10 @@ void main() {
     );
 
     testWidgets(
-      "flipping preserveExpansion to false drops memoized expansion",
+      "flipping expansionMemory to 0 drops memoized expansion",
       (tester) async {
-        // preserveExpansion=true remembers expansion across remove/re-add.
-        // Flipping to false mid-lifetime must stop honouring that memory —
+        // A nonzero expansionMemory remembers expansion across remove/re-add.
+        // Flipping to 0 mid-lifetime must stop honouring that memory —
         // the fresh sync controller has an empty memory map, so a re-added
         // node that was expanded before removal must come back collapsed.
         const fullTree = <_FlatItem>[
@@ -520,27 +520,27 @@ void main() {
         const parentGone = <_FlatItem>[_FlatItem(id: "other", label: "Other")];
 
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(
+          _ExpansionMemoryFlipHarness(
             items: fullTree,
-            preserveExpansion: true,
+            expansionMemory: 1024,
             initiallyExpanded: false,
           ),
         );
         await tester.pump();
 
-        final harness = tester.state<_PreserveExpansionFlipState>(
-          find.byType(_PreserveExpansionFlipHarness),
+        final harness = tester.state<_ExpansionMemoryFlipState>(
+          find.byType(_ExpansionMemoryFlipHarness),
         );
         harness.treeController.expand(key: "a", animate: false);
         await tester.pump();
         expect(find.text("A.1"), findsOneWidget);
 
-        // Remove 'a' (and its subtree) while preserveExpansion=true.
+        // Remove 'a' (and its subtree) while memory is enabled.
         // Memory stores a→true.
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(
+          _ExpansionMemoryFlipHarness(
             items: parentGone,
-            preserveExpansion: true,
+            expansionMemory: 1024,
             initiallyExpanded: false,
           ),
         );
@@ -548,24 +548,24 @@ void main() {
         expect(find.text("A"), findsNothing);
         expect(find.text("A.1"), findsNothing);
 
-        // Flip to preserveExpansion=false. The old sync controller (with
+        // Flip to expansionMemory=0. The old sync controller (with
         // its memory map) is disposed; a fresh one is created and
         // initialized against the current tree (no 'a' anywhere).
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(
+          _ExpansionMemoryFlipHarness(
             items: parentGone,
-            preserveExpansion: false,
+            expansionMemory: 0,
             initiallyExpanded: false,
           ),
         );
         await tester.pump();
 
-        // Re-add 'a' and 'a.1'. With preserveExpansion=false and a fresh
+        // Re-add 'a' and 'a.1'. With expansionMemory=0 and a fresh
         // memory, 'a' must be inserted collapsed by default.
         await tester.pumpWidget(
-          _PreserveExpansionFlipHarness(
+          _ExpansionMemoryFlipHarness(
             items: fullTree,
-            preserveExpansion: false,
+            expansionMemory: 0,
             initiallyExpanded: false,
           ),
         );
@@ -575,7 +575,7 @@ void main() {
         expect(
           find.text("A.1"),
           findsNothing,
-          reason: "expansion memory leaked across preserveExpansion flip",
+          reason: "expansion memory leaked across expansionMemory flip",
         );
       },
     );
@@ -790,26 +790,26 @@ void main() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// HARNESS FOR preserveExpansion FLIP
+// HARNESS FOR expansionMemory FLIP
 // ════════════════════════════════════════════════════════════════════════════
 
-class _PreserveExpansionFlipHarness extends StatefulWidget {
-  const _PreserveExpansionFlipHarness({
+class _ExpansionMemoryFlipHarness extends StatefulWidget {
+  const _ExpansionMemoryFlipHarness({
     required this.items,
-    required this.preserveExpansion,
+    required this.expansionMemory,
     this.initiallyExpanded = true,
   });
 
   final List<_FlatItem> items;
-  final bool preserveExpansion;
+  final int expansionMemory;
   final bool initiallyExpanded;
 
   @override
-  State<_PreserveExpansionFlipHarness> createState() =>
-      _PreserveExpansionFlipState();
+  State<_ExpansionMemoryFlipHarness> createState() =>
+      _ExpansionMemoryFlipState();
 }
 
-class _PreserveExpansionFlipState extends State<_PreserveExpansionFlipHarness> {
+class _ExpansionMemoryFlipState extends State<_ExpansionMemoryFlipHarness> {
   TreeController<String, _FlatItem>? _capturedController;
 
   TreeController<String, _FlatItem> get treeController {
@@ -830,7 +830,7 @@ class _PreserveExpansionFlipState extends State<_PreserveExpansionFlipHarness> {
               parentOf: (item) {
                 return item.parentId;
               },
-              preserveExpansion: widget.preserveExpansion,
+              expansionMemory: widget.expansionMemory,
               initiallyExpanded: widget.initiallyExpanded,
               animationStyle: TreeAnimationStyle.disabled,
               itemBuilder: (context, node) {

@@ -1,11 +1,15 @@
 /// Internal: sticky-header layout helper for [RenderSliverTree].
 ///
 /// Owns every piece of state that exists solely to compute and cache
-/// sticky-header positions: the per-frame throttle counter, the
-/// last-computed-at scroll offset, the precompute scratch arrays, and the
+/// sticky-header positions: the precompute scratch arrays and the
 /// nid-indexed sticky lookup. Kept out of the render object so the sticky
 /// logic is testable in isolation by feeding precomputed offsets and
 /// extents in directly.
+///
+/// The set is recomputed on EVERY layout, with no throttle, and adding one
+/// would be a mistake: skipping frames during an animation serves a WRONG
+/// band rather than a slightly stale one, because every extent moves each
+/// frame and the candidate probe reads those extents.
 library;
 
 import 'dart:math' as math;
@@ -40,6 +44,11 @@ class StickyHeaderComputer<TKey, TData> {
        _maxStickyDepth = maxStickyDepth;
 
   TreeController<TKey, TData> _controller;
+
+  /// The controller the probe reads structure, depths and extents from.
+  /// Re-bindable so one computer survives a controller swap; assigning the
+  /// same instance is a no-op. Pair a real swap with [reset], which drops
+  /// state keyed to the old controller's nids.
   TreeController<TKey, TData> get controller => _controller;
   set controller(TreeController<TKey, TData> value) {
     if (identical(_controller, value)) return;
@@ -47,6 +56,9 @@ class StickyHeaderComputer<TKey, TData> {
   }
 
   int _maxStickyDepth;
+
+  /// How many ancestor levels may pin at once. Zero disables sticky
+  /// headers entirely, and is the candidate probe's first early-out.
   int get maxStickyDepth => _maxStickyDepth;
   set maxStickyDepth(int value) {
     _maxStickyDepth = value;
@@ -56,21 +68,12 @@ class StickyHeaderComputer<TKey, TData> {
   // PER-FRAME LAYOUT STATE
   // ────────────────────────────────────────────────────────────────────────
 
-  /// Frame counter for throttling sticky recomputation during animation.
-  int _throttleCounter = 0;
-
-  /// Scroll offset observed on the last frame that computed sticky
-  /// headers. Used to force a recompute when the user scrolls during an
-  /// animation, so sticky [pinnedY] values don't lag behind the actual
-  /// scroll position. NaN means "never computed."
-  double _lastStickyScrollOffset = double.nan;
-
   /// Whether sticky subtree precomputation needs to re-run. Set on
   /// structure change, extent change, or animation-to-idle transition;
   /// cleared by [precomputeStableSubtreeBottoms].
   bool dirty = true;
 
-  /// Computed sticky headers for the current layout, ordered root→leaf.
+  /// Computed sticky headers for the current layout, ordered root to leaf.
   final List<StickyHeaderInfo<TKey>> _stickyHeaders = [];
 
   /// Sticky header info indexed by nid. Null when the node is not
@@ -80,9 +83,9 @@ class StickyHeaderComputer<TKey, TData> {
 
   /// Nids written into [_stickyByNid] this frame. Tracked separately from
   /// [_stickyHeaders] so the next frame's clear loop can null its slots
-  /// without going through `nidOf(sticky.nodeId)` — a freed key would
-  /// resolve to `noNid` and the slot would survive into the next frame,
-  /// leaking stickiness onto whichever fresh key recycles that nid.
+  /// without going through `nidOf(sticky.nodeId)`: a freed key resolves to
+  /// `noNid`, so its slot would survive into the next frame and leak
+  /// stickiness onto whichever fresh key recycles that nid.
   ///
   /// Backed by an [Int32List] with explicit length tracking
   /// ([_writtenStickyNidsLen]) so per-frame appends don't box ints.
@@ -94,19 +97,36 @@ class StickyHeaderComputer<TKey, TData> {
   // PRECOMPUTE SCRATCH (rebuilt each layout, reused across frames)
   // ────────────────────────────────────────────────────────────────────────
 
+  /// Depth per visible index, filled by pass A.
   Int32List _depthScratch = Int32List(0);
+
+  /// Prefix sums of stable extents, one entry longer than the visible
+  /// count so any descendant range totals in one subtraction. Pass A.
   Float64List _stablePrefix = Float64List(0);
+
+  /// Last visible index belonging to each node's subtree, resolved by
+  /// pass B's monotonic depth stack.
   Int32List _subtreeEndIndex = Int32List(0);
+
+  /// What pass C leaves behind: each node's subtree bottom, which the
+  /// candidate probe reads instead of walking descendants itself.
   Float64List _subtreeBottomByIndex = Float64List(0);
+
+  /// Pass B's working stack of visible indices, with an explicit length
+  /// counter so pushes and pops never allocate.
   Int32List _indexStack = Int32List(0);
   int _indexStackLen = 0;
+
+  /// Visible-node count the precompute last ran over. A candidate index at
+  /// or beyond it has no precomputed bottom, which is exactly what
+  /// [invalidatePrecompute] exploits by zeroing this.
   int _lastPrecomputedCount = 0;
 
   // ────────────────────────────────────────────────────────────────────────
   // PUBLIC READ API (consumed by paint, hit-test, transform, semantics)
   // ────────────────────────────────────────────────────────────────────────
 
-  /// All sticky headers in root→leaf order. The render object iterates
+  /// All sticky headers in root-to-leaf order. The render object iterates
   /// this from index 0 (shallowest, painted last so it lands on top).
   List<StickyHeaderInfo<TKey>> get headers => _stickyHeaders;
 
@@ -132,9 +152,7 @@ class StickyHeaderComputer<TKey, TData> {
     _stickyHeaders.clear();
     _writtenStickyNidsLen = 0;
     dirty = true;
-    _lastStickyScrollOffset = double.nan;
     _lastPrecomputedCount = 0;
-    _throttleCounter = 0;
   }
 
   /// Grows the nid-indexed sticky array to match the controller's current
@@ -187,60 +205,6 @@ class StickyHeaderComputer<TKey, TData> {
       _stablePrefix = Float64List(capacity + 1);
       _subtreeEndIndex = Int32List(capacity);
       _subtreeBottomByIndex = Float64List(capacity);
-    }
-  }
-
-  // ────────────────────────────────────────────────────────────────────────
-  // THROTTLING DECISION
-  // ────────────────────────────────────────────────────────────────────────
-
-  /// Returns true when sticky should be recomputed this frame. The
-  /// throttle keeps mid-animation frames cheap (every third frame) but
-  /// fires on every scroll, since stale `pinnedY` values produce visible
-  /// jitter and wrong hit-test coordinates.
-  bool shouldRecomputeThisFrame({
-    required bool hasActiveAnimations,
-    required double scrollOffset,
-  }) {
-    final scrolledSinceLast = _lastStickyScrollOffset != scrollOffset;
-    if (hasActiveAnimations && _maxStickyDepth > 0) {
-      _throttleCounter++;
-      return scrolledSinceLast || (_throttleCounter % 3) == 0;
-    }
-    _throttleCounter = 0;
-    return true;
-  }
-
-  /// During a throttle-skip frame, drop sticky entries whose node just
-  /// entered exiting state. Without this, a stale pinned row would keep
-  /// painting / inflating paintExtent for another 1–2 frames until the
-  /// next non-throttled recompute.
-  void purgeExitingDuringThrottle() {
-    if (_stickyHeaders.isEmpty) return;
-    // Track removals so [_writtenStickyNids] stays in sync with
-    // [_stickyByNid] for the next recompute's clear loop.
-    final purgedNids = <int>{};
-    _stickyHeaders.removeWhere((s) {
-      if (_controller.isExiting(s.nodeId)) {
-        final nid = _controller.nidOf(s.nodeId);
-        if (nid >= 0 && nid < _stickyByNid.length) {
-          _stickyByNid[nid] = null;
-          purgedNids.add(nid);
-        }
-        return true;
-      }
-      return false;
-    });
-    if (purgedNids.isNotEmpty) {
-      // In-place compaction over the typed-data scratch buffer.
-      int writeIdx = 0;
-      for (int readIdx = 0; readIdx < _writtenStickyNidsLen; readIdx++) {
-        final nid = _writtenStickyNids[readIdx];
-        if (!purgedNids.contains(nid)) {
-          _writtenStickyNids[writeIdx++] = nid;
-        }
-      }
-      _writtenStickyNidsLen = writeIdx;
     }
   }
 
@@ -347,8 +311,8 @@ class StickyHeaderComputer<TKey, TData> {
   /// each valid level. Stops when the chain breaks (animation, no
   /// children, etc.) or [onCandidate] returns false.
   ///
-  /// Shared probe logic for both [identifyPotentialStickyNodes] and
-  /// [computeStickyHeaders]. [nodeExtentsByNid] is only consulted by the
+  /// Shared probe logic, driven by [computeStickyHeaders].
+  /// [nodeExtentsByNid] is only consulted by the
   /// per-candidate fallback subtree-bottom scan; it is read every call so
   /// the fallback can avoid stashing it on a nullable field.
   void _forEachStickyCandidate({
@@ -365,6 +329,7 @@ class StickyHeaderComputer<TKey, TData> {
       double stackTop,
     )
     onCandidate,
+    double Function(int visibleIndex)? freshOffsetAt,
   }) {
     if (_maxStickyDepth <= 0 || visibleNodes.isEmpty) return;
 
@@ -384,26 +349,96 @@ class StickyHeaderComputer<TKey, TData> {
           _controller.getParent(candidateId) != parentStickyId) {
         break;
       }
-      if (_controller.isAnimating(candidateId)) break;
+      // Animation membership is deliberately NOT a disqualifier. It says how
+      // a row got where it is, not whether its subtree covers the band, and
+      // the two are independent: an exiting root still owns the band until
+      // its collapsing subtree stops reaching it, and an entering root owns
+      // the band the moment it does. The geometric gates below decide both
+      // cases on their own: `naturalY > stackTop` withholds a header that
+      // has not reached the band, and `pinnedY + extent <= stackTop` retires
+      // one whose subtree no longer supports it.
+      //
+      // Do NOT re-add an `isAnimating(candidateId)` check here. A break
+      // aborts the whole DEPTH loop, so one animating root blanks the
+      // entire sticky band for the length of its animation, which is what
+      // a sync diff adding or removing a depth-0 root produces. Guarded by
+      // `sticky_root_diff_repro_test.dart`.
       if (!_controller.hasChildren(candidateId)) break;
 
-      // Candidate must be in the current visible list — otherwise its
-      // offset slot holds stale data from a prior layout pass (or zero).
+      // Candidate must be in the current visible list: otherwise its
+      // offset slot holds stale data from a prior layout pass, or zero.
       final candidateIndex = _controller.getVisibleIndex(candidateId);
       if (candidateIndex < 0) break;
-      final naturalOffset = nodeOffsetsByNid[_controller.nidOf(candidateId)];
+      // Under the bulk-only fast path the per-nid slot is refreshed only
+      // for cache-region nids, and the pinned candidate's header row sits
+      // ABOVE the viewport, outside the cache region, exactly when it
+      // matters. Read through [freshOffsetAt] (the render layer's
+      // bulk-cumulative accessor, the same source `findFirstVisibleIndex`
+      // above resolves the candidate with) so selection and geometry
+      // agree. See `sticky_bulk_stale_offset_test.dart`.
+      final naturalOffset = freshOffsetAt != null
+          ? freshOffsetAt(candidateIndex)
+          : nodeOffsetsByNid[_controller.nidOf(candidateId)];
 
       final naturalY = naturalOffset - scrollOffset;
       if (naturalY > stackTop) break;
 
-      final extent = _controller.getEstimatedExtent(candidateId);
-      final subtreeBottom = (candidateIndex < _lastPrecomputedCount)
+      // A header pinned while ENTERING occupies only as much of the band as
+      // its own row currently does. Painting it at the settled height makes
+      // it snap to full size the frame it becomes sticky, while every
+      // non-pinned row around it grows in normally; at depth > 0 it also
+      // floats over the content still growing beneath it.
+      //
+      // Exiting is deliberately NOT symmetric. An exiting header is already
+      // at full height when its animation starts, so holding it there has no
+      // discontinuity, whereas shrinking it trips the retirement gate below
+      // early and makes it vanish mid-height instead of sliding off by
+      // push-up. The same asymmetry is already deliberate in the
+      // subtree-bottom computation (see the `entering` arms above).
+      //
+      // `getCurrentExtent`, not `nodeExtentsByNid[nid]`: that array is
+      // refreshed only for cache-region nids, so on the first probe of a
+      // frame it is stale for exactly the candidate that matters, the
+      // off-cache one the force-create path exists to serve. A stale zero
+      // there would trip the gate, the candidate would never be
+      // force-created, and the header would never pin.
+      double extent = _controller.getEstimatedExtent(candidateId);
+      bool candidateEntering = false;
+      if (_controller.hasActiveAnimations) {
+        final animation = _controller.getAnimationState(candidateId);
+        if (animation != null && animation.type == AnimationType.entering) {
+          candidateEntering = true;
+          extent = _controller.getCurrentExtent(candidateId);
+        }
+      }
+      // An ENTERING candidate's subtree bottom is its REAL animated bottom,
+      // not the stable one. The candidate is selected by the real offsets
+      // (`findFirstVisibleIndex` above), so it takes the band over only when
+      // its real bottom crosses the probe line; computing `pushUpY` from the
+      // stable bottom (entering descendants at full extent) at that moment
+      // yields a large positive value and clamps `pinnedY` to `stackTop`: the
+      // header pops in flush at the band top mid-animation instead of
+      // sliding down into it. The real bottom is a cumulative sum over the
+      // same extents the offsets are built from, so `pinnedY + extent` lands
+      // exactly on the natural top of the first row after the subtree: the
+      // entrance replicates the settled scroll-handover geometry. The stable
+      // bottom stays for non-entering candidates, where it prevents a pinned
+      // settled header from bouncing while its descendants enter. The
+      // precompute is bypassed when entering because it bakes the same
+      // stable assumption (see `precomputeStableSubtreeBottoms`).
+      // See `sticky_entering_root_handover_test.dart`.
+      final subtreeBottom =
+          (freshOffsetAt == null &&
+              !candidateEntering &&
+              candidateIndex < _lastPrecomputedCount)
           ? _subtreeBottomByIndex[candidateIndex]
           : _computeSubtreeBottomFallback(
               candidateId,
               visibleNodes,
               nodeOffsetsByNid,
               nodeExtentsByNid,
+              candidateEntering: candidateEntering,
+              freshOffsetAt: freshOffsetAt,
             );
       final pushUpY = (subtreeBottom - scrollOffset) - extent;
       final pinnedY = math.min(stackTop, pushUpY);
@@ -421,19 +456,50 @@ class StickyHeaderComputer<TKey, TData> {
   /// is invalidated (e.g. during animation). Walks descendants from the
   /// candidate's index forward, accumulating stable extents (full for
   /// entering nodes to prevent ancestor bounce). Reads per-nid extents
-  /// directly from [nodeExtentsByNid] — same direct typed-array access
-  /// pattern the original render-object implementation used.
+  /// directly from [nodeExtentsByNid], with no per-key hashing on a path
+  /// that runs once per candidate per frame while animations are active.
+  ///
+  /// [candidateEntering] switches every descendant to its REAL animated
+  /// extent, entering included. When the candidate itself is entering, its
+  /// bottom must track the real animation so the header enters the band by
+  /// push-down (see the caller); the stable substitution exists to keep an
+  /// already-pinned SETTLED header from bouncing, which cannot apply to a
+  /// candidate that is itself mid-enter.
+  ///
+  /// [freshOffsetAt] is non-null under the bulk-only fast path, where the
+  /// per-nid arrays are stale for off-cache nids and the position-indexed
+  /// bulk cumulatives are the live authority.
   double _computeSubtreeBottomFallback(
     TKey nodeId,
     List<TKey> visibleNodes,
     Float64List nodeOffsetsByNid,
-    Float64List nodeExtentsByNid,
-  ) {
+    Float64List nodeExtentsByNid, {
+    bool candidateEntering = false,
+    double Function(int visibleIndex)? freshOffsetAt,
+  }) {
     final index = _controller.getVisibleIndex(nodeId);
     if (index < 0) return 0.0;
     final nodeDepth = _controller.getDepth(nodeId);
 
     final orderNids = _controller.orderNidsView;
+
+    if (freshOffsetAt != null) {
+      // Bulk fast path. Row extents derive from consecutive cumulative
+      // offsets, so the subtree bottom is simply the offset one past its
+      // last visible row (extents are non-negative, the cumulative is
+      // monotone). No entering-state substitution applies here: under the
+      // bulk-only fast path no row carries an entering [AnimationState]
+      // (bulk members report null), and bulk member extents must track
+      // the live bulk value exactly as the fresh in-cache slots always
+      // did in the array-reading arm below.
+      int end = index + 1;
+      while (end < visibleNodes.length &&
+          _controller.depthOfNid(orderNids[end]) > nodeDepth) {
+        end++;
+      }
+      return freshOffsetAt(end);
+    }
+
     final nid = orderNids[index];
     double stableOffset = nodeOffsetsByNid[nid];
     stableOffset += nodeExtentsByNid[nid];
@@ -443,13 +509,17 @@ class StickyHeaderComputer<TKey, TData> {
       final childNid = orderNids[i];
       if (_controller.depthOfNid(childNid) <= nodeDepth) break;
 
-      final childId = visibleNodes[i];
-      final animation = _controller.getAnimationState(childId);
       final double childExtent;
-      if (animation != null && animation.type == AnimationType.entering) {
-        childExtent = _controller.getEstimatedExtentNid(childNid);
-      } else {
+      if (candidateEntering) {
         childExtent = nodeExtentsByNid[childNid];
+      } else {
+        final childId = visibleNodes[i];
+        final animation = _controller.getAnimationState(childId);
+        if (animation != null && animation.type == AnimationType.entering) {
+          childExtent = _controller.getEstimatedExtentNid(childNid);
+        } else {
+          childExtent = nodeExtentsByNid[childNid];
+        }
       }
       final childEnd = stableOffset + childExtent;
       if (childEnd > bottom) bottom = childEnd;
@@ -458,49 +528,35 @@ class StickyHeaderComputer<TKey, TData> {
     return bottom;
   }
 
-  /// Lightweight pre-pass that identifies nodes which might need to be
-  /// sticky. Used before Pass 2 to force-create their render objects.
-  Set<TKey> identifyPotentialStickyNodes({
+  /// Computes the sticky set for this layout, populating [headers] and the
+  /// per-nid lookup, and returns the candidate keys so the caller can
+  /// force-create any that are outside the cache region.
+  ///
+  /// ONE probe per call, and the caller repeats it ONLY when it actually
+  /// force-created a row: that is the sole way the inputs, meaning measured
+  /// extents and the offsets derived from them, can change between two
+  /// probes within one layout. In the common case the sticky candidate is
+  /// already inside the cache region and mounted, nothing is force-created,
+  /// and a second walk would be identical work over identical inputs. See
+  /// `RenderSliverTree.performLayout`.
+  /// [freshOffsetAt] must be supplied whenever the caller's per-nid arrays
+  /// are NOT the live offset authority (the render layer's bulk-only fast
+  /// path, where off-cache slots go stale while bulk cumulatives move
+  /// every frame); the probe then reads candidate offsets and subtree
+  /// bottoms through it instead of the arrays.
+  Set<TKey> computeStickyHeaders({
     required double scrollOffset,
     required double overlap,
     required List<TKey> visibleNodes,
     required Float64List nodeOffsetsByNid,
     required Float64List nodeExtentsByNid,
     required FindFirstVisibleIndex findFirstVisibleIndex,
-  }) {
-    final result = <TKey>{};
-    _forEachStickyCandidate(
-      scrollOffset: scrollOffset,
-      overlap: overlap,
-      visibleNodes: visibleNodes,
-      nodeOffsetsByNid: nodeOffsetsByNid,
-      nodeExtentsByNid: nodeExtentsByNid,
-      findFirstVisibleIndex: findFirstVisibleIndex,
-      onCandidate: (candidateId, pinnedY, extent, stackTop) {
-        result.add(candidateId);
-        return true;
-      },
-    );
-    return result;
-  }
-
-  /// Computes sticky headers based on scroll position, populating
-  /// [headers] and the per-nid lookup. Called after Pass 2 when actual
-  /// extents and offsets are available. [overlap] is `constraints.overlap`
-  /// — the number of pixels at the top covered by a preceding pinned
-  /// sliver (e.g. PinnedHeaderSliver).
-  void computeStickyHeaders({
-    required double scrollOffset,
-    required double overlap,
-    required List<TKey> visibleNodes,
-    required Float64List nodeOffsetsByNid,
-    required Float64List nodeExtentsByNid,
-    required FindFirstVisibleIndex findFirstVisibleIndex,
+    double Function(int visibleIndex)? freshOffsetAt,
   }) {
     // Null out prior-layout sticky entries before recomputing. Iterate
     // [_writtenStickyNids] (the nids we wrote LAST frame) instead of
-    // resolving keys back to nids — a key that was freed since last
-    // layout (immediate-purge removal) would yield `noNid`, leaving the
+    // resolving keys back to nids: a key freed since the last layout by an
+    // immediate-purge removal yields `noNid`, which would leave the
     // stale entry to leak stickiness onto whichever fresh key recycles
     // the nid. The nid handle is stable until reallocation, so clearing
     // through it is correct even when the original occupant is gone.
@@ -513,6 +569,9 @@ class StickyHeaderComputer<TKey, TData> {
     _writtenStickyNidsLen = 0;
     _stickyHeaders.clear();
 
+    // Allocated only when the tree actually has sticky headers; the probe
+    // returns immediately for `maxStickyDepth == 0`.
+    final candidates = <TKey>{};
     double? parentPinnedY;
     _forEachStickyCandidate(
       scrollOffset: scrollOffset,
@@ -521,6 +580,7 @@ class StickyHeaderComputer<TKey, TData> {
       nodeOffsetsByNid: nodeOffsetsByNid,
       nodeExtentsByNid: nodeExtentsByNid,
       findFirstVisibleIndex: findFirstVisibleIndex,
+      freshOffsetAt: freshOffsetAt,
       onCandidate: (candidateId, pinnedY, extent, stackTop) {
         // Deeper headers can slide behind parent, but must never go above
         // parent TOP.
@@ -547,9 +607,10 @@ class StickyHeaderComputer<TKey, TData> {
         _writtenStickyNids[_writtenStickyNidsLen++] = nid;
 
         parentPinnedY = pinnedY;
+        candidates.add(candidateId);
         return true;
       },
     );
-    _lastStickyScrollOffset = scrollOffset;
+    return candidates;
   }
 }

@@ -1,18 +1,19 @@
-/// Internal: per-drag session infrastructure for `TreeReorderController` —
-/// [SessionExit], [PointerSample]/[PointerSpace], [DragProbe], and
+/// Internal: per-drag session infrastructure for `TreeReorderController`:
+/// [SessionExit], [PointerSample] and [PointerSpace], [DragProbe], and
 /// [DragSession] itself. The behavior collaborators the session fans out
 /// to live in `_drag_session_behaviors.dart`.
 ///
 /// [PointerSpace] is the ONLY component that touches the scrollable:
 /// every coordinate conversion and every liveness question goes through
-/// it, and its reads are NULLABLE — a `null` sample means the scrollable
-/// `State` is unmounted (even `.context` asserts once unmounted), which
-/// forces every consumer to handle the defunct case at the type level.
+/// it, and its reads are NULLABLE. A null sample means the scrollable's
+/// `State` is unmounted, at which point even reading `.context` throws,
+/// so the nullability forces every consumer to handle the defunct case at
+/// the type level.
 ///
-/// Class names are public in this underscore-prefixed file because Dart
-/// makes underscore-prefixed CLASS names library-private, which would put
-/// them out of reach of the headless unit tests; internality is enforced
-/// by barrel non-export instead, as with `DropZoneResolver` and
+/// Class names are public despite the underscore-prefixed file: Dart
+/// makes an underscore-prefixed CLASS name library-private, which would
+/// hide it from the headless unit tests. Internality comes from barrel
+/// non-export instead, as with `DropZoneResolver` and
 /// `ReorderPreviewEngine`.
 library;
 
@@ -30,14 +31,14 @@ import 'reorder_render_port.dart';
 /// mutation).
 enum SessionExit { commit, cancel, dispose }
 
-/// One pointer conversion — everything the drag pipeline derives from a
+/// One pointer conversion: everything the drag pipeline derives from a
 /// pointer position, computed from a SINGLE viewport lookup per event.
 ///
-/// - [sliverY]: sliver-local y — the space
+/// - [sliverY]: sliver-local y, the space
 ///   [ReorderRenderPort.findRowAtPaintedY] consumes (first tree row at
 ///   0). Differs from viewport scroll space by the tree sliver's
 ///   `precedingScrollExtent`.
-/// - [sliverX]: viewport-local x — identical to sliver-local x for a
+/// - [sliverX]: viewport-local x, identical to sliver-local x for a
 ///   vertical-axis tree. Consumed by the depth hint.
 /// - [viewportDy] / [viewportHeight]: viewport-local vertical position
 ///   and extent, consumed by autoscroll edge-zone evaluation.
@@ -97,7 +98,7 @@ class PointerSpace<TKey> {
 }
 
 /// The session's resolution core: the ONE owner of grab geometry and the
-/// ONE site that turns a [PointerSample] into a [TreeDropTarget] — both
+/// ONE site that turns a [PointerSample] into a [TreeDropTarget]. Both
 /// the per-event pipeline ([DragSession.resolve]) and `endDrag`'s commit
 /// re-resolution go through [resolveTarget], so the committed slot is
 /// always the slot the feedback showed.
@@ -116,8 +117,9 @@ class DragProbe<TKey> {
   final DropZoneResolver<TKey> _resolver;
   final TKey _draggedKey;
 
-  /// Optional x → depth hint mapper. `null` disables x-aware depth
-  /// selection: the resolver then always picks the deepest legal level.
+  /// Optional mapper from pointer x to a preferred depth. Null disables
+  /// x-aware depth selection: the resolver then always picks the deepest
+  /// legal level.
   final int Function(double sliverLocalX)? _depthForPointerX;
 
   /// Drag-proxy grab geometry, captured once by [captureGrab]: the
@@ -131,44 +133,37 @@ class DragProbe<TKey> {
   double _grabRowExtent = 0.0;
 
   /// Touch-first probe offset: shifts slot resolution from the raw
-  /// pointer to the PROXY MIDPOINT (`grabRowExtent / 2 − grabDy`). On
-  /// touch there is no visible cursor — the card in hand is the only
-  /// thing the user can steer by, so selection must track it. Non-zero
+  /// pointer to the PROXY MIDPOINT, `grabRowExtent / 2 - grabDy`. On
+  /// touch there is no visible cursor, so the card in hand is the only
+  /// thing the user can steer by and selection has to track it. Non-zero
   /// only when the caller enables the midpoint probe (make-room plus
-  /// release-settle, i.e. the anchor IS the visible floating card) AND
-  /// the grab capture succeeded. It is a session constant, so the whole
-  /// resolution pipeline is simply probed at `pointer + probeDy`.
+  /// release-settle, where the anchor IS the visible floating card) and
+  /// the grab capture succeeded. A session constant, so the whole
+  /// resolution pipeline simply probes at `pointer + probeDy`.
   ///
-  /// Derived invariant: at drag start the probe is always the dragged
-  /// row's OWN midpoint (grab position cancels out), so every probed
-  /// session begins at the current-position target.
+  /// Derived invariant: at drag start the probe is the dragged row's OWN
+  /// midpoint, because the grab position cancels out, so every probed
+  /// session begins on the current-position target.
   double get probeDy => _probeDy;
   double _probeDy = 0.0;
 
   /// Captures grab geometry once at session start against the start
   /// sample.
   ///
-  /// Asks the render port where the DRAGGED KEY is painted, rather than
-  /// what row happens to sit at the pointer. Those differ at a sticky
-  /// header: a pinned header paints at its pinned band while its
-  /// structural offset has scrolled away above, so
-  /// [ReorderRenderPort.findRowAtPaintedY] answers with whatever content
-  /// is scrolled UNDERNEATH the pinned strip.
+  /// Asks the render port where the DRAGGED KEY is painted rather than
+  /// what row sits under the pointer. The two differ at a sticky header:
+  /// a pinned header paints in its pinned band while its structural
+  /// offset has scrolled away above, so
+  /// [ReorderRenderPort.findRowAtPaintedY] would answer with whatever
+  /// content is scrolled UNDERNEATH the pinned strip, and the capture
+  /// would take that foreign row's offset and extent.
   ///
-  /// The old positional form asked that question and then checked whether
-  /// the answer was the key it already knew, which is a roundabout way of
-  /// asking where a known key is. On a pinned header the check failed and
-  /// capture fell back to a top anchor carrying the foreign row's extent:
-  /// the proxy jumped to the pointer, rendered at the wrong height, and
-  /// the midpoint probe silently switched off, so the card on screen and
-  /// the gap in the list disagreed. Nothing threw.
-  ///
-  /// Because the key is now addressed directly, there is no "wrong row"
-  /// category left, so a located row is always trustworthy geometry and
-  /// [midpointProbe] applies whenever it is requested. The one remaining
-  /// failure is an unlocatable (unmounted) row, which zeroes the record:
-  /// there is no trustworthy extent to report either, and a zero extent
-  /// is already the drag proxy's "size to your content" signal.
+  /// Addressing the key directly leaves no "wrong row" case, so a located
+  /// row is always trustworthy geometry and [midpointProbe] applies
+  /// whenever it is requested. The one failure left is an unlocatable
+  /// (unmounted) row, which zeroes the record: there is no trustworthy
+  /// extent to report either, and a zero extent is already the drag
+  /// proxy's "size to your content" signal.
   void captureGrab({
     required PointerSample start,
     required bool midpointProbe,
@@ -194,8 +189,8 @@ class DragProbe<TKey> {
   /// One probe for the whole resolution: row lookup, zone classification
   /// and dwell all read `sample.sliverY + probeDy` (the proxy midpoint
   /// when the midpoint probe is on, the raw pointer otherwise). The
-  /// x-depth hint stays pointer-x — horizontal is unaffected by the
-  /// vertical shift.
+  /// x-depth hint stays on pointer x, which the vertical shift does not
+  /// affect.
   ///
   /// A `null` [sample] means the scrollable is gone: returns [previous]
   /// unchanged (no event can change what the user sees anyway; teardown
@@ -228,9 +223,9 @@ class DragProbe<TKey> {
 /// Per-drag state held only while a drag is active. It owns the two
 /// consolidation sites: [resolve] (the ONE choreography site) and
 /// [detachAll] (the ONE teardown site, dispatched on [SessionExit]).
-/// Behaviors are reached by direct calls — no interface, no registration
-/// list. Notification channels stay with the controller: this class never
-/// notifies listeners.
+/// Behaviors are reached by direct calls, with no interface and no
+/// registration list. Notification channels stay with the controller:
+/// this class never notifies listeners.
 class DragSession<TKey> {
   DragSession({
     required this.draggedKey,
@@ -242,7 +237,7 @@ class DragSession<TKey> {
   });
 
   /// Commit-slide timing, resolved from the tree controller's
-  /// `animationStyle.reorderSlide` ONCE at session start — a mid-drag
+  /// `animationStyle.reorderSlide` ONCE at session start, so a mid-drag
   /// restyle never retimes a live session; the next drag picks it up.
   /// Consumed by the commit script's baseline staging.
   final TreeAnimationSpec commitSlideSpec;
@@ -260,10 +255,10 @@ class DragSession<TKey> {
   final DragProbe<TKey> probe;
 
   /// Behavior collaborators, assigned by `startDrag` right after
-  /// construction (they need the session's identity for their
-  /// callbacks). [makeRoomDriver] / [settler] are null when the session
-  /// runs without make-room / without a proxy — absence IS the mode
-  /// flag.
+  /// construction, because they need the session's identity for their
+  /// callbacks. [makeRoomDriver] is null when the session runs without
+  /// make-room, [settler] when it runs without a proxy: absence IS the
+  /// mode flag.
   late final AutoScroller<TKey> autoScroller;
   late final DwellExpander<TKey> dwell;
   MakeRoomDriver<TKey>? makeRoomDriver;
@@ -280,12 +275,16 @@ class DragSession<TKey> {
   ScrollPosition? _subscribedPosition;
   VoidCallback? _scrollListener;
 
+  /// The slot the last resolution landed on, and the slot a commit uses.
+  /// Null when no row sits under the probe, but deliberately HELD when
+  /// the scrollable is gone, since [DragProbe.resolveTarget] returns the
+  /// previous target rather than dropping it.
   TreeDropTarget<TKey>? currentTarget;
 
   /// Subscribes [listener] to [position] for the session's lifetime:
   /// wheel/trackpad/second-finger scrolls move content under a
   /// stationary pointer, and the autoscroll ticker's own `jumpTo`
-  /// notifies the same listener — one re-resolution path for every
+  /// notifies this same listener, giving one re-resolution path for every
   /// scroll source. [detachAll] unsubscribes.
   void subscribeScroll(ScrollPosition position, VoidCallback listener) {
     _subscribedPosition = position;
@@ -295,9 +294,9 @@ class DragSession<TKey> {
 
   /// THE choreography site: one [PointerSpace.sample] per event (the
   /// single viewport lookup), the probe's resolution core, then every
-  /// behavior in a fixed order. Joining the pipeline is one edit here.
-  /// Re-entrant from a behavior's ASYNC callback only (the dwell fire) —
-  /// never synchronously from within this sequence.
+  /// behavior in a fixed order. A new behavior joins the pipeline by one
+  /// edit here. Re-entrant only from a behavior's ASYNC callback, meaning
+  /// the dwell fire, never synchronously from inside this sequence.
   void resolve() {
     final sample = pointerSpace.sample(pointerGlobal);
     currentTarget = probe.resolveTarget(
@@ -309,11 +308,11 @@ class DragSession<TKey> {
     autoScroller.evaluate(sample);
   }
 
-  /// Target-only re-resolution for the commit script: the same probe
-  /// core as [resolve] — so the committed slot is always the slot the
-  /// feedback showed — WITHOUT the behavior fan-out. Syncing the
-  /// behaviors at commit time could re-target the make-room gap between
-  /// the FLIP baseline capture and its snap, corrupting the slide.
+  /// Target-only re-resolution for the commit script: the same probe core
+  /// as [resolve], so the committed slot is always the slot the feedback
+  /// showed, but WITHOUT the behavior fan-out. Syncing the behaviors at
+  /// commit time could re-target the make-room gap between the FLIP
+  /// baseline capture and its snap, corrupting the slide.
   void resolveTargetOnly() {
     currentTarget = probe.resolveTarget(
       sample: pointerSpace.sample(pointerGlobal),
@@ -322,10 +321,13 @@ class DragSession<TKey> {
   }
 
   /// THE teardown site: every behavior's release, dispatched on [exit],
-  /// then the session-common resources. Joining teardown = one edit
-  /// here. The commit's make-room SNAP is deliberately absent — it must
-  /// precede the mutation, so the commit script owns it; the pointer
-  /// channel is controller-owned and nulled by the caller.
+  /// then the session-common resources, being the scroll subscription and
+  /// the dragged row's eviction pin. A new behavior joins teardown by one
+  /// edit here.
+  ///
+  /// The commit's make-room SNAP is deliberately absent: it must precede
+  /// the mutation, so the commit script owns it. The pointer channel is
+  /// controller-owned and nulled by the caller.
   void detachAll(SessionExit exit) {
     autoScroller.detach(exit);
     final listener = _scrollListener;

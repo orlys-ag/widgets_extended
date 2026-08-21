@@ -244,7 +244,7 @@ void main() {
         find.text("a1"),
         findsOneWidget,
         reason:
-            "preserveExpansion restored the node, and a restored state "
+            "expansion memory restored the node, and a restored state "
             "must win over the initial policy",
       );
     },

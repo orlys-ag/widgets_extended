@@ -7,9 +7,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/animation.dart' show AnimationController, Curve, Curves;
 import 'package:flutter/rendering.dart' show ParentData;
 
-// ════════════════════════════════════════════════════════════════════════════
 // ANIMATION TYPES
-// ════════════════════════════════════════════════════════════════════════════
 
 /// The type of animation a node is currently undergoing.
 enum AnimationType {
@@ -24,11 +22,11 @@ enum AnimationType {
   sliding,
 }
 
-/// How [TreeController.animateScrollToKey] handles ancestors of the target
+/// How `TreeController.animateScrollToKey` handles ancestors of the target
 /// key that are currently collapsed.
 enum AncestorExpansionMode {
   /// Do not expand any ancestors. If any ancestor of the target is
-  /// collapsed, [TreeController.animateScrollToKey] returns false without
+  /// collapsed, `TreeController.animateScrollToKey` returns false without
   /// scrolling.
   none,
 
@@ -46,10 +44,11 @@ enum AncestorExpansionMode {
 
 /// Animation state for a single node (standalone animations only).
 ///
-/// Only nodes that are actively animating via individual expand/collapse have
-/// an [AnimationState]. Bulk operations (expandAll/collapseAll) track nodes
-/// directly in [AnimationGroup] sets without creating AnimationState objects.
-/// Once animation completes, the state is removed.
+/// Only nodes animating individually through `StandaloneAnimator`, an
+/// enter or an exit, carry a stored [AnimationState]. Expand/collapse
+/// groups track per-node extents in [NodeGroupExtent], and bulk operations
+/// (expandAll/collapseAll) track keys directly in [AnimationGroup] sets.
+/// The stored state is dropped once the animation completes.
 class AnimationState {
   AnimationState({
     required this.type,
@@ -111,7 +110,7 @@ class AnimationState {
 /// [startDelta] = old scroll-space offset - new scroll-space offset (the
 /// distance the node appears to travel). [currentDelta] = lerp(startDelta,
 /// 0, curve(progress)); when progress reaches 1, currentDelta is snapped
-/// to exactly 0.0 (see [TreeController]'s slide tick handler).
+/// to exactly 0.0 by the slide engine's tick handler.
 class SlideAnimation<TKey> {
   SlideAnimation({
     required this.startDelta,
@@ -126,8 +125,8 @@ class SlideAnimation<TKey> {
   /// t=0; negative means below.
   double startDelta;
 
-  /// Animation progress from 0.0 to 1.0. Driven by a shared slide
-  /// [AnimationController] in [TreeController].
+  /// Animation progress from 0.0 to 1.0. Advanced per slide by the slide
+  /// engine's ticker, not by a shared controller: see [slideStartElapsed].
   double progress;
 
   /// The curve applied to the progress when computing [currentDelta].
@@ -139,7 +138,7 @@ class SlideAnimation<TKey> {
 
   /// X-axis (cross-axis indent) start delta. Computed as
   /// `oldIndent - newIndent`. Zero when the slide has no horizontal
-  /// component (the reorder-only case — same parent, same depth).
+  /// component (the reorder-only case: same parent, same depth).
   double startDeltaX;
 
   /// Interpolated current X delta, applied at paint time as a horizontal
@@ -147,7 +146,7 @@ class SlideAnimation<TKey> {
   /// [currentDelta].
   double currentDeltaX;
 
-  /// Wall-clock-equivalent ([Ticker.elapsed]) value at this slide's
+  /// Wall-clock-equivalent (`Ticker.elapsed`) value at this slide's
   /// progress=0 establishment (initial install, composition reset, or
   /// re-baseline). Per-slide progress in `_onSlideTick` is computed as
   /// `(ticker.elapsed - slideStartElapsed) / slideDuration` so each slide
@@ -162,7 +161,7 @@ class SlideAnimation<TKey> {
   /// When true, the engine's un-touched re-baseline branch in
   /// `animateFromOffsets` skips this slide. Set by the render layer for
   /// active edge-ghost and exit-phantom slides via
-  /// [TreeController.markSlidePreserveProgress] so concurrent batches
+  /// `TreeController.markSlidePreserveProgress` so concurrent batches
   /// (e.g. autoscroll commits) don't restart the ghost's progress clock.
   /// Cleared implicitly when the slide entry is replaced (composition
   /// creates a fresh entry with default false) or destroyed.
@@ -173,8 +172,8 @@ class SlideAnimation<TKey> {
   /// The engine's completion cleanup compares stamps instead of relying
   /// on object identity alone: composition mutates the entry IN PLACE, so
   /// identity cannot distinguish "the entry that just completed" from
-  /// "the same object, freshly retargeted by an `_onTick` listener" —
-  /// identity-only cleanup would silently kill the just-composed slide.
+  /// "the same object, composed onto by a listener during the same tick
+  /// notify". Identity-only cleanup would silently kill the fresh slide.
   int installStamp = 0;
 
   /// Whether this animation has completed.
@@ -199,8 +198,8 @@ class AnimationGroup<TKey> {
   /// Gets the curved animation value.
   double get value => curve.transform(controller.value);
 
-  /// Keys of nodes in this animation group.
-  /// extent = full * value for all members.
+  /// Keys of nodes in this group. Each member's extent is
+  /// `fullExtent * value`.
   final Set<TKey> members = {};
 
   /// Keys that should be removed from visible order when animation
@@ -224,7 +223,7 @@ class AnimationGroup<TKey> {
 /// Convention: [startExtent] corresponds to controller value = 0 (collapsed),
 /// [targetExtent] corresponds to controller value = 1 (expanded).
 /// - Fresh expand: startExtent = 0, targetExtent = full extent
-/// - Nodes joining mid-animation: startExtent = 0, targetExtent = captured extent
+/// - Joining mid-animation: startExtent = 0, targetExtent = captured extent
 class NodeGroupExtent {
   NodeGroupExtent({
     required this.startExtent,
@@ -241,9 +240,8 @@ class NodeGroupExtent {
 
   /// Whether [targetExtent] was set from a captured visual extent
   /// (true) versus a natural full reference (false). When true,
-  /// `setFullExtent` resize updates do NOT overwrite [targetExtent] —
-  /// the captured value is preserved as the maximum the animation
-  /// will reach.
+  /// `setFullExtent` resize updates do NOT overwrite [targetExtent]: the
+  /// captured value is preserved as the maximum the animation will reach.
   bool targetIsCaptured;
 
   /// Computes the interpolated extent for the given curved value.
@@ -261,9 +259,9 @@ class NodeGroupExtent {
 
 /// Animation group for a single expand/collapse operation.
 ///
-/// Each call to [TreeController.expand] or [TreeController.collapse] creates
+/// Each call to `TreeController.expand` or `TreeController.collapse` creates
 /// an [OperationGroup] with its own [AnimationController]. This provides
-/// automatic proportional timing on reversal — collapsing a 60%-done expand
+/// automatic proportional timing on reversal: collapsing a 60%-done expand
 /// takes 60% of the duration, not 100%.
 class OperationGroup<TKey> {
   OperationGroup({
@@ -297,14 +295,13 @@ class OperationGroup<TKey> {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // NODE DATA
-// ════════════════════════════════════════════════════════════════════════════
 
 /// User-provided data for a tree node.
 ///
-/// This is a simple wrapper that holds the node's unique ID and arbitrary data.
-/// The tree controller manages the structural relationships (parent, children, depth).
+/// A simple wrapper holding the node's key and its payload. Structural
+/// relationships (parent, children, depth) live in `TreeController`, not
+/// here.
 class TreeNode<TKey, TData> {
   const TreeNode({required this.key, required this.data});
 
@@ -333,13 +330,11 @@ class TreeNode<TKey, TData> {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // PARENT DATA
-// ════════════════════════════════════════════════════════════════════════════
 
-/// Parent data for children of [RenderSliverTree].
+/// Parent data for children of `RenderSliverTree`.
 ///
-/// Stores layout information computed during [RenderSliverTree.performLayout].
+/// Stores layout information computed during `RenderSliverTree.performLayout`.
 class SliverTreeParentData extends ParentData {
   /// The node ID this child represents.
   Object? nodeId;
@@ -370,8 +365,9 @@ class SliverTreeParentData extends ParentData {
 ///
 /// `isValid` is true exactly when a bulk animation group exists and has
 /// active members. Read [value] / [generation] / [containsMember] only on
-/// a valid snapshot — on an invalid snapshot they hold zero defaults.
+/// a valid snapshot: on an invalid snapshot they hold zero defaults.
 class BulkAnimationData<TKey> {
+  /// Private: snapshots are built through [snapshot] or [inactive].
   const BulkAnimationData._({
     required this.isValid,
     required this.value,
@@ -384,6 +380,8 @@ class BulkAnimationData<TKey> {
        _pendingRemoval = pendingRemoval,
        _bulkMemberByNid = bulkMemberByNid;
 
+  /// Backing instance for [inactive]. Typed `Never` so every field whose
+  /// type mentions the key parameter is provably null.
   static const BulkAnimationData<Never> _inactiveSentinel =
       BulkAnimationData<Never>._(
         isValid: false,
@@ -396,14 +394,15 @@ class BulkAnimationData<TKey> {
       );
 
   /// The "no bulk animation active" snapshot. Returns a const-shared
-  /// sentinel cast to [TKey] — no allocation per call. Safe to cache once
-  /// per controller. Soundness: every field on the sentinel that depends
-  /// on [TKey] is null, so [containsMember] never inspects the cast set.
+  /// `BulkAnimationData<Never>` cast to `BulkAnimationData<TKey>`, so it
+  /// allocates nothing per call and is safe to cache once per controller.
+  /// Soundness: every field on the sentinel that depends on [TKey] is
+  /// null, so [containsMember] never inspects the cast set.
   static BulkAnimationData<TKey> inactive<TKey>() =>
       _inactiveSentinel as BulkAnimationData<TKey>;
 
   /// Constructs a snapshot from the controller's current bulk state.
-  /// Internal use only — call [TreeController.bulkAnimationData]. Holds
+  /// Internal use only: call `TreeController.bulkAnimationData`. Holds
   /// references to the underlying sets; does not copy or union them, so
   /// no per-frame allocation beyond the snapshot record itself.
   static BulkAnimationData<TKey> snapshot<TKey>({
@@ -417,12 +416,9 @@ class BulkAnimationData<TKey> {
       isValid: true,
       value: value,
       generation: generation,
-      // Mirrors AnimationGroup.memberCount semantics — the count of
-      // currently-animating bulk members. NOT a union with pendingRemoval:
-      // collapse paths populate both sets with the SAME keys (a member
-      // that is also marked for post-animation removal), so summing the
-      // two would double-count. Callers that need to know whether a
-      // specific key is tracked should call `containsMember` instead.
+      // NOT a union with pendingRemoval: collapse paths put the SAME
+      // keys in both sets, so summing them would double-count. See
+      // [memberCount].
       memberCount: members.length,
       members: members,
       pendingRemoval: pendingRemoval,
@@ -443,15 +439,21 @@ class BulkAnimationData<TKey> {
   /// position-indexed cumulatives use this as the staleness signature.
   final int generation;
 
-  /// Live member count on the source group — mirrors
+  /// Live member count on the source group, mirroring
   /// `AnimationGroup.memberCount`. **Does not** add pendingRemoval, since
   /// collapse paths populate both sets with overlapping keys (the
   /// to-be-removed members are also live during the animation). Callers
   /// that need a per-key membership check should use [containsMember].
   final int memberCount;
 
+  /// The source group's live-member and pending-removal sets, held by
+  /// reference rather than copied. Null on the inactive sentinel, which is
+  /// what lets [containsMember] answer without inspecting a `Never` set.
   final Set<TKey>? _members;
   final Set<TKey>? _pendingRemoval;
+
+  /// Nid-indexed membership mirror backing [containsMemberNid]: a nonzero
+  /// byte marks a bulk member. Null on the inactive sentinel.
   final Uint8List? _bulkMemberByNid;
 
   /// Whether [key] is a member of the bulk group (in either the live
@@ -462,7 +464,7 @@ class BulkAnimationData<TKey> {
   /// [inactive] returns a const `BulkAnimationData<Never>` sentinel cast
   /// to `BulkAnimationData<TKey>`, and a `TKey`-typed parameter would
   /// trigger Dart's generic covariance check against the actual type
-  /// argument (`Never`) before the body runs — throwing for ANY real key
+  /// argument (`Never`) before the body runs, throwing for ANY real key
   /// instead of returning false.
   bool containsMember(Object? key) {
     final m = _members;
@@ -496,7 +498,9 @@ class StickyHeaderInfo<TKey> {
   /// The node ID of the sticky header.
   final TKey nodeId;
 
-  /// Y offset relative to the viewport top where this header paints.
+  /// Where this header paints, in sliver paint space (sliver scroll space
+  /// minus `constraints.scrollOffset`). Add that scroll offset back to
+  /// convert to sliver scroll space.
   final double pinnedY;
 
   /// Full (non-animated) extent of the header.

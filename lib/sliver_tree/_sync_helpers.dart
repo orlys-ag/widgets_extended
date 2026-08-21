@@ -18,10 +18,10 @@ import 'tree_controller.dart';
 ///   - passes [shouldExpand] when one is supplied, AND
 ///   - currently exists in the controller and is not already expanded.
 ///
-/// Both maps come from [TreeSyncController.snapshotChildPresence]: one
-/// entry per live node, mapped to whether it has live children. This
-/// heuristic never needed the child keys themselves, only that flag, and
-/// an absent entry reads the same as false (the node did not exist).
+/// Both maps come from `TreeSyncController.snapshotChildPresence`: one
+/// entry per live node, mapped to whether it has live children. Only that
+/// flag is needed here, never the child keys themselves, and an absent
+/// entry reads the same as false, since the node did not exist.
 ///
 /// [shouldExpand] carries the caller's per-node initial-expansion policy.
 /// Without it the heuristic expands every qualifying parent, which is the
@@ -31,10 +31,9 @@ import 'tree_controller.dart';
 /// gained-children parents produce one structural notification instead
 /// of K separate fan-outs across every mounted row.
 ///
-/// Used by `SyncedSliverTree`. Keep the rules in one place: the
-/// `rememberedBeforeSync` filter exists to prevent silently re-expanding
-/// a user-collapsed, re-added subtree, and duplicating that logic risks
-/// divergence.
+/// `SyncedSliverTree` is the only caller. The heuristic lives here rather
+/// than inline there so its rules, the [rememberedBeforeSync] filter in
+/// particular, have exactly one implementation to keep correct.
 void expandParentsThatGainedChildren<TKey, TData>({
   required TreeController<TKey, TData> controller,
   required Map<TKey, bool> oldChildPresence,

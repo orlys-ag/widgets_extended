@@ -1,14 +1,15 @@
 /// Internal: bulk animation source for [TreeController].
 ///
-/// Owns the single shared [AnimationGroup] used by `expandAll` /
+/// Owns the single shared [AnimationGroup] used by `expandAll` and
 /// `collapseAll`. One [AnimationController] drives every member
-/// proportionally — bulk semantics, not per-node.
+/// proportionally: bulk semantics, not per-node state.
 ///
 /// Maintains a per-nid mirror `_isMemberByNid` so render-layer hot paths
-/// can do O(1) membership checks via [isMemberNid] without HashMap probes.
-/// Generation counter `_generation` bumps on every membership change so
-/// downstream caches (the render-layer prefix sums, the coordinator's
-/// [BulkAnimationData] snapshot) can validate freshness in O(1).
+/// can test membership in O(1) via [isMemberNid] without hashing a key.
+/// The mirror covers `members` and `pendingRemoval` together, so a key
+/// leaving one set clears its bit only when it is absent from the other;
+/// every mutator below carries that check. [generation] bumps on each
+/// membership change so downstream caches validate freshness in O(1).
 library;
 
 import 'dart:typed_data';
@@ -38,18 +39,18 @@ class BulkAnimator<TKey> {
   final void Function() _onTick;
   final void Function(AnimationStatus status) _onStatusChanged;
 
-  /// Invoked whenever an existing group is disposed (from any caller:
-  /// completion teardown, [createGroup] replacement, [clear]). Wired by
-  /// the coordinator to its broad-generation bump so "group disposal ⇒
-  /// union mirrors invalidated" holds by construction — the bug class
-  /// where a completion handler forgets the pairing cannot recur.
+  /// Invoked on every group disposal, whatever the caller: completion
+  /// teardown, a [createGroup] replacement, or [clear]. The coordinator
+  /// wires it to its broad-generation bump, so disposal always
+  /// invalidates the union mirrors by construction and no individual
+  /// teardown path can forget the pairing.
   final void Function() _onGroupDisposed;
 
   AnimationGroup<TKey>? _group;
 
-  /// Per-nid mirror of `_group.members ∪ pendingRemoval`. Slot is `1`
-  /// when the corresponding nid is in either set, `0` otherwise. Sized
-  /// to the registry's nid capacity via [resizeForCapacity].
+  /// Per-nid mirror of the group's `members` and `pendingRemoval` sets
+  /// combined: a slot is `1` when the nid is in either, `0` otherwise.
+  /// Sized to the registry's nid capacity via [resizeForCapacity].
   Uint8List _isMemberByNid = Uint8List(0);
 
   int _generation = 0;
@@ -58,6 +59,8 @@ class BulkAnimator<TKey> {
   // Capacity sync
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Grows the membership mirror to [newCapacity], preserving set bits.
+  /// Never shrinks; [clear] releases the backing array.
   void resizeForCapacity(int newCapacity) {
     if (newCapacity > _isMemberByNid.length) {
       final grown = Uint8List(newCapacity);
@@ -66,8 +69,9 @@ class BulkAnimator<TKey> {
     }
   }
 
-  /// Per-nid cleanup used by the controller's adopt/release paths.
-  /// Idempotent.
+  /// Clears one nid's mirror bit, for the registry's adopt and release
+  /// paths. Idempotent, and resets the mirror only: the group's own sets
+  /// are left untouched, since the key is going away regardless.
   void clearForNid(int nid) {
     if (nid >= 0 && nid < _isMemberByNid.length) {
       _isMemberByNid[nid] = 0;
@@ -78,12 +82,15 @@ class BulkAnimator<TKey> {
   // Read API
   // ──────────────────────────────────────────────────────────────────────
 
+  /// The live bulk group, or null when no bulk animation is running.
   AnimationGroup<TKey>? get group => _group;
 
-  /// Whether the bulk source has any members. True when no group exists
-  /// OR the group exists but has no members.
+  /// Whether the bulk source has NO members: no group at all, or a group
+  /// holding none. Counts `members` only, so a key sitting in
+  /// `pendingRemoval` alone does not make this false.
   bool get isEmpty => _group == null || _group!.isEmpty;
 
+  /// Whether [key] is in the group's `members` or its `pendingRemoval`.
   bool isMember(TKey key) {
     final nid = _nids[key];
     return nid != null &&
@@ -91,24 +98,30 @@ class BulkAnimator<TKey> {
         _isMemberByNid[nid] != 0;
   }
 
+  /// Nid-keyed [isMember] for the render-layer hot path: one dense-array
+  /// read, no key hashing. Out-of-range nids report false.
   bool isMemberNid(int nid) {
     if (nid < 0 || nid >= _isMemberByNid.length) return false;
     return _isMemberByNid[nid] != 0;
   }
 
+  /// Counter bumped on every membership and group-lifecycle change, used
+  /// as the O(1) validity signature for caches derived from bulk state.
   int get generation => _generation;
 
-  /// Bumps the generation counter. Public so optimized callers can
-  /// invalidate downstream caches without going through a member mutation.
-  /// Bumps the bulk counter ONLY (a controller-side caller also calls
-  /// `coordinator.bumpAnimGen()` to bump the broad counter; the
-  /// coordinator's `bumpBulkGen()` does both).
+  /// Invalidates bulk-derived caches without mutating membership.
+  ///
+  /// Bumps the bulk counter ONLY. A caller that also needs the broad
+  /// animation counter invalidated goes through the coordinator's
+  /// `bumpBulkGen`, which bumps both.
   void bumpGeneration() {
     _generation++;
   }
 
-  /// Construct an allocation-free bulk-state snapshot. Mirrors the
-  /// existing `BulkAnimationData.snapshot<TKey>(...)` static factory.
+  /// Bulk state as a value the render layer can read once per frame.
+  /// Holds references to the live sets rather than copying them, and
+  /// returns a shared const value while no group runs, so a read costs at
+  /// most the snapshot record itself.
   BulkAnimationData<TKey> snapshot() {
     final g = _group;
     if (g == null || g.isEmpty) {
@@ -127,10 +140,12 @@ class BulkAnimator<TKey> {
   // Member mutators
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Adds [key] to `_group.members` and updates the nid-keyed mirror.
-  /// Returns true if the membership state changed. Caller is responsible
-  /// for bumping the generation if needed (or the coordinator's
-  /// `AnimationCoordinator.bumpBulkGen` does it as part of the broader bump).
+  /// Adds [key] to the group's `members` and sets its mirror bit.
+  /// Returns whether membership actually changed; no-ops without a group.
+  ///
+  /// Generation contract shared by every mutator here: they do NOT bump
+  /// [generation]. The caller does, normally through the coordinator's
+  /// `bumpBulkGen` so the broad counter moves with it.
   bool addMember(TKey key) {
     final g = _group;
     if (g == null) return false;
@@ -144,6 +159,8 @@ class BulkAnimator<TKey> {
     return added;
   }
 
+  /// Removes [key] from `members`. Its mirror bit survives when the key
+  /// is also in `pendingRemoval`, since the mirror covers both sets.
   bool removeMember(TKey key) {
     final g = _group;
     if (g == null) return false;
@@ -160,6 +177,8 @@ class BulkAnimator<TKey> {
     return removed;
   }
 
+  /// Marks [key] as exiting for this bulk operation and sets its mirror
+  /// bit. Its presence in `members` is left as it is.
   bool addPending(TKey key) {
     final g = _group;
     if (g == null) return false;
@@ -173,6 +192,8 @@ class BulkAnimator<TKey> {
     return added;
   }
 
+  /// Unmarks [key] as exiting. Its mirror bit survives when the key is
+  /// also in `members`.
   bool removePending(TKey key) {
     final g = _group;
     if (g == null) return false;
@@ -189,6 +210,9 @@ class BulkAnimator<TKey> {
     return removed;
   }
 
+  /// Drops every pending-removal entry, clearing the mirror bits only of
+  /// keys not also in `members`. Bounded by the pending set, not by nid
+  /// capacity.
   void clearPending() {
     final g = _group;
     if (g == null) return;
@@ -209,10 +233,11 @@ class BulkAnimator<TKey> {
   // Group lifecycle
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Creates a fresh AnimationGroup, disposing any prior one first.
-  /// [initialValue] is 0.0 for expandAll (forward), 1.0 for collapseAll
-  /// (reverse). Wires the constructor-injected [onTick] and
-  /// [onStatusChanged] callbacks.
+  /// Creates a fresh [AnimationGroup], disposing any prior one first, and
+  /// wires the injected tick and status callbacks to its controller.
+  /// [initialValue] is 0.0 for `expandAll`, which runs forward, and 1.0
+  /// for `collapseAll`, which reverses toward 0. Only completed and
+  /// dismissed statuses are forwarded.
   AnimationGroup<TKey> createGroup(
     Duration duration,
     Curve curve, {
@@ -237,14 +262,14 @@ class BulkAnimator<TKey> {
     return group;
   }
 
-  /// Disposes the current group's controller (if any) and zeros every
-  /// member's mirror slot. Sets the field to null FIRST, to prevent the
-  /// disposing controller's
-  /// final synchronous status event from interfering.
+  /// Disposes the current group's controller and zeros every member's
+  /// mirror slot. The field is nulled FIRST so the disposing controller's
+  /// final synchronous status event cannot act on a half-torn-down group.
   ///
-  /// Generation contract: the coordinator-wired [_onGroupDisposed]
-  /// callback discharges the broad-generation bump for every disposal, so
-  /// callers never pair one manually.
+  /// Generation contract: unlike the member mutators, this bumps
+  /// [generation] itself, and the coordinator-wired [_onGroupDisposed]
+  /// callback discharges the broad-generation bump, so callers never pair
+  /// one manually.
   void disposeGroup() {
     final g = _group;
     _group = null;
@@ -275,16 +300,18 @@ class BulkAnimator<TKey> {
   // Lifecycle
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Disposes the current group (if any), zeros the mirror, resets
-  /// generation. Leaves the animator usable for further `createGroup`
-  /// calls.
+  /// Disposes the current group, releases the mirror array and resets
+  /// [generation]. Leaves the animator usable for a later [createGroup];
+  /// the mirror stays empty until the next [resizeForCapacity].
   void clear() {
     disposeGroup();
     _isMemberByNid = Uint8List(0);
     _generation = 0;
   }
 
-  /// Same as [clear] plus marks the animator terminal.
+  /// Terminal teardown. Identical to [clear], because this animator holds
+  /// nothing beyond its group, and kept as its own entry point so every
+  /// sub-animator tears down through the same name.
   void dispose() {
     clear();
   }
@@ -293,8 +320,9 @@ class BulkAnimator<TKey> {
   // Debug
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Debug-only: asserts the bulk member mirror matches
-  /// `_group.members ∪ pendingRemoval` exactly across live nids.
+  /// Debug-only: asserts every mirror bit matches the union of the
+  /// group's `members` and `pendingRemoval`, in both directions, across
+  /// the whole mirror.
   void debugAssertConsistent() {
     assert(() {
       final g = _group;
@@ -310,7 +338,7 @@ class BulkAnimator<TKey> {
           if (nid != null) expected.add(nid);
         }
       }
-      // Walk the mirror — every set bit must be in `expected`, and every
+      // Walk the mirror: every set bit must be in `expected`, and every
       // expected nid must have its bit set.
       for (int nid = 0; nid < _isMemberByNid.length; nid++) {
         final isSet = _isMemberByNid[nid] != 0;

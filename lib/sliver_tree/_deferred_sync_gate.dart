@@ -1,23 +1,15 @@
-/// Holds a structural diff while a drag is live and re-examines it once
-/// the drag ends. Not exported from the package barrel.
+/// Internal: holds a structural diff while a drag is live and re-examines
+/// it once the drag ends. Not exported from the package barrel.
 ///
-/// Extracted from two independent copies of the same protocol (in
-/// `SyncedSliverTree` and the declarative `SectionedSliverList`) so its
-/// invariants live in one place. The protocol carries four of them, none
-/// locally checkable at a call site:
+/// Shared by `SyncedSliverTree` and the declarative `SectionedSliverList`,
+/// which is why the gate carries no policy of its own: each owner decides
+/// which input changes owe a diff, and each attaches at a different point
+/// in its own `initState`.
 ///
-/// 1. Schedule, do not act. The drag-end listener is registered by the
-///    owner's `initState` and so runs AHEAD of the reorderable widget's
-///    own drag-UI teardown in the same dispatch, while a make-room
-///    release animation is still in flight. Mutating structure
-///    synchronously would run removal animations under a row the drag UI
-///    still considers its own.
-/// 2. `ensureVisualUpdate()` before `addPostFrameCallback`, because a
-///    post-frame callback does not itself schedule a frame.
-/// 3. Compare `dragGeneration`, not `isDragging`. Generations never
-///    repeat, so an unchanged one proves no session was installed since.
-/// 4. Recheck the deferred bit inside the callback, because a rebuild
-///    usually consumes it first.
+/// None of the protocol's rules are checkable at a single call site, so
+/// each is documented where it is enforced. The governing one is SCHEDULE,
+/// DO NOT ACT: a drag-end transition may only queue work, never mutate
+/// structure inline. See [_handleReorderChanged].
 library;
 
 import 'package:flutter/foundation.dart' show VoidCallback;
@@ -25,12 +17,11 @@ import 'package:flutter/scheduler.dart' show SchedulerBinding;
 
 import 'tree_reorder_controller.dart';
 
-/// Holds a structural diff while a drag is live and re-examines it once
-/// the drag ends.
+/// Defers one owner's structural diff across a live drag.
 ///
-/// The owner keeps its own policy: which prop changes owe a diff stays
-/// in its `didUpdateWidget`. The gate answers "may I sync now"
-/// ([isDragging]) and "do I still owe one" ([isDeferred]), nothing else.
+/// The gate answers two questions and nothing more: "may I sync now"
+/// ([isDragging]) and "do I still owe one" ([isDeferred]). Deciding which
+/// input changes owe a diff stays in the owner's `didUpdateWidget`.
 class DeferredSyncGate<TKey> {
   DeferredSyncGate({
     required TreeReorderController<TKey> reorderController,
@@ -42,12 +33,10 @@ class DeferredSyncGate<TKey> {
 
   final TreeReorderController<TKey> _reorderController;
 
-  /// The owner's liveness question, asked at post-frame fire time.
-  /// [dispose] removes the drag listener but CANNOT cancel a post-frame
-  /// callback that is already scheduled, so one can still fire after the
-  /// owning `State` is gone. Reading `mounted` from a dead `State` is
-  /// safe; this stays a callback so the liveness question stays with the
-  /// object that can answer it.
+  /// The owner's liveness question, asked at post-frame fire time because
+  /// a scheduled callback can outlive the owning `State` (see [dispose]).
+  /// A callback rather than a captured flag, so the question is answered
+  /// when it is asked, by the object that can answer it.
   final bool Function() _isMounted;
 
   /// Runs the owner's sync. Must read the owner's CURRENT input (for a
@@ -78,37 +67,40 @@ class DeferredSyncGate<TKey> {
     _syncDeferred = true;
   }
 
-  /// Clears the bit after the owner synced by its OWN route, which is
-  /// `didUpdateWidget` reaching its sync call. The gate clears the bit
-  /// itself on ITS route, after [_onSync] returns from the post-frame
-  /// callback, so a caller never has to pair the two.
+  /// Clears the bit after the owner synced on its own route, meaning its
+  /// `didUpdateWidget` reached its sync call. The gate clears the bit
+  /// itself when it drives the sync instead, so a caller never has to
+  /// pair the two routes.
   void markSynced() {
     _syncDeferred = false;
   }
 
-  /// Starts watching session transitions. Separate from the constructor
-  /// because listener REGISTRATION ORDER is load-bearing and differs per
-  /// owner: `SyncedSliverTree` attaches after its first sync and initial
-  /// expansion pass, the sectioned widget before its first sync. Each
-  /// owner must keep its current position.
+  /// Starts watching drag-session transitions.
+  ///
+  /// Separate from the constructor because registration order is
+  /// load-bearing and differs per owner: `SyncedSliverTree` attaches after
+  /// its first sync and initial expansion pass, the sectioned widget
+  /// before its first sync. Neither call should move.
   void attach() {
     _reorderController.addListener(_handleReorderChanged);
   }
 
-  /// Detaches from the controller. Call before disposing the reorder
-  /// controller. An already-scheduled post-frame callback is NOT
-  /// cancelled (the scheduler has no API for that); it is guarded by
-  /// [_isMounted] and the generation check instead.
+  /// Detaches from the controller; call before disposing the reorder
+  /// controller. A post-frame callback already scheduled is NOT cancelled,
+  /// because the scheduler offers no way to cancel one; it is guarded
+  /// instead by the liveness and drag-generation checks inside the
+  /// callback itself.
   void dispose() {
     _reorderController.removeListener(_handleReorderChanged);
   }
 
-  /// Watches session transitions so a deferred diff is re-examined once
-  /// the drag ends. Deliberately schedules rather than acting: this
-  /// listener runs AHEAD of the reorderable widget's own drag-UI
-  /// teardown in the same dispatch, and a make-room release animation is
-  /// in flight, so mutating structure synchronously here would run
-  /// removal animations under a row the drag UI still considers its own.
+  /// Re-examines a deferred diff on the drag-end edge.
+  ///
+  /// Schedules rather than acting, which is the protocol's governing rule:
+  /// this listener runs AHEAD of the reorderable widget's own drag-UI
+  /// teardown in the same dispatch, while a make-room release animation is
+  /// still in flight. Syncing inline here would run removal animations
+  /// under a row the drag UI still considers its own.
   void _handleReorderChanged() {
     final reorder = _reorderController;
     final dragging = reorder.isDragging;

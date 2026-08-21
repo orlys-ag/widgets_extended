@@ -23,34 +23,32 @@ enum ViewportEdge { top, bottom }
 /// for the slide pipeline to consider it "on-screen" when classifying
 /// slide-clamp branches and edge-ghost re-promotion.
 ///
-/// Absolute (not a fraction of extent) so the threshold doesn't grow
-/// with row height — a 200 px row that's 30 px visible at the bottom
-/// edge is just as perceptible to the user as a 40 px row that's 30 px
-/// visible.
+/// Absolute rather than a fraction of extent, so the threshold does not
+/// grow with row height: a 200 px row showing 30 px at the bottom edge is
+/// just as perceptible as a 40 px row showing 30 px.
 ///
 /// Set to the smallest value that's safely above the `epsilon = 0.5`
 /// clamp used by the slide-composer's `applyClampAndInstallNewGhosts`:
 /// without that margin, a row whose baseline was just clamped to "just
 /// inside the viewport edge" (visiblePx == epsilon == 0.5) would tip
-/// the predicate based on floating-point noise alone. 1.0 leaves a 2×
-/// margin and still rejects the genuine sub-pixel ε intersections that
-/// the predicate exists to filter (a row whose bottom edge intrudes by
-/// 0.001 px is `intersects == true` but visually imperceptible).
+/// the predicate on floating-point noise alone. 1.0 leaves twice that
+/// margin and still rejects the genuine sub-pixel intersections the
+/// predicate exists to filter: a row whose bottom edge intrudes by
+/// 0.001 px is `intersects == true` but visually imperceptible.
 ///
 /// Erring small biases the slide pipeline toward "smooth continuation"
 /// over "clamp into viewport" for marginally-visible rows: any row the
-/// user is already seeing — even faintly — animates from its current
+/// user is already seeing, however faintly, animates from its current
 /// painted position rather than jumping to a fully-visible baseline.
 ///
 /// See [ViewportSnapshot.meaningfullyVisible].
 const double _kMinMeaningfulVisiblePx = 1.0;
 
-/// Immutable record of the slide-pipeline-relevant viewport state at a
-/// single moment in time: the scroll offset, the sliver's paint extent,
-/// and the current overhang setting. Owns every viewport-derived value
-/// the slide pipeline reads (top/bottom, overhang-adjusted edge bases),
-/// so capture-time vs current-time questions can be expressed in code
-/// instead of dropping into ad-hoc scroll-offset arithmetic.
+/// Immutable record of the slide-pipeline-relevant viewport state at one
+/// moment: the scroll offset, the sliver's paint extent, and the overhang
+/// setting in force. Every viewport-derived value the pipeline reads is
+/// computed from those three, so two snapshots can be compared directly
+/// rather than re-deriving either side's geometry.
 final class ViewportSnapshot {
   const ViewportSnapshot({
     required this.scrollOffset,
@@ -72,7 +70,10 @@ final class ViewportSnapshot {
   /// setting changes mid-batch.
   final double overhangPx;
 
+  /// Top edge in scroll space, the same value as [scrollOffset].
   double get top => scrollOffset;
+
+  /// Bottom edge in scroll space, one [paintExtent] below [top].
   double get bottom => scrollOffset + paintExtent;
 
   /// Any-pixel-overlap predicate. Use for paint culling, hit-test
@@ -96,18 +97,17 @@ final class ViewportSnapshot {
   /// Neither [intersects] nor a midpoint-in-viewport heuristic answers
   /// it correctly:
   ///
-  ///   * [intersects] is too generous — a sub-pixel sliver counts as
-  ///     on-screen, which routes a slide-IN composition into the
-  ///     on-screen branch (priorOn flips true), the baseline-clamp
-  ///     does not fire, and painted at t=0 lands off-viewport.
-  ///   * Midpoint-in-viewport is too strict — the threshold scales
-  ///     with extent (a 200 px row needs 100 px visible), so a row
-  ///     that's 10–40 px visible at the top or bottom edge is
-  ///     classified off-screen, falls into !priorOn && !targetOn, and
-  ///     (when no in-flight slide exists) gets its slide entry
-  ///     suppressed. The row pops into structural place instead of
-  ///     animating — visible only on edges, where partial visibility
-  ///     is most common.
+  /// - [intersects] is too generous: a sub-pixel sliver counts as
+  ///   on-screen, which routes a slide-IN composition into the on-screen
+  ///   branch (priorOn flips true), the baseline clamp does not fire, and
+  ///   the paint at t=0 lands off-viewport.
+  /// - Midpoint-in-viewport is too strict: the threshold scales with
+  ///   extent, so a 200 px row needs 100 px visible, and a row showing 10
+  ///   to 40 px at the top or bottom edge is classified off-screen, falls
+  ///   into !priorOn && !targetOn, and has its slide entry suppressed
+  ///   when no in-flight slide exists. The row then pops into structural
+  ///   place instead of animating, which shows up only at the edges,
+  ///   where partial visibility is most common.
   ///
   /// Resolution: require a small ABSOLUTE-pixel overlap, capped by
   /// `extent * 0.5` so very-small rows (smaller than the threshold)

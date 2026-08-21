@@ -112,9 +112,13 @@ _TaskTree _model = _initialModel();
 late List<SyncedTreeNode<String, Task>> _treeInput = _buildTreeInput();
 ```
 
-Every mode validates at sync time: dangling keys, duplicate children, a node
-under two parents, cycles, and (in `.flat`) unreachable nodes all throw
-`ArgumentError` naming the offending key rather than misrendering later.
+Every mode validates at sync time: duplicate keys, duplicate children, a node
+under two parents, cycles, and (in `.flat`) missing parent keys and
+unreachable nodes all throw `ArgumentError` naming the offending keys rather
+than misrendering later. In `.flat`, returning null from `parentOf` is the
+explicit "this item is a root": a filter that removes a parent while keeping
+its children guards the stored parent key with a set of the live keys and
+returns null for filtered-out parents.
 
 ---
 
@@ -202,8 +206,9 @@ Widget _buildRow(BuildContext context, TreeItemView<String, Task> view) {
 - `initialNodeExpansion: (key, item) => bool?` overrides it per node. Return
   null to defer to the blanket flag. It is an **initial** policy: a user's
   later toggle always wins.
-- `preserveExpansion` (default `true`) remembers expansion across
-  remove/re-add cycles, bounded by `maxExpansionMemorySize`.
+- `expansionMemory` (default `1024`) bounds how many removed nodes'
+  expansion states are remembered and restored on re-add; `0` disables
+  the memory.
 - `onExpansionChanged(key, isExpanded)` fires for user toggles, imperative
   calls and sync-driven expansion alike. It deliberately stays silent for the
   widget's own initial expansion pass, so restoring persisted state does not
@@ -261,7 +266,7 @@ Two rules about the config object:
   and non-null changes the widget type at that slot, tearing down the sliver,
   its per-key child caches and its render object, and orphaning any live drag.
   A debug assert catches it. To disable reordering at runtime, keep the config
-  and return false from `canReorder`.
+  and set `enabled: false`; `canReorder` stays the per-row policy.
 - **Its contents are live on every rebuild.** The drag tunings
   (`autoExpandDelay`, `autoScrollEdgeZone`, `autoScrollMaxVelocity`) are
   captured once per drag session, so a changed value applies from the next

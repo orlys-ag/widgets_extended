@@ -1,28 +1,23 @@
 /// Internal: facade over the five animation sources (standalone,
 /// per-operation groups, bulk, slide, make-room preview), plus the
-/// cross-source state and dispatch logic that span them.
+/// cross-source state that spans them.
 ///
 /// The first three drive layout and are unioned by [hasActiveAnimations];
 /// slide and preview are paint-only and are read through the slide-delta
 /// getters instead.
 ///
-/// Owns:
-/// - Cross-source per-nid state (`_fullExtentByNid`, `_isPendingDeletionByNid`,
-///   the union mirrors `_isAnimatingByNid` / `_isExitingByNid`).
-/// - The animation generation counter `_animationGeneration` (the broad
-///   counter; the bulk-specific counter lives on [BulkAnimator]).
-/// - The animating-keys cache + sparse-tracking lists used by
-///   [ensureAnimatingKeys].
-/// - The animation-listener channel (`addListener` / `removeListener` /
-///   `notifyListeners`).
-/// - The five sub-coordinators (composition, not inheritance).
+/// Owns the cross-source per-nid state (full extents, pending deletion,
+/// the animating and exiting union mirrors), the broad animation
+/// generation counter (the bulk-specific one lives on [BulkAnimator]),
+/// the animating-keys cache, and the animation-listener channel. The five
+/// sub-coordinators are held by composition, not inheritance.
 ///
 /// Implements [AnimationReader] so [RenderSliverTree] can hold an abstract
 /// reference instead of the concrete coordinator (or the controller).
 ///
-/// Status-change handlers and the standalone tick body STAY on
-/// `TreeController` — they cross structure / order / structural-notification
-/// concerns. The coordinator wires them as callbacks (see constructor).
+/// Status-change handlers and the standalone tick body stay on
+/// `TreeController`: they cross structure, order and structural
+/// notification concerns, and are wired in here as callbacks.
 library;
 
 import 'dart:async' show scheduleMicrotask;
@@ -42,11 +37,15 @@ import '_slide_animation_engine.dart';
 import '_standalone_animator.dart';
 import 'types.dart';
 
-/// Marker for unknown target extent. Mirrors `_unknownExtent` in the
-/// original part file.
+/// [AnimationState.targetExtent] value meaning "target not known yet",
+/// set when a row starts animating before it has ever been measured.
+/// Extent computations then scale the full extent by curved progress
+/// instead of interpolating toward a fixed target.
 const double _kUnknownExtent = -1.0;
 
-/// Sentinel in [_fullExtentByNid] meaning "never measured."
+/// Sentinel in [_fullExtentByNid] meaning "never measured". Shares the
+/// -1.0 value with [_kUnknownExtent] but is a distinct concept: a missing
+/// measurement rather than a missing animation target.
 const double _kUnmeasuredExtent = -1.0;
 
 /// Narrow read interface that the render layer depends on instead of
@@ -59,8 +58,10 @@ abstract class AnimationReader<TKey> {
   bool isAnimatingNid(int nid);
   bool isExitingNid(int nid);
 
-  /// 3-source union getter — paint scheduling, sticky throttle, eviction
-  /// deferral all read this. **Excludes slide** (slide is paint-only).
+  /// Union of the three layout-driving sources: standalone, operation
+  /// groups, bulk. Read by paint scheduling, eviction deferral and the
+  /// sticky band's entering-extent check. Deliberately EXCLUDES slide and
+  /// preview, which are paint-only.
   bool get hasActiveAnimations;
 
   // Slide engine reads (paint hot path).
@@ -69,7 +70,9 @@ abstract class AnimationReader<TKey> {
   double getSlideDeltaNid(int nid);
   double getSlideDeltaXNid(int nid);
 
-  /// Bulk-state snapshot (allocation-free per the existing const sentinel).
+  /// Bulk-state snapshot. Holds references to the live member sets rather
+  /// than copying them, and returns a shared const value when no bulk
+  /// group runs, so a per-frame read costs at most the snapshot record.
   BulkAnimationData<TKey> bulkAnimationData();
 
   // Generation counters for cache validation in render-side prefix sums.
@@ -103,11 +106,11 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   final TickerProvider _vsync;
   final NodeIdRegistry<TKey> _nids;
 
-  /// Enter/exit (standalone) timing — the style's `effectiveEnterExit`.
+  /// Enter/exit (standalone) timing: the style's `effectiveEnterExit`.
   final Duration Function() _enterExitDurationGetter;
   final Curve Function() _enterExitCurveGetter;
 
-  /// Expand/collapse timing — the style's `expandCollapse`. Feeds the
+  /// Expand/collapse timing: the style's `expandCollapse`. Feeds the
   /// per-operation group registry's controller durations.
   final Duration Function() _expandCollapseDurationGetter;
   final void Function(TKey opKey, AnimationStatus status)
@@ -116,8 +119,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   final void Function(Iterable<TKey> completedKeys) _onStandaloneTickComplete;
 
   /// Fallback extent for unmeasured rows, injected from
-  /// `TreeController.defaultExtent`. Injected rather than imported —
-  /// layering forbids the import, and a mirrored constant drifts.
+  /// `TreeController.defaultExtent`: layering forbids importing the
+  /// controller, and a mirrored constant would drift.
   final double _defaultExtent;
 
   // ──────────────────────────────────────────────────────────────────────
@@ -136,8 +139,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
       return ext < 0 ? null : ext;
     },
     onTick: (completedKeys) {
-      // Wrapper closure (Gap M): forwards to the controller's
-      // _finalizeAnimation handler AND fires the listener channel.
+      // Forwards to the controller's finalize handler AND fires the
+      // listener channel; the animator itself knows about neither.
       _onStandaloneTickComplete(completedKeys);
       notifyListeners();
     },
@@ -158,33 +161,31 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     onTick: notifyListeners,
     onStatusChanged: _onBulkAnimationStatus,
     // Group disposal invalidates the generation-keyed union mirrors
-    // ([ensureAnimatingKeys]) — wired here, at the construction boundary,
-    // so no disposal caller (completion handler, createGroup replacement,
-    // clear) can forget the pairing. bumpBulkGen only increments counters,
-    // so the extra bumps on replacement/teardown paths are free.
+    // ([ensureAnimatingKeys]). Wired at the construction boundary so no
+    // disposal path can forget the pairing; the extra bumps on
+    // replacement and teardown are free, since bumpBulkGen only
+    // increments counters.
     onGroupDisposed: bumpBulkGen,
   );
 
   late final SlideAnimationEngine<TKey> slide = SlideAnimationEngine<TKey>(
     vsync: _vsync,
     nids: _nids,
-    // IMMEDIATE dispatch — never coalesced. The engine's settle protocol
-    // documents that its notify fires BEFORE completed entries are
-    // removed (listeners must observe delta == 0 with hasActiveSlides
-    // still true so a final zero-delta paint is scheduled); a deferred
-    // dispatch would land after the cleanup. The engine runs ONE ticker
-    // for all slides, so this contributes at most one sweep per frame —
-    // it is not part of the K-multiplier the coalescing removes.
+    // IMMEDIATE dispatch, never coalesced. The engine's settle protocol
+    // notifies BEFORE completed entries are removed, so listeners observe
+    // delta == 0 while hasActiveSlides is still true and schedule a final
+    // zero-delta paint; a deferred dispatch would land after that cleanup
+    // and lose the frame. One ticker drives every slide, so this costs at
+    // most one sweep per frame.
     onTick: notifyListenersNow,
   );
 
-  /// Make-room preview offsets: a sibling of [slide] holding
-  /// paint-only Y offsets that persist (rather than decay) until
-  /// re-targeted or released. Composed with slide deltas at the
-  /// [TreeController] read delegators — the render layer sees one
-  /// combined paint offset per row and needs no preview awareness.
-  /// Same immediate-dispatch rationale as [slide]: its notify-before-
-  /// cleanup settle contract needs uncoalesced delivery.
+  /// Make-room preview offsets: paint-only Y offsets that are HELD until
+  /// re-targeted or released, rather than decaying to zero like a slide.
+  /// Composed with slide deltas in [getSlideDeltaNid], so the render
+  /// layer sees one combined offset per row and needs no preview
+  /// awareness. Dispatches immediately for the same settle-ordering
+  /// reason as [slide].
   late final ReorderPreviewEngine preview = ReorderPreviewEngine(
     vsync: _vsync,
     onTick: notifyListenersNow,
@@ -223,7 +224,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
 
   /// Nids written into [_isAnimatingByNid] by the last
   /// `ensureAnimatingKeys` rebuild. Drives the sparse clear at the start
-  /// of each rebuild — zeroing only the slots actually dirtied avoids an
+  /// of each rebuild: zeroing only the slots actually dirtied avoids an
   /// O(nidCapacity) memset on every animation-generation bump.
   final List<int> _writtenAnimatingNids = <int>[];
   final List<int> _writtenExitingNids = <int>[];
@@ -264,7 +265,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
 
   final List<VoidCallback> _animationListeners = <VoidCallback>[];
 
-  /// Reused snapshot buffer for [_dispatchListeners] — avoids a fresh
+  /// Reused snapshot buffer for [_dispatchListeners], avoiding a fresh
   /// defensive list copy per sweep.
   final List<VoidCallback> _dispatchScratch = <VoidCallback>[];
 
@@ -275,24 +276,26 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   /// buffer (re-entrancy guard).
   bool _dispatching = false;
 
+  /// Subscribes [cb] to the animation tick channel.
   void addListener(VoidCallback cb) {
     _animationListeners.add(cb);
   }
 
+  /// Unsubscribes a callback added by [addListener].
   void removeListener(VoidCallback cb) {
     _animationListeners.remove(cb);
   }
 
+  /// Fires the animation channel, coalesced to one dispatch per frame.
+  ///
+  /// With K concurrent op-group tickers plus the standalone, bulk and
+  /// slide tickers, an uncoalesced channel would fire K+3 full listener
+  /// sweeps per frame. Inside the transient-callbacks phase the dispatch
+  /// is deferred to one microtask, which lands after every same-frame
+  /// tick and still before build and layout, in the test binding as well
+  /// as production. Outside that phase (structural mutators, direct
+  /// controller driving) there is nothing to coalesce.
   void notifyListeners() {
-    // Per-frame coalescing: with K concurrent op-group
-    // tickers plus the standalone/bulk/slide tickers, an uncoalesced
-    // channel fires K+3 full listener sweeps per frame. During the
-    // transient-callbacks phase (ticker callbacks) defer to a single
-    // microtask — it runs after every same-frame tick has fired and
-    // before build/layout (the test binding flushes microtasks between
-    // handleBeginFrame and handleDrawFrame, matching production). Outside
-    // that phase (structural mutators, direct controller driving),
-    // dispatch immediately.
     if (SchedulerBinding.instance.schedulerPhase ==
         SchedulerPhase.transientCallbacks) {
       if (_notifyScheduled) return;
@@ -309,10 +312,10 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     _dispatchListeners();
   }
 
-  /// Uncoalesced dispatch for callers whose notify carries a documented
-  /// synchronous ordering contract (currently the slide engine's settle
-  /// protocol). Also satisfies any dispatch owed by a pending coalesced
-  /// microtask — listeners read live state, so this covers it.
+  /// Uncoalesced dispatch for callers whose notify carries a synchronous
+  /// ordering contract: the slide and preview engines, which notify
+  /// before clearing completed entries. Also satisfies any dispatch owed
+  /// by a pending coalesced microtask, since listeners read live state.
   void notifyListenersNow() {
     _notifyScheduled = false;
     _dispatchListeners();
@@ -330,7 +333,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     _dispatching = true;
     try {
       // Iterate a reused snapshot so listeners that remove themselves
-      // mid-fire don't mutate the iteration source — without a fresh
+      // mid-fire don't mutate the iteration source, without a fresh
       // list allocation per sweep.
       _dispatchScratch
         ..clear()
@@ -383,23 +386,16 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     slide.resizeForCapacity(newCapacity);
   }
 
-  /// Aggregating per-nid clear. Calls each sub-coordinator's
-  /// `clearForNid` plus resets coordinator-owned per-nid state. Does NOT
-  /// explicitly clear the union mirrors `_isAnimatingByNid` /
-  /// `_isExitingByNid` — they're rebuilt from scratch on the next
-  /// `ensureAnimatingKeys()` via the sparse-tracking lists.
+  /// Aggregating per-nid clear: forwards to every sub-coordinator and
+  /// resets coordinator-owned per-nid state. The union mirrors are left
+  /// alone deliberately, because the next [ensureAnimatingKeys] rebuild
+  /// clears them through the sparse-tracking lists.
   ///
-  /// **Generation invariant:** this method does NOT bump
-  /// `_animationGeneration`. Callers that read animation-gen-keyed caches
-  /// (e.g. render-layer prefix-sum caches gated on `animationGeneration`)
-  /// must ensure a bump happens before any such read between this call
-  /// and the next mutation. The animation-finalization path
-  /// (`_finalizeAnimation` in `_tree_controller_animation.dart`) already
-  /// bumps the generation before invoking transitively-clearing helpers,
-  /// so animation-driven cleanup is covered. The unpaired call sites are
-  /// `_adoptKey` and `_releaseNid` in `tree_controller.dart`; both are
-  /// lifecycle-only and run in contexts where cache-gated readers are
-  /// not reachable before the next structural mutation.
+  /// **Generation invariant:** this does NOT bump `_animationGeneration`,
+  /// so the caller must guarantee a bump lands before any
+  /// generation-keyed cache is read again. Animation finalization already
+  /// bumps before it clears; the remaining callers are nid lifecycle
+  /// paths, which run where no cache-gated reader can observe the gap.
   void clearForNid(int nid) {
     standalone.clearForNid(nid);
     opGroups.clearForNid(nid);
@@ -421,6 +417,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   // Full extent table (shared across sources)
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Measured full extent for [key], or null when the row has never been
+  /// measured or the key is unknown.
   double? fullExtentOf(TKey key) {
     final nid = _nids[key];
     if (nid == null) return null;
@@ -428,28 +426,27 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     return ext < 0 ? null : ext;
   }
 
-  /// Nid-keyed equivalent of [fullExtentOf] — a direct dense-array read
+  /// Nid-keyed equivalent of [fullExtentOf]: a direct dense-array read
   /// with the unmeasured sentinel folded to null. The store is already
-  /// nid-indexed, so the O(N)-per-frame hot paths (bulk cumulatives,
-  /// settled-offset snapshots, scroll prefix rebuild, sticky computer,
-  /// admission policy) must not pay a nid→key→hash→nid round-trip per
-  /// row. Caller must guarantee [nid] is live and within range.
+  /// nid-indexed, so the per-frame O(N) readers must not pay a nid to key
+  /// to hash round-trip per row. Caller must guarantee [nid] is live and
+  /// within range.
   @override
   double? fullExtentOfNid(int nid) {
     final ext = _fullExtentByNid[nid];
     return ext < 0 ? null : ext;
   }
 
-  /// Coordinates across op-group members: if [key] is mid-flight in an
-  /// op-group with `targetExtent == _unknownExtent`, resolves the target
-  /// from [extent]; if `targetIsCaptured` is false and the value changed,
-  /// updates the natural full reference. Returns the previous extent
-  /// value (null if it was unmeasured) so callers can invalidate
-  /// downstream caches when it changed.
+  /// Records a freshly measured full extent for [key] and repairs any
+  /// animation that started before the row had a size: a member still
+  /// carrying [_kUnknownExtent] has its target resolved to [extent], and
+  /// an op-group member whose target was not captured re-targets onto the
+  /// new measurement. Returns the previous extent (null if unmeasured) so
+  /// callers can invalidate downstream caches when it changed.
   double? setFullExtent(TKey key, double extent) {
     final oldExtent = fullExtentOf(key);
 
-    // Check operation group member — resolve unknown extents
+    // Check operation group member: resolve unknown extents
     final groupKey = opGroups.groupKeyOf(key);
     if (groupKey != null) {
       final group = opGroups.groupAt(groupKey);
@@ -527,6 +524,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   // Pending deletion
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Whether [key] is marked for purge once its exit animation finishes.
   bool isPendingDeletion(TKey key) {
     final nid = _nids[key];
     if (nid == null) return false;
@@ -534,6 +532,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
         _isPendingDeletionByNid[nid] != 0;
   }
 
+  /// Marks [key] for purge on exit completion. Idempotent: the counter
+  /// tracks distinct set slots, not calls.
   void markPendingDeletion(TKey key) {
     final nid = _nids[key];
     if (nid == null) return;
@@ -543,6 +543,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     }
   }
 
+  /// Unmarks [key], for a re-add that cancels a pending purge.
   void clearPendingDeletion(TKey key) {
     final nid = _nids[key];
     if (nid == null) return;
@@ -553,10 +554,11 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     }
   }
 
+  /// Number of nids currently marked pending deletion.
   int get pendingDeletionCount => _pendingDeletionCount;
 
   // ──────────────────────────────────────────────────────────────────────
-  // Dispatch — the "which source owns this key?" methods
+  // Dispatch: the "which source owns this key?" methods
   // ──────────────────────────────────────────────────────────────────────
 
   /// Captures a node's current animated extent from whichever source it's
@@ -606,7 +608,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
 
   /// Walks every animation source [key] might belong to, clears
   /// membership, returns the standalone state if any was cleared. Does
-  /// NOT compute a visible extent — cheaper than
+  /// NOT compute a visible extent, so it is cheaper than
   /// [captureAndRemoveFromGroups] when callers don't need it.
   AnimationState? removeFromAllSources(TKey key) {
     final state = standalone.clearAt(key);
@@ -633,21 +635,26 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     return state;
   }
 
-  // Subtree animation cancellation deliberately does NOT live here:
-  // `_cancelAnimationStateForSubtree` in `_tree_controller_animation.dart`
-  // is the single spec, because it needs the `preserveEntering` branch
-  // (guarded by `move_preserves_entering_test.dart`) that a
+  // Subtree animation cancellation deliberately does NOT live here.
+  // `_cancelAnimationStateForSubtree` on the controller stays the single
+  // implementation: it needs a `preserveEntering` branch that a
   // coordinator-level copy would not naturally carry.
 
   // ──────────────────────────────────────────────────────────────────────
   // Per-key animation queries (forwarded by TreeController)
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Whether [key] is animating in any layout-driving source. Gated on
+  /// the O(1) [hasActiveAnimations] check so an idle tree never builds
+  /// the union set.
   bool isAnimating(TKey key) {
     if (!hasActiveAnimations) return false;
     return ensureAnimatingKeys().contains(key);
   }
 
+  /// Whether [key] is animating OUT: pending removal in the bulk group
+  /// or in its operation group, or a standalone exit. Probes each source
+  /// directly, so it stays correct without forcing a union rebuild.
   bool isExiting(TKey key) {
     // Bulk pending removal
     if (bulk.group?.pendingRemoval.contains(key) == true) return true;
@@ -662,6 +669,10 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     return animation != null && animation.type == AnimationType.exiting;
   }
 
+  /// Animation state for [key], or null when it is not animating. Group
+  /// members carry no per-node state, so an expanding operation-group or
+  /// bulk member reports a synthetic entering state, and a member already
+  /// pending removal reports null.
   AnimationState? getAnimationState(TKey key) {
     // 1. Standalone
     final standaloneState = standalone.at(key);
@@ -695,12 +706,17 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     return null;
   }
 
+  /// Current animated extent for [key], falling back to the default
+  /// extent when the row has never been measured.
   double getCurrentExtent(TKey key) {
     return getAnimatedExtent(key, fullExtentOf(key) ?? _defaultExtent);
   }
 
+  /// Current extent for [key] against a caller-supplied [fullExtent].
+  /// Checks the sources in fixed precedence order (bulk, operation group,
+  /// standalone) and returns [fullExtent] when none owns the key.
   double getAnimatedExtent(TKey key, double fullExtent) {
-    // 1. Bulk — `isMember` covers members ∪ pendingRemoval, matching the
+    // 1. Bulk. `isMember` covers members AND pendingRemoval, matching the
     // nid-keyed mirror `getCurrentExtentNid` consults. A members-only
     // check here would let the scroll orchestrator compute offsets that
     // disagree with rendered layout whenever the two sets diverge.
@@ -840,11 +856,14 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   // AnimationReader implementation (render-layer hot-path reads)
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Nid-keyed [getAnimatedExtent] for the per-row layout hot path. Same
+  /// precedence order, but each probe is a dense-array read where it can
+  /// be, and the key is resolved at most once per call.
   @override
   double getCurrentExtentNid(int nid) {
     final fullRaw = _fullExtentByNid[nid];
     final full = fullRaw < 0 ? _defaultExtent : fullRaw;
-    // 1. Bulk — nid mirror is the fast path.
+    // 1. Bulk: the nid mirror is the fast path.
     if (bulk.isMemberNid(nid) && bulk.group != null) {
       return full * bulk.group!.value;
     }
@@ -879,6 +898,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     return lerpDouble(animation.startExtent, animation.targetExtent, t)!;
   }
 
+  /// Nid-keyed [isAnimating], served from the union mirror. Refreshes the
+  /// mirror first so a stale generation cannot serve a stale bit.
   @override
   bool isAnimatingNid(int nid) {
     ensureAnimatingKeys();
@@ -887,6 +908,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
         _isAnimatingByNid[nid] != 0;
   }
 
+  /// Nid-keyed [isExiting], served from the union mirror rather than by
+  /// probing each source.
   @override
   bool isExitingNid(int nid) {
     ensureAnimatingKeys();
@@ -953,9 +976,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     _animationGeneration++;
   }
 
-  /// Same as [clear] plus disposes the slide engine (which is the only
-  /// sub-coordinator with a meaningful `dispose()` distinction — the
-  /// others' `dispose()` is currently equivalent to `clear()`).
+  /// Terminal teardown: disposes every sub-coordinator and drops the
+  /// listener list, which [clear] deliberately keeps.
   void dispose() {
     standalone.dispose();
     opGroups.dispose();

@@ -4,14 +4,15 @@
 /// [AutoScroller] (edge-zone scrolling, per-session ticker),
 /// [DwellExpander] (hover-to-open collapsed parents), [MakeRoomDriver]
 /// (the paint-only gap), and [DropSettler] (the proxy hand-off glides).
-/// The session reaches them by direct calls — no interface — syncing
-/// every one of them from its single `resolve()` site and tearing every
-/// one of them down from its single `detachAll(exit)` site, dispatched
-/// on [SessionExit].
+/// The session calls them directly rather than through an interface,
+/// syncing all of them from its single `resolve()` site and tearing all
+/// of them down from its single `detachAll(exit)` site, which dispatches
+/// on [SessionExit]. Every `detach` therefore takes a [SessionExit], even
+/// the ones that ignore it.
 ///
-/// Class names are public in this underscore-prefixed file: internality
-/// is enforced by barrel non-export, and the headless unit tests
-/// reference these classes directly.
+/// Class names are public despite the underscore-prefixed file:
+/// internality comes from barrel non-export, and the headless unit tests
+/// construct these classes directly.
 library;
 
 import 'dart:async';
@@ -23,9 +24,9 @@ import '_drag_session.dart';
 import '_drop_zone_resolver.dart';
 import 'tree_controller.dart';
 
-/// Edge-zone autoscroll. Owns its ticker per session — created here,
-/// disposed in [detach], no controller-global ticker state. Keys off the
-/// FINGER's viewport position, never the probe, because edge zones are
+/// Edge-zone autoscroll. Owns its ticker per session, created here and
+/// disposed in [detach], so no ticker state outlives a drag. Keys off the
+/// FINGER's viewport position, never the probe, because an edge zone is
 /// about where the hand is, not where the card is.
 class AutoScroller<TKey> {
   AutoScroller({
@@ -49,9 +50,10 @@ class AutoScroller<TKey> {
   late final Ticker _ticker;
   Duration? _lastTick;
 
-  /// Pure velocity ramp: 0 at the zone's inner edge, [maxVelocity] at
-  /// the viewport edge, negative when scrolling up. Extracted for the
-  /// headless unit tests.
+  /// Pure velocity ramp: 0 at the zone's inner edge, [maxVelocity] at the
+  /// viewport edge, negative in the leading zone, and 0 between them.
+  /// Static and side-effect-free so it can be exercised without a
+  /// session.
   static double velocityAt({
     required double viewportDy,
     required double viewportHeight,
@@ -72,8 +74,8 @@ class AutoScroller<TKey> {
     return 0.0;
   }
 
-  /// Starts/stops the ticker for the pointer's current edge-zone
-  /// membership. A null [sample] means the scrollable is gone — stop.
+  /// Starts or stops the ticker for the pointer's current edge-zone
+  /// membership. A null [sample] means the scrollable is gone: stop.
   void evaluate(PointerSample? sample) {
     if (sample == null) {
       _stop();
@@ -92,6 +94,8 @@ class AutoScroller<TKey> {
     }
   }
 
+  /// Idles the ticker and forgets the last tick stamp, so a later start
+  /// begins a fresh time base instead of integrating a stale gap.
   void _stop() {
     if (_ticker.isActive) {
       _ticker.stop();
@@ -99,6 +103,9 @@ class AutoScroller<TKey> {
     _lastTick = null;
   }
 
+  /// Integrates one frame of scroll velocity into the scroll position.
+  /// The first tick assumes a 16ms step, having no previous stamp to
+  /// difference against.
   void _onTick(Duration elapsed) {
     // Nullable-sample hardening: between the tree unmounting mid-drag
     // and the backstop's post-frame cancel, one tick can still fire.
@@ -130,11 +137,13 @@ class AutoScroller<TKey> {
     if (newPixels != position.pixels) {
       // jumpTo synchronously notifies the session's scroll-position
       // listener, which re-resolves the target and coalesces the
-      // notification — one re-resolution path for every scroll source.
+      // notification: one re-resolution path for every scroll source.
       position.jumpTo(newPixels);
     }
   }
 
+  /// Stops and disposes the ticker. The exit reason does not matter:
+  /// autoscroll leaves no state behind to unwind differently.
   void detach(SessionExit exit) {
     _stop();
     _ticker.dispose();
@@ -163,13 +172,19 @@ class DwellExpander<TKey> {
   /// the timer ran. A callback, so this class never sees the controller.
   final bool Function() _sessionLive;
 
-  /// The controller's resolve-and-notify wrapper — the one ASYNC re-entry
+  /// The controller's resolve-and-notify wrapper: the one ASYNC re-entry
   /// into the session's resolve pipeline.
   final VoidCallback _requestResolve;
 
   Timer? _timer;
   TKey? _armedKey;
 
+  /// Re-arms the dwell timer for the newly resolved [target].
+  ///
+  /// A target qualifies only as an `into` drop on a collapsed row that
+  /// still has live children. Re-resolving to the same candidate is a
+  /// no-op, so a steady hover keeps one timer running; anything else
+  /// cancels it. A null or zero delay disables the behavior outright.
   void onTargetResolved(TreeDropTarget<TKey>? target) {
     final delay = _delay;
     if (delay == null || delay == Duration.zero) {
@@ -217,6 +232,8 @@ class DwellExpander<TKey> {
     });
   }
 
+  /// Cancels any armed dwell. The exit reason does not matter: a timer
+  /// that never fired has changed nothing to unwind.
   void detach(SessionExit exit) {
     _timer?.cancel();
     _timer = null;
@@ -244,17 +261,18 @@ class MakeRoomDriver<TKey> {
   final Duration _duration;
   final Curve _curve;
 
+  /// Opens or re-targets the gap at the resolved slot. A null target is a
+  /// transient dead spot and HOLDS the current gap; only the session's
+  /// exit paths release it.
   void onTargetResolved(TreeDropTarget<TKey>? target) {
     if (target == null) {
-      // Transient dead spot: HOLD the last gap. Released only by the
-      // session's exit paths below.
       return;
     }
-    // Deliberately unconditional — no driver-side debounce. The
-    // controller memoizes identical geometry inside
-    // [setReorderPreviewAtIndex] (all callers, self-healing against
-    // extent/structure changes), so a same-slot re-send is already O(1)
-    // there. Do not re-add one here.
+    // Deliberately unconditional: no driver-side debounce. The controller
+    // memoizes identical geometry and timing mode inside
+    // [setReorderPreviewAtIndex], so a same-slot re-send already early-
+    // outs there, and that memo self-heals against extent and structure
+    // changes in a way a driver-side one could not. Do not re-add one.
     //
     // The gap comes from the RESOLVED SLOT, not from the hovered row.
     // Deriving it from the row is only correct while the slot is
@@ -277,6 +295,9 @@ class MakeRoomDriver<TKey> {
     _treeController.clearReorderPreview(animate: false);
   }
 
+  /// Releases the gap according to how the session ended: a commit has
+  /// already snapped it through [snapForCommit], a cancel animates it
+  /// closed, and a dispose drops it with no motion left to watch.
   void detach(SessionExit exit) {
     switch (exit) {
       case SessionExit.commit:
@@ -329,17 +350,20 @@ class DropSettler<TKey> {
   final Duration _duration;
   final Curve _curve;
 
-  /// The dragged VISIBLE subtree's stack, captured at construction
-  /// (`startDrag` time, the same reads the proxy's drawing capture
-  /// uses): each row in visible order with its y offset within the
-  /// stack (cumulative captured extents) and its indent RELATIVE to
-  /// the dragged row. Entry 0 is the dragged row at (0, 0), so a leaf
-  /// or collapsed drag degenerates to the single-entry maps this
-  /// settler always emitted. Frozen per session; rows that leave the
+  /// The dragged VISIBLE subtree's stack, captured at construction, which
+  /// is `startDrag` time and the same reads the proxy's drawing capture
+  /// uses: each row in visible order with its y offset within the stack
+  /// (cumulative captured extents) and its indent RELATIVE to the dragged
+  /// row. Entry 0 is the dragged row at (0, 0), so a leaf or collapsed
+  /// drag reduces to one entry. Frozen per session; rows that leave the
   /// visible order mid-drag are skipped per entry at install time.
   late final List<({TKey key, double relativeY, double relativeIndent})>
   _stack;
 
+  /// Snapshots the dragged row and its visible descendants into stack
+  /// coordinates. Falls back to a lone dragged-row entry when the row
+  /// sits outside the visible order (an imperative drag of a hidden row)
+  /// or has no visible subtree.
   List<({TKey key, double relativeY, double relativeIndent})>
   _captureStack() {
     final tree = _treeController;
@@ -375,30 +399,29 @@ class DropSettler<TKey> {
 
   /// The proxy's VISUAL cross offset in sliver cross space, sampled at
   /// glide-install time so a release mid-animation hands off exactly
-  /// where the card visually is. Presentation-supplied through
-  /// `startDrag(proxyCrossOffset:)`; null for sessions with no proxy
-  /// presentation (imperative callers, unit tests), whose glides then
-  /// carry no x motion and whose baseline override preserves the
-  /// captured x, exactly the pre-existing y-only behavior.
+  /// where the card visually is. Supplied by the presentation layer
+  /// through `startDrag(proxyCrossOffset:)`, and null for sessions with
+  /// no proxy (imperative callers, unit tests): their glides carry no x
+  /// motion and their baseline override preserves each row's captured x.
   final double Function()? _proxyCrossOffset;
 
-  /// The commit script's baseline override: the dragged row's FLIP
-  /// starts at the proxy's release position (pointer − grab offset).
-  /// Null when the scrollable is gone — the classic old-slot FLIP is the
+  /// The commit script's baseline override: each row's FLIP starts at its
+  /// position in the proxy stack at release, which is the pointer minus
+  /// the grab offset plus that row's stack offset. Null when the
+  /// scrollable is gone, leaving the ordinary old-slot FLIP as the
   /// graceful fallback.
   Map<TKey, ({double y, double? x})>? baselineOverrides() {
     final release = _space.sample(_pointerGlobal());
     if (release == null) {
       return null;
     }
-    // One entry per subtree row: y stacks below the release position
-    // by the captured cumulative extents; x is the proxy's visual
-    // cross offset plus the row's relative indent, or null (preserve
-    // the captured x, per row) when this session has no proxy
-    // presentation. For closure-less `settleFromRelease` sessions the
-    // multi-row y is a deliberate extension: their subtree rows emerge
-    // stacked under the release point, completing the
-    // release-position handoff those callers opted into.
+    // One entry per subtree row: y stacks below the release position by
+    // the captured cumulative extents; x is the proxy's visual cross
+    // offset plus the row's relative indent, or null (preserve that row's
+    // captured x) when the session has no proxy presentation. Sessions
+    // that opted into `settleFromRelease` without a proxy get the
+    // multi-row y as well, so their subtree rows emerge stacked under the
+    // release point.
     final baseY = release.sliverY - _grabDy();
     final crossOffset = _proxyCrossOffset?.call();
     final map = <TKey, ({double y, double? x})>{};
@@ -411,12 +434,15 @@ class DropSettler<TKey> {
     return map;
   }
 
+  /// Installs the return glide, on cancel only. A commit carries its
+  /// hand-off through the FLIP baseline override instead, and a dispose
+  /// has no surface left to animate on.
   void detach(SessionExit exit) {
     if (exit != SessionExit.cancel) {
       return;
     }
     // Mirror of the commit settle: no mutation happened, so there is no
-    // consume-time FLIP to override — install the return glide directly
+    // consume-time FLIP to override; install the return glide directly
     // toward the row's unchanged slot.
     _installReleaseGlide();
   }
@@ -431,29 +457,26 @@ class DropSettler<TKey> {
     _installReleaseGlide();
   }
 
-  /// Shared glide install: proxy release position → the row's CURRENT
-  /// structural slot (pre-mutation on the cancel path, post-mutation in
-  /// the dead-commit fallback).
+  /// Shared glide install, from the proxy release position to each row's
+  /// CURRENT structural slot: pre-mutation on the cancel path,
+  /// post-mutation in the dead-commit fallback. One entry per subtree
+  /// row.
   ///
-  /// Rides the drop-settle channel, so the glide honors its OWN
-  /// family's zero rule rather than `reorderSlide`'s. A null sample
-  /// means the scrollable is gone (the cancel path also runs from the
-  /// deactivate backstop's POST-FRAME callback after a full tree
-  /// swap-out); a null structural y means the row left the visible
-  /// order (dead-commit fallback into a collapsed parent). Both skip
-  /// silently — nothing is visible to glide.
+  /// Rides the drop-settle channel, so the glide honors its OWN family's
+  /// zero rule rather than `reorderSlide`'s.
   ///
-  /// X: each glide starts at the row's position in the proxy stack
-  /// (the proxy's visual cross offset plus the row's relative indent)
-  /// and settles at the row's structural indent. With no proxy
-  /// cross-offset source the prior x equals the current x per row
-  /// (zero x delta): the pre-existing no-x-motion behavior for
-  /// closure-less sessions.
+  /// In x, each glide starts at the row's position in the proxy stack
+  /// (the proxy's visual cross offset plus its relative indent) and
+  /// settles at the row's structural indent. Without a proxy
+  /// cross-offset source, prior and current x are equal per row, so the
+  /// glide is y-only.
   ///
-  /// One entry per subtree row; a row whose structural y is null (left
-  /// the visible order mid-drag, or the whole subtree landed under a
-  /// collapsed parent) is skipped per entry, generalizing the old
-  /// single-key skip.
+  /// Two skips, both silent because nothing would be visible to animate:
+  /// a null sample means the scrollable is gone, which the cancel path
+  /// can hit because it also runs from the deactivate backstop's
+  /// POST-FRAME callback after a full tree swap-out; a null structural y
+  /// means that row left the visible order, which the dead-commit
+  /// fallback can hit when the subtree lands under a collapsed parent.
   void _installReleaseGlide() {
     final release = _space.sample(_pointerGlobal());
     if (release == null) {

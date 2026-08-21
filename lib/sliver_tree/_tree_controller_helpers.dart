@@ -5,9 +5,12 @@
 part of "tree_controller.dart";
 
 /// Internal helpers for [TreeController]: bulk visible-order maintenance,
-/// descendant/subtree walks, and node-data purging. Extracted purely for
-/// file-size reasons; the logical owner is still [TreeController].
+/// descendant and subtree walks, and node-data purging. Split out for file
+/// size only; the logical owner is still [TreeController], and every
+/// member here reads its private state directly.
 extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
+  /// Resets every aggregate to empty. Each one owns its own teardown, so
+  /// this is a fan-out rather than a place to add per-field clearing.
   void _clear() {
     // Each aggregate resets everything it owns: _anim covers all four
     // animation sources plus the shared per-nid arrays, ticker and
@@ -24,6 +27,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     _keysToRemoveScratch.clear();
   }
 
+  /// Rebuilds the order buffer's reverse index from scratch, for callers
+  /// that mutated the order without maintaining it incrementally.
   void _rebuildVisibleIndex() {
     _order.rebuildIndex();
     _assertIndexConsistency();
@@ -49,7 +54,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   /// By default only an O(changed-range) order/reverse-index agreement
   /// check runs for the span the caller just touched: the full sweep
   /// (whole order walk + full nid-table walks + every animation mirror)
-  /// makes N sequential inserts O(N²) in debug, taxing the whole
+  /// makes N sequential inserts O(N^2) in debug, taxing the whole
   /// widget-test suite on every mutation. The full sweep stays available
   /// behind [TreeController.debugFullConsistencyChecks], enabled by the
   /// fuzz/purge suites that exist to exercise it.
@@ -84,15 +89,14 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   ///    `_byNid` slot is non-null.
   /// 3. `SlideAnimationEngine._activeSlideNids` contains exactly the nids
   ///    whose `_slideByNid` slot is non-null.
-  /// 4. Every pending-deletion bit, standalone slot, and slide slot lives
-  ///    at a registered nid — no orphans surviving past [_releaseNid].
+  /// 4. Every pending-deletion bit, standalone slot and slide slot lives
+  ///    at a registered nid, with no orphans surviving [_releaseNid].
   void _assertAnimationStateConsistency() {
     assert(() {
       // The coordinator checks standalone, op groups and bulk, plus its
       // own pending-deletion counter. The slide engine is checked
-      // separately — it is the one source the coordinator's sweep does
-      // not cover. (The preview engine holds no per-nid invariant to
-      // check.)
+      // separately, being the one source the coordinator's sweep does not
+      // cover. The preview engine holds no per-nid invariant to check.
       _anim.debugAssertConsistent();
       _slide.debugAssertConsistent();
       return true;
@@ -125,9 +129,9 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     // Compare against [visibleCount] (not keys.length): a caller can pass a
     // key whose nid was already released (e.g. an op group's dismissed
     // handler purges pendingDeletion members before batching the visible-
-    // order removal). Those keys report VisibleOrderBuffer.kNotVisible here, and using
-    // keys.length would let the fast path fire when non-key rows sit in the
-    // range gap, clobbering unrelated siblings.
+    // order removal). Those keys report `VisibleOrderBuffer.kNotVisible`
+    // here, and using keys.length would let the fast path fire when
+    // non-key rows sit in the range gap, clobbering unrelated siblings.
     int minIdx = _order.length;
     int maxIdx = -1;
     int visibleCount = 0;
@@ -148,8 +152,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     // still present in the visible order. A batch that mixes already-purged
     // keys with live ones is routine: `_finalizeAnimation`'s deletion branch
     // (and the op-group dismissed handler's category-1 path) calls
-    // `_purgeNodeData` — which releases the nid and clears the reverse-index
-    // slot — but deliberately leaves the entry in `_orderNids`, deferring the
+    // `_purgeNodeData`, which releases the nid and clears the reverse-index
+    // slot but deliberately leaves the entry in `_orderNids`, deferring the
     // compaction to this call. The contiguous path removes an index range and
     // can only locate keys via the reverse index; a purged key's slot is no
     // longer locatable, so a range removal silently leaves its stale
@@ -176,6 +180,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     }
   }
 
+  /// Every descendant of [key], excluding [key] itself, in the pre-order
+  /// [_getDescendantsInto] documents. Allocates the result list.
   List<TKey> _getDescendants(TKey key) {
     debugDescendantWalkCount++;
     final result = <TKey>[];
@@ -184,10 +190,10 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   }
 
   /// Iterative DFS pre-order collection of every descendant of [key]
-  /// (excluding [key] itself). Children are pushed in reverse so the
-  /// first child pops first; this matches the original recursive
-  /// implementation's visit order, which [remove] and other callers
-  /// depend on.
+  /// (excluding [key] itself). Children are pushed in reverse so the first
+  /// child pops first, giving left-to-right pre-order. [remove] and other
+  /// callers depend on that exact visit order, so it is not free to
+  /// change.
   void _getDescendantsInto(TKey key, List<TKey> result) {
     final stack = <TKey>[];
     final seed = _childListOf(key);
@@ -210,6 +216,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     }
   }
 
+  /// Every visible descendant of [key], under the expansion rules
+  /// [_getVisibleDescendantsInto] documents. Allocates the result list.
   List<TKey> _getVisibleDescendants(TKey key) {
     debugVisibleDescendantsWalkCount++;
     final result = <TKey>[];
@@ -219,12 +227,12 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
 
   /// Iterative DFS collection of every visible descendant of [key].
   ///
-  /// A node is emitted when it is in the visible order. The original
-  /// recursive version gated *descent into grandchildren* on the child's
-  /// expansion state but **did not** gate the top-level walk on [key]'s
-  /// own expansion — callers such as [collapse] deliberately flip
-  /// expanded=false before asking which descendants to hide, and rely
-  /// on the first level being returned regardless.
+  /// A node is emitted when it is in the visible order. Descent into
+  /// grandchildren is gated on each child's expansion state, but the
+  /// top-level walk is deliberately NOT gated on [key]'s own expansion:
+  /// callers such as [collapse] flip expanded to false before asking which
+  /// descendants to hide, and rely on the first level coming back
+  /// regardless.
   void _getVisibleDescendantsInto(TKey key, List<TKey> result) {
     final seed = _childListOf(key);
     if (seed == null) {
@@ -260,10 +268,9 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     return result;
   }
 
-  /// Iterative DFS pre-order flatten. Only descends into expanded nodes
-  /// (matching the original recursive behaviour). Emits [key] itself
-  /// iff [includeRoot], then every descendant reachable through the
-  /// expanded subtree in DFS pre-order.
+  /// Iterative DFS pre-order flatten that descends only into expanded
+  /// nodes. Emits [key] itself when [includeRoot] is set, then every
+  /// descendant reachable through the expanded subtree, in pre-order.
   void _flattenSubtreeInto(
     TKey key,
     List<TKey> result, {
@@ -300,7 +307,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
   }
 
   /// Removes a single key from all internal maps (but not from the visible
-  /// order, _roots, or the parent's children list — those are handled by
+  /// order, _roots, or the parent's children list; those are handled by
   /// the caller).
   void _purgeNodeData(TKey key) {
     if (_clearFullExtent(key) != null) {
@@ -322,10 +329,11 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
         }
       }
     }
-    // If [key] IS an operation key (the node that triggered an expand/collapse),
-    // tear down the whole group. Without this, the entry lives on in the
-    // op-group registry orphaned — a later insert+expand with the same key
-    // would reuse the stale group via the Path 1 branch in [expand]/[collapse].
+    // If [key] IS an operation key, meaning the node whose expand or
+    // collapse created the group, tear the whole group down. Otherwise the
+    // entry lives on orphaned in the op-group registry, and a later insert
+    // plus expand with the same key would reuse that stale group through
+    // the reverse-an-existing-group branch of [expand] / [collapse].
     if (_anim.opGroups.removeGroup(key)) {
       _bumpAnimGen();
     }
@@ -383,9 +391,9 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     // reports kNotVisible and only the O(N + nidCapacity) sweep
     // (`removeWhereKeyIn` + `resetIndexAll`) can compact. Capture the
     // visible indices NOW: when every key in the batch holds a visible
-    // slot and those slots are contiguous — the dominant case, since an
-    // expanded subtree is contiguous in the visible order by
-    // construction — Step 3 can range-remove in O(range + suffix)
+    // slot and those slots are contiguous, which is the dominant case
+    // because an expanded subtree is contiguous in the visible order by
+    // construction, Step 3 can range-remove in O(range + suffix)
     // instead. Batches with hidden members (collapsed descendants,
     // possibly holding animation-carved order entries) or gaps keep the
     // safe sweep.
@@ -414,7 +422,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
 
     // Step 1: cache decrement (first surviving ancestor walk). Must run
     // before unlink/purge because the bump walk reads _parentByNid, and
-    // _purgeNodeData → _releaseNid clears it. Uses the explicit
+    // _purgeNodeData, where _releaseNid clears it. Uses the explicit
     // bumpFromSelf API so Step 3's compaction can suppress the inlined
     // callbacks without double-decrementing.
     for (final key in nodesToRemove) {
@@ -439,8 +447,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       }
     }
 
-    // Step 2: unlink and purge (combined per key — purge clears the
-    // parent pointer, so unlink must happen first within each iteration).
+    // Step 2: unlink and purge, combined per key because purge clears the
+    // parent pointer, so unlink has to happen first within each iteration.
     for (final key in nodesToRemove) {
       final parentKey = _parentKeyOfKey(key);
       if (parentKey != null) {
@@ -461,7 +469,7 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
         // Range fast path: the purge above already cleared
         // each released nid's reverse-index slot (the buffer method's
         // own clears are harmless re-writes), so this is O(range +
-        // suffix) — no full sweep, no O(nidCapacity) reverse-index reset.
+        // suffix): no full sweep, no O(nidCapacity) reverse-index reset.
         _order.runWithSubtreeSizeUpdatesSuppressed(() {
           _order.removeContiguousRange(minIdx, maxIdx + 1);
         });
@@ -477,6 +485,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     }
   }
 
+  /// Purges [nodeIds] and compacts the visible order in one pass, with no
+  /// exit animation. The non-animated arm of `remove`.
   void _removeNodesImmediate(List<TKey> nodeIds) {
     _purgeAndRemoveFromOrder(nodeIds);
   }

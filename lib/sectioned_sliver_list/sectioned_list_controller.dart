@@ -65,9 +65,14 @@ class SectionedListController<K extends Object, Section, Item>
          indentWidth: itemIndent,
        ),
        _preserveExpansion = preserveExpansion {
+    // The tree layer merged its two expansion-memory knobs into one int;
+    // this module keeps the friendlier bool (it never exposed the
+    // capacity) and maps it onto the shared default.
     _sync = TreeSyncController<SecKey<K>, SecPayload<Section, Item>>(
       treeController: _tree,
-      preserveExpansion: preserveExpansion,
+      expansionMemory: preserveExpansion
+          ? TreeSyncController.defaultExpansionMemory
+          : 0,
     );
     // Single underlying TreeController node-data listener that fans out
     // into the two domain-specific listener lists. Attached unconditionally;
@@ -150,7 +155,7 @@ class SectionedListController<K extends Object, Section, Item>
     _sync.dispose();
     _sync = TreeSyncController<SecKey<K>, SecPayload<Section, Item>>(
       treeController: _tree,
-      preserveExpansion: value,
+      expansionMemory: value ? TreeSyncController.defaultExpansionMemory : 0,
     );
     _sync.initializeTracking();
   }

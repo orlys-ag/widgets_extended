@@ -1,12 +1,11 @@
 /// Internal: lazy live-index-in-parent cache backing
 /// `TreeController.getIndexInParent`.
 ///
-/// Plan: `plans/2026-08-11-item3-step2-live-index-cache.md` (item 3 step 2
-/// of the 2026-07-29 architecture review). Pure stamp algebra and storage;
-/// the controller owns the refresh loop because a refresh needs both the
-/// raw sibling list (NodeStore) and the pending-deletion flags
-/// (AnimationCoordinator), which this component deliberately knows nothing
-/// about. That keeps it standalone-testable.
+/// Pure stamp algebra and storage. The controller owns the refresh loop,
+/// because a refresh needs both the raw sibling list (NodeStore) and the
+/// pending-deletion flags (AnimationCoordinator), neither of which this
+/// component knows anything about. That split is what keeps it
+/// standalone-testable.
 ///
 /// ## Validity model
 ///
@@ -37,7 +36,11 @@
 ///   entry-bumped refresh against a half-mutated list would be trusted
 ///   after the method returns. With exit placement such a refresh is
 ///   discarded by the exit bump, so mid-window reads are self-healing.
-///   See the plan's bump-placement section before changing this.
+/// - A NEW raw-sibling-list mutator must add its own exit bump AND join
+///   the mutation script in `live_index_oracle_fuzz_test.dart`. That fuzz
+///   guards both rules: it interleaves reads with mutations, so a missing
+///   or misplaced bump surfaces as a divergence from its independent
+///   oracle. A mutator absent from the script is simply unguarded.
 library;
 
 import 'dart:typed_data';
@@ -45,10 +48,19 @@ import 'dart:typed_data';
 /// Sentinel parent nid for the root list, which has no nid of its own.
 const int kRootListParentNid = -1;
 
+/// Stamp storage for the live-index cache: no tree knowledge and no
+/// refresh logic, just the generation algebra described above.
+///
+/// Refresh protocol: call [beginRefresh] once for a parent, then
+/// [writeSlot] for each live member of that list. Every [readSlot] is
+/// then valid until the next [bump] invalidates the whole cache.
 class LiveIndexCache {
   /// Monotonic validity generation. Starts at 1 so zero-filled stamp
   /// slots are stale by construction.
   int _generation = 1;
+
+  /// The current validity generation, compared against the parent and
+  /// slot stamps to decide whether a cached answer can be trusted.
   int get generation => _generation;
 
   /// Generation at which the root list was last refreshed. 0 = never.
@@ -67,10 +79,10 @@ class LiveIndexCache {
   /// own.
   Int32List _liveIndex = Int32List(0);
 
-  /// Invalidates every cached list. One no-argument increment; called by
-  /// every mutator after its raw-list writes (see the class doc for why
-  /// exit placement is load-bearing) and by the pending-deletion flip
-  /// forwarders.
+  /// Invalidates every cached list with a single increment. Called by
+  /// every mutator after its raw-list writes, and by the pending-deletion
+  /// flip forwarders. The library doc's invariants explain why that
+  /// placement is load-bearing rather than incidental.
   void bump() {
     _generation++;
   }

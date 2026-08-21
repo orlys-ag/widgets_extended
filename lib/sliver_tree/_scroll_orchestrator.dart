@@ -14,7 +14,14 @@ import 'package:flutter/widgets.dart';
 import 'tree_controller.dart';
 import 'types.dart';
 
-/// Scroll orchestration. See library docs.
+/// Scroll orchestration for one [TreeController]. See the library doc for
+/// the surface it owns.
+///
+/// Two of its concerns are stateful and worth knowing before editing it:
+/// the full-extent prefix cache, which every offset query reads and any
+/// visible-order or extent change invalidates, and the single in-flight
+/// animated scroll, whose teardown three different parties can race to
+/// perform.
 class ScrollOrchestrator<TKey, TData> {
   ScrollOrchestrator({
     required TreeController<TKey, TData> controller,
@@ -38,18 +45,18 @@ class ScrollOrchestrator<TKey, TData> {
   /// Ticker at that point trips the framework's active-Ticker assert.
   ///
   /// Animated scrolls are SINGLE-FLIGHT: starting a new one cancels the
-  /// in-flight one (the newer target wins — two concurrent animations
-  /// fighting over `position.jumpTo` was never meaningful), which is what
-  /// makes this single slot correct by construction. Before R2 the slot
-  /// held bare progress/follower fields that a second concurrent scroll
-  /// simply overwrote — the first scroll's resources then leaked past
-  /// [dispose], re-tripping the exact active-Ticker assert 1.9 fixed.
+  /// in-flight one, since two animations fighting over `position.jumpTo`
+  /// is not a meaningful state and the newer target wins. That is what
+  /// makes one slot sufficient. It must stay a whole session rather than
+  /// loose progress and follower fields: a second scroll would overwrite
+  /// those, stranding the first scroll's ticker and listener past
+  /// [dispose], which is the active-Ticker assert described above.
   _ActiveScroll? _activeScroll;
 
   /// Idempotently releases [session]'s resources (follower listener +
   /// progress controller). Callable from the owning loop's `finally`,
-  /// from a superseding scroll, and from [dispose] — whichever runs
-  /// first wins; the rest no-op via [_ActiveScroll.tornDown].
+  /// from a superseding scroll, and from [dispose]. Whichever runs first
+  /// wins, and the rest no-op via [_ActiveScroll.tornDown].
   void _teardownScroll(_ActiveScroll session) {
     if (session.tornDown) {
       return;
@@ -103,9 +110,9 @@ class ScrollOrchestrator<TKey, TData> {
     _fullOffsetPrefixDirty = false;
   }
 
-  /// Returns the prefix-sum full-extent offset up to visible index [index]
-  /// (exclusive). Public so the controller can access it via a thin
-  /// shim if any other path inside the controller still needs it.
+  /// Prefix-sum full-extent offset up to visible index [index], exclusive.
+  /// Rebuilds the cache first when it is stale, so the first call after a
+  /// mutation is O(N) and every call until the next one is O(1).
   double fullOffsetAt(int index) {
     _ensureFullOffsetPrefix();
     return _fullOffsetPrefix![index];
@@ -133,11 +140,11 @@ class ScrollOrchestrator<TKey, TData> {
     double offset = 0.0;
     final orderNids = _controller.orderNidsView;
     for (int i = 0; i < targetIndex; i++) {
-      // The slow path iterates visible-order nids — every entry there is
-      // guaranteed live by the order buffer's invariants, so the cast is
-      // safe. `as TKey` instead of `!` to satisfy the analyzer's
-      // nullable-type-parameter check (TKey itself may be nullable; the
-      // result of `keyOfNid` is `TKey?` which we know is non-null here).
+      // The slow path iterates visible-order nids, and the order buffer's
+      // invariants guarantee every entry there is live, so the cast is
+      // safe. `as TKey` rather than `!` satisfies the analyzer's
+      // nullable-type-parameter check: TKey may itself be nullable, while
+      // `keyOfNid` returns a `TKey?` that is known non-null here.
       final k = _controller.keyOfNid(orderNids[i]) as TKey;
       final measured = _controller.getMeasuredExtent(k);
       if (measured != null) {
@@ -231,8 +238,8 @@ class ScrollOrchestrator<TKey, TData> {
       if (expandedCount > 0) {
         // The synchronous expansion enlarged the scrollable content, but
         // `position.maxScrollExtent` still reflects the last laid-out
-        // geometry — clamping against it would stop the scroll at the
-        // stale max, leaving the target row below the viewport. Wait one
+        // geometry, so clamping against it would stop the scroll at the
+        // stale max and leave the target row below the viewport. Wait one
         // frame (scheduling one if none is pending) so the enlarged
         // sliver lays out before reading the position. Mirrors the
         // animated-concurrent path's endOfFrame wait + final snap.
@@ -268,10 +275,10 @@ class ScrollOrchestrator<TKey, TData> {
     return true;
   }
 
-  /// Runs ancestor expansion concurrently with a scroll animation. Each
-  /// animation tick re-derives the target from the current animated
-  /// offsets. Required because the rendered sliver's `scrollExtent` uses
-  /// animated extents — `position.maxScrollExtent` is undersized while
+  /// Runs ancestor expansion concurrently with a scroll animation,
+  /// re-deriving the target from the current animated offsets on every
+  /// tick. Required because the rendered sliver's `scrollExtent` uses
+  /// animated extents: `position.maxScrollExtent` is undersized while the
   /// ancestors grow, so a one-shot `animateTo` would clamp short.
   Future<bool> _animatedConcurrentScroll({
     required TKey key,
@@ -286,10 +293,10 @@ class ScrollOrchestrator<TKey, TData> {
     final position = scrollController.position;
     final initialPixels = position.pixels;
 
-    // Dedicated progress animation for the scroll curve. See
-    // [TreeController._animatedConcurrentScroll]'s original commentary
-    // for why this is an [AnimationController] (Ticker pipeline,
-    // FakeAsync compatibility, no `currentFrameTimeStamp` assertion).
+    // Dedicated progress animation for the scroll curve. An
+    // AnimationController rather than a raw Ticker: it rides the standard
+    // ticker pipeline, stays FakeAsync-compatible under test, and avoids
+    // the `currentFrameTimeStamp` assertion a hand-rolled ticker hits.
     final scrollProgress = AnimationController(
       vsync: _vsync,
       duration: duration,
@@ -302,10 +309,10 @@ class ScrollOrchestrator<TKey, TData> {
     }
 
     // Snapshot opaque tokens identifying the operation groups we just
-    // started. We wait on identity (not operationKey lookup) so a
-    // concurrent collapse + re-expand of the same ancestor — which
-    // would swap in a fresh group under the same key — does not mask
-    // our targets as already settled.
+    // started. Waiting on identity rather than an operationKey lookup
+    // matters because a concurrent collapse and re-expand of the same
+    // ancestor swaps in a fresh group under the same key, which would
+    // otherwise read as our targets having already settled.
     final startedTokens = <(TKey, Object)>[];
     for (final ancestor in ancestors) {
       final token = _controller.captureOperationGroupToken(ancestor);
@@ -367,18 +374,18 @@ class ScrollOrchestrator<TKey, TData> {
     _activeScroll = session;
 
     // Wait for both timelines to complete:
-    //   1. The dedicated [scrollProgress] (so the curve reaches 1.0).
-    //   2. Every ancestor expansion's terminal V=1.0 tick (observable
-    //      externally as the operation group's identity disappearing
-    //      from the controller's _operationGroups map).
+    //   1. The dedicated [scrollProgress], so the curve reaches 1.0.
+    //   2. Every ancestor expansion's terminal tick, observable from
+    //      outside as its operation group no longer matching the token
+    //      captured above.
     //
-    // The try/finally makes the listener removal + controller disposal
+    // The try/finally makes listener removal and controller disposal
     // structural: every exit path (normal completion, lost clients,
-    // cancellation, or an unexpected throw) releases both, idempotently —
-    // when [dispose] or a superseding scroll cancelled this session, they
-    // already tore it down synchronously and [_teardownScroll] no-ops.
-    // The `cancelled` check must run before anything touches
-    // [scrollProgress]: a cancelled session's controller is disposed.
+    // cancellation, an unexpected throw) releases both, idempotently. If
+    // [dispose] or a superseding scroll already cancelled this session,
+    // they tore it down synchronously and [_teardownScroll] no-ops. The
+    // `cancelled` check must run before anything touches [scrollProgress],
+    // because a cancelled session's controller is already disposed.
     try {
       while (true) {
         if (session.cancelled || _disposed) {
@@ -403,9 +410,9 @@ class ScrollOrchestrator<TKey, TData> {
       }
     } finally {
       _teardownScroll(session);
-      // Clear the slot only if it still holds THIS invocation's session —
-      // never a successor's (the pre-R2 unconditional null-out is exactly
-      // what stranded a successor's teardown handles).
+      // Clear the slot only when it still holds THIS invocation's
+      // session, never a successor's: an unconditional null-out here
+      // would strand the successor's own teardown handles.
       if (identical(_activeScroll, session)) {
         _activeScroll = null;
       }
@@ -433,12 +440,14 @@ class ScrollOrchestrator<TKey, TData> {
     return true;
   }
 
-  /// Cancels any in-flight [_animatedConcurrentScroll] (synchronously
-  /// removing its follower listener and disposing its progress
-  /// controller — the vsync State typically disposes right after the
-  /// owning [TreeController], so teardown cannot wait for the loop's
-  /// next iteration) and releases the prefix cache. Wired from
-  /// [TreeController.dispose].
+  /// Cancels any in-flight [_animatedConcurrentScroll] and releases the
+  /// prefix cache. Wired from [TreeController.dispose].
+  ///
+  /// Teardown is synchronous, removing the follower listener and
+  /// disposing the progress controller here rather than waiting for the
+  /// loop's next iteration: the vsync State typically disposes right
+  /// after the owning [TreeController], and an active Ticker at that
+  /// point trips the framework's assert.
   void dispose() {
     _disposed = true;
     final active = _activeScroll;
