@@ -34,7 +34,8 @@ double _computeAnimationSpeedMultiplier(
 /// Cross-source capture/teardown must NOT be redefined here. Dart's
 /// lexical scoping would resolve unqualified calls inside this extension
 /// to the local copy while class-body calls resolve through the
-/// controller's forwarders — two implementations that silently diverge.
+/// controller's forwarders, leaving two implementations that silently
+/// diverge.
 /// Every call site routes through the forwarders in tree_controller.dart
 /// to [AnimationCoordinator.captureAndRemoveFromGroups] /
 /// [AnimationCoordinator.removeFromAllSources]. Likewise, op-group and
@@ -58,7 +59,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
   ///
   /// **Pending-deletion deferral (animated path).** When [cancelSlides] is
   /// false (i.e. `moveNode(animate: true)`), members where
-  /// [_isPendingDeletion] is true are skipped entirely — pending-deletion
+  /// [_isPendingDeletion] is true are skipped entirely: pending-deletion
   /// is NOT cleared and the standalone exit state is NOT removed. The
   /// caller is responsible for invoking [_revertSubtreeFromPendingDeletion]
   /// AFTER the structural reparent so the case-1/2/3 policy can read the
@@ -73,7 +74,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// that same operation key).
   /// Pre-order visits ancestors before descendants, so by the time we
   /// process a node, every ancestor inside the subtree has already been
-  /// added to `preservedOpKeys` if applicable — the membership lookup
+  /// added to `preservedOpKeys` if applicable, so the membership lookup
   /// is correct. If this traversal order ever changes to BFS or
   /// post-order, the lookup will silently desync; keep pre-order or
   /// split into two passes again.
@@ -100,32 +101,31 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // (`_revertSubtreeFromPendingDeletion`, called by `moveNode` after
       // structural reparent) can apply the case-1/2/3 policy with
       // post-mutation ancestor visibility. Pending-deletion is set only by
-      // `remove()` and always pairs with a standalone exit — no op-group
-      // entanglement, so this skip is safe alongside the preservedOpKeys
-      // logic below.
+      // `remove()` and always pairs with a standalone exit, so there is no
+      // op-group entanglement and this skip is safe alongside the
+      // preservedOpKeys logic below.
       final defer = !cancelSlides && _isPendingDeletion(nodeId);
 
       if (!defer) {
         _clearPendingDeletion(nodeId);
       }
-      // Slide cancellation is conditional — when the caller is
+      // Slide cancellation is conditional. When the caller is
       // `moveNode(animate: true)`, the staged baseline already captured
       // the row's mid-flight painted position (structural + currentDelta),
       // and the next consume will COMPOSE the existing slide toward the
       // new destination. Cancelling here would force the consume's
-      // post-mutation snapshot to read `slideY = 0`, masking the in-
-      // flight state from `GhostRegistry.applyClampAndInstallNewGhosts` —
-      // its both-
-      // off-screen guard would then suppress what should have been a
-      // composition install, and the row would jump structurally with
-      // no visible animation.
+      // post-mutation snapshot to read `slideY = 0`, hiding the in-flight
+      // state from `GhostRegistry.applyClampAndInstallNewGhosts`, whose
+      // both-off-screen guard would then suppress what should have been a
+      // composition install, leaving the row to jump structurally with no
+      // visible animation.
       if (cancelSlides) {
         _slide.cancelForKey(nodeId);
       }
 
       final opGroupKey = _operationGroupOf(nodeId);
       if (opGroupKey != null && preservedOpKeys.contains(opGroupKey)) {
-        // Member of a preserved op group — keep its op-group state intact
+        // Member of a preserved op group: keep its op-group state intact
         // so the animation continues against the post-move position.
         // Still detach from standalone / bulk sources defensively: a node
         // shouldn't be in both an op group and another source, but any
@@ -154,8 +154,8 @@ extension _TreeControllerAnimationOps<TKey, TData>
         // own visible-order slot, has no positional anchor, and would
         // simply continue growing the row at its new slot if preserved.
         // Killing it on the animated path makes a mid-enter row "snap"
-        // to full extent at its destination — visible as the row
-        // appearing without any growth animation. Mirrors the
+        // to full extent at its destination, seen as the row appearing
+        // without any growth animation. Mirrors the
         // pending-deletion `defer` path: preserve type-entering state,
         // clear external sources.
         final activeStandalone = !cancelSlides ? _standaloneAt(nodeId) : null;
@@ -239,7 +239,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
     _disposeBulkAnimationGroup();
 
     // Only notify when visible order actually changed. The .completed branch
-    // (expandAll finished) inserts nothing new — every expansion happened at
+    // (expandAll finished) inserts nothing new: every expansion happened at
     // expandAll() call time and already fired _notifyStructural then. Firing
     // here a second time makes SliverTreeElement mark every mounted row dirty
     // and rebuild it, producing the end-of-animation rebuild spike.
@@ -267,7 +267,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // Expansion done (value = 1). Remove group, clean up maps.
       // No structural notification: the subtree was inserted into _order at
       // expand() call time and already notified then. This status flip is
-      // animation bookkeeping — the widget tree sees no change, so firing
+      // animation bookkeeping, and the widget tree sees no change, so firing
       // notifyListeners here would force SliverTreeElement to rebuild every
       // mounted row for nothing.
       //
@@ -284,8 +284,9 @@ extension _TreeControllerAnimationOps<TKey, TData>
       // Collapse done (value = 0). Remove nodes from visible order.
       //
       // pendingRemoval splits into two semantic categories:
-      //   (1) _pendingDeletion members: fully purge (unlink → cache
-      //       decrement → release nid). Order compaction is batched.
+      //   (1) _pendingDeletion members: fully purge, meaning unlink, then
+      //       cache decrement, then release nid. Order compaction is
+      //       batched.
       //   (2) Others: structurally still present; just leave _order if
       //       their ancestors are no longer expanded. No purge.
       //
@@ -357,6 +358,13 @@ extension _TreeControllerAnimationOps<TKey, TData>
     }
   }
 
+  /// Installs a standalone ENTER for [key], growing from whatever extent
+  /// the row currently paints at up to its measured full extent.
+  ///
+  /// The start extent is captured from whichever source owned the key
+  /// first, so a row re-entering mid-exit resumes where it is instead of
+  /// restarting from zero. An unmeasured row takes [_unknownExtent] as its
+  /// target, which layout resolves once the row has a size.
   void _startStandaloneEnterAnimation(TKey key, {TKey? triggeringAncestorId}) {
     // Capture current animated extent from any source BEFORE removing
     final capturedExtent = _captureAndRemoveFromGroups(key);
@@ -480,10 +488,22 @@ extension _TreeControllerAnimationOps<TKey, TData>
     }
   }
 
+  /// Installs a standalone EXIT for [key], shrinking from whatever extent
+  /// the row currently paints at down to zero.
+  ///
+  /// Mirror of [_startStandaloneEnterAnimation]: capturing the current
+  /// extent is what keeps a row that is already mid-animation from jumping
+  /// before it starts shrinking.
   void _startStandaloneExitAnimation(TKey key, {TKey? triggeringAncestorId}) {
-    // Capture current animated extent from any source BEFORE removing
+    // Capture current animated extent from any source BEFORE removing.
+    // A never-measured row falls back to the ESTIMATE, not zero: layout
+    // was sizing it at the estimate the frame before, and an exit that
+    // starts at zero deletes the row's extent in a single frame (see
+    // `unmeasured_exit_extent_test.dart`). Same fallback chain as the
+    // collapse group's target extent and `getCurrentExtent` at rest.
     final capturedExtent = _captureAndRemoveFromGroups(key);
-    final currentExtent = capturedExtent ?? (_fullExtentOf(key) ?? 0.0);
+    final currentExtent =
+        capturedExtent ?? (_fullExtentOf(key) ?? TreeController.defaultExtent);
 
     // Compute speed multiplier for proportional timing
     final full = _fullExtentOf(key) ?? TreeController.defaultExtent;
@@ -512,6 +532,15 @@ extension _TreeControllerAnimationOps<TKey, TData>
   // `_finalizeAnimation` per key, batches the order removal, and fires
   // the structural notification.
 
+  /// Completes [key]'s standalone animation and applies whatever
+  /// structural consequence it carries. Returns false when there was no
+  /// standalone state to finalize.
+  ///
+  /// An ENTER only clears state. An EXIT either purges the node, when it
+  /// was pending deletion, or leaves it structurally present and merely
+  /// out of the visible order. Removal from the visible order itself is
+  /// left to the caller, which batches it across every key completing on
+  /// the same tick.
   bool _finalizeAnimation(TKey key) {
     final state = _clearStandalone(key);
     if (state == null) {
@@ -542,7 +571,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
         // BEFORE any purge releases the nids. The actual removal of
         // entries from _orderNids is deferred and batched in
         // _removeFromVisibleOrder, but by then _releaseNid has cleared
-        // _parentByNid for every released nid — the visibility-loss
+        // _parentByNid for every released nid, so the visibility-loss
         // callback fired from the deferred removal would walk a broken
         // parent chain and never reach the real ancestors. Doing the
         // bookkeeping here, while parent links are still intact,
@@ -593,7 +622,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
 
         // Sever the parent pointer of every surviving descendant whose
         // structural parent is purged in this pass. Purging releases the
-        // parent's nid, and the registry's free list recycles nids — a
+        // parent's nid, and the registry's free list recycles nids, so a
         // survivor finalizing after recycling would resolve an UNRELATED
         // node as its parent and decrement that node's visible-subtree-size
         // chain (ABA corruption). Severing makes the survivor's later
@@ -618,7 +647,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
           }
         });
 
-        // Skip the visible-order removal — the caller batches it
+        // Skip the visible-order removal: the caller batches it
         for (final purged in purgedKeys) {
           _purgeNodeData(purged);
         }
@@ -627,11 +656,12 @@ extension _TreeControllerAnimationOps<TKey, TData>
         // Node is exiting due to ancestor collapse - remove from visible order
         // if ancestors are still collapsed
         final parentKey = _parentKeyOfKey(key);
+        // Stays visible when every ancestor is expanded, which is what a
+        // user re-expanding mid-collapse produces.
         final shouldRemove = parentKey == null
             ? !_roots.contains(key)
             : !_ancestorsExpandedFast(key);
         return shouldRemove;
-        // If all ancestors are expanded, the node should stay visible (user re-expanded mid-collapse)
       }
     }
 

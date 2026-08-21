@@ -1,16 +1,16 @@
 /// Internal: per-operation animation source for [TreeController].
 ///
-/// Each call to `expand()` / `collapse()` creates an [OperationGroup] with
-/// its own [AnimationController] — proportional reversal timing is the
-/// payoff (collapsing a 60%-done expand takes 60% of the duration, not
-/// 100%). This registry owns the map of live groups and the per-nid
-/// reverse index `_opGroupKeyByNid`.
+/// Each call to `expand()` or `collapse()` creates an [OperationGroup]
+/// with its own [AnimationController]. Proportional reversal timing is the
+/// payoff: collapsing a 60%-done expand takes 60% of the duration, not
+/// 100%. This registry owns the map of live groups and the per-nid reverse
+/// index from member to operation key.
 ///
-/// The registry wires per-group `addListener` (tick → `onTick`) and
-/// `addStatusListener` (status → `onStatusChanged(opKey, status)`) at
-/// install time. The status handler lives on [TreeController] because it
-/// crosses structure / order / notification concerns; the registry just
-/// forwards the event with the operation key.
+/// Per-group listeners are wired at install time, forwarding ticks to
+/// `onTick` and status changes to `onStatusChanged(opKey, status)`. The
+/// status handler itself lives on [TreeController] because it crosses
+/// structure, order and notification concerns; the registry only tags the
+/// event with the operation key.
 library;
 
 import 'package:flutter/animation.dart'
@@ -20,6 +20,14 @@ import 'package:flutter/scheduler.dart' show TickerProvider;
 import '_node_id_registry.dart';
 import 'types.dart';
 
+/// Owns the live [OperationGroup] map and the member-to-operation reverse
+/// index.
+///
+/// Membership lives in TWO places that callers must keep in step: each
+/// group's own `members` map, and this registry's per-nid reverse index.
+/// [setMembership] and [clearMembership] maintain only the latter, by
+/// design, so whichever caller adds or removes a member from the group is
+/// the one responsible for both halves.
 class OperationGroupRegistry<TKey> {
   OperationGroupRegistry({
     required NodeIdRegistry<TKey> nids,
@@ -44,15 +52,17 @@ class OperationGroupRegistry<TKey> {
   final Map<TKey, OperationGroup<TKey>> _groups =
       <TKey, OperationGroup<TKey>>{};
 
-  /// Per-nid reverse index: `[nid]` → the operation key whose group
-  /// contains this node as a member, or null. Sized to the registry's
-  /// nid capacity via [resizeForCapacity].
+  /// Per-nid reverse index: for each nid, the operation key whose group
+  /// holds that node as a member, or null. Sized to the nid registry's
+  /// capacity via [resizeForCapacity].
   List<TKey?> _opGroupKeyByNid = <TKey?>[];
 
   // ──────────────────────────────────────────────────────────────────────
   // Capacity sync
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Grows the reverse index to [newCapacity], preserving existing
+  /// entries. Never shrinks; [clear] releases the backing list.
   void resizeForCapacity(int newCapacity) {
     if (newCapacity > _opGroupKeyByNid.length) {
       final grown = List<TKey?>.filled(newCapacity, null);
@@ -89,8 +99,8 @@ class OperationGroupRegistry<TKey> {
   }
 
   /// Sets the reverse-index slot for [key] to [opKey]. [key] must be
-  /// registered. Does NOT add [key] to the group's `members` map — caller
-  /// is responsible for that.
+  /// registered. Does NOT add [key] to the group's `members` map; the
+  /// caller owns both halves.
   void setMembership(TKey key, TKey opKey) {
     final nid = _nids[key]!;
     _opGroupKeyByNid[nid] = opKey;
@@ -122,18 +132,20 @@ class OperationGroupRegistry<TKey> {
   /// to add member contributions to the union mirrors.
   Iterable<MapEntry<TKey, OperationGroup<TKey>>> get groups => _groups.entries;
 
-  /// Creates an OperationGroup whose AnimationController starts at
-  /// [initialValue] (0.0 for fresh expand / forward, 1.0 for fresh
-  /// collapse / reverse). Wires the constructor-injected [onTick] and
-  /// [onStatusChanged] callbacks. The status listener carries an
-  /// **identity guard** that prevents a stale controller's final
-  /// synchronous status event (during the narrow window between
-  /// `_groups.remove(opKey)` and `group.dispose()`) from mutating a
-  /// newer group that has taken its slot.
+  /// Creates an [OperationGroup] whose controller starts at
+  /// [initialValue]: 0.0 for a fresh expand, which runs forward, and 1.0
+  /// for a fresh collapse, which reverses. Wires the injected tick and
+  /// status callbacks.
   ///
-  /// Asserts the slot at [opKey] is empty — Path-2 fresh-expand /
-  /// fresh-collapse must only reach here when the prior path-1 branch
-  /// early-returned.
+  /// The status listener carries an IDENTITY GUARD. In the narrow window
+  /// between `_groups.remove(opKey)` and `group.dispose()`, a stale
+  /// controller can still fire one final synchronous status event;
+  /// without the guard it would act on whichever newer group has taken
+  /// its slot.
+  ///
+  /// Asserts the slot at [opKey] is empty. The controller's fresh-expand
+  /// and fresh-collapse branches reach here only once their
+  /// reverse-an-existing-group branch has early-returned.
   OperationGroup<TKey> install(
     TKey opKey,
     Curve curve, {
@@ -160,7 +172,7 @@ class OperationGroupRegistry<TKey> {
 
     controller.addListener(_onTick);
     controller.addStatusListener((status) {
-      // Identity guard — see method doc.
+      // Identity guard: see the method doc.
       if (!identical(_groups[opKey], group)) return;
       _onStatusChanged(opKey, status);
     });
@@ -168,10 +180,10 @@ class OperationGroupRegistry<TKey> {
     return group;
   }
 
-  /// Disposes the group at [opKey] if it has no members and no
-  /// pendingRemoval entries. No-op otherwise. Mirrors the
-  /// existing `_disposeOperationGroupIfEmpty` semantics including the
-  /// identity guard against a newer occupant.
+  /// Disposes the group at [opKey] when it has no members and no
+  /// pendingRemoval entries; a no-op otherwise. Re-checks identity before
+  /// removing, so a group that was replaced in its slot since the lookup
+  /// is left alone.
   void disposeIfEmpty(TKey opKey) {
     final group = _groups[opKey];
     if (group == null) return;
@@ -183,14 +195,15 @@ class OperationGroupRegistry<TKey> {
     group.dispose();
   }
 
-  /// Internal escape hatch used by the controller's Path-1 reverse/replay
-  /// flow (the "reversing a collapse" branch in expand() and the
-  /// "reversing an expand" branch in collapse()). Briefly removes the
-  /// group entry from the registry around [body] so a synchronous
-  /// dismissed status event fired by `controller.value = 0.0` (or 1.0)
-  /// is ignored by the install-time identity guard. Re-attaches the group
-  /// in a `finally` block so an exception inside [body] doesn't leave the
-  /// registry in an inconsistent state.
+  /// Escape hatch for the controller's reverse-and-replay flow: the
+  /// "reversing a collapse" branch of `expand()` and the "reversing an
+  /// expand" branch of `collapse()`.
+  ///
+  /// Removes the group from the registry for the duration of [body], so
+  /// the synchronous dismissed status event fired by assigning
+  /// `controller.value` is dropped by the install-time identity guard
+  /// instead of acted on. The `finally` re-attaches it, so a throw inside
+  /// [body] cannot strand the group outside the registry.
   void runWithGroupDetached(
     TKey opKey,
     void Function(OperationGroup<TKey> group) body,
@@ -204,19 +217,21 @@ class OperationGroupRegistry<TKey> {
     }
   }
 
-  /// Unconditionally removes (and disposes) the group at [opKey],
-  /// clearing every member's reverse-index slot. Used by the controller's
-  /// `_purgeNodeData` orphan-group teardown when [opKey] IS being deleted.
-  /// Distinct from [disposeIfEmpty] — this fires even when members remain.
+  /// Unconditionally removes and disposes the group at [opKey], clearing
+  /// every member's reverse-index slot. Used by the controller's
+  /// `_purgeNodeData` orphan-group teardown, when [opKey] itself is being
+  /// deleted. Unlike [disposeIfEmpty], this fires even when members
+  /// remain.
   ///
-  /// Returns true if a group was removed; false if the slot was empty.
+  /// Returns true when a group was removed, false when the slot was
+  /// empty.
   bool removeGroup(TKey opKey) {
     final group = _groups.remove(opKey);
     if (group == null) return false;
     for (final memberKey in group.members.keys) {
       // Only clear the reverse-index slot for members that still point at
-      // this opKey — defensive, since a member could have been moved to
-      // a different group between scheduling and teardown.
+      // this opKey: a member may have moved to a different group between
+      // scheduling and teardown, and clearing it would orphan that entry.
       final memberNid = _nids[memberKey];
       if (memberNid != null && _opGroupKeyByNid[memberNid] == opKey) {
         _opGroupKeyByNid[memberNid] = null;
@@ -241,10 +256,9 @@ class OperationGroupRegistry<TKey> {
     _opGroupKeyByNid = <TKey?>[];
   }
 
-  /// Same as [clear] plus marks the registry terminal. (Currently
-  /// equivalent to [clear] — the registry has no separate "terminal"
-  /// flag; the call is provided for API symmetry with the other
-  /// sub-coordinators.)
+  /// Terminal teardown. Identical to [clear], because the registry holds
+  /// nothing beyond its groups, and kept as its own entry point so every
+  /// sub-coordinator tears down through the same name.
   void dispose() {
     clear();
   }

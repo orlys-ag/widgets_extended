@@ -4,24 +4,24 @@
 /// [TreeAnimationSpec] is one (duration, curve) pair. [TreeAnimationStyle]
 /// carries one spec per animation family:
 ///
-/// - [TreeAnimationStyle.expandCollapse] — expand/collapse operation
+/// - [TreeAnimationStyle.expandCollapse]: expand/collapse operation
 ///   groups, bulk expandAll/collapseAll, and the scroll orchestrator's
 ///   animated-concurrent mode gate.
-/// - [TreeAnimationStyle.enterExit] — node enter/exit rows
-///   (insert/remove); inherits `expandCollapse` when unset.
-/// - [TreeAnimationStyle.reorderSlide] — FLIP reorder slides (`moveNode`,
+/// - [TreeAnimationStyle.enterExit]: node enter/exit rows for insert and
+///   remove. Inherits `expandCollapse` when unset.
+/// - [TreeAnimationStyle.reorderSlide]: FLIP reorder slides (`moveNode`,
 ///   `reorderRoots`/`reorderChildren`, `animateSlideFromOffsets`, the
 ///   drag-commit baseline).
-/// - [TreeAnimationStyle.makeRoom] — the drag make-room preview
-///   (gap open/re-target/release); inherits `reorderSlide` when unset.
-/// - [TreeAnimationStyle.dropSettle] — the drag proxy settle glides
-///   (commit handoff and cancel return); inherits `reorderSlide` when
-///   unset.
+/// - [TreeAnimationStyle.makeRoom]: the drag make-room preview, meaning
+///   gap open, re-target and release. Inherits `reorderSlide` when unset.
+/// - [TreeAnimationStyle.dropSettle]: the drag proxy settle glides, for
+///   the commit handoff and the cancel return. Inherits `reorderSlide`
+///   when unset.
 ///
 /// A family whose resolved spec has [Duration.zero] duration is OFF: it
 /// snaps instead of animating, and that kill switch dominates explicit
 /// per-call durations. [TreeAnimationStyle.disabled] turns every family
-/// off — the canonical synchronous-test configuration. Every family
+/// off, the canonical synchronous-test configuration. Every family
 /// gates on its OWN resolved zero: in particular, `dropSettle` glides
 /// run even when `reorderSlide` is zeroed (the drop commits instantly
 /// and the card settles into its new slot).
@@ -29,8 +29,8 @@
 /// The zero rule splits two meanings cleanly: a zero family CREATES no
 /// motion (installs are refused; other families' in-flight animations
 /// are untouched and re-base seamlessly across concurrent structural
-/// changes), while DISABLING — restyling `reorderSlide` to zero at
-/// runtime — STOPS in-flight slide motion at the transition.
+/// changes), while DISABLING, meaning restyling `reorderSlide` to zero at
+/// runtime, STOPS in-flight slide motion at the transition.
 library;
 
 import 'package:flutter/animation.dart';
@@ -42,12 +42,13 @@ class TreeAnimationSpec {
   const TreeAnimationSpec({required this.duration, required this.curve});
 
   /// Total animation duration. [Duration.zero] means the family snaps
-  /// (no animation) — see the library docs for the kill-switch rule.
+  /// (no animation). See the library doc for the kill-switch rule.
   final Duration duration;
 
   /// Easing curve applied over the animation's progress.
   final Curve curve;
 
+  /// Copies with the given fields replaced; omitted fields keep theirs.
   TreeAnimationSpec copyWith({Duration? duration, Curve? curve}) {
     return TreeAnimationSpec(
       duration: duration ?? this.duration,
@@ -78,10 +79,14 @@ class TreeAnimationSpec {
 /// Immutable value type: pass to `TreeController(animationStyle: ...)`
 /// (or the declarative widgets) and restyle at runtime by assigning a
 /// new instance. Unset fallback families ([enterExit], [makeRoom],
-/// [dropSettle]) INHERIT — they track later changes to the family they
+/// [dropSettle]) INHERIT: they track later changes to the family they
 /// fall back to, and [copyWith] preserves that unset-ness.
 @immutable
 class TreeAnimationStyle {
+  /// Builds a style from per-family specs. Leaving [enterExit],
+  /// [makeRoom] or [dropSettle] null is NOT the same as passing a copy of
+  /// the family it falls back to: null keeps it inheriting, so a later
+  /// restyle of the root family carries through to it.
   const TreeAnimationStyle({
     this.expandCollapse = defaultSpec,
     TreeAnimationSpec? enterExit,
@@ -92,7 +97,8 @@ class TreeAnimationStyle {
        _makeRoom = makeRoom,
        _dropSettle = dropSettle;
 
-  /// One spec for all five families.
+  /// One spec for all five families: sets the two root families and
+  /// leaves the other three inheriting them.
   factory TreeAnimationStyle.uniform({
     required Duration duration,
     required Curve curve,
@@ -102,15 +108,15 @@ class TreeAnimationStyle {
   }
 
   /// The ONE uniform default spec backing every family: 300ms, linear.
-  /// A single shared const — there is deliberately no per-family default
+  /// A single shared const: there is deliberately no per-family default
   /// literal anywhere else in the package.
   static const TreeAnimationSpec defaultSpec = TreeAnimationSpec(
     duration: Duration(milliseconds: 300),
     curve: Curves.linear,
   );
 
-  /// Every family off — total animation disable. The replacement for
-  /// the old `animationDuration: Duration.zero` testing idiom.
+  /// Every family off: a total animation disable, and the configuration
+  /// tests use when they need mutations to settle synchronously.
   static const TreeAnimationStyle disabled = TreeAnimationStyle(
     expandCollapse: TreeAnimationSpec(
       duration: Duration.zero,
@@ -172,7 +178,7 @@ class TreeAnimationStyle {
   /// Debug validation at the injection boundary ([TreeController]'s
   /// constructor and `animationStyle` setter): every configured
   /// duration must be non-negative. A negative duration has no meaning
-  /// and would STRAND animations — progress can never reach 1, which
+  /// and would STRAND animations, since progress can never reach 1, which
   /// blocks `hasActiveAnimations`-gated machinery (eviction deferral,
   /// sticky precomputation). Lives here rather than in the const
   /// constructor because Dart forbids non-const expressions in const
@@ -191,9 +197,9 @@ class TreeAnimationStyle {
   }
 
   /// Copies with the given fields replaced. Omitted fields keep their
-  /// stored value — including stored "unset" for the fallback families,
-  /// which therefore keep inheriting. (Un-setting a previously set
-  /// fallback family is not expressible; construct a fresh style.)
+  /// stored value, including a stored "unset" for the fallback families,
+  /// which therefore keep inheriting. Un-setting a fallback family that
+  /// was previously set is not expressible; construct a fresh style.
   TreeAnimationStyle copyWith({
     TreeAnimationSpec? expandCollapse,
     TreeAnimationSpec? enterExit,

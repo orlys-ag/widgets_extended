@@ -34,15 +34,15 @@ import 'types.dart';
 /// A controller that syncs a [TreeController] to a desired state using
 /// animated diffs.
 ///
-/// This controller does not own the [TreeController] — it drives it.
+/// This controller does not own the [TreeController]; it drives it.
 /// Dispose this controller before disposing the underlying [TreeController].
 ///
 /// **Composes with direct controller mutations.** Every diff reads the
 /// controller's live state ([TreeController.liveRootKeys] /
 /// [TreeController.getLiveChildren]) as its "current" baseline, so
-/// structural mutations that bypass this controller — imperative
+/// structural mutations that bypass this controller (imperative
 /// `insert`/`remove`/`moveNode` calls through an escape-hatch reference,
-/// or [TreeReorderController] committing a drag-drop — are simply the new
+/// or `TreeReorderController` committing a drag-drop) are simply the new
 /// baseline for the next sync. No resync hook is needed.
 class TreeSyncController<TKey, TData> {
   /// Creates a sync controller.
@@ -63,15 +63,16 @@ class TreeSyncController<TKey, TData> {
   final TreeController<TKey, TData> _controller;
 
   /// Maximum number of entries in [_rememberedExpansion]. When exceeded,
-  /// the oldest entries are evicted (FIFO via [LinkedHashMap] insertion
-  /// order). 0 disables expansion memory entirely: nothing is remembered
-  /// or restored across remove/re-add cycles.
+  /// the oldest are evicted: Dart maps iterate in first-insertion order,
+  /// and re-recording an existing key does not move it, so eviction is
+  /// FIFO by when a key was FIRST remembered. 0 disables the memory
+  /// entirely: nothing is remembered or restored across remove/re-add.
   final int expansionMemory;
 
-  /// The single gate for expansion memory. Every memory read and write
-  /// site routes through this. (The read sides would no-op on the empty
-  /// stores either way; routing them through the same gate makes that a
-  /// property of the code rather than a consequence of emptiness.)
+  /// The gate every recording, restoring, and pruning path checks before
+  /// touching expansion memory. With it false both stores stay
+  /// permanently empty, which is why [snapshotRememberedKeys] and
+  /// [clearExpansionMemory] can read and clear them ungated.
   bool get _memoryEnabled {
     return expansionMemory > 0;
   }
@@ -87,7 +88,7 @@ class TreeSyncController<TKey, TData> {
   /// auto-expand heuristic (surfaced through [snapshotRememberedKeys]):
   /// when the children return in a later sync, the heuristic must not
   /// override the user's deliberate collapse. [_rememberedExpansion] cannot
-  /// carry this — the parent is never removed, so a memory entry for it
+  /// carry this: the parent is never removed, so a memory entry for it
   /// would be consumed by the restore/prune passes of the very sync that
   /// recorded it. Bounded by [expansionMemory] (FIFO eviction).
   final Set<TKey> _emptiedWhileCollapsed = <TKey>{};
@@ -98,16 +99,14 @@ class TreeSyncController<TKey, TData> {
   Set<TKey>? _globallyDesiredChildren;
 
   /// True while [_syncChildrenRecursive] is running. Tells [syncChildren]
-  /// to skip immediate expansion restoration — the recursive method handles
-  /// it after each node's full subtree is in place.
+  /// to skip immediate expansion restoration: the walk handles it after
+  /// each node's full subtree is in place.
   bool _deferExpansionRestore = false;
 
   /// The underlying [TreeController] being driven.
   TreeController<TKey, TData> get treeController => _controller;
 
-  // ══════════════════════════════════════════════════════════════════════════
   // PUBLIC API
-  // ══════════════════════════════════════════════════════════════════════════
 
   /// Syncs the root nodes to match [desired].
   ///
@@ -116,7 +115,7 @@ class TreeSyncController<TKey, TData> {
   /// The order of [desired] is respected.
   ///
   /// If [childrenOf] is provided, it is called recursively for every node
-  /// in the desired tree — roots and their descendants — to sync children
+  /// in the desired tree (roots and their descendants) to sync children
   /// at all depths. Return an empty list for leaf nodes. If a re-added node
   /// was previously expanded (and [expansionMemory] is nonzero), it is
   /// automatically expanded after its children are set.
@@ -132,9 +131,9 @@ class TreeSyncController<TKey, TData> {
   /// tree (under a different parent), is animated (slid) into its new
   /// position rather than purged with the old root. This is implemented
   /// by deferring root removal until after the recursive children sync
-  /// has had a chance to call [TreeController.moveNode] for every cross-
-  /// parent reparent. The old root then exits as a clean separate animation
-  /// on the (now-empty or non-desired-residue) subtree it had left.
+  /// has had a chance to call [TreeController.moveNode] for every
+  /// cross-parent reparent. The old root then exits as a clean separate
+  /// animation on the (now-empty or non-desired-residue) subtree it left.
   ///
   /// Set [animate] to false to suppress animations (useful for initial setup).
   void syncRoots(
@@ -148,6 +147,12 @@ class TreeSyncController<TKey, TData> {
     });
   }
 
+  /// The [syncRoots] body, already inside the caller's batch.
+  ///
+  /// Eight ordered steps, and the ordering is the load-bearing part: root
+  /// removal is deferred to step 2' so step 5's recursive children sync
+  /// still sees soon-to-be-removed roots alive and can reparent
+  /// descendants out of them against a stable slide baseline.
   void _syncRootsImpl(
     List<TreeNode<TKey, TData>> desired, {
     List<TreeNode<TKey, TData>> Function(TKey key)? childrenOf,
@@ -193,13 +198,20 @@ class TreeSyncController<TKey, TData> {
 
     // Pre-compute the full set of desired descendant keys so the reparenting
     // check below can detect a root that is moving to any depth in the new
-    // tree (not just a direct child of another new root). This set is also
-    // reused in step 6 to defer cross-parent removals in _syncChildrenRecursive.
+    // tree (not just a direct child of another new root). Collected (and
+    // therefore validated) HERE, before steps 1-4 mutate the controller,
+    // so a cyclic or duplicated [childrenOf] fails fast on an untouched
+    // tree. The set is published as [_globallyDesiredChildren] only for
+    // the duration of step 5 (the recursive children sync), inside the
+    // try/finally there. Its single reader is [syncChildren]'s
+    // cross-parent-mover deferral, which only runs during that step.
+    // Publishing it any earlier re-creates the leak this shape fixes: a
+    // throw between assignment and the step-5 finally would strand the
+    // field and silently disable removals in every later [syncChildren].
     Set<TKey>? desiredDescendants;
     if (resolveChildren != null) {
       desiredDescendants = <TKey>{};
-      _globallyDesiredChildren = desiredDescendants;
-      _collectDesiredDescendants(desired, resolveChildren);
+      _collectDesiredDescendants(desiredDescendants, desired, resolveChildren);
     }
 
     // 1. Compute which roots are no longer desired, but DEFER their actual
@@ -209,19 +221,18 @@ class TreeSyncController<TKey, TData> {
     //    see the old root still alive so it can resolve `getParent(child)`
     //    and stage a clean FLIP slide. Removing the old root first marks
     //    the entire subtree pending-deletion, which leaves the child's
-    //    slide composing against an ancestor-driven exit animation — the
-    //    bug fixed by this ordering.
+    //    slide composing against an ancestor-driven exit animation.
     //
     //    When childrenOf is provided, the `desiredDescendants.contains(key)`
     //    check below in step 2' also skips removal of roots that appear
-    //    anywhere in the desired tree — they are being reparented, not
+    //    anywhere in the desired tree: they are being reparented, not
     //    deleted.
     final toRemove = currentSet.difference(desiredSet);
 
     // 2. Build the post-removal list plus a Fenwick tree keyed by desired
     //    position, seeded with 1s at retained keys' desired positions. The
-    //    insertion loop below uses prefix sums for O(log N) insertion-index
-    //    queries instead of the old O(N) walk over desiredOrder per insert.
+    //    insertion loop below reads each insertion index as a prefix sum,
+    //    so K insertions cost O(K log N) rather than O(K * N).
     final desiredPos = <TKey, int>{
       for (int i = 0; i < desiredKeys.length; i++) desiredKeys[i]: i,
     };
@@ -261,11 +272,10 @@ class TreeSyncController<TKey, TData> {
             preservePendingSubtreeState: true,
           );
         } else {
-          // Reparenting child → root. moveNode now composes a smooth
+          // Reparenting a child up to root. moveNode composes a smooth
           // extent reversal with the FLIP slide for any pending-deletion
-          // members of the moved subtree (Phase B / `_revertSubtreeFrom-
-          // PendingDeletion`), so this path is correct even when the
-          // moved node is mid-exit.
+          // members of the moved subtree, so this path stays correct even
+          // when the moved node is mid-exit.
           _controller.updateNode(node);
           _controller.moveNode(
             node.key,
@@ -289,7 +299,7 @@ class TreeSyncController<TKey, TData> {
     //    Exiting (pending-deletion) roots never reach this loop: the
     //    live-filtered `currentSet` excludes them, so a desired key that
     //    is mid-exit lands in `toAdd` and the branch above cancels the
-    //    deletion (the desired state is authoritative — asking for the
+    //    deletion (the desired state is authoritative: asking for the
     //    key means it should exist). Callers that want an imperative
     //    `remove()` to keep animating out should mirror live state via
     //    `liveRootKeys` so the exiting key drops out of `desired`.
@@ -303,10 +313,12 @@ class TreeSyncController<TKey, TData> {
     }
 
     // 5. Re-sync children recursively for all desired nodes.
-    //    _globallyDesiredChildren was already populated at the top of this
-    //    method so the reparent detection in step 1 could see deep moves.
-    //    syncChildren uses it to defer removal of nodes desired under a
-    //    different parent.
+    //    The desired-descendants set was collected (and validated) at the
+    //    top of this method; it is published as _globallyDesiredChildren
+    //    only for the duration of this step, assigned immediately before
+    //    the try and cleared in the finally (the same shape
+    //    syncMultipleChildren uses). syncChildren reads it to defer
+    //    removal of nodes desired under a different parent.
     //
     //    This must run BEFORE step 2' (root removal) and BEFORE reorderRoots:
     //    a former root being reparented into another root's subtree is still
@@ -314,10 +326,11 @@ class TreeSyncController<TKey, TData> {
     //    matches the current live roots exactly. The reparenting moveNode
     //    happens inside this recursive pass. By keeping the old roots alive
     //    until after this pass, moveNode can resolve getParent(child) cleanly
-    //    and stage a FLIP slide against a stable baseline — the fix for the
-    //    "reparent through removed root" bug.
+    //    and stage a FLIP slide against a stable baseline. This is the
+    //    "reparent through removed root" behavior [syncRoots] documents.
     if (resolveChildren != null) {
       _deferExpansionRestore = true;
+      _globallyDesiredChildren = desiredDescendants;
       try {
         // The memoized resolver, so this walk reuses the child lists the
         // collection walk above already built rather than rebuilding them.
@@ -333,15 +346,15 @@ class TreeSyncController<TKey, TData> {
     //     remain under each toRemove root are correctly purged with it.
     //
     //     Read the captured local `desiredDescendants` here, NOT the
-    //     `_globallyDesiredChildren` field — the field is set to null in the
-    //     finally block above before this loop runs.
+    //     `_globallyDesiredChildren` field: the field is only non-null
+    //     inside step 5's try/finally and is already null again here.
     assert(() {
       if (desiredDescendants != null) {
         for (final key in toRemove) {
           // Skip roots that are themselves being reparented: their entire
           // subtree rides along with the moveNode call in step 3 or step 5,
           // so it's expected that their remaining descendants are still in
-          // desiredDescendants — that's how moveNode found them.
+          // desiredDescendants: that is how moveNode found them.
           if (desiredDescendants.contains(key)) continue;
           final tracked = _controller.getNodeData(key) != null
               ? _controller.getChildren(key)
@@ -469,7 +482,7 @@ class TreeSyncController<TKey, TData> {
 
   /// Throws [ArgumentError] when [desired] contains the same key more
   /// than once. The diff machinery downstream dedupes via a set, but the
-  /// per-position loops walk the raw list — duplicates land in the
+  /// per-position loops walk the raw list: duplicates land in the
   /// internal `remaining` tracker, producing wrong Fenwick offsets.
   /// `TreeController.setRoots`/`setChildren` already enforce this for the
   /// imperative path; matching it here closes the declarative path.
@@ -488,15 +501,17 @@ class TreeSyncController<TKey, TData> {
     }
   }
 
+  /// The [syncChildren] body, already inside the caller's batch and past
+  /// the unknown-parent guard.
   void _syncChildrenImpl(
     TKey parentKey,
     List<TreeNode<TKey, TData>> desired, {
     bool animate = true,
   }) {
     // Cheap early-out, mirroring TreeController.setChildren's exact-match
-    // fast path: when [desired] exactly matches the controller's
-    // current child list — same keys in order, same data, no
-    // pending-deletion members — skip the whole diff (keys list, two
+    // fast path: when [desired] exactly matches the controller's current
+    // child list (same keys in order, same data, no pending-deletion
+    // members), skip the whole diff (keys list, two
     // sets, Fenwick) before any allocation. The deferred
     // expansion-restore retry still runs: a parent whose children arrived
     // in an earlier sync may still be awaiting its expand.
@@ -555,8 +570,8 @@ class TreeSyncController<TKey, TData> {
 
     // 2. Build the post-removal list plus a Fenwick tree keyed by desired
     //    position, seeded with 1s at retained keys' desired positions. The
-    //    insertion loop below uses prefix sums for O(log N) insertion-index
-    //    queries instead of the old O(N) walk over desiredOrder per insert.
+    //    insertion loop below reads each insertion index as a prefix sum,
+    //    so K insertions cost O(K log N) rather than O(K * N).
     final desiredPos = <TKey, int>{
       for (int i = 0; i < desiredKeys.length; i++) desiredKeys[i]: i,
     };
@@ -595,10 +610,9 @@ class TreeSyncController<TKey, TData> {
             preservePendingSubtreeState: true,
           );
         } else {
-          // Reparenting across parents. moveNode now composes a smooth
-          // extent reversal with the FLIP slide for any pending-deletion
-          // members of the moved subtree (Phase B / `_revertSubtreeFrom-
-          // PendingDeletion`), so this path is correct even when the
+          // Reparenting across parents. moveNode composes a smooth extent
+          // reversal with the FLIP slide for any pending-deletion members
+          // of the moved subtree, so this path stays correct even when the
           // moved node is mid-exit.
           _controller.updateNode(node);
           _controller.moveNode(
@@ -619,7 +633,7 @@ class TreeSyncController<TKey, TData> {
         );
         // Restore expansion state only for truly new nodes.
         // When inside a recursive sync (_deferExpansionRestore is true),
-        // skip — the node's own children haven't been synced yet, so
+        // skip: the node's own children haven't been synced yet, so
         // expand() would be a no-op. _syncChildrenRecursive handles
         // restoration after each node's full subtree is in place.
         if (!_deferExpansionRestore) {
@@ -637,8 +651,8 @@ class TreeSyncController<TKey, TData> {
     //    is mid-exit lands in `toAdd`, and step 3's re-add cancels the
     //    deletion (same parent: `insert` with
     //    `preservePendingSubtreeState: true`; cross-parent mover:
-    //    `moveNode`'s pending-subtree revert) — the same policy as
-    //    `_syncRootsImpl` step 4: the desired state is authoritative;
+    //    `moveNode`'s pending-subtree revert). This is the same policy
+    //    as `_syncRootsImpl` step 4: the desired state is authoritative;
     //    asking for the key means it should exist. Callers
     //    that want an imperative `remove()` / `removeItem` to keep
     //    animating out should mirror live state (`getLiveChildren`, or
@@ -658,13 +672,14 @@ class TreeSyncController<TKey, TData> {
     //    deferred cross-parent mover (skipped in step 1 because it is
     //    globally desired elsewhere) is still a live child of [parentKey]
     //    at this point, so a mirror-derived comparison both misses genuine
-    //    misorders (the mirror never disagrees with itself — silent
-    //    permanent misorder) and, when a reorder IS issued, fails
-    //    [TreeController.reorderChildren]'s exact-live-set validation.
+    //    misorders (the mirror never disagrees with itself, so the
+    //    misorder is silent and permanent) and, when a reorder IS issued,
+    //    fails [TreeController.reorderChildren]'s exact-live-set
+    //    validation.
     //
     //    Build the target order as a permutation of the controller's live
     //    children: desired keys first (in desired order), then any live
-    //    children not in the desired set — i.e. the deferred movers, in
+    //    children not in the desired set, i.e. the deferred movers, in
     //    their current relative order, appended. The movers are moved out
     //    later in the same batch when their destination parent syncs, so
     //    the transient tail position is invisible. Exiting
@@ -679,7 +694,7 @@ class TreeSyncController<TKey, TData> {
         if (!desiredSet.contains(k)) k,
     ];
     if (!_listEquals(controllerLive, orderedKeys)) {
-      // Explicit expandCollapse timing — see the reorderRoots call site.
+      // Explicit expandCollapse timing: see the reorderRoots call site.
       _controller.reorderChildren(
         parentKey,
         orderedKeys,
@@ -711,9 +726,9 @@ class TreeSyncController<TKey, TData> {
   ///
   /// The same child key MUST NOT appear under two different parents in
   /// [desiredByParent]. If it does, the second `syncChildren` call would
-  /// reparent the key from the first parent's tree, producing last-write-
-  /// wins semantics. Debug builds assert against this; release builds
-  /// silently apply last-write-wins.
+  /// reparent the key out of the first parent's tree, producing
+  /// last-write-wins semantics. Debug builds assert against this; release
+  /// builds silently apply last-write-wins.
   ///
   /// Set [animate] to false to suppress animations.
   void syncMultipleChildren(
@@ -757,14 +772,14 @@ class TreeSyncController<TKey, TData> {
     });
   }
 
-  /// No-op, kept for backward compatibility.
+  /// A no-op, and deliberately still called.
   ///
-  /// Diffs now read the controller's live state directly
-  /// ([TreeController.liveRootKeys] / [TreeController.getLiveChildren]),
-  /// so there is no private tracking state to initialize: a sync
-  /// controller created against a populated [TreeController] — or one
-  /// whose tree was mutated directly — always diffs against the
-  /// controller's actual current state.
+  /// Every diff reads the controller's live state directly, so there is
+  /// no private tracking state to seed: a sync controller created against
+  /// a populated [TreeController], or one whose tree was mutated behind
+  /// its back, already diffs against the controller's actual state. The
+  /// method survives as the hook callers invoke after (re)creating a sync
+  /// controller, so an implementation added later needs no new call site.
   void initializeTracking() {}
 
   /// Returns a deep-copied snapshot of the current live child order,
@@ -772,12 +787,11 @@ class TreeSyncController<TKey, TData> {
   ///
   /// The returned map and lists are detached from the controller's internal
   /// state, so callers can safely compare snapshots across sync operations.
-  /// Exiting (pending-deletion) nodes are excluded — they are on their way
-  /// out and not part of the current logical tree.
+  /// Exiting (pending-deletion) nodes are excluded: they are on their
+  /// way out and not part of the current logical tree.
   Map<TKey, List<TKey>> snapshotCurrentChildren() {
     final out = <TKey, List<TKey>>{};
-    // Iterative DFS so deep linear chains do not stack-overflow Dart's
-    // recursion limit (typically ~10k–20k frames).
+    // Iterative DFS so deep linear chains do not overflow the Dart stack.
     final stack = <TKey>[..._controller.liveRootKeys];
     while (stack.isNotEmpty) {
       final key = stack.removeLast();
@@ -797,8 +811,8 @@ class TreeSyncController<TKey, TData> {
   /// only ask "which nodes exist" and "does this one have children". Those
   /// are the only two questions the initial-expansion and auto-expand
   /// passes ask, and answering them through [snapshotCurrentChildren]
-  /// copied every child key in the tree once per call, twice per sync, to
-  /// produce lists nothing ever read.
+  /// would copy every child key in the tree once per call, twice per
+  /// sync, to produce lists nothing reads.
   ///
   /// The key set is identical to [snapshotCurrentChildren]'s: one entry per
   /// live node, leaves included and mapped to false. Exiting
@@ -810,8 +824,7 @@ class TreeSyncController<TKey, TData> {
   /// result map and nothing per node.
   Map<TKey, bool> snapshotChildPresence() {
     final out = <TKey, bool>{};
-    // Iterative DFS so deep linear chains do not stack-overflow Dart's
-    // recursion limit (typically ~10k–20k frames).
+    // Iterative DFS so deep linear chains do not overflow the Dart stack.
     final stack = <TKey>[];
     for (final rootKey in _controller.rootKeys) {
       if (!_controller.isPendingDeletion(rootKey)) {
@@ -847,22 +860,21 @@ class TreeSyncController<TKey, TData> {
   /// [syncRoots]/[syncChildren] and its expansion state was recorded
   /// for restoration on re-add, or if it is a retained parent whose
   /// deliberate collapse must not be overridden when its children return.
-  /// Intended for callers (e.g., the auto-expand heuristic in
-  /// [SyncedSliverTree]) that need to distinguish a genuinely new key
+  /// Intended for callers (e.g. the auto-expand heuristic in
+  /// `SyncedSliverTree`) that need to distinguish a genuinely new key
   /// from one that is being re-added after having been filtered out.
   Set<TKey> snapshotRememberedKeys() {
     return {..._rememberedExpansion.keys, ..._emptiedWhileCollapsed};
   }
 
-  /// Releases resources. Call before disposing the underlying [TreeController].
+  /// Drops all expansion memory. Call before disposing the underlying
+  /// [TreeController], which this controller drives but does not own.
   void dispose() {
     _rememberedExpansion.clear();
     _emptiedWhileCollapsed.clear();
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // PRIVATE HELPERS
-  // ══════════════════════════════════════════════════════════════════════════
 
   /// Whether [desired] exactly matches the controller's current child
   /// list under [parentKey]: same keys in the same order, same data
@@ -906,16 +918,25 @@ class TreeSyncController<TKey, TData> {
     return seen.add(key);
   }
 
-  /// Collects all desired descendant keys into [_globallyDesiredChildren].
+  /// Collects all desired descendant keys into [into].
+  ///
+  /// Writes only into [into], never through [_globallyDesiredChildren].
+  /// The caller publishes the collected set on that field only for step
+  /// 5's try/finally window; writing it here would re-couple validation
+  /// (which throws) to the field's lifetime, so a rejected desired tree
+  /// would strand the field and silently disable removals in every later
+  /// [syncChildren].
   ///
   /// Iterative DFS so deep desired trees do not stack-overflow. Guards
-  /// against revisits: a cyclic [childrenOf] (`a → b → a`) would loop
-  /// forever on an unguarded walk (hanging the UI thread), and a DAG
+  /// against revisits: a cyclic [childrenOf] (`a` yielding `b` yielding
+  /// `a`) would loop forever on an unguarded walk (hanging the UI
+  /// thread), and a DAG
   /// (same key under two parents) would walk exponentially before
   /// producing last-write-wins thrash. Throws [ArgumentError] naming the
   /// repeated key, matching the validation the other `SyncedSliverTree`
   /// input modes already perform.
   void _collectDesiredDescendants(
+    Set<TKey> into,
     List<TreeNode<TKey, TData>> nodes,
     List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
   ) {
@@ -931,7 +952,7 @@ class TreeSyncController<TKey, TData> {
             "involving key \"${child.key}\".",
           );
         }
-        _globallyDesiredChildren!.add(child.key);
+        into.add(child.key);
         stack.add(child);
       }
     }
@@ -941,27 +962,22 @@ class TreeSyncController<TKey, TData> {
   /// After all descendants are synced, restores expansion bottom-up so
   /// each `expand()` sees its children already registered.
   ///
-  /// Iterative DFS so deep desired trees do not stack-overflow. The
-  /// restore phase walks `restoreOrder` in reverse — the order keys are
-  /// pushed in is top-down (parent before children); reversing yields
-  /// the bottom-up order the recursive version produced.
+  /// Iterative DFS so deep desired trees do not overflow the Dart stack.
+  /// Keys enter `restoreOrder` top-down (parent before children), so the
+  /// restore phase walks it in reverse to get bottom-up order.
   ///
-  /// The [animate] flag is passed through unconditionally to each
-  /// [syncChildren] call. A previous version suppressed animation
-  /// (`animate: false`) when the parent was in the newly-added set,
-  /// which was intended to avoid double-animation when a brand-new
-  /// subtree appeared. That suppression also disabled the FLIP slide
-  /// on cross-parent reparented children whose new parent happened to
-  /// be newly added — the "Failure B" bug fixed here. Letting fresh
-  /// children of a fresh parent animate alongside the parent's enter
-  /// produces cohesive subtree growth, which is an acceptable (and
-  /// arguably preferable) visual.
+  /// [animate] passes through unconditionally. Suppressing it for nodes
+  /// in the newly-added set looks like the way to avoid double-animating
+  /// a brand-new subtree, but it also kills the FLIP slide on a
+  /// cross-parent reparented child whose new parent happens to be newly
+  /// added. Letting fresh children animate alongside their fresh parent's
+  /// enter produces cohesive subtree growth instead.
   void _syncChildrenRecursive(
     List<TreeNode<TKey, TData>> nodes,
     List<TreeNode<TKey, TData>> Function(TKey key) childrenOf,
     bool animate,
   ) {
-    // Revisit guard, DEBUG-ONLY — see [_collectDesiredDescendants]. That
+    // Revisit guard, DEBUG-ONLY. See [_collectDesiredDescendants]: that
     // walk runs first, over the SAME memoized answers (`_syncRootsImpl`
     // hands both walks one resolver), and throws [ArgumentError] on
     // exactly this condition in every build mode. So the caller-facing
@@ -1003,15 +1019,14 @@ class TreeSyncController<TKey, TData> {
       for (final child in children) {
         restoreOrder.add(child.key);
       }
-      // Push children for recursion (reversed so first child pops first,
-      // matching the recursive version's left-to-right visit order).
+      // Pushed in reverse so the first child pops first, giving
+      // left-to-right visit order.
       for (int i = children.length - 1; i >= 0; i--) {
         stack.add(children[i]);
       }
     }
-    // Restore in reverse push order = bottom-up, matching recursion's
-    // post-order placement of `_restoreExpansion(child.key, ...)` after
-    // `_syncChildrenRecursive(children, ...)` returned.
+    // Reverse push order is bottom-up: every node's children are
+    // restored before the node itself.
     for (int i = restoreOrder.length - 1; i >= 0; i--) {
       _restoreExpansion(restoreOrder[i], animate: animate);
     }
@@ -1045,8 +1060,8 @@ class TreeSyncController<TKey, TData> {
   /// controller, so remembering it is redundant.
   ///
   /// Nodes that are pending deletion (playing an exit animation) are NOT
-  /// considered live — their data still exists in the controller but will
-  /// be purged when the animation completes.
+  /// considered live: their data still exists in the controller but is
+  /// purged when the animation completes.
   void _pruneExpansionMemory() {
     if (_rememberedExpansion.isEmpty) return;
     _rememberedExpansion.removeWhere((key, wasExpanded) {
@@ -1080,7 +1095,7 @@ class TreeSyncController<TKey, TData> {
       return;
     }
     if (!_controller.hasChildren(key)) {
-      // Keep memory for the next sync — expand() now would be a no-op.
+      // Keep memory for the next sync: expand() now would be a no-op.
       return;
     }
     _rememberedExpansion.remove(key);
@@ -1097,11 +1112,11 @@ class TreeSyncController<TKey, TData> {
   }
 }
 
-/// Minimal Fenwick / binary indexed tree over a fixed-size array of ints.
+/// Minimal Fenwick (binary indexed) tree over a fixed-size array of ints.
 ///
-/// Used by [TreeSyncController] to compute insertion indices in O(log N)
-/// per call across a batch of insertions, in place of the prior O(N)
-/// linear walk over the desired order.
+/// [TreeSyncController] seeds one with a 1 at each already-placed key's
+/// desired position. A prefix sum then turns a desired position into the
+/// insertion index among those keys, in O(log N) per query.
 class _Fenwick {
   _Fenwick(int size) : _size = size, _tree = List<int>.filled(size + 1, 0);
 

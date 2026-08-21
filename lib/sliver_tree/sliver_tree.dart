@@ -1,3 +1,13 @@
+/// SliverTree: a sliver-based tree with animated expand and collapse,
+/// FLIP reorder slides, drag-and-drop reordering, and sticky headers.
+///
+/// Entry points: [SliverTree] driven imperatively through a
+/// [TreeController], [SyncedSliverTree] for declarative diffing of a
+/// desired tree, and [SliverReorderableTree] with [TreeReorderController]
+/// for drag-and-drop.
+///
+/// This barrel is the module's public surface; anything not exported here
+/// is internal regardless of its name.
 library;
 
 export 'animation_style.dart' show TreeAnimationSpec, TreeAnimationStyle;

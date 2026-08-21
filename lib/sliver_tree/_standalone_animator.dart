@@ -16,15 +16,30 @@ import 'package:flutter/scheduler.dart' show Ticker, TickerProvider;
 import '_node_id_registry.dart';
 import 'types.dart';
 
-/// Marker value indicating the target extent should be determined from the
-/// measured size during layout. Matches `_unknownExtent` in
-/// `_tree_controller_animation.dart`.
+/// [AnimationState.targetExtent] value meaning the real target is not
+/// known yet and must come from the measured size during layout.
+///
+/// Library privacy forces one copy per library: the same -1.0 sentinel is
+/// `_unknownExtent` in `_tree_controller_animation.dart` and
+/// `_kUnknownExtent` in `_animation_coordinator.dart`. All three must
+/// agree.
 const double _kUnknownExtent = -1.0;
 
-// The animation speed multiplier is owned by
-// `_computeAnimationSpeedMultiplier` in `_tree_controller_animation.dart`;
-// do not add a copy here.
+// Speed multipliers are computed by `_computeAnimationSpeedMultiplier` in
+// `_tree_controller_animation.dart` and arrive already resolved on
+// [AnimationState.speedMultiplier]. Do not add a second implementation
+// here; this animator only reads the value.
 
+/// Per-node enter and exit animations, driven by one shared ticker.
+///
+/// The dense `_byNid` array holds the state while the [activeNids] set is
+/// what the tick loop iterates, so every write goes through [set],
+/// [clearAt] or [clearForNid] to keep the two in step. That pairing is
+/// what [debugAssertConsistent] verifies.
+///
+/// A zero effective duration is handled inside the tick rather than at the
+/// call sites: [_runTick] snaps every active state to completion and
+/// routes it through the normal completion handler.
 class StandaloneAnimator<TKey> {
   StandaloneAnimator({
     required TickerProvider vsync,
@@ -63,6 +78,10 @@ class StandaloneAnimator<TKey> {
   final Set<int> _activeNids = <int>{};
 
   Ticker? _ticker;
+
+  /// Previous tick's elapsed value, or null on the first tick after a
+  /// start. The null case yields a zero dt, so a fresh run never advances
+  /// progress by the whole span since the ticker last ran.
   Duration? _lastTickElapsed;
 
   /// Reusable buffer for the tick loop's completed-key collection. Cleared
@@ -73,6 +92,8 @@ class StandaloneAnimator<TKey> {
   // Capacity sync
   // ──────────────────────────────────────────────────────────────────────
 
+  /// Grows the per-nid slot array to [newCapacity], preserving existing
+  /// entries. Never shrinks; [clear] releases the backing list.
   void resizeForCapacity(int newCapacity) {
     if (newCapacity > _byNid.length) {
       final grown = List<AnimationState?>.filled(newCapacity, null);
@@ -141,8 +162,9 @@ class StandaloneAnimator<TKey> {
   /// Whether any standalone animation is active.
   bool get hasAny => _activeNids.isNotEmpty;
 
-  /// Iterate active nids — used by the coordinator's `ensureAnimatingKeys`
-  /// to write the standalone contribution into the union mirrors.
+  /// The nids holding a live slot, iterated by the tick loop and by the
+  /// coordinator's `ensureAnimatingKeys` when it writes the standalone
+  /// contribution into the union mirrors.
   Iterable<int> get activeNids => _activeNids;
 
   // ──────────────────────────────────────────────────────────────────────
@@ -181,9 +203,9 @@ class StandaloneAnimator<TKey> {
     }
   }
 
-  /// Stops the per-frame ticker if running. Idempotent. Called when
-  /// `hasAny` becomes false — there's nothing to advance until
-  /// [ensureRunning] is called again.
+  /// Stops the per-frame ticker if running. Idempotent. Called once
+  /// [hasAny] goes false, since there is nothing to advance until
+  /// [ensureRunning] runs again.
   void stop() {
     _ticker?.stop();
   }
@@ -202,7 +224,7 @@ class StandaloneAnimator<TKey> {
     }
     final duration = _enterExitDurationGetter();
     if (duration.inMicroseconds == 0) {
-      // Zero duration means "animations complete instantly" — the same
+      // Zero duration means "animations complete instantly", the same
       // convention every mutator applies on entry (`if (enter/exit spec
       // == Duration.zero) animate = false`). Snap every active state to
       // completion and route the full set through the completion handler
@@ -219,9 +241,9 @@ class StandaloneAnimator<TKey> {
         _completedScratch.add(_nids.keyOfUnchecked(nid));
       }
       _onTick(_completedScratch);
-      // The handler may have started fresh states (e.g. revert paths);
-      // only stop when nothing is left — otherwise the next tick snaps
-      // the newcomers too.
+      // The handler may have started fresh states, revert paths for one,
+      // so only stop when nothing is left; otherwise the next tick would
+      // snap the newcomers too.
       if (_activeNids.isEmpty) {
         _ticker?.stop();
       }
@@ -265,8 +287,9 @@ class StandaloneAnimator<TKey> {
     _completedScratch.clear();
   }
 
-  /// Same destructive cleanup as [clear], plus marks the animator terminal
-  /// (further calls are undefined).
+  /// Terminal teardown. Identical to [clear], which already disposes the
+  /// ticker, and kept as its own entry point so every sub-animator tears
+  /// down through the same name.
   void dispose() {
     clear();
   }

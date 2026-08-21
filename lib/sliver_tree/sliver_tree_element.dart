@@ -82,13 +82,14 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// frame" instead of walking `_children.keys` unconditionally on every
   /// parent rebuild. Without this bound, an external listener that
   /// rebuilds SliverTree's ancestor (e.g. `ListenableBuilder` on the
-  /// controller) would cause `update` to rebuild every mounted row —
+  /// controller) would cause `update` to rebuild every mounted row,
   /// including off-screen descendants that are moments away from
   /// stale-eviction. See `sliver_tree_widget_test.dart` regressions.
   final Set<TKey> _dirtyKeys = {};
 
-  /// Whether the last animation tick observed [TreeController.hasActiveAnimations]
-  /// as true. Used by [_onAnimationTick] so the settle tick (where the
+  /// Whether the last animation tick observed
+  /// [TreeController.hasActiveAnimations] as true. Used by
+  /// [_onAnimationTick] so the settle tick (where the
   /// controller has already cleared animation state before notifying) still
   /// triggers [RenderObject.markNeedsLayout]. Without this, completed extent
   /// animations would never relayout and the render would remain at the
@@ -96,7 +97,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   bool _priorTickHadAnimations = false;
 
   /// Mirror of [_priorTickHadAnimations] for slides. Used so the
-  /// settle tick of a slide-only animation still triggers a relayout —
+  /// settle tick of a slide-only animation still triggers a relayout,
   /// the render object's Step 0a / 0b ghost-cleanup runs only inside
   /// `performLayout`, and without a final layout pass after settle,
   /// settled ghost entries would linger until the next unrelated
@@ -160,9 +161,13 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       _dirtyKeys.clear();
       // Schedule a GC pass: keys that existed under the old controller
       // but not under the new one would otherwise survive as stale
-      // elements (the renderObject's _children map was cleared in the
-      // controller setter, but the Elements themselves remain in
-      // _children, still in the widget tree, with no live nodeData).
+      // elements. The renderObject's _children map is deliberately NOT
+      // cleared in the controller setter (keys shared by both
+      // controllers must keep their adopted render boxes; see the
+      // setter's comment), so an old-only key keeps its Element here
+      // AND its RenderBox there, with no live nodeData. The GC pass
+      // evicts both: updateChild(element, null, slot) routes through
+      // removeRenderObjectChild, which drops the adopted box.
       // Without this, a parent rebuild can swap controllers and leave
       // dead rows participating in find/semantics/focus until the next
       // structural notification on the new controller fires GC.
@@ -178,10 +183,10 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
 
     // Parent rebuild: the `nodeBuilder` closure may have captured new
     // state. Queue every mounted row for lazy refresh and trigger a
-    // layout pass — retained rows rebuild in [createChild] within the
+    // layout pass, retained rows rebuild in [createChild] within the
     // same frame; off-screen rows wait for re-entry or discard. This
-    // bounds the rebuild fan-out to the retained set (≈ cache region),
-    // not the full mounted set. See [_dirtyKeys] doc.
+    // bounds the rebuild fan-out to the retained set (roughly the cache
+    // region), not the full mounted set. See [_dirtyKeys] doc.
     _dirtyKeys.addAll(_children.keys);
     renderObject.markNeedsLayout();
   }
@@ -191,8 +196,8 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     super.performRebuild();
     // All widget-refresh work happens lazily in [createChild] during
     // layout (see [_dirtyKeys]). If the framework marks us dirty, the
-    // super call satisfies that contract — the actual reconciliation
-    // lands when the next layout fires and iterates cache-region keys.
+    // super call satisfies that contract; the actual reconciliation lands
+    // when the next layout fires and iterates cache-region keys.
   }
 
   /// Deactivates all existing children so they are recreated with the
@@ -214,16 +219,16 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Handles structural notifications from the controller.
   ///
   /// [affectedKeys] semantics (set by the controller):
-  ///   - `null` — scope unknown; every mounted row may need refresh.
+  ///   - `null`: scope unknown; every mounted row may need refresh.
   ///     Queued lazily; consumed in [createChild] for retained rows.
-  ///   - empty set — structural change occurred but no mounted row's
+  ///   - empty set: structural change occurred but no mounted row's
   ///     builder output changed (new rows first-build via [createChild],
   ///     removed rows GC'd); only relayout + GC are required. Nothing
   ///     is added to [_dirtyKeys]; avoiding this queue is what keeps an
   ///     external `ChangeNotifier` subscriber that rebuilds SliverTree's
   ///     ancestor from amplifying the empty-set notify into a refresh
   ///     sweep over off-screen descendants.
-  ///   - non-empty set — queue exactly the listed mounted keys.
+  ///   - non-empty set: queue exactly the listed mounted keys.
   void _onStructuralChange(Set<TKey>? affectedKeys) {
     renderObject.markNeedsLayout();
     _scheduleGarbageCollection();
@@ -247,21 +252,21 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// Called on pure animation ticks (no structural change).
   ///
   /// Routes to [RenderObject.markNeedsLayout] for extent animations
-  /// (enter/exit/bulk/op-group) — they change structural layout.
+  /// (enter/exit/bulk/op-group), because those change structural layout.
   ///
-  /// Routes to [RenderObject.markNeedsPaint] for slide-only ticks — slide
+  /// Routes to [RenderObject.markNeedsPaint] for slide-only ticks: slide
   /// is paint-only; structural layout is unchanged and marking layout dirty
   /// would trigger an unnecessary relayout every frame.
   ///
   /// The completion tick of an extent animation fires **after** the
   /// controller has cleared its state (so [TreeController.hasActiveAnimations]
   /// is already false). We still need a final relayout to settle the final
-  /// extent, which is why [_priorTickHadAnimations] is checked — if the
+  /// extent, which is why [_priorTickHadAnimations] is checked: if the
   /// previous tick saw active animations, the current tick is the settle
   /// tick and must relayout even though the flag is now false.
   ///
   /// Slide-only ticks are routed to [RenderObject.markNeedsPaint]: slides
-  /// are paint-only by contract — the build window is computed at the
+  /// are paint-only by contract. The build window is computed at the
   /// install layout with overreach = max |delta| and only shrinks
   /// thereafter, so no new rows need building mid-slide, and scrolling
   /// during a slide triggers layout through the viewport anyway. A full
@@ -287,7 +292,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       renderObject.markNeedsLayout();
     } else if ((_priorTickHadFlipSlides && !hasFlipSlides) ||
         (_priorTickHadSlides && !hasSlides)) {
-      // Settle transition — one final layout for ghost cleanup.
+      // Settle transition: one final layout for ghost cleanup.
       //
       // EITHER transition, deliberately, and this must stay a single
       // branch with an OR rather than two markNeedsLayout sites:
@@ -307,7 +312,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       // counts stay unchanged (pinned by `slide_paint_only_test.dart`).
       renderObject.markNeedsLayout();
     } else if (hasSlides) {
-      // Pure slide tick — paint-only.
+      // Pure slide tick: paint-only.
       renderObject.markNeedsPaint();
     }
     _priorTickHadAnimations = active;
@@ -319,7 +324,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// without any structural mutation. Queues a targeted rebuild of just
   /// that row, consumed lazily by [createChild] during the next layout.
   void _onNodeDataChanged(TKey key) {
-    // Node not mounted — nothing to refresh. Don't queue or schedule a
+    // Node not mounted: nothing to refresh. Don't queue or schedule a
     // layout, otherwise we'd do a no-op pass for every off-screen update.
     if (!_children.containsKey(key)) return;
     _dirtyKeys.add(key);
@@ -349,7 +354,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     final controller = widget.controller;
     final deadNodes = <TKey>[];
 
-    // Dead nodes — no longer in the controller at all. Always evict.
+    // Dead nodes: no longer in the controller at all. Always evict.
     for (final nodeId in _children.keys) {
       if (controller.getNodeData(nodeId) == null) {
         deadNodes.add(nodeId);
@@ -405,13 +410,13 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// true)` batches, a row's slide-engine entry can settle and clear
   /// (delta=0) on one frame; on the same post-frame, this eviction
   /// callback would otherwise race a follow-up batch's pending mutation
-  /// and evict a row whose new slide hasn't installed yet — leaving a
+  /// and evict a row whose new slide hasn't installed yet, leaving a
   /// "row missing in viewport until next layout" gap that only resolves
   /// on a subsequent scroll-triggered re-layout. With the slide gate,
   /// eviction is paused for the entire cascade and runs once after all
   /// slides have settled.
   ///
-  /// The [_staleEvictionScheduled] flag dedupes across layout passes —
+  /// The [_staleEvictionScheduled] flag dedupes across layout passes,
   /// continuous scroll fires `didFinishLayout` every frame, but we only
   /// want one post-frame eviction sweep per frame. The [_children] walk
   /// happens inside the post-frame callback (not in the hot layout
@@ -425,7 +430,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _staleEvictionScheduled = false;
       if (!mounted || _inLayout) return;
-      // An animation may have started between scheduling and firing —
+      // An animation may have started between scheduling and firing,
       // e.g. the user expanded a node in the same frame. Bail out so we
       // don't evict a row that's about to begin its enter/exit animation
       // OR its FLIP slide.
@@ -477,7 +482,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     //   2. Existing element, queued as dirty by a prior update / notify:
     //      rebuild with a fresh widget so the row picks up any new state
     //      captured by the `nodeBuilder` closure or new controller data.
-    //   3. Existing element, not dirty: no-op — this is the hot path
+    //   3. Existing element, not dirty: no-op; this is the hot path
     //      every layout hits for already-mounted cache-region keys.
     final needsRefresh = existing != null && _dirtyKeys.remove(nodeId);
     if (existing != null && !needsRefresh) {

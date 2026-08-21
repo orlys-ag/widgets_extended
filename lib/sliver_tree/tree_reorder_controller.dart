@@ -17,19 +17,19 @@
 /// session at `startDrag`. Everything else is delegated to the session
 /// architecture:
 ///
-/// - `DragSession` (`_drag_session.dart`) — per-drag state; the single
+/// - `DragSession` (`_drag_session.dart`): per-drag state; the single
 ///   `resolve()` choreography site and the single `detachAll(SessionExit)`
 ///   teardown site.
-/// - `PointerSpace` — the ONLY component touching the scrollable; every
+/// - `PointerSpace`: the ONLY component touching the scrollable; every
 ///   read is nullable (null = defunct scrollable) and every pointer event
 ///   costs exactly one viewport lookup.
-/// - `DragProbe` — grab geometry + the touch-first probe shift + the
+/// - `DragProbe`: grab geometry + the touch-first probe shift + the
 ///   resolution core over [DropZoneResolver] (`_drop_zone_resolver.dart`).
-/// - Behavior collaborators (`_drag_session_behaviors.dart`) —
+/// - Behavior collaborators (`_drag_session_behaviors.dart`):
 ///   `AutoScroller` (per-session ticker), `DwellExpander`,
 ///   `MakeRoomDriver`, `DropSettler`.
 ///
-/// Render-layer access goes exclusively through [ReorderRenderPort] — this
+/// Render-layer access goes exclusively through [ReorderRenderPort]: this
 /// package never lets reorder code touch the concrete render object.
 /// Coordinate space is exclusively **sliver-local scroll-space** (distance
 /// from the start of the sliver's scroll extent, matching
@@ -50,7 +50,7 @@ export '_drop_zone_resolver.dart' show TreeDropTarget, TreeDropZone;
 /// Controls a drag-and-drop reorder over a [TreeController].
 ///
 /// Not usable with a comparator-based controller (auto-sort would
-/// override user order) — the constructor throws [ArgumentError] in that
+/// override user order); the constructor throws [ArgumentError] in that
 /// case.
 ///
 /// Extends [ChangeNotifier]: listeners are notified whenever
@@ -69,7 +69,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     this.autoScrollMaxVelocity = 1200.0,
     this.autoExpandDelay = const Duration(milliseconds: 700),
   }) {
-    // Runtime check in all build modes — asserts disappear in release.
+    // Runtime check in all build modes: asserts disappear in release.
     // hasComparator, not comparator: reading the comparator getter through
     // this class's covariant `TreeController<TKey, Object?>` view throws a
     // TypeError (TData appears contravariantly in its function type).
@@ -87,7 +87,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
 
   /// The tree controller to mutate on drop.
   ///
-  /// Typed on the key only — reorder orchestration never reads node data,
+  /// Typed on the key only: reorder orchestration never reads node data,
   /// so any `TreeController<TKey, *>` is accepted.
   final TreeController<TKey, Object?> treeController;
 
@@ -156,6 +156,9 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     canAcceptDrop: canAcceptDrop,
   );
 
+  /// The live drag session, or null when no drag is in flight. Its
+  /// presence IS the [isDragging] answer, and every per-drag collaborator
+  /// hangs off it, so tearing it down is what ends a drag.
   DragSession<TKey>? _session;
 
   /// Vsync for the per-session autoscroll ticker; the ticker itself lives
@@ -209,13 +212,13 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   /// Per-pointer-move channel: the latest global pointer position, `null`
   /// when idle. A drag proxy must reposition on EVERY move, whereas the
   /// [ChangeNotifier] channel deliberately coalesces to semantic target
-  /// changes — two channels, two contracts.
+  /// changes: two channels, two contracts.
   ValueListenable<Offset?> get pointerPosition => _pointerPosition;
   final ValueNotifier<Offset?> _pointerPosition = ValueNotifier<Offset?>(null);
 
   /// The active session's grab geometry: the pointer's dy within the
   /// dragged row at start, and that row's extent. `null` when idle.
-  /// Presentation consumers position the proxy at `pointer − grabDy`.
+  /// Presentation consumers position the proxy at `pointer - grabDy`.
   ({double grabDy, double rowExtent})? get dragProxyGeometry {
     final session = _session;
     if (session == null) {
@@ -231,18 +234,18 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   ///
   /// [renderPort] is the render surface currently displaying
   /// [treeController] (the `RenderSliverTree`). [scrollable] is the
-  /// ancestor scrollable whose viewport clips the tree — used for
-  /// pointer → scroll-space conversion and autoscroll.
+  /// ancestor scrollable whose viewport clips the tree, used for
+  /// pointer-to-scroll-space conversion and autoscroll.
   ///
-  /// Returns `true` when the session started. Returns `false` — starting
-  /// nothing — when [canReorder] refuses [key], or when [renderPort] has
+  /// Returns `true` when the session started. Returns `false`, starting
+  /// nothing, when [canReorder] refuses [key], or when [renderPort] has
   /// not been laid out yet (no painted rows to resolve against). A policy
   /// refusal is a normal runtime answer, not misuse, so it is a return
   /// value rather than an exception.
   ///
   /// [depthForPointerX] maps the pointer's sliver-local x to an UNCLAMPED
-  /// preferred depth (e.g. `x ~/ indentWidth` — the widget layer owns
-  /// the pixel constant); the resolver clamps it to the legal candidate
+  /// preferred depth (e.g. `x ~/ indentWidth`, since the widget layer
+  /// owns the pixel constant); the resolver clamps it to the legal candidate
   /// chain when a below-zone drop sits at a subtree right-boundary. Omit
   /// it to always resolve at the deepest legal level.
   ///
@@ -253,12 +256,12 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   /// released mid-animation. Presentation-supplied, following the
   /// [depthForPointerX] precedent. Omit it (imperative drags with no
   /// proxy) and the glides carry no x motion while the commit baseline
-  /// preserves the captured x — the classic y-only handoff. Only
+  /// preserves the captured x, the classic y-only handoff. Only
   /// consulted when [settleFromRelease] builds a settler.
   ///
   /// When [makeRoom] AND [settleFromRelease] are BOTH set (touch-first
   /// make-room mode), slot resolution probes at the PROXY MIDPOINT
-  /// (`pointer + rowExtent/2 − grabDy`, a session constant) instead of
+  /// (`pointer + rowExtent/2 - grabDy`, a session constant) instead of
   /// the raw pointer: on touch there is no visible cursor, so selection
   /// tracks the card in hand regardless of where it was grabbed. Every
   /// other configuration resolves at the raw pointer.
@@ -298,7 +301,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     );
     final startSample = pointerSpace.sample(pointerGlobal);
     if (startSample == null) {
-      // The scrollable is unmounted or its viewport is detached — there
+      // The scrollable is unmounted or its viewport is detached: there
       // is nothing to drag within, so refuse like any other policy check.
       return false;
     }
@@ -315,7 +318,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
       midpointProbe: makeRoom && settleFromRelease,
     );
     // Per-session animation resolution: the tree controller's style is
-    // read ONCE here — a mid-drag restyle never retimes a live session;
+    // read ONCE here: a mid-drag restyle never retimes a live session;
     // the next drag picks it up.
     final style = treeController.animationStyle;
     final session = DragSession<TKey>(
@@ -371,7 +374,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     renderPort.pinNode(key);
     session.subscribeScroll(scrollable.position, _onScrollPositionChanged);
     _pointerPosition.value = pointerGlobal;
-    // One choreography site: probe + resolver + every behavior — the
+    // One choreography site: probe + resolver + every behavior. The
     // make-room gap of a session born over a valid slot opens here, and
     // the edge-zone-at-start autoscroll evaluation runs here too.
     session.resolve();
@@ -463,7 +466,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
 
   /// Commits the drop: mutates [treeController] (via [TreeController.moveNode],
   /// [TreeController.reorderChildren], or [TreeController.reorderRoots]) and
-  /// starts the FLIP slide animation to interpolate old → new positions.
+  /// starts the FLIP slide animation to interpolate old to new positions.
   ///
   /// If no valid target is currently resolved, behaves like [cancelDrag].
   ///
@@ -471,9 +474,9 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   /// method asks the render port to capture a baseline of current painted
   /// offsets BEFORE mutating the controller; the next `performLayout`
   /// (triggered by that mutation) snapshots the post-mutation offsets and
-  /// installs a FLIP slide from baseline → current. The paint pass of the
+  /// installs a FLIP slide from baseline to current. The paint pass of the
   /// same frame then renders rows at their prior painted position and
-  /// slides them toward their new structural position smoothly — no
+  /// slides them toward their new structural position smoothly, with no
   /// one-frame "jump to new position, then slide back" flicker.
   void endDrag() {
     final session = _session;
@@ -487,7 +490,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // become pending-deletion (or been purged) since. Committing a stale
     // target would throw out of a gesture callback with the session
     // permanently stuck, and a baseline staged before validation
-    // would be consumed by nobody — first-wins staging then blocks every
+    // would be consumed by nobody: first-wins staging then blocks every
     // subsequent slide stage until an unrelated layout flushes it.
     session.resolveTargetOnly();
     final target = session.currentTarget;
@@ -514,7 +517,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
 
     // Current-position drop: the resolver now reports the dragged row's
     // own slot as a valid target ("returns here" feedback), but committing
-    // it must mutate NOTHING — and must stage NO baseline (an unconsumed
+    // it must mutate NOTHING, and must stage NO baseline (an unconsumed
     // baseline is exactly the protocol violation the expiry backstop
     // guards against). cancelDrag is the precise semantic: settle-back
     // glide, make-room release, clean teardown.
@@ -541,8 +544,8 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // synchronous, so no tick can interleave before then.
 
     // Dead-commit-slide settle fallback: when the commit FLIP cannot run
-    // (its reorderSlide family is zeroed — captured or live) but the
-    // drop-settle family is live and a proxy settler exists, the handoff
+    // (its reorderSlide family is zeroed, whether captured or live) but
+    // the drop-settle family is live and a proxy settler exists, the handoff
     // glide is installed DIRECTLY after the mutation instead of riding a
     // baseline override. The baseline MUST NOT be staged in this mode
     // (and the mutation must not self-stage): a dead baseline's consume
@@ -561,17 +564,19 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // destination for one frame.
     //
     // Proxy drop-settle: overriding the dragged row's baseline entry to
-    // the RELEASE position (pointer − grab offset — exactly where the
-    // floating proxy is at this instant) carries the row from the user's
-    // hand into its new slot, instead of replaying the old-slot →
-    // new-slot reparent slide underneath the vanishing proxy.
+    // the RELEASE position (pointer minus grab offset, which is exactly
+    // where the floating proxy is at this instant) carries the row from
+    // the user's hand into its new slot, instead of replaying the
+    // old-slot to new-slot reparent slide underneath the vanishing
+    // proxy.
     if (!useSettleFallback) {
       session.renderPort.beginSlideBaseline(
         duration: session.commitSlideSpec.duration,
         curve: session.commitSlideSpec.curve,
         // Proxy drop-settle: the dragged row's FLIP starts at the release
-        // position (null when no settler, or scrollable gone → classic
-        // old-slot FLIP). The override's x is the proxy's visual cross
+        // position (null when there is no settler, or the scrollable is
+        // gone, which means the classic old-slot FLIP). The override's x
+        // is the proxy's visual cross
         // offset, or null (preserve the captured x) when the session has
         // no proxy cross-offset source.
         baselineOverrides: session.settler?.baselineOverrides(),
@@ -580,7 +585,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
 
     // Make-room handoff: the baseline above captured the SHIFTED painted
     // positions (preview offsets ride the composed slide-delta read).
-    // Snap the preview away now, BEFORE the mutation — the consume-time
+    // Snap the preview away now, BEFORE the mutation: the consume-time
     // snapshot then reads clean post-mutation structural positions, and
     // rows already previewing at their destination get ~zero FLIP deltas
     // (no jump, no double animation). This ordering is why the snap is a
@@ -614,7 +619,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     } finally {
       // The re-resolve + validation above makes the commit's throwing
       // paths unreachable, so an exception here is a genuine invariant
-      // violation — let it propagate, but never leave the session stuck.
+      // violation: let it propagate, but never leave the session stuck.
       session.detachAll(SessionExit.commit);
       _pointerPosition.value = null;
       _session = null;
@@ -794,6 +799,10 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     return _moveBySiblingDelta(key, 1);
   }
 
+  /// Shared body of [moveUp] and [moveDown]: shifts [key] by [delta]
+  /// positions among its LIVE siblings. Returns false when the key has no
+  /// live position or the target would fall outside the sibling range,
+  /// which is what makes the two public methods no-ops at the ends.
   bool _moveBySiblingDelta(TKey key, int delta) {
     final index = treeController.getIndexInParent(key);
     if (index < 0) {
@@ -850,7 +859,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   void cancelDrag() {
     final session = _session;
     if (session == null) {
-      return; // Per-session ticker: no session ⇒ nothing can be ticking.
+      return; // Per-session ticker: no session, so nothing can be ticking.
     }
     session.detachAll(SessionExit.cancel);
     _pointerPosition.value = null;

@@ -2,8 +2,8 @@
 /// parameter per knob on every constructor.
 ///
 /// Passing a non-null [TreeReorderConfig] IS enabling reorder, and by
-/// default that is all the wiring a row needs: [
-/// TreeReorderConfig.buildDefaultDragHandles] installs a long-press drag
+/// default that is all the wiring a row needs:
+/// [TreeReorderConfig.buildDefaultDragHandles] installs a long-press drag
 /// over the whole row, the way `ReorderableListView` does. Set it false
 /// to place [TreeDragHandle]s yourself, anywhere in the row you like.
 library;
@@ -128,8 +128,7 @@ class TreeReorderConfig<TKey> {
   /// A policy may therefore answer null without consulting the index. If
   /// a genuine shape-only query is ever wanted, it should get its own
   /// callback: overloading null onto a parameter whose entire meaning is
-  /// a position is what produced the dead-zone regression described
-  /// above.
+  /// a position is exactly what opens the dead zone described above.
   final bool Function({required TKey movingKey, TKey? newParent, int? index})?
   canAcceptDrop;
 
@@ -140,8 +139,7 @@ class TreeReorderConfig<TKey> {
   /// making the whole row draggable after a long press.
   ///
   /// Defaults to true, matching
-  /// `ReorderableListView.buildDefaultDragHandles` and preserving the
-  /// gesture this package has always installed. A uniform long-press
+  /// `ReorderableListView.buildDefaultDragHandles`. A uniform long-press
   /// default is predictable, needs no platform reasoning to understand,
   /// and does not change your layout as a side effect of turning reorder
   /// on. The cost is that desktop users get no visible affordance and a
@@ -223,8 +221,8 @@ class TreeReorderConfig<TKey> {
   ///
   /// The supported way to reach what the config cannot express: reading
   /// `isDragging` for chrome, `cancelDrag()`, subscribing to
-  /// `pointerPosition` for a custom overlay, or driving [
-  /// TreeReorderController.moveTo] programmatically. Do NOT dispose it.
+  /// `pointerPosition` for a custom overlay, or driving
+  /// [TreeReorderController.moveTo] programmatically. Do NOT dispose it.
   final void Function(TreeReorderController<TKey> controller)?
   onControllerCreated;
 }

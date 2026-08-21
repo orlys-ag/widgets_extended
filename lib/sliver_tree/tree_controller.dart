@@ -29,15 +29,15 @@ part '_tree_controller_helpers.dart';
 /// Invoked from [TreeController.moveNode] (and any future animated mutation)
 /// to ask the render object to snapshot current painted offsets BEFORE the
 /// mutation so the next `performLayout` can install a FLIP slide from
-/// baseline → post-mutation.
+/// baseline to post-mutation.
 ///
-/// Returning `true` means "the host is participating in this slide cycle" —
+/// Returning `true` means "the host is participating in this slide cycle",
 /// either it staged a fresh baseline now, or a prior call this frame already
 /// staged one and the host is honoring the first-wins policy. Returning
 /// `false` indicates the host cannot participate at all (not yet laid out,
 /// detached, etc.).
 ///
-/// **Internal contract** — this typedef is part of the sliver-render-object
+/// **Internal contract**: this typedef is part of the sliver-render-object
 /// staging protocol. External callers should not implement or depend on it.
 typedef TreeRenderHost =
     bool Function({required Duration duration, required Curve curve});
@@ -54,7 +54,8 @@ typedef TreeRenderHost =
 /// for efficient iteration and memory usage.
 ///
 /// The controller provides two notification channels:
-/// - [addListener] / [removeListener] from [ChangeNotifier]: for structure changes
+/// - [addListener] / [removeListener] from [ChangeNotifier]: for structure
+/// changes
 /// - [addAnimationListener] / [removeAnimationListener]: for animation ticks
 ///
 /// This separation allows the render object to only do full relayout when
@@ -85,7 +86,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Mutable at runtime. When [TreeAnimationStyle.expandCollapse]'s
   /// duration changes, the new value is written onto every in-flight
   /// [AnimationController] (operation groups and the bulk group), but a
-  /// running simulation is **not** re-timed — the controller reads
+  /// running simulation is **not** re-timed: the controller reads
   /// `duration` at the next `forward()`/`reverse()`, so in-flight groups
   /// finish at their old rate and the new duration applies from the next
   /// start. Curves apply to newly started groups only. The per-node
@@ -113,7 +114,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
     // Disabled-mode split: a zero family CREATES no motion (install-time
-    // refusal), while DISABLING — this transition — STOPS motion. Zeroing
+    // refusal), while DISABLING, this transition, STOPS motion. Zeroing
     // the reorderSlide family purges in-flight slides here, explicitly;
     // no other family transition purges (a live drop-settle glide already
     // survives a live dropSettle zeroing, and standalone/op-group
@@ -131,7 +132,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Horizontal indent per depth level in logical pixels.
   ///
   /// Mutable at runtime. [getIndent] reads this live, so setting a new
-  /// value only needs to trigger a relayout on subscribers — fires the
+  /// value only needs to trigger a relayout on subscribers, fires the
   /// animation-tick channel (layout-only) rather than the structural
   /// channel so children aren't rebuilt unnecessarily.
   double get indentWidth => _indentWidth;
@@ -153,12 +154,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Whether this controller sorts siblings with a [comparator].
   ///
   /// Exists because reading [comparator] itself through a covariantly-typed
-  /// reference (`TreeController<TKey, Object?>` — how `TreeReorderController`
+  /// reference (`TreeController<TKey, Object?>`, how `TreeReorderController`
   /// holds its controller) throws a runtime `TypeError` whenever a
   /// comparator is actually set: the comparator's function type uses
   /// `TData` contravariantly, so a non-null value fails the implicit
-  /// covariance check on the read. (A null comparator reads fine — null
-  /// inhabits every nullable type — which makes the failure mode
+  /// covariance check on the read. (A null comparator reads fine, null
+  /// inhabits every nullable type, which makes the failure mode
   /// data-dependent and easy to miss.) A `bool` carries no `TData` and is
   /// safe from any reference type.
   bool get hasComparator {
@@ -260,7 +261,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// already be registered; [parent] must also be registered (unless null).
   ///
   /// Forwards directly to [NodeStore.setParent], which fires
-  /// [NodeStore.onParentChanged] after the structural write — the order
+  /// [NodeStore.onParentChanged] after the structural write, the order
   /// buffer's [VisibleOrderBuffer.handleParentChanged] subscriber shifts
   /// the visible-subtree-size cache from the old ancestor chain to the
   /// new one. No additional bookkeeping needed here.
@@ -345,7 +346,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   List<TKey> get _roots => _order.roots;
 
   /// Flattened visible-order buffer: maintains the dense nid array, the
-  /// reverse nid → visible-index map, the per-nid visible-subtree-size
+  /// reverse map from nid to visible index, the per-nid subtree-size
   /// cache, and the roots list. Mutations invalidate the full-extent
   /// prefix sum via the `onOrderMutated` callback. The buffer subscribes
   /// to [NodeStore.onParentChanged] (wired in the [_store] initializer
@@ -366,8 +367,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Opt-in: run the FULL cross-structure consistency sweep (whole order
   /// walk, nid-table walks, every animation mirror) after every
-  /// incremental order mutation in debug builds. Off by default — the
-  /// sweep makes N sequential inserts O(N²) in debug; the default is an
+  /// incremental order mutation in debug builds. Off by default, the
+  /// sweep makes N sequential inserts O(N^2) in debug; the default is an
   /// O(changed-range) order/reverse-index agreement check. The fuzz/purge
   /// suites, which exist to exercise the invariants, enable this.
   static bool debugFullConsistencyChecks = false;
@@ -392,7 +393,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ANIMATION STATE — owned by AnimationCoordinator
+  // ANIMATION STATE: owned by AnimationCoordinator
   // ══════════════════════════════════════════════════════════════════════════
   //
   // Every animation source (standalone, per-operation groups, bulk, slide)
@@ -403,11 +404,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   //   `_onOperationGroupStatusChange`) because they cross structure /
   //   order / structural-notification concerns.
   // - The standalone-tick completion handler (`_onStandaloneTickComplete`)
-  //   for the same reason — it calls `_finalizeAnimation`, which purges
+  //   for the same reason, it calls `_finalizeAnimation`, which purges
   //   structure.
   // - Private forwarders (`_clearStandalone`, `_setOperationGroup`,
-  //   `_isPendingDeletion`, …) used by this file and the part files.
-  // - `_keysToRemoveScratch` — controller-owned scratch buffer for the
+  //   `_isPendingDeletion`, and so on) used by this file and the part files.
+  // - `_keysToRemoveScratch`: controller-owned scratch buffer for the
   //   status / finalize handlers.
 
   /// Animation subsystem facade. Owns the five animation sources plus
@@ -443,8 +444,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// order / notification.
   ///
   /// Mirrors the standalone tick's post-progress block: capture
-  /// parent-before-finalize → finalize each → batch _removeFromVisibleOrder
-  /// → bump structure → fire structural notification. The animator's
+  /// parent-before-finalize, then finalize each, then batch
+  /// _removeFromVisibleOrder, then bump structure, then fire the
+  /// structural notification. The animator's
   /// tick callback ALSO fires the listener channel via the wrapper
   /// closure in AnimationCoordinator, so this method does not need to
   /// call _notifyAnimationListeners.
@@ -548,10 +550,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // Listener channel
   void _notifyAnimationListeners() => _anim.notifyListeners();
 
-  // Animating-keys cache — public access via `currentlyAnimatingKeys`
+  // Animating-keys cache: public access via `currentlyAnimatingKeys`
   // and the AnimationReader getters; in-file callers use _anim directly.
 
-  // Slide engine — used by the controller's public slide API forwarders
+  // Slide engine: used by the controller's public slide API forwarders
   // and by `_cancelAnimationStateForSubtree`.
   SlideAnimationEngine<TKey> get _slide => _anim.slide;
   ReorderPreviewEngine get _preview => _anim.preview;
@@ -581,7 +583,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   final List<MapEntry<TKey, OperationGroup<TKey>>> _opGroupSnapshot =
       <MapEntry<TKey, OperationGroup<TKey>>>[];
 
-  // Private field — already invisible across files.
+  // Private field: already invisible across files.
   final Set<TreeRenderHost> _renderHosts = <TreeRenderHost>{};
 
   /// Phantom-anchor relationships staged by `moveNode(animate: true)` for
@@ -592,16 +594,16 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// Drained by `RenderSliverTree._consumeSlideBaselineIfAny` via
   /// [takePendingPhantomAnchors] when the next layout consumes the staged
-  /// baseline. Cleared after consumption — never persists across slide
+  /// baseline. Cleared after consumption, never persists across slide
   /// cycles.
   Map<TKey, TKey>? _pendingPhantomAnchors;
 
   /// Returns and clears the staged phantom-anchor relationships. Called by
   /// the render object during baseline consumption. Returns null when no
-  /// relationships were staged (the common case — only animated reparents
+  /// relationships were staged (the common case, only animated reparents
   /// of hidden subtrees produce entries).
   ///
-  /// **Internal contract** — sliver-render-object-specific.
+  /// **Internal contract**: sliver-render-object-specific.
   Map<TKey, TKey>? takePendingPhantomAnchors() {
     final result = _pendingPhantomAnchors;
     _pendingPhantomAnchors = null;
@@ -613,7 +615,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// hidden AFTER (because the new parent or an ancestor is collapsed).
   /// Each entry maps a soon-to-be-hidden key to the NEW visible ancestor
   /// (typically the new collapsed parent's row) whose painted position
-  /// should be used as the slide's destination anchor — the row visually
+  /// should be used as the slide's destination anchor, the row visually
   /// slides into the new parent's row and disappears behind it.
   ///
   /// Symmetric to [_pendingPhantomAnchors] (the entry case). Drained by
@@ -623,7 +625,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Returns and clears the staged exit-phantom relationships. Companion
   /// to [takePendingPhantomAnchors] for the visible-to-hidden case.
   ///
-  /// **Internal contract** — sliver-render-object-specific.
+  /// **Internal contract**: sliver-render-object-specific.
   Map<TKey, TKey>? takePendingExitPhantomAnchors() {
     final result = _pendingExitPhantomAnchors;
     _pendingExitPhantomAnchors = null;
@@ -645,7 +647,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Registers a render host. Called by `RenderSliverTree.attach`. Idempotent.
   ///
-  /// **Internal contract** — the staging protocol is sliver-render-object-
+  /// **Internal contract**: the staging protocol is sliver-render-object-
   /// specific; external callers will get inconsistent results.
   void registerRenderHost(TreeRenderHost host) {
     _renderHosts.add(host);
@@ -654,13 +656,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Unregisters a render host. Called by `RenderSliverTree.detach`. Tolerant
   /// of a host that was never registered (no-op).
   ///
-  /// **Internal contract** — see [registerRenderHost].
+  /// **Internal contract**: see [registerRenderHost].
   void unregisterRenderHost(TreeRenderHost host) {
     _renderHosts.remove(host);
   }
 
   /// Fans out a baseline-capture request to every attached render host.
-  /// Returns true if at least one host is participating in this slide cycle —
+  /// Returns true if at least one host is participating in this slide cycle,
   /// either it freshly staged a baseline, or a prior pending baseline (from
   /// an earlier same-frame call) is being honored under first-wins. Returns
   /// false only when no host could participate at all (no hosts attached, or
@@ -698,7 +700,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// staging and the removal logic.
   int debugVisibleDescendantsWalkCount = 0;
 
-  /// Whether [key] currently has a live (non-zero) FLIP slide delta — which,
+  /// Whether [key] currently has a live (non-zero) FLIP slide delta, which,
   /// because exit ghosts slide toward their anchor's SETTLED y, is also true
   /// for any in-flight exit-ghost (its delta is non-zero for the whole
   /// traversal). Gates base-change staging so idle expand/collapse stays
@@ -711,7 +713,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// base is about to change currently has a live slide/ghost. Called from
   /// [expand]/[collapse] BEFORE the structural mutation so the captured
   /// painted positions are the FLIP "before". The next `performLayout` consume
-  /// composes `newDelta = currentPaintedPosition − newStructuralOffset` through
+  /// composes `newDelta = currentPaintedPosition - newStructuralOffset` through
   /// the engine's existing composition path, preserving painted position
   /// across the base change (no teleport, no extra layout pass).
   ///
@@ -764,7 +766,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   final List<void Function(TKey)> _nodeDataListeners = [];
 
   /// Listeners notified on structural mutations with an optional set of
-  /// affected keys. A `null` set means "scope unknown — full refresh"; an
+  /// affected keys. A `null` set means "scope unknown, full refresh"; an
   /// empty set means "structural change happened, but no mounted row's
   /// builder output changed" (valid when the effect is absorbed by
   /// `createChild` for new rows and GC for removed rows); a non-empty set
@@ -820,7 +822,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// batch entry, not the live mutated state. In-batch readers that
   /// depend on visible-order membership (e.g. [moveNode]'s phantom-anchor
   /// decisions) must consult a structural predicate that's correct
-  /// regardless of [_order] freshness — see [_isStructurallyVisible].
+  /// regardless of [_order] freshness, see [_isStructurallyVisible].
   /// Public visible-order accessors call [_ensureVisibleOrder] first to
   /// flush the deferred rebuild on demand.
   bool _visibleOrderDirty = false;
@@ -922,7 +924,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   // or overwrite on structural change.
 
   /// Sentinel returned by [nidOf] when the key isn't registered. Same value
-  /// as the internal [VisibleOrderBuffer.kNotVisible] but exposed separately since callers
+  /// as the internal [VisibleOrderBuffer.kNotVisible] but exposed separately
+  /// since callers
   /// should treat it as "unknown key".
   static const int noNid = NodeIdRegistry.noNid;
 
@@ -949,7 +952,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Read-only view over the visible-order nid buffer for hot-path
   /// consumers that walk all visible positions and want to skip the
   /// per-position [visibleNidAt] dispatch. The underlying buffer's
-  /// length may exceed [visibleNodeCount] — only the first N entries
+  /// length may exceed [visibleNodeCount], only the first N entries
   /// are valid. The buffer itself is mutated in place by structural
   /// changes; callers must not retain the reference across mutations.
   Int32List get orderNidsView {
@@ -971,12 +974,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Depth for [nid] (0 for roots). No [TKey] hash. [nid] must be live.
   int depthOfNid(int nid) => _store.depthByNid[nid];
 
-  /// Estimated full extent for the live [nid] — measured value when
+  /// Estimated full extent for the live [nid], measured value when
   /// available, [defaultExtent] otherwise. Hot-path equivalent of
-  /// [getEstimatedExtent] that avoids the [TKey]→nid hash. Caller must
+  /// [getEstimatedExtent] that avoids the key-to-nid hash. Caller must
   /// guarantee [nid] is live and within range.
   double getEstimatedExtentNid(int nid) {
-    // Direct nid-indexed read — the store is nid-keyed, so no key
+    // Direct nid-indexed read: the store is nid-keyed, so no key
     // resolution (and no string hash) is involved at all.
     return _anim.fullExtentOfNid(nid) ?? defaultExtent;
   }
@@ -994,7 +997,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Live, read-only view of every key currently animating across
   /// standalone, operation-group, and bulk sources. Backed by the lazy
   /// `AnimationCoordinator.ensureAnimatingKeys` cache; **do NOT mutate**
-  /// — same convention as
+  ///, same convention as
   /// [orderNidsView]. Iteration is stable within one frame.
   Set<TKey> get currentlyAnimatingKeys => _anim.ensureAnimatingKeys();
 
@@ -1024,8 +1027,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Slide delta for the live [nid] (paint-only FLIP offset), or 0.0 when
   /// the node is not currently sliding. Hot-path equivalent of
-  /// [getSlideDelta] — read every paint, hit-test, and transform call
-  /// for visible rows, so saving the [TKey]→nid hash matters.
+  /// [getSlideDelta]: read every paint, hit-test, and transform call
+  /// for visible rows, so saving the key-to-nid hash matters.
   double getSlideDeltaNid(int nid) {
     // Composed with the make-room preview: painted position =
     // structural + FLIP delta + held preview offset. One boolean guard
@@ -1059,7 +1062,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// X-axis (cross-axis indent) slide delta for the live [nid], or 0.0
   /// when the node is not currently sliding. Hot-path equivalent of
-  /// [getSlideDeltaX] — read on every paint, hit-test, and transform
+  /// [getSlideDeltaX]: read on every paint, hit-test, and transform
   /// call for visible rows during a depth-changing reparent.
   double getSlideDeltaXNid(int nid) => _slide.deltaXForNid(nid);
 
@@ -1071,7 +1074,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// engine's "un-touched re-baseline" branch on subsequent batch
   /// installs.
   ///
-  /// Set-only-true semantics — the engine implicitly clears the flag
+  /// Set-only-true semantics: the engine implicitly clears the flag
   /// when the slide entry is destroyed (settles, cancelled, or replaced
   /// via composition). The render layer should never need to clear the
   /// flag explicitly.
@@ -1092,12 +1095,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return _isExpandedKey(key);
   }
 
-  /// Whether [key] is currently in the flattened visible order — i.e.
+  /// Whether [key] is currently in the flattened visible order, i.e.
   /// every ancestor (if any) is expanded AND the node itself exists.
   ///
   /// O(1) via the visible-order buffer's nid-indexed reverse lookup.
   /// Useful for the render object to distinguish "truly hidden" from
-  /// "ghost-rendered after a visible→hidden reparent."
+  /// "ghost-rendered after a visible-to-hidden reparent."
   bool isVisible(TKey key) {
     _ensureVisibleOrder();
     return _order.contains(key);
@@ -1122,7 +1125,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// be reparented under any of its own descendants.
   List<TKey> getDescendants(TKey key) => _getDescendants(key);
 
-  /// Whether [key] is pending deletion — present in the structural maps but
+  /// Whether [key] is pending deletion, present in the structural maps but
   /// animating out and scheduled for purge once the animation settles.
   ///
   /// Drop-target resolution should skip pending-deletion rows: they are
@@ -1232,7 +1235,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// of its parent (or the live root list, if [key] is a root). Returns -1
   /// if [key] is not present or is itself pending deletion.
   ///
-  /// Live-space — not full-list-space — so the returned index directly
+  /// Live-space: not full-list-space: so the returned index directly
   /// matches positions in [liveRootKeys] / [getLiveChildren] and the input
   /// space of [reorderRoots] / [reorderChildren].
   ///
@@ -1297,7 +1300,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Used by the element and render object to defer expensive operations
   /// (like stale-node eviction and sticky precomputation) during animation.
   ///
-  /// **Slide animations are deliberately excluded.** Slide is paint-only —
+  /// **Slide animations are deliberately excluded.** Slide is paint-only,
   /// it does not change layout, sticky geometry, or eviction decisions.
   /// Callers that care about slide state read [hasActiveSlides] instead.
   bool get hasActiveAnimations => _anim.hasActiveAnimations;
@@ -1305,8 +1308,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Whether any FLIP slide animations are currently active.
   ///
   /// Deliberately separate from [hasActiveAnimations]: slide is paint-only
-  /// and must not be mixed into the sticky-throttle / eviction-deferral
-  /// signal that [hasActiveAnimations] drives. The sliver element routes
+  /// and must not be mixed into the eviction-deferral signal that
+  /// [hasActiveAnimations] drives. The sliver element routes
   /// slide-only ticks to [RenderObject.markNeedsPaint] rather than
   /// [RenderObject.markNeedsLayout] based on this flag.
   bool get hasActiveSlides => _slide.hasActive || _preview.hasActive;
@@ -1330,7 +1333,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   /// Whether any in-flight slide has a non-zero X-axis component
   /// (depth-changing reparent). Hot-path render code uses this to skip
-  /// per-row X-delta reads when no X-axis work is in flight — the common
+  /// per-row X-delta reads when no X-axis work is in flight, the common
   /// case, since most reorders are same-depth.
   bool get hasActiveXSlides => _slide.hasActiveX;
 
@@ -1340,14 +1343,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// NOT a bound on the composed per-row delta and deliberately not part
   /// of the production read surface: [getSlideDeltaNid] SUMS the FLIP
   /// engine and the make-room preview, so a row carrying both can exceed
-  /// this max — the bug class every former consumer was migrated off of.
+  /// this max, the bug class every former consumer was migrated off of.
   /// Every window that must provably contain the composed painted
   /// positions (the render's build/paint/hit-test overreach widening, the
   /// bounded drop-target scan) reads [composedSlideAbsDeltaBound] (the
   /// sum). This getter is retained solely for tests that pin the
   /// max-vs-sum distinction: the make-room composition pin, and the
   /// bounded-scan oracle's teeth gate, which must prove its engineered
-  /// overlap state exceeds a max-based bound — a value not derivable from
+  /// overlap state exceeds a max-based bound, a value not derivable from
   /// any other public read.
   @visibleForTesting
   double get maxActiveSlideAbsDelta {
@@ -1359,7 +1362,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return base > previewMax ? base : previewMax;
   }
 
-  /// A true upper bound on the COMPOSED per-row delta — the SUM companion
+  /// A true upper bound on the COMPOSED per-row delta, the SUM companion
   /// of [maxActiveSlideAbsDelta]'s max. [getSlideDeltaNid] SUMS the FLIP
   /// engine and the make-room preview, and a row can carry both at once
   /// (a drag started while the prior commit's FLIP is still animating),
@@ -1369,14 +1372,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// widening, the bounded drop-target scan). Degenerates to the single
   /// engine's max whenever the other is idle (an idle engine's max is
   /// 0.0), so single-engine states pay no extra width. Both engine maxima
-  /// are computed on demand — never stale.
+  /// are computed on demand, never stale.
   double get composedSlideAbsDeltaBound =>
       _slide.maxAbsDelta + _preview.maxAbsDelta;
 
   /// Current slide delta for [key] in scroll-space y, or 0.0 if the node is
   /// not currently sliding. Read by [RenderSliverTree.paint],
   /// [RenderSliverTree.applyPaintTransform], and the hit-test path on
-  /// every frame (no caching — staleness-safe under tick-without-paint).
+  /// every frame (no caching, staleness-safe under tick-without-paint).
   double getSlideDelta(TKey key) {
     final base = _slide.deltaForKey(key);
     if (!_preview.hasActive) {
@@ -1490,7 +1493,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   bool isExiting(TKey key) => _anim.isExiting(key);
 
   /// Gets the estimated full extent for a node.
-  /// Returns the cached measured extent if available, otherwise [defaultExtent].
+  /// Returns the cached measured extent if available, otherwise
+  /// [defaultExtent].
   double getEstimatedExtent(TKey key) =>
       _anim.fullExtentOf(key) ?? defaultExtent;
 
@@ -1506,12 +1510,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Starts a FLIP slide animation for every visible node whose position in
   /// scroll-space changed between [priorOffsets] (pre-mutation) and
   /// [currentOffsets] (post-mutation). Produce both with
-  /// [RenderSliverTree.snapshotVisibleOffsets] — the first **before** the
+  /// [RenderSliverTree.snapshotVisibleOffsets], the first **before** the
   /// structural mutation, the second from inside a
   /// [WidgetsBinding.addPostFrameCallback] **after** the mutation's layout
   /// has run.
   ///
-  /// A node present in both maps with `priorOffsets[key] != currentOffsets[key]`
+  /// A node present in both maps with `priorOffsets[key] !=
+  /// currentOffsets[key]`
   /// receives a new [SlideAnimation] with `startDelta = prior - current`.
   /// A node only in one map is ignored (it was either added or removed and
   /// has its own enter/exit animation for that). A zero delta installs no
@@ -1560,8 +1565,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// kill switch is computed from the DROP-SETTLE family
   /// ([TreeAnimationStyle.effectiveDropSettle]) instead of
   /// `reorderSlide`, so the glide honors its own family's zero rule.
-  /// [duration]/[curve] are the drag session's CAPTURED spec — values
-  /// are captured per session, the kill switch reads the live style
+  /// [duration]/[curve] are the drag session's CAPTURED spec: values are
+  /// captured per session, while the kill switch reads the live style
   /// (the same split the make-room family uses).
   void animateDropSettleGlide(
     Map<TKey, ({double y, double x})> priorOffsets,
@@ -1586,7 +1591,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Debug-only: number of visible-order slots examined by the last
   /// [setReorderPreview] target computation. -1 when the computation has
   /// never run (calls that exit before the target loop leave it
-  /// unchanged). Pins the loop's O(visibleNodeCount) contract — the order
+  /// unchanged). Pins the loop's O(visibleNodeCount) contract, the order
   /// buffer is grow-only, so an unbounded loop would silently scan the
   /// stale capacity tail after a high-water mark.
   int debugLastPreviewTargetIterationCount = -1;
@@ -1599,13 +1604,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
   // Geometry memo for [setReorderPreview]: the target map is a pure
   // function of (draggedNid, gapIndex, lift) over the visible order, so
-  // an identical re-send — the per-pointer-event common case while the
-  // pointer dwells in one slot — can skip the O(visibleNodeCount) loop
+  // an identical re-send, the per-pointer-event common case while the
+  // pointer dwells in one slot, can skip the O(visibleNodeCount) loop
   // and map allocation entirely. `_previewMemoStructureGen` guards the
   // one case geometry can't see (an equal-extent swap inside the shifted
   // span); the validity flag (rather than `_preview.hasActive`) keeps
-  // empty-target installs — hovering the dragged block's own slot, the
-  // initial state of every drag — memoizable too. Reset as the first
+  // empty-target installs, hovering the dragged block's own slot, the
+  // initial state of every drag, memoizable too. Reset as the first
   // line of [clearReorderPreview]; every other preview writer is either
   // a purge path (which bumps the structure generation) or the engine's
   // self-settle (only reachable via a release that started in
@@ -1664,7 +1669,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Structure never changes: no structural listeners fire, no sync diff
   /// runs, layout is untouched. The offsets ride the same composed read
   /// path as FLIP slide deltas, so painted positions, painted-truth
-  /// snapshots (FLIP baselines — this is what makes the commit handoff
+  /// snapshots (FLIP baselines, which is what makes the commit handoff
   /// seamless), hit-testing, retention, and overreach all see them
   /// automatically. Snaps instead of animating when the effective
   /// make-room spec (or the resolved per-call duration) is zero.
@@ -1709,7 +1714,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // part of the memo key: the engine's retarget path early-outs on
     // identical targets (so dropped re-sends with different
     // duration/curve VALUES are behavior-identical), but the snap branch
-    // has no such early-out — an animating→snap re-send with identical
+    // has no such early-out: an animating-to-snap re-send with identical
     // geometry forces instant arrival and must not be skipped.
     final resolvedDuration =
         duration ?? _animationStyle.effectiveMakeRoom.duration;
@@ -1718,7 +1723,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         resolvedDuration == Duration.zero;
 
     // Geometry memo (see field docs): identical geometry + timing mode
-    // already installed — nothing to do. `lift` compares exactly: an
+    // already installed, nothing to do. `lift` compares exactly: an
     // unchanged state recomputes the same left-to-right sum bitwise, and
     // any input extent change flows into the sum (or into gapIndex / the
     // structure generation).
@@ -1732,7 +1737,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     // Per-row shift over the CURRENT visible order (which still contains
-    // the dragged rows in place): closing the vacated slot (−lift for
+    // the dragged rows in place): closing the vacated slot (minus lift for
     // rows after the dragged subtree) composes with opening the gap
     // (+lift for rows at/after the slot). Rows on the far side of both
     // cancel to zero; only the span between the old and new positions
@@ -1767,7 +1772,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       curve: curve ?? _animationStyle.effectiveMakeRoom.curve,
       snap: resolvedSnap,
     );
-    // Written after the install, for every install — including an
+    // Written after the install, for every install, including an
     // empty-target one (own-slot hover), which the engine expresses as
     // "no entries" but is still a held, re-skippable state.
     _previewMemoValid = true;
@@ -1779,8 +1784,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   /// Ends the make-room preview: animate the shifted rows back
-  /// ([animate] true — pointer left every valid slot, or the drag was
-  /// cancelled) or drop the offsets instantly ([animate] false — the
+  /// ([animate] true, pointer left every valid slot, or the drag was
+  /// cancelled) or drop the offsets instantly ([animate] false, the
   /// commit path, where the staged FLIP baseline has already captured the
   /// shifted painted positions and the mutation's layout takes over).
   void clearReorderPreview({
@@ -1947,7 +1952,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// - [AncestorExpansionMode.immediate] (default): ancestors are expanded
   ///   synchronously (no animation) before the scroll begins. When this
   ///   actually expanded something, the method waits one frame before
-  ///   computing the target so the enlarged sliver lays out first —
+  ///   computing the target so the enlarged sliver lays out first,
   ///   otherwise the scroll would clamp against the pre-expansion
   ///   `maxScrollExtent` and stop short of the target row.
   /// - [AncestorExpansionMode.animated]: ancestors animate open while the
@@ -1965,7 +1970,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// For nodes that have never been laid out, [extentEstimator] supplies
   /// a fallback height; without it, [defaultExtent] is used. A mismatch
   /// between estimate and actual measurement may cause slight over- or
-  /// undershoot — the render pass that includes the target will snap to
+  /// undershoot, the render pass that includes the target will snap to
   /// the exact offset on the next frame.
   ///
   /// [sliverBaseOffset] is the scroll-space distance from the top of the
@@ -1975,7 +1980,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// Animated-mode scrolls are single-flight: starting one while another
   /// is still in flight cancels the earlier scroll (its future resolves
-  /// false) — the newer target wins.
+  /// false), the newer target wins.
   ///
   /// Returns true if a scroll was issued, false if [key] could not be
   /// resolved, [scrollController] has no attached position, or the scroll
@@ -2002,7 +2007,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ANIMATION LISTENERS — forwarded to AnimationCoordinator
+  // ANIMATION LISTENERS: forwarded to AnimationCoordinator
   // ══════════════════════════════════════════════════════════════════════════
 
   /// Registers a callback that fires on every animation tick.
@@ -2043,7 +2048,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   void _fireNodeDataListeners(TKey key) {
-    // Snapshot before iteration — listeners may remove themselves.
+    // Snapshot before iteration: listeners may remove themselves.
     final listeners = List<void Function(TKey)>.of(_nodeDataListeners);
     for (final listener in listeners) {
       listener(key);
@@ -2056,7 +2061,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// This is a finer-grained channel than [addListener] ([ChangeNotifier]).
   /// External callers that only need to know "something changed" can keep
-  /// using [addListener] — [notifyListeners] still fires from
+  /// using [addListener], [notifyListeners] still fires from
   /// [_notifyStructural]. Listeners that can do targeted work (e.g. the
   /// sliver tree element refreshing only specific mounted rows) should
   /// prefer this channel.
@@ -2171,8 +2176,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Runs [body] with structural notifications coalesced into a single
   /// [notifyListeners] call fired after [body] returns.
   ///
-  /// Any number of mutations inside [body] — [insertRoot], [insert],
-  /// [remove], [expand], [collapse], [updateNode], [moveNode], etc. — fire
+  /// Any number of mutations inside [body], [insertRoot], [insert],
+  /// [remove], [expand], [collapse], [updateNode], [moveNode], etc., fire
   /// at most one structural notification when the outermost [runBatch]
   /// exits. Nested [runBatch] calls coalesce into the outermost one.
   ///
@@ -2197,7 +2202,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _batchDepth--;
       if (_batchDepth == 0) {
         // Flush any deferred visible-order rebuild BEFORE notifications
-        // fire — listeners reading visibleNodes/orderNidsView in their
+        // fire, listeners reading visibleNodes/orderNidsView in their
         // callback must see the post-batch state. Cheap when no
         // mutation flagged dirtiness (single bool check).
         _ensureVisibleOrder();
@@ -2236,10 +2241,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// [affectedKeys] narrows the refresh scope for listeners subscribed via
   /// [addStructuralListener]:
-  ///   - `null` — scope unknown; listeners should do a full refresh.
-  ///   - empty set — structural change occurred but no mounted row's
+  ///   - `null`: scope unknown; listeners should do a full refresh.
+  ///   - empty set: structural change occurred but no mounted row's
   ///     builder output changed; listeners need only relayout/GC.
-  ///   - non-empty set — exactly these keys need refresh.
+  ///   - non-empty set: exactly these keys need refresh.
   ///
   /// Inside [runBatch], `null` is a poison pill: any in-batch call with
   /// `null` forces the coalesced exit notification to use `null`, even if
@@ -2376,7 +2381,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// If the node is currently pending deletion (animating out from a previous
   /// remove), the deletion is cancelled and the node animates back in.
   ///
-  /// [index] is the position among **live** root siblings — exiting
+  /// [index] is the position among **live** root siblings, exiting
   /// (pending-deletion) roots are skipped, matching [liveRootKeys] /
   /// [getIndexInParent] and the input space of [reorderRoots].
   void insertRoot(
@@ -2417,7 +2422,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Raw sibling-list writes above; invalidate cached live indices.
         _liveIndexCache.bump();
       } else if (index != null) {
-        // Already a root — honor an explicitly requested index by
+        // Already a root: honor an explicitly requested index by
         // relocating within _roots. The index is live-space; convert
         // after the removal so the conversion sees the list the insert
         // will apply to.
@@ -2463,8 +2468,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     // Node is already present (e.g. restored by an ancestor's
-    // _cancelDeletion, or a live re-insert). Update the data and — if the
-    // caller requested a different location — relocate it to honor the
+    // _cancelDeletion, or a live re-insert). Update the data and, if the
+    // caller requested a different location, relocate it to honor the
     // insertRoot(index:) contract instead of silently dropping the index.
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
@@ -2472,11 +2477,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != null) {
         // Fire the node-data channel BEFORE delegating. moveNode's
-        // structural notification is targeted — on a depth-preserving
-        // move its affectedKeys omits the moved key itself — so this is
+        // structural notification is targeted, on a depth-preserving
+        // move its affectedKeys omits the moved key itself, so this is
         // the only refresh path for the overwritten payload.
         _notifyNodeDataChanged(node.key);
-        // Different parent — delegate to moveNode. Forward the caller's
+        // Different parent: delegate to moveNode. Forward the caller's
         // `animate` so insertRoot(animate: false) doesn't silently slide
         // (now that moveNode itself defaults to animate: true).
         moveNode(node.key, null, index: index, animate: animate);
@@ -2515,11 +2520,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _liveIndexCache.bump();
         _markVisibleOrderDirty();
         // Relocation changes row positions (and the payload was
-        // overwritten) — structural refresh, which subsumes the data
+        // overwritten), structural refresh, which subsumes the data
         // channel's row refresh, so the data channel does not also fire.
         _notifyStructural(affectedKeys: <TKey>{node.key});
       } else {
-        // Data-only update — fire the node-data channel only, matching
+        // Data-only update: fire the node-data channel only, matching
         // updateNode's contract. Firing a structural notification too
         // would refresh the same row twice.
         _notifyNodeDataChanged(node.key);
@@ -2570,7 +2575,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _notifyStructural(affectedKeys: _siblingRefreshSet(null));
   }
 
-  /// Calculates the visible order index for inserting a root at the given root index.
+  /// Calculates the visible order index for inserting a root at the given root
+  /// index.
   int _calculateRootInsertIndex(int rootIndex) {
     if (rootIndex == 0) return 0;
     if (rootIndex >= _roots.length) return _order.length;
@@ -2592,7 +2598,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// entries.
   ///
   /// Returns the full-list index of the live entry currently at live
-  /// position [liveIndex] — the insert lands directly above that live
+  /// position [liveIndex]: the insert lands directly above that live
   /// sibling, so intervening exiting rows stay above the new node (matching
   /// drop-slot semantics), or `fullList.length` when [liveIndex] is
   /// at or past the live count. O(1) when no pending deletions exist;
@@ -2633,7 +2639,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   }
 
   /// Fast-path equality check for [setChildren]. Returns true iff the
-  /// new list exactly matches the existing child list — same keys in
+  /// new list exactly matches the existing child list, same keys in
   /// the same order, same data values, and no pending-deletion children
   /// (which would otherwise force the slow path's resurrection logic).
   ///
@@ -2668,7 +2674,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// Throws an [ArgumentError] if [children] contains duplicate keys, if
   /// any child key equals [parentKey], or if any child key already exists
-  /// under a *different* parent — use [moveNode] or [remove] for that
+  /// under a *different* parent, use [moveNode] or [remove] for that
   /// case rather than re-parenting by side effect.
   void setChildren(TKey parentKey, List<TreeNode<TKey, TData>> children) {
     assert(_hasKey(parentKey), 'Parent node $parentKey not found');
@@ -2696,11 +2702,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           "(a node cannot be its own child)",
         );
       }
-      // Reject keys that already exist under a different parent — silently
-      // overwriting _childListOf(child.key) = [] below would orphan the existing
+      // Reject keys that already exist under a different parent, silently
+      // overwriting _childListOf(child.key) = [] below would orphan the
+      // existing
       // subtree and leave a stale reference in the old parent's child list.
       // Accept when the key is already a child of this same parent (no-op
-      // reparent — handled by the purge-old-children step).
+      // reparent, handled by the purge-old-children step).
       if (_hasKey(child.key) && _parentKeyOfKey(child.key) != parentKey) {
         throw ArgumentError(
           "setChildren($parentKey): key ${child.key} already exists under "
@@ -2710,8 +2717,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     // Fast path: if the new list exactly matches the existing child
-    // list — same keys in order, same data values, no pending-deletion
-    // children — this is a structural no-op. Without this short-circuit,
+    // list, same keys in order, same data values, no pending-deletion
+    // children, this is a structural no-op. Without this short-circuit,
     // the purge-and-re-adopt loop below destroys any in-flight animation
     // state on these children (the purge calls _purgeNodeData which
     // clears standalone/op-group/bulk membership) for zero visual change.
@@ -2815,7 +2822,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     // Bulk child replacement: old children (and their subtrees) were purged,
     // new children registered. Any retained row under [parentKey] may have
-    // its builder output differ — fall back to a full refresh.
+    // its builder output differ, fall back to a full refresh.
     _notifyStructural();
   }
 
@@ -2823,7 +2830,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   ///
   /// If [animate] is true, the node will animate in.
   ///
-  /// [index] is the position among **live** siblings — exiting
+  /// [index] is the position among **live** siblings, exiting
   /// (pending-deletion) siblings are skipped, matching [getLiveChildren] /
   /// [getIndexInParent] and the input space of [reorderChildren].
   ///
@@ -2842,7 +2849,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     assert(_hasKey(parentKey), "Parent node $parentKey not found");
     // Flush any pending visible-order rebuild from a prior in-batch mutator
-    // (moveNode, reorderRoots, reorderChildren, cancelDeletion, …). Without
+    // (moveNode, reorderRoots, reorderChildren, cancelDeletion, and so
+    // on). Without
     // this, the `_order.indexOf(parentKey)` / `_order.subtreeSizeOf(parentNid)`
     // reads further down would return stale values and yield an insertIndex
     // past `_order.length`, crashing `VisibleOrderBuffer.insertNid` with a
@@ -2891,7 +2899,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Raw sibling-list writes above; invalidate cached live indices.
         _liveIndexCache.bump();
       } else if (index != null) {
-        // Same parent — honor an explicitly requested index by relocating
+        // Same parent: honor an explicitly requested index by relocating
         // within the sibling list. The index is live-space; convert after
         // the removal so the conversion sees the list the insert will
         // apply to.
@@ -2910,14 +2918,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       );
       _adoptKey(node.key);
       _store.setData(node.key, node);
-      // Same as insertRoot's matching branch — fire the node-data channel
+      // Same as insertRoot's matching branch, fire the node-data channel
       // so listeners subscribed via [addNodeDataListener] see the data
       // update.
       _notifyNodeDataChanged(node.key);
       if (preservePendingSubtreeState) {
         _markVisibleOrderDirty();
         // See insertRoot's matching branch: cancelling a pending deletion
-        // may restore a subtree and flip ancestor hasChildren state — fall
+        // may restore a subtree and flip ancestor hasChildren state, fall
         // back to a full refresh.
         _notifyStructural();
         return;
@@ -2934,8 +2942,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return;
     }
     // Node is already present (e.g. restored by an ancestor's
-    // _cancelDeletion, or a live re-insert). Update the data and — if the
-    // caller requested a different location — relocate it to honor the
+    // _cancelDeletion, or a live re-insert). Update the data and, if the
+    // caller requested a different location, relocate it to honor the
     // insert(parentKey:, index:) contract instead of silently dropping it.
     if (_hasKey(node.key)) {
       _adoptKey(node.key);
@@ -2943,11 +2951,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       final currentParent = _parentKeyOfKey(node.key);
       if (currentParent != parentKey) {
         // Fire the node-data channel BEFORE delegating. moveNode's
-        // structural notification is targeted — on a depth-preserving
-        // move its affectedKeys omits the moved key itself — so this is
+        // structural notification is targeted, on a depth-preserving
+        // move its affectedKeys omits the moved key itself, so this is
         // the only refresh path for the overwritten payload.
         _notifyNodeDataChanged(node.key);
-        // Different parent — delegate to moveNode. Forward the caller's
+        // Different parent: delegate to moveNode. Forward the caller's
         // `animate` so insert(animate: false) doesn't silently slide
         // (now that moveNode itself defaults to animate: true).
         moveNode(node.key, parentKey, index: index, animate: animate);
@@ -2986,11 +2994,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _liveIndexCache.bump();
         _markVisibleOrderDirty();
         // Relocation changes row positions (and the payload was
-        // overwritten) — structural refresh, which subsumes the data
+        // overwritten), structural refresh, which subsumes the data
         // channel's row refresh, so the data channel does not also fire.
         _notifyStructural(affectedKeys: <TKey>{node.key});
       } else {
-        // Data-only update — fire the node-data channel only, matching
+        // Data-only update: fire the node-data channel only, matching
         // updateNode's contract. Firing a structural notification too
         // would refresh the same row twice.
         _notifyNodeDataChanged(node.key);
@@ -3025,7 +3033,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Fast path: the visible insertion index equals the parent's
         // visible index plus every prior sibling's visible-subtree
         // contribution. Cache lookups are O(1) per sibling, so the
-        // whole computation is O(prior-sibling-count) — one array
+        // whole computation is O(prior-sibling-count), one array
         // read per sibling, no nested descendant walks.
         int insertIndex;
         if (effectiveIndex != null) {
@@ -3076,7 +3084,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // rebuild so the `_order.contains(key)` path gate below reads fresh
     // state. Inside a batch a prior mutation can leave the order dirty,
     // and a stale containment read picks the wrong path in both
-    // directions — a row made visible earlier in the batch would degrade
+    // directions, a row made visible earlier in the batch would degrade
     // to an immediate purge, and a row hidden earlier in the batch would
     // animate out where nobody can see it.
     _ensureVisibleOrder();
@@ -3235,7 +3243,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         liveChildSet.add(k);
       }
     }
-    // Validate in all build modes — see reorderRoots for rationale.
+    // Validate in all build modes: see reorderRoots for rationale.
     if (orderedKeys.length != liveChildSet.length ||
         orderedKeys.toSet().length != orderedKeys.length ||
         !liveChildSet.containsAll(orderedKeys)) {
@@ -3249,13 +3257,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     // Stage the FLIP slide baseline BEFORE mutating, but only when the children
     // are strictly visible (parent + ancestors expanded). The
-    // _markVisibleOrderDirty below fires for the same `visible` case, so the next
+    // _markVisibleOrderDirty below fires for the same `visible` case, so the
+    // next
     // layout consumes the baseline and slides shifted rows. Gating on `visible`
     // avoids a pointless slide for a collapsed reorder and never strands an
     // unconsumed baseline.
     final visible =
         _isExpandedKey(parentKey) && _ancestorsExpandedFast(parentKey);
-    // Family kill switch — see reorderRoots.
+    // Family kill switch: see reorderRoots.
     if (animate &&
         visible &&
         _animationStyle.reorderSlide.duration != Duration.zero) {
@@ -3297,7 +3306,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// If [newParentKey] is null, the node becomes a root. If [index] is
   /// provided, the node is inserted at that position among its new siblings;
   /// otherwise it is appended. [index] is the position among **live**
-  /// siblings — exiting (pending-deletion) siblings are skipped, matching
+  /// siblings, exiting (pending-deletion) siblings are skipped, matching
   /// [getIndexInParent] / [getLiveChildren] and the space
   /// `TreeReorderController` computes drop indices in.
   ///
@@ -3312,12 +3321,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// pre-move painted position to its post-move structural position over
   /// [slideDuration] using [slideCurve]. Both default to the
   /// controller's [animationStyle] `reorderSlide` spec when omitted.
-  /// The slide is paint-only — layout settles immediately at the new
+  /// The slide is paint-only: layout settles immediately at the new
   /// structural positions.
   ///
   /// **Same-frame composition:** multiple animated `moveNode` calls in the
   /// same synchronous block (or inside the same [runBatch]) coalesce under
-  /// a first-wins baseline policy — the first call's pre-mutation snapshot
+  /// a first-wins baseline policy, the first call's pre-mutation snapshot
   /// covers every visible row, and subsequent calls' deltas are computed
   /// relative to that single baseline. The first call's [slideDuration]
   /// and [slideCurve] win for the cohesive transition. If the batch
@@ -3330,7 +3339,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// engine no-ops in that case to honor the global animation-disabled
   /// setting).
   ///
-  /// Throws a [StateError] — in all build modes, not just debug — if
+  /// Throws a [StateError]: in all build modes, not just debug, if
   /// [key] is [newParentKey], if [newParentKey] is a descendant of [key]
   /// (either would form a cycle), or if [newParentKey] is pending
   /// deletion (it will be purged when its exit animation completes,
@@ -3357,7 +3366,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     // Reparenting under a descendant would form a cycle; check at runtime
     // (release builds skip the assert below). O(depth) ancestor walk from
-    // the new parent — materializing every descendant
+    // the new parent, materializing every descendant
     // (`_getDescendants(key).contains(...)`) cost O(subtree) time and
     // allocation per move.
     if (newParentKey != null) {
@@ -3391,13 +3400,13 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final oldParent = _parentKeyOfKey(key);
     // If already under the target parent and no explicit position was
     // requested, nothing to do. With an explicit [index] that matches the
-    // node's current position under the same parent, also a no-op —
+    // node's current position under the same parent, also a no-op,
     // avoid wasted baseline staging + structural notification + slide
     // composition for a mutation that produces zero visual change.
     //
     // CRITICAL: this no-op return MUST precede the animate staging below.
     // Otherwise an animated no-op call would stage a baseline (via
-    // _stageSlideBaselineOnHosts → beginSlideBaseline) that triggers no
+    // _stageSlideBaselineOnHosts to beginSlideBaseline) that triggers no
     // layout (no _notifyStructural fires for a no-op), leaving the
     // _pendingSlideBaseline stuck and blocking all subsequent stages
     // under first-wins until something else triggers a layout.
@@ -3405,7 +3414,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (index == null) return;
       // Compare against the LIVE index (excluding pending-deletion
       // siblings). getIndexInParent returns -1 only when the key is
-      // unknown or pending-deletion — neither applies here, so the
+      // unknown or pending-deletion, neither applies here, so the
       // value is the current live index.
       if (index == getIndexInParent(key)) return;
     }
@@ -3415,23 +3424,23 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     //
     // Use the structural predicate ([_ancestorsExpandedFast]) instead of
     // [_order.contains] because, inside [runBatch] with deferred rebuilds,
-    // [_order] still reflects state at batch entry — any prior in-batch
+    // [_order] still reflects state at batch entry, any prior in-batch
     // mutation that changed this key's visibility hasn't been flushed yet.
     // The structural predicate reads parent-chain expansion which is
     // eagerly maintained on every [_setParentKey] / [_setExpandedKey],
     // so it's correct regardless of [_order] freshness. The predicate
     // also gives the desired user-facing answer for the rare "key is in
     // [_order] only because it has an active animation under a collapsed
-    // ancestor" case — the user sees a collapsed parent, no row visible,
+    // ancestor" case, the user sees a collapsed parent, no row visible,
     // so an entry-phantom path is the right choice.
     final wasVisible = animate && _isStructurallyVisible(key);
 
     // Lazily computed, shared expansion-gated flatten of the moved
     // subtree. The phantom-anchor, exit-anchor, and affected-keys
-    // consumers below all need the identical set — the
+    // consumers below all need the identical set, the
     // subtree's INTERNAL structure (children lists, expansion flags) is
     // invariant across the move; only key's parent pointer and the
-    // subtree's depths change — so one walk serves whichever of the
+    // subtree's depths change, so one walk serves whichever of the
     // three fire instead of up to three full walks per move.
     List<TKey>? movedSubtreeScratch;
     List<TKey> movedSubtree() {
@@ -3453,24 +3462,24 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (animate) {
       // Null timing resolves to the style's reorderSlide spec. Zero
       // durations are killed downstream by the slide engine's disabled
-      // gate, not here — hostParticipating has anchor-draining side
+      // gate, not here, hostParticipating has anchor-draining side
       // effects that must match today's master-zero shape.
       hostParticipating = _stageSlideBaselineOnHosts(
         duration: slideDuration ?? _animationStyle.reorderSlide.duration,
         curve: slideCurve ?? _animationStyle.reorderSlide.curve,
       );
 
-      // Phantom-anchor for collapsed → visible reparenting:
+      // Phantom-anchor for collapsed-to-visible reparenting:
       // If the moved subtree's root is currently NOT in the visible order
       // (because the old parent or an ancestor is collapsed), the staged
-      // baseline contains no entry for it — animateFromOffsets would skip
+      // baseline contains no entry for it, animateFromOffsets would skip
       // installing a slide and the row would pop instantly into its new
       // visible position. Walk up the OLD parent chain to find the
       // deepest visible ancestor (the row the user actually sees with
       // the chevron) and record it as the phantom anchor for every node
       // in the moved subtree. The render object resolves these to
-      // painted positions during baseline consumption — anchor's painted
-      // position when it's on-screen, viewport edge otherwise — so the
+      // painted positions during baseline consumption, anchor's painted
+      // position when it's on-screen, viewport edge otherwise, so the
       // emerging row visually slides "out from behind" its old parent.
       if (!wasVisible && hostParticipating) {
         TKey? cursor = _parentKeyOfKey(key);
@@ -3479,7 +3488,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
         if (cursor != null) {
           _pendingPhantomAnchors ??= <TKey, TKey>{};
-          // Apply the same anchor to the entire moved subtree — children
+          // Apply the same anchor to the entire moved subtree, children
           // inherit the parent's anchor since they were all hidden inside
           // the same collapsed ancestor.
           for (final k in movedSubtree()) {
@@ -3504,7 +3513,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // post-mutation snapshot to recognize the row as having an active
     // slide and avoid the both-off-screen suppression guard inside
     // `GhostRegistry.applyClampAndInstallNewGhosts`. Composition absorbs the
-    // structural shift into the new currentDelta — no double-counting.
+    // structural shift into the new currentDelta, no double-counting.
     _cancelAnimationStateForSubtree(key, cancelSlides: !animate);
 
     // Remove from old parent's child list (or roots).
@@ -3566,7 +3575,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _revertSubtreeFromPendingDeletion(key);
     }
 
-    // Exit-phantom for visible → hidden reparenting:
+    // Exit-phantom for visible-to-hidden reparenting:
     // Symmetric to the entry-phantom block above. If the moved subtree
     // was visible BEFORE mutation but is hidden AFTER (because the new
     // parent or an ancestor is collapsed), the staged baseline has the
@@ -3593,7 +3602,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Every node that was in the visible OLD subtree shares the same
         // exit anchor. Use the OLD-subtree flatten by enumerating from
         // baseline keys is impractical here; instead, flatten the now-
-        // structural subtree (children list still intact post-move) —
+        // structural subtree (children list still intact post-move),
         // the moved subtree's expanded structure is preserved through
         // moveNode, so the same set of nodes was visible before and is
         // hidden after.
@@ -3605,7 +3614,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     final affected = <TKey>{};
     // If the moved subtree's depth changed, every row in it must rebuild
-    // — nodeBuilder receives `depth` as an argument and indentation scales
+    //, nodeBuilder receives `depth` as an argument and indentation scales
     // with it. The shared flatten enumerates the currently-expanded rows
     // (the only ones that can be mounted).
     if (newDepth != oldDepth) {
@@ -3704,7 +3713,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     if (!animate) {
-      // No animation — insert and return
+      // No animation: insert and return
       final nodesToShow = _flattenSubtree(key, includeRoot: false);
       final nodesToInsert = <TKey>[];
       for (final nodeId in nodesToShow) {
@@ -3728,7 +3737,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Animated expand
     final existingGroup = _opGroupAt(key);
     if (existingGroup != null) {
-      // Path 1: Reversing a collapse — group already exists.
+      // Path 1: Reversing a collapse: group already exists.
       //
       // The op-group's controller is the shared timing primitive;
       // each member's NodeGroupExtent envelope (start/target) defines
@@ -3772,7 +3781,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           // Reverse the exit to an enter with speedMultiplier
           _startStandaloneEnterAnimation(nodeId);
         } else if (!_order.contains(nodeId)) {
-          // New node not yet visible — insert at correct sibling position
+          // New node not yet visible: insert at correct sibling position
           // and animate. _insertNodeIntoVisibleOrder appends at the end of
           // the grandparent's subtree, which drops the node past its
           // following siblings when they are already in the visible order.
@@ -3785,7 +3794,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return;
     }
 
-    // Path 2: Fresh expand — create new operation group via the
+    // Path 2: Fresh expand: create new operation group via the
     // OperationGroupRegistry's install API (constructs the controller +
     // OperationGroup internally and wires the tick + status callbacks).
     final nodesToShow = _flattenSubtree(key, includeRoot: false);
@@ -3808,7 +3817,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     // Path 2 expand: each newly-affected descendant joins the group as
     // a member with a NodeGroupExtent envelope. Per-node animation
-    // records are NOT created on a fresh op — they only come into
+    // records are NOT created on a fresh op, they only come into
     // existence on CAPTURE (a prior op's mid-flight node being pulled
     // into a new op). The op-group's controller is the shared timing
     // primitive for non-captured members; private records, when they
@@ -3878,7 +3887,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
 
     _structureGeneration++;
     group.controller.forward();
-    // Path 2 creates no standalone states of its own — only keep the
+    // Path 2 creates no standalone states of its own, only keep the
     // standalone ticker alive when states from other sources exist. An
     // ungated start costs one wasted start/stop frame per operation.
     if (_anim.standalone.hasAny) {
@@ -3945,15 +3954,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Animated collapse
     final existingGroup = _opGroupAt(key);
     if (existingGroup != null) {
-      // Path 1: Reversing an expand — group already exists.
+      // Path 1: Reversing an expand: group already exists.
       //
       // Mirror of the expand Path-1 reversal block:
       //   1. Rebase each member: capture its current visual extent
-      //      and animate from `current → 0` over the configured
+      //      and animate from `current` to 0 over the configured
       //      duration. We do this by setting startExtent=0 and
       //      targetExtent=currentExtent (so as the controller's
-      //      reverse takes value from 1 → 0, lerp(0, current, value)
-      //      runs from current → 0).
+      //      reverse takes value from 1 to 0, lerp(0, current, value)
+      //      runs from current to 0).
       //   2. Add all members to pendingRemoval so the dismissed
       //      handler removes them from `_order`.
       //   3. Reset controller.value=1 with the detach/reattach trick
@@ -3991,7 +4000,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return;
     }
 
-    // Path 2: Fresh collapse — create new operation group via the
+    // Path 2: Fresh collapse: create new operation group via the
     // OperationGroupRegistry's install API with initialValue=1.0
     // (collapse starts fully expanded and reverses toward 0).
     final group = _anim.opGroups.install(
@@ -4041,11 +4050,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       animate = false;
     }
     // Flush any pending visible-order rebuild from a prior in-batch mutator
-    // (moveNode, reorderRoots, reorderChildren, cancelDeletion, …). The
-    // collection loop below classifies children via `_order.contains`;
+    // (moveNode, reorderRoots, reorderChildren, cancelDeletion, and so on).
+    // The collection loop below classifies children via `_order.contains`;
     // inside a [runBatch] the order still reflects state at batch entry,
     // so a child whose visibility was changed by an earlier in-batch
-    // mutation would be misclassified — omitted from nodesToShow (pops in
+    // mutation would be misclassified, omitted from nodesToShow (pops in
     // at full extent, never joins the bulk group). Same pattern as
     // [insert] / [expand] / [collapse].
     _ensureVisibleOrder();
@@ -4089,7 +4098,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             // nodesToExpand, and depth-limited nodes are not descended
             // into), so without this flatten those revealed descendants
             // would render at full extent from frame one while everything
-            // around them animates — expand(key:) on the identical
+            // around them animates, expand(key:) on the identical
             // structure animates the whole revealed subtree.
             flattenScratch.clear();
             _flattenSubtreeInto(childId, flattenScratch, includeRoot: true);
@@ -4137,7 +4146,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       return;
     }
     // Batch update expansion states. Skip per-call ancestors-expanded
-    // propagation — we rebuild it wholesale below in O(N).
+    // propagation, we rebuild it wholesale below in O(N).
     for (final key in nodesToExpand) {
       _setExpandedKey(key, true, propagate: false);
       _recordExpansionChange(key, wasExpanded: false);
@@ -4198,7 +4207,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           }
         }
 
-        // Add any new nodes to the group (skip if already in an operation group)
+        // Add any new nodes to the group (skip if already in an operation
+        // group)
         for (final key in nodesToShow) {
           if (_order.contains(key) && !_hasOperationGroup(key)) {
             _addBulkMember(key);
@@ -4211,14 +4221,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       } else if (_activeBulkGroup != null &&
           _activeBulkGroup!.members.isNotEmpty) {
         // Continuation: a bulk expand is already mid-flight (members
-        // present, nothing pending removal). Keep the group — existing
+        // present, nothing pending removal). Keep the group, existing
         // members continue from their current extent. Creating a fresh
         // group here would dispose the in-flight one and pop every
         // half-expanded member to full extent in a single frame.
         //
         // Genuinely NEW nodes must NOT join the mid-flight group (they
         // would pop from 0 to `full * currentValue` on join); route them
-        // through standalone enter animations instead — the same policy
+        // through standalone enter animations instead, the same policy
         // the reverse branch applies to nodesToReverseExit.
         for (final key in nodesToReverseExit) {
           if (!_hasOperationGroup(key)) {
@@ -4253,7 +4263,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           }
         }
 
-        // Add new nodes to the bulk group (skip if already in an operation group)
+        // Add new nodes to the bulk group (skip if already in an operation
+        // group)
         for (final key in nodesToShow) {
           if (_order.contains(key) && !_hasOperationGroup(key)) {
             _addBulkMember(key);
@@ -4286,7 +4297,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Flush any pending visible-order rebuild from a prior in-batch mutator.
     // `_getVisibleDescendants` below reads `_order.contains`; inside a
     // [runBatch] the order still reflects state at batch entry, so a node
-    // made visible by an earlier in-batch mutation would be missed —
+    // made visible by an earlier in-batch mutation would be missed,
     // never joining the bulk group and popping out in one frame. Same
     // pattern as [insert] / [expand] / [collapse].
     _ensureVisibleOrder();
@@ -4349,7 +4360,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           _collapseAllInRegistry(maxDepth),
           wasExpanded: true,
         );
-        // Bulk expansion-state clear — see main collapseAll branch below.
+        // Bulk expansion-state clear: see main collapseAll branch below.
         _notifyStructural();
       }
       return;
@@ -4373,7 +4384,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       for (final entry in _opGroupSnapshot) {
         final group = entry.value;
         if (group.pendingRemoval.isEmpty) {
-          // Group is expanding — reverse it
+          // Group is expanding: reverse it
           for (final nodeId in group.members.keys) {
             if (!_isPendingDeletion(nodeId)) {
               group.pendingRemoval.add(nodeId);
@@ -4417,7 +4428,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       } else if (_activeBulkGroup != null &&
           _activeBulkGroup!.pendingRemoval.isNotEmpty) {
         // Continuation: a bulk collapse is already mid-flight. Keep the
-        // group — existing members continue from their current extent.
+        // group, existing members continue from their current extent.
         // Creating a fresh group at value 1.0 here (e.g. on a double-tap
         // of a "collapse all" button) would dispose the in-flight one and
         // snap every half-collapsed row back to full extent for a frame.
@@ -4500,10 +4511,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Suppresses per-nid visibility callbacks during the rebuild and
   /// recomputes the visible-subtree-size cache in one O(N) post-order
   /// pass afterwards. Firing the incremental callback N times would be
-  /// O(N·depth), which degenerates to O(N²) on deep trees.
+  /// O(N * depth), which degenerates to O(N^2) on deep trees.
   ///
   /// Delegates to [VisibleOrderBuffer.rebuild], which owns "clear + fill
-  /// + finalize all derived state" — it clears the order, runs the
+  /// + finalize all derived state", it clears the order, runs the
   /// closure (which only does the populate work), then calls
   /// `rebuildIndex()` and `_rebuildSubtreeSizes()` itself.
   void _rebuildVisibleOrder() {
@@ -4556,8 +4567,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Backed by [_ancestorsExpandedFast] (O(1), eagerly maintained by
   /// [_setParentKey] / [_setExpandedKey] through the node store). Does
   /// NOT reflect the "pending-deletion ancestor with active descendant
-  /// animation" carve-out that [_rebuildVisibleOrderImpl] applies — but
-  /// that case is irrelevant for [moveNode] (its `_cancelAnimationStateForSubtree`
+  /// animation" carve-out that [_rebuildVisibleOrderImpl] applies, but
+  /// that case is irrelevant for [moveNode] (its
+  /// `_cancelAnimationStateForSubtree`
   /// step already strips pending-deletion state from the moved subtree
   /// before any post-mutation visibility check fires).
   bool _isStructurallyVisible(TKey key) {
@@ -4586,7 +4598,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (_isPendingDeletion(key)) {
         // Don't recurse based on expansion state (prevents zombie children),
         // but DO include children that are also pending deletion and still
-        // have running exit animations — they need to stay in the visible order
+        // have running exit animations, they need to stay in the visible order
         // to animate out smoothly.
         for (int i = children.length - 1; i >= 0; i--) {
           final childId = children[i];
@@ -4624,7 +4636,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_scrollCreated) {
       _scroll.dispose();
     }
-    // Break the closure → _order reference wired in _store's initializer
+    // Break the closure-to-_order reference wired in _store's initializer
     // cascade so the GC graph is clean even if something holds a stale
     // _store reference past dispose. No-op if the wiring never fired.
     _store.onParentChanged = null;

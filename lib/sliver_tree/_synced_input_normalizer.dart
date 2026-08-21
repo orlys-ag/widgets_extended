@@ -9,9 +9,9 @@
 /// validation layer behind these walks; each normalizer must reject every
 /// malformed shape on its own, in every build mode.
 ///
-/// Underscore-prefixed file: not exported by the barrel. Class and
-/// function names are public so tests can import this file directly, the
-/// same convention as `_drag_session.dart`.
+/// Names here are public despite the underscore-prefixed file:
+/// internality comes from barrel non-export, while the tests import this
+/// file directly to exercise each walk in isolation.
 library;
 
 import 'synced_tree_node.dart';
@@ -32,6 +32,7 @@ class NormalizedTreeInput<TKey, TItem> {
   final List<TreeNode<TKey, TItem>> roots;
   final Map<TKey, List<TreeNode<TKey, TItem>>> childrenByParent;
 
+  /// Children of [key] in sibling order, empty when it has none.
   List<TreeNode<TKey, TItem>> childrenOf(TKey key) {
     return childrenByParent[key] ?? <TreeNode<TKey, TItem>>[];
   }
@@ -39,6 +40,11 @@ class NormalizedTreeInput<TKey, TItem> {
 
 /// Normalizes a nested [SyncedTreeNode] tree (the default constructor's
 /// input mode).
+///
+/// The walk rejects cycles via `visiting`, keys repeated anywhere in the
+/// tree via `seen`, and keys repeated among one node's children via
+/// `seenChildren`. Reachability needs no separate check: every emitted
+/// node was reached by the walk.
 NormalizedTreeInput<TKey, TItem> normalizeSyncedNodes<TKey, TItem>(
   Iterable<SyncedTreeNode<TKey, TItem>> tree,
 ) {
@@ -46,12 +52,10 @@ NormalizedTreeInput<TKey, TItem> normalizeSyncedNodes<TKey, TItem>(
   final childrenByParent = <TKey, List<TreeNode<TKey, TItem>>>{};
   final seen = <TKey>{};
   final visiting = <TKey>{};
-  // Iterative DFS so deep input trees do not stack-overflow Dart's
-  // recursion limit. Tracks each node's [TreeNode] in [nodeByKey] so
-  // the post-order exit phase can populate `childrenByParent[key]`
-  // by looking up each child's already-built [TreeNode]; sidesteps
-  // the recursive version's "visit child returns its TreeNode for the
-  // parent's list" pattern.
+  // Iterative DFS so a deep input tree cannot overflow the stack. Each
+  // node's built [TreeNode] is kept in `nodeByKey`, which is what lets an
+  // exit frame assemble `childrenByParent[key]` from children that are
+  // already built by the time it pops.
   final nodeByKey = <TKey, TreeNode<TKey, TItem>>{};
 
   final stack = <SyncedTreeNode<TKey, TItem>>[];
@@ -99,9 +103,10 @@ NormalizedTreeInput<TKey, TItem> normalizeSyncedNodes<TKey, TItem>(
       );
     }
 
-    // Pre-validate sibling-key uniqueness within node.children. Done
-    // before the recursion so the error matches the recursive version's
-    // throw site (parent context, not deep inside the child's visit).
+    // Validate sibling-key uniqueness here, in the parent's frame,
+    // rather than as each child is visited: the error can then name the
+    // parent the duplicates sit under, which is what a caller needs in
+    // order to find them.
     final seenChildren = <TKey>{};
     for (final child in node.children) {
       if (!seenChildren.add(child.key)) {
@@ -118,10 +123,10 @@ NormalizedTreeInput<TKey, TItem> normalizeSyncedNodes<TKey, TItem>(
       roots.add(treeNode);
     }
 
-    // Push exit marker FIRST so it pops AFTER all children; the
-    // recursive version's `visiting.remove(key)` and its
-    // `childrenByParent[key] = childNodes` happen at the tail of the
-    // function body, after all child recursion completes.
+    // Push the exit marker FIRST so it pops AFTER every child. That is
+    // what makes the frame post-order, and both the `visiting.remove(key)`
+    // and the `childrenByParent[key]` assembly require every child to
+    // have been visited already.
     stack.add(node);
     isRootStack.add(false);
     exitMarkers.add(true);
@@ -144,7 +149,7 @@ NormalizedTreeInput<TKey, TItem> normalizeSyncedNodes<TKey, TItem>(
 /// Normalizes nested domain objects (the `.hierarchy` input mode).
 ///
 /// The walk itself establishes every invariant on the way past: cycles
-/// via [visiting], global key uniqueness via the `nodeByKey` guard (which
+/// via `visiting`, global key uniqueness via the `nodeByKey` guard (which
 /// is also what rejects a node under two parents, and a root that
 /// reappears as a child), sibling uniqueness via `seenChildren`, and
 /// reachability by construction, since every emitted node was reached by
@@ -173,8 +178,8 @@ NormalizedTreeInput<TKey, TItem> normalizeHierarchy<TKey, TItem>({
   final exitChildKeys = <List<TKey>>[];
 
   // Push roots in REVERSE so the first root pops first. `items` is a
-  // LIFO stack, so seeding it forward reversed the whole root list in
-  // the output while child order (pushed in reverse below) stayed
+  // LIFO stack, so seeding it forward would reverse the whole root list
+  // in the output while child order, pushed in reverse below, stayed
   // correct. Same trick, same reason, as the children loop.
   final rootList = roots is List<TItem> ? roots : roots.toList(growable: false);
   for (int i = rootList.length - 1; i >= 0; i--) {
@@ -237,16 +242,15 @@ NormalizedTreeInput<TKey, TItem> normalizeHierarchy<TKey, TItem>({
       childItems.add(child);
     }
 
-    // Push exit marker FIRST so it pops AFTER all children; preserves
-    // the recursive version's `visiting.remove(key)` placement at the
-    // tail of the function body.
+    // Push the exit marker FIRST so it pops AFTER every child, which is
+    // what defers `visiting.remove(key)` to the end of this subtree.
     items.add(item); // placeholder, ignored on exit pop
     isRootStack.add(false);
     exitMarkers.add(key);
     exitChildKeys.add(childKeys);
 
     // Then push children in reverse so the first child pops first,
-    // matching the recursive version's left-to-right visit order.
+    // preserving left-to-right visit order.
     for (int i = childItems.length - 1; i >= 0; i--) {
       items.add(childItems[i]);
       isRootStack.add(false);

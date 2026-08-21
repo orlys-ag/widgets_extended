@@ -1,9 +1,10 @@
-/// Internal: bidirectional key↔nid mapping with free-list recycling.
+/// Internal: bidirectional key-to-nid mapping with free-list recycling.
 ///
 /// Hands out stable integer handles ("nids") for arbitrary user keys so
 /// hot-path per-node state can live in dense typed-data arrays indexed by
-/// nid rather than hash maps keyed by [TKey]. Not exported from the
-/// package barrel; used only by [TreeController].
+/// nid rather than hash maps keyed by the key type. Not exported from the
+/// package barrel: `NodeStore` owns the single instance and injects it
+/// into every component that maintains per-nid arrays.
 library;
 
 /// A bidirectional registry from opaque user keys to dense integer "nids".
@@ -20,13 +21,26 @@ library;
 ///
 /// The registry does not own any per-nid arrays itself.
 class NodeIdRegistry<TKey> {
-  /// Sentinel returned by [nidOf] when a key is not registered. Shares the
-  /// value of many other "not-present" sentinels in the controller (-1).
+  /// Sentinel returned by [nidOf] when a key is not registered. Its value
+  /// is -1, matching the "not present" sentinel the controller's other
+  /// index APIs return.
   static const int noNid = -1;
 
+  /// Forward map. Absence means the key is not registered.
   final Map<TKey, int> _keyToNid = {};
+
+  /// Reverse map indexed by nid. A null entry marks a free slot, which is
+  /// what [isFree] and [keyOf] test for.
   final List<TKey?> _nidToKey = <TKey?>[];
+
+  /// Recycle pool. [release] appends and [allocate] takes from the tail,
+  /// LIFO because both ends of that are O(1) on a `List`. Recycling at
+  /// all is what bounds [length] at the high-water mark of concurrently
+  /// live keys instead of at every key ever registered, which is what
+  /// keeps the callers' dense per-nid arrays small.
   final List<int> _freeNids = <int>[];
+
+  /// Next never-used nid, handed out only when the recycle pool is empty.
   int _nextNid = 0;
 
   /// Number of nid slots ever allocated (including freed slots currently in
@@ -67,9 +81,11 @@ class NodeIdRegistry<TKey> {
     return _nidToKey[nid];
   }
 
-  /// Hot-path reverse lookup. [nid] must refer to a live slot within
-  /// `[0, length)`; behavior on a free slot is a nullable-cast failure in
-  /// checked mode and undefined in production. Use [keyOf] when unsure.
+  /// Hot-path reverse lookup that skips the bounds and liveness checks
+  /// [keyOf] performs. [nid] must refer to a live slot within
+  /// `[0, length)`; anything else is a programming error, and a free slot
+  /// fails the cast whenever the key type is non-nullable. Use [keyOf]
+  /// when unsure.
   TKey keyOfUnchecked(int nid) {
     return _nidToKey[nid] as TKey;
   }
@@ -85,16 +101,18 @@ class NodeIdRegistry<TKey> {
 
   /// Allocates a nid for [key]. Idempotent for already-registered keys.
   ///
-  /// * `nid` — the handle to use.
-  /// * `isNew` — `true` if this call registered the key. `false` means the
-  ///   returned nid was already in use and no per-nid initialization is
-  ///   required.
-  /// * `grew` — `true` if the call appended a fresh slot at the tail
-  ///   (i.e. [length] increased). `false` means a slot was recycled from
-  ///   the free list. Callers that hold per-nid dense arrays must grow
-  ///   those arrays to match [length] when `grew` is `true`; when `grew`
-  ///   is `false` but `isNew` is `true`, the per-nid slot at `nid` carries
-  ///   stale data from a prior occupant and must be reset.
+  /// - `nid`: the handle to use.
+  /// - `isNew`: true when this call registered the key; false means the
+  ///   nid was already in use and needs no per-nid initialization.
+  /// - `grew`: true when the call appended a fresh slot at the tail, so
+  ///   [length] increased; false when the slot came from the recycle
+  ///   pool.
+  ///
+  /// The two flags drive different obligations, and the combination that
+  /// catches callers out is `grew: false` with `isNew: true`: no array
+  /// needs growing, but the slot is recycled and still holds the previous
+  /// occupant's data, so it must be reset. `grew: true` is the signal to
+  /// grow per-nid arrays to [length].
   ({int nid, bool isNew, bool grew}) allocate(TKey key) {
     final existing = _keyToNid[key];
     if (existing != null) {

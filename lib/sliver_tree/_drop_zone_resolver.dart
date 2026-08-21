@@ -1,9 +1,9 @@
 /// Pure drop-target resolution for drag-and-drop reorder.
 ///
 /// Resolution is a pure function of controller state, hovered-row
-/// geometry, and the pointer position, so the full zone table is
-/// unit-testable without a widget tree. Same split as the other
-/// render/logic collaborators (`StickyHeaderComputer`, `SlideComposer`).
+/// geometry and the pointer position, so the full zone table is
+/// unit-testable without a widget tree, following the same split as the
+/// package's other render and logic collaborators.
 ///
 /// This library owns the **semantic** drop-target model. Pixel concerns
 /// like indent-per-depth never enter resolution: the pointer's x arrives
@@ -162,8 +162,8 @@ class DropZoneResolver<TKey> {
   /// geometry is [targetPaintedY] / [targetExtent].
   ///
   /// [preferredDepth] is the depth level the pointer's HORIZONTAL
-  /// position indicates (unclamped — the widget layer maps
-  /// `x ~/ indentWidth` without knowing which levels are legal). It
+  /// position indicates, unclamped, because the widget layer maps
+  /// `x ~/ indentWidth` without knowing which levels are legal. It
   /// matters at subtree boundaries, where one visible slot has several
   /// legal depth expressions: the `below` zone at a right-boundary
   /// (ancestor subtrees ending at the target row) and the `above` zone at
@@ -235,34 +235,34 @@ class DropZoneResolver<TKey> {
     final t = targetExtent <= 0 ? 0.0 : localY / targetExtent;
 
     // Rows that can't take the dragged node as a child collapse to a
-    // two-zone split at the MIDPOINT. "Can't take" is structural (self /
-    // descendant — a cycle) OR policy: a [canAcceptDrop] that vetoes
-    // nesting under this row would leave the `into` third permanently
-    // dead, so consult it here and give flat-list-style policies clean
-    // ReorderableListView-like midpoint-crossing semantics instead.
+    // two-zone split at the MIDPOINT. "Can't take" is structural (self or
+    // descendant, which is a cycle) or policy: a [canAcceptDrop] that
+    // vetoes nesting under this row would leave the `into` third
+    // permanently dead, so consult it here and give flat-list-style
+    // policies clean ReorderableListView-like midpoint-crossing semantics
+    // instead.
     final targetAllowsChildren =
         _canTargetAcceptInto(targetKey, draggedKey) &&
         (canAcceptDrop == null ||
             canAcceptDrop!(
               movingKey: draggedKey,
               newParent: targetKey,
-              // A concrete 0, deliberately, and an earlier change to
-              // `null` here was a REGRESSION that had to be reverted.
+              // A concrete 0, deliberately, never null.
               //
-              // The argument for null was that this asks "can the row
-              // take children at all", not "may the node land at index
-              // 0". True, but the zones downstream cannot act on the
-              // distinction: `into` and the below-on-expanded-parent
-              // rule both commit to `rawIndex: 0` and RETURN
-              // UNCONDITIONALLY, with no fallback chain. So under null a
-              // policy that vetoes only index 0 passes this gate, gets
-              // the three-zone split, and then resolves null in the
-              // middle third while both outer thirds work, which flaps
-              // the gap as the pointer crosses 1/3 and 2/3.
+              // Null would read as "can the row take children at all"
+              // rather than "may the node land at index 0", but the zones
+              // downstream cannot act on that distinction: `into` and the
+              // below-on-expanded-parent rule both commit to
+              // `rawIndex: 0` and RETURN UNCONDITIONALLY, with no
+              // fallback chain. Under null, a policy vetoing only index 0
+              // passes this gate, gets the three-zone split, then
+              // resolves null in the middle third while both outer thirds
+              // work, flapping the gap as the pointer crosses 1/3 and
+              // 2/3.
               //
-              // With 0 the same policy simply collapses the row to a
-              // clean two-zone midpoint split. A row that degrades
-              // uniformly beats a row with a hole in the middle of it.
+              // With 0 the same policy collapses the row to a clean
+              // two-zone midpoint split. A row that degrades uniformly
+              // beats a row with a hole in the middle of it.
               index: 0,
             ));
 
@@ -290,7 +290,7 @@ class DropZoneResolver<TKey> {
         // chain): the slot above [targetKey] is the SAME visible slot as
         // the tail of every deeper subtree that closes at the previous
         // visible row. Example: "above a section header" is also "after
-        // the previous section's last child" — when the shallow candidate
+        // the previous section's last child". When the shallow candidate
         // is filtered (policy vetoing root-level drops, cycles), the
         // deeper expressions of the same slot must be tried, or crossing
         // a boundary dies in a dead band (and, under make-room, flaps
@@ -312,7 +312,7 @@ class DropZoneResolver<TKey> {
           while (d > baseDepth) {
             final idx = treeController.getIndexInParent(node);
             if (idx < 0) {
-              // Pending-deletion link — its live index is meaningless;
+              // Pending-deletion link: its live index is meaningless, so
               // stop the chain at this level.
               break;
             }
@@ -352,6 +352,7 @@ class DropZoneResolver<TKey> {
         // over another container's expanded contents resolves only at
         // that subtree's tail, because no legal slot for it exists
         // anywhere else along those rows.
+
         // Hidden-interior fallback: when the row above is a CONTAINER
         // whose contents are not on screen, the chain above cannot see
         // into it (its depth is not greater than the target's), so the
@@ -383,9 +384,9 @@ class DropZoneResolver<TKey> {
             );
           }
         }
-        // No hint defaults to the SHALLOWEST candidate — the classic
-        // above-target slot (pre-chain semantics); the deeper levels are
-        // reached by pointer x or by filter fallback.
+        // No hint defaults to the SHALLOWEST candidate, the plain
+        // above-target slot; deeper levels are reached by pointer x or by
+        // filter fallback.
         return _resolveCandidates(
           draggedKey: draggedKey,
           draggedParent: draggedParent,
@@ -421,8 +422,10 @@ class DropZoneResolver<TKey> {
         // many rows below the edge directly under the target row (which
         // is visually the FIRST CHILD's slot). Resolve as first-child
         // (identical to `into`) so the gap and the commit agree by
-        // construction: conventional tree-DnD semantics. Such a row is never a subtree right-boundary (its
-        // subtree continues below), so the x-aware chain never applies.
+        // construction, which is the conventional tree drag-and-drop
+        // semantics. Such a row is never a subtree right-boundary, since
+        // its subtree continues below, so the x-aware chain never
+        // applies.
         if (targetAllowsChildren &&
             treeController.isExpanded(targetKey) &&
             treeController.hasLiveChildren(targetKey)) {
@@ -442,10 +445,10 @@ class DropZoneResolver<TKey> {
         }
 
         // At a subtree right-boundary the slot under the target row is
-        // ambiguous — it belongs equally to every ancestor whose
-        // subtree ends at this row. Build the candidate chain
-        // deepest-first; depths are contiguous (each ancestor level is
-        // exactly one shallower).
+        // ambiguous: it belongs equally to every ancestor whose subtree
+        // ends at this row. Build the candidate chain deepest-first;
+        // depths are contiguous, each ancestor level exactly one
+        // shallower.
         // Each candidate anchors its gap on the node whose sibling index
         // it incremented, resolved lazily for the winner only. The levels
         // do NOT share one anchor: the chain climbs on a LIVE-space index
@@ -454,10 +457,10 @@ class DropZoneResolver<TKey> {
         // sibling whose rows are still painted, and the ancestor's
         // visible tail includes them while the target's does not.
         // Each level's live index is computed exactly once and carried
-        // through the climb: it serves both that level's candidate and
-        // the NEXT iteration's boundary check (the value cannot change
-        // mid-walk; the walk mutates nothing). Recomputing per check
-        // doubled the O(siblings) scans of this chain.
+        // through the climb, serving both that level's candidate and the
+        // NEXT iteration's boundary check. The value cannot change
+        // mid-walk because the walk mutates nothing, and each lookup is
+        // an O(siblings) scan worth not repeating.
         final targetIdx = treeController.getIndexInParent(targetKey);
         final candidates = <_Candidate<TKey>>[
           (
@@ -529,8 +532,8 @@ class DropZoneResolver<TKey> {
               )
             : null;
 
-        // No hint defaults to the DEEPEST candidate — also what a
-        // handle-drag pointer at the row's right edge clamps to.
+        // No hint defaults to the DEEPEST candidate, which is also what
+        // a handle-drag pointer at the row's right edge clamps to.
         return _resolveCandidates(
           draggedKey: draggedKey,
           draggedParent: draggedParent,
@@ -548,11 +551,12 @@ class DropZoneResolver<TKey> {
   }
 
   /// Selects among boundary [candidates] (deepest-first, contiguous
-  /// depths): clamp the hint (or [defaultDepth] when no hint) to the
-  /// chain, then try candidates by |depth − chosen|, deeper-first on
-  /// ties. A filtered candidate (cycle / policy veto) falls back to the
-  /// next-nearest level instead of nulling the whole resolution — some
-  /// legal expression of the slot beats a dead zone.
+  /// depths): clamp the hint, or [defaultDepth] when there is none, to
+  /// the chain, then try candidates by absolute depth distance from that
+  /// clamped value, deeper-first on ties. A filtered candidate (cycle or
+  /// policy veto) falls back to the next-nearest level rather than
+  /// nulling the whole resolution, because some legal expression of the
+  /// slot beats a dead zone.
   ///
   /// [lastResort] is a hidden-interior slot: the inside of a collapsed or
   /// empty container at this boundary. It participates in NEITHER the
@@ -681,11 +685,11 @@ class DropZoneResolver<TKey> {
     // already sits. This is a VALID target: the honest feedback is
     // "drops back here", which make-room paints as an open gap at the
     // original position, and it gives crossing hysteresis instead of a dead
-    // zone: otherwise dragging DOWN onto the next sibling's top third
-    // ("above next" ≡ current position) would select nothing, going dark
-    // for two-thirds of the card. The commit path detects the case and
-    // mutates nothing. The policy filter is deliberately skipped —
-    // "not moving" is not a drop a policy can forbid.
+    // zone: otherwise dragging DOWN onto the next sibling's top third,
+    // where "above next" IS the current position, would select nothing
+    // and go dark for two-thirds of the card. The commit path detects the
+    // case and mutates nothing. The policy filter is deliberately
+    // skipped: "not moving" is not a drop a policy can forbid.
     if (isSameParent && indexInFinalList == draggedLiveIndex()) {
       return TreeDropTarget<TKey>(
         targetKey: targetKey,
@@ -743,14 +747,13 @@ class DropZoneResolver<TKey> {
     return index + treeController.visibleSubtreeSize(anchor);
   }
 
-  /// Whether [node] is a strict descendant (not [ancestor] itself) of
-  /// [ancestor]. O(depth) ancestor walk with no allocation — the drop-target
-  /// resolution path asks this up to three times per pointer move, and the
-  /// alternative `getDescendants(ancestor).contains(node)` materialized a
-  /// fresh list of every descendant on each call.
+  /// Whether [node] is a strict descendant of [ancestor], excluding
+  /// [ancestor] itself. An O(depth) ancestor walk that allocates nothing,
+  /// which matters because drop-target resolution asks it up to three
+  /// times per pointer move.
   ///
-  /// Public (unlike the other helpers) because commit-time re-validation in
-  /// `TreeReorderController.endDrag` runs the same cycle check.
+  /// Public, unlike the other helpers, because commit-time re-validation
+  /// in `TreeReorderController.endDrag` runs the same cycle check.
   bool isStrictDescendantOf(TKey node, TKey ancestor) {
     TKey? current = treeController.getParent(node);
     while (current != null) {
@@ -762,15 +765,14 @@ class DropZoneResolver<TKey> {
     return false;
   }
 
-  /// Cheap "can this row accept children as a drop target?" heuristic: the
-  /// node is not the dragged key and not one of its descendants. Finer
+  /// Cheap "can this row accept children as a drop target?" test: the
+  /// node is neither the dragged key nor one of its descendants. Finer
   /// policies (leaf-only, depth limits) flow through [canAcceptDrop].
   ///
-  /// This IS the inclusive same-or-descendant test, negated. It used to be
-  /// paired with a separately named helper expressing the same predicate,
-  /// so the guard read `!sameOrDescendant(t, d) && canAcceptInto(t, d)`:
-  /// one expression ANDed with itself, and a second O(depth) ancestor walk
-  /// per pointer move on the hot path this file is otherwise careful about.
+  /// This is exactly the inclusive same-or-descendant test, negated, so a
+  /// caller must not pair it with a separate cycle check: that ANDs the
+  /// expression with itself and pays a second O(depth) ancestor walk per
+  /// pointer move, on a path this file is otherwise careful about.
   bool _canTargetAcceptInto(TKey targetKey, TKey draggedKey) {
     if (targetKey == draggedKey) {
       return false;

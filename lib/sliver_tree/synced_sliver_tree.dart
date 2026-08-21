@@ -450,6 +450,11 @@ class _SyncedSliverTreeState<TKey, TItem>
     with TickerProviderStateMixin {
   late TreeController<TKey, TItem> _treeController;
   late TreeSyncController<TKey, TItem> _syncController;
+
+  /// False until the first [_sync] completes. The gained-children
+  /// heuristic diffs against a previous child-presence snapshot, so it is
+  /// skipped on that first pass, where every parent would otherwise look
+  /// newly populated.
   bool _hasSyncedOnce = false;
 
   /// Reorder state, created iff reorder was enabled at construction.
@@ -457,17 +462,14 @@ class _SyncedSliverTreeState<TKey, TItem>
   /// The controller and the config it was built from live and die
   /// TOGETHER in one nullable field, which is the whole point: no code
   /// path can hold one without the other, so `build` needs no `!` on
-  /// either. The crash this replaced is not guarded against, it is
-  /// unrepresentable.
+  /// either. The hazard is not guarded against, it is unrepresentable.
   ///
-  /// What it replaced: `build` dispatched on the controller alone, which
-  /// only covers a null to non-null flip. In the other direction the
-  /// controller exists, so `build` went on to `widget.reorder!` and a
-  /// RELEASE build threw `Null check operator used on a null value` from
-  /// inside `build` -- debug being saved only by `didUpdateWidget`'s
-  /// presence assert firing first. Every forwarder's "a null config
-  /// degrades to refusing" reasoning was moot, because the widget had
-  /// already crashed before any of them could be asked.
+  /// Splitting the two back apart would let `build` reach a live
+  /// controller beside a null config and dereference it. Dispatching on
+  /// the controller alone catches only the null to non-null direction; in
+  /// the other direction a release build throws `Null check operator used
+  /// on a null value` from inside `build`, before any forwarder's "a null
+  /// config degrades to refusing" reasoning can apply.
   ///
   /// Worth saying plainly: no test pins this. `flutter_test` runs with
   /// asserts enabled, so `didUpdateWidget` aborts the subtree build first
@@ -604,7 +606,7 @@ class _SyncedSliverTreeState<TKey, TItem>
   ///
   /// Every route here runs through `TreeReorderController._fireOnReorder`,
   /// which only runs after `_canCommit`, whose first question is
-  /// `canReorder` -- the always-non-null [_handleCanReorder] tear-off,
+  /// `canReorder`, the always-non-null [_handleCanReorder] tear-off,
   /// which refuses a null config. So a null config commits nothing and
   /// reports nothing, on the drag path and through `moveTo` alike.
   ///
@@ -623,6 +625,8 @@ class _SyncedSliverTreeState<TKey, TItem>
     config?.onReorder(key, newParent, index);
   }
 
+  /// Lets the app rewrite a row's reorder semantics actions. Returns the
+  /// built-in map untouched when no `semanticsActionsBuilder` is set.
   Map<CustomSemanticsAction, VoidCallback> _handleSemanticsActions(
     TKey key,
     Map<CustomSemanticsAction, VoidCallback> builtIn,
@@ -712,6 +716,10 @@ class _SyncedSliverTreeState<TKey, TItem>
     });
   }
 
+  /// Builds a sync controller bound to the current tree controller and
+  /// expansion-memory capacity. Called at construction, and again when
+  /// [SyncedSliverTree.expansionMemory] changes, since that capacity is
+  /// fixed for a controller's lifetime.
   TreeSyncController<TKey, TItem> _createSyncController() {
     return TreeSyncController<TKey, TItem>(
       treeController: _treeController,
@@ -821,6 +829,11 @@ class _SyncedSliverTreeState<TKey, TItem>
     };
   }
 
+  /// Normalizes this build's input and diffs it into the controller, then
+  /// runs the post-sync expansion passes when the widget asked for any.
+  ///
+  /// [animate] is false for the construction-time sync, where there is no
+  /// prior state to animate from, and true for every later one.
   void _sync({required bool animate}) {
     // ONE decision point for the post-sync expansion work. Both passes
     // below, and every input they need, hang off this: without a per-node
@@ -837,7 +850,7 @@ class _SyncedSliverTreeState<TKey, TItem>
     // sync. syncRoots will clear entries as part of _restoreExpansion /
     // _pruneExpansionMemory, so by the time expandParentsThatGainedChildren
     // runs below, the memory no longer reflects which keys were filtered
-    // out previously — and the heuristic would wrongly auto-expand a
+    // out previously, and the heuristic would wrongly auto-expand a
     // re-added, user-collapsed section.
     final Set<TKey> rememberedBeforeSync = needsExpansionPasses
         ? _syncController.snapshotRememberedKeys()
@@ -887,6 +900,9 @@ class _SyncedSliverTreeState<TKey, TItem>
     _hasSyncedOnce = true;
   }
 
+  /// Walks this build's mode input into a [NormalizedTreeInput]. The cast
+  /// in each arm is sound because a constructor sets the mode and its
+  /// backing fields together, so the mode selects which are non-null.
   NormalizedTreeInput<TKey, TItem> _normalizeInput() {
     return switch (widget._mode) {
       _SyncedSliverTreeMode.tree => normalizeSyncedNodes(
@@ -975,6 +991,9 @@ class _SyncedSliverTreeState<TKey, TItem>
     );
   }
 
+  /// Builds one row through [SyncedSliverTree.itemBuilder]. Yields an
+  /// empty box for a key carrying no data, which a row can transiently do
+  /// when its data was purged while it is still in the visible order.
   Widget _buildRow(BuildContext context, TKey key, int depth) {
     final nodeData = _treeController.getNodeData(key);
     if (nodeData == null) {

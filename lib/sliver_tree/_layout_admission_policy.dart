@@ -1,9 +1,9 @@
 /// Internal: cache-region admission policy for [RenderSliverTree].
 ///
 /// Owns the dual-accumulator (live/post) admission decision used in the
-/// non-bulk path of the layout's Pass 2. Stateless apart from a back-pointer
-/// to its [TreeController] — every per-frame input is passed in via
-/// parameters, as with [StickyHeaderComputer].
+/// non-bulk path of the layout's Pass 2. Stateless apart from a
+/// back-pointer to its [TreeController]: every per-frame input arrives as
+/// a parameter, and nothing is cached between calls.
 ///
 /// Not exported from the package barrel; used only by [RenderSliverTree].
 library;
@@ -15,14 +15,19 @@ import 'tree_controller.dart';
 /// Cache-region admission policy. Decides which visible-order positions
 /// should be admitted into the cache region during Pass 2 of the layout.
 ///
-/// The bulk-only fast path is handled separately (inline on the render
-/// object) — this policy is for the non-bulk path where extent animations
-/// require the dual-view (live extent / post-animation extent) cap.
+/// The bulk-only fast path is handled separately, inline on the render
+/// object. This policy serves the non-bulk path, where an extent
+/// animation makes a row's current position and its post-animation
+/// position disagree, so admission has to weigh both.
 class LayoutAdmissionPolicy<TKey, TData> {
   LayoutAdmissionPolicy({required TreeController<TKey, TData> controller})
     : _controller = controller;
 
   TreeController<TKey, TData> _controller;
+
+  /// The controller admission reads structure and animation state from.
+  /// Re-bindable so a render object that swaps controllers keeps one
+  /// policy instance; assigning the same instance is a no-op.
   TreeController<TKey, TData> get controller => _controller;
   set controller(TreeController<TKey, TData> value) {
     if (identical(_controller, value)) return;
@@ -31,18 +36,22 @@ class LayoutAdmissionPolicy<TKey, TData> {
 
   /// Admits cache-region members into [inCacheRegionByNid] (writes 1) and
   /// fires [onCacheRegionAdmit] for each admitted nid in iteration order.
-  /// Returns the new `cacheEndIndex` (one past the last admitted index).
+  /// Returns the new `cacheEndIndex`, one past the last admitted index.
   ///
-  /// Dual-view semantics:
-  ///   * liveAccum — uses full extent for animating rows; caps admission
-  ///     at the pre-animation row count during enters (prevents
-  ///     mass-mounting the entering subtree on frame 1 of an expand).
-  ///   * postAccum — uses target extent (full for enters, 0 for exits,
-  ///     live for non-animating); tracks the post-animation layout.
-  /// A row is admitted when it passes either view, with the constraint
-  /// that exits can only be admitted via the LIVE view.
+  /// Two accumulators run in parallel, because an extent animation makes
+  /// "where the row is now" and "where it will end up" disagree:
   ///
-  /// Loop stops only when BOTH views agree no future row could be admitted.
+  /// - liveAccum tracks the current layout, charging animating rows their
+  ///   FULL extent. That fills the budget faster during an enter, which
+  ///   is what holds admission near the pre-animation row count instead
+  ///   of mass-mounting the entering subtree on frame 1 of an expand.
+  /// - postAccum tracks the post-animation layout, charging each row its
+  ///   target extent: full for enters, 0 for exits, live otherwise.
+  ///
+  /// A row is admitted when EITHER view has room, except that an exit can
+  /// only be admitted through the live view, having no post-animation
+  /// position worth pre-mounting for. The loop stops only once both views
+  /// agree no later row could be admitted.
   int admit({
     required int cacheStartIndex,
     required List<TKey> visibleNodes,
@@ -78,7 +87,7 @@ class LayoutAdmissionPolicy<TKey, TData> {
       final bool postBudgetOk =
           postOffset < effectiveCacheEnd && postAccum < budgetCap;
 
-      // Both views failed — offsets and accumulators only grow, so no
+      // Both views failed: offsets and accumulators only grow, so no
       // future row can be admitted.
       if (!liveBudgetOk && !postBudgetOk) {
         break;
@@ -97,10 +106,9 @@ class LayoutAdmissionPolicy<TKey, TData> {
         cacheEndIndex = i + 1;
       }
 
-      // Update accumulators regardless of admission — the budget is a
-      // cumulative quantity measured over every row the loop has
-      // considered, not just admitted ones. Future-row break decisions
-      // depend on these.
+      // Update accumulators regardless of admission: the budget is
+      // measured over every row the loop has considered, not just the
+      // admitted ones, and the break decision above depends on them.
       final double liveContribution;
       final double postContribution;
       if (isAnimating) {

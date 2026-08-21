@@ -10,9 +10,11 @@ import 'tree_controller.dart';
 /// A sliver that displays a tree structure with support for
 /// expand/collapse animations.
 ///
-/// The tree data and state are managed by [TreeController]. The widget
-/// rebuilds when the controller notifies listeners (e.g., on animation tick
-/// or expand/collapse).
+/// The tree data and state are managed by [TreeController]. The element
+/// subscribes to that controller and refreshes only what changed: a data
+/// notification refreshes one row, a structural change queues just the
+/// affected rows, and a slide-only animation tick needs paint alone. A
+/// controller notification does not rebuild the whole sliver.
 ///
 /// Children are built lazily using [nodeBuilder] only when they become
 /// visible in the viewport.
@@ -70,14 +72,15 @@ class SliverTree<TKey, TData> extends RenderObjectWidget {
 
   /// Builder function that creates a widget for each visible tree node.
   ///
-  /// The [nodeKey] parameter is the unique identifier for the node.
-  /// The [nodeDepth] parameter is the nesting level (0 for roots).
+  /// `nodeKey` is the node's unique identifier and `nodeDepth` its nesting
+  /// level, 0 for roots.
   ///
   /// Use [TreeController.getNodeData] to look up the node's data payload.
   ///
-  /// The returned widget should typically be a fixed-height item like
-  /// [ListTile] or a custom row widget. Variable-height items are supported
-  /// but may affect scroll performance.
+  /// Variable-height rows are supported. The cost is that a row carries no
+  /// measured extent until it has been laid out once, so any offset derived
+  /// for rows that have never been on screen uses an estimate and is
+  /// corrected once the real heights arrive.
   final Widget Function(BuildContext context, TKey nodeKey, int nodeDepth)
   nodeBuilder;
 
@@ -85,7 +88,7 @@ class SliverTree<TKey, TData> extends RenderObjectWidget {
   ///
   /// - `0` = no sticky headers (default, zero overhead)
   /// - `1` = root nodes (depth 0) stick
-  /// - `2` = roots + their direct children (depths 0–1) stick
+  /// - `2` = roots plus their direct children (depths 0 and 1) stick
   /// - etc.
   final int maxStickyDepth;
 
