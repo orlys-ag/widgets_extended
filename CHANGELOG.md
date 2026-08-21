@@ -7,6 +7,11 @@ the memory had just restored. A section the user collapsed now comes
 back collapsed, and one they expanded comes back expanded, matching
 `SyncedSliverTree`. Callers who relied on the old behavior can set
 `preserveExpansion: false`.
+- Perf: scrolling anywhere inside a subtree whose sticky header is pinned
+rebuilt a prefix sum over every visible row on each frame, because the
+header's own row is force-mounted from outside the cache region. The
+per-row offset is now read directly on the frames where it is
+authoritative.
 - Fix: `TreeSyncController.syncMultipleChildren` destroyed a moved node's
 own children when `animate` was false and the node's old parent was
 removed in the same call. The old parent's removal is now deferred until

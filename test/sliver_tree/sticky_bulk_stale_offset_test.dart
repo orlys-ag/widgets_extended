@@ -32,6 +32,18 @@ import 'package:widgets_extended/widgets_extended.dart';
 const Duration kAnim = Duration(milliseconds: 300);
 
 void main() {
+  setUp(() {
+    // This test is the one that exposed the bulk fall-off frame, where
+    // `_nodeOffsetsByNid` is authoritative for the tail only, so it is
+    // also where the render object's freshness cross-check earns its
+    // keep. The check is gated on this flag so debug builds do not pay
+    // an O(N_visible) prefix sum per frame.
+    TreeController.debugFullConsistencyChecks = true;
+  });
+  tearDown(() {
+    TreeController.debugFullConsistencyChecks = false;
+  });
+
   testWidgets(
     "the pinned band survives expandAll when preceding content grows: it "
     "always shows the root whose subtree covers it",

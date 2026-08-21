@@ -533,6 +533,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// install and settle frames.
   int debugPerformLayoutCount = 0;
 
+  /// Whether `_nodeOffsetsByNid` currently describes EVERY visible row,
+  /// off-cache ones included, for this frame.
+  ///
+  /// True after any non-bulk Pass 1 branch (each writes the full visible
+  /// prefix) and after the sticky block's full recompute. False on a
+  /// bulk-fast-path frame, whose per-nid slots are maintained only for
+  /// the cache region, INCLUDING one that leaves the fast path mid-frame:
+  /// Pass 2's fall-off rewrites just the tail from the first changed row,
+  /// so earlier off-cache slots still hold the previous non-bulk frame's
+  /// values.
+  bool _offsetsAuthoritative = false;
+
   double _admittedSlideBound = 0.0;
 
   /// The composed slide bound the last [performLayout] widened its
@@ -2658,6 +2670,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // last frame instead of memset'ing the whole nid-indexed array, the
     // array's length tracks nidCapacity, which grows monotonically and
     // dwarfs the actual cache-region size on a long-lived tree.
+    // Every non-bulk branch above leaves the full visible prefix written;
+    // the bulk branch maintains only the cache region. See
+    // [_offsetsAuthoritative].
+    _offsetsAuthoritative = !bulkOnly;
+
     for (int i = 0; i < _writtenCacheRegionNidsLen; i++) {
       final nid = _writtenCacheRegionNids[i];
       if (nid < _inCacheRegionByNid.length) {
@@ -2914,6 +2931,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           );
         }
         totalScrollExtent = _recomputeOffsets();
+        // A full recompute rewrites every visible nid's slot, so the
+        // array is authoritative even on a bulk frame.
+        _offsetsAuthoritative = true;
         stickyMeasurementMovedOffsets = true;
         if (_maxStickyDepth > 0 && !hasAnimations) {
           _sticky.precomputeStableSubtreeBottoms(
@@ -3129,13 +3149,39 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           // Bulk-only fast path: per-nid offset slots are not kept fresh
           // for out-of-cache-region nids, derive from cumulatives.
           offset = _offsetAtVisibleIndex(visIdx);
+        } else if (!_offsetsAuthoritative) {
+          // Bulk frame that left the fast path mid-frame: the slots
+          // before the first changed row are still the previous
+          // non-bulk frame's, so derive from a fresh cumulative.
+          final cumulative =
+              freshCumulative ??= _buildParentDataRefreshCumulative(
+                visibleNodes.length,
+              );
+          offset = cumulative[visIdx];
         } else {
-          // Non-bulk: `_nodeOffsetsByNid` is stale for off-cache rows.
-          // Build (once) and use the fresh structural cumulative.
-          freshCumulative ??= _buildParentDataRefreshCumulative(
-            visibleNodes.length,
-          );
-          offset = freshCumulative[visIdx];
+          // Non-bulk: the per-nid slot is authoritative for off-cache
+          // rows too (see [_offsetsAuthoritative]), which spares the
+          // O(N_visible) prefix sum this used to build on EVERY frame
+          // that force-mounted a pinned header outside the cache region.
+          offset = _nodeOffsetsByNid[nid];
+          assert(() {
+            // Cross-check against the cumulative under the invariant
+            // suites only: building it here unconditionally would
+            // reintroduce the cost in debug and defeat the perf pin.
+            if (!TreeController.debugFullConsistencyChecks) {
+              return true;
+            }
+            final cumulative =
+                freshCumulative ??= _buildParentDataRefreshCumulative(
+                  visibleNodes.length,
+                );
+            assert(
+              cumulative[visIdx] == offset,
+              "_nodeOffsetsByNid stale for off-cache nid $nid: slot "
+              "$offset, cumulative ${cumulative[visIdx]}",
+            );
+            return true;
+          }());
         }
         final parentData = child.parentData! as SliverTreeParentData;
         parentData.layoutOffset = offset;
