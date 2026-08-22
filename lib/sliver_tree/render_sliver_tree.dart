@@ -279,18 +279,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// during the fast path only cache-region nid slots are fresh.
   bool _lastFrameUsedBulkCumulatives = false;
 
-  /// Whether `_nodeOffsetsByNid` currently describes EVERY visible row,
-  /// off-cache ones included, for this frame.
-  ///
-  /// True after any non-bulk Pass 1 branch (each writes the full visible
-  /// prefix) and after the sticky block's full recompute. False on a
-  /// bulk-fast-path frame, whose per-nid slots are maintained only for
-  /// the cache region, INCLUDING one that leaves the fast path mid-frame:
-  /// Pass 2's fall-off rewrites just the tail from the first changed row,
-  /// so earlier off-cache slots still hold the previous non-bulk frame's
-  /// values.
-  bool _offsetsAuthoritative = false;
-
   /// One-shot cumulative offset buffer used by `_findFirstVisibleIndex`
   /// when called outside layout after a bulk-only frame, where
   /// `_nodeOffsetsByNid` is fresh only for the cache region. Cached
@@ -2662,12 +2650,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       }
     }
 
-    // Pass 1 is done: record whether it left `_nodeOffsetsByNid` describing
-    // EVERY visible row. Each non-bulk branch above writes the full visible
-    // prefix; the bulk branch maintains only the cache region. See
-    // [_offsetsAuthoritative], which the parentData refresh reads to decide
-    // whether an off-cache row's offset can come from the array.
-    _offsetsAuthoritative = !bulkOnly;
+    // Pass 1 is done: does `_nodeOffsetsByNid` now describe EVERY visible
+    // row, off-cache ones included? Each non-bulk branch above writes the
+    // full visible prefix, so yes; the bulk fast path maintains only the
+    // cache region, so no. That includes a bulk frame which LEAVES the
+    // fast path later in this method: Pass 2's fall-off rewrites just the
+    // tail from the first changed row, so earlier off-cache slots still
+    // hold the previous non-bulk frame's values.
+    //
+    // Frame-local by construction: written here, refined by the sticky
+    // block's full recompute below, and read by the parentData refresh,
+    // all within this one `performLayout`. Nothing carries it across
+    // frames, so there is no stale value to reset anywhere.
+    bool offsetsAuthoritative = !bulkOnly;
 
     // ────────────────────────────────────────────────────────────────────────
     // PASS 2: Create children for nodes in cache region
@@ -2937,7 +2932,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         totalScrollExtent = _recomputeOffsets();
         // A full recompute rewrites every visible nid's slot, so the
         // array is authoritative even on a bulk frame.
-        _offsetsAuthoritative = true;
+        offsetsAuthoritative = true;
         stickyMeasurementMovedOffsets = true;
         if (_maxStickyDepth > 0 && !hasAnimations) {
           _sticky.precomputeStableSubtreeBottoms(
@@ -3153,7 +3148,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           // Bulk-only fast path: per-nid offset slots are not kept fresh
           // for out-of-cache-region nids, derive from cumulatives.
           offset = _offsetAtVisibleIndex(visIdx);
-        } else if (!_offsetsAuthoritative) {
+        } else if (!offsetsAuthoritative) {
           // Bulk frame that left the fast path mid-frame: the slots
           // before the first changed row are still the previous
           // non-bulk frame's, so derive from a fresh cumulative.
@@ -3164,7 +3159,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           offset = cumulative[visIdx];
         } else {
           // Non-bulk: the per-nid slot is authoritative for off-cache
-          // rows too (see [_offsetsAuthoritative]), which spares the
+          // rows too (see `offsetsAuthoritative` above), which spares the
           // O(N_visible) prefix sum this used to build on EVERY frame
           // that force-mounted a pinned header outside the cache region.
           offset = _nodeOffsetsByNid[nid];
