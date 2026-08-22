@@ -1,5 +1,29 @@
 ## Unreleased
 
+- Fix: a downward drag that resolved "into" a collapsed or leaf row
+committed the node as that row's SIBLING instead. The drop probe reads
+painted positions, so once the make-room gap opened under it, the probe
+landed in the gap and re-resolved against the row below it. The gap is
+now recognized as the slot it represents.
+- Fix: starting or moving a drag in the window between a structural
+mutation and the next frame could throw a `RangeError`, or answer with
+another row's geometry, because the row lookup indexed layout caches the
+mutation had invalidated. Such a lookup now takes the exact scan.
+- Fix: `animateScrollToKey` with `AncestorExpansionMode.animated` wrote
+to a disposed `ScrollPosition` when the scrollable was rebuilt mid-scroll
+(an assertion in debug, a dead write in release). It now follows the live
+position and re-seeds its baseline across the swap.
+- Fix: three defects in `TreeSyncController`'s expansion memory let a
+sync override the user's expand or collapse across a remove and re-add:
+a descendant hidden under a collapsed ancestor lost its entry, a retained
+root re-added childless was never restored once its children arrived, and
+a second removal while childless overwrote the remembered state.
+- Fix: disposing a `TreeReorderController` mid-drag and rebuilding with a
+new one left the dragged row invisible and its drag proxy in the overlay.
+- Perf: a batch of K animated mutations in one frame took K full
+visible-order snapshots to stage one FLIP baseline, which the first-wins
+slot then discarded all but one of. Measured on 4000 rows with 400
+batched moves: 465ms to 176ms.
 - Fix: `SectionedSliverList`'s `preserveExpansion` had no effect. Every
 sync re-applied the initial-expansion policy to any section that was not
 live before it, which is every re-added section, overwriting the state
