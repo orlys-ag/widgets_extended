@@ -279,6 +279,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// during the fast path only cache-region nid slots are fresh.
   bool _lastFrameUsedBulkCumulatives = false;
 
+  /// Whether `_nodeOffsetsByNid` currently describes EVERY visible row,
+  /// off-cache ones included, for this frame.
+  ///
+  /// True after any non-bulk Pass 1 branch (each writes the full visible
+  /// prefix) and after the sticky block's full recompute. False on a
+  /// bulk-fast-path frame, whose per-nid slots are maintained only for
+  /// the cache region, INCLUDING one that leaves the fast path mid-frame:
+  /// Pass 2's fall-off rewrites just the tail from the first changed row,
+  /// so earlier off-cache slots still hold the previous non-bulk frame's
+  /// values.
+  bool _offsetsAuthoritative = false;
+
   /// One-shot cumulative offset buffer used by `_findFirstVisibleIndex`
   /// when called outside layout after a bulk-only frame, where
   /// `_nodeOffsetsByNid` is fresh only for the cache region. Cached
@@ -533,32 +545,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// install and settle frames.
   int debugPerformLayoutCount = 0;
 
-  /// Whether `_nodeOffsetsByNid` currently describes EVERY visible row,
-  /// off-cache ones included, for this frame.
-  ///
-  /// True after any non-bulk Pass 1 branch (each writes the full visible
-  /// prefix) and after the sticky block's full recompute. False on a
-  /// bulk-fast-path frame, whose per-nid slots are maintained only for
-  /// the cache region, INCLUDING one that leaves the fast path mid-frame:
-  /// Pass 2's fall-off rewrites just the tail from the first changed row,
-  /// so earlier off-cache slots still hold the previous non-bulk frame's
-  /// values.
-  bool _offsetsAuthoritative = false;
-
-  double _admittedSlideBound = 0.0;
-
-  /// The composed slide bound the last [performLayout] widened its
-  /// admission window by.
-  ///
-  /// **Internal contract**: read by [SliverTreeElement] on animation
-  /// ticks. A paint-only tick whose current bound exceeds this one may
-  /// be painting rows from structural positions the last layout did not
-  /// admit, so it needs a layout rather than a repaint; a tick within
-  /// it is genuinely paint-only. Same class of element-to-render
-  /// contract as [TreeController.takePendingPhantomAnchors]; external
-  /// callers should not depend on it.
-  double get admittedSlideBound => _admittedSlideBound;
-
   /// Lifetime count of [snapshotVisibleOffsets] calls. Perf oracle for
   /// the first-wins baseline: K animated mutations in one frame must
   /// produce exactly ONE staging snapshot, not K of them, because the
@@ -759,6 +745,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   ///
   /// `double.nan` initially (first layout has no previous to compare).
   double _lastObservedScrollOffset = double.nan;
+
+  double _admittedSlideBound = 0.0;
+
+  /// The composed slide bound the last [performLayout] widened its
+  /// admission window by.
+  ///
+  /// **Internal contract**: read by [SliverTreeElement] on animation
+  /// ticks. A paint-only tick whose current bound exceeds this one may
+  /// be painting rows from structural positions the last layout did not
+  /// admit, so it needs a layout rather than a repaint; a tick within
+  /// it is genuinely paint-only. Same class of element-to-render
+  /// contract as [TreeController.takePendingPhantomAnchors]; external
+  /// callers should not depend on it.
+  double get admittedSlideBound => _admittedSlideBound;
 
   /// Cached callback registered with the controller's host registry on
   /// `attach` and unregistered on `detach`. `late final` so the same
@@ -1768,6 +1768,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// bounded window scan (false). Untouched by no-delta fast-path calls.
   bool debugLastFindRowUsedFullScan = false;
 
+  /// Whether the per-nid offset/extent arrays and the bulk cumulatives
+  /// describe the CURRENT visible order.
+  ///
+  /// Both are written only by `performLayout` (the structure stamp and
+  /// the cumulative's element count are stamped there), so they go stale
+  /// for exactly one window: between a structural mutation and the next
+  /// layout. Nothing inside a frame can observe that window, but the
+  /// gesture-time readers below can, because a pointer event is
+  /// delivered between frames. Every reader that indexes those caches
+  /// has to ask this first and fall back to the cache-free full scan.
+  bool get _rowGeometryIsFresh {
+    return controller.structureGeneration == _lastStructureGeneration &&
+        !(_bulkCumulativesValid &&
+            _bulkCumulativesCount != controller.visibleNodeCount);
+  }
+
   /// Finds the first live (non-pending-deletion) visible row whose painted
   /// scroll-space range `[paintedOffset, paintedOffset + extent)` contains
   /// [scrollY], falling back to the last live row when [scrollY] sits past
@@ -1809,22 +1825,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   ///    controller truth during extent animations (extent ticks force
   ///    relayout every frame), the same staleness class [_liveRowAt]
   ///    already accepts.
-  /// Whether the per-nid offset/extent arrays and the bulk cumulatives
-  /// describe the CURRENT visible order.
-  ///
-  /// Both are written only by `performLayout` (the structure stamp and
-  /// the cumulative's element count are stamped there), so they go stale
-  /// for exactly one window: between a structural mutation and the next
-  /// layout. Nothing inside a frame can observe that window, but the
-  /// gesture-time readers below can, because a pointer event is
-  /// delivered between frames. Every reader that indexes those caches
-  /// has to ask this first and fall back to the cache-free full scan.
-  bool get _rowGeometryIsFresh {
-    return controller.structureGeneration == _lastStructureGeneration &&
-        !(_bulkCumulativesValid &&
-            _bulkCumulativesCount != controller.visibleNodeCount);
-  }
-
   @override
   ({TKey key, double paintedOffset, double extent})? findRowAtPaintedY(
     double scrollY,
@@ -2660,6 +2660,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       }
     }
 
+    // Pass 1 is done: record whether it left `_nodeOffsetsByNid` describing
+    // EVERY visible row. Each non-bulk branch above writes the full visible
+    // prefix; the bulk branch maintains only the cache region. See
+    // [_offsetsAuthoritative], which the parentData refresh reads to decide
+    // whether an off-cache row's offset can come from the array.
+    _offsetsAuthoritative = !bulkOnly;
+
     // ────────────────────────────────────────────────────────────────────────
     // PASS 2: Create children for nodes in cache region
     // ────────────────────────────────────────────────────────────────────────
@@ -2670,11 +2677,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // last frame instead of memset'ing the whole nid-indexed array, the
     // array's length tracks nidCapacity, which grows monotonically and
     // dwarfs the actual cache-region size on a long-lived tree.
-    // Every non-bulk branch above leaves the full visible prefix written;
-    // the bulk branch maintains only the cache region. See
-    // [_offsetsAuthoritative].
-    _offsetsAuthoritative = !bulkOnly;
-
     for (int i = 0; i < _writtenCacheRegionNidsLen; i++) {
       final nid = _writtenCacheRegionNids[i];
       if (nid < _inCacheRegionByNid.length) {
