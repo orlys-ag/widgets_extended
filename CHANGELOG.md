@@ -1,79 +1,59 @@
 ## Unreleased
 
-- Fix: a downward drag that resolved "into" a collapsed or leaf row
-committed the node as that row's SIBLING instead. The drop probe reads
-painted positions, so once the make-room gap opened under it, the probe
-landed in the gap and re-resolved against the row below it. The gap is
-now recognized as the slot it represents.
-- Fix: starting or moving a drag in the window between a structural
-mutation and the next frame could throw a `RangeError`, or answer with
-another row's geometry, because the row lookup indexed layout caches the
-mutation had invalidated. Such a lookup now takes the exact scan.
-- Fix: `animateScrollToKey` with `AncestorExpansionMode.animated` wrote
-to a disposed `ScrollPosition` when the scrollable was rebuilt mid-scroll
-(an assertion in debug, a dead write in release). It now follows the live
-position and re-seeds its baseline across the swap.
-- Fix: three defects in `TreeSyncController`'s expansion memory let a
-sync override the user's expand or collapse across a remove and re-add:
-a descendant hidden under a collapsed ancestor lost its entry, a retained
-root re-added childless was never restored once its children arrived, and
-a second removal while childless overwrote the remembered state.
-- Fix: disposing a `TreeReorderController` mid-drag and rebuilding with a
-new one left the dragged row invisible and its drag proxy in the overlay.
-- Perf: a batch of K animated mutations in one frame took K full
-visible-order snapshots to stage one FLIP baseline, which the first-wins
-slot then discarded all but one of. Measured on 4000 rows with 400
-batched moves: 465ms to 176ms.
-- Fix: `SectionedSliverList`'s `preserveExpansion` had no effect. Every
-sync re-applied the initial-expansion policy to any section that was not
-live before it, which is every re-added section, overwriting the state
-the memory had just restored. A section the user collapsed now comes
-back collapsed, and one they expanded comes back expanded, matching
-`SyncedSliverTree`. Callers who relied on the old behavior can set
-`preserveExpansion: false`.
-- Perf: scrolling anywhere inside a subtree whose sticky header is pinned
-rebuilt a prefix sum over every visible row on each frame, because the
-header's own row is force-mounted from outside the cache region. The
-per-row offset is now read directly on the frames where it is
-authoritative.
-- Fix: `TreeSyncController.syncMultipleChildren` destroyed a moved node's
-own children when `animate` was false and the node's old parent was
-removed in the same call. The old parent's removal is now deferred until
-every mover has been placed.
 - **BREAKING** `SectionedListController.addItem` and `setItems` now throw
-`ArgumentError` for an item key that belongs to another section, instead
-of silently moving the item out of it. Use `moveItem` to move an item
-between sections. Re-adding an item to its own section is unchanged
-(an upsert, or a cancel of a pending removal).
-- **BREAKING** `SectionedListController.addSection` now throws
-`ArgumentError` for a section key that already exists, and validates its
-`items` before mutating, so a rejected call no longer leaves an empty
-section behind. Re-adding a section that is animating out still cancels
-its removal.
-- Fix: `SectionedListController.moveItem` resurrected an item that was
-animating out when it was given a `toSection`; the in-section form
-already refused. Both forms now refuse.
-- Fix: `SectionedListController.moveItem(toSection:)` with no `index` is
-documented to append, but was a no-op when the item was already in that
-section.
-- Fix: the dragged row's hidden in-place copy was still hit-testable, so
-a second finger landing on it could kill the drag (a touch on one of the
-row's own handles ran the re-entry guard) or fire that row's tap
-handlers. The hidden copy now ignores pointers; every other row stays
-interactive.
-- Fix: a make-room drag suspended stale-row eviction for its whole
-duration, so every row an autoscroll drag passed stayed mounted until
-the drop (2000 rows over 200 frames: 18 mounted rows became 143).
-Eviction and retention now read the FLIP-slide state, which goes idle,
-rather than the composed state, which a held preview never lets go idle.
-- Fix: dragging a subtree taller than the scrollable's cache extent left
-blank space where the make-room preview had shifted rows into the
-viewport. Preview offsets are paint-only, so nothing widened the layout
-admission window until autoscroll or the drop forced a layout. The
-window now widens once per re-target.
-- Added `SectionedListController.rememberedSectionKeys()`, the section
-keys whose expansion state is held for a re-add. It replaces the
-undocumented `debugSnapshotRememberedSectionKeys()`.
+`ArgumentError` for an item key that belongs to another section, instead of
+silently moving the item out of it. Use `moveItem` to move an item between
+sections; re-adding an item to its own section is unchanged.
+- **BREAKING** `SectionedListController.addSection` now throws `ArgumentError`
+for a section key that already exists, and validates `items` before mutating,
+so a rejected call no longer leaves an empty section behind. Re-adding a
+section that is animating out still cancels its removal.
+- Fix: a downward drag onto a collapsed or leaf row committed the node as that
+row's sibling instead of into it. The probe was landing in the gap the
+make-room preview had just opened and re-resolving against the row below it.
+- Fix: starting or moving a drag between a structural mutation and the next
+frame could throw a `RangeError` or report another row's geometry, because the
+row lookup read layout caches the mutation had invalidated.
+- Fix: `animateScrollToKey` with `AncestorExpansionMode.animated` kept driving
+a disposed `ScrollPosition` when the scrollable was rebuilt mid-scroll, which
+asserted in debug and silently abandoned the scroll in release.
+- Fix: three defects in `TreeSyncController`'s expansion memory let a sync
+override the user's expand or collapse across a remove and re-add: a
+descendant hidden under a collapsed ancestor lost its entry, a root re-added
+without children was never restored once they arrived, and a second removal
+while childless overwrote the remembered state.
+- Fix: `SectionedSliverList` ignored `preserveExpansion`, because every sync
+re-applied the initial-expansion policy to re-added sections. Sections now
+come back as the user left them, matching `SyncedSliverTree`; pass
+`preserveExpansion: false` for the old behavior.
+- Fix: `TreeSyncController.syncMultipleChildren` destroyed a moved node's own
+children when `animate` was false and the node's old parent was removed in the
+same call.
+- Fix: `SectionedListController.moveItem` brought back an item that was
+animating out when given a `toSection`; the in-section form already refused.
+- Fix: `SectionedListController.moveItem(toSection:)` with no `index` did
+nothing when the item was already in that section, instead of appending it as
+documented.
+- Fix: disposing a `TreeReorderController` mid-drag and rebuilding with a new
+one left the dragged row invisible and its drag proxy stuck in the overlay.
+- Fix: the dragged row's hidden copy was still hit-testable, so a second finger
+landing on it could cancel the drag or fire that row's tap handlers. Every
+other row stays interactive.
+- Fix: dragging a subtree taller than the scrollable's cache extent left blank
+space where the make-room preview had shifted rows into view. Re-targeting the
+gap now costs one layout, independent of frame rate.
+- Perf: a batch of K animated mutations took K full visible-order snapshots to
+stage one slide baseline. Measured on 4000 rows with 400 batched moves, 465ms
+to 176ms.
+- Perf: a drag suspended stale-row eviction for its whole duration, so every
+row an autoscroll drag passed stayed mounted until the drop. Measured on 2000
+rows over 200 frames, 143 mounted rows to 25 against a steady state of 18.
+- Perf: scrolling inside a subtree whose sticky header is pinned rebuilt a
+prefix sum over every visible row on each frame, because the header's own row
+is mounted from outside the cache region.
+- Added `SectionedListController.rememberedSectionKeys()`, the section keys
+whose expansion state is held for a re-add. It replaces the undocumented
+`debugSnapshotRememberedSectionKeys()`.
 
 ## 0.0.33
 
