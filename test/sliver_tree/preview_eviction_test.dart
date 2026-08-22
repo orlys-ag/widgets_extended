@@ -70,6 +70,19 @@ void main() {
           "eviction gates",
     );
 
+    // While they are still on screen, the rows the preview actually
+    // shifted must be built. Asserting this AFTER the scroll below would
+    // be vacuous: by then they are 6000px above the viewport and the
+    // guard would skip every case.
+    for (final key in ["r1", "r2", "r3"]) {
+      expect(
+        controller.getSlideDeltaNid(controller.nidOf(key)),
+        isNot(0.0),
+        reason: "setup: $key is one of the rows the preview shifted",
+      );
+      expect(render.getChildForNode(key), isNotNull);
+    }
+
     // Autoscroll past a few hundred rows.
     for (int i = 0; i < 200; i++) {
       scrollController.jumpTo(scrollController.offset + 30);
@@ -83,24 +96,18 @@ void main() {
           "(this read 143 against a steady state of 18)",
     );
 
-    // The rows the preview actually shifted must still be built while
-    // their painted band is inside the viewport.
-    for (final key in ["r1", "r2", "r3"]) {
-      final index = controller.getVisibleIndex(key);
-      if (index < 0) {
-        continue;
-      }
-      final painted =
-          index * 48.0 +
-          controller.getSlideDeltaNid(controller.nidOf(key)) -
-          scrollController.offset;
-      if (painted > -48 && painted < 600) {
-        expect(
-          render.getChildForNode(key),
-          isNotNull,
-          reason: "$key paints at $painted and must stay built",
-        );
-      }
+    // The other half of the contract: eviction running again must not
+    // starve the viewport. Every row on screen at the new offset is
+    // built.
+    final firstVisible = (scrollController.offset / 48).floor();
+    for (int i = firstVisible; i < firstVisible + 12; i++) {
+      final key = controller.visibleNodes[i];
+      expect(
+        render.getChildForNode(key),
+        isNotNull,
+        reason: "$key is on screen at offset ${scrollController.offset} "
+            "and must be built",
+      );
     }
 
     controller.clearReorderPreview(animate: false);

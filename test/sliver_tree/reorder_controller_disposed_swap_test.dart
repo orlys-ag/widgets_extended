@@ -55,6 +55,11 @@ Widget _host(
   );
 }
 
+/// Opacity applied to the single remaining in-place row for [key].
+///
+/// Only meaningful once the drag proxy is gone: while a drag is live the
+/// key matches twice (in-place copy plus proxy clone) and which one this
+/// resolves is not defined.
 double _rowOpacity(WidgetTester tester, String key) {
   final opacity = tester.widget<Opacity>(
     find
@@ -94,9 +99,11 @@ void main() {
     await tester.pump();
     expect(first.isDragging, isTrue, reason: "setup: a live session");
     expect(
-      _rowOpacity(tester, "b"),
-      0.0,
-      reason: "setup: the dragged row's in-place copy is hidden",
+      find.text("b"),
+      findsNWidgets(2),
+      reason: "setup: the in-place copy plus the floating proxy, which is "
+          "why the opacity helper below is only read once the proxy is "
+          "gone",
     );
 
     // The app disposes the controller and rebuilds with a fresh one.

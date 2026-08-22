@@ -530,9 +530,15 @@ class _SliverReorderableTreeState<TKey, TData>
       // never runs; the row-side orphan backstop also returns early
       // because the disposed controller's `draggedKey` is already null.
       // Without this the dragged row stays at opacity 0 and the proxy
-      // stays in the overlay until the next drag. The swap is the only
-      // event this state gets, and `_onDragEnd`'s setState and overlay
-      // removal are both legal here.
+      // stays in the overlay until the next drag.
+      //
+      // The swap is the only event this state gets, and both halves of
+      // `_onDragEnd` are legal from here (verified against the SDK, not
+      // assumed): `markNeedsBuild` permits a mark during build when the
+      // element is a descendant of the current build target, which this
+      // one is (the parent is what is rebuilding), and
+      // `OverlayEntry.remove` defers its `_markDirty` to a post-frame
+      // callback while the scheduler is in `persistentCallbacks`.
       if (_draggedKey != null && !widget.reorderController.isDragging) {
         _onDragEnd();
       }
