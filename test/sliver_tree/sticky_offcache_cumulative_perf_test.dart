@@ -138,7 +138,11 @@ void main() {
       // The row at this offset is the one the visible order puts there.
       final index = (offset / 48).floor();
       final key = controller.visibleNodes[index];
-      final rect = tester.getRect(find.text(key).first);
+      // No `.first`: the finder matches exactly one row at these
+      // offsets, and letting an ambiguity throw is better than silently
+      // measuring whichever copy came first (the pinned header paints a
+      // second time in its band).
+      final rect = tester.getRect(find.text(key));
       expect(
         rect.top,
         closeTo(index * 48.0 - offset, 0.01),

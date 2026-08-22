@@ -600,6 +600,16 @@ class TreeSyncController<TKey, TData> {
       // remainder is left. (With `animate: true` the purge is deferred by
       // the exit animation and `moveNode` revives the subtree, which is
       // why this only ever bit the non-animated path.)
+      //
+      // The `moverAncestors` test is a PRECISION choice, not a
+      // correctness one: deferring every removal in a multi-parent call
+      // would reach the same end state, because the drain below removes
+      // whatever is still unwanted inside the same
+      // [TreeController.runBatch]. Verified by mutation during the
+      // 2026-08-21 audit, where widening this to "defer everything" broke
+      // no test. What the test buys is that an ordinary removal keeps the
+      // timing single-parent `syncChildren` gives it, instead of being
+      // relocated to the end of the call for no reason.
       final deferredRemovals = _deferredSubtreeRemovals;
       final moverAncestors = _moverAncestors;
       if (deferredRemovals != null &&

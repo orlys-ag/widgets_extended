@@ -109,6 +109,21 @@ void main() {
 
     expect(error, isNull);
     expect(result, isNotNull, reason: "the scroll future must complete");
+    // The assertion above only catches the DEBUG symptom. In release the
+    // same defect is silent: the follower keeps driving an object nothing
+    // renders while the visible scrollable never moves. Assert the
+    // outcome the user would notice, which is what makes this test
+    // meaningful with asserts compiled out.
+    expect(
+      scrollController.offset,
+      greaterThan(0.0),
+      reason: "the NEW position must actually have been scrolled",
+    );
+    expect(
+      find.text("target"),
+      findsOneWidget,
+      reason: "and the row the scroll was asked for must be on screen",
+    );
   });
 
   testWidgets("unmounting the scrollable mid animated-concurrent scroll "
