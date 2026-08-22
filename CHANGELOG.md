@@ -1,4 +1,4 @@
-## Unreleased
+## 0.0.34
 
 - **BREAKING** `SectionedListController.addItem` and `setItems` now throw
 `ArgumentError` for an item key that belongs to another section, instead of

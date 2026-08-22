@@ -8,6 +8,10 @@ reorders slide, reparenting glides across depths. No controller to manage,
 no imperative mutation calls, no manual keys bookkeeping. Drag-and-drop
 reorder is one parameter.
 
+## Install
+
+`flutter pub add widgets_extended`.
+
 ## Quick start
 
 ```dart
@@ -69,13 +73,21 @@ them):
 
 | | |
 | --- | --- |
-| Data | `node.item`, `node.key`, `node.depth`, `node.parentKey`, `node.indent` |
-| Structure | `node.hasChildren`, `node.childCount`, `node.isFirst`, `node.isLast`, `node.indexInParent`, `node.siblingCount` |
+| Data | `node.item`, `node.key`, `node.depth`, `node.parentKey`, `node.isRoot`, `node.indent` |
+| Structure | `node.hasChildren`, `node.childCount`, `node.liveChildCount`, `node.hasLiveChildren`, `node.isFirst`, `node.isLast`, `node.indexInParent`, `node.siblingCount` |
 | Expansion | `node.isExpanded`, `node.toggle()`, `node.expand()`, `node.collapse()` |
 
 `node.isFirst` / `node.isLast` make connector lines and rounded-group
-styling trivial. `node.controller` is the escape hatch to the full
-imperative API if you ever need it.
+styling trivial. They, `node.indexInParent` and `node.siblingCount` are
+all live-space: a sibling that is animating out is already excluded, so
+the last row stays the last row for the length of a removal. The child
+counts split the other way. `node.childCount` INCLUDES children still
+painting their exit, which is what a badge rendered beside those rows
+wants; `node.liveChildCount` and `node.hasLiveChildren` report the
+settled state instead.
+
+`node.controller` is the escape hatch to the full imperative API if you
+ever need it.
 
 ## Drag-and-drop reorder
 
@@ -116,12 +128,41 @@ Rules your `onReorder` handler lives by:
 - **Async handlers record before awaiting**, then reconcile or roll back on
   the response.
 
-To switch reordering off and on with app state (an edit mode), flip
-`enabled:` on the config; to gate dragging per row, pass
-`canReorder: (key) => ...`. On desktop,
-long-press reads as lag, so turn the default handles off and place a
-visible grip anywhere inside the row (`TreeDragHandle` drags immediately,
-`TreeDelayedDragHandle` on press-and-hold; both draw nothing):
+Three policies gate a move, and they compose. `enabled:` is the
+tree-wide runtime switch, for an edit mode you flip with app state.
+`canReorder: (key) => ...` gates dragging per row. `canAcceptDrop:
+({required movingKey, newParent, index}) => ...` filters destinations
+instead of sources, and also shapes the zones: a row that refuses
+`(newParent: thatRow, index: 0)` cannot take children at all, so it drops
+its `into` zone and splits in two rather than three.
+
+A refused row keeps its exact widget shape, which is deliberate: a shape
+that varied with policy would fail `Widget.canUpdate` and re-inflate every
+row subtree on each toggle, disposing whatever `State` your builder keeps
+there. The trade is that a refused row's handle still RENDERS, inert,
+because the package does not decide what your grip looks like. Read
+`TreeRowDragScope.canDrag` from a `Builder` inside the row to hide it
+while reserving its space:
+
+```dart
+Builder(
+  builder: (context) {
+    final canDrag = TreeRowDragScope.maybeOf(context)?.canDrag ?? false;
+    return Visibility(
+      visible: canDrag,
+      maintainSize: true,
+      maintainAnimation: true,
+      maintainState: true,
+      child: const TreeDragHandle(child: Icon(Icons.drag_indicator)),
+    );
+  },
+)
+```
+
+On desktop, long-press reads as lag, so turn the default handles off and
+place a visible grip anywhere inside the row (`TreeDragHandle` drags
+immediately, `TreeDelayedDragHandle` on press-and-hold; both draw
+nothing):
 
 ```dart
 reorder: TreeReorderConfig<String>(
@@ -144,9 +185,11 @@ same `onReorder`.
 
 ## Expansion
 
-- `initiallyExpanded: true` (the default) opens the whole tree on first
-  sync; `initialNodeExpansion: (key, item) => bool?` overrides it per node
-  (return null to defer).
+- `initiallyExpanded: true` (the default) opens the whole tree on the
+  first sync, and opens any node that gains its first children in a later
+  one; `initialNodeExpansion: (key, item) => bool?` overrides it per node
+  (return null to defer). Both are INITIAL policies: once a node exists,
+  its own expansion state wins.
 - `expansionMemory` (default 1024) remembers up to that many removed
   nodes' expansion states across remove/re-add cycles (0 disables it),
   and a user's deliberate collapse is never overridden by later syncs.
@@ -176,10 +219,10 @@ parameters otherwise:
 
 ```dart
 // Flat rows with parent pointers (query results, adjacency lists).
-SyncedSliverTree<String, Row>.flat(
-  items: rows,
-  keyOf: (r) => r.id,
-  parentOf: (r) => r.parentId, // null = root; unknown key = ArgumentError
+SyncedSliverTree<String, Task>.flat(
+  items: tasks,
+  keyOf: (t) => t.id,
+  parentOf: (t) => t.parentId, // null = root; unknown key = ArgumentError
   itemBuilder: ...,
 )
 
@@ -227,3 +270,11 @@ synchronous-test configuration.
 All of it runs on one sliver core: viewport-aware lazy building, dense
 integer-indexed state storage, and reorder slides that are paint-only per
 frame, so rows glide without relayout.
+
+## Learn more
+
+- `doc/synced_sliver_tree_tutorial.md` builds one drag-and-drop screen
+  from nothing: input modes, the row builder, a custom grip, the
+  `onReorder` contract, the drag proxy and the accessibility actions.
+- `examples/lib/` holds a runnable program per feature. Point
+  `examples/lib/main.dart`'s `home:` at the one you want.
