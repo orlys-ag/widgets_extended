@@ -1114,8 +1114,16 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // `hidden`, so the widget shape is stable across the drag, and the
     // in-flight pointer is unaffected (it is already routed to its
     // recognizer; IgnorePointer only removes the subtree from NEW hit
-    // tests). Semantics are untouched, which is why the wrapper goes
-    // INSIDE the Semantics below.
+    // The wrapper goes INSIDE the Semantics below, so the row's reorder
+    // actions survive the drag: `IgnorePointer` leaves its subtree in the
+    // semantics TREE (it only skips children when the deprecated
+    // `ignoringSemantics` is explicitly true, and this passes null), and
+    // the `isBlockingUserActions` it does set applies to its own node
+    // and below, never to the ancestor carrying those actions. Pinned by
+    // `hidden_row_hit_test.dart`. What that flag does block, for the
+    // length of the drag, is activation of the hidden row's OWN content
+    // semantics, which is the intended reading of a row that is both
+    // invisible and pointer-transparent.
     content = IgnorePointer(
       ignoring: hidden,
       child: Opacity(opacity: hidden ? 0.0 : 1.0, child: content),

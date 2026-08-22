@@ -14,6 +14,17 @@
 /// mid-session), but it is no longer reachable while the row is hidden,
 /// which is what the two rewritten tests in `caller_placed_handle_test`
 /// and `drag_handle_audit_test` now pin.
+///
+/// KNOWN GAP, deliberate. The accessibility half of the wrap, that the
+/// row's reorder actions survive because `Semantics` sits OUTSIDE both
+/// wrappers, is verified against the SDK in the source comment but is
+/// NOT covered here. Two instruments were tried during the 2026-08-21
+/// audit and both measure something else: `tester.getSemantics` resolves
+/// a node whose action ids persist under either nesting, and a
+/// label-keyed walk of the live tree misses the actions entirely because
+/// they sit on the wrapper node rather than the labelled one. A test
+/// that passes under the mistake it claims to catch is worse than none,
+/// so this stays an explicit gap.
 library;
 
 import 'package:flutter/gestures.dart';
