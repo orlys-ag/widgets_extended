@@ -15,20 +15,20 @@
 /// which is what the two rewritten tests in `caller_placed_handle_test`
 /// and `drag_handle_audit_test` now pin.
 ///
-/// KNOWN GAP, deliberate. The accessibility half of the wrap, that the
-/// row's reorder actions survive because `Semantics` sits OUTSIDE both
-/// wrappers, is verified against the SDK in the source comment but is
-/// NOT covered here. Two instruments were tried during the 2026-08-21
-/// audit and both measure something else: `tester.getSemantics` resolves
-/// a node whose action ids persist under either nesting, and a
-/// label-keyed walk of the live tree misses the actions entirely because
-/// they sit on the wrapper node rather than the labelled one. A test
-/// that passes under the mistake it claims to catch is worse than none,
-/// so this stays an explicit gap.
+/// The accessibility half of the wrap, that the row's reorder actions
+/// survive a drag, is covered by the last test here. Getting an
+/// instrument that can actually fail took three tries during the
+/// 2026-08-21 audit: `tester.getSemantics` resolves a node whose action
+/// ids persist under either nesting, and a label-keyed walk of the live
+/// tree misses the actions entirely because they sit on the wrapper
+/// node rather than the labelled one. Counting the NODES that carry the
+/// action does discriminate, because the hidden row's own node is the
+/// one at stake.
 library;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
@@ -49,6 +49,41 @@ _controllers(WidgetTester tester) {
     vsync: tester,
   );
   return (tree: tree, reorder: reorder);
+}
+
+const _moveDown = CustomSemanticsAction(label: "Move down");
+
+/// Number of semantics nodes in the LIVE tree carrying [action].
+///
+/// Counting nodes is the instrument that discriminates here. Asking one
+/// row's node for its action ids does not: `tester.getSemantics` walks
+/// up to a node whose ids survive either nesting, and keying a tree walk
+/// on the row's label misses the actions because they sit on the
+/// wrapper node, not the labelled one. During a drag the count is 2, the
+/// hidden in-place row plus the floating proxy, and it drops to 1 the
+/// moment the in-place row's semantics subtree stops being emitted.
+int _nodesWithAction(WidgetTester tester, CustomSemanticsAction action) {
+  final id = CustomSemanticsAction.getIdentifier(action);
+  // The non-deprecated routes (rootPipelineOwner / SemanticsBinding) do
+  // not expose the semantics owner that holds widget-test nodes. Same
+  // exemption the other semantics tests in this directory take.
+  // ignore: deprecated_member_use
+  final owner = tester.binding.pipelineOwner.semanticsOwner!;
+  final root = owner.rootSemanticsNode!;
+  var count = 0;
+  void visit(SemanticsNode node) {
+    final ids = node.getSemanticsData().customSemanticsActionIds;
+    if (ids != null && ids.contains(id)) {
+      count++;
+    }
+    node.visitChildren((child) {
+      visit(child);
+      return true;
+    });
+  }
+
+  visit(root);
+  return count;
 }
 
 void main() {
@@ -189,6 +224,85 @@ void main() {
 
     await first.up();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets("the dragged row keeps its reorder actions while hidden", (
+    tester,
+  ) async {
+    // The accessibility half of the wrap. Both wrappers sit INSIDE the
+    // row's `Semantics`, and that ordering is load-bearing for `Opacity`
+    // specifically: `RenderOpacity.visitChildrenForSemantics` stops
+    // emitting its child at alpha 0 unless `alwaysIncludeSemantics` is
+    // set, so a `Semantics` placed inside it would take the row's
+    // reorder actions out of the tree for the length of every drag,
+    // which is precisely when a screen-reader user might reach for them.
+    //
+    // `IgnorePointer` is not what this pins: it keeps its subtree in the
+    // tree and only marks it `isBlockingUserActions`, which leaves the
+    // custom action ids in place. Moving it outside changes nothing
+    // here, and this test does not claim otherwise.
+    final handle = tester.ensureSemantics();
+    final c = _controllers(tester);
+    addTearDown(() {
+      if (c.reorder.isDragging) {
+        c.reorder.cancelDrag();
+      }
+      c.reorder.dispose();
+      c.tree.dispose();
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              SliverReorderableTree<String, String>(
+                controller: c.tree,
+                reorderController: c.reorder,
+                showDragProxy: true,
+                nodeBuilder: (context, key, depth) {
+                  return TreeDelayedDragHandle(
+                    child: SizedBox(
+                      key: ValueKey("row-$key"),
+                      height: 50,
+                      child: Text(key),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final idleCount = _nodesWithAction(tester, _moveDown);
+    expect(
+      idleCount,
+      greaterThan(0),
+      reason: "setup: some rows can move down while the list is idle",
+    );
+
+    final gesture = await tester.startGesture(const Offset(400, 75));
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await gesture.moveTo(const Offset(400, 76));
+    await tester.pump();
+    expect(c.reorder.isDragging, isTrue, reason: "setup: a live drag");
+
+    expect(
+      _nodesWithAction(tester, _moveDown),
+      idleCount,
+      reason: "hiding the dragged row must not remove its action-carrying "
+          "semantics node; this reads one FEWER when the row's semantics "
+          "are dropped along with its opacity",
+    );
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(_nodesWithAction(tester, _moveDown), idleCount);
+    // Disposed in the body, not a tearDown: the binding verifies handles
+    // before tearDowns run.
+    handle.dispose();
   });
 
   testWidgets("rows that are not being dragged stay interactive", (

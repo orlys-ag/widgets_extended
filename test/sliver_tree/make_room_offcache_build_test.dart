@@ -113,6 +113,78 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets("the layout cost does not depend on the tick rate", (
+    tester,
+  ) async {
+    // The terminal-bound design is what makes this true: the bound
+    // covers where the shifted rows are GOING, so it is exceeded once,
+    // on the first tick after the re-target, no matter how many ticks
+    // the gap animation is divided into. A bound that grew with the
+    // animation would cost a layout per tick, and would do so more
+    // often on a faster display, which is the shape of regression this
+    // pins. 250Hz through 30Hz all cost one layout.
+    for (final tickMs in [4, 8, 16, 33]) {
+      final controller = TreeController<String, String>(vsync: tester);
+      controller.setRoots([
+        for (int i = 0; i < 40; i++) TreeNode(key: "r$i", data: "R$i"),
+      ]);
+      controller.setChildren("r0", [
+        for (int i = 0; i < 12; i++) TreeNode(key: "c$i", data: "C$i"),
+      ]);
+      controller.expand(key: "r0", animate: false);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 600,
+              child: CustomScrollView(
+                slivers: [
+                  SliverTree<String, String>(
+                    controller: controller,
+                    nodeBuilder: (context, key, depth) {
+                      return SizedBox(height: 48, child: Text(key));
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final render = tester.renderObject<RenderSliverTree<String, String>>(
+        find.byType(SliverTree<String, String>),
+      );
+
+      final layoutsBefore = render.debugPerformLayoutCount;
+      controller.setReorderPreviewAtIndex(
+        draggedKey: "r0",
+        gapVisibleIndex: controller.visibleNodeCount,
+      );
+      for (int elapsed = 0; elapsed < 400; elapsed += tickMs) {
+        await tester.pump(Duration(milliseconds: tickMs));
+      }
+
+      expect(
+        render.debugPerformLayoutCount - layoutsBefore,
+        1,
+        reason: "one layout at ${tickMs}ms ticks",
+      );
+      for (int i = 1; i <= 13; i++) {
+        expect(
+          render.getChildForNode("r$i"),
+          isNotNull,
+          reason: "r$i must be built at ${tickMs}ms ticks",
+        );
+      }
+
+      controller.clearReorderPreview(animate: false);
+      await tester.pumpAndSettle();
+      controller.dispose();
+    }
+  });
+
   testWidgets("a preview costs one layout when the window widens and none "
       "when it does not", (tester) async {
     // Control for the routing rule: the element lays out when the
