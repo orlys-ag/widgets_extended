@@ -1758,6 +1758,53 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// bounded window scan (false). Untouched by no-delta fast-path calls.
   bool debugLastFindRowUsedFullScan = false;
 
+  /// Debug-only: a row that paint SKIPS for want of a render box must not
+  /// be one the user can see.
+  ///
+  /// Paint reaches rows out to the overreach-widened bound, and skipping
+  /// an unbuilt one is normal out there. Inside the viewport it is not:
+  /// the row is transiting where the user is looking and simply does not
+  /// appear, which is a hole that survives until something else triggers
+  /// a layout. Every way of producing that hole ends here, so this is
+  /// the one place worth checking, whatever the cause upstream:
+  /// admission that did not widen for a composed offset (see
+  /// [admittedSlideBound]), or an eviction that dropped a row whose
+  /// slide was between settling and re-installing, which is the hazard
+  /// `SliverTreeElement._scheduleStaleEviction`'s FLIP gate exists to
+  /// prevent and which no test otherwise pins.
+  ///
+  /// Scoped to frames with slide activity: a row can legitimately be
+  /// unbuilt and on-screen for one frame during structural churn, before
+  /// the layout that admits it, and only a composed offset can put a row
+  /// in view from a structural position layout never admitted.
+  bool _debugAssertUnbuiltRowIsOffScreen({
+    required int i,
+    required int nid,
+    required TKey nodeId,
+  }) {
+    if (!controller.hasActiveSlides) {
+      return true;
+    }
+    if (controller.isPendingDeletion(nodeId)) {
+      return true;
+    }
+    final painted =
+        _structuralOffsetAt(i, nid) + controller.getSlideDeltaNid(nid);
+    final extent = _nodeExtentsByNid[nid];
+    final viewportTop = constraints.scrollOffset;
+    final viewportBottom = viewportTop + constraints.remainingPaintExtent;
+    final onScreen = painted + extent > viewportTop && painted < viewportBottom;
+    assert(
+      !onScreen,
+      "Row $nodeId paints at $painted (extent $extent) inside the viewport "
+      "[$viewportTop, $viewportBottom) with no render box, so it leaves a "
+      "hole until the next layout. Either layout did not admit it against "
+      "its composed offset, or it was evicted while its slide was between "
+      "settling and re-installing.",
+    );
+    return true;
+  }
+
   /// Whether the per-nid offset/extent arrays and the bulk cumulatives
   /// describe the CURRENT visible order.
   ///
@@ -3336,7 +3383,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       final nodeId = visibleNodes[i];
 
       final child = getChildForNode(nodeId);
-      if (child == null) continue;
+      if (child == null) {
+        assert(
+          _debugAssertUnbuiltRowIsOffScreen(i: i, nid: nid, nodeId: nodeId),
+        );
+        continue;
+      }
 
       // Paint-only FLIP slide delta: read from the controller on every
       // frame so localToGlobal / semantics (which can resolve between
