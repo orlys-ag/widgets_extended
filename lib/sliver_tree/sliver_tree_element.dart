@@ -439,6 +439,20 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// [RenderSliverTree.admittedSlideBound]), which leaves them retained
   /// by the ordinary cache-region check.
   ///
+  /// Kept, but do not read it as load-bearing. Overreach widens the
+  /// admitted cache region by the composed bound, so any row that can be
+  /// painting near the viewport is IN that region and is retained by the
+  /// cache-region check before the slide-delta clause is ever reached;
+  /// the window that clause covered, "slide installed, no layout yet",
+  /// is itself closed by the bound-driven layout. Measured on a
+  /// 300-row long transit, removing this gate and that clause together
+  /// changes nothing: same mounted counts (18 steady, 33 peak), same
+  /// final state, no assertion. It stays because it costs one bool and
+  /// because the hazard it names, a settle racing a pending mutation in
+  /// one post-frame, is a window no test has managed to construct
+  /// either way. `RenderSliverTree`'s unbuilt-row assertion is what
+  /// would catch its removal going wrong.
+  ///
   /// The [_staleEvictionScheduled] flag dedupes across layout passes,
   /// continuous scroll fires `didFinishLayout` every frame, but we only
   /// want one post-frame eviction sweep per frame. The [_children] walk

@@ -1521,6 +1521,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // never decays, so the composed read retained every row a preview
     // touched for the whole drag. A preview-shifted row is admitted by
     // layout instead, so the cache-region check above already covers it.
+    //
+    // In fact the cache-region check above covers a mid-slide row too,
+    // because overreach widens that region by the composed bound. This
+    // clause is the belt to that braces; see the eviction gate's doc for
+    // the measurement.
     if (_controller.getFlipSlideDeltaNid(nid) != 0.0 ||
         _controller.getSlideDeltaXNid(nid) != 0.0) {
       return true;
