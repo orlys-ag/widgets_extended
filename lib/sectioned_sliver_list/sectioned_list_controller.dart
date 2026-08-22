@@ -178,7 +178,21 @@ class SectionedListController<K extends Object, Section, Item>
     return out;
   }
 
-  Set<K> debugSnapshotRememberedSectionKeys() {
+  /// Section keys whose expansion state is currently REMEMBERED, meaning
+  /// the section is not in the tree right now but its expanded/collapsed
+  /// state is being held for a re-add. Empty when [preserveExpansion] is
+  /// off.
+  ///
+  /// A caller that applies its own initial-expansion policy must skip
+  /// these keys: a remembered section is not a new one, and forcing the
+  /// policy onto it discards the state the user set before it was
+  /// filtered out. That is exactly what the declarative widget does with
+  /// this, mirroring `SyncedSliverTree`'s `rememberedBeforeSync` pass.
+  ///
+  /// Snapshot the set BEFORE the sync that may re-add the section: the
+  /// sync spends the memory it restores.
+  Set<K> rememberedSectionKeys() {
+    _checkNotDisposed();
     final out = <K>{};
     for (final k in _sync.snapshotRememberedKeys()) {
       if (k is SectionKey<K>) {
@@ -248,6 +262,11 @@ class SectionedListController<K extends Object, Section, Item>
   void setItems(K sectionKey, Iterable<Item> items, {bool animate = true}) {
     _checkNotDisposed();
     _requireSection(sectionKey, "setItems");
+    _requireItemsFree(
+      [for (final i in items) itemKeyOf(i)],
+      "setItems",
+      exceptInSection: sectionKey,
+    );
     // Re-initialize tracking so the diff is computed against the actual
     // current state — see [setSections] for the rationale.
     _sync.initializeTracking();
@@ -277,6 +296,20 @@ class SectionedListController<K extends Object, Section, Item>
   }) {
     _checkNotDisposed();
     final sectionKey = sectionKeyOf(section);
+    // A section that is mid-EXIT is excluded: addSection on it is the
+    // documented re-include path, which cancels the deletion through
+    // insertRoot. `hasSection` reads the node data, which an exiting
+    // section still has.
+    if (hasSection(sectionKey) &&
+        !_tree.isPendingDeletion(SectionKey<K>(sectionKey))) {
+      throw ArgumentError(
+        "SectionedListController.addSection: section $sectionKey already "
+        "exists. Use setItems() or updateSection() instead.",
+      );
+    }
+    if (items != null) {
+      _requireItemsFree([for (final i in items) itemKeyOf(i)], "addSection");
+    }
     _tree.runBatch(() {
       _tree.insertRoot(
         TreeNode(
@@ -362,6 +395,14 @@ class SectionedListController<K extends Object, Section, Item>
   }) {
     _checkNotDisposed();
     _requireSection(toSection, "addItem");
+    // Scoped to OTHER sections: re-adding into `toSection` is either the
+    // cancel-deletion path for a mid-exit item or an in-section upsert,
+    // both of which `insert` handles.
+    _requireItemsFree(
+      [itemKeyOf(item)],
+      "addItem",
+      exceptInSection: toSection,
+    );
     _tree.insert(
       parentKey: SectionKey<K>(toSection),
       node: TreeNode(
@@ -430,12 +471,27 @@ class SectionedListController<K extends Object, Section, Item>
   }) {
     _checkNotDisposed();
     _requireItem(itemKey, "moveItem");
+    // Hoisted above the branch: the in-section path always refused a
+    // vanishing item, while the cross-section path fell through to
+    // moveNode, which CANCELS the deletion and resurrects it.
+    if (_tree.isPendingDeletion(ItemKey<K>(itemKey))) {
+      _throwMissing("moveItem", "item $itemKey is being removed");
+    }
     if (toSection != null) {
       _requireSection(toSection, "moveItem(toSection)");
+      // Documented as "appended" when [index] is null. moveNode treats a
+      // same-parent move with no index as a no-op, so name the last live
+      // slot explicitly; its own live-space guard keeps an already-last
+      // item a no-op.
+      final int? effectiveIndex =
+          index ??
+          (sectionOf(itemKey) == toSection
+              ? _tree.liveChildCount(SectionKey<K>(toSection)) - 1
+              : null);
       _tree.moveNode(
         ItemKey<K>(itemKey),
         SectionKey<K>(toSection),
-        index: index,
+        index: effectiveIndex,
         animate: animate,
         slideDuration:
             slideDuration ?? _tree.animationStyle.expandCollapse.duration,
@@ -446,9 +502,6 @@ class SectionedListController<K extends Object, Section, Item>
     if (index == null) {
       // Neither a reparent target nor a reorder index — nothing to do.
       return;
-    }
-    if (_tree.isPendingDeletion(ItemKey<K>(itemKey))) {
-      _throwMissing("moveItem", "item $itemKey is being removed");
     }
     final parentKey = sectionOf(itemKey);
     if (parentKey == null) {
@@ -817,6 +870,39 @@ class SectionedListController<K extends Object, Section, Item>
 
   void _checkNotDisposed() {
     assert(!_disposed, "SectionedListController used after dispose()");
+  }
+
+  /// Rejects item keys that already live in a section other than
+  /// [exceptInSection], and duplicates within [keys].
+  ///
+  /// Runs BEFORE any tree mutation so a caller's batch cannot fail
+  /// halfway. The underlying tree would reject a cross-parent duplicate
+  /// on its own, but it does so in terms of the internal `SectionKey` /
+  /// `ItemKey` wrappers and only once the mutation is already under way.
+  ///
+  /// [exceptInSection] keeps the two legitimate same-section cases
+  /// working: re-adding an item that is mid-exit (which cancels its
+  /// deletion) and re-sending a live item (an in-section upsert).
+  void _requireItemsFree(
+    Iterable<K> keys,
+    String method, {
+    K? exceptInSection,
+  }) {
+    final seen = <K>{};
+    for (final key in keys) {
+      if (!seen.add(key)) {
+        throw ArgumentError(
+          "SectionedListController.$method: duplicate item key $key",
+        );
+      }
+      final owner = sectionOf(key);
+      if (owner != null && owner != exceptInSection) {
+        throw ArgumentError(
+          "SectionedListController.$method: item $key already exists in "
+          "section $owner. Use moveItem() or removeItem() first.",
+        );
+      }
+    }
   }
 
   void _requireSection(K sectionKey, String method) {

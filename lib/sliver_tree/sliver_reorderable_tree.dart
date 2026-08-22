@@ -523,6 +523,25 @@ class _SliverReorderableTreeState<TKey, TData>
     if (!identical(oldWidget.reorderController, widget.reorderController)) {
       oldWidget.reorderController.removeListener(_onControllerChanged);
       widget.reorderController.addListener(_onControllerChanged);
+      // Reconcile a session the OLD controller never reported ending.
+      // `TreeReorderController.dispose` tears its session down without
+      // notifying (a disposed ChangeNotifier cannot), so
+      // `_onControllerChanged`, the single owner of drag-UI teardown,
+      // never runs; the row-side orphan backstop also returns early
+      // because the disposed controller's `draggedKey` is already null.
+      // Without this the dragged row stays at opacity 0 and the proxy
+      // stays in the overlay until the next drag.
+      //
+      // The swap is the only event this state gets, and both halves of
+      // `_onDragEnd` are legal from here (verified against the SDK, not
+      // assumed): `markNeedsBuild` permits a mark during build when the
+      // element is a descendant of the current build target, which this
+      // one is (the parent is what is rebuilding), and
+      // `OverlayEntry.remove` defers its `_markDirty` to a post-frame
+      // callback while the scheduler is in `persistentCallbacks`.
+      if (_draggedKey != null && !widget.reorderController.isDragging) {
+        _onDragEnd();
+      }
     }
     if (!widget.showDragProxy && widget.dragProxyBuilder == null) {
       _removeProxy();
@@ -1085,7 +1104,30 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // its subtree at zero alpha unless `alwaysIncludeSemantics` is set,
     // so hoisting this any further would silently strip the row's reorder
     // actions from the semantics tree for the length of every drag.
-    content = Opacity(opacity: hidden ? 0.0 : 1.0, child: content);
+    // IgnorePointer, not Opacity alone: `RenderOpacity` does not override
+    // `hitTest`, so an invisible row stayed hit-testable. While the drag
+    // rests in its own slot the preview holds no offsets, which leaves
+    // the hidden copy as the only thing under its band, and a second
+    // finger landing there hit content the user cannot see: on a grip it
+    // ran this row's re-entry guard and cancelled the live drag, on body
+    // content it fired that content's own callbacks. `ignoring` tracks
+    // `hidden`, so the widget shape is stable across the drag, and the
+    // in-flight pointer is unaffected (it is already routed to its
+    // recognizer; IgnorePointer only removes the subtree from NEW hit
+    // The wrapper goes INSIDE the Semantics below, so the row's reorder
+    // actions survive the drag: `IgnorePointer` leaves its subtree in the
+    // semantics TREE (it only skips children when the deprecated
+    // `ignoringSemantics` is explicitly true, and this passes null), and
+    // the `isBlockingUserActions` it does set applies to its own node
+    // and below, never to the ancestor carrying those actions. Pinned by
+    // `hidden_row_hit_test.dart`. What that flag does block, for the
+    // length of the drag, is activation of the hidden row's OWN content
+    // semantics, which is the intended reading of a row that is both
+    // invisible and pointer-transparent.
+    content = IgnorePointer(
+      ignoring: hidden,
+      child: Opacity(opacity: hidden ? 0.0 : 1.0, child: content),
+    );
 
     // Expose the reorder capability to assistive technology. Pointer
     // drags are unusable with a screen reader; these actions commit the

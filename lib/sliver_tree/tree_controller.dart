@@ -1352,6 +1352,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// bounded-scan oracle's teeth gate, which must prove its engineered
   /// overlap state exceeds a max-based bound, a value not derivable from
   /// any other public read.
+  ///
+  /// Like [composedSlideAbsDeltaBound], the preview half of this is the
+  /// TERMINAL magnitude of each held offset, not its instantaneous one.
   @visibleForTesting
   double get maxActiveSlideAbsDelta {
     final base = _slide.maxAbsDelta;
@@ -1373,6 +1376,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// engine's max whenever the other is idle (an idle engine's max is
   /// 0.0), so single-engine states pay no extra width. Both engine maxima
   /// are computed on demand, never stale.
+  ///
+  /// The preview's contribution is its TERMINAL magnitude
+  /// (`max(|current|, |target|)` per row), so this bound does not grow
+  /// as a gap animates open: it already covers where those rows are
+  /// going. That is what lets the sliver element widen its layout
+  /// admission window once per retarget rather than on every tick, and
+  /// it is why a consumer may compare this against a bound recorded at
+  /// the last layout (`RenderSliverTree.admittedSlideBound`).
   double get composedSlideAbsDeltaBound =>
       _slide.maxAbsDelta + _preview.maxAbsDelta;
 

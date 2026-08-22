@@ -167,6 +167,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     _bulkCumulativesCount = 0;
     _lastBulkAnimationGeneration = -1;
     _lastFrameUsedBulkCumulatives = false;
+    _admittedSlideBound = 0.0;
     // The out-of-layout findRowAtPaintedY scratch is keyed by the old
     // controller's structureGeneration; invalidate so a post-swap
     // pointer poll re-materializes against the new controller.
@@ -532,6 +533,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// install and settle frames.
   int debugPerformLayoutCount = 0;
 
+  /// Lifetime count of [snapshotVisibleOffsets] calls. Perf oracle for
+  /// the first-wins baseline: K animated mutations in one frame must
+  /// produce exactly ONE staging snapshot, not K of them, because the
+  /// slot keeps only the first. The walk is O(visible) with a map entry
+  /// and a key hash per row, so the discarded ones were the dominant
+  /// cost of a batched reparent.
+  int debugSnapshotVisibleOffsetsCount = 0;
+
   /// Number of live entries in `_phantomExitGhosts`. Exposed for tests
   /// that verify phantom-exit cleanup (paint purity, controller swap,
   /// per-layout pruning). Zero when the map is null.
@@ -725,6 +734,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// `double.nan` initially (first layout has no previous to compare).
   double _lastObservedScrollOffset = double.nan;
 
+  double _admittedSlideBound = 0.0;
+
+  /// The composed slide bound the last [performLayout] widened its
+  /// admission window by.
+  ///
+  /// **Internal contract**: read by [SliverTreeElement] on animation
+  /// ticks. A paint-only tick whose current bound exceeds this one may
+  /// be painting rows from structural positions the last layout did not
+  /// admit, so it needs a layout rather than a repaint; a tick within
+  /// it is genuinely paint-only. Same class of element-to-render
+  /// contract as [TreeController.takePendingPhantomAnchors]; external
+  /// callers should not depend on it.
+  double get admittedSlideBound => _admittedSlideBound;
+
   /// Cached callback registered with the controller's host registry on
   /// `attach` and unregistered on `detach`. `late final` so the same
   /// closure identity is registered and unregistered (the registry is a
@@ -773,6 +796,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // those extents fall through to defaultExtent and the snapshot is
     // fictitious. Silently no-op rather than stage a garbage baseline.
     if (geometry == null) return;
+    // First-wins, asked BEFORE the snapshot rather than after it. The
+    // slot refuses a second stage in the same cycle, so the O(visible)
+    // walk and its map (one entry and one key hash per row) below would
+    // be computed only to be discarded. K animated mutations in one
+    // frame are routine (a batched reparent, a sync diff), and paying
+    // K snapshots for one baseline was the dominant cost of such a
+    // batch. Pinned by `slide_baseline_first_wins_cost_test.dart`.
+    if (_composer.isBaselineStaged) {
+      return;
+    }
     final offsets = snapshotVisibleOffsets();
     // Per-key overrides (proxy drop-settle): the consume path installs
     // the FLIP from these positions instead of the painted ones. Only
@@ -1483,7 +1516,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // / vanishes during its visible transit through the viewport. Once
     // the slide settles (delta=0), this branch falls through and the
     // next eviction releases the box normally.
-    if (_controller.getSlideDeltaNid(nid) != 0.0 ||
+    // FLIP-only, for the reason spelled out in
+    // `SliverTreeElement._scheduleStaleEviction`: a held preview offset
+    // never decays, so the composed read retained every row a preview
+    // touched for the whole drag. A preview-shifted row is admitted by
+    // layout instead, so the cache-region check above already covers it.
+    //
+    // In fact the cache-region check above covers a mid-slide row too,
+    // because overreach widens that region by the composed bound. This
+    // clause is the belt to that braces; see the eviction gate's doc for
+    // the measurement.
+    if (_controller.getFlipSlideDeltaNid(nid) != 0.0 ||
         _controller.getSlideDeltaXNid(nid) != 0.0) {
       return true;
     }
@@ -1515,6 +1558,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       geometry != null,
       "snapshotVisibleOffsets called before first layout",
     );
+    debugSnapshotVisibleOffsetsCount++;
     // Hoist per-axis activity checks. The common case is no slides at
     // all (idle) or Y-only slides (same-depth reorders). Skip the
     // per-row delta reads in those cases.
@@ -1719,6 +1763,69 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// bounded window scan (false). Untouched by no-delta fast-path calls.
   bool debugLastFindRowUsedFullScan = false;
 
+  /// Debug-only: a row that paint SKIPS for want of a render box must not
+  /// be one the user can see.
+  ///
+  /// Paint reaches rows out to the overreach-widened bound, and skipping
+  /// an unbuilt one is normal out there. Inside the viewport it is not:
+  /// the row is transiting where the user is looking and simply does not
+  /// appear, which is a hole that survives until something else triggers
+  /// a layout. Every way of producing that hole ends here, so this is
+  /// the one place worth checking, whatever the cause upstream:
+  /// admission that did not widen for a composed offset (see
+  /// [admittedSlideBound]), or an eviction that dropped a row whose
+  /// slide was between settling and re-installing, which is the hazard
+  /// `SliverTreeElement._scheduleStaleEviction`'s FLIP gate exists to
+  /// prevent and which no test otherwise pins.
+  ///
+  /// Scoped to frames with slide activity: a row can legitimately be
+  /// unbuilt and on-screen for one frame during structural churn, before
+  /// the layout that admits it, and only a composed offset can put a row
+  /// in view from a structural position layout never admitted.
+  bool _debugAssertUnbuiltRowIsOffScreen({
+    required int i,
+    required int nid,
+    required TKey nodeId,
+  }) {
+    if (!controller.hasActiveSlides) {
+      return true;
+    }
+    if (controller.isPendingDeletion(nodeId)) {
+      return true;
+    }
+    final painted =
+        _structuralOffsetAt(i, nid) + controller.getSlideDeltaNid(nid);
+    final extent = _nodeExtentsByNid[nid];
+    final viewportTop = constraints.scrollOffset;
+    final viewportBottom = viewportTop + constraints.remainingPaintExtent;
+    final onScreen = painted + extent > viewportTop && painted < viewportBottom;
+    assert(
+      !onScreen,
+      "Row $nodeId paints at $painted (extent $extent) inside the viewport "
+      "[$viewportTop, $viewportBottom) with no render box, so it leaves a "
+      "hole until the next layout. Either layout did not admit it against "
+      "its composed offset, or it was evicted while its slide was between "
+      "settling and re-installing.",
+    );
+    return true;
+  }
+
+  /// Whether the per-nid offset/extent arrays and the bulk cumulatives
+  /// describe the CURRENT visible order.
+  ///
+  /// Both are written only by `performLayout` (the structure stamp and
+  /// the cumulative's element count are stamped there), so they go stale
+  /// for exactly one window: between a structural mutation and the next
+  /// layout. Nothing inside a frame can observe that window, but the
+  /// gesture-time readers below can, because a pointer event is
+  /// delivered between frames. Every reader that indexes those caches
+  /// has to ask this first and fall back to the cache-free full scan.
+  bool get _rowGeometryIsFresh {
+    return controller.structureGeneration == _lastStructureGeneration &&
+        !(_bulkCumulativesValid &&
+            _bulkCumulativesCount != controller.visibleNodeCount);
+  }
+
   /// Finds the first live (non-pending-deletion) visible row whose painted
   /// scroll-space range `[paintedOffset, paintedOffset + extent)` contains
   /// [scrollY], falling back to the last live row when [scrollY] sits past
@@ -1775,7 +1882,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       // generation bump, so the stamp comparison sees post-flush truth.
       if (_composer.hasGhosts ||
           _lastFrameUsedBulkCumulatives ||
-          controller.structureGeneration != _lastStructureGeneration) {
+          !_rowGeometryIsFresh) {
         debugLastFindRowUsedFullScan = true;
         return _findRowFullScan(scrollY, visible);
       }
@@ -1783,7 +1890,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       return _findRowBoundedScan(scrollY, visible);
     }
 
+    // Same staleness window as the slide branch above, and the same
+    // answer: the full scan reads extents and deltas from the controller
+    // rather than from the layout-stamped caches, so it is correct on a
+    // frame the caches do not describe. Without this the binary search
+    // in [_findFirstVisibleIndex] and the cumulative read in
+    // [_liveRowAt] index the PREVIOUS order: a bulk cumulative shorter
+    // than the new visible count throws, and a recycled nid's offset
+    // slot answers with its previous occupant's position.
+    if (!_rowGeometryIsFresh) {
+      debugLastFindRowUsedFullScan = true;
+      return _findRowFullScan(scrollY, visible);
+    }
+
     // Fast path: no composed deltas, painted offset == structural offset.
+    debugLastFindRowUsedFullScan = false;
     debugLastFindRowIterationCount = 0;
     final startIdx = _findFirstVisibleIndex(scrollY);
     for (int i = startIdx; i < visible.length; i++) {
@@ -2352,6 +2473,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       _lastObservedScrollOffset = double.nan;
       _structureChanged = true;
       _lastVisibleNodeCount = 0;
+      // Nothing was admitted, so no bound was honored either; leaving a
+      // stale one would let a later tick read "already admitted" for a
+      // window this layout never opened.
+      _admittedSlideBound = 0.0;
       geometry = SliverGeometry.zero;
       childManager?.didFinishLayout();
       return;
@@ -2465,6 +2590,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // displacement reaches the sum. Identical to the max whenever only
     // one engine is active.
     final slideOverreach = controller.composedSlideAbsDeltaBound;
+    _admittedSlideBound = slideOverreach;
     final effectiveCacheStart = cacheStart - slideOverreach;
     final effectiveCacheEnd = cacheEnd + slideOverreach;
 
@@ -2575,6 +2701,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         }
       }
     }
+
+    // Pass 1 is done: does `_nodeOffsetsByNid` now describe EVERY visible
+    // row, off-cache ones included? Each non-bulk branch above writes the
+    // full visible prefix, so yes; the bulk fast path maintains only the
+    // cache region, so no. That includes a bulk frame which LEAVES the
+    // fast path later in this method: Pass 2's fall-off rewrites just the
+    // tail from the first changed row, so earlier off-cache slots still
+    // hold the previous non-bulk frame's values.
+    //
+    // Frame-local by construction: written here, refined by the sticky
+    // block's full recompute below, and read by the parentData refresh,
+    // all within this one `performLayout`. Nothing carries it across
+    // frames, so there is no stale value to reset anywhere.
+    bool offsetsAuthoritative = !bulkOnly;
 
     // ────────────────────────────────────────────────────────────────────────
     // PASS 2: Create children for nodes in cache region
@@ -2842,6 +2982,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           );
         }
         totalScrollExtent = _recomputeOffsets();
+        // A full recompute rewrites every visible nid's slot, so the
+        // array is authoritative even on a bulk frame.
+        offsetsAuthoritative = true;
         stickyMeasurementMovedOffsets = true;
         if (_maxStickyDepth > 0 && !hasAnimations) {
           _sticky.precomputeStableSubtreeBottoms(
@@ -3057,13 +3200,39 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           // Bulk-only fast path: per-nid offset slots are not kept fresh
           // for out-of-cache-region nids, derive from cumulatives.
           offset = _offsetAtVisibleIndex(visIdx);
+        } else if (!offsetsAuthoritative) {
+          // Bulk frame that left the fast path mid-frame: the slots
+          // before the first changed row are still the previous
+          // non-bulk frame's, so derive from a fresh cumulative.
+          final cumulative =
+              freshCumulative ??= _buildParentDataRefreshCumulative(
+                visibleNodes.length,
+              );
+          offset = cumulative[visIdx];
         } else {
-          // Non-bulk: `_nodeOffsetsByNid` is stale for off-cache rows.
-          // Build (once) and use the fresh structural cumulative.
-          freshCumulative ??= _buildParentDataRefreshCumulative(
-            visibleNodes.length,
-          );
-          offset = freshCumulative[visIdx];
+          // Non-bulk: the per-nid slot is authoritative for off-cache
+          // rows too (see `offsetsAuthoritative` above), which spares the
+          // O(N_visible) prefix sum this used to build on EVERY frame
+          // that force-mounted a pinned header outside the cache region.
+          offset = _nodeOffsetsByNid[nid];
+          assert(() {
+            // Cross-check against the cumulative under the invariant
+            // suites only: building it here unconditionally would
+            // reintroduce the cost in debug and defeat the perf pin.
+            if (!TreeController.debugFullConsistencyChecks) {
+              return true;
+            }
+            final cumulative =
+                freshCumulative ??= _buildParentDataRefreshCumulative(
+                  visibleNodes.length,
+                );
+            assert(
+              cumulative[visIdx] == offset,
+              "_nodeOffsetsByNid stale for off-cache nid $nid: slot "
+              "$offset, cumulative ${cumulative[visIdx]}",
+            );
+            return true;
+          }());
         }
         final parentData = child.parentData! as SliverTreeParentData;
         parentData.layoutOffset = offset;
@@ -3219,7 +3388,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       final nodeId = visibleNodes[i];
 
       final child = getChildForNode(nodeId);
-      if (child == null) continue;
+      if (child == null) {
+        assert(
+          _debugAssertUnbuiltRowIsOffScreen(i: i, nid: nid, nodeId: nodeId),
+        );
+        continue;
+      }
 
       // Paint-only FLIP slide delta: read from the controller on every
       // frame so localToGlobal / semantics (which can resolve between

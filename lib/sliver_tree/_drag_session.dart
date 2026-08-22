@@ -195,6 +195,18 @@ class DragProbe<TKey> {
   /// A `null` [sample] means the scrollable is gone: returns [previous]
   /// unchanged (no event can change what the user sees anyway; teardown
   /// paths handle the session's end).
+  ///
+  /// **The make-room gap.** A probe ABOVE the hovered row's painted band
+  /// cannot happen while rows are contiguous, so it means exactly one
+  /// thing: the probe is inside the gap the preview has opened, and the
+  /// row the scan answered with is the one BELOW that gap (the scans hit
+  /// on `scrollY < painted + extent`, with no lower bound). The gap IS
+  /// the slot [previous] is previewing, so that is the honest answer;
+  /// re-classifying against the row below it is what made a downward
+  /// "into" drag commit as a sibling. The x-depth hint is deliberately
+  /// not re-evaluated there: a gap has no row to anchor a candidate
+  /// chain on, so horizontal movement changes nothing until the pointer
+  /// leaves the gap.
   TreeDropTarget<TKey>? resolveTarget({
     required PointerSample? sample,
     required TreeDropTarget<TKey>? previous,
@@ -207,6 +219,21 @@ class DragProbe<TKey> {
     final hovered = _renderPort.findRowAtPaintedY(probeY);
     if (hovered == null) {
       return null;
+    }
+
+    // See "The make-room gap" above. The index equality is what keeps
+    // this to the preview's own gap: the row directly below the gap is
+    // the row at `gapVisibleIndex` in the current visible order, whether
+    // the gap sits before the dragged block (rows at/after it shifted
+    // down) or after it (rows in `[draggedEnd, gapIndex)` shifted up).
+    // Any other above-the-band probe (a FLIP slide in flight, an
+    // edge-ghost base, a stale `previous` after an external mutation)
+    // falls through to normal classification.
+    if (previous != null &&
+        probeY < hovered.paintedOffset &&
+        previous.gapVisibleIndex ==
+            _resolver.treeController.getVisibleIndex(hovered.key)) {
+      return previous;
     }
 
     return _resolver.resolve(

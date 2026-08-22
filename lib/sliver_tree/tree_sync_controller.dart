@@ -103,6 +103,33 @@ class TreeSyncController<TKey, TData> {
   /// each node's full subtree is in place.
   bool _deferExpansionRestore = false;
 
+  /// Parents whose removal step 1 deferred because a DESCENDANT of theirs
+  /// is desired under another parent in the enclosing multi-parent call.
+  ///
+  /// Non-null only inside [syncMultipleChildren], which drains it after
+  /// every parent has synced. Step 1's own deferral covers a removed key
+  /// that is itself a mover; this covers the key whose SUBTREE holds one,
+  /// because removing it first purges the mover's children out from under
+  /// the later move.
+  List<TKey>? _deferredSubtreeRemovals;
+
+  /// Every ancestor of a mover, as of the start of the enclosing
+  /// multi-parent call. Non-null exactly when [_deferredSubtreeRemovals]
+  /// is, and the O(1) answer to "would removing this key purge a mover?".
+  ///
+  /// Built once by walking UP from each globally desired key that is
+  /// currently in the tree, which costs O(movers * depth) with an early
+  /// exit on an already-marked ancestor. The alternative, asking each
+  /// removal candidate whether its SUBTREE holds a mover, costs
+  /// O(removed subtree) per candidate and allocates a descendant list
+  /// every time.
+  ///
+  /// Computed pre-mutation, so it can name a parent whose mover has since
+  /// been moved out by an earlier parent's sync. That only defers a
+  /// removal the drain then performs anyway, inside the same
+  /// [TreeController.runBatch], so the outcome is unchanged.
+  Set<TKey>? _moverAncestors;
+
   /// The underlying [TreeController] being driven.
   TreeController<TKey, TData> get treeController => _controller;
 
@@ -564,6 +591,33 @@ class TreeSyncController<TKey, TData> {
           _globallyDesiredChildren!.contains(key)) {
         continue;
       }
+      // Same, one level out: a node whose SUBTREE holds a mover cannot be
+      // removed yet either. `remove(animate: false)` purges the subtree
+      // immediately, so the mover would be re-created as a fresh leaf at
+      // its destination with its own children gone. Deferred to the end
+      // of the multi-parent call, by which time the destination parent's
+      // sync has moved the mover out and only the genuinely unwanted
+      // remainder is left. (With `animate: true` the purge is deferred by
+      // the exit animation and `moveNode` revives the subtree, which is
+      // why this only ever bit the non-animated path.)
+      //
+      // The `moverAncestors` test is a PRECISION choice, not a
+      // correctness one: deferring every removal in a multi-parent call
+      // would reach the same end state, because the drain below removes
+      // whatever is still unwanted inside the same
+      // [TreeController.runBatch]. Verified by mutation during the
+      // 2026-08-21 audit, where widening this to "defer everything" broke
+      // no test. What the test buys is that an ordinary removal keeps the
+      // timing single-parent `syncChildren` gives it, instead of being
+      // relocated to the end of the call for no reason.
+      final deferredRemovals = _deferredSubtreeRemovals;
+      final moverAncestors = _moverAncestors;
+      if (deferredRemovals != null &&
+          moverAncestors != null &&
+          moverAncestors.contains(key)) {
+        deferredRemovals.add(key);
+        continue;
+      }
       _rememberExpansion(key);
       _controller.remove(key: key, animate: animate);
     }
@@ -763,11 +817,45 @@ class TreeSyncController<TKey, TData> {
             _globallyDesiredChildren!.add(c.key);
           }
         }
+        _deferredSubtreeRemovals = <TKey>[];
+        // See [_moverAncestors]: one upward pass per mover, rather than
+        // a downward subtree scan per removal candidate.
+        final moverAncestors = _moverAncestors = <TKey>{};
+        for (final moverKey in _globallyDesiredChildren!) {
+          if (_controller.getNodeData(moverKey) == null) {
+            continue;
+          }
+          var cursor = _controller.getParent(moverKey);
+          while (cursor != null && moverAncestors.add(cursor)) {
+            cursor = _controller.getParent(cursor);
+          }
+        }
         for (final entry in desiredByParent.entries) {
           syncChildren(entry.key, entry.value, animate: animate);
         }
+        // Every mover has been placed by its destination parent's sync,
+        // so what is left under a deferred key is the remainder nobody
+        // asked for. Skip a key that is already gone, that has since
+        // moved somewhere this call does not describe, or that turned out
+        // to be desired under its own current parent after all.
+        for (final key in _deferredSubtreeRemovals!) {
+          if (_controller.getNodeData(key) == null) {
+            continue;
+          }
+          final parent = _controller.getParent(key);
+          if (parent == null || !desiredByParent.containsKey(parent)) {
+            continue;
+          }
+          if (desiredByParent[parent]!.any((node) => node.key == key)) {
+            continue;
+          }
+          _rememberExpansion(key);
+          _controller.remove(key: key, animate: animate);
+        }
       } finally {
         _globallyDesiredChildren = null;
+        _deferredSubtreeRemovals = null;
+        _moverAncestors = null;
       }
     });
   }
@@ -997,7 +1085,15 @@ class TreeSyncController<TKey, TData> {
       return true;
     }());
     final stack = <TreeNode<TKey, TData>>[];
-    final restoreOrder = <TKey>[];
+    // Seeded with the ROOTS, which the walk below never appends (it adds
+    // each visited node's CHILDREN). A retained root re-added childless
+    // keeps its remembered expansion for a later sync, and this loop is
+    // the only site that can spend it inside a recursive sync: step 7
+    // restores newly ADDED roots only, and both retry sites in
+    // `_syncChildrenImpl` are suppressed while `_deferExpansionRestore`
+    // is set. Roots go in first so the reverse iteration below still
+    // restores them LAST, preserving the bottom-up contract.
+    final restoreOrder = <TKey>[for (final node in nodes) node.key];
     for (int i = nodes.length - 1; i >= 0; i--) {
       stack.add(nodes[i]);
     }
@@ -1044,7 +1140,20 @@ class TreeSyncController<TKey, TData> {
     final stack = <TKey>[key];
     while (stack.isNotEmpty) {
       final current = stack.removeLast();
-      _rememberedExpansion[current] = _controller.isExpanded(current);
+      final expanded = _controller.isExpanded(current);
+      // A childless node cannot be expanded, so `false` here carries no
+      // information about what the user wanted. Overwriting a kept
+      // `true` with it is how a remove / re-add-childless / remove
+      // sequence lost the expansion that the childless-keep in
+      // [_restoreExpansion] and [_pruneExpansionMemory] exists to
+      // protect.
+      final keepPending =
+          !expanded &&
+          !_controller.hasChildren(current) &&
+          _rememberedExpansion[current] == true;
+      if (!keepPending) {
+        _rememberedExpansion[current] = expanded;
+      }
       for (final childKey in _controller.getChildren(current)) {
         stack.add(childKey);
       }
@@ -1066,7 +1175,17 @@ class TreeSyncController<TKey, TData> {
     if (_rememberedExpansion.isEmpty) return;
     _rememberedExpansion.removeWhere((key, wasExpanded) {
       if (_controller.getNodeData(key) == null) return false;
-      if (_controller.isExiting(key)) return false;
+      // Pending-deletion, NOT `isExiting`. The two differ for a
+      // descendant under a collapsed ancestor inside a removed subtree:
+      // `remove()` marks it for purge but installs an exit animation
+      // only for rows in the visible order, so `isExiting` is false
+      // while its data is still present, and pruning here would drop
+      // the expansion the user set before the removal. `isExiting`
+      // stays in the test for a collapse-driven exit, which is not a
+      // deletion and whose memory is equally worth keeping.
+      if (_controller.isPendingDeletion(key) || _controller.isExiting(key)) {
+        return false;
+      }
       // If the remembered state says expanded but the node currently has
       // no children in the controller, the restore couldn't complete yet
       // (children arrive in a later sync). Keep the memory so the next

@@ -443,12 +443,24 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets("a superseded pointer commits nothing when it is released", (
+  testWidgets("a second pointer on the dragged row does not supersede it", (
     tester,
   ) async {
-    // The generation guard on `_RowDrag`. After a second handle supersedes
-    // the first, the first pointer's release must be inert rather than
-    // committing or cancelling whatever session is live by then.
+    // Was: "a superseded pointer commits nothing when it is released",
+    // which pinned the generation guard on `_RowDrag` by superseding a
+    // live session through the DRAGGED row's other grip.
+    //
+    // That supersession is no longer reachable. Issue 9 of the
+    // 2026-08-21 review made the hidden dragged row non-interactive
+    // (`Opacity(0)` alone left it hit-testable, so a stray second finger
+    // killed the drag), so the second pointer-down never reaches the
+    // grip, no recognizer is replaced, and the first finger still owns
+    // and commits its drag.
+    //
+    // The generation guard itself stays: it is what makes a released
+    // pointer whose recognizer was disposed inert, and the neighbouring
+    // test "a released gesture cannot end a session that REPLACED its
+    // own" still exercises it.
     final tree = TreeController<String, String>(
       vsync: tester,
       animationStyle: TreeAnimationStyle.disabled,
@@ -513,27 +525,38 @@ void main() {
     await tester.pump();
     expect(reorder.isDragging, isTrue, reason: "setup: a live session");
 
-    // Supersede it.
+    // A second finger lands on the hidden row's other grip.
     final second = await tester.startGesture(
       tester.getCenter(find.byKey(const ValueKey("grip-right-a"))),
       pointer: 2,
     );
     await tester.pump();
+    expect(
+      reorder.isDragging,
+      isTrue,
+      reason: "the hidden row ignores pointers, so nothing supersedes "
+          "the live session",
+    );
+    expect(reorder.draggedKey, "a");
 
-    // The first finger keeps moving and then releases. Its recognizer was
-    // disposed, so nothing should reach the controller at all; the guard
-    // is what makes that safe rather than merely likely.
+    // The first finger keeps moving and then releases: it still owns the
+    // session, so its release COMMITS.
     await first.moveBy(const Offset(0.0, 200.0));
     await tester.pump();
     await first.up();
     await tester.pumpAndSettle();
 
-    expect(reported, isEmpty, reason: "a dead gesture commits nothing");
-    expect(tree.rootKeys, ["a", "b", "c"]);
+    expect(
+      reported.map((r) => r),
+      ["a"],
+      reason: "the owning finger's release commits, because nothing took "
+          "the session from it",
+    );
+    expect(tree.rootKeys, ["b", "c", "a"]);
 
     await second.up();
     await tester.pumpAndSettle();
-    expect(reported, isEmpty);
+    expect(reported.length, 1, reason: "the stray finger commits nothing");
   });
 
   testWidgets("a released gesture cannot end a session that REPLACED its own", (

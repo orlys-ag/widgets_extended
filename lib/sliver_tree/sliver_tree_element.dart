@@ -312,8 +312,20 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       // counts stay unchanged (pinned by `slide_paint_only_test.dart`).
       renderObject.markNeedsLayout();
     } else if (hasSlides) {
-      // Pure slide tick: paint-only.
-      renderObject.markNeedsPaint();
+      if (c.composedSlideAbsDeltaBound > renderObject.admittedSlideBound) {
+        // The composed offsets now reach further than the window the
+        // last layout admitted against, so a row may be painting inside
+        // the cache region from a structural position that was never
+        // built (a make-room preview whose lift exceeds the cache
+        // extent is the case that showed it: blank space where the
+        // shifted rows belong). One layout re-admits. The preview's
+        // contribution to the bound is TERMINAL, so a retarget costs
+        // exactly this one layout, not one per tick.
+        renderObject.markNeedsLayout();
+      } else {
+        // Pure slide tick: paint-only.
+        renderObject.markNeedsPaint();
+      }
     }
     _priorTickHadAnimations = active;
     _priorTickHadSlides = hasSlides;
@@ -416,6 +428,31 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// eviction is paused for the entire cascade and runs once after all
   /// slides have settled.
   ///
+  /// FLIP-ONLY, deliberately, not the composed `hasActiveSlides`. A
+  /// make-room preview offset is HELD rather than decaying, so the
+  /// composed flag stays true from a drag's first resolve to its
+  /// release and this gate would suspend eviction for the whole drag:
+  /// every row an autoscroll drag passed stayed mounted until the drop.
+  /// The cascade hazard above is specific to FLIP slides, whose ticks
+  /// are paint-only, and preview-shifted rows do not need the gate
+  /// because layout admits them (see
+  /// [RenderSliverTree.admittedSlideBound]), which leaves them retained
+  /// by the ordinary cache-region check.
+  ///
+  /// Kept, but do not read it as load-bearing. Overreach widens the
+  /// admitted cache region by the composed bound, so any row that can be
+  /// painting near the viewport is IN that region and is retained by the
+  /// cache-region check before the slide-delta clause is ever reached;
+  /// the window that clause covered, "slide installed, no layout yet",
+  /// is itself closed by the bound-driven layout. Measured on a
+  /// 300-row long transit, removing this gate and that clause together
+  /// changes nothing: same mounted counts (18 steady, 33 peak), same
+  /// final state, no assertion. It stays because it costs one bool and
+  /// because the hazard it names, a settle racing a pending mutation in
+  /// one post-frame, is a window no test has managed to construct
+  /// either way. `RenderSliverTree`'s unbuilt-row assertion is what
+  /// would catch its removal going wrong.
+  ///
   /// The [_staleEvictionScheduled] flag dedupes across layout passes,
   /// continuous scroll fires `didFinishLayout` every frame, but we only
   /// want one post-frame eviction sweep per frame. The [_children] walk
@@ -424,7 +461,9 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   void _scheduleStaleEviction() {
     if (_staleEvictionScheduled) return;
     if (widget.controller.hasActiveAnimations) return;
-    if (widget.controller.hasActiveSlides) return;
+    if (widget.controller.hasActiveFlipSlides) {
+      return;
+    }
     _staleEvictionScheduled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -435,7 +474,9 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       // don't evict a row that's about to begin its enter/exit animation
       // OR its FLIP slide.
       if (widget.controller.hasActiveAnimations) return;
-      if (widget.controller.hasActiveSlides) return;
+      if (widget.controller.hasActiveFlipSlides) {
+        return;
+      }
 
       final render = renderObject;
       final staleNodes = <TKey>[];

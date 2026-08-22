@@ -107,12 +107,24 @@ class ReorderPreviewEngine {
     return entry == null ? 0.0 : entry.current;
   }
 
-  /// Largest absolute current offset across every entry, composed into the
-  /// layout overreach bound so preview-shifted rows stay built.
+  /// TERMINAL bound on every offset this engine will produce from now
+  /// on, composed into the layout overreach bound so preview-shifted
+  /// rows stay built.
+  ///
+  /// `max(|current|, |target|)` per entry, not `|current|`. An entry
+  /// lerps from its start to its target and then HOLDS there, so the
+  /// target is where it is going and the current value is where it is;
+  /// the larger of the two bounds the whole remaining animation. That
+  /// is what lets a consumer widen its admission window ONCE per
+  /// retarget instead of re-checking on every tick as the offset grows.
+  /// `current` stays in the max for a release, whose target is 0 while
+  /// the row is still displaced.
   double get maxAbsDelta {
     double m = 0.0;
     for (final entry in _entries.values) {
-      final d = entry.current.abs();
+      final current = entry.current.abs();
+      final target = entry.target.abs();
+      final d = current > target ? current : target;
       if (d > m) {
         m = d;
       }
