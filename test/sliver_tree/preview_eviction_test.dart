@@ -87,7 +87,9 @@ void main() {
     // their painted band is inside the viewport.
     for (final key in ["r1", "r2", "r3"]) {
       final index = controller.getVisibleIndex(key);
-      if (index < 0) continue;
+      if (index < 0) {
+        continue;
+      }
       final painted =
           index * 48.0 +
           controller.getSlideDeltaNid(controller.nidOf(key)) -

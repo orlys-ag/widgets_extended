@@ -815,7 +815,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // frame are routine (a batched reparent, a sync diff), and paying
     // K snapshots for one baseline was the dominant cost of such a
     // batch. Pinned by `slide_baseline_first_wins_cost_test.dart`.
-    if (_composer.isBaselineStaged) return;
+    if (_composer.isBaselineStaged) {
+      return;
+    }
     final offsets = snapshotVisibleOffsets();
     // Per-key overrides (proxy drop-settle): the consume path installs
     // the FLIP from these positions instead of the painted ones. Only

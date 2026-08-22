@@ -38,8 +38,12 @@ void main() {
     addTearDown(sync.dispose);
 
     List<TreeNode<String, String>> childrenOf(String key) {
-      if (key == "R") return [_n("P")];
-      if (key == "P") return [_n("c")];
+      if (key == "R") {
+        return [_n("P")];
+      }
+      if (key == "P") {
+        return [_n("c")];
+      }
       return const [];
     }
 

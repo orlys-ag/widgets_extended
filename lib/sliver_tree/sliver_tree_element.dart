@@ -447,7 +447,9 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   void _scheduleStaleEviction() {
     if (_staleEvictionScheduled) return;
     if (widget.controller.hasActiveAnimations) return;
-    if (widget.controller.hasActiveFlipSlides) return;
+    if (widget.controller.hasActiveFlipSlides) {
+      return;
+    }
     _staleEvictionScheduled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -458,7 +460,9 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       // don't evict a row that's about to begin its enter/exit animation
       // OR its FLIP slide.
       if (widget.controller.hasActiveAnimations) return;
-      if (widget.controller.hasActiveFlipSlides) return;
+      if (widget.controller.hasActiveFlipSlides) {
+        return;
+      }
 
       final render = renderObject;
       final staleNodes = <TKey>[];

@@ -335,7 +335,9 @@ class ScrollOrchestrator<TKey, TData> {
       // whose position has not been laid out yet (a fresh position has
       // no pixels, viewport or content dimensions until its first
       // layout, and every read below would throw on the null check).
-      if (!scrollController.hasClients) return;
+      if (!scrollController.hasClients) {
+        return;
+      }
       final position = scrollController.position;
       if (!position.hasPixels ||
           !position.hasViewportDimension ||

@@ -600,9 +600,12 @@ class TreeSyncController<TKey, TData> {
       // remainder is left. (With `animate: true` the purge is deferred by
       // the exit animation and `moveNode` revives the subtree, which is
       // why this only ever bit the non-animated path.)
-      if (_deferredSubtreeRemovals != null &&
-          _moverAncestors!.contains(key)) {
-        _deferredSubtreeRemovals!.add(key);
+      final deferredRemovals = _deferredSubtreeRemovals;
+      final moverAncestors = _moverAncestors;
+      if (deferredRemovals != null &&
+          moverAncestors != null &&
+          moverAncestors.contains(key)) {
+        deferredRemovals.add(key);
         continue;
       }
       _rememberExpansion(key);
