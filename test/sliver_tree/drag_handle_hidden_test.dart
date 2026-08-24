@@ -76,17 +76,18 @@ Future<TreeReorderController<String>> _mount(WidgetTester tester) async {
   return reorder;
 }
 
-/// The smallest `Opacity.opacity` on the path from [finder] up to the
-/// root, or 1.0 when nothing on that path fades it. This is what actually
-/// decides whether the widget puts ink on the screen.
-double _effectiveOpacity(WidgetTester tester, Finder finder) {
-  double result = 1.0;
-  for (final Widget w in tester.widgetList<Opacity>(
-    find.ancestor(of: finder, matching: find.byType(Opacity)),
+/// Whether every hide wrapper on the path from [finder] up to the root
+/// is visible. This is what actually decides whether the widget puts ink
+/// on the screen.
+bool _isVisible(WidgetTester tester, Finder finder) {
+  for (final Widget w in tester.widgetList<Visibility>(
+    find.ancestor(of: finder, matching: find.byType(Visibility)),
   )) {
-    result = result < (w as Opacity).opacity ? result : w.opacity;
+    if (!(w as Visibility).visible) {
+      return false;
+    }
   }
-  return result;
+  return true;
 }
 
 void main() {
@@ -98,8 +99,8 @@ void main() {
     final handle = find.byKey(_handleKey);
     expect(handle, findsOneWidget);
     expect(
-      _effectiveOpacity(tester, handle),
-      1.0,
+      _isVisible(tester, handle),
+      isTrue,
       reason: "setup: the handle is visible before any drag",
     );
 
@@ -119,16 +120,16 @@ void main() {
 
     // The row's own content is hidden already; that part works today.
     expect(
-      _effectiveOpacity(tester, find.byKey(const ValueKey("row-a"))),
-      0.0,
+      _isVisible(tester, find.byKey(const ValueKey("row-a"))),
+      isFalse,
       reason: "setup: the in-place row content is hidden for the drag",
     );
 
     // The handle must go with it. Neighbouring rows slide across this
     // slot, so anything left painting here overlaps them.
     expect(
-      _effectiveOpacity(tester, handle),
-      0.0,
+      _isVisible(tester, handle),
+      isFalse,
       reason: "the handle is residual paint in a slot that is closing",
     );
 
@@ -136,8 +137,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      _effectiveOpacity(tester, handle),
-      1.0,
+      _isVisible(tester, handle),
+      isTrue,
       reason: "and it comes back once the drag ends",
     );
   });
@@ -145,10 +146,11 @@ void main() {
   testWidgets("hiding the row does not break the in-flight drag gesture", (
     tester,
   ) async {
-    // The fix moves the gesture detector INSIDE the Opacity. RenderOpacity
-    // does not override hitTest, and an in-flight drag routes to its
-    // recognizer regardless, but that is worth pinning rather than
-    // assuming: a zero-opacity subtree must still drive the session.
+    // The fix moves the gesture detector INSIDE the hide wrapper. Its
+    // `IgnorePointer` only removes the subtree from NEW hit tests, and an
+    // in-flight drag routes to its recognizer regardless, but that is
+    // worth pinning rather than assuming: a hidden subtree must still
+    // drive the session.
     final reorder = await _mount(tester);
     final handle = find.byKey(_handleKey);
 

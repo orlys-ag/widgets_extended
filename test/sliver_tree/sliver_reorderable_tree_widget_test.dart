@@ -81,15 +81,15 @@ Future<_Harness> _mount(
   return _Harness(tree: tree, reorder: reorder);
 }
 
-/// Reads the Opacity widget value painted above a given row key.
-double _opacityOf(WidgetTester tester, String rowKey) {
-  final op = tester.widget<Opacity>(
+/// Reads the hide wrapper's visibility above a given row key.
+bool _isVisible(WidgetTester tester, String rowKey) {
+  final v = tester.widget<Visibility>(
     find.ancestor(
       of: find.byKey(ValueKey("row-$rowKey")),
-      matching: find.byType(Opacity),
+      matching: find.byType(Visibility),
     ),
   );
-  return op.opacity;
+  return v.visible;
 }
 
 void main() {
@@ -139,8 +139,8 @@ void main() {
       final h = await _mount(tester);
 
       expect(
-        _opacityOf(tester, "a"),
-        1.0,
+        _isVisible(tester, "a"),
+        isTrue,
         reason: "pre-drag opacity must be full",
       );
 
@@ -151,16 +151,16 @@ void main() {
       await tester.pump();
 
       expect(
-        _opacityOf(tester, "a"),
-        0.0,
+        _isVisible(tester, "a"),
+        isFalse,
         reason:
             "mid-drag source row must be hidden — make-room closes "
             "its slot underneath it, so residual paint would overlap "
             "the rows shifting into that space",
       );
       expect(
-        _opacityOf(tester, "b"),
-        1.0,
+        _isVisible(tester, "b"),
+        isTrue,
         reason: "non-dragged siblings must remain fully opaque",
       );
 
@@ -170,8 +170,8 @@ void main() {
 
       expect(h.reorder.currentTarget, isNull);
       expect(
-        _opacityOf(tester, "a"),
-        1.0,
+        _isVisible(tester, "a"),
+        isTrue,
         reason: "post-drop opacity must restore to full",
       );
     });
@@ -240,8 +240,8 @@ void main() {
           reason: "canReorder=false must decline the session",
         );
         expect(
-          _opacityOf(tester, "a"),
-          1.0,
+          _isVisible(tester, "a"),
+          isTrue,
           reason: "a refused drag must not hide the row",
         );
 

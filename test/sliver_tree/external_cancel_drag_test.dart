@@ -18,18 +18,19 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
-/// Reads the in-place row's opacity. Mounts that assert on it disable the
-/// drag proxy: the default proxy clones the dragged row's child into the
-/// overlay under its own [Opacity], which would make this finder ambiguous
-/// mid-drag.
-double _opacityOf(WidgetTester tester, String rowKey) {
-  final op = tester.widget<Opacity>(
+/// Reads the in-place row's visibility. Mounts that assert on it disable
+/// the drag proxy: the default proxy mounts the dragged row's child in the
+/// overlay, reproducing the row's `ValueKey`, so this finder would be
+/// ambiguous mid-drag through DUPLICATED KEYS (and the in-place copy would
+/// be a placeholder without the key at all).
+bool _isVisible(WidgetTester tester, String rowKey) {
+  final v = tester.widget<Visibility>(
     find.ancestor(
       of: find.byKey(ValueKey("row-$rowKey")),
-      matching: find.byType(Opacity),
+      matching: find.byType(Visibility),
     ),
   );
-  return op.opacity;
+  return v.visible;
 }
 
 /// A mid-drag HANDLE swap must be a NON-EVENT.
@@ -140,8 +141,8 @@ void _addModeSwapTest() {
           "handle widget cannot disturb the gesture it started",
     );
     expect(
-      _opacityOf(tester, "a"),
-      0.0,
+      _isVisible(tester, "a"),
+      isFalse,
       reason: "the drag UI must survive the swap along with the session",
     );
 
@@ -231,8 +232,8 @@ void main() {
 
     // Sanity: drag is active.
     expect(
-      _opacityOf(tester, "a"),
-      0.0,
+      _isVisible(tester, "a"),
+      isFalse,
       reason:
           "Mid-drag, row 'a' must be hidden — make-room closes "
           "its slot underneath it",
@@ -246,8 +247,8 @@ void main() {
     // S059 assertion: local UI clears even though the gesture
     // wasn't released.
     expect(
-      _opacityOf(tester, "a"),
-      1.0,
+      _isVisible(tester, "a"),
+      isTrue,
       reason:
           "External cancelDrag() must clear _draggedKey via the "
           "state's controller listener (S059). Without the fix, "

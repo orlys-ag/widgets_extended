@@ -452,8 +452,9 @@ void main() {
     //
     // That supersession is no longer reachable. Issue 9 of the
     // 2026-08-21 review made the hidden dragged row non-interactive
-    // (`Opacity(0)` alone left it hit-testable, so a stray second finger
-    // killed the drag), so the second pointer-down never reaches the
+    // (hiding with `Opacity(0)` alone left it hit-testable, so a stray
+    // second finger killed the drag), so the second pointer-down never
+    // reaches the
     // grip, no recognizer is replaced, and the first finger still owns
     // and commits its drag.
     //

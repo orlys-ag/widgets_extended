@@ -25,17 +25,17 @@ class _Node {
   }
 }
 
-double _opacityOf(WidgetTester tester, String key) {
+bool _isVisible(WidgetTester tester, String key) {
   return tester
-      .widget<Opacity>(
+      .widget<Visibility>(
         find
             .ancestor(
               of: find.byKey(ValueKey("row-$key")),
-              matching: find.byType(Opacity),
+              matching: find.byType(Visibility),
             )
             .first,
       )
-      .opacity;
+      .visible;
 }
 
 void main() {
@@ -103,8 +103,8 @@ void main() {
     // Setup sanity: the session genuinely exists and owns THIS row, so
     // what follows exercises the claimed path rather than a no-op.
     expect(
-      _opacityOf(tester, "b"),
-      0.0,
+      _isVisible(tester, "b"),
+      isFalse,
       reason: "make-room hides the row that owns the drag",
     );
 
@@ -116,8 +116,8 @@ void main() {
     await tester.pump();
 
     expect(
-      _opacityOf(tester, "b"),
-      1.0,
+      _isVisible(tester, "b"),
+      isTrue,
       reason: "the orphaned session must be torn down, not left running",
     );
 
@@ -125,7 +125,7 @@ void main() {
     // must not resurrect or re-commit anything.
     await gesture.up();
     await tester.pumpAndSettle();
-    expect(_opacityOf(tester, "b"), 1.0);
+    expect(_isVisible(tester, "b"), isTrue);
   });
 
   // Coverage, NOT a repro: verified to still pass with the build-time
@@ -200,8 +200,8 @@ void main() {
     await gesture.moveBy(const Offset(0.0, 20.0));
     await tester.pump();
     expect(
-      _opacityOf(tester, "b"),
-      0.0,
+      _isVisible(tester, "b"),
+      isFalse,
       reason: "setup sanity: the long-press drag is genuinely running",
     );
 

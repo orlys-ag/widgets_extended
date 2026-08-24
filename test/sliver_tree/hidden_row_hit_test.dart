@@ -229,11 +229,11 @@ void main() {
   testWidgets("the dragged row keeps its reorder actions while hidden", (
     tester,
   ) async {
-    // The accessibility half of the wrap. Both wrappers sit INSIDE the
-    // row's `Semantics`, and that ordering is load-bearing for `Opacity`
-    // specifically: `RenderOpacity.visitChildrenForSemantics` stops
-    // emitting its child at alpha 0 unless `alwaysIncludeSemantics` is
-    // set, so a `Semantics` placed inside it would take the row's
+    // The accessibility half of the wrap. The hide wrapper sits INSIDE the
+    // row's `Semantics`, and that ordering is load-bearing for the hide
+    // specifically: `_RenderVisibility.visitChildrenForSemantics` stops
+    // emitting its child while hidden unless `maintainSemantics` is set
+    // (it is not), so a `Semantics` placed inside it would take the row's
     // reorder actions out of the tree for the length of every drag,
     // which is precisely when a screen-reader user might reach for them.
     //

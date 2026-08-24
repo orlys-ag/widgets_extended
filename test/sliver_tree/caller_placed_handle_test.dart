@@ -238,8 +238,8 @@ void main() {
       "a second pointer-down on the DRAGGED row's other handle is ignored",
       (tester) async {
         // The dragged row's in-place copy is hidden AND non-interactive
-        // (issue 9 of the 2026-08-21 review: `Opacity(0)` alone left it
-        // hit-testable, so a second finger on its other grip ran the
+        // (issue 9 of the 2026-08-21 review: hiding with `Opacity(0)` alone
+        // left it hit-testable, so a second finger on its other grip ran the
         // row's re-entry guard and cancelled the live drag, which the
         // user experiences as the drag dying under a stray touch).
         // The pointer no longer reaches the hidden row at all, so the

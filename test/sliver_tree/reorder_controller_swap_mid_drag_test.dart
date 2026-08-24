@@ -90,18 +90,18 @@ Future<TestGesture> _startDragOn(WidgetTester tester, String key) async {
   return gesture;
 }
 
-/// Opacity applied to the single remaining in-place row for [key]. Only
+/// Whether the single remaining in-place row for [key] is visible. Only
 /// meaningful when the proxy is gone (exactly one match for the key).
-double _rowOpacity(WidgetTester tester, String key) {
-  final opacity = tester.widget<Opacity>(
+bool _rowVisible(WidgetTester tester, String key) {
+  final v = tester.widget<Visibility>(
     find
         .ancestor(
           of: find.byKey(ValueKey("row-$key")),
-          matching: find.byType(Opacity),
+          matching: find.byType(Visibility),
         )
         .first,
   );
-  return opacity.opacity;
+  return v.visible;
 }
 
 void main() {
@@ -187,8 +187,8 @@ void main() {
         reason: "the drag proxy must be removed, not left frozen on screen",
       );
       expect(
-        _rowOpacity(tester, "a"),
-        1.0,
+        _rowVisible(tester, "a"),
+        isTrue,
         reason: "the source row must be visible again, not stuck hidden",
       );
       expect(

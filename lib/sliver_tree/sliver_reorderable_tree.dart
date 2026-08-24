@@ -1118,45 +1118,53 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // row's or a descendant's) would overlap the rows shifting into
     // that space. The drag proxy is the subtree's representation. With
     // the proxy enabled the payload above is already a sized placeholder
-    // (H5), so the `Opacity(0)` is redundant over it and stays only
-    // because the wrapper's shape must not change across the drag.
+    // (H5), so the hide is redundant over it and stays only because the
+    // wrapper's shape must not change across the drag (see below).
     //
     // Applied AFTER the scope, so a handle is hidden along with the row
     // it belongs to. Wrapping only `widget.child` left a caller's grip
     // painting at full opacity in the closing slot, which is residual
     // paint of exactly the kind this hide exists to remove.
     //
+    // `Visibility`, not `Opacity` (M19). `RenderOpacity` is a compositing
+    // boundary at any alpha above zero, so an `Opacity(1.0)` wrapper made
+    // EVERY visible row a repaint boundary with its own `OpacityLayer`,
+    // on top of the package's own `RepaintBoundary`, and
+    // `addRepaintBoundaries: false` could not remove it.
+    // `Visibility(maintainSize: true)` renders through a plain
+    // `RenderProxyBox` that only skips `paint` while hidden: layout and
+    // the measured extent are untouched, no layer is added, and it emits
+    // the `IgnorePointer` this hide needs (an invisible row must not be
+    // hit-testable: while the drag rests in its own slot the preview
+    // holds no offsets, the hidden copy is the only thing under its band,
+    // and a second finger landing there used to run this row's re-entry
+    // guard and cancel the live drag, or fire the content's own
+    // callbacks) plus an `ExcludeFocus` that unfocuses a focused
+    // descendant, so a focused field in the dragged row no longer keeps
+    // primary focus while invisible. Not `Offstage` (`maintainSize`
+    // false): it lays the child out without adopting its size, so the
+    // hidden row would measure 0 and poison the extent cache, the offset
+    // prefix sum and the make-room lift.
+    //
     // Nesting is load-bearing in both directions. The drag surface may
-    // sit INSIDE: `RenderOpacity` does not override `hitTest`, and an
-    // in-flight drag routes to the row's recognizer regardless.
-    // `Semantics`
-    // must stay OUTSIDE: `RenderOpacity.visitChildrenForSemantics` drops
-    // its subtree at zero alpha unless `alwaysIncludeSemantics` is set,
-    // so hoisting this any further would silently strip the row's reorder
-    // actions from the semantics tree for the length of every drag.
-    // IgnorePointer, not Opacity alone: `RenderOpacity` does not override
-    // `hitTest`, so an invisible row stayed hit-testable. While the drag
-    // rests in its own slot the preview holds no offsets, which leaves
-    // the hidden copy as the only thing under its band, and a second
-    // finger landing there hit content the user cannot see: on a grip it
-    // ran this row's re-entry guard and cancelled the live drag, on body
-    // content it fired that content's own callbacks. `ignoring` tracks
-    // `hidden`, so the widget shape is stable across the drag, and the
-    // in-flight pointer is unaffected (it is already routed to its
-    // recognizer; IgnorePointer only removes the subtree from NEW hit
-    // The wrapper goes INSIDE the Semantics below, so the row's reorder
-    // actions survive the drag: `IgnorePointer` leaves its subtree in the
-    // semantics TREE (it only skips children when the deprecated
-    // `ignoringSemantics` is explicitly true, and this passes null), and
-    // the `isBlockingUserActions` it does set applies to its own node
-    // and below, never to the ancestor carrying those actions. Pinned by
-    // `hidden_row_hit_test.dart`. What that flag does block, for the
-    // length of the drag, is activation of the hidden row's OWN content
-    // semantics, which is the intended reading of a row that is both
-    // invisible and pointer-transparent.
-    content = IgnorePointer(
-      ignoring: hidden,
-      child: Opacity(opacity: hidden ? 0.0 : 1.0, child: content),
+    // sit INSIDE: the in-flight drag is already routed to the row's
+    // recognizer, and the `IgnorePointer` only removes the subtree from
+    // NEW hit tests. `Semantics` must stay OUTSIDE: with
+    // `maintainSemantics` false the hidden subtree is dropped from the
+    // semantics tree, so hoisting this any further would silently strip
+    // the row's reorder actions for the length of every drag, while the
+    // `IgnorePointer` leaves its subtree in the semantics tree and only
+    // blocks user actions on its own node and below. Pinned by
+    // `hidden_row_hit_test.dart`. The widget SHAPE is identical in both
+    // states (`maintainSize` is a constant here), so element identity
+    // and every row `State` survive the hidden flip; see the note on the
+    // `Semantics` wrapper below.
+    content = Visibility(
+      visible: !hidden,
+      maintainSize: true,
+      maintainState: true,
+      maintainAnimation: true,
+      child: content,
     );
 
     // Expose the reorder capability to assistive technology. Pointer

@@ -9342,6 +9342,42 @@ unique again.)
 
 ### M19. `Opacity(1.0)` around every reorderable row
 
+**Status.** IMPLEMENTED 2026-08-24 after H5 (chain 4), as written: the
+wrapper is `Visibility(visible: !hidden, maintainSize: true, maintainState:
+true, maintainAnimation: true)`; the comment block rewritten (why
+`Visibility`, why not `Opacity` or `Offstage`, and the two facts that still
+matter); the eight probe files ported (`double` 1.0/0.0 to `bool`
+true/false through `Visibility.visible`, helpers renamed `_isVisible` and
+`_rowVisible`); the comment sites updated (`hidden_row_hit_test.dart`'s
+ordering pin now names `_RenderVisibility.visitChildrenForSemantics` with
+`maintainSemantics` false, `drag_handle_hidden_test.dart`'s in-flight-drag
+note, and the two historical `Opacity(0)` mentions reworded as history);
+`external_cancel_drag_test.dart`'s note names key duplication as the block
+requires; changelog entry. SDK claims read this session: `proxy_box.dart:884`
+and `:887` (`alwaysNeedsCompositing => child != null && _alpha > 0`,
+`isRepaintBoundary => alwaysNeedsCompositing`), `visibility.dart:265-290`
+(the `ExcludeFocus`, `_Visibility`, `IgnorePointer` chain) and `:591-627`
+(`_RenderVisibility` is a `RenderProxyBox` that only skips paint and drops
+semantics while hidden), `proxy_box.dart:3905-3907` and `:3919-3921`
+(`RenderOffstage` reports `constraints.smallest` and lays the child out
+without adopting its size). Test `reorder_row_layer_and_focus_test.dart`,
+the block's three cases: case 1 red before the fix (three `Opacity` widgets
+under the scroll view, and the boundary walk); case 2 red before the fix
+(focus kept), and it runs under `showDragProxy: false` by a decision
+recorded here: under the default proxy H5's placeholder unmounts the
+in-place field at lift, which detaches the test's `FocusNode` for a reason
+unrelated to the hide, so only the no-proxy mount discriminates the
+`ExcludeFocus`; case 3 green before and after, the guard against the
+conditional-wrapper alternative (its `identical` check dropped as implied
+by the `initState` count, a new State always runs `initState`). All 8
+assertions shown red by their own mutation (an `Opacity` or a
+`RepaintBoundary` re-added inside the wrapper, `maintainFocusability:
+true`, the conditional wrapper, no `requestFocus`, a sub-slop move, a short
+press, a doubled probe). Verification: `flutter analyze` 47; full suite
+1167 passed, 4 skipped; `repaint_boundary_test.dart` untouched and green,
+as the block resolves; of the edited test files, the five that were not
+format-clean at HEAD were left so and the rest are clean.
+
 **Finding.** Every reorderable row is wrapped unconditionally in
 `IgnorePointer(ignoring: hidden, child: Opacity(opacity: hidden ? 0.0 : 1.0, ...))`
 (`sliver_reorderable_tree.dart:1127-1130`, `hidden` computed at `:1032`).

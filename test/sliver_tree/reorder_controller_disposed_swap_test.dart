@@ -55,21 +55,21 @@ Widget _host(
   );
 }
 
-/// Opacity applied to the single remaining in-place row for [key].
+/// Whether the single remaining in-place row for [key] is visible.
 ///
 /// Only meaningful once the drag proxy is gone: while a drag is live the
-/// key matches twice (in-place copy plus proxy clone) and which one this
-/// resolves is not defined.
-double _rowOpacity(WidgetTester tester, String key) {
-  final opacity = tester.widget<Opacity>(
+/// key matches the proxy clone (the in-place copy is a placeholder without
+/// the key), and that clone carries no hide wrapper.
+bool _rowVisible(WidgetTester tester, String key) {
+  final v = tester.widget<Visibility>(
     find
         .ancestor(
           of: find.byKey(ValueKey("row-$key")),
-          matching: find.byType(Opacity),
+          matching: find.byType(Visibility),
         )
         .first,
   );
-  return opacity.opacity;
+  return v.visible;
 }
 
 void main() {
@@ -136,8 +136,8 @@ void main() {
 
     expect(second.isDragging, isFalse);
     expect(
-      _rowOpacity(tester, "b"),
-      1.0,
+      _rowVisible(tester, "b"),
+      isTrue,
       reason: "the row must not stay invisible after the controller that "
           "owned its session is gone",
     );
@@ -179,7 +179,7 @@ void main() {
     await tester.pumpWidget(_host(tree, second));
     await tester.pumpAndSettle();
 
-    expect(_rowOpacity(tester, "b"), 1.0);
+    expect(_rowVisible(tester, "b"), isTrue);
     expect(second.isDragging, isFalse);
 
     // And a drag on the new controller still works end to end.

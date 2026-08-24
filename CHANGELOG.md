@@ -19,6 +19,13 @@ nor mid-extent-animation). A header row whose child paints outside its box (a
 shadow, an overflowing badge) now shows that overflow while pinned, matching
 how the same row paints in flow; an app that relied on the pinned clip to
 contain overflow should clip inside its own row widget.
+- Fix: every reorderable row was wrapped in `Opacity(1.0)`, whose render
+object is a compositing boundary at any alpha above zero, so each visible row
+carried its own `OpacityLayer` on top of the package's `RepaintBoundary` and
+`addRepaintBoundaries: false` could not remove it. The hide is now a
+`Visibility` (size, state and animation maintained), which adds no layer and
+also excludes focus while hidden: a focused field in the dragged row no
+longer keeps primary focus while invisible.
 - Changed: while the drag preview is shown (`showDragProxy: true`, the
 default, or a `dragProxyBuilder`), the dragged subtree's in-place rows are
 sized placeholders for the drag instead of hidden live copies, so row content
