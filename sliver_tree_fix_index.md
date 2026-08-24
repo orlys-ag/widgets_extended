@@ -41,15 +41,15 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The plan creates 31 new test files.
+not be worked in parallel. The plan creates 26 new test files.
 
-NEW means not yet in `git ls-files`. 5 of those 31 already exist on
+NEW means not yet in `git ls-files`. 3 of those 26 already exist on
 disk, written for items that have landed but are not committed:
-`audit_repro_h6_test.dart`, `audit_repro_m14_test.dart`,
-`audit_repro_m3_test.dart`, `empty_op_group_shell_test.dart`,
-`expand_reversal_animating_mirror_test.dart`.
+`audit_repro_m4_test.dart`,
+`insert_relocation_sibling_refresh_test.dart`,
+`sibling_refresh_batching_test.dart`.
 
-Landed so far: 5 implemented (H6, M3, M14, M22, M23); 1 partially implemented
+Landed so far: 8 implemented (H6, M3, M4, M9, M14, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -118,15 +118,13 @@ M14).
 
 Adjacent to items outside this cluster (see the adjacency list): L26 with H5.
 
-New tests: `audit_repro_h6_test.dart`, `audit_repro_m14_test.dart`.
-
-Existing tests touched: `child_count_invalidation_test.dart`, `controller_swap_children_retained_test.dart`, `controller_swap_test.dart`, `data_only_reinsert_notification_test.dart`, `drag_proxy_test.dart`, `mid_slide_eviction_test.dart`, `parent_data_refresh_iteration_test.dart`, `sliver_tree_widget_test.dart`, `source_encoding_guard_test.dart`, `sticky_nid_recycle_test.dart`, `tree_node_builder_targeted_rebuild_test.dart`.
+Existing tests touched: `audit_repro_h6_test.dart`, `audit_repro_m14_test.dart`, `child_count_invalidation_test.dart`, `controller_swap_children_retained_test.dart`, `controller_swap_test.dart`, `data_only_reinsert_notification_test.dart`, `drag_proxy_test.dart`, `mid_slide_eviction_test.dart`, `parent_data_refresh_iteration_test.dart`, `sliver_tree_widget_test.dart`, `source_encoding_guard_test.dart`, `sticky_nid_recycle_test.dart`, `tree_node_builder_targeted_rebuild_test.dart`.
 
 ### Cluster 4: M4, M9, M21
 
-- **M4** (M) Comparator re-insert of an existing key moves it one slot right
-- **M9** (M) K inserts under one parent cost O(K * S)
-- **M21** (S) Same-parent relocation notifies only the moved key
+- **M4** (M) Comparator re-insert of an existing key moves it one slot right  **[DONE]**
+- **M9** (M) K inserts under one parent cost O(K * S)  **[DONE]**
+- **M21** (S) Same-parent relocation notifies only the moved key  **[DONE]**
 
 Ordering constraints:
 
@@ -228,11 +226,11 @@ reading that entry first.
 | L23 | S | Sticky-classified rows never show a FLIP slide | - | - | - |
 | L28 | M | Direction flip under a same-frame pending baseline drops the edge-to-edge composition | - | - | - |
 | L29 | M | Optional: capture InheritedTheme for the drag proxy | - | - | - |
-| M3 (+) | M | `expand(animate: false)` mid-collapse misorders new descendants | `audit_repro_m3_test.dart` | M23 | [DONE] |
+| M3 (+) | M | `expand(animate: false)` mid-collapse misorders new descendants | - | M23 | [DONE] |
 | M16 (+) | S | `moveNode` depth change does not dirty rows hidden under a collapsed node | `audit_repro_m16_test.dart` | M9 | - |
 | M17 (+) | M | Drag proxy is sized and positioned in the viewport's cross-axis frame | `audit_repro_m17_test.dart` | M25 | - |
-| M22 | S | `expand` Path 1 leaves the animating mirror stale | `expand_reversal_animating_mirror_test.dart` | - | [DONE] |
-| M23 (+) | M | Empty operation-group shells keep `hasActiveAnimations` true | `empty_op_group_shell_test.dart` | M3 | [DONE] |
+| M22 | S | `expand` Path 1 leaves the animating mirror stale | - | - | [DONE] |
+| M23 (+) | M | Empty operation-group shells keep `hasActiveAnimations` true | - | M3 | [DONE] |
 | M25 (+) | M | Scroll subscription bound to the `ScrollPosition` captured at `startDrag` | `drag_position_swap_test.dart` | M17 | - |
 | M26 | S | Hot reload does not refresh rows when the `SliverTree` instance is hoisted | `audit_repro_m26_test.dart` | - | [NOT AUDITED] |
 

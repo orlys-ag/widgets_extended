@@ -853,6 +853,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// if other in-batch calls carried specific keys.
   bool _batchAffectedStructuralUnknown = false;
 
+  /// Parents whose sibling list changed inside the current [runBatch].
+  /// The O(siblings) refresh set is built ONCE per distinct parent at
+  /// batch exit instead of once per mutation: K appends under one parent
+  /// go from O(K*S) set work to O(K + S). Same deferral discipline as
+  /// [_visibleOrderDirty]. Null when nothing recorded.
+  Set<TKey>? _batchDirtySiblingParents;
+
+  /// Root-list counterpart of [_batchDirtySiblingParents]. A separate
+  /// bool rather than a null entry in the set, because [TKey] is
+  /// unbounded and may itself be nullable.
+  bool _batchDirtyRootSiblings = false;
+
   /// Set when a mutation inside [runBatch] would have triggered a full
   /// [_rebuildVisibleOrder] call. Inside a batch, mutations call
   /// [_markVisibleOrderDirty] instead of rebuilding directly: K reparents
@@ -2261,13 +2273,36 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _ensureVisibleOrder();
         final didStructural = _batchDidRequestStructural;
         final dirtyData = _batchDirtyDataNodes;
-        final structuralAffected = _batchAffectedStructuralUnknown
-            ? null
-            : _batchAffectedStructuralKeys;
+        // Drain the deferred sibling-refresh tokens recorded by
+        // _siblingRefreshOrToken: one O(siblings) build per distinct
+        // dirty parent, written straight into the union. The raw sibling
+        // lists read here are the post-batch ones, so keys removed later
+        // in the batch are (correctly) absent. A null poison pill
+        // subsumes the tokens: listeners do a full refresh anyway.
+        Set<TKey>? structuralAffected;
+        if (_batchAffectedStructuralUnknown) {
+          structuralAffected = null;
+        } else {
+          structuralAffected = _batchAffectedStructuralKeys;
+          if (_batchDirtyRootSiblings || _batchDirtySiblingParents != null) {
+            structuralAffected ??= <TKey>{};
+            if (_batchDirtyRootSiblings) {
+              _addSiblingRefreshInto(null, structuralAffected);
+            }
+            final parents = _batchDirtySiblingParents;
+            if (parents != null) {
+              for (final parent in parents) {
+                _addSiblingRefreshInto(parent, structuralAffected);
+              }
+            }
+          }
+        }
         _batchDidRequestStructural = false;
         _batchDirtyDataNodes = null;
         _batchAffectedStructuralKeys = null;
         _batchAffectedStructuralUnknown = false;
+        _batchDirtySiblingParents = null;
+        _batchDirtyRootSiblings = false;
         // Fire structural first: a structural notify causes the element to
         // mark itself for a full refresh, which subsumes any data-only
         // refresh for the same keys. Firing data first would queue a
@@ -2287,6 +2322,18 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
   }
+
+  /// Cumulative count of O(siblings) sibling-refresh set builds, i.e.
+  /// calls to [_addSiblingRefreshInto], which both [_siblingRefreshSet]
+  /// and the [runBatch] exit drain route through. Perf pin for the
+  /// deferral contract: K mutations under ONE parent inside one batch
+  /// must build the refresh set once, not K times. Counts builds rather
+  /// than keys, so the budget is exact and independent of the sibling
+  /// count. The increment is assert-guarded, so a release build pays
+  /// nothing on a mutation hot path. Never reset internally; tests zero
+  /// it directly, the same convention as
+  /// [debugIndexInParentIterationCount].
+  int debugSiblingRefreshSetBuilds = 0;
 
   /// Fires a structural notification, or records the intent when inside
   /// [runBatch]. All in-controller mutation paths call this instead of
@@ -2321,15 +2368,51 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// own bookkeeping, and the element narrows the set to mounted rows
   /// before rebuilding anything.
   Set<TKey> _siblingRefreshSet(TKey? parentKey) {
-    final siblings = parentKey == null
-        ? _roots
-        : (_childListOf(parentKey) ?? const []);
     final out = <TKey>{};
+    _addSiblingRefreshInto(parentKey, out);
+    return out;
+  }
+
+  /// Adds every key whose builder output can change when the sibling
+  /// list under [parentKey] (or the root list, when null) changes: every
+  /// sibling, plus the parent itself. See [_siblingRefreshSet] for the
+  /// rationale.
+  ///
+  /// THE single O(siblings) copy site: both the unbatched path
+  /// ([_siblingRefreshSet]) and the [runBatch] exit drain pass through
+  /// here, so [debugSiblingRefreshSetBuilds] covers both.
+  void _addSiblingRefreshInto(TKey? parentKey, Set<TKey> out) {
+    assert(() {
+      debugSiblingRefreshSetBuilds++;
+      return true;
+    }());
     if (parentKey != null) {
       out.add(parentKey);
     }
-    out.addAll(siblings);
-    return out;
+    out.addAll(
+      parentKey == null ? _roots : (_childListOf(parentKey) ?? const []),
+    );
+  }
+
+  /// The refresh set for [parentKey] outside a batch; inside one, records
+  /// a TOKEN and returns the shared empty set, because the union is not
+  /// consumed until [runBatch] exit and the set can be built once per
+  /// distinct parent there. `Set<Never>` is assignable to `Set<TKey>` by
+  /// covariance and the literal is const-canonical, so the in-batch path
+  /// allocates nothing; the same idiom as [_addSiblingRefreshInto]'s
+  /// `const []` sibling fallback. The returned set is never mutated by
+  /// any caller: the call sites either union it into a local `affected`
+  /// set or hand it to [_notifyStructural], which only reads it.
+  Set<TKey> _siblingRefreshOrToken(TKey? parentKey) {
+    if (_batchDepth > 0) {
+      if (parentKey == null) {
+        _batchDirtyRootSiblings = true;
+      } else {
+        (_batchDirtySiblingParents ??= <TKey>{}).add(parentKey);
+      }
+      return const <Never>{};
+    }
+    return _siblingRefreshSet(parentKey);
   }
 
   void _notifyStructural({Set<TKey>? affectedKeys}) {
@@ -2356,17 +2439,30 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Binary-searches [siblings] for the sorted insertion index of [node]
   /// using [comparator]. Skips pending-deletion keys.
   ///
-  /// Fast path (no pending deletions): a plain binary search over [siblings]
-  /// with no allocation. Slow path: a linear scan that skips pending-deletion
-  /// entries, still without allocating an intermediate filtered list.
-  int _sortedIndex(List<TKey> siblings, TreeNode<TKey, TData> node) {
+  /// When [excludeIndex] is non-negative, the entry at that position is
+  /// treated as absent and the result is a position in the list AFTER
+  /// `removeAt(excludeIndex)`. The re-insert paths need this for two
+  /// reasons: the upper-bound search would otherwise count the node's own
+  /// equal-comparing slot and report `current + 1`, and the caller has
+  /// already overwritten that slot's data with [node], so the list is not
+  /// sorted there and must not be probed at all.
+  int _sortedIndex(
+    List<TKey> siblings,
+    TreeNode<TKey, TData> node, {
+    int excludeIndex = -1,
+  }) {
     assert(comparator != null);
+    assert(excludeIndex < siblings.length);
     final cmp = comparator!;
+    final int n = excludeIndex >= 0 ? siblings.length - 1 : siblings.length;
     if (_anim.pendingDeletionCount == 0) {
-      int lo = 0, hi = siblings.length;
+      int lo = 0, hi = n;
       while (lo < hi) {
         final mid = (lo + hi) >> 1;
-        final midNode = _dataOf(siblings[mid])!;
+        // Index-shift the excluded slot out of the search space; no list
+        // copy, still O(log n).
+        final raw = (excludeIndex >= 0 && mid >= excludeIndex) ? mid + 1 : mid;
+        final midNode = _dataOf(siblings[raw])!;
         if (cmp(midNode, node) <= 0) {
           lo = mid + 1;
         } else {
@@ -2375,16 +2471,25 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       return lo;
     }
-    // Pending-deletion keys are intermixed, so a binary search would need a
-    // rank-mapping structure to locate live entries. A single linear scan is
-    // allocation-free and competitive for typical sibling counts.
+    // Pending-deletion keys are intermixed; a single linear scan is
+    // allocation-free and competitive for typical sibling counts. `reduced`
+    // counts positions in the post-removal list, which is the space the
+    // caller inserts into.
+    int reduced = 0;
     for (int i = 0; i < siblings.length; i++) {
+      if (i == excludeIndex) {
+        continue;
+      }
       final k = siblings[i];
-      if (_isPendingDeletion(k)) continue;
-      final other = _dataOf(k)!;
-      if (cmp(other, node) > 0) return i;
+      if (!_isPendingDeletion(k)) {
+        final other = _dataOf(k)!;
+        if (cmp(other, node) > 0) {
+          return reduced;
+        }
+      }
+      reduced++;
     }
-    return siblings.length;
+    return reduced;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -2540,48 +2645,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         moveNode(node.key, null, index: index, animate: animate);
         return;
       }
-      final currentRootIndex = _roots.indexOf(node.key);
-      // Explicit index is live-space (compare live-vs-live and convert at
-      // the insert); the comparator path stays full-space end to end.
-      final int? sortedDesired = index == null && comparator != null
-          ? _sortedIndex(_roots, node)
-          : null;
-      final bool wantsRelocate;
-      if (index != null) {
-        final currentLiveIndex = getIndexInParent(node.key);
-        final liveCount = _liveCountOf(_roots);
-        wantsRelocate =
-            index != currentLiveIndex &&
-            // Appending is a no-op if already live-last.
-            !(currentLiveIndex == liveCount - 1 && index >= liveCount);
-      } else if (sortedDesired != null) {
-        wantsRelocate =
-            sortedDesired != currentRootIndex &&
-            // Appending is a no-op if already at the end.
-            !(currentRootIndex == _roots.length - 1 &&
-                sortedDesired >= _roots.length);
-      } else {
-        wantsRelocate = false;
-      }
-      if (wantsRelocate) {
-        _roots.removeAt(currentRootIndex);
-        final insertAt = index != null
-            ? _liveIndexToFullInsertIndex(_roots, index)
-            : sortedDesired!.clamp(0, _roots.length);
-        _roots.insert(insertAt, node.key);
-        // Raw sibling-list writes above; invalidate cached live indices.
-        _liveIndexCache.bump();
-        _markVisibleOrderDirty();
-        // Relocation changes row positions (and the payload was
-        // overwritten), structural refresh, which subsumes the data
-        // channel's row refresh, so the data channel does not also fire.
-        _notifyStructural(affectedKeys: <TKey>{node.key});
-      } else {
-        // Data-only update: fire the node-data channel only, matching
-        // updateNode's contract. Firing a structural notification too
-        // would refresh the same row twice.
-        _notifyNodeDataChanged(node.key);
-      }
+      _relocateOrUpdateExistingSibling(null, node, index);
       return;
     }
 
@@ -2625,7 +2689,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // The new key itself enters visible order via createChild, not a
     // refresh, and roots have no parent whose hasChildren could flip. The
     // other roots DO need one: the insert shifted their positions.
-    _notifyStructural(affectedKeys: _siblingRefreshSet(null));
+    _notifyStructural(affectedKeys: _siblingRefreshOrToken(null));
   }
 
   /// Calculates the visible order index for inserting a root at the given root
@@ -2689,6 +2753,62 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
     }
     return count;
+  }
+
+  /// The "key is already present under the requested parent" arm shared by
+  /// [insertRoot] and [insert]. [parentKey] is null for the roots case and
+  /// selects the RAW sibling list the relocation writes to (`_roots`, or the
+  /// parent's child list). Relocates when the caller's requested position
+  /// differs from the current one and fires the matching notification:
+  /// structural on a move, carrying the sibling refresh set (every
+  /// sibling, plus the parent when [parentKey] is non-null; the displaced
+  /// siblings' positional inputs changed, and the set includes [node]'s
+  /// key, so it subsumes the data channel's row refresh), node-data only
+  /// on a pure payload update.
+  ///
+  /// [index] is live-space; the comparator path works in the post-removal
+  /// full-space the insert applies to (see [_sortedIndex]'s `excludeIndex`).
+  void _relocateOrUpdateExistingSibling(
+    TKey? parentKey,
+    TreeNode<TKey, TData> node,
+    int? index,
+  ) {
+    final siblings = parentKey == null
+        ? _roots
+        : _childListOrCreate(parentKey);
+    final currentIndex = siblings.indexOf(node.key);
+    final int? sortedDesired = index == null && comparator != null
+        ? _sortedIndex(siblings, node, excludeIndex: currentIndex)
+        : null;
+    final bool wantsRelocate;
+    if (index != null) {
+      final currentLiveIndex = getIndexInParent(node.key);
+      final liveCount = _liveCountOf(siblings);
+      wantsRelocate =
+          index != currentLiveIndex &&
+          // Appending is a no-op if already live-last.
+          !(currentLiveIndex == liveCount - 1 && index >= liveCount);
+    } else if (sortedDesired != null) {
+      // Post-removal space: the node's own position is unchanged by its
+      // removal, so equality is the exact no-op test. No append guard is
+      // needed, `sortedDesired` maxes out at `siblings.length - 1`.
+      wantsRelocate = sortedDesired != currentIndex;
+    } else {
+      wantsRelocate = false;
+    }
+    if (wantsRelocate) {
+      siblings.removeAt(currentIndex);
+      final insertAt = index != null
+          ? _liveIndexToFullInsertIndex(siblings, index)
+          : sortedDesired!.clamp(0, siblings.length);
+      siblings.insert(insertAt, node.key);
+      // Raw sibling-list writes above; invalidate cached live indices.
+      _liveIndexCache.bump();
+      _markVisibleOrderDirty();
+      _notifyStructural(affectedKeys: _siblingRefreshOrToken(parentKey));
+    } else {
+      _notifyNodeDataChanged(node.key);
+    }
   }
 
   /// Fast-path equality check for [setChildren]. Returns true iff the
@@ -3014,48 +3134,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         moveNode(node.key, parentKey, index: index, animate: animate);
         return;
       }
-      final siblings = _childListOrCreate(parentKey);
-      final currentIndex = siblings.indexOf(node.key);
-      // Explicit index is live-space (compare live-vs-live and convert at
-      // the insert); the comparator path stays full-space end to end.
-      final int? sortedDesired = index == null && comparator != null
-          ? _sortedIndex(siblings, node)
-          : null;
-      final bool wantsRelocate;
-      if (index != null) {
-        final currentLiveIndex = getIndexInParent(node.key);
-        final liveCount = _liveCountOf(siblings);
-        wantsRelocate =
-            index != currentLiveIndex &&
-            // Appending is a no-op if already live-last.
-            !(currentLiveIndex == liveCount - 1 && index >= liveCount);
-      } else if (sortedDesired != null) {
-        wantsRelocate =
-            sortedDesired != currentIndex &&
-            !(currentIndex == siblings.length - 1 &&
-                sortedDesired >= siblings.length);
-      } else {
-        wantsRelocate = false;
-      }
-      if (wantsRelocate) {
-        siblings.removeAt(currentIndex);
-        final insertAt = index != null
-            ? _liveIndexToFullInsertIndex(siblings, index)
-            : sortedDesired!.clamp(0, siblings.length);
-        siblings.insert(insertAt, node.key);
-        // Raw sibling-list writes above; invalidate cached live indices.
-        _liveIndexCache.bump();
-        _markVisibleOrderDirty();
-        // Relocation changes row positions (and the payload was
-        // overwritten), structural refresh, which subsumes the data
-        // channel's row refresh, so the data channel does not also fire.
-        _notifyStructural(affectedKeys: <TKey>{node.key});
-      } else {
-        // Data-only update: fire the node-data channel only, matching
-        // updateNode's contract. Firing a structural notification too
-        // would refresh the same row twice.
-        _notifyNodeDataChanged(node.key);
-      }
+      _relocateOrUpdateExistingSibling(parentKey, node, index);
       return;
     }
     final parentDepth = _depthOfKey(parentKey);
@@ -3120,7 +3199,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // The new key enters via createChild. The retained rows that can
     // change are the parent (its child count grew, and its hasChildren may
     // have flipped) and every sibling the insert displaced.
-    _notifyStructural(affectedKeys: _siblingRefreshSet(parentKey));
+    _notifyStructural(affectedKeys: _siblingRefreshOrToken(parentKey));
   }
 
   /// Removes a node and all its descendants from the tree.
@@ -3166,14 +3245,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // marking is the moment liveChildCount readers go stale, so the
       // parent row must refresh now as well, along with every sibling
       // whose live position shifted.
-      affected.addAll(_siblingRefreshSet(parentKey));
+      affected.addAll(_siblingRefreshOrToken(parentKey));
     } else {
       _removeNodesImmediate(nodesToRemove);
       _structureGeneration++;
       // Immediate path: the parent's child-list length changed (and its
       // hasChildren may have flipped), and the surviving siblings shifted
       // into new positions.
-      affected.addAll(_siblingRefreshSet(parentKey));
+      affected.addAll(_siblingRefreshOrToken(parentKey));
     }
     _notifyStructural(affectedKeys: affected);
   }
@@ -3261,7 +3340,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // from the controller (and the declarative layer's node view exposes
     // it), so a reorder does change what the reordered rows render. The
     // sliver's layout repositions elements in place either way.
-    _notifyStructural(affectedKeys: _siblingRefreshSet(null));
+    _notifyStructural(affectedKeys: _siblingRefreshOrToken(null));
   }
 
   /// Reorders the children of [parentKey] to match [orderedKeys].
@@ -3351,7 +3430,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     // See reorderRoots: the reordered rows' own positions are builder
     // inputs, so they refresh.
-    _notifyStructural(affectedKeys: _siblingRefreshSet(parentKey));
+    _notifyStructural(affectedKeys: _siblingRefreshOrToken(parentKey));
   }
 
   /// Moves a node from its current parent to [newParentKey].
@@ -3675,8 +3754,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
     // Both parents' child-list lengths changed (and hasChildren may have
     // flipped on either), and both sibling lists shifted around the move.
-    affected.addAll(_siblingRefreshSet(oldParent));
-    affected.addAll(_siblingRefreshSet(newParentKey));
+    affected.addAll(_siblingRefreshOrToken(oldParent));
+    affected.addAll(_siblingRefreshOrToken(newParentKey));
     _notifyStructural(affectedKeys: affected);
   }
 

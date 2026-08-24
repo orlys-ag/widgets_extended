@@ -3,9 +3,11 @@
 /// "structural subsumes data — never fire both for one row":
 ///
 /// - No relocation → node-data channel ONLY (6.6; `updateNode` contract).
-/// - Same-parent relocation → structural (`affectedKeys: {key}`) ONLY —
-///   the 6.6 change left the data fire before the relocate decision, so
-///   the relocation path still refreshed the row twice (R3).
+/// - Same-parent relocation: structural ONLY, carrying the sibling
+///   refresh set (every sibling, plus the parent for the child case; it
+///   includes the key). R3's original finding: the 6.6 change left the
+///   data fire before the relocate decision, so the relocation path
+///   still refreshed the row twice.
 /// - Different-parent (moveNode delegation) → the data fire must SURVIVE:
 ///   moveNode's targeted structural `affectedKeys` omits the moved key on
 ///   an equal-depth move, so the data channel is the only refresh path

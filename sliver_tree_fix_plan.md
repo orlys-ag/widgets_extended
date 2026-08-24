@@ -3681,6 +3681,43 @@ gap 0, gap == length, and k == 0.
 
 ### M4. Comparator re-insert of an existing key moves it one slot right
 
+**Status.** IMPLEMENTED 2026-08-23, three audit passes, all three clean
+(passes 1 and 2 are the required consecutive pair; pass 3 was an extra
+lens over the M21 handoff and the named Risk tests). Landed as the
+Solution prescribes, anchors re-derived against the landed tree:
+`_sortedIndex` gains `excludeIndex` with the index-shift fast path and the
+`reduced` linear arm verbatim from this block (`tree_controller.dart:
+2449-2493`), the shared helper `_relocateOrUpdateExistingSibling` sits
+beside the live-space boundary helpers (`:2768`, after `_liveCountOf`),
+and both re-insert arms are one-call replacements (insertRoot `:2648`,
+insert `:3134`). `_sortedIndex` now has 7 call sites plus the declaration
+(measured): six keep the default and only the helper passes
+`excludeIndex`, which preserves this block's "only the re-insert paths
+exclude" rule with the two prescribed sites collapsed into one. For M21:
+the two `_notifyStructural(affectedKeys: <TKey>{node.key})` lines this
+block cites at `:2536` and `:3010` are now ONE line, `:2805` inside the
+helper (the grep returns exactly one occurrence), and that line is what
+M21 replaces.
+
+`test/sliver_tree/audit_repro_m4_test.dart` is the regression test: five
+tests, 19 assertions. Pre-fix reds matched the traces exactly: both
+idempotent re-inserts read [a, c, b], the pending-deletion case reads
+[a, d, b] in live space, and a changed payload sorting EARLIER lands at
+index 3 ([a, b, d, c, e]). One finding against this block's sketch: its
+Zebra changed-payload case passes on UNFIXED code too (traced: the
+polluted upper-bound search happens to land a to-end move correctly), so
+it is kept as a contract pin and the to-front payload case above was
+added as the changed-payload discriminator. All 19 assertions were
+individually shown red: seven by test-side constructions (six runs; the
+two byte-identical three-root setup sanities share one), four by the
+pre-fix run, and eight under four temporary lib mutations (relocation
+forced on equality; the node-data fire dropped; forced relocation with an
+off-by-one insert position; relocation suppressed), with the lib restored
+and diff-verified byte-identical after each. The block's Risk suites pass
+together (128 tests), the full suite reads 1093 passed, 4 skipped (the
+1088 post-M9 baseline plus these five), `flutter analyze` stays at the
+48-issue baseline, and the source-encoding guard is green.
+
 **Finding.** `_sortedIndex` is an upper-bound binary search
 (`tree_controller.dart:2320-2346`; `cmp(midNode, node) <= 0` moves `lo` past
 the equal slot at `:2328-2329`), and both re-insert paths call it with the
@@ -6692,6 +6729,40 @@ do not touch this path.
 
 ### M9. K inserts under one parent cost O(K * S)
 
+**Status.** IMPLEMENTED 2026-08-23, three audit passes, 2 and 3 consecutively
+clean; pass 1 found one defect (the `_siblingRefreshOrToken` doc attributed
+the `const []` sibling fallback to `_siblingRefreshSet` after the split had
+moved it into `_addSiblingRefreshInto`; fixed in place). Landed as the
+Solution prescribes, integrated with the working tree's current `runBatch`
+exit shape. Anchors here are re-derived against the landed tree: the two
+batch fields (`tree_controller.dart:861`, `:866`), the exit drain
+(`:2276-2305`, tokens cleared on the poison path too, and this is the
+post-M9 exit block M21 must be written against), `debugSiblingRefreshSetBuilds`
+(`:2336`), the `_siblingRefreshSet` wrapper (`:2370-2374`),
+`_addSiblingRefreshInto` (`:2384-2395`), `_siblingRefreshOrToken`
+(`:2406-2416`), and all eight call sites as one-word renames (`:2711`,
+`:3206`, `:3252`, `:3259`, `:3347`, `:3437`, `:3761`, `:3762`). One placement
+deviation: the counter is declared beside its subject, directly above
+`_siblingRefreshSet`, the same beside-the-subject precedent as
+`debugIndexInParentIterationCount`, rather than in the counter cluster this
+block's stale `:686-701` anchor pointed at.
+
+`test/sliver_tree/sibling_refresh_batching_test.dart` is the regression test,
+landed via the promoted-repro flow this block prescribes: the counter landed
+first inside the old `_siblingRefreshSet` body, and the pre-fix pins read
+exactly the predicted 25, 20 and 1 (the first two red, the third green),
+against 2, 1, 1 after the fix. Half (a) passed on both sides, as the block
+predicts. All 13 assertions were individually shown red: seven by
+constructing the rejected state test-side (collapsed parent, short setup, no
+runBatch, undercounted inserts, a same-position move, a double insert), two
+by the pre-fix run, and four under three temporary lib mutations (parent key
+dropped from the copy site; a root token recorded for every dirty parent; the
+`_batchDepth` gate removed so the deferral leaks out of runBatch), with the
+mutation reverted and diff-verified byte-identical after each. The block's
+Risk suites pass together (198 tests), the full suite reads 1088 passed, 4
+skipped (the 1084 baseline plus these four), `flutter analyze` stays at the
+48-issue baseline, and the source-encoding guard is green.
+
 **Finding.** `_siblingRefreshSet` allocates a `Set` and copies the whole
 sibling list plus the parent on every call
 (`tree_controller.dart:2281-2291`), and it is called from eight sites, all
@@ -9467,6 +9538,46 @@ of twenty children, 48 px rows, `maxStickyDepth: 1`.
 **Effort.** M.
 
 ### M21. Same-parent relocation notifies only the moved key
+
+**Status.** IMPLEMENTED 2026-08-24, three audit passes, 2 and 3 consecutively
+clean; pass 1 found two defects in newly written text, both fixed: the helper
+doc and the rewritten test header claimed the set carries "every sibling plus
+the parent", false as literally read for the roots case (a null parent adds
+nothing), and the rewritten header bullet had re-typed the file's pre-existing
+arrow and em-dash characters, now plain ASCII. Landed in the post-M9, post-M4
+shape both sequencing notes prescribe: ONE line inside
+`_relocateOrUpdateExistingSibling`,
+`_notifyStructural(affectedKeys: _siblingRefreshOrToken(parentKey))`
+(`tree_controller.dart:2808`), serving both `insertRoot` and `insert`;
+`_siblingRefreshOrToken` now has nine call sites (measured; this block's
+"nine and ten" collapsed into one when M4 folded the twin arms). The helper's
+doc (`:2758-2770`) states the sibling-refresh-set payload, discharging this
+block's "update those two comments" instruction (M4 had already collapsed the
+two cited comments into that doc), and the stale `affectedKeys: {key}`
+contract in `data_only_reinsert_notification_test.dart`'s header is
+rewritten. That file's assertions are counts-only, exactly as this block
+records, and all its tests pass unchanged.
+
+`test/sliver_tree/insert_relocation_sibling_refresh_test.dart` is the
+regression test: the block's three prescribed cases (roots set equality,
+child mirror with the parent in the set, and the widget half pinning that
+displaced rows re-render their index labels), plus a fourth case for the M9
+interaction this block says must be known: batched relocations must join the
+deferred token path, pinned as `debugSiblingRefreshSetBuilds == 1` for two
+same-parent in-batch relocations. Pre-fix reds: the captured sets read `{c}`
+and `{z}`, the displaced row kept its stale "a:0" label, and the counter read
+0. All 18 assertions were individually shown red: eleven by test-side
+constructions, four by the pre-fix run, and three more under four temporary
+lib mutations (the index-arm relocation suppressed; the notify reverted to
+the one-element set, reaching the stale-label and batch-set assertions; the
+parent dropped from the copy site, additionally pinning the child case's
+parent claim; the token path bypassed with a direct `_siblingRefreshSet`
+call, additionally pinning the counter in the over-counting direction,
+builds == 2), with the lib restored and diff-verified byte-identical after
+each. The block's re-run list plus the M9 and M4 regressions and the oracle
+fuzz pass together (35 tests), the full suite reads 1097 passed, 4 skipped
+(the 1093 post-M4 baseline plus these four), `flutter analyze` stays at the
+48-issue baseline, and the source-encoding guard is green.
 
 **Finding.** The relocation branches of `insertRoot` and `insert` fire
 `_notifyStructural(affectedKeys: <TKey>{node.key})`
