@@ -603,7 +603,9 @@ class TreeSyncController<TKey, TData> {
   /// Throws [ArgumentError] when [desired] contains the same key more
   /// than once. The diff machinery downstream dedupes via a set, but the
   /// per-position loops walk the raw list: duplicates land in the
-  /// internal `remaining` tracker, producing wrong Fenwick offsets.
+  /// internal `remaining` tracker, producing wrong Fenwick offsets (on both
+  /// paths: a duplicated desired key updates the Fenwick twice at one
+  /// position in the insert loop).
   /// `TreeController.setRoots`/`setChildren` already enforce this for the
   /// imperative path; matching it here closes the declarative path.
   static void _assertNoDuplicateKeys<TKey, TData>(
@@ -716,21 +718,24 @@ class TreeSyncController<TKey, TData> {
       _controller.remove(key: key, animate: animate);
     }
 
-    // 2. Build the post-removal list plus a Fenwick tree keyed by desired
-    //    position, seeded with 1s at retained keys' desired positions. The
-    //    insertion loop below reads each insertion index as a prefix sum,
-    //    so K insertions cost O(K log N) rather than O(K * N).
+    // 2. Build a Fenwick tree keyed by desired position, seeded with 1s at
+    //    retained keys' desired positions. The insertion loop below reads
+    //    each insertion index as a prefix sum, so K insertions cost
+    //    O(K log N) rather than O(K * N). No survivor list here (L2): the
+    //    roots copy keeps one because its live-space conversion anchors on
+    //    `remaining[survivorIndex]`; this copy has no such read.
     final desiredPos = <TKey, int>{
       for (int i = 0; i < desiredKeys.length; i++) desiredKeys[i]: i,
     };
-    final remaining = <TKey>[
-      for (final k in currentKeys)
-        if (!toRemove.contains(k)) k,
-    ];
     final remainingBit = _Fenwick(desiredKeys.length);
-    for (final k in remaining) {
+    for (final k in currentKeys) {
+      if (toRemove.contains(k)) {
+        continue;
+      }
       final p = desiredPos[k];
-      if (p != null) remainingBit.update(p, 1);
+      if (p != null) {
+        remainingBit.update(p, 1);
+      }
     }
 
     // 3. Insert new children at their correct position. If a node already
@@ -788,7 +793,6 @@ class TreeSyncController<TKey, TData> {
           _restoreExpansion(node.key, animate: animate);
         }
       }
-      remaining.insert(targetIndex, node.key);
       remainingBit.update(p, 1);
     }
 

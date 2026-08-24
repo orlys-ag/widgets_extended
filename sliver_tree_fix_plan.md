@@ -10827,6 +10827,24 @@ counter is unchanged, `visibleNodes.length == 50`,
 
 ### L2. Delete the dead `remaining.insert` on the `syncChildren` path
 
+**Status.** IMPLEMENTED 2026-08-24, after M12 and M13 (`8cdfa51`), narrowed
+to the `_syncChildrenImpl` copy exactly as the Sequencing paragraph
+requires: the O(N) `remaining.insert` deleted from its insert loop, the
+`remaining` list folded away (the Fenwick is seeded straight from
+`currentKeys`, skipping `toRemove`), the step-2 comment reworded, and the
+duplicate-key doc gains the more precise reason as an addition (a
+duplicated desired key updates the Fenwick twice at one position in the
+insert loop). The roots copy keeps its list untouched: M12's live-space
+conversion anchors on `remaining[survivorIndex]` and its
+`remaining.insert(survivorIndex, ...)` keeps it aligned, so the roots-side
+insert is load-bearing, as both blocks record. After the change
+`grep -n "remaining"` over the file returns the roots copy's list (its
+declaration, seed loop, the two conversion reads, the insert) plus prose
+only. No test added (no observable change, per the block);
+`tree_sync_controller_test.dart` and `tree_sync_deep_tree_test.dart`
+unchanged and green with the rest of the sync suites (92) and the full
+suite (1154 passed, 4 skipped); `flutter analyze` 47; `dart format` clean.
+
 **Finding.** `lib/sliver_tree/tree_sync_controller.dart:266-269` builds
 `remaining`, :271-274 reads it once to seed `remainingBit`, and :319 then pays
 an O(N) `remaining.insert(targetIndex, node.key)` per inserted key; the twin is

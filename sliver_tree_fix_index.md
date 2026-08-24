@@ -41,13 +41,9 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The plan creates 10 new test files.
+not be worked in parallel. The plan creates 8 new test files.
 
-NEW means not yet in `git ls-files`. 2 of those 10 already exist on
-disk, written for items that have landed but are not committed:
-`audit_repro_m12_test.dart`, `audit_repro_m13_test.dart`.
-
-Landed so far: 29 implemented (H1, H2, H3, H4, H6, L6, L7, L13, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M12, M13, M14, M16, M20, M21, M22, M23); 1 partially implemented
+Landed so far: 30 implemented (H1, H2, H3, H4, H6, L2, L6, L7, L13, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M12, M13, M14, M16, M20, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -131,7 +127,7 @@ Existing tests touched: `audit_repro_m4_test.dart`, `batch_notification_test.dar
 
 ### Cluster 5: L2, M12, M13
 
-- **L2** (S) Delete the dead `remaining.insert` on the `syncChildren` path
+- **L2** (S) Delete the dead `remaining.insert` on the `syncChildren` path  **[DONE]**
 - **M12** (M) `syncRoots` computes root insert indices before deferred removals  **[DONE]**
 - **M13** (M) `syncRoots` lacks the mover-subtree deferral  **[DONE]**
 
@@ -140,9 +136,7 @@ Ordering constraints:
 - Chain 7, the sync diff (M12 and M13 are one change).
 - Chain 9, the sync diff's `remaining` list (M12 with L2).
 
-New tests: `audit_repro_m12_test.dart`, `audit_repro_m13_test.dart`.
-
-Existing tests touched: `audit_repro_f32_test.dart`, `audit_repro_f33_test.dart`, `batch_notification_test.dart`, `reparent_during_exit_test.dart`, `skip_repro_test.dart`, `sync_children_of_memoization_test.dart`, `sync_controller_truth_test.dart`, `sync_deferral_during_drag_test.dart`, `sync_expansion_memory_regression_test.dart`, `sync_multiple_children_subtree_test.dart`, `synced_reorder_e2e_test.dart`, `synced_reorder_test.dart`, `synced_sliver_tree_test.dart`, `tree_sync_controller_test.dart`, `tree_sync_deep_tree_test.dart`, `unmeasured_exit_extent_test.dart`.
+Existing tests touched: `audit_repro_f32_test.dart`, `audit_repro_f33_test.dart`, `audit_repro_m12_test.dart`, `audit_repro_m13_test.dart`, `batch_notification_test.dart`, `reparent_during_exit_test.dart`, `skip_repro_test.dart`, `sync_children_of_memoization_test.dart`, `sync_controller_truth_test.dart`, `sync_deferral_during_drag_test.dart`, `sync_expansion_memory_regression_test.dart`, `sync_multiple_children_subtree_test.dart`, `synced_reorder_e2e_test.dart`, `synced_reorder_test.dart`, `synced_sliver_tree_test.dart`, `tree_sync_controller_test.dart`, `tree_sync_deep_tree_test.dart`, `unmeasured_exit_extent_test.dart`.
 
 ### Cluster 6: H5, M19
 
