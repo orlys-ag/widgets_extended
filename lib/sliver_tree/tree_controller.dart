@@ -3568,15 +3568,28 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     final wasVisible = animate && _isStructurallyVisible(key);
 
     // Lazily computed, shared expansion-gated flatten of the moved
-    // subtree. The phantom-anchor, exit-anchor, and affected-keys
-    // consumers below all need the identical set, the
+    // subtree. The phantom-anchor and exit-anchor consumers below need
+    // the identical set, the
     // subtree's INTERNAL structure (children lists, expansion flags) is
     // invariant across the move; only key's parent pointer and the
     // subtree's depths change, so one walk serves whichever of the
-    // three fire instead of up to three full walks per move.
+    // two fire instead of up to two full walks per move.
     List<TKey>? movedSubtreeScratch;
     List<TKey> movedSubtree() {
       return movedSubtreeScratch ??= _flattenSubtree(key, includeRoot: true);
+    }
+
+    // Structural counterpart for the depth-change affected-keys branch:
+    // enumerates the whole subtree regardless of expansion. Separate
+    // memo; do not merge with [movedSubtree], the two walks answer
+    // different questions (which rows WERE VISIBLE for the anchor sites,
+    // which rows COULD STILL BE MOUNTED for the depth branch below).
+    List<TKey>? movedSubtreeStructuralScratch;
+    List<TKey> movedSubtreeStructural() {
+      return movedSubtreeStructuralScratch ??= <TKey>[
+        key,
+        ...getDescendants(key),
+      ];
     }
 
     // First-wins staging fan-out. Every attached sliver render object's
@@ -3745,12 +3758,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     final affected = <TKey>{};
-    // If the moved subtree's depth changed, every row in it must rebuild
-    //, nodeBuilder receives `depth` as an argument and indentation scales
-    // with it. The shared flatten enumerates the currently-expanded rows
-    // (the only ones that can be mounted).
+    // If the moved subtree's depth changed, every row in it must rebuild:
+    // nodeBuilder receives `depth` as an argument and indentation scales
+    // with it.
     if (newDepth != oldDepth) {
-      affected.addAll(movedSubtree());
+      // Structural, not expansion-gated: a row collapsed earlier in the
+      // same handler is still mounted (removeChild is a no-op in the
+      // element and eviction is post-frame), and createChild never
+      // rebuilds a mounted row that is not dirty, so an expansion-gated
+      // set leaves it rendering its pre-move depth. Same reason expand()
+      // uses getDescendants for its base-change staging.
+      affected.addAll(movedSubtreeStructural());
     }
     // Both parents' child-list lengths changed (and hasChildren may have
     // flipped on either), and both sibling lists shifted around the move.

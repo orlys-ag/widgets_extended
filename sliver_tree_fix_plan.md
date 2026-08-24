@@ -8605,6 +8605,40 @@ Before the fix this throws the `child._parent == this` assertion from
 
 ### M16. `moveNode` depth change does not dirty rows hidden under a collapsed node
 
+**Status.** IMPLEMENTED 2026-08-24, five audit passes, 4 and 5 consecutively
+clean; pass 1 trimmed an unverified clause from a test comment and pass 3
+fixed a reason string that said "remounted-visible" for a row whose defining
+property is that it is never unmounted. Landed as the Solution prescribes,
+anchors re-derived against the landed tree: the structural memo
+`movedSubtreeStructural` sits beside the expansion-gated one
+(`tree_controller.dart:3587-3593`), the depth branch consumes it with this
+block's comment (`:3760-3772`), the two phantom-anchor sites stay on
+`movedSubtree()` (`:3639`, `:3754`, its only remaining consumers, measured),
+and the shared-memo comment's "three consumers" wording is corrected to two.
+The `newDepth != oldDepth` gate is kept and no listener-count gate was added,
+per the Gating paragraph.
+
+`test/sliver_tree/audit_repro_m16_test.dart` follows this block's sketch:
+lifecycle-tracked rows render "$key@$depth"; collapse(P), moveNode(P, Q),
+expand(Q), expand(P) in one handler; on unfixed code it fails at exactly the
+predicted point, `find.text("C@2")` finds nothing while every sanity
+assertion passes, including that C's element was never unmounted. One finding
+recorded in the test: a P-label assertion ("P@1") cannot fail in the
+direction the test checks, because expand(key: "P") in the same handler
+dirties the toggled node itself (the behavior `rebuild_budget_test.dart`
+pins); verified by mutation (with moveNode notifying an empty set, "P@1"
+still renders), so the test carries the exclusion as a comment instead of an
+inert assertion. All 7 assertions were individually shown red: five by
+test-side constructions (one of which proves the dispose tracker really
+detects an unmount, by removing C), the primary pin by the pre-fix run, and
+the "C@1 absent" pin under a depth-branch reversion mutation, with the lib
+restored and diff-verified byte-identical after each. This block's suites
+pass together with the repro (41 tests);
+`expand_collapse_staging_gate_test.dart`'s `debugDescendantWalkCount` pins
+are unaffected (measured: that file contains no `moveNode` call). Full suite
+1098 passed, 4 skipped (the 1097 post-Cluster-4 baseline plus this one),
+`flutter analyze` at the 48-issue baseline, source-encoding guard green.
+
 **Finding.** `moveNode` adds `movedSubtree()` to `affected` when the depth
 changed (`tree_controller.dart:3626-3633`, guard at `:3631`), and
 `movedSubtree()` is `_flattenSubtree(key, includeRoot: true)` (`:3456-3459`),
