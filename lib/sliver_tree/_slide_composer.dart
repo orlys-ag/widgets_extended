@@ -9,7 +9,7 @@
 /// composer is **purely passive**: the render layer hands it the
 /// current viewport snapshot, asks for a ghost base Y, and tells it
 /// when to install / re-evaluate / prune. Viewport assembly and the
-/// `TreeRenderHost` callback registration stay on the render object.
+/// `TreeRenderHost` registration stay on the render object.
 library;
 
 import 'package:flutter/animation.dart' show Curve;

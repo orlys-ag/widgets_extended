@@ -105,6 +105,7 @@ class ScrollOrchestrator<TKey, TData> {
     double alignment,
     double sliverBaseOffset,
     double Function(TKey key)? extentEstimator,
+    bool avoidStickyHeaders,
   })?
   _pendingSnap;
   bool _snapScheduled = false;
@@ -115,6 +116,7 @@ class ScrollOrchestrator<TKey, TData> {
     required double alignment,
     required double sliverBaseOffset,
     required double Function(TKey key)? extentEstimator,
+    required bool avoidStickyHeaders,
   }) {
     _pendingSnap = (
       key: key,
@@ -122,6 +124,7 @@ class ScrollOrchestrator<TKey, TData> {
       alignment: alignment,
       sliverBaseOffset: sliverBaseOffset,
       extentEstimator: extentEstimator,
+      avoidStickyHeaders: avoidStickyHeaders,
     );
     if (_snapScheduled) {
       return;
@@ -160,10 +163,17 @@ class ScrollOrchestrator<TKey, TData> {
         snap.key,
         extentEstimator: snap.extentEstimator,
       );
+      // M20: the snap re-derives the same settled inset the landing
+      // used, or it would undo an inset landing by exactly the band.
+      final snapInset = snap.avoidStickyHeaders
+          ? stickyInsetOf(snap.key, extentEstimator: snap.extentEstimator)
+          : 0.0;
+      final snapUsable = position.viewportDimension - snapInset;
       final target =
           snap.sliverBaseOffset +
           sliverOffset -
-          (position.viewportDimension - rowExtent) * snap.alignment;
+          snapInset -
+          (snapUsable - rowExtent) * snap.alignment;
       final clamped = target.clamp(
         position.minScrollExtent,
         position.maxScrollExtent,
@@ -273,6 +283,52 @@ class ScrollOrchestrator<TKey, TData> {
     return TreeController.defaultExtent;
   }
 
+  /// PRIVATE core of the sticky-band inset. `animated` selects the
+  /// extent source and never reaches public API: pick it by one
+  /// question, does this same call site read `getCurrentExtent` for the
+  /// TARGET's own row extent? The follower does (`animated: true`); the
+  /// one-shot sites do not (`animated: false`). `extentOf` cannot serve
+  /// the follower: it returns the measured extent first, so an animating
+  /// ancestor that has ever been laid out would freeze the inset at its
+  /// settled height for the whole animation.
+  ///
+  /// LIMITATION, deliberate: the walk predicts the tree's own band
+  /// measured from the sliver's paint origin, while the sticky computer
+  /// starts the band at `max(0, overlap)`. Under a preceding pinned
+  /// sliver overlapping the tree by `h`, the real band ends `h` lower
+  /// and the target is covered by `h`; the controller cannot read
+  /// `constraints.overlap` before layout, and publishing it would
+  /// recreate the layout dependency this API exists to avoid.
+  double _stickyInsetCore(
+    TKey key, {
+    required bool animated,
+    double Function(TKey key)? extentEstimator,
+  }) {
+    final limit = _controller.maxStickyDepthAcrossHosts;
+    if (limit <= 0) {
+      return 0.0;
+    }
+    double inset = 0.0;
+    TKey? current = _controller.getParent(key);
+    while (current != null) {
+      if (_controller.getDepth(current) < limit) {
+        inset += animated
+            ? _controller.getCurrentExtent(current)
+            : extentOf(current, extentEstimator: extentEstimator);
+      }
+      current = _controller.getParent(current);
+    }
+    return inset;
+  }
+
+  /// Height of the sticky band that will sit above [key] after a scroll
+  /// that brings it to the top. Settled (non-animated) extents, matching
+  /// [scrollOffsetOf] and [extentOf].
+  double stickyInsetOf(
+    TKey key, {
+    double Function(TKey key)? extentEstimator,
+  }) => _stickyInsetCore(key, animated: false, extentEstimator: extentEstimator);
+
   /// Synchronously expands every collapsed ancestor of [key].
   int ensureAncestorsExpanded(TKey key) {
     final toExpand = <TKey>[];
@@ -300,6 +356,7 @@ class ScrollOrchestrator<TKey, TData> {
     AncestorExpansionMode ancestorExpansion = AncestorExpansionMode.immediate,
     double Function(TKey key)? extentEstimator,
     double sliverBaseOffset = 0.0,
+    bool avoidStickyHeaders = false,
   }) async {
     assert(
       alignment >= 0.0 && alignment <= 1.0,
@@ -333,6 +390,7 @@ class ScrollOrchestrator<TKey, TData> {
         alignment: alignment,
         extentEstimator: extentEstimator,
         sliverBaseOffset: sliverBaseOffset,
+        avoidStickyHeaders: avoidStickyHeaders,
         waitForQuiescence: false,
       );
     }
@@ -409,6 +467,7 @@ class ScrollOrchestrator<TKey, TData> {
         alignment: alignment,
         extentEstimator: extentEstimator,
         sliverBaseOffset: sliverBaseOffset,
+        avoidStickyHeaders: avoidStickyHeaders,
         waitForQuiescence: true,
       );
     }
@@ -448,10 +507,18 @@ class ScrollOrchestrator<TKey, TData> {
     final position = scrollController.position;
     final viewportExtent = position.viewportDimension;
     final rowExtent = extentOf(key, extentEstimator: extentEstimator);
+    // M20: inset the target below the sticky band its pinned ancestors
+    // will form; alignment works against the usable viewport, which
+    // leaves bottom alignment untouched.
+    final inset = avoidStickyHeaders
+        ? stickyInsetOf(key, extentEstimator: extentEstimator)
+        : 0.0;
+    final usable = viewportExtent - inset;
     final rawTarget =
         sliverBaseOffset +
         sliverOffset -
-        (viewportExtent - rowExtent) * alignment;
+        inset -
+        (usable - rowExtent) * alignment;
     final clamped = rawTarget.clamp(
       position.minScrollExtent,
       position.maxScrollExtent,
@@ -472,6 +539,7 @@ class ScrollOrchestrator<TKey, TData> {
       alignment: alignment,
       sliverBaseOffset: sliverBaseOffset,
       extentEstimator: extentEstimator,
+      avoidStickyHeaders: avoidStickyHeaders,
     );
     // L13: a superseded plain scroll reports false (the follower's
     // per-tick jumpTo completes this path's DrivenScrollActivity, so the
@@ -502,6 +570,10 @@ class ScrollOrchestrator<TKey, TData> {
     required double alignment,
     required double Function(TKey key)? extentEstimator,
     required double sliverBaseOffset,
+    // M20: forwarded mode flag; the follower reads CURRENT animated
+    // extents for the band (its per-tick target already does), the final
+    // snap reads settled ones.
+    required bool avoidStickyHeaders,
     // H3: when true, the completion loop also waits for the tree to be
     // quiescent (`hasActiveAnimations` false) before the final snap, so
     // a scroll issued DURING caller-side animations resolves on settled
@@ -593,10 +665,17 @@ class ScrollOrchestrator<TKey, TData> {
 
       final rowExtent = _controller.getCurrentExtent(key);
       final viewportExtent = position.viewportDimension;
+      // M20: CURRENT animated extents, per the one-question rule (this
+      // site reads getCurrentExtent for the target's own row extent).
+      final inset = avoidStickyHeaders
+          ? _stickyInsetCore(key, animated: true)
+          : 0.0;
+      final usable = viewportExtent - inset;
       final desired =
           sliverBaseOffset +
           currentOffset -
-          (viewportExtent - rowExtent) * alignment;
+          inset -
+          (usable - rowExtent) * alignment;
       final desiredClamped = desired.clamp(
         position.minScrollExtent,
         position.maxScrollExtent,
@@ -675,10 +754,15 @@ class ScrollOrchestrator<TKey, TData> {
     final finalPosition = scrollController.position;
     final viewportExtent = finalPosition.viewportDimension;
     final rowExtent = extentOf(key, extentEstimator: extentEstimator);
+    final finalInset = avoidStickyHeaders
+        ? stickyInsetOf(key, extentEstimator: extentEstimator)
+        : 0.0;
+    final finalUsable = viewportExtent - finalInset;
     final finalTarget =
         sliverBaseOffset +
         finalOffset -
-        (viewportExtent - rowExtent) * alignment;
+        finalInset -
+        (finalUsable - rowExtent) * alignment;
     finalPosition.jumpTo(
       finalTarget.clamp(
         finalPosition.minScrollExtent,

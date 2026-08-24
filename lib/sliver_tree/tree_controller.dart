@@ -37,10 +37,15 @@ part '_tree_controller_helpers.dart';
 /// `false` indicates the host cannot participate at all (not yet laid out,
 /// detached, etc.).
 ///
-/// **Internal contract**: this typedef is part of the sliver-render-object
+/// **Internal contract**: this interface is part of the sliver-render-object
 /// staging protocol. External callers should not implement or depend on it.
-typedef TreeRenderHost =
-    bool Function({required Duration duration, required Curve curve});
+/// One implementer, `RenderSliverTree`, which registers ITSELF so the
+/// registry can also read render-side CONFIG (the sticky depth) without a
+/// second back-channel (M20).
+abstract interface class TreeRenderHost {
+  bool stageSlideBaseline({required Duration duration, required Curve curve});
+  int get maxStickyDepth;
+}
 
 /// Controller for a [SliverTree] widget.
 ///
@@ -720,6 +725,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _renderHosts.remove(host);
   }
 
+  /// Largest `maxStickyDepth` among attached render hosts, 0 when none
+  /// pins headers. Config only: valid before the first layout. O(hosts),
+  /// one in practice.
+  int get maxStickyDepthAcrossHosts {
+    int max = 0;
+    for (final host in _renderHosts) {
+      if (host.maxStickyDepth > max) {
+        max = host.maxStickyDepth;
+      }
+    }
+    return max;
+  }
+
   /// Fans out a baseline-capture request to every attached render host.
   /// Returns true if at least one host is participating in this slide cycle,
   /// either it freshly staged a baseline, or a prior pending baseline (from
@@ -733,7 +751,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     if (_renderHosts.isEmpty) return false;
     bool any = false;
     for (final host in _renderHosts) {
-      if (host(duration: duration, curve: curve)) any = true;
+      if (host.stageSlideBaseline(duration: duration, curve: curve)) {
+        any = true;
+      }
     }
     return any;
   }
@@ -2115,6 +2135,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// resolves false), the newer target wins, whether either scroll is
   /// plain or animated-mode.
   ///
+  /// [avoidStickyHeaders] (default false, preserving today's landings)
+  /// insets the target below the sticky band its own pinned ancestors
+  /// will form after the scroll ([stickyInsetOf]); alignment then works
+  /// against the viewport minus that band, which leaves bottom alignment
+  /// untouched. The inset predicts the tree's OWN band from the sliver's
+  /// paint origin; a preceding pinned sliver that overlaps the tree
+  /// lowers the real band by its overlap, which this parameter does not
+  /// see.
+  ///
   /// Returns true if a scroll was issued, false if [key] could not be
   /// resolved, [scrollController] has no attached position, or the scroll
   /// was cancelled (superseded, or the controller was disposed) before
@@ -2128,6 +2157,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     AncestorExpansionMode ancestorExpansion = AncestorExpansionMode.immediate,
     double Function(TKey key)? extentEstimator,
     double sliverBaseOffset = 0.0,
+    bool avoidStickyHeaders = false,
   }) => _scroll.animateScrollToKey(
     key,
     scrollController: scrollController,
@@ -2137,7 +2167,17 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     ancestorExpansion: ancestorExpansion,
     extentEstimator: extentEstimator,
     sliverBaseOffset: sliverBaseOffset,
+    avoidStickyHeaders: avoidStickyHeaders,
   );
+
+  /// Height of the sticky band that will sit above [key] after a scroll
+  /// that brings it to the top, from settled extents; the composing
+  /// escape hatch for callers doing their own scroll math (see
+  /// [animateScrollToKey]'s `avoidStickyHeaders`).
+  double stickyInsetOf(
+    TKey key, {
+    double Function(TKey key)? extentEstimator,
+  }) => _scroll.stickyInsetOf(key, extentEstimator: extentEstimator);
 
   // ══════════════════════════════════════════════════════════════════════════
   // ANIMATION LISTENERS: forwarded to AnimationCoordinator

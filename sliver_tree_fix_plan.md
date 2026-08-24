@@ -9728,6 +9728,56 @@ of twenty children, 48 px rows, `maxStickyDepth: 1`.
 
 **Effort.** M.
 
+**Status.** IMPLEMENTED 2026-08-24, test-first. Landed items 1-5 as
+written: `TreeRenderHost` is an interface, `RenderSliverTree` implements it
+and registers `this` at all four sites (the `_hostCallback` closure is gone),
+`maxStickyDepthAcrossHosts`, the private `_stickyInsetCore` with the
+`animated` flag, public `stickyInsetOf` on both layers, `avoidStickyHeaders`
+on both `animateScrollToKey` signatures and as a `required` parameter of
+`_animatedConcurrentScroll` (both call sites forward it, H3's route
+included), and the inset in the plain, follower and final-snap targets. A
+FOURTH target site the block predates, H1's post-frame settle snap, carries
+the flag in its record and re-derives the same settled inset; without it the
+snap would undo an inset landing by exactly the band, and demo D9 showed that
+with H1 in place the snap, not the plain-path arithmetic, decides where a
+zero-duration plain scroll ends (the identity assertion went red only when
+both formulas were mutated). Two deviations from the block's test, both
+recorded after runs. (1) The block's animated construct (only `r3` collapsed,
+target `r3c10`) cannot discriminate the extent sources: a probe with the
+follower on `animated: false` printed `getCurrentExtent(r3) = 48.0` and a
+slot top of 48.0 mid-flight, identical to `animated: true`, because expanding
+`r3` animates its ENTERING children, not `r3`'s own row. The landed case
+targets depth-2 `r3c1g5` under `maxStickyDepth: 2` with `r3` and `r3c1` both
+collapsed, so `r3c1` enters under `r3`'s expansion while it is part of the
+band, and runs a 100 ms scroll under a 600 ms expansion so the follower's
+per-tick `jumpTo` lands exactly on its target once the scroll curve reaches
+1.0 (`initialPixels + (desiredClamped - initialPixels) * tCurved`); the
+mid-flight assertion pins the slot top at `48 + getCurrentExtent(r3c1)`
+(observed 72.32), and a settled-extent follower lands it at 96 (D13 red).
+(2) Painted tops are measured at the row SLOT (`SliverTreeParentData.layoutOffset`
+minus the sliver scroll offset), not the row widget: an entering row's widget
+top sat at 48.64 while its slot was at 72.32; the two agree once settled.
+Reds: the stub-first landing (full API surface, inset core returning 0.0)
+failed the one-shot pin and the animated pin at 0.0 against 48.0; each of the
+19 assertions was then shown red by its own mutation (the flag forced on the
+default path; `maxStickyDepth` 0 with and without a hardcoded walk limit;
+unknown keys; a 452 px push so `r4` displaces `r3`; 60 px rows;
+viewport-instead-of-usable in the plain plus snap formulas; pump counts of 1,
+36 and 60 for the mid-flight sanity checks; the settled follower; a zeroed
+final-snap inset; a superseding plain scroll for the future's result).
+Verification: `flutter analyze` 48 to 47, the removed issue being
+`prefer_function_declarations_over_variables` on the deleted closure
+(identified by stashing the three files); the block's risk suites
+(`render_host_registry_test.dart` first, `animated_move_to_test.dart`,
+`controller_swap_test.dart`, the sticky and scroll suites, the H1 and H3
+repros) 61 green; full suite 1149 passed, 4 skipped. Also: the
+`_slide_composer.dart` library doc no longer calls the registration a
+callback, a changelog entry under Unreleased, and the overlap limitation
+stated on the parameter doc as item 3 asks (`_sticky_header_computer.dart:336`
+read this session). Residual, unverified: the overlap limitation under a
+preceding pinned sliver, no such test exists. `TreeRenderHost` stays
+barrel-private (`sliver_tree.dart:24` exports only `TreeController`).
+
 ### M21. Same-parent relocation notifies only the moved key
 
 **Status.** IMPLEMENTED 2026-08-24, three audit passes, 2 and 3 consecutively

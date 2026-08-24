@@ -85,7 +85,7 @@ class _ExitGhost<TKey> {
 /// `TreeReorderController` binds to for drag-and-drop (row hit-testing,
 /// eviction pinning, FLIP baseline staging, coordinate conversion).
 class RenderSliverTree<TKey, TData> extends RenderSliver
-    implements ReorderRenderPort<TKey> {
+    implements ReorderRenderPort<TKey>, TreeRenderHost {
   /// Creates a render sliver tree.
   RenderSliverTree({
     required TreeController<TKey, TData> controller,
@@ -130,9 +130,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   TreeController<TKey, TData> get controller => _controller;
   set controller(TreeController<TKey, TData> value) {
     if (_controller == value) return;
-    if (attached) _controller.unregisterRenderHost(_hostCallback);
+    if (attached) _controller.unregisterRenderHost(this);
     _controller = value;
-    if (attached) _controller.registerRenderHost(_hostCallback);
+    if (attached) _controller.registerRenderHost(this);
     // Pending baseline fields are keyed against the OLD controller's TKey
     // instances; consuming them against the new controller would miss
     // every key (silent no-op) at best, or, if the two controllers share
@@ -195,6 +195,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   }
 
   int _maxStickyDepth;
+  @override
   int get maxStickyDepth => _maxStickyDepth;
   set maxStickyDepth(int value) {
     if (_maxStickyDepth == value) return;
@@ -815,18 +816,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// callers should not depend on it.
   double get admittedSlideBound => _admittedSlideBound;
 
-  /// Cached callback registered with the controller's host registry on
-  /// `attach` and unregistered on `detach`. `late final` so the same
-  /// closure identity is registered and unregistered (the registry is a
-  /// `Set` keyed by identity).
-  late final TreeRenderHost _hostCallback =
-      ({required Duration duration, required Curve curve}) {
-        // Mirror beginSlideBaseline's geometry guard so the bool return
-        // contract reflects "host could participate at all."
-        if (geometry == null) return false;
-        beginSlideBaseline(duration: duration, curve: curve);
-        return true;
-      };
+  /// [TreeRenderHost] entry point: the controller's host registry calls
+  /// this to stage a FLIP baseline. The render object registers ITSELF
+  /// on attach and on controller swap, so identity in the registry `Set`
+  /// is the render object.
+  @override
+  bool stageSlideBaseline({required Duration duration, required Curve curve}) {
+    // Mirror beginSlideBaseline's geometry guard so the bool return
+    // contract reflects "host could participate at all."
+    if (geometry == null) return false;
+    beginSlideBaseline(duration: duration, curve: curve);
+    return true;
+  }
 
   /// Captures the current painted offsets so the next [performLayout] can
   /// install a FLIP slide from them to the post-mutation offsets.
@@ -2305,12 +2306,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     for (final child in _children.values) {
       child.attach(owner);
     }
-    _controller.registerRenderHost(_hostCallback);
+    _controller.registerRenderHost(this);
   }
 
   @override
   void detach() {
-    _controller.unregisterRenderHost(_hostCallback);
+    _controller.unregisterRenderHost(this);
     // A pending FLIP baseline AND any registered ghosts may carry stale
     // state across the detach/re-attach gap (e.g. ghost entries against
     // freed nids). `_composer.reset()` drops both maps. Practical impact

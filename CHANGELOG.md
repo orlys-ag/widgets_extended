@@ -5,6 +5,14 @@
 spec times the state, declared at the install site. External constructions
 of `AnimationState` must now pass it; states obtained from
 `TreeController.getAnimationState` simply carry the new field.
+- Added `avoidStickyHeaders` to `TreeController.animateScrollToKey`. When
+true, the target lands just below the sticky band its own pinned ancestors
+will form after the scroll instead of under it, and alignment works against
+the viewport minus that band (bottom alignment is unchanged); the default,
+false, keeps today's landings. `TreeController.stickyInsetOf` exposes the same
+settled-extent inset for callers composing their own scroll math, and
+`maxStickyDepthAcrossHosts` reports the largest `maxStickyDepth` among the
+attached slivers.
 - Fix: standalone animations spawned by expand/collapse mutators (partial
 reversals, nested-subtree exits, bulk continuations) ran on the `enterExit`
 family's timing while the mutator's own kill switch read `expandCollapse`.
