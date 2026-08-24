@@ -1777,7 +1777,15 @@ void main() {
       // when the group disposes.
       controller.expandAll();
       await tester.pump(const Duration(milliseconds: 1));
-      await tester.pump(const Duration(milliseconds: 50));
+      // Read at half the CONFIGURED 400 ms. The reversal restarts the
+      // group's controller from 0 over the full duration instead of
+      // forwarding the remaining quarter, so 50 ms would now be the first
+      // eighth of the timeline (below the captured 24) rather than the
+      // last eighth. At 200 ms the envelope lerp(18, 48, 0.5) reads 33,
+      // while a regression that rebases startExtent but forgets to
+      // restore targetExtent is bounded above by the captured 24, so
+      // greaterThan(28) keeps its meaning.
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(
         controller.getCurrentExtent("c"),
@@ -1844,7 +1852,13 @@ void main() {
         // behavior of the shared controller.
         controller.collapseAll();
         await tester.pump(const Duration(milliseconds: 1));
-        await tester.pump(const Duration(milliseconds: 30));
+        // Read at half the CONFIGURED 400 ms: the reversal now resets the
+        // controller and replays the full duration, and its rebase makes
+        // the FIRST frame read exactly bExtentBeforeBulkReverse (the
+        // no-pop property), so a 30 ms read point would pass on a margin
+        // of only about 2 px. At 200 ms the envelope reads about half the
+        // captured extent, a real margin.
+        await tester.pump(const Duration(milliseconds: 200));
 
         expect(
           controller.getCurrentExtent("b"),

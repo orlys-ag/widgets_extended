@@ -2703,6 +2703,40 @@ matching the review's repros:
 
 ### H4. Depth-limited `expandAll` / `collapseAll` ignore post-flip visibility
 
+**Status.** IMPLEMENTED 2026-08-24, landed with L27 as chain 15 requires, in
+ONE commit; five audit passes over the pair, 4 and 5 consecutively clean
+(pass 1 recorded the now-stale synchronous-trigger rationale on
+`_opGroupSnapshot`'s field doc, pass 2 caught a non-ASCII separator in a new
+test comment, pass 3 tightened an over-broad reachability claim in a new
+code comment). All three edits landed as prescribed, merged with L27's
+recipe in this block's stated per-branch order (partition, continue,
+displace, clear or re-pend, rebase the survivors, detached reset,
+forward or reverse). Anchors re-derived against the landed tree: the
+harvest gate (`tree_controller.dart:4382`) and its debug assert (`:4437`),
+`_partitionByPostFlipVisibility` (`_tree_controller_animation.dart:505`)
+with the two scratch lists (`tree_controller.dart:642-643`), the four
+rewritten reversal branches, `_routeShownNodesToStandaloneEnters` (`:4274`,
+called unconditionally in the bulk-reverse branch and from the continuation
+branch), and the collapseAll harvest filter (`:4696`). Chain 12's
+re-derivation rule was followed: the install-site grep returns 17 call
+sites post-merge (14 before this pair; the four new displacements plus the
+helper's two, minus the three absorbed loops), every one carrying M5's
+required family parameter, the new ones all `expandCollapse`.
+
+`test/sliver_tree/audit_repro_h4_test.dart` carries this block's five
+cases. Pre-fix reds matched the predictions exactly: cases 1 through 3
+settled to the zombie orders ([a, b, c] twice, [r, a, b, c]), case 4's
+sampled extent decreased mid-flight, and case 5 emptied the order to [a].
+Every sanity and settled-state assertion across the pair's two new test
+files was individually shown red by a test-side construction (24
+constructions, one run), and the primaries by the pre-fix run. The block's
+Risk suites pass; `expand_collapse_staging_gate_test` and the fuzz suites
+are green in the full run (1116 passed, 4 skipped, the 1104 post-M5
+baseline plus these twelve; analyze at the 48-issue baseline). The
+specified-but-unexercised op-group displacement in expandAll (visible and
+hidden non-empty in the SAME group) remains defensive, exactly as this
+block records; its bulk mirror is exercised by case 2.
+
 **Finding.** Two mirrored defects, both rooted in a depth-blind harvest.
 
 `expandAll` harvests exiting children "regardless of depth" (`tree_controller.dart:4128-4147`), then un-pends EVERY op group with a non-empty `pendingRemoval` (`:4191-4192`, `group.pendingRemoval.clear()`) and EVERY bulk pending member (`:4212`, `_clearBulkPending()`), with no check that the member's post-flip ancestor chain is expanded. The op-group `completed` handler removes nothing from `_order` (`_tree_controller_animation.dart:266-282`) and `_onBulkAnimationComplete` removes only on `dismissed` (`:216`), so a member whose chain stayed collapsed grows back to full extent and stays in the visible order forever.
@@ -13647,6 +13681,35 @@ Enumerated cost, measured rather than estimated: 62 generic declarations in `lib
 **Effort.** M for (a) to (g); M again for (h) on its own.
 
 ### L27. Bulk reversals re-target op-group envelopes without the Path-1 rebase
+
+**Status.** IMPLEMENTED 2026-08-24, landed with H4 as chain 15 requires, in
+ONE commit; the audit trail is shared with H4's Status. Edits 0 through 3
+landed as prescribed inside the merged branch scripts: the expandAll rebase
+with `?? defaultExtent` and the unmeasured-member flag clear (merged branch,
+`tree_controller.dart:4497-4517`), the collapseAll mirror with the
+compute-first write order (`:4754-4770`), edit 2 absorbed into H4's
+`_routeShownNodesToStandaloneEnters` carrying `expandCollapse`, and edit 3's
+second site at expand Path 1 (`:3965-3977`). The predicted breakage happened
+exactly as derived: `tree_controller_test.dart`'s expandAll-reversal test
+failed at 21.75 against greaterThan(28), and the prescribed pump-schedule
+repair (50 ms to 200 ms, comment included) landed in the same commit, along
+with the recommended 30-to-200 ms widen in the collapseAll mirror test and
+the two coverage notes in `op_group_iteration_snapshot_test.dart`. Under a
+mutation that drops the targetExtent restore, the repaired read point goes
+red at the derived capped 21.0, so the threshold keeps its meaning.
+
+Legs (a) through (f) landed in `bulk_reentry_continuation_test.dart` with a
+new file-local off-cache harness shared by (d), (e1), (e2) and (f). Every
+pre-fix red matched this block's derived value: (a) 50 against 25, (b) 50
+against 75, (c) 50 against 0, (d) 24 against 12, (e1) 70.0, (e2) 19.2. Leg
+(f) passes on both sides as the route-C guard and goes red at the derived
+48.0 at BOTH of its assertions under the withdrawn-draft mutation (the
+mirror reduced to startExtent zeroing plus the reset); leg (b) goes red at
+the derived 50.0 under a backwards write order (zero, then capture), so the
+compute-first order has its named discriminator. One merged-landing note:
+with both mirrors now rebasing, route C no longer delivers a sentinel to
+the expandAll site; the absorbing capture stays as defense and its comment
+states the old route in the past tense.
 
 **Finding.** `expandAll`'s op-group reversal (`tree_controller.dart:4189-4203`) sets `targetExtent = _fullExtentOf(member.key) ?? _unknownExtent` at `:4198-4199` and calls `forward()` at `:4201`, without touching `startExtent` or resetting `controller.value`. `collapseAll`'s (`:4395-4411`) sets `startExtent = 0.0` at `:4408` and calls `reverse()` at `:4410`, likewise without re-targeting or resetting. `expand` Path 1 (`:3765-3782`) and `collapse` Path 1 (`:3985-4000`) both do all three.
 

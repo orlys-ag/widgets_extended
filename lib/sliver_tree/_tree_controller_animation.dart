@@ -494,6 +494,30 @@ extension _TreeControllerAnimationOps<TKey, TData>
     }
   }
 
+  /// Splits [members] by post-flip visibility: a member goes to
+  /// [visibleOut] when [_ancestorsExpandedFast] holds and to [hiddenOut]
+  /// otherwise. Clears both out-lists itself, so no caller can forget.
+  ///
+  /// Callers must have applied their expansion flips and rebuilt the
+  /// ancestors-expanded cache first. Only READS [members], which is what
+  /// makes passing a live `group.members.keys` / bulk pending view safe:
+  /// every subsequent mutation runs over the scratch copies.
+  void _partitionByPostFlipVisibility(
+    Iterable<TKey> members,
+    List<TKey> visibleOut,
+    List<TKey> hiddenOut,
+  ) {
+    visibleOut.clear();
+    hiddenOut.clear();
+    for (final member in members) {
+      if (_ancestorsExpandedFast(member)) {
+        visibleOut.add(member);
+      } else {
+        hiddenOut.add(member);
+      }
+    }
+  }
+
   /// Reverts pending-deletion state for an entire subtree, applying the
   /// case-1/2/3 policy to every member where [_isPendingDeletion] is true.
   /// Non-pending members are left untouched.

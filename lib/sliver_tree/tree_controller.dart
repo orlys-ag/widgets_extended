@@ -557,7 +557,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   bool _removeBulkMember(TKey key) => _anim.bulk.removeMember(key);
   bool _addBulkPending(TKey key) => _anim.bulk.addPending(key);
   bool _removeBulkPending(TKey key) => _anim.bulk.removePending(key);
-  void _clearBulkPending() => _anim.bulk.clearPending();
   void _disposeBulkAnimationGroup() => _anim.bulk.disposeGroup();
 
   // Pending deletion
@@ -622,8 +621,26 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// mid-iteration and throwing `ConcurrentModificationError`. The buffer
   /// is shared because the two callers run sequentially on the same
   /// controller instance.
+  ///
+  /// Since the reversal branches reset each group's controller to the
+  /// opposite end (inside `runWithGroupDetached`, whose detached handler
+  /// early-returns) before `forward()`/`reverse()`, that original trigger
+  /// no longer fires in either caller; see the coverage notes in
+  /// `op_group_iteration_snapshot_test.dart`. Whether any other path
+  /// still needs the snapshot is unverified, so it stays.
   final List<MapEntry<TKey, OperationGroup<TKey>>> _opGroupSnapshot =
       <MapEntry<TKey, OperationGroup<TKey>>>[];
+
+  /// Reusable out-lists for [_partitionByPostFlipVisibility], shared by
+  /// [expandAll] and [collapseAll] for the same reason as
+  /// [_opGroupSnapshot]. Both are fully consumed before the partitioned
+  /// group's `forward()`/`reverse()` runs, so nothing in them has to
+  /// survive a call that can fire a synchronous terminal handler. Two
+  /// lists rather than one plus a count: each direction displaces one
+  /// side to standalone animations, which detaches the member from the
+  /// group mid-iteration, so both sides must be safe scratch copies.
+  final List<TKey> _partitionVisibleScratch = <TKey>[];
+  final List<TKey> _partitionHiddenScratch = <TKey>[];
 
   // Private field: already invisible across files.
   final Set<TreeRenderHost> _renderHosts = <TreeRenderHost>{};
@@ -3945,13 +3962,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       final preReversalCurvedValue = existingGroup.curvedValue;
       for (final entry in existingGroup.members.entries) {
-        final full = _fullExtentOf(entry.key) ?? defaultExtent;
+        final measured = _fullExtentOf(entry.key);
+        final full = measured ?? defaultExtent;
         final currentExtent = entry.value.computeExtent(
           preReversalCurvedValue,
           full,
         );
         entry.value.startExtent = currentExtent;
         entry.value.targetExtent = full;
+        if (measured == null) {
+          // `full` is a GUESS, not a capture: leave setFullExtent free to
+          // re-target it on the first measurement (a captured flag would
+          // hold the default-extent terminus for the whole animation).
+          entry.value.targetIsCaptured = false;
+        }
       }
       _anim.opGroups.runWithGroupDetached(key, (group) {
         group.controller.value = 0.0;
@@ -4240,6 +4264,41 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
   }
 
+  /// Routes [expandAll]'s newly-shown rows onto standalone enter
+  /// animations: reversing exits resume from their current extent, and
+  /// genuinely NEW nodes enter from zero on their own timeline instead of
+  /// joining the mid-flight bulk group (a joiner would pop from 0 to
+  /// `full * currentValue`). Shared by the bulk-reverse and continuation
+  /// branches so the two agree on the joiner policy. [_activeBulkGroup]
+  /// must be non-null at both call sites.
+  void _routeShownNodesToStandaloneEnters(
+    List<TKey> reverseExit,
+    List<TKey> show,
+  ) {
+    for (final key in reverseExit) {
+      if (!_hasOperationGroup(key)) {
+        _startStandaloneEnterAnimation(
+          key,
+          family: TreeAnimationFamily.expandCollapse,
+        );
+      }
+    }
+    for (final key in show) {
+      if (_order.contains(key) &&
+          !_hasOperationGroup(key) &&
+          !_activeBulkGroup!.members.contains(key)) {
+        final st = _standaloneAt(key);
+        if (st != null && st.type == AnimationType.entering) {
+          continue;
+        }
+        _startStandaloneEnterAnimation(
+          key,
+          family: TreeAnimationFamily.expandCollapse,
+        );
+      }
+    }
+  }
+
   /// Expands all nodes in the tree.
   ///
   /// Uses batch operations for better performance with large trees.
@@ -4312,22 +4371,32 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         }
       }
 
-      // Still check children for exiting animations regardless of depth.
-      for (final childId in children) {
-        // Check standalone exiting
-        final animation = _standaloneAt(childId);
-        if (animation != null && animation.type == AnimationType.exiting) {
-          if (!_isPendingDeletion(childId)) {
-            nodesToReverseExit.add(childId);
-          }
-        }
-        // Check operation group exiting (pendingRemoval)
-        final opGroupKey = _operationGroupOf(childId);
-        if (opGroupKey != null) {
-          final opGroup = _opGroupAt(opGroupKey);
-          if (opGroup != null && opGroup.pendingRemoval.contains(childId)) {
+      // Harvest exiting children only when this parent is POST-FLIP
+      // expanded, which by induction from the roots means the children are
+      // post-flip visible: the DFS pushes children only when the parent is
+      // withinDepthLimit, and such a parent is either already expanded or
+      // joins nodesToExpand. A child harvested under a parent that stays
+      // collapsed would be un-pended below, grow back to full extent, and
+      // stay in the visible order (the terminal handlers never remove a
+      // completed enter).
+      final postFlipExpanded = withinDepthLimit || _isExpandedKey(key);
+      if (postFlipExpanded) {
+        for (final childId in children) {
+          // Check standalone exiting
+          final animation = _standaloneAt(childId);
+          if (animation != null && animation.type == AnimationType.exiting) {
             if (!_isPendingDeletion(childId)) {
               nodesToReverseExit.add(childId);
+            }
+          }
+          // Check operation group exiting (pendingRemoval)
+          final opGroupKey = _operationGroupOf(childId);
+          if (opGroupKey != null) {
+            final opGroup = _opGroupAt(opGroupKey);
+            if (opGroup != null && opGroup.pendingRemoval.contains(childId)) {
+              if (!_isPendingDeletion(childId)) {
+                nodesToReverseExit.add(childId);
+              }
             }
           }
         }
@@ -4363,6 +4432,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // rebuild synchronously); inside a batch it forces consumption now,
     // and any subsequent in-batch mutation can re-mark dirty as needed.
     _ensureVisibleOrder();
+    // The harvest gate above makes this exact, not conservative: every
+    // harvested reverse-exit key is post-flip visible.
+    assert(nodesToReverseExit.every(_ancestorsExpandedFast));
     // Start animations for newly visible nodes and reverse exiting animations
     if (animate) {
       // Reverse collapsing operation groups. Snapshot before iterating: a
@@ -4376,15 +4448,69 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       for (final entry in _opGroupSnapshot) {
         final group = entry.value;
         if (group.pendingRemoval.isNotEmpty) {
-          group.pendingRemoval.clear();
-          opGroupReversed = true;
-          // Restore each member's targetExtent to full so the reversal
-          // terminates at the correct natural size instead of at a
-          // captured mid-flight value.
-          for (final member in group.members.entries) {
-            member.value.targetExtent =
-                _fullExtentOf(member.key) ?? _unknownExtent;
+          _partitionByPostFlipVisibility(
+            group.members.keys,
+            _partitionVisibleScratch,
+            _partitionHiddenScratch,
+          );
+          if (_partitionVisibleScratch.isEmpty) {
+            // No member is post-flip visible: leave the group pended and
+            // reversing. Its dismissed handler removes the members via
+            // _ancestorsExpandedFast; un-pending here would grow them
+            // back to full extent under a collapsed chain.
+            continue;
           }
+          opGroupReversed = true;
+          // Capture the curved value BEFORE any write: the displacement
+          // reads it, and the rebase below re-anchors against it.
+          final preReversalCurvedValue = group.curvedValue;
+          // Displace the post-flip HIDDEN members to standalone exits
+          // BEFORE the pendingRemoval.clear() (so disposeIfEmpty stays
+          // hard-blocked by the non-empty pending set during the
+          // detaches) and BEFORE the rebase and reset (the capture inside
+          // _startStandaloneExitAnimation reads the endpoints the rebase
+          // overwrites and the curved value the reset moves).
+          for (final key in _partitionHiddenScratch) {
+            _startStandaloneExitAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
+          }
+          group.pendingRemoval.clear();
+          // Path-1 rebase (expand Path 1) over the SURVIVORS: capture
+          // each member's CURRENT painted extent under the OLD envelope,
+          // re-anchor start to it, target full, and reset the controller
+          // so computeExtent at value 0 reproduces exactly that extent.
+          // Re-targeting alone pops by (full - oldTarget) * curvedValue.
+          //
+          // `?? defaultExtent` is deliberate and REPLACES the
+          // `?? _unknownExtent` that stood here. It is the same fallback
+          // the read path applies, so an unmeasured member's captured
+          // extent is its true painted one; and the sentinel must not be
+          // WRITTEN here, because computeExtent ignores both endpoints
+          // under it and the reset below would drop the row to zero in a
+          // single frame. An INCOMING sentinel is a different thing (the
+          // old collapseAll reversal never touched targetExtent, so one
+          // could arrive here); the capture absorbs it either way,
+          // returning full * preReversalCurvedValue, the member's true
+          // painted extent, so the sentinel leaves the record here.
+          for (final member in group.members.entries) {
+            final measured = _fullExtentOf(member.key);
+            final full = measured ?? defaultExtent;
+            member.value.startExtent = member.value.computeExtent(
+              preReversalCurvedValue,
+              full,
+            );
+            member.value.targetExtent = full;
+            if (measured == null) {
+              // `full` is a GUESS, not a capture: leave setFullExtent
+              // free to re-target it on the first measurement.
+              member.value.targetIsCaptured = false;
+            }
+          }
+          _anim.opGroups.runWithGroupDetached(entry.key, (g) {
+            g.controller.value = 0.0;
+          });
           group.controller.forward();
         }
       }
@@ -4394,30 +4520,37 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // Check if there's a collapsing bulk animation we can reverse
       if (_activeBulkGroup != null &&
           _activeBulkGroup!.pendingRemoval.isNotEmpty) {
-        // Reverse the animation - nodes being removed will now expand
-        // Clear pending removal since we're expanding now
-        _clearBulkPending();
-
-        // Reverse standalone exit animations smoothly
-        for (final key in nodesToReverseExit) {
-          if (!_hasOperationGroup(key)) {
-            _startStandaloneEnterAnimation(
-              key,
-              family: TreeAnimationFamily.expandCollapse,
-            );
-          }
+        // Partition the pending set by post-flip visibility: only a
+        // post-flip-visible member may un-pend and grow back; a member
+        // whose chain stays collapsed is displaced to a standalone exit
+        // so it finishes shrinking away instead of becoming a permanent
+        // hidden-parent row (the exit's finalizer removes it from the
+        // order via _ancestorsExpandedFast).
+        _partitionByPostFlipVisibility(
+          _activeBulkGroup!.pendingRemoval,
+          _partitionVisibleScratch,
+          _partitionHiddenScratch,
+        );
+        for (final key in _partitionHiddenScratch) {
+          // Captures full * bulk.value and removes the member from both
+          // bulk sets.
+          _startStandaloneExitAnimation(
+            key,
+            family: TreeAnimationFamily.expandCollapse,
+          );
         }
-
-        // Add any new nodes to the group (skip if already in an operation
-        // group)
-        for (final key in nodesToShow) {
-          if (_order.contains(key) && !_hasOperationGroup(key)) {
-            _addBulkMember(key);
-          }
+        final anyVisible = _partitionVisibleScratch.isNotEmpty;
+        for (final key in _partitionVisibleScratch) {
+          _removeBulkPending(key);
         }
-
-        // Reverse the controller direction
-        _activeBulkGroup!.controller.forward();
+        // Both sub-cases share one joiner policy: reversing exits and
+        // genuinely new rows ride standalone enters, never the mid-flight
+        // group. The partition only decides whether forward() runs.
+        _routeShownNodesToStandaloneEnters(nodesToReverseExit, nodesToShow);
+        if (anyVisible) {
+          // Reverse the controller direction
+          _activeBulkGroup!.controller.forward();
+        }
         _bumpBulkGen();
       } else if (_activeBulkGroup != null &&
           _activeBulkGroup!.members.isNotEmpty) {
@@ -4426,33 +4559,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // members continue from their current extent. Creating a fresh
         // group here would dispose the in-flight one and pop every
         // half-expanded member to full extent in a single frame.
-        //
-        // Genuinely NEW nodes must NOT join the mid-flight group (they
-        // would pop from 0 to `full * currentValue` on join); route them
-        // through standalone enter animations instead, the same policy
-        // the reverse branch applies to nodesToReverseExit.
-        for (final key in nodesToReverseExit) {
-          if (!_hasOperationGroup(key)) {
-            _startStandaloneEnterAnimation(
-              key,
-              family: TreeAnimationFamily.expandCollapse,
-            );
-          }
-        }
-        for (final key in nodesToShow) {
-          if (_order.contains(key) &&
-              !_hasOperationGroup(key) &&
-              !_activeBulkGroup!.members.contains(key)) {
-            final st = _standaloneAt(key);
-            if (st != null && st.type == AnimationType.entering) {
-              continue;
-            }
-            _startStandaloneEnterAnimation(
-              key,
-              family: TreeAnimationFamily.expandCollapse,
-            );
-          }
-        }
+        _routeShownNodesToStandaloneEnters(nodesToReverseExit, nodesToShow);
         _bumpBulkGen();
       } else {
         // Create fresh group via the BulkAnimator (auto-disposes any
@@ -4581,6 +4688,12 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _collapseAllInRegistry(maxDepth),
       wasExpanded: true,
     );
+    // The harvest above is depth-blind; the flips just applied are not.
+    // Keep only the rows that actually became invisible, so every branch
+    // below (including the non-animated removal) is a no-op for rows a
+    // depth limit left visible. The ancestors-expanded cache is post-flip
+    // here: _collapseAllInRegistry rebuilds it itself.
+    nodesToHide.retainWhere((k) => !_ancestorsExpandedFast(k));
     _structureGeneration++;
     if (animate) {
       // Reverse expanding operation groups. Snapshot before iterating: a
@@ -4594,18 +4707,70 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       for (final entry in _opGroupSnapshot) {
         final group = entry.value;
         if (group.pendingRemoval.isEmpty) {
-          // Group is expanding: reverse it
-          for (final nodeId in group.members.keys) {
+          _partitionByPostFlipVisibility(
+            group.members.keys,
+            _partitionVisibleScratch,
+            _partitionHiddenScratch,
+          );
+          if (_partitionHiddenScratch.isEmpty) {
+            // Nothing under this group became invisible: the group is
+            // already animating in the right direction and this call has
+            // nothing to say about it. Tearing it apart into per-member
+            // standalone enters would dispose a live group and produce a
+            // visible timing discontinuity for a call that flipped
+            // nothing. No re-pend, no rebase, no reset, no reverse().
+            continue;
+          }
+          // Capture the curved value BEFORE any write; the displacement
+          // and the rebase both read it.
+          final preReversalCurvedValue = group.curvedValue;
+          // Re-pend FIRST, so pendingRemoval is non-empty before any
+          // detach and disposeIfEmpty stays hard-blocked during the
+          // displacement below.
+          for (final nodeId in _partitionHiddenScratch) {
             if (!_isPendingDeletion(nodeId)) {
               group.pendingRemoval.add(nodeId);
               opGroupReversed = true;
             }
           }
-          // Normalize startExtent to 0 so the reversal terminates at
-          // zero instead of at a captured mid-flight start value.
-          for (final member in group.members.entries) {
-            member.value.startExtent = 0.0;
+          // Displace the post-flip VISIBLE members to standalone enters,
+          // so those rows finish growing on their own timeline instead of
+          // being dragged to zero by the group's reverse(). Must precede
+          // the rebase and the reset: the capture inside
+          // _startStandaloneEnterAnimation reads the endpoints the rebase
+          // overwrites and the curved value the reset moves.
+          for (final key in _partitionVisibleScratch) {
+            _startStandaloneEnterAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
           }
+          // Path-1 mirror rebase (collapse Path 1) over the SURVIVORS:
+          // capture each member's CURRENT painted extent under the OLD
+          // envelope, make it the target, re-anchor start to zero, and
+          // reset the controller so computeExtent at value 1 reproduces
+          // exactly that extent. Normalizing startExtent alone pops by
+          // startExtent * (1 - cv).
+          for (final member in group.members.entries) {
+            // COMPUTE FIRST, into a local, BEFORE either write:
+            // computeExtent READS startExtent, so zeroing it first would
+            // capture lerp(0, oldTarget, cv) instead of the pre-reversal
+            // painted extent. No targetIsCaptured write on this side:
+            // targetExtent IS a genuine capture here, which is what the
+            // flag exists to protect. This write is also what clears an
+            // incoming sentinel out of the record before the reset to 1.0
+            // could read it (a surviving sentinel would paint the whole
+            // default row for a frame).
+            final currentExtent = member.value.computeExtent(
+              preReversalCurvedValue,
+              _fullExtentOf(member.key) ?? defaultExtent,
+            );
+            member.value.startExtent = 0.0;
+            member.value.targetExtent = currentExtent;
+          }
+          _anim.opGroups.runWithGroupDetached(entry.key, (g) {
+            g.controller.value = 1.0;
+          });
           group.controller.reverse();
         }
       }
@@ -4616,14 +4781,41 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       if (_activeBulkGroup != null &&
           _activeBulkGroup!.members.isNotEmpty &&
           _activeBulkGroup!.pendingRemoval.isEmpty) {
-        // Mark all members for removal when animation completes at 0
-        for (final key in _activeBulkGroup!.members) {
-          if (!_isPendingDeletion(key)) {
-            _addBulkPending(key);
+        // Partition the members by post-flip visibility: a member the
+        // depth limit left visible must not be dragged to zero and popped
+        // back by the group's reverse().
+        _partitionByPostFlipVisibility(
+          _activeBulkGroup!.members,
+          _partitionVisibleScratch,
+          _partitionHiddenScratch,
+        );
+        if (_partitionHiddenScratch.isNotEmpty) {
+          // Mark the hidden members for removal when the animation
+          // completes at 0.
+          for (final key in _partitionHiddenScratch) {
+            if (!_isPendingDeletion(key)) {
+              _addBulkPending(key);
+            }
           }
+          // Displace still-visible members to standalone enters so they
+          // finish growing on their own timeline. Captures full *
+          // bulk.value and removes the member from the group.
+          for (final key in _partitionVisibleScratch) {
+            _startStandaloneEnterAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
+          }
+          // Reverse the controller direction
+          _activeBulkGroup!.controller.reverse();
+          _bumpBulkGen();
         }
+        // else: nothing under the group became invisible; leave it
+        // expanding untouched.
 
-        // Handle additional nodes not in any group
+        // Handle additional nodes not in any group. Runs in both cases:
+        // it serves nodes that are NOT bulk members, and is a no-op once
+        // nodesToHide has been filtered to the post-flip-hidden rows.
         for (final key in nodesToHide) {
           if (_isPendingDeletion(key)) continue;
           if (!_activeBulkGroup!.members.contains(key) &&
@@ -4634,10 +4826,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             );
           }
         }
-
-        // Reverse the controller direction
-        _activeBulkGroup!.controller.reverse();
-        _bumpBulkGen();
       } else if (_activeBulkGroup != null &&
           _activeBulkGroup!.pendingRemoval.isNotEmpty) {
         // Continuation: a bulk collapse is already mid-flight. Keep the

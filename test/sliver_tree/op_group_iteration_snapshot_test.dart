@@ -60,6 +60,14 @@ void main() {
     // → status listener removes the group from _groups, mutating the
     // map. Without the snapshot, this would throw
     // ConcurrentModificationError on the iteration.
+    //
+    // COVERAGE NOTE (L27): the reversal now resets each group's
+    // controller to the opposite end before forward(), so forward()
+    // itself no longer fires synchronously; the synchronous status event
+    // moved to the `controller.value =` write, which runs inside
+    // runWithGroupDetached where the detached group's handler
+    // early-returns. This test keeps passing but can no longer fail
+    // through its original trigger.
     expect(
       () => controller.expandAll(animate: true),
       returnsNormally,
@@ -101,6 +109,13 @@ void main() {
     // simulationDuration=0 → synchronously fires `dismissed` status
     // → status listener removes the group, mutating the map. Without
     // the snapshot, this throws ConcurrentModificationError.
+    //
+    // COVERAGE NOTE (L27): the reversal now resets each group's
+    // controller to the opposite end before reverse(), so reverse()
+    // itself no longer fires synchronously; the synchronous status event
+    // moved to the `controller.value =` write inside runWithGroupDetached,
+    // where the detached group's handler early-returns. This test keeps
+    // passing but can no longer fail through its original trigger.
     expect(
       () => controller.collapseAll(animate: true),
       returnsNormally,

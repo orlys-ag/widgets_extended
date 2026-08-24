@@ -41,13 +41,13 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The plan creates 21 new test files.
+not be worked in parallel. The plan creates 20 new test files.
 
-NEW means not yet in `git ls-files`. 1 of those 21 already exist on
+NEW means not yet in `git ls-files`. 1 of those 20 already exist on
 disk, written for items that have landed but are not committed:
-`audit_repro_m5_test.dart`.
+`audit_repro_h4_test.dart`.
 
-Landed so far: 12 implemented (H6, M1, M2, M3, M4, M5, M9, M14, M16, M21, M22, M23); 1 partially implemented
+Landed so far: 14 implemented (H4, H6, L27, M1, M2, M3, M4, M5, M9, M14, M16, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -85,8 +85,8 @@ Existing tests touched: `adjacent_collapsed_exit_ghost_test.dart`, `animated_mov
 
 ### Cluster 2: H4, L27, M1, M2, M5
 
-- **H4** (M) Depth-limited `expandAll` / `collapseAll` ignore post-flip visibility
-- **L27** (M) Bulk reversals re-target op-group envelopes without the Path-1 rebase
+- **H4** (M) Depth-limited `expandAll` / `collapseAll` ignore post-flip visibility  **[DONE]**
+- **L27** (M) Bulk reversals re-target op-group envelopes without the Path-1 rebase  **[DONE]**
 - **M1** (S) Re-insert of a mid-exit node under a collapsed parent leaves a permanent row  **[DONE]**
 - **M2** (M) Re-inserting a mid-exit node keeps its old subtree  **[DONE]**
 - **M5** (L) Standalone animations spawned by expand/collapse are timed by `enterExit`  **[DONE]**
@@ -99,9 +99,9 @@ M5).
 with H4 and L27).
 - Chain 15, the op-group reversal bodies (H4 with L27), ONE commit.  **ONE COMMIT**
 
-New tests: `audit_repro_h4_test.dart`, `audit_repro_m5_test.dart`.
+New tests: `audit_repro_h4_test.dart`.
 
-Existing tests touched: `animation_notify_coalescing_test.dart`, `animation_style_flow_test.dart`, `animation_style_test.dart`, `animation_transitions_test.dart`, `audit_repro_m2_test.dart`, `bulk_dispose_generation_test.dart`, `bulk_reentry_continuation_test.dart`, `child_count_invalidation_test.dart`, `collapsed_interior_fallback_test.dart`, `concurrent_extents_test.dart`, `dismissed_handler_mixed_category_test.dart`, `drop_zone_resolver_test.dart`, `expand_all_interior_expanded_test.dart`, `expand_collapse_all_stale_order_test.dart`, `expand_collapse_staging_gate_test.dart`, `findrow_bounded_scan_oracle_test.dart`, `ghost_prune_flip_only_test.dart`, `imperative_remove_with_mirror_test.dart`, `independent_timelines_test.dart`, `live_index_oracle_fuzz_test.dart`, `op_group_iteration_snapshot_test.dart`, `purge_cache_audit_test.dart`, `purge_subtree_visible_size_test.dart`, `readd_pending_deletion_test.dart`, `remove_flushes_visible_order_test.dart`, `reparent_during_exit_test.dart`, `section_header_item_count_test.dart`, `skip_repro_test.dart`, `tree_controller_test.dart`, `tree_expansion_listener_test.dart`, `tree_sync_controller_test.dart`, `unmeasured_exit_extent_test.dart`, `visible_subtree_size_invariant_fuzz_test.dart`.
+Existing tests touched: `animation_notify_coalescing_test.dart`, `animation_style_flow_test.dart`, `animation_style_test.dart`, `animation_transitions_test.dart`, `audit_repro_m2_test.dart`, `audit_repro_m5_test.dart`, `bulk_dispose_generation_test.dart`, `bulk_reentry_continuation_test.dart`, `child_count_invalidation_test.dart`, `collapsed_interior_fallback_test.dart`, `concurrent_extents_test.dart`, `dismissed_handler_mixed_category_test.dart`, `drop_zone_resolver_test.dart`, `expand_all_interior_expanded_test.dart`, `expand_collapse_all_stale_order_test.dart`, `expand_collapse_staging_gate_test.dart`, `findrow_bounded_scan_oracle_test.dart`, `ghost_prune_flip_only_test.dart`, `imperative_remove_with_mirror_test.dart`, `independent_timelines_test.dart`, `live_index_oracle_fuzz_test.dart`, `op_group_iteration_snapshot_test.dart`, `purge_cache_audit_test.dart`, `purge_subtree_visible_size_test.dart`, `readd_pending_deletion_test.dart`, `remove_flushes_visible_order_test.dart`, `reparent_during_exit_test.dart`, `section_header_item_count_test.dart`, `skip_repro_test.dart`, `tree_controller_test.dart`, `tree_expansion_listener_test.dart`, `tree_sync_controller_test.dart`, `unmeasured_exit_extent_test.dart`, `visible_subtree_size_invariant_fuzz_test.dart`.
 
 ### Cluster 3: H6, L26, M14
 
