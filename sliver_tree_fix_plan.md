@@ -11935,6 +11935,8 @@ direct `moveNode`, and the converse case (`reorderSlide: zero`,
 
 ### L13. Make every scroll the orchestrator starts single-flight, both directions
 
+**Status.** IMPLEMENTED 2026-08-24. New `scroll_single_flight_test.dart`, three cases, all red on unfixed code (true against false at each): a plain scroll now cancels a live animated session, registers a resource-less session of its own, and reports `!session.cancelled`; the animated path and `dispose` share the extracted `_cancelActiveScroll`; `_ActiveScroll` gained the nullable pair and `plain()` constructor with the retitled doc; both single-flight docs widened. As second lander after H3, the ordering rule is honored in spirit with one recorded deviation: the install sits where this block places it (before the expansion wait, so the whole path is covered), guarded by a key-EXISTENCE check rather than sitting below (a0), because (a0)'s visibility test would reject known-but-hidden keys the expansion exists to reveal; an unknown key still cannot cancel a live scroll, and H3's guard case goes red when the existence guard is removed (demonstrated). The block's post-wait cancelled check landed and was probed INERT in case 3, whose false comes from the terminal `!session.cancelled` either way; the check's remaining contribution, preventing a stray jump between the wait and the return, is recorded as untested. Cases that cancel mid-expansion settle before ending (ticker hygiene). Five demo states shown red individually. Risk suites 42 green; full suite 1145 passed, 4 skipped; analyze at the 48-issue baseline.
+
 **Finding.** The plain path
 (`lib/sliver_tree/_scroll_orchestrator.dart:236-276`) never reads
 `_activeScroll` (:54); only `_animatedConcurrentScroll` (:397-401) and

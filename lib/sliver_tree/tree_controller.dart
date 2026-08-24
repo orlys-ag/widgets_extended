@@ -2110,9 +2110,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// issued during an in-flight animation lands on the current animated
   /// geometry (plus the post-frame settle snap), not the settled one.
   ///
-  /// Animated-mode scrolls are single-flight: starting one while another
-  /// is still in flight cancels the earlier scroll (its future resolves
-  /// false), the newer target wins.
+  /// Scrolls are single-flight, in both directions: starting one while
+  /// another is still in flight cancels the earlier scroll (its future
+  /// resolves false), the newer target wins, whether either scroll is
+  /// plain or animated-mode.
   ///
   /// Returns true if a scroll was issued, false if [key] could not be
   /// resolved, [scrollController] has no attached position, or the scroll
