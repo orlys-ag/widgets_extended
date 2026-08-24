@@ -1161,6 +1161,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     return getDepth(key) * indentWidth;
   }
 
+  /// Nid-keyed [getIndent]: no [TKey] hash. Caller must guarantee [nid]
+  /// is live.
+  double getIndentNid(int nid) => depthOfNid(nid) * indentWidth;
+
   /// Whether the given node is expanded.
   bool isExpanded(TKey key) {
     return _isExpandedKey(key);
@@ -1588,6 +1592,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// Otherwise returns [fullExtent].
   double getAnimatedExtent(TKey key, double fullExtent) =>
       _anim.getAnimatedExtent(key, fullExtent);
+
+  /// Nid-keyed [getAnimatedExtent] against a caller-supplied full extent;
+  /// see `AnimationCoordinator.getAnimatedExtentNid`.
+  double getAnimatedExtentNid(int nid, double fullExtent) =>
+      _anim.getAnimatedExtentNid(nid, fullExtent);
 
   /// Starts a FLIP slide animation for every visible node whose position in
   /// scroll-space changed between [priorOffsets] (pre-mutation) and

@@ -41,30 +41,31 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The plan creates 20 new test files.
+not be worked in parallel. The plan creates 19 new test files.
 
-NEW means not yet in `git ls-files`. 1 of those 20 already exist on
+NEW means not yet in `git ls-files`. 4 of those 19 already exist on
 disk, written for items that have landed but are not committed:
-`audit_repro_h4_test.dart`.
+`audit_repro_h2_test.dart`, `bulk_collapse_admission_test.dart`,
+`bulk_fast_path_stability_test.dart`, `bulk_paint_extent_test.dart`.
 
-Landed so far: 14 implemented (H4, H6, L27, M1, M2, M3, M4, M5, M9, M14, M16, M21, M22, M23); 1 partially implemented
-(L26). Everything else is open.
+Landed so far: 18 implemented (H2, H4, H6, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M14, M16, M21, M22, M23); 2 partially implemented
+(L25, L26). Everything else is open.
 
 ## Coupled clusters
 
 ### Cluster 1: H1, H2, H3, L6, L7, L13, L24, L25, M6, M7, M8, M10, M20
 
 - **H1** (L) Scroll position is never corrected for estimate vs measured row height
-- **H2** (M) Admission starves the viewport below a row taller than the cache extent
+- **H2** (M) Admission starves the viewport below a row taller than the cache extent  **[DONE]**
 - **H3** (M) `animateScrollToKey` after a mutation clamps to the pre-layout `maxScrollExtent`
 - **L6** (M) `applyPaintTransform` has no branch for anchor-based exit ghosts
 - **L7** (S) Pass A's edge-ghost skip must ask the FLIP-only question
 - **L13** (S) Make every scroll the orchestrator starts single-flight, both directions
 - **L24** (M) Pass A.7 repaints an exit-ghost anchor a second time per frame
-- **L25** (M) Minor render-layer and buffer performance items
-- **M6** (S) The bulk-only fast path falls off on every frame
-- **M7** (S) Paint-extent loop reads unwritten per-nid slots on bulk frames
-- **M8** (L) Bulk `collapseAll` never admits rows after the collapsing subtree
+- **L25** (M) Minor render-layer and buffer performance items  **[PARTLY DONE]**
+- **M6** (S) The bulk-only fast path falls off on every frame  **[DONE]**
+- **M7** (S) Paint-extent loop reads unwritten per-nid slots on bulk frames  **[DONE]**
+- **M8** (L) Bulk `collapseAll` never admits rows after the collapsing subtree  **[DONE]**
 - **M10** (M) Exit-ghost lifecycle reads the anchor's composed delta
 - **M20** (M) `animateScrollToKey` ignores the sticky band
 
@@ -99,9 +100,7 @@ M5).
 with H4 and L27).
 - Chain 15, the op-group reversal bodies (H4 with L27), ONE commit.  **ONE COMMIT**
 
-New tests: `audit_repro_h4_test.dart`.
-
-Existing tests touched: `animation_notify_coalescing_test.dart`, `animation_style_flow_test.dart`, `animation_style_test.dart`, `animation_transitions_test.dart`, `audit_repro_m2_test.dart`, `audit_repro_m5_test.dart`, `bulk_dispose_generation_test.dart`, `bulk_reentry_continuation_test.dart`, `child_count_invalidation_test.dart`, `collapsed_interior_fallback_test.dart`, `concurrent_extents_test.dart`, `dismissed_handler_mixed_category_test.dart`, `drop_zone_resolver_test.dart`, `expand_all_interior_expanded_test.dart`, `expand_collapse_all_stale_order_test.dart`, `expand_collapse_staging_gate_test.dart`, `findrow_bounded_scan_oracle_test.dart`, `ghost_prune_flip_only_test.dart`, `imperative_remove_with_mirror_test.dart`, `independent_timelines_test.dart`, `live_index_oracle_fuzz_test.dart`, `op_group_iteration_snapshot_test.dart`, `purge_cache_audit_test.dart`, `purge_subtree_visible_size_test.dart`, `readd_pending_deletion_test.dart`, `remove_flushes_visible_order_test.dart`, `reparent_during_exit_test.dart`, `section_header_item_count_test.dart`, `skip_repro_test.dart`, `tree_controller_test.dart`, `tree_expansion_listener_test.dart`, `tree_sync_controller_test.dart`, `unmeasured_exit_extent_test.dart`, `visible_subtree_size_invariant_fuzz_test.dart`.
+Existing tests touched: `animation_notify_coalescing_test.dart`, `animation_style_flow_test.dart`, `animation_style_test.dart`, `animation_transitions_test.dart`, `audit_repro_h4_test.dart`, `audit_repro_m2_test.dart`, `audit_repro_m5_test.dart`, `bulk_dispose_generation_test.dart`, `bulk_reentry_continuation_test.dart`, `child_count_invalidation_test.dart`, `collapsed_interior_fallback_test.dart`, `concurrent_extents_test.dart`, `dismissed_handler_mixed_category_test.dart`, `drop_zone_resolver_test.dart`, `expand_all_interior_expanded_test.dart`, `expand_collapse_all_stale_order_test.dart`, `expand_collapse_staging_gate_test.dart`, `findrow_bounded_scan_oracle_test.dart`, `ghost_prune_flip_only_test.dart`, `imperative_remove_with_mirror_test.dart`, `independent_timelines_test.dart`, `live_index_oracle_fuzz_test.dart`, `op_group_iteration_snapshot_test.dart`, `purge_cache_audit_test.dart`, `purge_subtree_visible_size_test.dart`, `readd_pending_deletion_test.dart`, `remove_flushes_visible_order_test.dart`, `reparent_during_exit_test.dart`, `section_header_item_count_test.dart`, `skip_repro_test.dart`, `tree_controller_test.dart`, `tree_expansion_listener_test.dart`, `tree_sync_controller_test.dart`, `unmeasured_exit_extent_test.dart`, `visible_subtree_size_invariant_fuzz_test.dart`.
 
 ### Cluster 3: H6, L26, M14
 

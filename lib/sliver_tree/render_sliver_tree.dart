@@ -274,6 +274,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// repeatedly reading it from the controller during inner loops.
   double _bulkValueCached = 0.0;
 
+  /// True when the last [_rebuildBulkCumulatives] pass saw a NON-member
+  /// row whose full extent measures exactly 0.0. The collapse admission
+  /// phase's survivor hop finds the next non-member by looking for the
+  /// first index where [_stableCumulative] grows, which a zero-extent
+  /// survivor never makes it do, so when this flag is set that phase falls
+  /// back to a linear scan. Valid iff [_bulkCumulativesValid].
+  bool _bulkHasZeroExtentNonMember = false;
+
   /// Whether the previous frame ran the bulk-only fast path. Used to
   /// force a full Pass 1 walk on the frame we exit fast path, because
   /// during the fast path only cache-region nid slots are fresh.
@@ -302,6 +310,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     List<TKey> visibleNodes,
     BulkAnimationData<TKey> bulkData,
   ) {
+    debugBulkCumulativeRebuildCount++;
     final n = visibleNodes.length;
     if (_stableCumulative.length < n + 1) {
       final newLen = math.max(
@@ -313,6 +322,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     }
     double sStable = 0.0;
     double sBulkFull = 0.0;
+    bool hasZeroExtentNonMember = false;
     _stableCumulative[0] = 0.0;
     _bulkFullCumulative[0] = 0.0;
     // Read nids straight from the order buffer to skip the
@@ -328,12 +338,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // Non-bulk nodes are stable during bulk-only frames (gated by
         // !hasOpGroupAnimations at entry), so their full extent equals
         // their current extent.
+        if (full == 0.0) {
+          hasZeroExtentNonMember = true;
+        }
         sStable += full;
       }
       _stableCumulative[i + 1] = sStable;
       _bulkFullCumulative[i + 1] = sBulkFull;
     }
     _bulkCumulativesCount = n;
+    _bulkHasZeroExtentNonMember = hasZeroExtentNonMember;
     _bulkCumulativesValid = true;
   }
 
@@ -430,55 +444,40 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     return null;
   }
 
-  /// Admits cache-region members under the bulk-only fast path.
+  /// Flags indexed by nid: non-zero iff the node was ADMITTED this layout,
+  /// which by construction also means its [_nodeOffsetsByNid] and
+  /// [_nodeExtentsByNid] slots were written this layout. Admission sets the
+  /// flag, appends the nid to [_writtenCacheRegionNids] and writes both
+  /// slots at ONE site (the `onCacheRegionAdmit` callback), so the three
+  /// cannot disagree. Cleared sparsely at the start of Pass 2 each layout
+  /// (via [_writtenCacheRegionNids]).
   ///
-  /// Invoked from Pass 2 when [_bulkCumulativesValid] is true. Pulls per-row
-  /// offset/extent from the precomputed cumulatives and syncs them into the
-  /// per-nid slots so downstream code (Pass 2 measurement, paint extent,
-  /// paint, hit-test) reads correct values without a branch per access.
-  /// Anchors the admission band to full-space (`fullCacheEnd`) so a low
-  /// bulk progress value doesn't admit thousands of sub-pixel rows on
-  /// frame 1 of `expandAll`.
-  ///
-  /// The caller owns the outer-loop dispatch; this method performs the
-  /// per-row writes and sparse-track buffer maintenance for the admitted
-  /// range.
-  int _admitBulkFastPath({
-    required int cacheStartIndex,
-    required List<TKey> visibleNodes,
-    required double fullCacheEnd,
-  }) {
-    int cacheEndIndex = cacheStartIndex;
-    final orderNids = controller.orderNidsView;
-    for (int i = cacheStartIndex; i < visibleNodes.length; i++) {
-      final nid = orderNids[i];
-      final offset = _offsetAtVisibleIndex(i);
-      _nodeOffsetsByNid[nid] = offset;
-      _nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i + 1) - offset;
-      final fullOffset = _stableCumulative[i] + _bulkFullCumulative[i];
-      if (fullOffset >= fullCacheEnd) break;
-      _inCacheRegionByNid[nid] = 1;
-      _writeCacheRegionNid(nid);
-      cacheEndIndex = i + 1;
-    }
-    return cacheEndIndex;
-  }
-
-  /// Flags indexed by nid: non-zero iff the node lies in the current cache
-  /// region. Cleared sparsely at the start of Pass 2 each layout (via
-  /// [_writtenCacheRegionNids]), then set for every cache-region member.
+  /// This is the only membership and freshness test in the layout. The
+  /// admission range `[cacheStartIndex, cacheEndIndex)` is an iteration
+  /// bound: it holds rows that were iterated but not admitted, and under a
+  /// bulk collapse whole spans that were never visited.
   Uint8List _inCacheRegionByNid = Uint8List(0);
 
-  /// Nids written into [_inCacheRegionByNid] last frame. Drives the sparse
-  /// clear at the start of each Pass 2, zeroing only the slots actually
-  /// dirtied avoids an O(nidCapacity) memset on every layout.
+  /// Nids written into [_inCacheRegionByNid], in ascending visible-index
+  /// order. Two jobs. Across frames it drives the sparse clear at the start
+  /// of each Pass 2, zeroing only the slots actually dirtied avoids an
+  /// O(nidCapacity) memset on every layout. Within the frame it is the ONLY
+  /// enumeration of the admitted rows: the create loop, the measurement
+  /// loop and the post-recompute parentData rewrite all iterate it rather
+  /// than `[cacheStartIndex, cacheEndIndex)`, which after the bulk
+  /// collapse's prefix hop can be orders of magnitude wider than the
+  /// admitted set (200k rows in the bound, 35 admitted).
+  ///
+  /// Ascending order is load-bearing, not incidental: the measurement loop
+  /// takes the first tracked entry whose extent changed as its
+  /// lowest-index changed row, which is what lets it recover a visible
+  /// index once per layout instead of once per row.
   ///
   /// Mirrors the pattern used by `_writtenStickyNids` in
   /// [StickyHeaderComputer]. Backed by an [Int32List] with explicit length
   /// tracking ([_writtenCacheRegionNidsLen]) so per-frame appends don't box
-  /// ints. Capacity is bounded by the cache region size (about one viewport of
-  /// rows),
-  /// grown by doubling when exceeded.
+  /// ints. Capacity is bounded by the cache region size (about one viewport
+  /// of rows), grown by doubling when exceeded.
   Int32List _writtenCacheRegionNids = Int32List(64);
   int _writtenCacheRegionNidsLen = 0;
 
@@ -486,6 +485,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// verify the sparse-clear bound is `O(viewport)`, not `O(nidCapacity)`.
   @visibleForTesting
   int get debugWrittenCacheRegionNidCount => _writtenCacheRegionNidsLen;
+
+  /// Non-bulk admit callback: the per-nid slots were written by Pass 1 on
+  /// this arm (or carried forward under `offsetsAuthoritative`), so
+  /// admission only appends the sparse track. The visible index is unused.
+  void _admitNonBulk(int nid, int visibleIndex) {
+    _writeCacheRegionNid(nid);
+  }
 
   /// Appends [nid] to [_writtenCacheRegionNids], doubling capacity when full.
   void _writeCacheRegionNid(int nid) {
@@ -527,6 +533,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// In-flow loop iterations of the last [visitChildrenForSemantics]
   /// call. Bounded by the mounted-children count, not the visible count.
   int debugLastSemanticsIterationCount = 0;
+
+  /// Lifetime count of `_rebuildBulkCumulatives` calls. Perf oracle for the
+  /// bulk-only fast path: a bulk animation whose rows do not change height
+  /// must build the cumulatives ONCE, not once per frame.
+  @visibleForTesting
+  int debugBulkCumulativeRebuildCount = 0;
+
+  /// Force-created sticky rows whose written `parentData.layoutOffset`
+  /// disagreed with the frame's structural authority
+  /// ([_structuralOffsetAt]) at the moment of the write. MUST be 0 on
+  /// every layout: the sticky block writes that authority, and this
+  /// write is the one place in `performLayout` that used to read a raw
+  /// `_nodeOffsetsByNid` slot for a nid the frame never wrote. Reset at
+  /// the top of `performLayout`.
+  @visibleForTesting
+  int debugStickyOffsetAuthorityMismatchCount = 0;
 
   /// Lifetime count of [performLayout] invocations. Perf oracle for
   /// slide-only paint routing: a pure FLIP slide must lay out only on its
@@ -1763,6 +1785,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// bounded window scan (false). Untouched by no-delta fast-path calls.
   bool debugLastFindRowUsedFullScan = false;
 
+  /// Debug-only: whether the last layout's cache-region admission ran on
+  /// the BULK arm, deciding from a [BulkAdmissionView] over the
+  /// precomputed cumulatives (true), or on the non-bulk arm, deciding from
+  /// the per-nid offset and extent slots (false). Both arms run
+  /// [LayoutAdmissionPolicy.admit]; this pins which one a test exercised.
+  bool debugLastLayoutUsedBulkAdmission = false;
+
   /// Debug-only: a row that paint SKIPS for want of a render box must not
   /// be one the user can see.
   ///
@@ -2309,12 +2338,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
   /// Bulk fast-path escape hatch shared by Pass 2's extent-change handler
   /// and the sticky force-create path. Under [_bulkCumulativesValid] the
-  /// per-nid extent slots are fresh ONLY for cache-region nids, any
-  /// full-order offset recompute must first materialize the stale slots
-  /// (from [fromIndex] onward, skipping the cache region whose slots are
-  /// already fresh) from the controller's current animated extents, then
-  /// drop the fast path for this frame. The next frame rebuilds the
-  /// cumulatives fresh via [_rebuildBulkCumulatives].
+  /// per-nid extent slots are fresh ONLY for nids admission flagged this
+  /// layout, any full-order offset recompute must first materialize the
+  /// stale slots (from [fromIndex] onward, skipping the flagged nids) from
+  /// the controller's current animated extents, then drop the fast path
+  /// for this frame. The next frame rebuilds the cumulatives fresh via
+  /// [_rebuildBulkCumulatives].
+  ///
+  /// The skip asks [_inCacheRegionByNid] per nid rather than testing
+  /// membership of `[cacheStartIndex, cacheEndIndex)`. Under a bulk
+  /// collapse the two differ: the post view's prefix hop leaves unvisited
+  /// members INSIDE that range holding their pre-collapse extents, and a
+  /// range-keyed skip would leave them stale and overstate
+  /// `geometry.scrollExtent` by the whole collapsed remainder.
   ///
   /// Nodes measured earlier this frame are safe to overwrite:
   /// [_layoutNodeChild] stores measurements through
@@ -2322,14 +2358,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// the measured value for them.
   void _materializeBulkStaleExtents({
     required int fromIndex,
-    required int cacheStartIndex,
-    required int cacheEndIndex,
     required int visibleCount,
   }) {
     final orderNids = controller.orderNidsView;
     for (int i = fromIndex; i < visibleCount; i++) {
-      if (i >= cacheStartIndex && i < cacheEndIndex) continue;
       final nid = orderNids[i];
+      if (_inCacheRegionByNid[nid] != 0) continue;
       _nodeExtentsByNid[nid] = controller.getCurrentExtentNid(nid);
     }
     _bulkCumulativesValid = false;
@@ -2380,11 +2414,15 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// Uses a consistent width-tight, height-flexible constraint shape so
   /// rows can change height at the same width. Flutter's built-in
   /// `RenderBox.layout` short-circuit handles the unchanged case efficiently.
-  double? _layoutNodeChild(TKey nodeId, double crossAxisExtent) {
+  ({double extent, RenderBox child})? _layoutNodeChild(
+    TKey nodeId,
+    int nid,
+    double crossAxisExtent,
+  ) {
     final child = getChildForNode(nodeId);
     if (child == null) return null;
 
-    final indent = controller.getIndent(nodeId);
+    final indent = controller.getIndentNid(nid);
     final w = math.max(0.0, crossAxisExtent - indent);
     final childConstraints = BoxConstraints(
       minWidth: w,
@@ -2399,8 +2437,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     child.layout(childConstraints, parentUsesSize: true);
     controller.setFullExtent(nodeId, child.size.height);
 
-    final actualAnimatedExtent = controller.getAnimatedExtent(
-      nodeId,
+    final actualAnimatedExtent = controller.getAnimatedExtentNid(
+      nid,
       child.size.height,
     );
 
@@ -2409,7 +2447,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     parentData.indent = indent;
     parentData.visibleExtent = actualAnimatedExtent;
 
-    return actualAnimatedExtent;
+    return (extent: actualAnimatedExtent, child: child);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -2421,6 +2459,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     debugPerformLayoutCount++;
     debugLastParentDataRefreshIterationCount = 0;
     debugLastParentDataCumulativeBuilds = 0;
+    debugStickyOffsetAuthorityMismatchCount = 0;
     final constraints = this.constraints;
     // This sliver's layout and paint code assume a vertical-forward axis.
     // Child constraints, offset math, sticky pinning and hit-testing all use
@@ -2720,8 +2759,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // PASS 2: Create children for nodes in cache region
     // ────────────────────────────────────────────────────────────────────────
 
-    // Clear prior-layout cache-region flags in one memset-style pass, then
-    // mark the slice [cacheStartIndex, cacheEndIndex) as this frame's members.
+    // Clear prior-layout cache-region flags in one memset-style pass.
+    // Admission then flags this frame's members one at a time as it admits
+    // them; there is no slice of members to mark, the admitted set is
+    // sparse inside [cacheStartIndex, cacheEndIndex).
     // Sparse clear of last frame's writes. Iterate the nids we wrote
     // last frame instead of memset'ing the whole nid-indexed array, the
     // array's length tracks nidCapacity, which grows monotonically and
@@ -2735,68 +2776,93 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     _writtenCacheRegionNidsLen = 0;
     final cacheStartIndex = _findFirstVisibleIndex(effectiveCacheStart);
 
-    // In bulk-only mode, break on the row's *steady-state* (full-space)
-    // position rather than its animated position. At low bulkValue, animated
-    // rows have sub-pixel extents, using animated offsets would admit
-    // thousands of invisible rows into the cache region on frame 1 of
-    // expandAll, causing a mass-mount hitch. Anchoring the band to full-space
-    // caps admission at the count we'd mount at bulkValue=1.
-    final double fullCacheEnd;
-    if (_bulkCumulativesValid && cacheStartIndex < visibleNodes.length) {
-      final fullStart =
-          _stableCumulative[cacheStartIndex] +
-          _bulkFullCumulative[cacheStartIndex];
-      fullCacheEnd = fullStart + remainingCacheExtent + slideOverreach * 2.0;
-    } else {
-      fullCacheEnd = 0.0;
-    }
-
     // Dispatch the per-iteration `if (_bulkCumulativesValid)` branch out of
     // the loop body, it's invariant across one loop run, so a single
-    // up-front decision replaces N per-iteration branches.
+    // up-front decision replaces N per-iteration branches. Here it picks
+    // the admit CALLBACK and, on the bulk arm, builds the
+    // [BulkAdmissionView]; the rule itself is ONE implementation serving
+    // both arms, in [LayoutAdmissionPolicy.admit].
     //
-    // Bulk fast path: scalar offset = _stableCumulative[i] + value *
-    // _bulkFullCumulative[i]. Inline because the loop writes per-nid
-    // arrays the render object owns and reads cumulative arrays the
-    // render object owns.
+    // Bulk arm: scalar offset = _stableCumulative[i] + value *
+    // _bulkFullCumulative[i]. Only the DECISION moved. The per-nid slot
+    // writes stay here, in the callback, because this object owns those
+    // arrays and owns the extent arithmetic that has to stay bitwise equal
+    // to the Pass 2 measurement.
     //
-    // Op-group path: dual-view (live/post) admission cap that pre-mounts
+    // Both arms: dual-view (live/post) admission cap that pre-mounts
     // post-animation visible rows during a collapse and caps mass-mounting
-    // during an expand. Lives in [LayoutAdmissionPolicy.admit].
-    final int cacheEndIndex;
+    // during an expand, under a paint-region floor that admits any
+    // non-animating row the viewport paints whatever the two views say.
+    // Lives in [LayoutAdmissionPolicy.admit].
+    final BulkAdmissionView<TKey>? bulkView;
+    final void Function(int nid, int visibleIndex) onAdmit;
     if (_bulkCumulativesValid) {
-      cacheEndIndex = _admitBulkFastPath(
-        cacheStartIndex: cacheStartIndex,
-        visibleNodes: visibleNodes,
-        fullCacheEnd: fullCacheEnd,
+      bulkView = BulkAdmissionView<TKey>(
+        stableCumulative: _stableCumulative,
+        fullCumulative: _bulkFullCumulative,
+        value: _bulkValueCached,
+        isCollapsing: bulkData.isCollapsing,
+        bulkData: bulkData,
+        hasZeroExtentNonMember: _bulkHasZeroExtentNonMember,
       );
+      // Same field `bulkView.value` carries and `_offsetAtVisibleIndex`
+      // reads, assigned once per frame from `bulkData.value`, so the slot
+      // and the admission decision cannot disagree about `v`.
+      final double v = _bulkValueCached;
+      onAdmit = (int nid, int visibleIndex) {
+        // Moved verbatim from the deleted `_admitBulkFastPath`, carrying
+        // M6's extent arithmetic rather than the cumulative difference.
+        // Bitwise-identical to the Pass 2 measurement
+        // (`AnimationCoordinator.getAnimatedExtent`, which returns
+        // `fullExtent * bulk.group.value` for a member and `fullExtent`
+        // otherwise), which is what keeps the exact `!=` in the
+        // measurement loop firing only on a real height change.
+        _nodeOffsetsByNid[nid] = _offsetAtVisibleIndex(visibleIndex);
+        final full = controller.getEstimatedExtentNid(nid);
+        _nodeExtentsByNid[nid] = bulkData.containsMemberNid(nid)
+            ? full * v
+            : full;
+        _writeCacheRegionNid(nid);
+      };
     } else {
-      cacheEndIndex = _admission.admit(
-        cacheStartIndex: cacheStartIndex,
-        visibleNodes: visibleNodes,
-        nodeOffsetsByNid: _nodeOffsetsByNid,
-        nodeExtentsByNid: _nodeExtentsByNid,
-        inCacheRegionByNid: _inCacheRegionByNid,
-        onCacheRegionAdmit: _writeCacheRegionNid,
-        effectiveCacheEnd: effectiveCacheEnd,
-        slideOverreach: slideOverreach,
-        remainingCacheExtent: remainingCacheExtent,
-      );
+      bulkView = null;
+      onAdmit = _admitNonBulk;
     }
+    debugLastLayoutUsedBulkAdmission = bulkView != null;
+    // The returned `cacheEndIndex` is an iteration bound, never a
+    // membership test, and after the sparse-track switch no in-layout
+    // consumer reads it: freshness is [_inCacheRegionByNid] per nid and
+    // enumeration is [_writtenCacheRegionNids]. Discarded.
+    _admission.admit(
+      cacheStartIndex: cacheStartIndex,
+      visibleNodes: visibleNodes,
+      nodeOffsetsByNid: _nodeOffsetsByNid,
+      nodeExtentsByNid: _nodeExtentsByNid,
+      inCacheRegionByNid: _inCacheRegionByNid,
+      onCacheRegionAdmit: onAdmit,
+      effectiveCacheStart: effectiveCacheStart,
+      effectiveCacheEnd: effectiveCacheEnd,
+      paintRegionStart: scrollOffset,
+      paintRegionEnd: scrollOffset + remainingPaintExtent,
+      slideOverreach: slideOverreach,
+      remainingCacheExtent: remainingCacheExtent,
+      bulkView: bulkView,
+    );
 
-    // Create children for nodes in the cache region.
+    // Create children for the rows admission actually admitted.
     //
-    // The range `[cacheStartIndex, cacheEndIndex)` may contain rows that
-    // were iterated but not admitted (e.g. off-screen exits during a
-    // collapse, iterated past to reach the post-animation-visible
-    // following rows, but not admitted themselves). Gate on
-    // `_inCacheRegionByNid[nid]` so skipped rows do not trigger a build.
-    if (cacheEndIndex > cacheStartIndex) {
+    // Iterate the sparse track, not `[cacheStartIndex, cacheEndIndex)`.
+    // That range is an iteration bound and contains rows that were iterated
+    // but not admitted (off-screen exits during a collapse, iterated past
+    // to reach the post-animation-visible following rows; and under a bulk
+    // collapse the entire hopped-over span), which must not be built. The
+    // track holds admitted nids only, in ascending visible-index order, so
+    // no per-row gate is needed and no TKey hash is paid to reach the nid.
+    if (_writtenCacheRegionNidsLen > 0) {
       invokeLayoutCallback<SliverConstraints>((SliverConstraints constraints) {
-        for (int i = cacheStartIndex; i < cacheEndIndex; i++) {
-          final nodeId = visibleNodes[i];
-          final nid = _controller.nidOf(nodeId);
-          if (_inCacheRegionByNid[nid] == 0) continue;
+        for (int pos = 0; pos < _writtenCacheRegionNidsLen; pos++) {
+          final nodeId = controller.keyOfNid(_writtenCacheRegionNids[pos]);
+          if (nodeId == null) continue;
           childManager?.createChild(nodeId);
         }
       });
@@ -2805,26 +2871,36 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // Layout the children: track whether any extent changed to skip
     // the O(N) _recomputeOffsets when sizes are stable (cache hit path).
     // Also track the smallest index whose extent changed so we can walk
-    // only from there when recomputing offsets.
+    // only from there when recomputing offsets, and the POSITION of that
+    // row in the sparse track, so the parentData rewrite below resumes the
+    // track without a second search.
     bool extentsChanged = false;
     int firstChangedIdx = visibleNodes.length;
+    int firstChangedTrackPos = _writtenCacheRegionNidsLen; // none yet
 
-    for (int i = cacheStartIndex; i < cacheEndIndex; i++) {
-      final nodeId = visibleNodes[i];
-      final actualAnimatedExtent = _layoutNodeChild(nodeId, crossAxisExtent);
-      if (actualAnimatedExtent == null) continue;
+    for (int pos = 0; pos < _writtenCacheRegionNidsLen; pos++) {
+      final nid = _writtenCacheRegionNids[pos];
+      final nodeId = controller.keyOfNid(nid);
+      if (nodeId == null) continue;
+      final measured = _layoutNodeChild(nodeId, nid, crossAxisExtent);
+      if (measured == null) continue;
+      final actualAnimatedExtent = measured.extent;
 
-      final nid = _controller.nidOf(nodeId);
       final estimatedExtent = _nodeExtentsByNid[nid];
       if (actualAnimatedExtent != estimatedExtent) {
         _nodeExtentsByNid[nid] = actualAnimatedExtent;
         totalScrollExtent += actualAnimatedExtent - estimatedExtent;
-        extentsChanged = true;
-        if (i < firstChangedIdx) firstChangedIdx = i;
+        if (!extentsChanged) {
+          extentsChanged = true;
+          firstChangedTrackPos = pos;
+          // Once per layout: the track ascends in visible index, so the
+          // first tracked entry whose extent changed is also the
+          // lowest-index changed row.
+          firstChangedIdx = controller.visibleIndexOfNid(nid);
+        }
       }
 
-      final child = getChildForNode(nodeId)!;
-      final parentData = child.parentData! as SliverTreeParentData;
+      final parentData = measured.child.parentData! as SliverTreeParentData;
       parentData.layoutOffset = _nodeOffsetsByNid[nid];
     }
 
@@ -2844,25 +2920,31 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // the fast path for this frame.
         _materializeBulkStaleExtents(
           fromIndex: firstChangedIdx,
-          cacheStartIndex: cacheStartIndex,
-          cacheEndIndex: cacheEndIndex,
           visibleCount: visibleNodes.length,
         );
       }
 
       totalScrollExtent = _recomputeOffsetsFrom(firstChangedIdx);
 
-      // Only rewrite parentData.layoutOffset for cache-region nodes at or
-      // after firstChangedIdx. Earlier cache-region nodes already had the
-      // correct value written in the measurement loop above.
-      final updateStart = math.max(cacheStartIndex, firstChangedIdx);
-      final orderNids = controller.orderNidsView;
-      for (int i = updateStart; i < cacheEndIndex; i++) {
-        final nodeId = visibleNodes[i];
+      // Only rewrite parentData.layoutOffset for admitted rows at or after
+      // the first one whose extent changed. Earlier admitted rows already
+      // had the correct value written in the measurement loop above.
+      // Resuming the sparse track at `firstChangedTrackPos` is the sparse
+      // equivalent of `max(cacheStartIndex, firstChangedIdx)`: every
+      // tracked nid sits at a visible index >= cacheStartIndex by
+      // construction, and the track ascends in that index. Rows inside the
+      // range that were iterated but NOT admitted are deliberately not
+      // rewritten here; the post-sticky parentData refresh owns them.
+      for (int pos = firstChangedTrackPos;
+          pos < _writtenCacheRegionNidsLen;
+          pos++) {
+        final nid = _writtenCacheRegionNids[pos];
+        final nodeId = controller.keyOfNid(nid);
+        if (nodeId == null) continue;
         final child = getChildForNode(nodeId);
         if (child == null) continue;
         final parentData = child.parentData! as SliverTreeParentData;
-        parentData.layoutOffset = _nodeOffsetsByNid[orderNids[i]];
+        parentData.layoutOffset = _nodeOffsetsByNid[nid];
       }
     }
 
@@ -2960,9 +3042,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       bool stickyExtentsChanged = false;
       for (final nodeId in newStickyNodes) {
         final nid = _controller.nidOf(nodeId);
-        final priorExtent = _nodeExtentsByNid[nid];
-        final extent = _layoutNodeChild(nodeId, crossAxisExtent);
-        if (extent != null) {
+        // Prior estimate read through the SAME chain the measurement
+        // resolves: `_layoutNodeChild` returns `getAnimatedExtent(nodeId,
+        // child.size.height)`. `_nodeExtentsByNid[nid]` is not that value
+        // for an off-cache ANIMATING nid on a bulk frame; these nids were
+        // selected precisely because `_inCacheRegionByNid[nid] == 0`, and
+        // `_admitBulkFastPath` writes extent slots only from
+        // `cacheStartIndex` to its break, so a pinned bulk member holds a
+        // previous frame's product (or a never-written 0.0) and the exact
+        // `!=` below fires on nothing.
+        final priorExtent = controller.getCurrentExtentNid(nid);
+        final measured = _layoutNodeChild(nodeId, nid, crossAxisExtent);
+        if (measured != null) {
+          final extent = measured.extent;
           _nodeExtentsByNid[nid] = extent;
           if (extent != priorExtent) stickyExtentsChanged = true;
         }
@@ -2976,8 +3068,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           // frame's geometry.scrollExtent with stale-extent garbage.
           _materializeBulkStaleExtents(
             fromIndex: 0,
-            cacheStartIndex: cacheStartIndex,
-            cacheEndIndex: cacheEndIndex,
             visibleCount: visibleNodes.length,
           );
         }
@@ -3000,9 +3090,24 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       for (final nodeId in newStickyNodes) {
         final child = getChildForNode(nodeId);
         if (child == null) continue;
+        final nid = _controller.nidOf(nodeId);
+        final visIdx = _controller.visibleIndexOfNid(nid);
+        if (visIdx < 0) continue;
         final parentData = child.parentData! as SliverTreeParentData;
-        parentData.layoutOffset =
-            _nodeOffsetsByNid[_controller.nidOf(nodeId)];
+        // Write the structural authority, never a raw per-nid slot:
+        // these nids are outside the cache region by construction, so
+        // on a bulk frame their offset slots are stale.
+        // `_structuralOffsetAt` is the same authority
+        // `_stickyFreshOffsetAt` hands the re-probe, so write and
+        // probe cannot disagree.
+        final structural = _structuralOffsetAt(visIdx, nid);
+        parentData.layoutOffset = structural;
+        assert(() {
+          if (parentData.layoutOffset != structural) {
+            debugStickyOffsetAuthorityMismatchCount++;
+          }
+          return true;
+        }());
       }
 
       // Re-probe, and ONLY here. Force-creating measured children, which
@@ -3030,29 +3135,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // ────────────────────────────────────────────────────────────────────────
     // Calculate paint extent
     // ────────────────────────────────────────────────────────────────────────
-    double paintExtent = 0.0;
-
-    final startIndex = _findFirstVisibleIndex(scrollOffset);
-    final orderNids = controller.orderNidsView;
-    for (int i = startIndex; i < visibleNodes.length; i++) {
-      final nid = orderNids[i];
-      final offset = _nodeOffsetsByNid[nid];
-      final extent = _nodeExtentsByNid[nid];
-      final endOfNode = offset + extent;
-
-      if (offset >= scrollOffset + remainingPaintExtent) break;
-
-      final visibleStart = math.max(offset, scrollOffset);
-      final visibleEnd = math.min(
-        endOfNode,
-        scrollOffset + remainingPaintExtent,
-      );
-      // Only add positive contributions (can be negative when scrolled past
-      // content)
-      if (visibleEnd > visibleStart) {
-        paintExtent += visibleEnd - visibleStart;
-      }
-    }
+    // Rows are contiguous by construction: every Pass 1 branch writes
+    // offset(i+1) = offset(i) + extent(i), and the bulk fast path's
+    // cumulatives are prefix sums by definition
+    // (`_rebuildBulkCumulatives`). The visible portion of a contiguous
+    // [0, totalScrollExtent) band is therefore exactly the
+    // sliver-protocol intersection, with no per-row walk and no
+    // dependence on per-nid slot freshness (under the bulk-only fast
+    // path, off-cache slots are stale; reading them under-reported
+    // this extent and let a following sliver paint inside the tree).
+    double paintExtent = calculatePaintOffset(
+      constraints,
+      from: 0.0,
+      to: totalScrollExtent,
+    );
 
     // Ensure paintExtent covers sticky headers. Sticky headers
     // paint at pinnedY (near viewport top) but content may have scrolled far
@@ -3113,12 +3209,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     );
 
     // Refresh parentData (layoutOffset, indent, visibleExtent) for
-    // children mounted in a prior frame that now fall outside
-    // [cacheStartIndex, cacheEndIndex). The admission cap deliberately
-    // limits *new* mounts to prevent mass-mounting during large
-    // expansions, but already-mounted rows below an expanding subtree keep
-    // their pre-expand parentData and would otherwise paint at stale
-    // positions until something re-admits them to cache.
+    // children mounted in a prior frame that admission did not admit this
+    // frame, i.e. every mounted row with `_inCacheRegionByNid[nid] == 0`,
+    // whether it sits outside [cacheStartIndex, cacheEndIndex) or inside a
+    // span the bulk collapse's prefix hop skipped. The admission cap
+    // deliberately limits *new* mounts to prevent mass-mounting during
+    // large expansions, but already-mounted rows below an expanding or
+    // collapsing subtree keep their stale parentData and would otherwise
+    // paint at stale positions until something re-admits them to cache.
     //
     // Placed after the sticky pass so any _recomputeOffsets triggered by
     // stickyExtentsChanged has already landed in _nodeOffsetsByNid /
@@ -3163,14 +3261,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           // Dead key: purge handled by stale-node eviction.
           continue;
         }
-        // Cache-region children already had their parentData written by
-        // the measurement loop. Skip them. Non-admitted-but-mounted
-        // children inside [cacheStartIndex, cacheEndIndex) have
-        // `_inCacheRegionByNid[nid] == 0` here and would also have been
-        // touched by the measurement loop via `_layoutNodeChild`, letting
-        // them through is a redundant (but correctness-safe) re-write of
-        // the same offset. Cost is one field assignment per such row;
-        // the case is rare (off-screen exits during a collapse).
+        // Admitted children already had their parentData written by the
+        // measurement loop. Skip them. Everything else reaching this line
+        // has `_inCacheRegionByNid[nid] == 0`, and this loop is its ONLY
+        // parentData write of the frame: the measurement loop iterates the
+        // sparse admitted track, so it no longer calls [_layoutNodeChild]
+        // on non-admitted rows inside [cacheStartIndex, cacheEndIndex).
+        // Under a bulk collapse that population is not rare, it is every
+        // mounted row in the hopped-over span, which is why the three
+        // writes below (layoutOffset, indent, visibleExtent) resolve from
+        // `controller.getIndent` and `controller.getCurrentExtentNid`, the
+        // same chain [_layoutNodeChild] consumes via `getAnimatedExtent`.
+        // Such a row is mounted but not laid out this frame, which is
+        // already the normal state of every retained off-cache row (edge
+        // ghosts, exit phantoms, slide-active rows) and is bounded by the
+        // viewport-bounded paint and hit-test bands.
         //
         // EXCEPT when the sticky block's force-create measurement moved the
         // offsets: the measurement loop's writes predate that recompute, so

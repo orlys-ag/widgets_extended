@@ -492,6 +492,21 @@ class BulkAnimationData<TKey> {
     if (nid < 0 || nid >= mirror.length) return false;
     return mirror[nid] != 0;
   }
+
+  /// Whether this group is COLLAPSING (`collapseAll`) rather than expanding
+  /// (`expandAll`). Direction is uniform per group by construction; see the
+  /// four writer sites in `TreeController` (`expandAll`'s fresh-group and
+  /// reverse-a-collapsing-group branches, `collapseAll`'s fresh-group and
+  /// reverse-an-expanding-group branches).
+  ///
+  /// Known degenerate case, deliberately accepted: if EVERY member of an
+  /// expanding group is concurrently mid-`remove` (pending deletion),
+  /// `collapseAll`'s reversal skips all of them and this returns false for
+  /// a frame while the controller reverses. The only consequence is that
+  /// the admission post view charges those rows their full extent, i.e.
+  /// the admission degenerates to the old under-admission. Never
+  /// incorrect, only unoptimised.
+  bool get isCollapsing => _pendingRemoval?.isNotEmpty ?? false;
 }
 
 /// Computed sticky header position for a single node.

@@ -1256,6 +1256,8 @@ than `defaultExtent` 48):
 
 ### H2. Admission starves the viewport below a row taller than the cache extent
 
+**Status.** IMPLEMENTED 2026-08-24, chain 1 commit, landed last as specified. Part (d) landed first (the repro reads the pin); `audit_repro_h2_test.dart` pre-fix reds: case 1 at r11, scroll 600 (the first refused intersecting row), case 2 at f9, matching the block's f9..f17 against the post-M8 admission (f0..f8 admitted). Parts (a) and (b) landed in `LayoutAdmissionPolicy.admit`: the seed (its first term on the bulk arm from the view, as the Sequencing paragraph requires, shared with `postOffsetOrigin`), the hoisted animation reads, the guarded floor on both the two-view stop and M8's bulk live-cut break, and the widened admit decision; the collapse phase's threshold folds to `budgetCap - seed`. Part (c) withdrawn exactly as written (M8's Step 2a deleted its target). The two direct unit cases Risk requires were added to `layout_admission_policy_test.dart` and each shown red under targeted disablement (seed zeroed: end 7 not 8; floor forced false: end 1 not 7); the three existing call sites gained the new arguments with unchanged expectations. Doc items landed per the ownership split. Full suite green.
+
 **Finding.** `LayoutAdmissionPolicy.admit` seeds both accumulators at 0 at
 `cacheStartIndex` (`_layout_admission_policy.dart:67-68`) and charges a
 non-animating row its whole extent (`:119-121`), while `budgetCap` is
@@ -4450,6 +4452,8 @@ on `enterExit`, so the fix cannot be "route everything to expandCollapse".
 
 ### M6. The bulk-only fast path falls off on every frame
 
+**Status.** IMPLEMENTED 2026-08-24, chain 1 (one commit with M7, M8, H2). The counter landed first; `bulk_fast_path_stability_test.dart` failed on unfixed code exactly as derived (case 1: expected 1, actual 10, one rebuild per frame from frame 3 on; case 2 pre-flip sanity: actual 5). Fix landed as specified (product-form extent write plus the `bulkData` parameter); M8's Step 3a then carried the arithmetic verbatim into the admit callback in the same sitting, deleting `_admitBulkFastPath` as both blocks record. All six assertion sites were shown to fail individually: two via the pre-fix reds, four via temporary mutations (`bulkOnly` forced false, counter seeded to 1, signal disabled, out-of-band finder). Risk suites and the full suite green; analyze at the 48-issue baseline.
+
 **Finding.** `_admitBulkFastPath` writes the per-row estimate as a difference
 of two cumulative offsets, `_nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i +
 1) - offset` (`render_sliver_tree.dart:455-457`), while Pass 2 measures the
@@ -4727,6 +4731,8 @@ edits no dartdoc, so there is no competing edit to that range.
 ---
 
 ### M7. Paint-extent loop reads unwritten per-nid slots on bulk frames
+
+**Status.** IMPLEMENTED 2026-08-24, chain 1 commit. `bulk_paint_extent_test.dart` pre-fix reds: case 1 paintExtent 480.0 against 600.0 (the review's number), case 2 rebuild counter 3 against 1, case 3 mismatch counter 1 against 0 after landing `debugStickyOffsetAuthorityMismatchCount` against the old write, per the promoted flow. Two test-side corrections against the block, both measured: the pinned header at the jump frame is C9, not C10 (the block's arithmetic evaluates the probe at v = 0.5, but the pump after the jump advances v), so case 3 asserts on the actually-pinned pre-measured header; and its pre-jump sanity was rewritten to a pre-jump snapshot, because force-creation itself builds the row, so a post-jump `buildCounts` lookup could never fail in the direction its reason claimed. Every assertion shown red individually; parts 1 to 3 landed as printed (part 2's loop later gained M8/L25.6's nid-threaded `_layoutNodeChild` record form). Risk suites and the full suite green.
 
 **Finding.** The paint-extent loop at `render_sliver_tree.dart:3035-3055` reads
 `_nodeOffsetsByNid[nid]` and `_nodeExtentsByNid[nid]` directly for every
@@ -5224,6 +5230,8 @@ off-cache extent slots whose staleness the second case is about.
 ---
 
 ### M8. Bulk `collapseAll` never admits rows after the collapsing subtree
+
+**Status.** IMPLEMENTED 2026-08-24, chain 1 commit. `bulk_collapse_admission_test.dart` pre-fix: case 1 red (B still unbuilt at 250 ms), cases 2 and 3 green, exactly as the block states. Steps 1 to 5 landed as specified: `isCollapsing`, `BulkAdmissionView`, `fullCacheEnd` deleted whole, the callback widened to `(nid, visibleIndex)` with both slot writes in the dispatch closure, the per-nid materialize skip, the sparse-track create/measure/rewrite loops with `firstChangedTrackPos`, and the collapse prefix with survivor hops plus the zero-extent linear fallback. One consequence Step 3 implies but never prints, found when the phase-2 teeth demo refused to go red: the phase-1 walk must break on the LIVE view alone on the bulk arm, because members keep the post accumulator flat, so the dual-view stop would walk the whole collapsing subtree (the naive O(N) the hop exists to avoid) and leave phase 2 dead code; landed as a bulk-only break beside the two-view stop. The returned `cacheEndIndex` then has no reader and is discarded at the call site. Demos recorded: range-keyed freshness (scrollExtent off by 190.08 px), first-survivor-only (C unbuilt), full-charge removal (frame-1 mount 2001), non-bulk arm, huge-cache sanities. Doc items 1 to 19 landed per the ownership split with H2. Full suite green.
 
 **Finding.** `_admitBulkFastPath` breaks on
 `_stableCumulative[i] + _bulkFullCumulative[i] >= fullCacheEnd`
@@ -13328,6 +13336,8 @@ Leg 4, the regression the audit found, also a control that passes today: with an
 **Effort.** M.
 
 ### L25. Minor render-layer and buffer performance items
+
+**Status.** PARTIALLY IMPLEMENTED 2026-08-24: sub-items 25.4 and 25.6 landed with chain 1 per chain 11; everything else in this block remains open. 25.4: the `liveDead` hoist was re-derived against the unified two-view admit as the Sequencing paragraph requires; on the bulk arm the branch is unreachable (the walk breaks when the live view dies, floor aside), so the skip serves the non-bulk arm's exit runs. 25.6: slice 1's two `nidOf` sites were deleted outright by M8's sparse-track switch, as recorded on both sides; slices 2 and 3 landed (`_layoutNodeChild(TKey, int nid, double)` returning `({double extent, RenderBox child})` with both callers updated, `getIndentNid`, and `getAnimatedExtentNid` mirroring `getCurrentExtentNid`'s three-source precedence). No observable behavior change; the layout-counter suites and the full suite are green.
 
 **Read this as a batch, not as one finding.** L25 is nine independent micro-items. Each sub-item below carries its own Finding, Root cause and Solution inline in its own paragraph; the standard sections (Alternatives considered, Architecture fit, Risk, Test to add, Effort) are pooled at the END of the block, because per item they are one-liners. Do not look for a single Finding heading above; there is not one, deliberately. Nothing here changes observable behaviour except 25.3's early break (same answer, fewer iterations), 25.7's bump batching (same cache values, fewer walks), and 25.1, which IS a narrow visual change and says so in its own paragraph. Recommended order is at the end.
 

@@ -906,6 +906,45 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     return lerpDouble(animation.startExtent, animation.targetExtent, t)!;
   }
 
+  /// Nid-keyed [getAnimatedExtent] against a CALLER-SUPPLIED full extent
+  /// (the fresh measurement), for the per-row layout hot path. Same
+  /// three-source precedence as [getCurrentExtentNid]; the only
+  /// difference is that the full extent is the measurement just taken
+  /// rather than the stored slot.
+  double getAnimatedExtentNid(int nid, double fullExtent) {
+    // 1. Bulk: the nid mirror is the fast path.
+    if (bulk.isMemberNid(nid) && bulk.group != null) {
+      return fullExtent * bulk.group!.value;
+    }
+    // 2. Op group; same guard and single key resolution as
+    // [getCurrentExtentNid].
+    if (opGroups.isNotEmpty) {
+      final key = _nids.keyOfUnchecked(nid);
+      final opKey = opGroups.groupKeyOf(key);
+      if (opKey != null) {
+        final group = opGroups.groupAt(opKey);
+        if (group != null) {
+          final member = group.members[key];
+          if (member != null) {
+            return member.computeExtent(group.curvedValue, fullExtent);
+          }
+        }
+      }
+    }
+    // 3. Standalone
+    final animation = standalone.slotAtNid(nid);
+    if (animation == null) return fullExtent;
+    final t = _styleGetter().specFor(animation.family).curve.transform(
+      animation.progress.clamp(0.0, 1.0),
+    );
+    if (animation.targetExtent == _kUnknownExtent) {
+      return animation.type == AnimationType.entering
+          ? fullExtent * t
+          : fullExtent * (1.0 - t);
+    }
+    return lerpDouble(animation.startExtent, animation.targetExtent, t)!;
+  }
+
   /// Nid-keyed [isAnimating], served from the union mirror. Refreshes the
   /// mirror first so a stale generation cannot serve a stale bit.
   @override
