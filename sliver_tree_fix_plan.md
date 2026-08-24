@@ -11107,6 +11107,8 @@ expect no throw, `getSlideDelta("a") != 0.0`, and `getSlideDelta("ghost") == 0.0
 
 ### L6. `applyPaintTransform` has no branch for anchor-based exit ghosts
 
+**Status.** IMPLEMENTED 2026-08-24. Repro appended to `phantom_exit_reparent_test.dart`: pre-fix the transform reported the stale slot plus the composed delta (24.0) against the painted 72.0, differing by exactly the 48 px slot offset. The branch landed as printed, mirroring M10's FLIP-only Pass A.5 gate symbol for symbol (ghost and anchor `getFlipSlideDeltaNid` reads) and translating by the shared base plus the composed delta with no `yAdjust`; the hoisted cast sits beside the branch, before the edge-ghost section, an equivalent placement both ghost branches read. One compile fix: `typedNodeId != null` joins the guard so the key promotes into `ghostKey:`. The inventory recipe re-run returns 21 non-comment lines minus 3 declarations = eighteen reads, category (c) six, fifteen FLIP-only; the AGENTS.md bullet carries those figures. Sanity demos shown red individually (oracle emptiness past settle; distinguishability at t = 0.005, 0.24 against the 0.5 tolerance). `childMainAxisPosition` carries no ghost term and stays a recorded follow-up as the block states. Risk suites 19 green; full suite 1132 passed, 4 skipped; analyze at the 48-issue baseline.
+
 **Finding.** Pass A.5 paints a phantom exit ghost at
 `_exitGhostPaintedBaseScrollSpace(...)` plus the ghost's own slide delta
 (`lib/sliver_tree/render_sliver_tree.dart:3531-3538`, painted at :3566 and

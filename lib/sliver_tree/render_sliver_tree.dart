@@ -4591,6 +4591,45 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         : 0.0;
 
     final scrollOffset = constraints.scrollOffset;
+    final typedNodeId = nodeId as TKey?;
+
+    // Exit-ghost rows (the anchor-based `_phantomExitGhosts` model) paint
+    // in Pass A.5 at the shared base plus the ghost's own composed delta,
+    // never at `parentData.layoutOffset`. Mirror that here, gated on the
+    // SAME FLIP-only liveness question the Pass A.5 gate and Step 0a's
+    // prune ask (a PAIR: a transform reading a different delta than the
+    // paint it mirrors reports the row at a position nothing paints).
+    // Carve-out inventory category (c), EXIT-ghost LIFECYCLE. No
+    // `yAdjust`: Pass A.5 applies none. Fall through when the gate fails
+    // or the base is unresolvable, so a settled ghost reports its
+    // structural slot, the same fallback rule as the edge-ghost branch
+    // below.
+    final exitGhost = (_phantomExitGhosts == null || typedNodeId == null)
+        ? null
+        : _phantomExitGhosts![typedNodeId];
+    if (exitGhost != null && typedNodeId != null && nid >= 0) {
+      final ghostFlip = controller.getFlipSlideDeltaNid(nid);
+      final anchorNidForGate = controller.nidOf(exitGhost.anchor);
+      final anchorFlip = anchorNidForGate >= 0
+          ? controller.getFlipSlideDeltaNid(anchorNidForGate)
+          : 0.0;
+      if (ghostFlip != 0.0 || slideDeltaX != 0.0 || anchorFlip != 0.0) {
+        final ghostBase = _exitGhostPaintedBaseScrollSpace(
+          ghostKey: typedNodeId,
+          ghost: exitGhost,
+        );
+        if (ghostBase != null) {
+          transform.translateByDouble(
+            ghostBase.x + slideDeltaX,
+            ghostBase.y - scrollOffset + slideDelta,
+            0.0,
+            1.0,
+          );
+          return;
+        }
+      }
+    }
+
     // Edge-ghost rows paint at `composer.baseFor + slideDelta`, not at
     // `parentData.layoutOffset + slideDelta`. Substitute the live edge
     // base so framework code (`localToGlobal`, semantics, focus
@@ -4599,7 +4638,6 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // scrolling. Settled-check: if the slide is settled but lazy-prune
     // hasn't run, fall back to the structural offset so post-settlement
     // queries report the row's real (off-screen) position.
-    final typedNodeId = nodeId as TKey?;
     final edgeEntry = typedNodeId == null
         ? null
         : _composer.ghosts.entryFor(typedNodeId);

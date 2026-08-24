@@ -41,13 +41,9 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The plan creates 15 new test files.
+not be worked in parallel. The plan creates 14 new test files.
 
-NEW means not yet in `git ls-files`. 1 of those 15 already exist on
-disk, written for items that have landed but are not committed:
-`exit_ghost_prune_flip_only_test.dart`.
-
-Landed so far: 18 implemented (H2, H4, H6, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M14, M16, M21, M22, M23); 2 partially implemented
+Landed so far: 19 implemented (H2, H4, H6, L6, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M14, M16, M21, M22, M23); 2 partially implemented
 (L25, L26). Everything else is open.
 
 ## Coupled clusters
@@ -57,7 +53,7 @@ Landed so far: 18 implemented (H2, H4, H6, L27, M1, M2, M3, M4, M5, M6, M7, M8, 
 - **H1** (L) Scroll position is never corrected for estimate vs measured row height
 - **H2** (M) Admission starves the viewport below a row taller than the cache extent  **[DONE]**
 - **H3** (M) `animateScrollToKey` after a mutation clamps to the pre-layout `maxScrollExtent`
-- **L6** (M) `applyPaintTransform` has no branch for anchor-based exit ghosts
+- **L6** (M) `applyPaintTransform` has no branch for anchor-based exit ghosts  **[DONE]**
 - **L7** (S) Pass A's edge-ghost skip must ask the FLIP-only question
 - **L13** (S) Make every scroll the orchestrator starts single-flight, both directions
 - **L24** (M) Pass A.7 repaints an exit-ghost anchor a second time per frame
@@ -79,9 +75,9 @@ Ordering constraints:
 - Chain 17, the measurement loop (M8, then H1).
 - Chain 18, the carve-out inventory (H1 with M10), no fixed order.
 
-New tests: `audit_repro_h1_test.dart`, `audit_repro_h3_test.dart`, `exit_ghost_prune_flip_only_test.dart`, `ghost_flip_only_pass_a_skip_test.dart`, `scroll_sticky_inset_test.dart`.
+New tests: `audit_repro_h1_test.dart`, `audit_repro_h3_test.dart`, `ghost_flip_only_pass_a_skip_test.dart`, `scroll_sticky_inset_test.dart`.
 
-Existing tests touched: `adjacent_collapsed_exit_ghost_test.dart`, `animated_move_to_test.dart`, `animation_transitions_test.dart`, `audit_repro_f24_test.dart`, `audit_repro_h2_test.dart`, `bounded_iteration_test.dart`, `bulk_collapse_admission_test.dart`, `bulk_fast_path_stability_test.dart`, `bulk_paint_extent_test.dart`, `bulk_reentry_continuation_test.dart`, `bulk_sticky_recompute_test.dart`, `cache_extent_protocol_test.dart`, `concurrent_extents_test.dart`, `entry_phantom_clip_unchanged_test.dart`, `find_row_after_bulk_test.dart`, `find_row_stale_cache_test.dart`, `findrow_bounded_scan_oracle_test.dart`, `ghost_prune_flip_only_test.dart`, `ghost_revisible_double_paint_test.dart`, `independent_timelines_test.dart`, `layout_admission_policy_test.dart`, `live_index_oracle_fuzz_test.dart`, `make_room_offcache_build_test.dart`, `mid_slide_eviction_test.dart`, `offscreen_anchor_exit_ghost_test.dart`, `paint_purity_test.dart`, `parent_data_refresh_iteration_test.dart`, `phantom_anchor_reparent_test.dart`, `phantom_anchor_staging_test.dart`, `phantom_exit_reparent_test.dart`, `preview_eviction_test.dart`, `purge_subtree_visible_size_test.dart`, `purge_visible_subtree_size_test.dart`, `rapid_reparent_visual_gaps_test.dart`, `rebuild_budget_test.dart`, `remove_contiguous_fast_path_test.dart`, `remove_from_order_zombie_leak_test.dart`, `render_host_registry_test.dart`, `repaint_boundary_test.dart`, `reparent_all_gap_test.dart`, `reparent_painted_coverage_test.dart`, `repro_occlusion_tall_card_test.dart`, `scroll_orchestrator_dispose_test.dart`, `scroll_orchestrator_position_swap_test.dart`, `scroll_reresolve_test.dart`, `slide_paint_only_test.dart`, `slide_scroll_concurrency_test.dart`, `slide_viewport_clamp_test.dart`, `sliver_tree_widget_test.dart`, `sticky_bulk_stale_offset_test.dart`, `sticky_entering_root_handover_test.dart`, `sticky_offcache_cumulative_perf_test.dart`, `sticky_small_tree_max_paint_test.dart`, `synced_on_controller_created_test.dart`, `tall_card_occlusion_zorder_test.dart`, `visible_order_buffer_test.dart`, `visible_subtree_size_invariant_fuzz_test.dart`.
+Existing tests touched: `adjacent_collapsed_exit_ghost_test.dart`, `animated_move_to_test.dart`, `animation_transitions_test.dart`, `audit_repro_f24_test.dart`, `audit_repro_h2_test.dart`, `bounded_iteration_test.dart`, `bulk_collapse_admission_test.dart`, `bulk_fast_path_stability_test.dart`, `bulk_paint_extent_test.dart`, `bulk_reentry_continuation_test.dart`, `bulk_sticky_recompute_test.dart`, `cache_extent_protocol_test.dart`, `concurrent_extents_test.dart`, `entry_phantom_clip_unchanged_test.dart`, `exit_ghost_prune_flip_only_test.dart`, `find_row_after_bulk_test.dart`, `find_row_stale_cache_test.dart`, `findrow_bounded_scan_oracle_test.dart`, `ghost_prune_flip_only_test.dart`, `ghost_revisible_double_paint_test.dart`, `independent_timelines_test.dart`, `layout_admission_policy_test.dart`, `live_index_oracle_fuzz_test.dart`, `make_room_offcache_build_test.dart`, `mid_slide_eviction_test.dart`, `offscreen_anchor_exit_ghost_test.dart`, `paint_purity_test.dart`, `parent_data_refresh_iteration_test.dart`, `phantom_anchor_reparent_test.dart`, `phantom_anchor_staging_test.dart`, `phantom_exit_reparent_test.dart`, `preview_eviction_test.dart`, `purge_subtree_visible_size_test.dart`, `purge_visible_subtree_size_test.dart`, `rapid_reparent_visual_gaps_test.dart`, `rebuild_budget_test.dart`, `remove_contiguous_fast_path_test.dart`, `remove_from_order_zombie_leak_test.dart`, `render_host_registry_test.dart`, `repaint_boundary_test.dart`, `reparent_all_gap_test.dart`, `reparent_painted_coverage_test.dart`, `repro_occlusion_tall_card_test.dart`, `scroll_orchestrator_dispose_test.dart`, `scroll_orchestrator_position_swap_test.dart`, `scroll_reresolve_test.dart`, `slide_paint_only_test.dart`, `slide_scroll_concurrency_test.dart`, `slide_viewport_clamp_test.dart`, `sliver_tree_widget_test.dart`, `sticky_bulk_stale_offset_test.dart`, `sticky_entering_root_handover_test.dart`, `sticky_offcache_cumulative_perf_test.dart`, `sticky_small_tree_max_paint_test.dart`, `synced_on_controller_created_test.dart`, `tall_card_occlusion_zorder_test.dart`, `visible_order_buffer_test.dart`, `visible_subtree_size_invariant_fuzz_test.dart`.
 
 ### Cluster 2: H4, L27, M1, M2, M5
 

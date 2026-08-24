@@ -364,4 +364,94 @@ void main() {
       await tester.pumpAndSettle();
     });
   });
+
+  group("L6: applyPaintTransform mirrors the exit-ghost paint", () {
+    testWidgets(
+      "a mid-slide exit ghost's row box reports the Pass A.5 painted "
+      "position, not its pre-move slot",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
+
+        // A (expanded) [Y, Y2]; B (COLLAPSED) [b1]. Pre-move layout:
+        // A=0, Y=48, Y2=96, B=144. Post-move order [A, Y2, B]: B lands
+        // at 96 while Y's stale parentData keeps the pre-move slot.
+        controller.setRoots([
+          const TreeNode(key: "A", data: "A"),
+          const TreeNode(key: "B", data: "B"),
+        ]);
+        controller.setChildren("A", [
+          const TreeNode(key: "Y", data: "Y"),
+          const TreeNode(key: "Y2", data: "Y2"),
+        ]);
+        controller.setChildren("B", [const TreeNode(key: "b1", data: "b1")]);
+        controller.expand(key: "A", animate: false);
+
+        await tester.pumpWidget(_harness(controller));
+        await tester.pumpAndSettle();
+
+        final preMoveTop = tester
+            .getTopLeft(find.byKey(const ValueKey("row-Y")))
+            .dy;
+
+        controller.moveNode(
+          "Y",
+          "B",
+          index: 0,
+          animate: true,
+          slideDuration: const Duration(milliseconds: 400),
+          slideCurve: Curves.linear,
+        );
+        await tester.pump(); // install frame
+        await tester.pump(const Duration(milliseconds: 200)); // mid-slide
+
+        final sliver = tester.renderObject<RenderSliverTree<String, String>>(
+          find.byType(SliverTree<String, String>),
+        );
+        final paint = sliver.debugLastPhantomGhostPaint;
+        expect(
+          paint.containsKey("Y"),
+          isTrue,
+          reason: "setup: the mid-slide ghost must have been painted and "
+              "captured by the oracle",
+        );
+
+        // ghostRect is in sliver PAINT space; convert to global through
+        // the scroll view's top (single sliver, no leading padding).
+        final csTop = tester.getTopLeft(find.byType(CustomScrollView)).dy;
+        final ghostGlobalTop = csTop + paint["Y"]!.ghostRect.top;
+
+        // Setup sanity: the ghost's painted top and the pre-move slot
+        // must be distinguishable, or the main assertion proves nothing.
+        expect(
+          (preMoveTop - ghostGlobalTop).abs(),
+          greaterThan(0.5),
+          reason: "setup: the painted ghost must sit away from the "
+              "pre-move slot by more than the tolerance",
+        );
+
+        final reportedTop = tester
+            .getRect(find.byKey(const ValueKey("row-Y")))
+            .top;
+        expect(
+          reportedTop,
+          closeTo(ghostGlobalTop, 0.5),
+          reason: "applyPaintTransform must report the exit ghost at its "
+              "Pass A.5 painted position; a transform reading the stale "
+              "layoutOffset points localToGlobal, semantics and focus at "
+              "the pre-move slot for the slide's duration",
+        );
+
+        await tester.pumpAndSettle();
+      },
+    );
+  });
 }
