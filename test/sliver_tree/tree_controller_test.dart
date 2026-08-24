@@ -1466,9 +1466,14 @@ void main() {
         controller.remove(key: "a");
         await tester.pump(const Duration(milliseconds: 50));
 
-        // Re-insert 'a' at root. Depth of 'a' should become 0 and the
-        // subtree depths must cascade (x=1, y=2).
-        controller.insertRoot(TreeNode(key: "a", data: "A-new"));
+        // Re-insert 'a' at root WITH its in-flight subtree (M2 contract:
+        // the default discards it; this test's subject is the depth
+        // cascade of the RESTORED subtree). Depth of 'a' should become 0
+        // and the subtree depths must cascade (x=1, y=2).
+        controller.insertRoot(
+          TreeNode(key: "a", data: "A-new"),
+          preservePendingSubtreeState: true,
+        );
         await tester.pumpAndSettle();
 
         expect(controller.getParent("a"), isNull);
@@ -2275,7 +2280,14 @@ void main() {
         expect(extentBeforeReadd, greaterThan(0.0));
         expect(extentBeforeReadd, lessThan(48.0));
 
-        controller.insertRoot(TreeNode(key: "a", data: "A"));
+        // M2 contract: a default-flag re-add DISCARDS the in-flight removal
+        // subtree (pinned by audit_repro_m2_test.dart). This test's subject
+        // is the smooth extent resume of a RESTORED subtree, which is what
+        // preservePendingSubtreeState: true owns.
+        controller.insertRoot(
+          TreeNode(key: "a", data: "A"),
+          preservePendingSubtreeState: true,
+        );
         controller.expand(key: "a");
 
         final extentAfterReexpand = controller.getCurrentExtent("a1");
@@ -2336,7 +2348,12 @@ void main() {
         expect(extentBeforeReadd, greaterThan(0.0));
         expect(extentBeforeReadd, lessThan(48.0));
 
-        controller.insertRoot(TreeNode(key: "a", data: "A"));
+        // M2 contract: see the sibling test above; restoration is the
+        // preservePendingSubtreeState: true path.
+        controller.insertRoot(
+          TreeNode(key: "a", data: "A"),
+          preservePendingSubtreeState: true,
+        );
         controller.expandAll();
 
         final extentAfterReexpand = controller.getCurrentExtent("a1");

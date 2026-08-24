@@ -43,7 +43,11 @@ with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
 not be worked in parallel. The plan creates 22 new test files.
 
-Landed so far: 10 implemented (H6, M1, M3, M4, M9, M14, M16, M21, M22, M23); 1 partially implemented
+NEW means not yet in `git ls-files`. 1 of those 22 already exist on
+disk, written for items that have landed but are not committed:
+`audit_repro_m2_test.dart`.
+
+Landed so far: 11 implemented (H6, M1, M2, M3, M4, M9, M14, M16, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -84,7 +88,7 @@ Existing tests touched: `adjacent_collapsed_exit_ghost_test.dart`, `animated_mov
 - **H4** (M) Depth-limited `expandAll` / `collapseAll` ignore post-flip visibility
 - **L27** (M) Bulk reversals re-target op-group envelopes without the Path-1 rebase
 - **M1** (S) Re-insert of a mid-exit node under a collapsed parent leaves a permanent row  **[DONE]**
-- **M2** (M) Re-inserting a mid-exit node keeps its old subtree
+- **M2** (M) Re-inserting a mid-exit node keeps its old subtree  **[DONE]**
 - **M5** (L) Standalone animations spawned by expand/collapse are timed by `enterExit`
 
 Ordering constraints:

@@ -3151,6 +3151,45 @@ Pre-fix `visibleNodes` settles to `["a", "b", "x"]` and stays there.
 
 ### M2. Re-inserting a mid-exit node keeps its old subtree
 
+**Status.** IMPLEMENTED 2026-08-24, five audit passes, 4 and 5 consecutively
+clean; pass 3 caught the M1-era `_cancelDeletion` doc gone stale ("root and
+descendants all route through the policy"), now rewritten for the split.
+Landed as the Solution prescribes, contract (B): the descendant half routes
+default-flag re-adds through the new `_discardPendingSubtree`
+(`_tree_controller_animation.dart:423-426` branch, helper at `:459-490`,
+body verbatim from this block), the preserve loop passes the literal `true`,
+and `preservePendingSubtreeState` is documented on both public signatures
+(`tree_controller.dart:2546-2553`, `:3018-3025`) with the exit-lands-later
+caveat this block requires.
+
+`test/sliver_tree/audit_repro_m2_test.dart` implements steps 1 through 7 as
+three tests (repro, A/B convergence control, smoothness control) under
+`debugFullConsistencyChecks = true`. Pre-fix red at exactly step 4:
+`getLiveChildren("A")` read `["a1"]`; both controls passed pre-fix, as
+designed. All 11 assertions were individually shown red: six by test-side
+constructions, the step-4 pin by the pre-fix run, the three settled-state
+pins under a discard-disabled mutation, and the smoothness pin under a
+purge-immediately mutation (dropping the standalone skip moved c by exactly
+b1's mid-exit 50 px), with the lib restored diff-verified byte-identical
+after each.
+
+One finding against this block's Risk enumeration: FOUR pre-existing tests
+pinned the old default-restore contract and were missed by the list, all
+four present at 4d15c0c (measured). The two tests in `tree_controller_test.
+dart`'s "remove and re-add across intermediate animation states" group, the
+depth-cascade test sitting just past the list's cited `:1378-1419` range,
+and `skip_repro_test.dart`'s "reinsert then re-expand restores descendants
+smoothly" all re-added with default flags and asserted subtree restoration.
+Each was adapted to `preservePendingSubtreeState: true` with a comment
+naming this contract, which preserves their subjects (extent resume, depth
+cascade, restoration smoothness) on the path that now owns restoration; the
+adapted extent-resume tests pass through case 1 because the preserve branch
+keeps the parent's expansion. Recorded so the next contract-touching item
+re-greps for affected tests rather than trusting a block's enumeration.
+The block's Risk suites pass, the full suite reads 1101 passed, 4 skipped
+(the 1098 post-M1 baseline plus these three), `flutter analyze` stays at
+the 48-issue baseline, and the source-encoding guard is green.
+
 **Finding.** With default flags, `_cancelDeletion(preserveSubtreeState: false)`
 sends every descendant to `_revertSinglePendingDeletion` with
 `preserveSubtreeState: false` (`_tree_controller_animation.dart:421-424`),

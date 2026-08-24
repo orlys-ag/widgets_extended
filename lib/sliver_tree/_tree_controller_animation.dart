@@ -391,14 +391,17 @@ extension _TreeControllerAnimationOps<TKey, TData>
     _anim.standalone.ensureRunning();
   }
 
-  /// Cancels a pending deletion for a node and all its descendants.
+  /// Cancels a pending deletion for a node.
   ///
   /// Reverses the exit animation of [key] into an enter animation so the
-  /// re-inserted node animates back in. Root and descendants all route
-  /// through [_revertSinglePendingDeletion]'s case-1/2/3 policy; the root
-  /// passes `explicitTarget: true` (the caller named it, so the mid-exit
+  /// re-inserted node animates back in. The root routes through
+  /// [_revertSinglePendingDeletion]'s case-1/2/3 policy with
+  /// `explicitTarget: true` (the caller named it, so the mid-exit
   /// requirement is relaxed), but its visibility gate still applies: a
-  /// key re-added under a collapsed chain must not enter (M1).
+  /// key re-added under a collapsed chain must not enter (M1). Descendants
+  /// route through the same policy only when [preserveSubtreeState] is
+  /// true; otherwise the in-flight removal subtree is discarded via
+  /// [_discardPendingSubtree] (M2).
   void _cancelDeletion(
     TKey key, {
     bool animate = true,
@@ -417,17 +420,72 @@ extension _TreeControllerAnimationOps<TKey, TData>
       _clearPendingDeletion(key);
       _removeAnimation(key);
     }
-    final descendants = _getDescendants(key);
-    for (final nodeId in descendants) {
+    if (!preserveSubtreeState) {
+      _discardPendingSubtree(key, animate: animate);
+      return;
+    }
+    // The loop below only ever runs with `preserveSubtreeState: true`,
+    // which is the only value under which case 1 was reachable anyway.
+    for (final nodeId in _getDescendants(key)) {
       if (!animate) {
         _clearPendingDeletion(nodeId);
         _removeAnimation(nodeId);
         continue;
       }
-      _revertSinglePendingDeletion(
-        nodeId,
-        preserveSubtreeState: preserveSubtreeState,
-      );
+      _revertSinglePendingDeletion(nodeId, preserveSubtreeState: true);
+    }
+  }
+
+  /// Discards the in-flight removal subtree under a node whose deletion was
+  /// just cancelled WITHOUT `preservePendingSubtreeState`.
+  ///
+  /// Contract: a default re-add restores the node, not its subtree, matching
+  /// `remove(animate: false)` followed by `insert`. Members with a live
+  /// standalone exit KEEP their pending-deletion marker, so
+  /// [_finalizeAnimation]'s purge branch removes them when the exit lands;
+  /// that is what stops the following rows jumping upward by the
+  /// descendant's current extent in a single frame (pinned by
+  /// `test/sliver_tree/skip_repro_test.dart`). Members with no exit were
+  /// never in the visible order, so nothing would ever finalize them; they
+  /// and their whole subtree are purged here.
+  ///
+  /// The walk descends into a member only once it has decided to purge it,
+  /// so a purged node never leaves a live child behind and no parent-pointer
+  /// severing (the [_finalizeAnimation] ABA guard) is needed: a survivor's
+  /// parent is always a survivor, because a node with an exit was in
+  /// `_order`, and `_order` is closed under "child present implies parent
+  /// present" (`_rebuildVisibleOrderImpl` only pushes children of a key it
+  /// has already added).
+  void _discardPendingSubtree(TKey key, {required bool animate}) {
+    final seed = _childListOf(key);
+    if (seed == null || seed.isEmpty) {
+      return;
+    }
+    List<TKey>? purgeNow;
+    final stack = <(TKey, bool)>[];
+    for (final child in seed) {
+      stack.add((child, false));
+    }
+    while (stack.isNotEmpty) {
+      final (nodeId, forced) = stack.removeLast();
+      if (!forced) {
+        if (!_isPendingDeletion(nodeId)) {
+          continue;
+        }
+        if (animate && _hasStandalone(nodeId)) {
+          continue;
+        }
+      }
+      (purgeNow ??= <TKey>[]).add(nodeId);
+      final children = _childListOf(nodeId);
+      if (children != null) {
+        for (final grandChild in children) {
+          stack.add((grandChild, true));
+        }
+      }
+    }
+    if (purgeNow != null) {
+      _purgeAndRemoveFromOrder(purgeNow);
     }
   }
 

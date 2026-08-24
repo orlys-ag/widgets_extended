@@ -607,11 +607,20 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 150));
 
-    // Reinsert b collapsed (default).
-    controller.insertRoot(TreeNode(key: "b", data: "B"), index: 1);
+    // Reinsert b WITH its in-flight subtree. M2 contract: the default
+    // discards the subtree (pinned by audit_repro_m2_test.dart); this
+    // test's subject is descendant restoration, which is what
+    // preservePendingSubtreeState: true owns. The preserve path keeps b's
+    // expansion, so b1 reverts to an enter here and the expand below is a
+    // no-op.
+    controller.insertRoot(
+      TreeNode(key: "b", data: "B"),
+      index: 1,
+      preservePendingSubtreeState: true,
+    );
     await tester.pump();
 
-    // Re-expand b — b1 should animate back to full height.
+    // b1 animates back to full height.
     controller.expand(key: "b");
     await tester.pumpAndSettle();
 

@@ -2542,6 +2542,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [index] is the position among **live** root siblings, exiting
   /// (pending-deletion) roots are skipped, matching [liveRootKeys] /
   /// [getIndexInParent] and the input space of [reorderRoots].
+  ///
+  /// [preservePendingSubtreeState] controls what happens to a re-added
+  /// mid-exit node's in-flight removal subtree: false (the default)
+  /// discards it, so the node comes back alone, matching
+  /// `remove(animate: false)` followed by a fresh add; true restores it.
+  /// A discarded descendant whose exit animation is still running is
+  /// removed when that exit lands, not at the instant of the re-add, so
+  /// the raw [getChildren] view still lists it until then.
   void insertRoot(
     TreeNode<TKey, TData> node, {
     int? index,
@@ -3006,6 +3014,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [index] is the position among **live** siblings, exiting
   /// (pending-deletion) siblings are skipped, matching [getLiveChildren] /
   /// [getIndexInParent] and the input space of [reorderChildren].
+  ///
+  /// [preservePendingSubtreeState] controls what happens to a re-added
+  /// mid-exit node's in-flight removal subtree: false (the default)
+  /// discards it, so the node comes back alone, matching
+  /// `remove(animate: false)` followed by a fresh add; true restores it.
+  /// A discarded descendant whose exit animation is still running is
+  /// removed when that exit lands, not at the instant of the re-add, so
+  /// the raw [getChildren] view still lists it until then.
   ///
   /// Throws a [StateError] if [parentKey] is pending deletion (animating
   /// out): the parent will be purged when its exit animation completes,
