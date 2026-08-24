@@ -11287,6 +11287,8 @@ otherwise the test proves nothing.
 
 ### L7. Pass A's edge-ghost skip must ask the FLIP-only question
 
+**Status.** IMPLEMENTED 2026-08-24. New `ghost_flip_only_pass_a_skip_test.dart` builds exactly the block's geometry (leading-edge ghost from the n12 move, the 3 s n55 FLIP keeping frames paint-only, n20's 200 px held lift); pre-fix red at the main assert with the n17 control advancing, pinning the row painted by neither pass on a paint-only frame. The skip landed as printed; the break comment gained the composed-overreach clause; and, L6 having landed first, this block carried the recorded reconciliation: `applyPaintTransform`'s edge-ghost `useGhost` gate is now FLIP-only with the same PAIR rationale. Inventory recipe re-run at landing: 23 non-comment lines minus 3 declarations = twenty reads, category (a) eight, seventeen FLIP-only; the AGENTS.md bullet carries those figures (the block's recipe-tightening note is satisfied by the recipe wording M10 landed). Twelve demo states shown red individually; the control's reject-state is a skipped frame, because a pumped no-op frame still paints under this harness (measured). Risk suites 18 green; full suite 1133 passed, 4 skipped; analyze at the 48-issue baseline.
+
 **Finding.** Pass A skips a row that has a registry ghost entry when the
 COMPOSED delta is non-zero (`lib/sliver_tree/render_sliver_tree.dart:3417-3421`,
 `slideDelta` from `controller.getSlideDeltaNid` at :3402), while Pass A.6

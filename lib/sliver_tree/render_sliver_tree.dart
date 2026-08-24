@@ -3529,8 +3529,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // or past this offset can paint inside the viewport, break instead
     // of paying a sticky check + hash probe for every below-viewport row.
     // Composer edge-ghost rows paint at the live viewport edge regardless
-    // of structural position, but Pass A already skips them (Pass A.6
-    // iterates the small ghost registry), so the break cannot drop one.
+    // of structural position, but Pass A already skips the FLIP-live ones
+    // (Pass A.6 iterates the small ghost registry), so the break cannot
+    // drop one of those; a FLIP-settled ghost row falls through to
+    // standard paint, and `paintBound` already carries the composed
+    // overreach, so a row past this break cannot paint inside the paint
+    // region at any composed offset.
     // Sticky headers likewise paint from their own pass.
     final paintBound = scrollOffset + remainingPaintExtent + slideOverreach;
     List<int>? slidingIndices;
@@ -3564,19 +3568,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
       // Edge-ghost rows paint via the parallel edge-ghost pass at
       // `entry.edgeY + slideDelta`: skip standard paint so they don't
-      // double-paint at the wrong (structural) position. BUT only when
-      // the engine still has a live slide entry for this nid; if the
-      // engine cleared the slide via composition (composedY/X both 0)
-      // while the ghost registry entry survived (e.g.
-      // direction-flip kept the entry, then composition zeroed the
-      // delta), the edge-ghost paint pass will prune the entry without
-      // painting. Skipping standard paint here would leave the row
-      // invisible until the next layout's prune. Instead, only skip
-      // when there's actually a delta to render via the edge-ghost
-      // pass; otherwise fall through to standard paint at structural+0.
+      // double-paint at the wrong (structural) position. BUT only while
+      // the row still has a live FLIP delta to render there: the skip
+      // mirrors Pass A.6's criterion and `GhostRegistry.pruneSettled`,
+      // so the set Pass A skips is exactly the set Pass A.6 paints. The
+      // question is FLIP-ONLY ([TreeController.getFlipSlideDeltaNid]),
+      // never the composed delta: a held make-room preview offset on a
+      // FLIP-settled ghost keeps the composed delta non-zero while Pass
+      // A.6 declines the row, and a composed skip here left it painted
+      // by NEITHER pass on every paint-only frame until the next layout
+      // pruned the entry (unbounded while another FLIP kept ticking). A
+      // settled ghost falls through to the composed test below and
+      // paints at structural + FLIP + preview like any other row.
       if (hasEdgeGhosts &&
           _composer.ghosts.entryFor(nodeId) != null &&
-          (slideDelta != 0.0 || slideDeltaX != 0.0)) {
+          (controller.getFlipSlideDeltaNid(nid) != 0.0 ||
+              slideDeltaX != 0.0)) {
         continue;
       }
 
@@ -4638,11 +4645,20 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // scrolling. Settled-check: if the slide is settled but lazy-prune
     // hasn't run, fall back to the structural offset so post-settlement
     // queries report the row's real (off-screen) position.
+    //
+    // The settled-check is FLIP-ONLY, mirroring Pass A's skip and Pass
+    // A.6's gate (the PAIR rule): those read FLIP-only state, so a
+    // FLIP-settled ghost under a held preview paints through standard
+    // Pass A at structural plus composed, and the transform must fall
+    // through to `layoutOffset` there too, or `localToGlobal` reports
+    // the edge base while paint draws `baseForEdge - layoutOffset` away.
     final edgeEntry = typedNodeId == null
         ? null
         : _composer.ghosts.entryFor(typedNodeId);
     final useGhost =
-        edgeEntry != null && (slideDelta != 0.0 || slideDeltaX != 0.0);
+        edgeEntry != null &&
+        nid >= 0 &&
+        (controller.getFlipSlideDeltaNid(nid) != 0.0 || slideDeltaX != 0.0);
     final base = useGhost
         ? _currentViewportSnapshot().baseForEdge(edgeEntry.edge)
         : parentData.layoutOffset;

@@ -43,7 +43,11 @@ with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
 not be worked in parallel. The plan creates 14 new test files.
 
-Landed so far: 19 implemented (H2, H4, H6, L6, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M14, M16, M21, M22, M23); 2 partially implemented
+NEW means not yet in `git ls-files`. 1 of those 14 already exist on
+disk, written for items that have landed but are not committed:
+`ghost_flip_only_pass_a_skip_test.dart`.
+
+Landed so far: 20 implemented (H2, H4, H6, L6, L7, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M14, M16, M21, M22, M23); 2 partially implemented
 (L25, L26). Everything else is open.
 
 ## Coupled clusters
@@ -54,7 +58,7 @@ Landed so far: 19 implemented (H2, H4, H6, L6, L27, M1, M2, M3, M4, M5, M6, M7, 
 - **H2** (M) Admission starves the viewport below a row taller than the cache extent  **[DONE]**
 - **H3** (M) `animateScrollToKey` after a mutation clamps to the pre-layout `maxScrollExtent`
 - **L6** (M) `applyPaintTransform` has no branch for anchor-based exit ghosts  **[DONE]**
-- **L7** (S) Pass A's edge-ghost skip must ask the FLIP-only question
+- **L7** (S) Pass A's edge-ghost skip must ask the FLIP-only question  **[DONE]**
 - **L13** (S) Make every scroll the orchestrator starts single-flight, both directions
 - **L24** (M) Pass A.7 repaints an exit-ghost anchor a second time per frame
 - **L25** (M) Minor render-layer and buffer performance items  **[PARTLY DONE]**
