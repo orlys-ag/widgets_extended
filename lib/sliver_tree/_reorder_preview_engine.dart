@@ -110,6 +110,22 @@ class ReorderPreviewEngine {
   /// gates the render layer's slide-aware paths.
   bool get hasActive => _entries.isNotEmpty;
 
+  /// The nid a held make-room preview has LIFTED (the dragged row; its
+  /// visible subtree rides with it), or -1 when no preview is installed
+  /// (M11). Independent of [_entries]: an own-slot hover legitimately
+  /// holds no offsets while the row is still lifted and hidden, so this
+  /// survives [releaseAll] and the tick's arrived-at-zero cleanup. It is
+  /// cleared by [setLifted] with -1 (the controller's preview clear),
+  /// [snapClearAll], [clearAll], and a [clearForNid] of the lifted nid
+  /// itself.
+  int get liftedNid => _liftedNid;
+  int _liftedNid = -1;
+
+  /// Records the lifted nid; -1 clears it.
+  void setLifted(int nid) {
+    _liftedNid = nid;
+  }
+
   /// Preview delta for [nid], or 0.0 when not previewing.
   double deltaForNid(int nid) {
     final entry = _entries[nid];
@@ -273,6 +289,7 @@ class ReorderPreviewEngine {
   /// positions; the mutation's layout takes over from here) and by
   /// teardown paths where animating a release is meaningless.
   void snapClearAll() {
+    _liftedNid = -1;
     if (_entries.isEmpty) {
       return;
     }
@@ -285,6 +302,9 @@ class ReorderPreviewEngine {
   /// or re-adopted mid-preview must not keep a stale offset.
   void clearForNid(int nid) {
     _entries.remove(nid);
+    if (nid == _liftedNid) {
+      _liftedNid = -1;
+    }
   }
 
   /// Resets all state and disposes the ticker. Next use recreates it.
@@ -292,6 +312,7 @@ class ReorderPreviewEngine {
     _ticker?.dispose();
     _ticker = null;
     _entries.clear();
+    _liftedNid = -1;
     _lastTickElapsed = Duration.zero;
   }
 

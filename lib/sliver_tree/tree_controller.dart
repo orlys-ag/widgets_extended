@@ -1119,6 +1119,40 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// the AnimationCoordinator's nid-keyed read.
   double getCurrentExtentNid(int nid) => _anim.getCurrentExtentNid(nid);
 
+  /// First visible index of the rows a held make-room preview has
+  /// LIFTED (the dragged row plus its visible subtree), or -1 when no
+  /// preview is installed or the lifted row is not in the visible
+  /// order.
+  ///
+  /// Lifted rows are laid out but not painted (the reorderable widget
+  /// hides them so their slot can close), so painted-position lookups
+  /// must skip them exactly the way they skip pending-deletion rows.
+  /// Pair with [previewLiftedCount]: the exclusive end of the range is
+  /// `start + count`, computed by the caller. Start and count, never a
+  /// pair or an end getter: an end getter re-resolves the start, and a
+  /// record allocates on a read taken once per pointer event.
+  int get previewLiftedStartIndex {
+    final nid = _preview.liftedNid;
+    if (nid < 0) {
+      return -1;
+    }
+    _ensureVisibleOrder();
+    // kNotVisible is -1, so a lifted row that left the order answers -1
+    // without a second test.
+    return _order.indexByNid[nid];
+  }
+
+  /// Number of rows in the lifted range, 0 when nothing is lifted. O(1)
+  /// read against the visible-subtree-size cache.
+  int get previewLiftedCount {
+    final nid = _preview.liftedNid;
+    if (nid < 0) {
+      return 0;
+    }
+    _ensureVisibleOrder();
+    return _order.subtreeSizeOf(nid);
+  }
+
   /// Slide delta for the live [nid] (paint-only FLIP offset), or 0.0 when
   /// the node is not currently sliding. Hot-path equivalent of
   /// [getSlideDelta]: read every paint, hit-test, and transform call
@@ -1922,6 +1956,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // Written after the install, for every install, including an
     // empty-target one (own-slot hover), which the engine expresses as
     // "no entries" but is still a held, re-skippable state.
+    _preview.setLifted(draggedNid);
     _previewMemoValid = true;
     _previewMemoDraggedNid = draggedNid;
     _previewMemoGapIndex = gapIndex;
@@ -1944,6 +1979,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // must never memo-skip its first re-install, and the empty-target
     // (own-slot) memo state has no engine entries to make hasActive true.
     _previewMemoValid = false;
+    // Same placement, same reason: an own-slot preview holds no offsets,
+    // so the lifted nid must clear before the early return too (M11).
+    _preview.setLifted(-1);
     if (!_preview.hasActive) {
       return;
     }

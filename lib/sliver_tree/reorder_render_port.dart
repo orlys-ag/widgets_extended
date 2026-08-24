@@ -51,6 +51,10 @@ abstract interface class ReorderRenderPort<TKey> {
   ///
   /// Painted offsets include any active FLIP slide delta: this is the row
   /// under the pointer as the user sees it, not as the structure says.
+  /// For the same reason the rows a held make-room preview has LIFTED
+  /// (the dragged row and its visible subtree, laid out but hidden so
+  /// their slot can close) are skipped like pending-deletion rows: the
+  /// answer is the row painted over their band.
   ({TKey key, double paintedOffset, double extent})? findRowAtPaintedY(
     double scrollY,
   );

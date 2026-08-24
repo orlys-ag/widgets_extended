@@ -43,7 +43,11 @@ with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
 not be worked in parallel. The plan creates 8 new test files.
 
-Landed so far: 30 implemented (H1, H2, H3, H4, H6, L2, L6, L7, L13, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M12, M13, M14, M16, M20, M21, M22, M23); 1 partially implemented
+NEW means not yet in `git ls-files`. 1 of those 8 already exist on disk,
+written for items that have landed but are not committed:
+`audit_repro_m11_test.dart`.
+
+Landed so far: 31 implemented (H1, H2, H3, H4, H6, L2, L6, L7, L13, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M16, M20, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -156,7 +160,7 @@ Existing tests touched: `caller_placed_handle_modes_test.dart`, `caller_placed_h
 ### Cluster 7: L21, M11
 
 - **L21** (M) A drag started on a sticky-pinned header probes the content beneath the strip
-- **M11** (M) The hidden dragged row shadows rows the preview shifted into its band
+- **M11** (M) The hidden dragged row shadows rows the preview shifted into its band  **[DONE]**
 
 Ordering constraints:
 

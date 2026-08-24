@@ -1961,6 +1961,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// the bottom of the tree. Returns null when the visible order is empty or
   /// every entry is pending-deletion.
   ///
+  /// Rows a held make-room preview has LIFTED (M11:
+  /// [TreeController.previewLiftedStartIndex] and [previewLiftedCount])
+  /// are skipped by all three branches exactly like pending-deletion
+  /// rows: they are laid out but not painted, so the row PAINTED over
+  /// their band is the answer. The fast path needs the skip too: an
+  /// own-slot hover installs no offsets, so `hasActiveSlides` is false
+  /// while the row is still hidden.
+  ///
   /// Painted offsets include the node's composed slide delta (FLIP engine
   /// + make-room preview), matching what [snapshotVisibleOffsets] would
   /// return, but without allocating an O(N) map. Designed for
@@ -2035,11 +2043,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // Fast path: no composed deltas, painted offset == structural offset.
     debugLastFindRowUsedFullScan = false;
     debugLastFindRowIterationCount = 0;
+    final liftStart = controller.previewLiftedStartIndex;
+    final liftEnd = liftStart < 0
+        ? -1
+        : liftStart + controller.previewLiftedCount;
     final startIdx = _findFirstVisibleIndex(scrollY);
     for (int i = startIdx; i < visible.length; i++) {
       debugLastFindRowIterationCount++;
       final key = visible[i];
       if (controller.isPendingDeletion(key)) continue;
+      if (i >= liftStart && i < liftEnd) continue;
       return _liveRowAt(i, key);
     }
     // Past the end (or every trailing row is pending-deletion), walk back
@@ -2048,6 +2061,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       debugLastFindRowIterationCount++;
       final key = visible[i];
       if (controller.isPendingDeletion(key)) continue;
+      if (i >= liftStart && i < liftEnd) continue;
       return _liveRowAt(i, key);
     }
     return null;
@@ -2117,6 +2131,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         ? _currentViewportSnapshot()
         : null;
     debugLastFindRowIterationCount = 0;
+    final liftStart = controller.previewLiftedStartIndex;
+    final liftEnd = liftStart < 0
+        ? -1
+        : liftStart + controller.previewLiftedCount;
     for (int i = 0; i < visible.length; i++) {
       debugLastFindRowIterationCount++;
       final nid = orderNids[i];
@@ -2132,7 +2150,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       final paintedOffset = ghostBase != null
           ? ghostBase + slide
           : structural + slide;
-      if (!controller.isPendingDeletion(key)) {
+      // A lifted row still occupies layout space (it accumulates below)
+      // but is neither an answer nor a fallback, so the guard is on the
+      // inclusion, not on the loop body.
+      final lifted = i >= liftStart && i < liftEnd;
+      if (!lifted && !controller.isPendingDeletion(key)) {
         if (scrollY < paintedOffset + extent) {
           return (key: key, paintedOffset: paintedOffset, extent: extent);
         }
@@ -2183,6 +2205,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     final upperBound = scrollY + d;
     final seed = _findFirstVisibleIndex(scrollY - d);
     debugLastFindRowIterationCount = 0;
+    final liftStart = controller.previewLiftedStartIndex;
+    final liftEnd = liftStart < 0
+        ? -1
+        : liftStart + controller.previewLiftedCount;
 
     TKey? lastLiveKey;
     double lastLiveOffset = 0.0;
@@ -2201,6 +2227,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       debugLastFindRowIterationCount++;
       final key = visible[i];
       if (controller.isPendingDeletion(key)) {
+        continue;
+      }
+      if (i >= liftStart && i < liftEnd) {
         continue;
       }
       final painted = structural + controller.getSlideDeltaNid(nid);
@@ -2222,6 +2251,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       if (controller.isPendingDeletion(key)) {
         continue;
       }
+      if (i >= liftStart && i < liftEnd) {
+        continue;
+      }
       final nid = orderNids[i];
       final painted = _nodeOffsetsByNid[nid] + controller.getSlideDeltaNid(nid);
       return (key: key, paintedOffset: painted, extent: _nodeExtentsByNid[nid]);
@@ -2241,6 +2273,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       debugLastFindRowIterationCount++;
       final key = visible[j];
       if (controller.isPendingDeletion(key)) {
+        continue;
+      }
+      if (j >= liftStart && j < liftEnd) {
         continue;
       }
       final nid = orderNids[j];

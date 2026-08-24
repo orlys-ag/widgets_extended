@@ -7945,6 +7945,35 @@ the recipe rather than assuming what M10 or another block left.
 
 ### M11. The hidden dragged row shadows rows the preview shifted into its band
 
+**Status.** IMPLEMENTED 2026-08-24 as written. `ReorderPreviewEngine`
+carries `liftedNid` (`setLifted`; cleared by `snapClearAll`, `clearAll`, a
+`clearForNid` of the lifted nid, and the controller's `clearReorderPreview`
+before its `hasActive` early return, so the own-slot state clears too;
+untouched by `releaseAll` and the tick's arrived-at-zero cleanup);
+`setReorderPreviewAtIndex` records it beside the memo writes (its early-outs
+call `clearReorderPreview`, which clears it, so no separate `setLifted(-1)`
+sits on them); `TreeController.previewLiftedStartIndex` and
+`previewLiftedCount` are start and count, never a pair or an end getter;
+all three `findRowAtPaintedY` branches hoist the range once per call and
+skip it beside the pending-deletion test, the full scan on its inclusion
+test so a lifted row still accumulates its extent and never becomes the
+fallback; the port and routing docs updated. Test
+`audit_repro_m11_test.dart`: three controller-level legs (the bounded scan,
+the full-scan oracle including the accumulation check at y 60, and the
+own-slot fast path with the release after `clearReorderPreview`) plus the
+block's end-to-end case; every leg's key assertion answered `a` before the
+fix; all 22 assertions shown red by their own mutation (routing forced to
+the other branch, each skip removed in turn, the accumulation guarded, the
+offset arithmetic perturbed, gesture constructs). Verification: `flutter
+analyze` 47; the block's ten risk suites plus the repro, 44 green, no
+re-baseline needed; full suite 1158 passed, 4 skipped; the two small
+touched files format-clean as before (the render object and the controller
+were not format-clean at HEAD and were left so). The sequencing paragraph's
+unverified question (does a pinned-band lookup reach the lifted row, and
+should it skip it) is answered by L21's Decision: it reaches it and
+deliberately does not skip it; L21 lands next and pins that. The FLIP-only
+carve-out inventory is unchanged (this is a composed-state read).
+
 **Finding.** `setReorderPreviewAtIndex` skips the dragged visible range when it
 builds shift targets (`tree_controller.dart:1765-1767`, inside the scan at
 `:1764-1778`), so rows after the block paint over the block's band while the
