@@ -646,6 +646,42 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// extents snapshot the final (progress=1) values.
   bool _animationsWereActive = false;
 
+  /// Scroll-correction epsilon: offsets are a Float64 prefix sum over up
+  /// to 1e5 rows, so a tolerance in the 1e-10 class would let float
+  /// drift emit corrections forever against the viewport's cycle cap.
+  static const double _kScrollCorrectionEpsilon = 0.01;
+
+  /// Corrections emitted since the last settled layout. Reset at the
+  /// single point reached only by a layout that did NOT emit one (beside
+  /// the checkpoint writes before `didFinishLayout`), which is exactly
+  /// "this frame's layout settled": the viewport re-runs layout after a
+  /// correction and stops only when one returns without one.
+  /// Deliberately no frame identity: `currentFrameTimeStamp` does not
+  /// advance across a `tester.pump()` with no duration, and the
+  /// scheduler exposes no public frame counter. The budget is
+  /// load-bearing, not defensive: a leading band of rows SHORTER than
+  /// the estimate yields a negative correction that exposes a fresh
+  /// unmeasured band each cycle, which without a budget outgrows the
+  /// viewport's ten-cycle cap; with it, the residual converges over
+  /// frames (each correction consumes real over-estimate, measured
+  /// extents are stored once, so the remaining residual strictly
+  /// decreases).
+  int _correctionsThisFrame = 0;
+  static const int _kMaxCorrectionsPerFrame = 2;
+
+  /// Ask for one more layout so a correction the per-frame budget
+  /// refused is applied on the next frame instead of being dropped: a
+  /// viewport whose dimensions did not change schedules no further
+  /// layout on its own.
+  void _scheduleCorrectionFollowUp() {
+    SchedulerBinding.instance.ensureVisualUpdate();
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (attached) {
+        markNeedsLayout();
+      }
+    });
+  }
+
   /// Marks the tree structure as changed, clears layout caches, and
   /// requests a new layout pass.
   ///
@@ -2935,6 +2971,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // track without a second search.
     bool extentsChanged = false;
     int firstChangedIdx = visibleNodes.length;
+    double aboveAnchorDelta = 0.0;
     int firstChangedTrackPos = _writtenCacheRegionNidsLen; // none yet
 
     for (int pos = 0; pos < _writtenCacheRegionNidsLen; pos++) {
@@ -2949,6 +2986,21 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       if (actualAnimatedExtent != estimatedExtent) {
         _nodeExtentsByNid[nid] = actualAnimatedExtent;
         totalScrollExtent += actualAnimatedExtent - estimatedExtent;
+        // H1: a row entirely above the viewport top, measured to a new
+        // extent, shifts everything below it; accumulate the residual so
+        // the frame can emit a scrollOffsetCorrection that moves
+        // `pixels` with the content. The offset compare IS "this row
+        // lies entirely above the anchor row", the same comparison
+        // `_findFirstVisibleIndex` binary-searches, evaluated on
+        // pre-measurement geometry: `estimatedExtent` was read before
+        // the slot was overwritten, and this loop writes no offsets.
+        // Animating rows are excluded: their movement is the
+        // animation's, already accounted for by Pass 1, not a
+        // measurement residual.
+        if (_nodeOffsetsByNid[nid] + estimatedExtent <= scrollOffset &&
+            !controller.isAnimatingNid(nid)) {
+          aboveAnchorDelta += actualAnimatedExtent - estimatedExtent;
+        }
         if (!extentsChanged) {
           extentsChanged = true;
           firstChangedTrackPos = pos;
@@ -3115,7 +3167,22 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         if (measured != null) {
           final extent = measured.extent;
           _nodeExtentsByNid[nid] = extent;
-          if (extent != priorExtent) stickyExtentsChanged = true;
+          if (extent != priorExtent) {
+            stickyExtentsChanged = true;
+            // H1: the same residual class as the measurement loop.
+            // Position test through the structural authority: these nids
+            // are off-cache by construction, so their raw offset slots
+            // are stale on a bulk frame (M7's rule). The compare is a
+            // guard, not a formality: no sticky gate asserts the
+            // candidate's BOTTOM is above `scrollOffset`.
+            final visIdx = _controller.visibleIndexOfNid(nid);
+            if (visIdx >= 0 &&
+                _structuralOffsetAt(visIdx, nid) + priorExtent <=
+                    scrollOffset &&
+                !controller.isAnimatingNid(nid)) {
+              aboveAnchorDelta += extent - priorExtent;
+            }
+          }
         }
       }
       if (stickyExtentsChanged) {
@@ -3194,6 +3261,44 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // ────────────────────────────────────────────────────────────────────────
     // Calculate paint extent
     // ────────────────────────────────────────────────────────────────────────
+    // H1: emit the anchor-preserving correction ONCE, after both
+    // measurement sources, budgeted per frame (see the fields' docs).
+    // `correctionsAllowed` is a RE-ENTRANCY gate, not a displacement
+    // gate: the emit aborts this method and the viewport re-runs it at a
+    // different scrollOffset, which must not replay the once-per-frame
+    // pre-Pass-1 slide pipeline (ghost normalization fires on
+    // scrollChanged; the baseline slot is CONSUME-ONCE and its slides
+    // bind to this frame's viewport, so the re-run would get null and
+    // could redo none of it). FLIP-only for the family's usual reason
+    // asked of a re-entrancy question: a held preview never goes idle,
+    // and the composed flag would refuse every correction for the whole
+    // of a drag, precisely when the offset array is read against
+    // `pixels` on every pointer event (the accumulator itself reads only
+    // STRUCTURAL offsets, so displacement is not the issue). Carve-out
+    // inventory category (e), SCROLL-CORRECTION RE-ENTRANCY.
+    final bool correctionsAllowed =
+        !controller.hasActiveFlipSlides && !_composer.hasGhosts;
+    final bool wantsCorrection =
+        correctionsAllowed &&
+        aboveAnchorDelta.abs() > _kScrollCorrectionEpsilon;
+    if (wantsCorrection && _correctionsThisFrame >= _kMaxCorrectionsPerFrame) {
+      // Budget spent for this frame. Consume the rest next frame instead
+      // of dropping it, then fall through and finish the layout.
+      _scheduleCorrectionFollowUp();
+    } else if (wantsCorrection) {
+      _correctionsThisFrame++;
+      // Replicate the settled checkpoint so the same-frame re-run starts
+      // consistent: without these, the re-run would force a redundant
+      // full Pass 1 walk (visible-count mismatch) or reuse a stale total
+      // on the pure-scrolling branch.
+      _lastVisibleNodeCount = visibleNodes.length;
+      _lastTotalScrollExtent = totalScrollExtent;
+      _animationsWereActive = hasAnimations;
+      geometry = SliverGeometry(scrollOffsetCorrection: aboveAnchorDelta);
+      childManager?.didFinishLayout();
+      return;
+    }
+
     // Rows are contiguous by construction: every Pass 1 branch writes
     // offset(i+1) = offset(i) + extent(i), and the bulk fast path's
     // cumulatives are prefix sums by definition
@@ -3414,6 +3519,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       }
     }
 
+    _correctionsThisFrame = 0;
     _lastVisibleNodeCount = visibleNodes.length;
     _lastTotalScrollExtent = totalScrollExtent;
     _animationsWereActive = hasAnimations;

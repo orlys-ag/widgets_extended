@@ -43,14 +43,18 @@ with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
 not be worked in parallel. The plan creates 13 new test files.
 
-Landed so far: 21 implemented (H2, H4, H6, L6, L7, L24, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M14, M16, M21, M22, M23); 2 partially implemented
+NEW means not yet in `git ls-files`. 1 of those 13 already exist on
+disk, written for items that have landed but are not committed:
+`audit_repro_h1_test.dart`.
+
+Landed so far: 22 implemented (H1, H2, H4, H6, L6, L7, L24, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M14, M16, M21, M22, M23); 2 partially implemented
 (L25, L26). Everything else is open.
 
 ## Coupled clusters
 
 ### Cluster 1: H1, H2, H3, L6, L7, L13, L24, L25, M6, M7, M8, M10, M20
 
-- **H1** (L) Scroll position is never corrected for estimate vs measured row height
+- **H1** (L) Scroll position is never corrected for estimate vs measured row height  **[DONE]**
 - **H2** (M) Admission starves the viewport below a row taller than the cache extent  **[DONE]**
 - **H3** (M) `animateScrollToKey` after a mutation clamps to the pre-layout `maxScrollExtent`
 - **L6** (M) `applyPaintTransform` has no branch for anchor-based exit ghosts  **[DONE]**

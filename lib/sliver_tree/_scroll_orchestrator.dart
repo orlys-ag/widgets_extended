@@ -8,6 +8,7 @@
 /// Not exported from the package barrel; used only by [TreeController].
 library;
 
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -64,6 +65,92 @@ class ScrollOrchestrator<TKey, TData> {
     session.tornDown = true;
     _controller.removeAnimationListener(session.follower);
     session.progress.dispose();
+  }
+
+  /// Pending single-shot post-frame settle snap for [animateScrollToKey]
+  /// (H1 part b). The render layer's `scrollOffsetCorrection` keeps
+  /// `pixels` and the offset array in one coordinate system, but an
+  /// `animateTo` overwrites corrections tick by tick with ABSOLUTE
+  /// values, and a caller-supplied estimator can disagree with
+  /// `defaultExtent`; the snap re-derives the target once, next frame.
+  /// One slot, newest wins; exactly one iteration and never rescheduled
+  /// from inside itself: with the correction in place the no-estimator
+  /// re-derive already matches `pixels`, and with an estimator the snap
+  /// removes the whole measured-rows residual, which is all iteration
+  /// could remove without measuring the remaining rows.
+  ({
+    TKey key,
+    ScrollController scrollController,
+    double alignment,
+    double sliverBaseOffset,
+    double Function(TKey key)? extentEstimator,
+  })?
+  _pendingSnap;
+  bool _snapScheduled = false;
+
+  void _scheduleSettleSnap({
+    required TKey key,
+    required ScrollController scrollController,
+    required double alignment,
+    required double sliverBaseOffset,
+    required double Function(TKey key)? extentEstimator,
+  }) {
+    _pendingSnap = (
+      key: key,
+      scrollController: scrollController,
+      alignment: alignment,
+      sliverBaseOffset: sliverBaseOffset,
+      extentEstimator: extentEstimator,
+    );
+    if (_snapScheduled) {
+      return;
+    }
+    _snapScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _snapScheduled = false;
+      final snap = _pendingSnap;
+      _pendingSnap = null;
+      if (snap == null || _disposed) {
+        return;
+      }
+      final sc = snap.scrollController;
+      if (!sc.hasClients) {
+        return;
+      }
+      if (_activeScroll != null) {
+        // The animated-concurrent follower owns the position.
+        return;
+      }
+      final position = sc.position;
+      if (position.userScrollDirection != ScrollDirection.idle) {
+        // A user drag or fling took over. `jumpTo` itself goes through
+        // `goIdle`, whose activity publishes idle, so this guard rejects
+        // exactly user-driven motion, not the snap's own jumps.
+        return;
+      }
+      final sliverOffset = scrollOffsetOf(
+        snap.key,
+        extentEstimator: snap.extentEstimator,
+      );
+      if (sliverOffset == null) {
+        return;
+      }
+      final rowExtent = extentOf(
+        snap.key,
+        extentEstimator: snap.extentEstimator,
+      );
+      final target =
+          snap.sliverBaseOffset +
+          sliverOffset -
+          (position.viewportDimension - rowExtent) * snap.alignment;
+      final clamped = target.clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((clamped - position.pixels).abs() > 0.5) {
+        position.jumpTo(clamped);
+      }
+    });
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -272,6 +359,17 @@ class ScrollOrchestrator<TKey, TData> {
     } else {
       await position.animateTo(clamped, duration: duration, curve: curve);
     }
+    // H1 part (b): the landing above was computed against pre-layout
+    // geometry; the post-frame snap re-derives it after the corrected
+    // layout settles. Scheduled, not awaited: the returned Future's
+    // timing is unchanged.
+    _scheduleSettleSnap(
+      key: key,
+      scrollController: scrollController,
+      alignment: alignment,
+      sliverBaseOffset: sliverBaseOffset,
+      extentEstimator: extentEstimator,
+    );
     return true;
   }
 
@@ -479,6 +577,7 @@ class ScrollOrchestrator<TKey, TData> {
   /// point trips the framework's assert.
   void dispose() {
     _disposed = true;
+    _pendingSnap = null;
     final active = _activeScroll;
     if (active != null) {
       active.cancelled = true;
