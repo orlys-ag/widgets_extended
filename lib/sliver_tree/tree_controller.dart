@@ -2102,6 +2102,14 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// computed sliver-local offset. Leave at 0.0 when [SliverTree] is the
   /// first (or only) sliver in the [CustomScrollView].
   ///
+  /// A non-zero-duration call issued while tree animations are in flight
+  /// follows the moving target (the same follower the animated mode
+  /// uses) and therefore participates in the single-flight slot below;
+  /// its future resolves once the scroll curve has finished, the tree is
+  /// quiescent, and the final snap has run. `duration: Duration.zero`
+  /// issued during an in-flight animation lands on the current animated
+  /// geometry (plus the post-frame settle snap), not the settled one.
+  ///
   /// Animated-mode scrolls are single-flight: starting one while another
   /// is still in flight cancels the earlier scroll (its future resolves
   /// false), the newer target wins.

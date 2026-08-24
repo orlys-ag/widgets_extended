@@ -312,6 +312,7 @@ class ScrollOrchestrator<TKey, TData> {
         alignment: alignment,
         extentEstimator: extentEstimator,
         sliverBaseOffset: sliverBaseOffset,
+        waitForQuiescence: false,
       );
     }
 
@@ -336,6 +337,64 @@ class ScrollOrchestrator<TKey, TData> {
         }
         await scheduler.endOfFrame;
         if (_disposed || !scrollController.hasClients) return false;
+      }
+    }
+
+    // H3 (a0): the key must resolve BEFORE either routing decision
+    // below. Routing an unresolvable key would both report success (the
+    // follower and the final snap have no validity early-out of their
+    // own) and cancel an in-flight animated scroll through the
+    // single-flight slot. This hoists the existing `sliverOffset == null`
+    // test rather than inventing a new one; the null check below stays,
+    // now unreachable for a visible key. L13's plain-path session
+    // install, when it lands, must sit BELOW this guard.
+    if (_controller.getVisibleIndex(key) < 0) {
+      return false;
+    }
+
+    // H3 (a): the content is still moving, so the target is moving; a
+    // one-shot animateTo would clamp against stale geometry and ride the
+    // whole duration to the wrong place. Route to the existing follower,
+    // which re-derives the target every tick, and hold the returned
+    // Future until the tree is quiescent so the final snap lands on
+    // settled geometry.
+    if (duration != Duration.zero && _controller.hasActiveAnimations) {
+      return _animatedConcurrentScroll(
+        key: key,
+        ancestors: const [],
+        scrollController: scrollController,
+        duration: duration,
+        curve: curve,
+        alignment: alignment,
+        extentEstimator: extentEstimator,
+        sliverBaseOffset: sliverBaseOffset,
+        waitForQuiescence: true,
+      );
+    }
+
+    // H3 (b): a caller-side mutation not yet laid out leaves
+    // `maxScrollExtent` describing the pre-mutation content, and the
+    // clamp below would silently truncate the target to it. The rule is
+    // one-sided and therefore safe: the scrollable's content is at least
+    // `sliverBaseOffset + treeTotal` once laid out (later slivers only
+    // add), so a materially SMALLER observed max proves a layout is
+    // pending. Exactly one wait, never a loop: one frame suffices when
+    // no animation is in flight, and the animating case was routed to
+    // the follower above.
+    {
+      final position = scrollController.position;
+      if (position.hasViewportDimension && position.hasContentDimensions) {
+        final double treeTotal = fullOffsetAt(_controller.visibleNodeCount);
+        final double requiredMax =
+            sliverBaseOffset + treeTotal - position.viewportDimension;
+        if (requiredMax > position.maxScrollExtent + 0.5) {
+          final scheduler = SchedulerBinding.instance;
+          if (!scheduler.hasScheduledFrame) {
+            scheduler.scheduleFrame();
+          }
+          await scheduler.endOfFrame;
+          if (_disposed || !scrollController.hasClients) return false;
+        }
       }
     }
 
@@ -387,6 +446,12 @@ class ScrollOrchestrator<TKey, TData> {
     required double alignment,
     required double Function(TKey key)? extentEstimator,
     required double sliverBaseOffset,
+    // H3: when true, the completion loop also waits for the tree to be
+    // quiescent (`hasActiveAnimations` false) before the final snap, so
+    // a scroll issued DURING caller-side animations resolves on settled
+    // geometry. The animated-ancestor call site passes false and keeps
+    // its token-based exit bit-for-bit.
+    required bool waitForQuiescence,
   }) async {
     // Mutable, not captured: a [ScrollController] can detach from one
     // [ScrollPosition] and attach to another while this scroll runs (the
@@ -532,7 +597,11 @@ class ScrollOrchestrator<TKey, TData> {
             break;
           }
         }
-        if (scrollDone && expansionDone) break;
+        if (scrollDone &&
+            expansionDone &&
+            (!waitForQuiescence || !_controller.hasActiveAnimations)) {
+          break;
+        }
         await SchedulerBinding.instance.endOfFrame;
       }
     } finally {

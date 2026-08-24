@@ -2468,6 +2468,8 @@ Both must be accompanied by an unchanged run of
 
 ### H3. `animateScrollToKey` after a mutation clamps to the pre-layout `maxScrollExtent`
 
+**Status.** IMPLEMENTED 2026-08-24. `audit_repro_h3_test.dart` red on unfixed code at the JOURNEY, not the landing: with H1's settle snap already landed, the zero-duration landing self-heals a frame later, so both cases discriminate mid-flight (case 1 riding to the stale 400 clamp, 200.0 against the greater-than-500 pin; case 2 pinned at 0.0). Case 1 starts from a NONZERO stale max, because a clamp equal to the current pixels completes instantly, goes idle, and lets the snap mask the defect. (a0), (a) with `waitForQuiescence`, and (b) landed as printed; the animated-ancestor call site passes false and its token-based exit is unchanged; the controller doc gained the two clauses. One harness finding recorded: a Ticker's epoch is its FIRST tick, so a ride started between frames (which (b)'s wait forces) banks no time by the next pump; both cases give it an epoch-setting tick before sampling. Case 2's mid-flight literal is 50, the tracked value depending on the clamp against the mid-expansion max (measured 95.1 at the sample). Case 3 is the (a0) guard, red with the guard removed (the routed call cancels the in-flight scroll, whose future then resolves false). Six demo states shown red individually. Risk suites 42 green; full suite 1142 passed, 4 skipped; analyze at the 48-issue baseline.
+
 **Finding.** `_scroll_orchestrator.dart:236-253` waits one frame ONLY when
 the orchestrator itself expanded ancestors
 (`collapsedAncestors.isNotEmpty && expandedCount > 0`). The target is then
