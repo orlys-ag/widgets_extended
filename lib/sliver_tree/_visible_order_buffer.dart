@@ -478,6 +478,53 @@ class VisibleOrderBuffer<TKey> {
     _onMutated();
   }
 
+  /// Inserts [keys] at the PRE-insert positions [gaps], in one pass.
+  ///
+  /// `gaps[i]` is the index in the CURRENT buffer that `keys[i]` lands in
+  /// front of; several entries may share a gap and keep their relative
+  /// order. [gaps] must be non-decreasing and in range, which the caller
+  /// guarantees by building it with a forward-only cursor.
+  ///
+  /// The mixed-block counterpart of [insertAllKeys]: k separate
+  /// [insertNid] calls each memmove the whole suffix, O(k * suffix),
+  /// while the backward merge below moves every entry exactly once,
+  /// O(suffix + k).
+  void insertAllKeysAtGaps(List<int> gaps, List<TKey> keys) {
+    final int k = keys.length;
+    assert(gaps.length == k);
+    assert(() {
+      for (int i = 1; i < k; i++) {
+        if (gaps[i] < gaps[i - 1]) {
+          return false;
+        }
+      }
+      return k == 0 || (gaps.first >= 0 && gaps.last <= _len);
+    }(), "insertAllKeysAtGaps needs non-decreasing, in-range gaps.");
+    if (k == 0) {
+      return;
+    }
+    _ensureOrderCapacity(_len + k);
+    // Backward merge. `write` walks down the grown buffer, `read` down
+    // the original: every surviving entry is copied at most once, and
+    // each key drops into the hole its gap opened.
+    int write = _len + k - 1;
+    int read = _len - 1;
+    for (int i = k - 1; i >= 0; i--) {
+      final int gap = gaps[i];
+      while (read >= gap) {
+        _orderNids[write--] = _orderNids[read--];
+      }
+      _orderNids[write--] = _nids[keys[i]]!;
+    }
+    _len += k;
+    if (!_suppress) {
+      for (int i = 0; i < k; i++) {
+        bumpFromSelf(_nids[keys[i]]!, 1);
+      }
+    }
+    _onMutated();
+  }
+
   /// Removes the entry at visible position [index], shifting the suffix
   /// left by one.
   void removeAt(int index) {

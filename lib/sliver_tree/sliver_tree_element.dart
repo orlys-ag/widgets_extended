@@ -66,12 +66,15 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
 
   /// Keys whose mounted widget may be stale and needs refresh.
   ///
-  /// Populated by three sources:
+  /// Populated by four sources:
   ///   - [update] (parent rebuild): every mounted key is queued so rows
   ///     pick up the new `nodeBuilder` closure / captured parent state.
   ///   - [_onStructuralChange]: null affectedKeys queues every mounted
   ///     key; a non-empty set queues only the listed mounted keys.
   ///   - [_onNodeDataChanged]: queues the single affected mounted key.
+  ///   - [didChangeDependencies]: every mounted key is queued, because
+  ///     rows share this element as their BuildContext, so any inherited
+  ///     widget any row reads dirties every mounted row.
   ///
   /// Consumed lazily in [createChild] during the next layout: cache-
   /// region and sticky children are rebuilt there; off-screen queued
@@ -192,12 +195,57 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Fourth [_dirtyKeys] producer. Rows build with THIS element as their
+    // BuildContext (see [createChild]), so every inherited read a
+    // nodeBuilder performs registers here; a Theme / MediaQuery /
+    // DefaultTextStyle change means every mounted row's builder output
+    // may differ. Same lazy shape as [update]: queue, mark layout, let
+    // [createChild] rebuild the cache-region and sticky rows the next
+    // layout reaches (see [_dirtyKeys]). NOT only the cache region:
+    // sticky headers the cache region rejected are force-created too
+    // (render_sliver_tree.dart:2928-2934, :2952).
+    if (_children.isEmpty) {
+      return;
+    }
+    _dirtyKeys.addAll(_children.keys);
+    renderObject.markNeedsLayout();
+  }
+
+  @override
   void performRebuild() {
     super.performRebuild();
-    // All widget-refresh work happens lazily in [createChild] during
-    // layout (see [_dirtyKeys]). If the framework marks us dirty, the
-    // super call satisfies that contract; the actual reconciliation lands
-    // when the next layout fires and iterates cache-region keys.
+    // Deliberately queues NOTHING. Two causes mark this element dirty:
+    //
+    //   - [didChangeDependencies], which has already added every mounted
+    //     key to [_dirtyKeys] and called `markNeedsLayout` by the time
+    //     the build phase reaches here (`markNeedsBuild` only enqueues;
+    //     framework.dart:5386-5390). Nothing is left to do.
+    //   - `Element.reassemble`, which calls `markNeedsBuild()`
+    //     (framework.dart:3754-3759) and reaches this element through
+    //     [reassemble]'s `super` call. When the reassemble makes the
+    //     ancestor hand down a FRESH `SliverTree`, [update] runs and its
+    //     `_didReassemble` branch handles the cause more strongly, via
+    //     [_invalidateAllChildren]. When the ancestor hands down the
+    //     IDENTICAL instance instead, which `Element.updateChild`
+    //     short-circuits (framework.dart:4014), [update] does not run
+    //     that frame: `_didReassemble` stays set and the mounted rows
+    //     stay stale until some later [update]. Measured in that shape,
+    //     0 rows rebuild on the reassemble frame. Queueing here WOULD
+    //     close that gap, because the element is dirty either way, but
+    //     the cause belongs at its own call site ([reassemble]) rather
+    //     than at this shared sink. Tracked as M26; hot-reload only.
+    //
+    // The parent-rebuild path does not reach this method at all:
+    // `RenderObjectElement.update` calls the private `_performRebuild()`
+    // (framework.dart:6813), not this override, so [update] owns its own
+    // queueing.
+    //
+    // RULE: a future `markNeedsBuild()` on this element queues its own
+    // keys at its own call site. Landing here queues nothing, and the
+    // next layout finds every mounted row clean, because [createChild]
+    // early-returns for an existing, non-dirty key.
   }
 
   /// Deactivates all existing children so they are recreated with the
@@ -590,15 +638,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     final nodeId = child.slot as TKey?;
     if (nodeId != null) {
       _children.remove(nodeId);
-      // forgetChild bypasses removeRenderObjectChild, so if a GlobalKey
-      // inside nodeBuilder moves the element elsewhere, the RenderBox
-      // stays adopted as a zombie in renderObject._children and gets
-      // walked by attach/detach/visitChildren. Drop it here when it's
-      // still our adopted child.
-      final box = renderObject.getChildForNode(nodeId);
-      if (box != null && identical(box.parent, renderObject)) {
-        renderObject.removeChild(box, nodeId);
-      }
     }
     super.forgetChild(child);
   }

@@ -510,6 +510,48 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   void _disposeOperationGroupIfEmpty(TKey opKey, OperationGroup<TKey> _) =>
       _anim.opGroups.disposeIfEmpty(opKey);
 
+  /// Returns true when [group] took no members, so the caller skips
+  /// starting it, disposing it first if the registry still holds it.
+  ///
+  /// The Path-2 install sites in [expand] and [collapse] call
+  /// `opGroups.install` BEFORE the member loops that filter
+  /// `_isPendingDeletion`, so a parent whose every descendant is
+  /// mid-exit produces a group with nothing in it. (Named rather than
+  /// cited by line: both sites move whenever this file is edited, and
+  /// they are its only two `opGroups.install` calls.) Left running,
+  /// that shell holds [hasActiveAnimations] true for a full
+  /// `expandCollapse` duration (`_animation_coordinator.dart:929-930`
+  /// reads group EXISTENCE, not membership), and
+  /// `SliverTreeElement._onAnimationTick` marks layout on every tick
+  /// while it does (`sliver_tree_element.dart:333`, `:340`).
+  ///
+  /// True is the right answer in all three registry states, which is
+  /// why the return value does not track whether the disposal actually
+  /// happened:
+  ///
+  ///   - the slot still holds [group]: dispose it, skip the start;
+  ///   - the slot is empty because something already disposed it:
+  ///     `dispose` nulls the ticker (`animation_controller.dart:925`)
+  ///     and `forward` asserts on it (`:475-479`), so starting it
+  ///     would throw;
+  ///   - the slot holds a DIFFERENT group: ours is orphaned, and its
+  ///     status events would be dropped by the install-time identity
+  ///     guard (`_operation_group_registry.dart:185`) anyway.
+  ///
+  /// Nothing downstream is owed either way: `disposeIfEmpty` removes
+  /// the group from the registry BEFORE disposing it (`:203-204`), so
+  /// any status event the disposal dispatches meets that same identity
+  /// guard, and both status branches walk collections that are empty
+  /// here (`_tree_controller_animation.dart:274`, `:298`).
+  bool _abandonEmptyOperationGroup(TKey opKey, OperationGroup<TKey> group) {
+    if (group.members.isNotEmpty || group.pendingRemoval.isNotEmpty) {
+      return false;
+    }
+    _disposeOperationGroupIfEmpty(opKey, group);
+    _bumpAnimGen();
+    return true;
+  }
+
   // Bulk animator
   bool _addBulkMember(TKey key) => _anim.bulk.addMember(key);
   bool _removeBulkMember(TKey key) => _anim.bulk.removeMember(key);
@@ -3727,18 +3769,31 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // No animation: insert and return
       final nodesToShow = _flattenSubtree(key, includeRoot: false);
       final nodesToInsert = <TKey>[];
+      int alreadyVisibleCount = 0;
       for (final nodeId in nodesToShow) {
         if (_isPendingDeletion(nodeId)) continue;
         if (!_order.contains(nodeId)) {
           nodesToInsert.add(nodeId);
         } else {
+          alreadyVisibleCount++;
           _removeAnimation(nodeId);
         }
       }
-      if (nodesToInsert.isNotEmpty) {
-        final insertIndex = parentIndex + 1;
-        _order.insertAllKeys(insertIndex, nodesToInsert);
-        _updateIndicesFrom(insertIndex);
+      if (alreadyVisibleCount == 0) {
+        // Every member is new: one memmove, the dominant case.
+        if (nodesToInsert.isNotEmpty) {
+          final insertIndex = parentIndex + 1;
+          _order.insertAllKeys(insertIndex, nodesToInsert);
+          _updateIndicesFrom(insertIndex);
+        }
+      } else {
+        // Mixed: members of an in-flight collapse still hold their order
+        // slots, because the group's `pendingRemoval` is not consumed
+        // until its dismissed handler runs. A block insert at
+        // parentIndex + 1 would place the new rows AHEAD of their own
+        // earlier siblings, and `_removeAnimation` above cannot correct
+        // it: it lands in AnimationCoordinator, which cannot see _order.
+        _spliceIntoVisibleOrderAfter(parentIndex, nodesToShow);
       }
       _structureGeneration++;
       _notifyStructural(affectedKeys: <TKey>{key});
@@ -3863,41 +3918,38 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _order.insertAllKeys(insertIndex, nodesToInsert);
       _updateIndicesFrom(insertIndex);
     } else {
-      // Mixed path: some visible (exiting), some need insertion
-      int currentInsertIndex = parentIndex + 1;
-      int insertOffset = 0;
-      int minInsertIndex = _order.length;
-      for (final nodeId in nodesToShow) {
-        if (_isPendingDeletion(nodeId)) continue;
-        final existingIndex = _order.indexOf(nodeId);
-        final capturedExtent = _captureAndRemoveFromGroups(nodeId);
-        final nge = NodeGroupExtent(
-          startExtent: capturedExtent ?? 0.0,
-          targetExtent: _fullExtentOf(nodeId) ?? _unknownExtent,
-        );
-        group.members[nodeId] = nge;
-        _setOperationGroup(nodeId, key);
-
-        if (existingIndex != VisibleOrderBuffer.kNotVisible) {
-          // Node already visible (was exiting)
-          currentInsertIndex = existingIndex + insertOffset + 1;
-        } else {
-          // Insert at current position
-          if (currentInsertIndex < minInsertIndex) {
-            minInsertIndex = currentInsertIndex;
-          }
-          _order.insertKey(currentInsertIndex, nodeId);
-          insertOffset++;
-          currentInsertIndex++;
-        }
-      }
-      if (insertOffset > 0) {
-        _updateIndicesFrom(minInsertIndex);
-      }
+      // Mixed path: some visible (exiting), some need insertion. Shares
+      // one helper with the non-animated branch, which had the same
+      // protocol and got the placement wrong. The helper also replaces k
+      // separate `insertKey` calls (each memmoving the whole suffix,
+      // O(k * suffix)) with one backward merge, O(suffix + k).
+      //
+      // The read order is preserved: this body captured
+      // `_order.indexOf(nodeId)` BEFORE `_captureAndRemoveFromGroups`,
+      // and the helper likewise calls `onVisit` after reading the index.
+      _spliceIntoVisibleOrderAfter(
+        parentIndex,
+        nodesToShow,
+        onVisit: (nodeId, _) {
+          final capturedExtent = _captureAndRemoveFromGroups(nodeId);
+          group.members[nodeId] = NodeGroupExtent(
+            startExtent: capturedExtent ?? 0.0,
+            targetExtent: _fullExtentOf(nodeId) ?? _unknownExtent,
+          );
+          _setOperationGroup(nodeId, key);
+        },
+      );
     }
 
     _structureGeneration++;
-    group.controller.forward();
+    // Every descendant may have been filtered out of the three member
+    // loops above by `_isPendingDeletion`; see
+    // [_abandonEmptyOperationGroup]. Expand adds no `pendingRemoval`
+    // entries (all such adds are in [collapse]'s two paths or
+    // [collapseAll]), so the check here is about members alone.
+    if (!_abandonEmptyOperationGroup(key, group)) {
+      group.controller.forward();
+    }
     // Path 2 creates no standalone states of its own, only keep the
     // standalone ticker alive when states from other sources exist. An
     // ungated start costs one wasted start/stop frame per operation.
@@ -3996,7 +4048,6 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       _anim.opGroups.runWithGroupDetached(key, (group) {
         group.controller.value = 1.0;
       });
-      _bumpAnimGen();
       existingGroup.controller.reverse();
 
       // Handle descendants NOT in this group (from nested expansions)
@@ -4036,7 +4087,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     }
 
     _structureGeneration++;
-    group.controller.reverse();
+    // Every descendant may have been filtered out of the member loop
+    // above by `_isPendingDeletion`; see [_abandonEmptyOperationGroup].
+    if (!_abandonEmptyOperationGroup(key, group)) {
+      group.controller.reverse();
+    }
     // See the matching gate in the expand path.
     if (_anim.standalone.hasAny) {
       _anim.standalone.ensureRunning();

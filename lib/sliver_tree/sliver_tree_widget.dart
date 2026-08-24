@@ -81,6 +81,13 @@ class SliverTree<TKey, TData> extends RenderObjectWidget {
   /// measured extent until it has been laid out once, so any offset derived
   /// for rows that have never been on screen uses an estimate and is
   /// corrected once the real heights arrive.
+  ///
+  /// Every row shares ONE [BuildContext], the sliver's own element, so an
+  /// inherited read here registers against that element rather than against
+  /// the row. A change to any inherited widget any row reads therefore
+  /// dirties every mounted row, and the next layout rebuilds the cache-region
+  /// and sticky rows it reaches. Reading a high-frequency inherited value in a
+  /// row builder costs one queue plus one layout per notification.
   final Widget Function(BuildContext context, TKey nodeKey, int nodeDepth)
   nodeBuilder;
 

@@ -261,6 +261,69 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
     }
   }
 
+  /// Splices the DFS pre-order [nodesToShow] into the visible order
+  /// starting just after [parentIndex], keeping every NEW key at its
+  /// structural position relative to members that are ALREADY in the
+  /// buffer (rows a mid-collapse operation group is still animating out).
+  /// Pending-deletion members are skipped. Returns true when anything was
+  /// inserted.
+  ///
+  /// [onVisit] fires for each surviving member during the placement pass,
+  /// with `alreadyVisible` telling the caller which arm it is on, so
+  /// per-node bookkeeping (group membership, animation teardown) happens
+  /// in the same walk.
+  ///
+  /// Pass 1 mutates nothing, which is why there is no `insertOffset`
+  /// correction: `_order.indexOf` still answers in the one index space
+  /// every gap is expressed in. Pass 2 is a single
+  /// [VisibleOrderBuffer.insertAllKeysAtGaps] plus one
+  /// [_updateIndicesFrom]. The cursor only moves forward, so `gaps` is
+  /// sorted by construction even if the order it reads is already
+  /// corrupt, and a new row can never land ahead of a member visited
+  /// before it.
+  ///
+  /// Deferring the buffer write until after the whole [onVisit] pass is
+  /// safe for the two callees Path 2 passes. Both land in
+  /// `AnimationCoordinator` (`_captureAndRemoveFromGroups` directly,
+  /// `_setOperationGroup` through `opGroups.setMembership`), and that
+  /// class holds no reference to the order at all: `VisibleOrderBuffer`
+  /// and `_order` appear nowhere in `_animation_coordinator.dart`, so
+  /// reaching the order from there is not merely avoided but
+  /// unavailable. A future callee that DID read `_order` would break the
+  /// interleaved cursor just as badly, since that one exposes a
+  /// half-spliced buffer instead of an untouched one.
+  bool _spliceIntoVisibleOrderAfter(
+    int parentIndex,
+    List<TKey> nodesToShow, {
+    void Function(TKey nodeId, bool alreadyVisible)? onVisit,
+  }) {
+    List<int>? gaps;
+    List<TKey>? newKeys;
+    int cursor = parentIndex + 1;
+    for (final nodeId in nodesToShow) {
+      if (_isPendingDeletion(nodeId)) {
+        continue;
+      }
+      final existingIndex = _order.indexOf(nodeId);
+      final alreadyVisible = existingIndex != VisibleOrderBuffer.kNotVisible;
+      onVisit?.call(nodeId, alreadyVisible);
+      if (alreadyVisible) {
+        if (existingIndex + 1 > cursor) {
+          cursor = existingIndex + 1;
+        }
+        continue;
+      }
+      (gaps ??= <int>[]).add(cursor);
+      (newKeys ??= <TKey>[]).add(nodeId);
+    }
+    if (gaps == null) {
+      return false;
+    }
+    _order.insertAllKeysAtGaps(gaps, newKeys!);
+    _updateIndicesFrom(gaps.first);
+    return true;
+  }
+
   /// Flattens a subtree into a list of node IDs in depth-first order.
   List<TKey> _flattenSubtree(TKey key, {bool includeRoot = true}) {
     final result = <TKey>[];
@@ -327,6 +390,15 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
         if (removedMember || removedPending) {
           _bumpAnimGen();
         }
+        // Fourth of the four member-removal paths to ask this; the other
+        // three are `removeFromAllSources`
+        // (`_animation_coordinator.dart:620`, its `disposeIfEmpty` at
+        // `:634`), `captureAndRemoveFromGroups` (`:575`, its call at
+        // `:589`) and the preserve-entering branch
+        // (`_tree_controller_animation.dart:165-176`). Without it,
+        // purging a group's last member leaves an empty shell holding
+        // [hasActiveAnimations] true for the rest of its duration.
+        _disposeOperationGroupIfEmpty(opGroupKey, group);
       }
     }
     // If [key] IS an operation key, meaning the node whose expand or

@@ -153,6 +153,13 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
         durationGetter: _expandCollapseDurationGetter,
         onTick: notifyListeners,
         onStatusChanged: _onOperationGroupStatus,
+        // A detached group is invisible to `groups`, so a union mirror
+        // rebuilt during the detach window omits its members and caches
+        // that omission against the current generation. Wired at the
+        // construction boundary so no detach call site can forget the
+        // pairing; the extra bumps are free, since bumpAnimGen only
+        // increments a counter.
+        onMembershipVisibilityChanged: bumpAnimGen,
       );
 
   late final BulkAnimator<TKey> bulk = BulkAnimator<TKey>(

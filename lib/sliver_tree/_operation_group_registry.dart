@@ -35,17 +35,26 @@ class OperationGroupRegistry<TKey> {
     required Duration Function() durationGetter,
     required void Function() onTick,
     required void Function(TKey opKey, AnimationStatus status) onStatusChanged,
+    required void Function() onMembershipVisibilityChanged,
   }) : _nids = nids,
        _vsync = vsync,
        _durationGetter = durationGetter,
        _onTick = onTick,
-       _onStatusChanged = onStatusChanged;
+       _onStatusChanged = onStatusChanged,
+       _onMembershipVisibilityChanged = onMembershipVisibilityChanged;
 
   final NodeIdRegistry<TKey> _nids;
   final TickerProvider _vsync;
   final Duration Function() _durationGetter;
   final void Function() _onTick;
   final void Function(TKey opKey, AnimationStatus status) _onStatusChanged;
+
+  /// Invoked when a group is hidden from [groups] and then restored
+  /// without the group itself changing: today, the detach window in
+  /// [runWithGroupDetached]. Injected rather than reached for, so this
+  /// registry stays unaware of what the owner caches, exactly as
+  /// [_onTick] and [_onStatusChanged] are.
+  final void Function() _onMembershipVisibilityChanged;
 
   /// Live groups keyed by their `operationKey` (the node whose
   /// expand/collapse created the group).
@@ -214,6 +223,12 @@ class OperationGroupRegistry<TKey> {
       body(group);
     } finally {
       _groups[opKey] = group;
+      // The window above hides a LIVE group from [groups]. A synchronous
+      // listener that rebuilds a membership-derived cache inside `body`
+      // therefore builds it without this group's members and stamps it
+      // with the pre-detach generation, which nothing else invalidates.
+      // Fired here so no call site can forget the pairing.
+      _onMembershipVisibilityChanged();
     }
   }
 
