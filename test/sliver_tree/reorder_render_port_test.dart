@@ -57,6 +57,13 @@ class _FakePort implements ReorderRenderPort<String> {
   /// [boundsOf] to model a sticky header, whose painted band is NOT
   /// discoverable positionally.
   @override
+  ({String key, double paintedOffset, double extent})? findPinnedRowAtPaintedY(
+    double scrollY,
+  ) {
+    return null;
+  }
+
+  @override
   ({double paintedOffset, double extent})? paintedRowBounds(String key) {
     final override = boundsOf;
     if (override != null) {

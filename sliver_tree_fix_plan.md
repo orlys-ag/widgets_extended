@@ -12927,6 +12927,41 @@ Leg 2, the dwell control, in the exact frame ordering a dwell produces. Straight
 
 ### L21. A drag started on a sticky-pinned header probes the content beneath the strip
 
+**Status.** IMPLEMENTED 2026-08-24 as written, after M11 (chain 6).
+`ReorderRenderPort.findPinnedRowAtPaintedY` added and documented with the
+Decision (pending-deletion filter only, no lifted skip); `RenderSliverTree`
+implements it beside `paintedRowBounds` (shallowest-first over
+`_sticky.headers`, paint space converted to sliver-local by adding
+`constraints.scrollOffset`); `DragProbe.resolveTarget` consults it before
+`findRowAtPaintedY`; the invariant prose, the resolve doc (with the
+off-screen-gap consequence), and the port's inverse doc updated; the seven
+scripted fakes gained a null-returning member; changelog entry. Test: the
+third case in `sticky_grab_geometry_test.dart`. Pre-fix the first resolve
+produced a NULL target, not the block's traced `i5`: the positional lookup
+does answer `i5` (the setup assertion pins that through
+`findRowAtPaintedY`), but `i5` is a strict descendant of the dragged header
+and the resolver's cycle filter (`_drop_zone_resolver.dart:660`) refuses
+it, so the drag had no target at all while the pointer stayed in the band.
+A structural finding reshaped the block's second leg: `startDrag` runs the
+session's first `resolve()` (`tree_reorder_controller.dart:380`) and
+`DragSession.resolve` installs the make-room preview through
+`MakeRoomDriver.onTargetResolved` (`_drag_session.dart:350`,
+`_drag_session_behaviors.dart:283`), so the lifted range covers the header
+BEFORE the first pointer-move resolve; the "apply the skip" mutation
+therefore went red at the first resolve, and the case pins the
+lifted-range precondition (`previewLiftedStartIndex ==
+getVisibleIndex("s1")`) ahead of ONE `targetKey` assertion that both the
+positional-only and the skip-applied mutations turn red. All seven
+assertions shown red individually (no pinning scrolled 10 px, scrolled 30
+px, scrolled 350 px so the row beneath is `i6`, a short press, the
+positional-only lookup, the lifted record removed, the skip applied).
+Verification: `flutter analyze` 47; risk suites (both sticky suites, the
+two sectioned reorder suites, the seven fake-hosting files, M11's repro) 83
+green; full suite 1159 passed, 4 skipped; touched files format-clean as at
+HEAD (the render object and controller were not format-clean before and
+were left so). M11's open sequencing question is closed as this block's
+Decision says.
+
 **Finding.** `DragProbe.captureGrab` asks `_renderPort.paintedRowBounds(_draggedKey)` (`_drag_session.dart:171`), which substitutes the pinned band (`render_sliver_tree.dart:1945-1954` delegating to `_anchorPaintedBounds`, whose sticky branch returns `info.pinnedY`/`info.extent` at `:3969-3974`). `DragProbe.resolveTarget` asks `_renderPort.findRowAtPaintedY(probeY)` (`_drag_session.dart:219`), which has no sticky awareness (`render_sliver_tree.dart:1871-1925`). The port's own doc says the two are "NOT interchangeable at a sticky header" (`reorder_render_port.dart:62-73`).
 
 **Root cause.** The "derived invariant" at `_drag_session.dart:144-146` ("at drag start the probe is the dragged row's OWN midpoint, because the grab position cancels out") is only true when `paintedRowBounds` and `findRowAtPaintedY` agree. For a pinned header, `grabDy = start.sliverY - pinnedBounds.paintedOffset` (`:177`) and `probeDy = pinnedBounds.extent / 2 - grabDy` (`:180`), so `probeY = pinnedBounds.paintedOffset + extent / 2`, a sliver-local y that `findRowAtPaintedY` resolves against STRUCTURAL offsets and answers with whatever row is scrolled beneath the strip. Verified arithmetically against `sticky_grab_geometry_test.dart`'s setup (header 40 px, rows 50 px, scrolled to 300): grabbing the header 12 px down probes at 312 (or 320 with the midpoint probe), which lands on item `i5`.

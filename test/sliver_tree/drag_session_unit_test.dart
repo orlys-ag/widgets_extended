@@ -56,6 +56,13 @@ class _FakeRenderPort implements ReorderRenderPort<String> {
   /// NOT record into [lookups]: that list pins WHERE the probe looked
   /// positionally, and grab capture no longer looks positionally.
   @override
+  ({String key, double paintedOffset, double extent})? findPinnedRowAtPaintedY(
+    double scrollY,
+  ) {
+    return null;
+  }
+
+  @override
   ({double paintedOffset, double extent})? paintedRowBounds(String key) {
     final pin = pinned[key];
     if (pin != null) {

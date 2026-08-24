@@ -190,4 +190,112 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
   });
+
+  testWidgets("a drag started on a pinned sticky header resolves the header, "
+      "not the content scrolled beneath the strip (L21)", (tester) async {
+    late TreeReorderController<String> reorder;
+    final scroll = ScrollController();
+    addTearDown(scroll.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 400.0,
+            child: CustomScrollView(
+              controller: scroll,
+              slivers: <Widget>[
+                SyncedSliverTree<String, _Node>.hierarchy(
+                  roots: <_Node>[
+                    _Node("s1", <_Node>[
+                      for (int i = 0; i < 20; i++) _Node("i$i"),
+                    ]),
+                  ],
+                  keyOf: (n) {
+                    return n.id;
+                  },
+                  childrenOf: (n) {
+                    return n.children;
+                  },
+                  maxStickyDepth: 1,
+                  animationStyle: TreeAnimationStyle.disabled,
+                  reorder: TreeReorderConfig<String>(
+                    showDragProxy: false,
+                    onReorder: (key, newParent, index) {},
+                    onControllerCreated: (c) {
+                      reorder = c;
+                    },
+                  ),
+                  itemBuilder: (context, view) {
+                    return SizedBox(
+                      key: ValueKey("row-${view.key}"),
+                      height: view.depth == 0 ? _kHeader : _kRow,
+                      child: Text(view.key),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    scroll.jumpTo(300.0);
+    await tester.pumpAndSettle();
+
+    final headerRect = tester.getRect(find.byKey(const ValueKey("row-s1")));
+    expect(
+      headerRect.top,
+      moreOrLessEquals(0.0, epsilon: 0.5),
+      reason: "setup: the header must be pinned at the viewport top",
+    );
+    expect(
+      scroll.position.pixels,
+      greaterThan(_kHeader),
+      reason: "setup: and scrolled past its own structural offset",
+    );
+    final render = tester.renderObject<RenderSliverTree<String, _Node>>(
+      find.byType(SliverTree<String, _Node>),
+    );
+    expect(
+      render.findRowAtPaintedY(scroll.position.pixels + 20.0)!.key,
+      "i5",
+      reason:
+          "setup: the row structurally beneath the pinned band's "
+          "midpoint is i5, which is what a positional lookup answers",
+    );
+
+    final gesture = await tester.startGesture(
+      Offset(headerRect.center.dx, headerRect.top + 12.0),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.moveBy(const Offset(0.0, 2.0));
+    await tester.pump();
+    expect(reorder.isDragging, isTrue, reason: "setup: the drag started");
+    // The Decision's precondition: the make-room preview is installed at
+    // drag start, so its lifted range already covers the very header the
+    // lookup must answer with. The pinned lookup must NOT apply the
+    // lifted skip, or every resolve falls through to the content beneath
+    // the strip.
+    final tree = reorder.treeController;
+    expect(
+      tree.previewLiftedStartIndex,
+      tree.getVisibleIndex("s1"),
+      reason:
+          "setup: the held preview's lifted range must cover the "
+          "header the lookup answers with",
+    );
+    expect(
+      reorder.currentTarget?.targetKey,
+      "s1",
+      reason:
+          "the probe sits inside the pinned band, so the header owns "
+          "it; a positional lookup against structural offsets, or a pinned "
+          "lookup that skips the lifted range, resolves elsewhere",
+    );
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
 }

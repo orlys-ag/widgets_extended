@@ -143,7 +143,11 @@ class DragProbe<TKey> {
   ///
   /// Derived invariant: at drag start the probe is the dragged row's OWN
   /// midpoint, because the grab position cancels out, so every probed
-  /// session begins on the current-position target.
+  /// session begins on the current-position target. For a drag started
+  /// on a pinned header that holds only because [resolveTarget] consults
+  /// the pinned-band lookup first (L21): the grab geometry is the pinned
+  /// band's, and a positional lookup against structural offsets would
+  /// answer with the content scrolled beneath the strip.
   double get probeDy => _probeDy;
   double _probeDy = 0.0;
 
@@ -181,10 +185,16 @@ class DragProbe<TKey> {
     }
   }
 
-  /// Finds the live row under the probe via
-  /// [ReorderRenderPort.findRowAtPaintedY] and hands classification to
-  /// the [DropZoneResolver]. Pending-deletion rows are vanishing and
-  /// cannot be valid drop targets; the lookup skips them.
+  /// Finds the live row under the probe, a pinned header first
+  /// ([ReorderRenderPort.findPinnedRowAtPaintedY]) and otherwise the row
+  /// painted there ([ReorderRenderPort.findRowAtPaintedY]), and hands
+  /// classification to the [DropZoneResolver]. Pending-deletion rows are
+  /// vanishing and cannot be valid drop targets; both lookups skip them.
+  /// While the probe is inside a pinned band the resolved slot is the
+  /// header's, so `gapVisibleIndex` points at the header's STRUCTURAL
+  /// visible index, which may be scrolled off-screen and the make-room
+  /// gap opens where the user cannot see it: the same trade hit-testing
+  /// takes, and strictly better than resolving against an unrelated row.
   ///
   /// One probe for the whole resolution: row lookup, zone classification
   /// and dwell all read `sample.sliverY + probeDy` (the proxy midpoint
@@ -216,7 +226,13 @@ class DragProbe<TKey> {
     }
     final probeY = sample.sliverY + _probeDy;
 
-    final hovered = _renderPort.findRowAtPaintedY(probeY);
+    // The pinned band is on top (L21): a probe inside it is on the
+    // header, not on the content scrolled beneath the strip, the priority
+    // hit-testing already gives pinned headers. The gap branch below is
+    // unaffected: a pinned hit never satisfies `probeY < paintedOffset`.
+    final hovered =
+        _renderPort.findPinnedRowAtPaintedY(probeY) ??
+        _renderPort.findRowAtPaintedY(probeY);
     if (hovered == null) {
       return null;
     }

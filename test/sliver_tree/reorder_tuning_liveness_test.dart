@@ -40,6 +40,13 @@ class _FakePort implements ReorderRenderPort<String> {
   }
 
   @override
+  ({String key, double paintedOffset, double extent})? findPinnedRowAtPaintedY(
+    double scrollY,
+  ) {
+    return null;
+  }
+
+  @override
   ({double paintedOffset, double extent})? paintedRowBounds(String key) {
     return switch (key) {
       "p" => (paintedOffset: 0.0, extent: 50.0),

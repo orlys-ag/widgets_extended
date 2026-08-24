@@ -63,21 +63,40 @@ abstract interface class ReorderRenderPort<TKey> {
   /// [findRowAtPaintedY] speaks. Returns `null` when the row is not
   /// mounted.
   ///
-  /// The INVERSE of [findRowAtPaintedY], and the two are NOT
-  /// interchangeable at a sticky header. A pinned header paints at its
-  /// pinned band while its structural offset has scrolled away above;
-  /// this member substitutes the pinned band, and [findRowAtPaintedY]
-  /// does not (it answers with whatever content is scrolled beneath the
-  /// pinned strip).
+  /// The INVERSE of [findRowAtPaintedY]. At a sticky header the two speak
+  /// different geometry: a pinned header paints at its pinned band while
+  /// its structural offset has scrolled away above; this member
+  /// substitutes the pinned band, and [findRowAtPaintedY] walks the
+  /// visible order and answers with whatever content is scrolled beneath
+  /// the pinned strip. [findPinnedRowAtPaintedY] is the positional twin
+  /// of the substitution: a probe consults it first (L21), so a position
+  /// question inside a pinned band agrees with this member.
   ///
-  /// So ask THIS when you know the key and want its geometry, and
-  /// [findRowAtPaintedY] only when the position is the question. Grab
+  /// So ask THIS when you know the key and want its geometry, and the
+  /// positional pair only when the position is the question. Grab
   /// capture knows the key, which is why it uses this: resolving grab
   /// geometry positionally yields a top-anchored proxy of the wrong
   /// height whenever a drag begins on a pinned header.
   ///
   /// Includes any active FLIP slide delta, matching [findRowAtPaintedY].
   ({double paintedOffset, double extent})? paintedRowBounds(TKey key);
+
+  /// The sticky-pinned row whose PAINTED band contains [scrollY], or null
+  /// when [scrollY] is not inside any pinned band. Sliver-local, like its
+  /// neighbours. Mirrors the priority `RenderSliverTree.hitTestChildren`
+  /// already gives pinned headers: the band is on top, so a pointer
+  /// inside it is on the header, not on the content scrolled underneath.
+  ///
+  /// Filters pending-deletion rows and NOTHING ELSE. In particular it does
+  /// NOT apply the make-room lifted-range skip that [findRowAtPaintedY]
+  /// applies: a drag started on a pinned header lifts that very header,
+  /// and skipping it would hand the probe back to the content beneath the
+  /// strip. The lifted skip belongs to lookups that walk the VISIBLE
+  /// ORDER; a future member takes it if and only if it iterates the
+  /// visible order.
+  ({TKey key, double paintedOffset, double extent})? findPinnedRowAtPaintedY(
+    double scrollY,
+  );
 
   /// Pins [key] against stale eviction until [unpinNode]. Idempotent.
   ///

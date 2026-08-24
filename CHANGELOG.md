@@ -19,6 +19,10 @@ nor mid-extent-animation). A header row whose child paints outside its box (a
 shadow, an overflowing badge) now shows that overflow while pinned, matching
 how the same row paints in flow; an app that relied on the pinned clip to
 contain overflow should clip inside its own row widget.
+- Fix: a drag started on a sticky-pinned header resolved its drop target
+against the content scrolled beneath the pinned strip. The drop probe now
+consults the pinned band first, matching hit-testing, so the header itself is
+the target while the pointer stays inside its band.
 - Fix: standalone animations spawned by expand/collapse mutators (partial
 reversals, nested-subtree exits, bulk continuations) ran on the `enterExit`
 family's timing while the mutator's own kill switch read `expandCollapse`.

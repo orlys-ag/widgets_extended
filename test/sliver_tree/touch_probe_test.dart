@@ -574,6 +574,13 @@ class _FakePort implements ReorderRenderPort<String> {
   // this, not findRowAtPaintedY, so a pinned header reports its
   // painted band rather than whatever sits structurally beneath it.
   @override
+  ({String key, double paintedOffset, double extent})? findPinnedRowAtPaintedY(
+    double scrollY,
+  ) {
+    return null;
+  }
+
+  @override
   ({double paintedOffset, double extent})? paintedRowBounds(String key) {
     return switch (key) {
       "a" => (paintedOffset: 0.0, extent: 50.0),

@@ -2097,6 +2097,44 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     );
   }
 
+  /// The pinned header whose painted band contains [scrollY]. See
+  /// [ReorderRenderPort]. Scans `_sticky.headers` shallowest-first (the
+  /// list is ordered root to leaf) and converts paint space to
+  /// sliver-local by adding `constraints.scrollOffset`, the same
+  /// conversion [paintedRowBounds] performs. A gesture-time caller, so
+  /// `_sticky` holds the last PAINTED frame's values, which is the
+  /// geometry the user is looking at (see [paintedRowBounds]).
+  ///
+  /// Filters pending-deletion rows and nothing else: NOT the make-room
+  /// lifted range [findRowAtPaintedY] skips (L21's Decision). A drag
+  /// started on a pinned header lifts that very header, and skipping it
+  /// would hand the probe back to the content beneath the strip; the
+  /// own-slot answer is the correct state, and a pinned strict descendant
+  /// of the dragged row is refused by the resolver's cycle filter anyway,
+  /// a null target that holds the current gap. The lifted skip belongs to
+  /// lookups that walk the VISIBLE ORDER; this one walks the sticky set.
+  @override
+  ({TKey key, double paintedOffset, double extent})? findPinnedRowAtPaintedY(
+    double scrollY,
+  ) {
+    final headers = _sticky.headers;
+    if (headers.isEmpty) {
+      return null;
+    }
+    final paintY = scrollY - constraints.scrollOffset;
+    for (final sticky in headers) {
+      if (paintY < sticky.pinnedY) continue;
+      if (paintY >= sticky.pinnedY + sticky.extent) continue;
+      if (controller.isPendingDeletion(sticky.nodeId)) continue;
+      return (
+        key: sticky.nodeId,
+        paintedOffset: sticky.pinnedY + constraints.scrollOffset,
+        extent: sticky.extent,
+      );
+    }
+    return null;
+  }
+
   /// Test-only oracle access to [_findRowFullScan], so equivalence tests
   /// can compare the bounded scan's routing result against the exact
   /// full-scan answer for the same [scrollY] with zero drift risk.

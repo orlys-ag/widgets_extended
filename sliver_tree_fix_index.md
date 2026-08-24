@@ -41,13 +41,9 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The plan creates 8 new test files.
+not be worked in parallel. The plan creates 7 new test files.
 
-NEW means not yet in `git ls-files`. 1 of those 8 already exist on disk,
-written for items that have landed but are not committed:
-`audit_repro_m11_test.dart`.
-
-Landed so far: 31 implemented (H1, H2, H3, H4, H6, L2, L6, L7, L13, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M16, M20, M21, M22, M23); 1 partially implemented
+Landed so far: 32 implemented (H1, H2, H3, H4, H6, L2, L6, L7, L13, L21, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M16, M20, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -159,16 +155,14 @@ Existing tests touched: `caller_placed_handle_modes_test.dart`, `caller_placed_h
 
 ### Cluster 7: L21, M11
 
-- **L21** (M) A drag started on a sticky-pinned header probes the content beneath the strip
+- **L21** (M) A drag started on a sticky-pinned header probes the content beneath the strip  **[DONE]**
 - **M11** (M) The hidden dragged row shadows rows the preview shifted into its band  **[DONE]**
 
 Ordering constraints:
 
 - Chain 6, drag row lookup (M11 before L21).
 
-New tests: `audit_repro_m11_test.dart`.
-
-Existing tests touched: `auto_expand_dwell_test.dart`, `below_zone_expanded_parent_test.dart`, `drag_proxy_test.dart`, `drag_session_unit_test.dart`, `drag_subtree_hide_test.dart`, `findrow_bounded_scan_oracle_test.dart`, `gap_anchor_resolved_slot_test.dart`, `hidden_row_hit_test.dart`, `make_room_hole_commit_test.dart`, `make_room_preview_test.dart`, `preview_eviction_test.dart`, `reorder_commit_path_test.dart`, `reorder_render_port_test.dart`, `reorder_tuning_liveness_test.dart`, `sticky_grab_geometry_test.dart`, `sticky_root_diff_repro_test.dart`, `touch_probe_test.dart`, `x_aware_below_zone_test.dart`.
+Existing tests touched: `audit_repro_m11_test.dart`, `auto_expand_dwell_test.dart`, `below_zone_expanded_parent_test.dart`, `drag_proxy_test.dart`, `drag_session_unit_test.dart`, `drag_subtree_hide_test.dart`, `findrow_bounded_scan_oracle_test.dart`, `gap_anchor_resolved_slot_test.dart`, `hidden_row_hit_test.dart`, `make_room_hole_commit_test.dart`, `make_room_preview_test.dart`, `preview_eviction_test.dart`, `reorder_commit_path_test.dart`, `reorder_render_port_test.dart`, `reorder_tuning_liveness_test.dart`, `sticky_grab_geometry_test.dart`, `sticky_root_diff_repro_test.dart`, `touch_probe_test.dart`, `x_aware_below_zone_test.dart`.
 
 ## Adjacent, but not ordered
 
