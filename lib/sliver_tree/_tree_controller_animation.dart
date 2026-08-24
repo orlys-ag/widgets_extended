@@ -365,7 +365,11 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// first, so a row re-entering mid-exit resumes where it is instead of
   /// restarting from zero. An unmeasured row takes [_unknownExtent] as its
   /// target, which layout resolves once the row has a size.
-  void _startStandaloneEnterAnimation(TKey key, {TKey? triggeringAncestorId}) {
+  void _startStandaloneEnterAnimation(
+    TKey key, {
+    required TreeAnimationFamily family,
+    TKey? triggeringAncestorId,
+  }) {
     // Capture current animated extent from any source BEFORE removing
     final capturedExtent = _captureAndRemoveFromGroups(key);
     final startExtent = capturedExtent ?? 0.0;
@@ -381,6 +385,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       key,
       AnimationState(
         type: AnimationType.entering,
+        family: family,
         startExtent: startExtent,
         targetExtent: targetExtent,
         triggeringAncestorId: triggeringAncestorId,
@@ -551,7 +556,14 @@ extension _TreeControllerAnimationOps<TKey, TData>
         _ancestorsExpandedFast(nodeId);
     if (reverseIntoEnter) {
       _clearPendingDeletion(nodeId);
-      _startStandaloneEnterAnimation(nodeId);
+      // Reverses an exit that `remove` installed as enterExit, from both
+      // callers (`_cancelDeletion` and `_revertSubtreeFromPendingDeletion`),
+      // so one literal here is the single named site; no parameter is
+      // needed until a second family appears on this path.
+      _startStandaloneEnterAnimation(
+        nodeId,
+        family: TreeAnimationFamily.enterExit,
+      );
     } else if (isStandaloneExiting) {
       _clearPendingDeletion(nodeId);
     } else {
@@ -566,7 +578,11 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// Mirror of [_startStandaloneEnterAnimation]: capturing the current
   /// extent is what keeps a row that is already mid-animation from jumping
   /// before it starts shrinking.
-  void _startStandaloneExitAnimation(TKey key, {TKey? triggeringAncestorId}) {
+  void _startStandaloneExitAnimation(
+    TKey key, {
+    required TreeAnimationFamily family,
+    TKey? triggeringAncestorId,
+  }) {
     // Capture current animated extent from any source BEFORE removing.
     // A never-measured row falls back to the ESTIMATE, not zero: layout
     // was sizing it at the estimate the frame before, and an exit that
@@ -588,6 +604,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
       key,
       AnimationState(
         type: AnimationType.exiting,
+        family: family,
         startExtent: currentExtent,
         targetExtent: 0.0,
         triggeringAncestorId: triggeringAncestorId,

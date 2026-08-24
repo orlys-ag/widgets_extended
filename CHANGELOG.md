@@ -1,3 +1,17 @@
+## Unreleased
+
+- **BREAKING** `AnimationState` gains a required `family` field
+(`TreeAnimationFamily`, newly exported): the animation family whose style
+spec times the state, declared at the install site. External constructions
+of `AnimationState` must now pass it; states obtained from
+`TreeController.getAnimationState` simply carry the new field.
+- Fix: standalone animations spawned by expand/collapse mutators (partial
+reversals, nested-subtree exits, bulk continuations) ran on the `enterExit`
+family's timing while the mutator's own kill switch read `expandCollapse`.
+Each install site now declares its family and the standalone ticker resolves
+the declared family through the live style, so restyling either family at
+runtime retimes exactly its own in-flight states.
+
 ## 0.0.34
 
 - **BREAKING** `SectionedListController.addItem` and `setItems` now throw

@@ -4044,6 +4044,46 @@ a pending-deletion-present case to cover the linear arm.
 
 ### M5. Standalone animations spawned by expand/collapse are timed by `enterExit`
 
+**Status.** IMPLEMENTED 2026-08-24, four audit passes, 3 and 4 consecutively
+clean; pass 2 caught the one stale doc the Solution did not enumerate: the
+`animationStyle` setter's dartdoc still said the standalone ticker re-reads
+`effectiveEnterExit` (now rewritten for the declared-family read). Landed as
+the Solution prescribes, anchors re-derived against the landed tree:
+`TreeAnimationFamily` (`animation_style.dart:41`) and `specFor` (`:190`),
+`AnimationState.family` required with no default (`types.dart:57`, `:73`),
+both install methods take `required TreeAnimationFamily family`
+(`_tree_controller_animation.dart:368`, `:573`), the per-family `_runTick`
+verbatim from this block (`_standalone_animator.dart:226-275`, the two
+injected getters replaced by one `styleGetter`), the coordinator's five
+curve reads and the synthetic entering state resolve the declared family,
+the wiring is `styleGetter: () => _animationStyle`, and the enum is exported
+from the barrel. The CHANGELOG gains an Unreleased section noting the
+`AnimationState` public-API break, per this block's instruction. Landing
+last in chain 8, the table was re-derived per this block's own rule: the
+grep returns 16 lines, minus the two declarations, so 14 sites, matching the
+post-M1 projection; 13 annotations in `tree_controller.dart` (3 enterExit:
+insertRoot, insert, remove; 10 expandCollapse across expand, collapse,
+expandAll, collapseAll, each verified against its mutator's kill-switch
+gate at `:3824`, `:4080`, `:4227`, `:4472`) plus the case-1 enterExit
+literal in the policy method. One new analyzer warning (the coordinator's
+now-unused `Curve` import) was removed, keeping the 48-issue baseline.
+
+`test/sliver_tree/audit_repro_m5_test.dart` is the regression test,
+family-flow style: the Path-1 standalone exit must settle on the
+expandCollapse clock (pre-fix red: G1 lingered at +310 ms on enterExit's
+10 s spec), the zero-enterExit mirror (pre-fix red: the old ticker's
+zero branch snapped G1 away in a single frame), and the insertRoot control
+(passes both sides; shown red by a mutation annotating insertRoot's site
+expandCollapse, under which the enter reads progress 0.03 at +310 ms,
+exactly 310 ms of the 10 s clock). All 6 assertion sites were individually
+shown red: the three setup sanities by test-side constructions, the two
+primary pins by the pre-fix run, and the control under the misroute
+mutation, with the lib restored diff-verified byte-identical after. The block's Risk suites pass together (97 tests,
+including the live-re-read pin in `animation_style_flow_test.dart`), the
+full suite reads 1104 passed, 4 skipped (the 1101 post-M2 baseline plus
+these three), `flutter analyze` stays at the 48-issue baseline, and the
+source-encoding guard is green.
+
 **Finding.** `StandaloneAnimator._runTick` reads one duration and one curve for
 the whole active set, both from the enter/exit family
 (`_standalone_animator.dart:225`, `:235`, `:258`), and `AnimationState`

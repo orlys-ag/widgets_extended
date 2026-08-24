@@ -24,13 +24,14 @@ import 'dart:async' show scheduleMicrotask;
 import 'dart:typed_data';
 import 'dart:ui' show lerpDouble;
 
-import 'package:flutter/animation.dart' show AnimationStatus, Curve;
+import 'package:flutter/animation.dart' show AnimationStatus;
 import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:flutter/scheduler.dart'
     show SchedulerBinding, SchedulerPhase, TickerProvider;
 
 import '_bulk_animator.dart';
 import '_node_id_registry.dart';
+import 'animation_style.dart';
 import '_operation_group_registry.dart';
 import '_reorder_preview_engine.dart';
 import '_slide_animation_engine.dart';
@@ -84,8 +85,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   AnimationCoordinator({
     required TickerProvider vsync,
     required NodeIdRegistry<TKey> nids,
-    required Duration Function() enterExitDurationGetter,
-    required Curve Function() enterExitCurveGetter,
+    required TreeAnimationStyle Function() styleGetter,
     required Duration Function() expandCollapseDurationGetter,
     required void Function(TKey opKey, AnimationStatus status)
     onOperationGroupStatus,
@@ -95,8 +95,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     required double defaultExtent,
   }) : _vsync = vsync,
        _nids = nids,
-       _enterExitDurationGetter = enterExitDurationGetter,
-       _enterExitCurveGetter = enterExitCurveGetter,
+       _styleGetter = styleGetter,
        _expandCollapseDurationGetter = expandCollapseDurationGetter,
        _onOperationGroupStatus = onOperationGroupStatus,
        _onBulkAnimationStatus = onBulkAnimationStatus,
@@ -106,9 +105,10 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   final TickerProvider _vsync;
   final NodeIdRegistry<TKey> _nids;
 
-  /// Enter/exit (standalone) timing: the style's `effectiveEnterExit`.
-  final Duration Function() _enterExitDurationGetter;
-  final Curve Function() _enterExitCurveGetter;
+  /// The live style. Standalone timing resolves each state's DECLARED
+  /// [AnimationState.family] through this, both in the ticker and in the
+  /// extent read paths below.
+  final TreeAnimationStyle Function() _styleGetter;
 
   /// Expand/collapse timing: the style's `expandCollapse`. Feeds the
   /// per-operation group registry's controller durations.
@@ -130,8 +130,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   late final StandaloneAnimator<TKey> standalone = StandaloneAnimator<TKey>(
     vsync: _vsync,
     nids: _nids,
-    enterExitCurveGetter: _enterExitCurveGetter,
-    enterExitDurationGetter: _enterExitDurationGetter,
+    styleGetter: _styleGetter,
     defaultExtent: _defaultExtent,
     fullExtentGetter: (nid) {
       if (nid < 0 || nid >= _fullExtentByNid.length) return null;
@@ -481,7 +480,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
       if (animation != null && animation.targetExtent == _kUnknownExtent) {
         if (animation.type == AnimationType.entering) {
           animation.targetExtent = extent;
-          animation.updateExtent(_enterExitCurveGetter());
+          animation.updateExtent(_styleGetter().specFor(animation.family).curve);
         }
       }
       return oldExtent;
@@ -493,12 +492,12 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     if (animation != null && animation.targetExtent == _kUnknownExtent) {
       if (animation.type == AnimationType.entering) {
         animation.targetExtent = extent;
-        animation.updateExtent(_enterExitCurveGetter());
+        animation.updateExtent(_styleGetter().specFor(animation.family).curve);
       }
     } else if (animation != null) {
       if (animation.type == AnimationType.entering) {
         animation.targetExtent = extent;
-        animation.updateExtent(_enterExitCurveGetter());
+        animation.updateExtent(_styleGetter().specFor(animation.family).curve);
       }
       // Exiting: leave startExtent as historical (extent at exit start).
     }
@@ -744,7 +743,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     // 3. Standalone
     final animation = standalone.at(key);
     if (animation == null) return fullExtent;
-    final t = _enterExitCurveGetter().transform(
+    final t = _styleGetter().specFor(animation.family).curve.transform(
       animation.progress.clamp(0.0, 1.0),
     );
     if (animation.targetExtent == _kUnknownExtent) {
@@ -761,6 +760,8 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
   static AnimationState _buildSyntheticEnteringState() {
     return AnimationState(
       type: AnimationType.entering,
+      // Op/bulk members run on the expandCollapse clock.
+      family: TreeAnimationFamily.expandCollapse,
       startExtent: 0,
       targetExtent: 0,
     );
@@ -894,7 +895,7 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     // 3. Standalone
     final animation = standalone.slotAtNid(nid);
     if (animation == null) return full;
-    final t = _enterExitCurveGetter().transform(
+    final t = _styleGetter().specFor(animation.family).curve.transform(
       animation.progress.clamp(0.0, 1.0),
     );
     if (animation.targetExtent == _kUnknownExtent) {

@@ -90,10 +90,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// `duration` at the next `forward()`/`reverse()`, so in-flight groups
   /// finish at their old rate and the new duration applies from the next
   /// start. Curves apply to newly started groups only. The per-node
-  /// standalone ticker re-reads [TreeAnimationStyle.effectiveEnterExit]
-  /// on every tick, so enter/exit animations adjust immediately; a zero
-  /// enter/exit duration makes all in-flight standalone animations
-  /// complete (finalize) on the next tick.
+  /// standalone ticker re-reads each state's DECLARED family spec
+  /// ([TreeAnimationStyle.specFor] of [AnimationState.family]) on every
+  /// tick, so standalone animations adjust immediately; zeroing a family
+  /// makes THAT family's in-flight standalone states complete (finalize)
+  /// on the next tick while the other family's keep running.
   TreeAnimationStyle get animationStyle {
     return _animationStyle;
   }
@@ -416,8 +417,7 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   late final AnimationCoordinator<TKey> _anim = AnimationCoordinator<TKey>(
     vsync: _vsync,
     nids: _nids,
-    enterExitDurationGetter: () => _animationStyle.effectiveEnterExit.duration,
-    enterExitCurveGetter: () => _animationStyle.effectiveEnterExit.curve,
+    styleGetter: () => _animationStyle,
     expandCollapseDurationGetter: () => _animationStyle.expandCollapse.duration,
     onOperationGroupStatus: _onOperationGroupStatusChange,
     onBulkAnimationStatus: _onBulkAnimationComplete,
@@ -2691,7 +2691,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     _structureGeneration++;
 
     if (animate) {
-      _startStandaloneEnterAnimation(node.key);
+      _startStandaloneEnterAnimation(
+        node.key,
+        family: TreeAnimationFamily.enterExit,
+      );
     }
 
     // The new key itself enters visible order via createChild, not a
@@ -3208,7 +3211,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         _updateIndicesFrom(insertIndex);
         _structureGeneration++;
         if (animate) {
-          _startStandaloneEnterAnimation(node.key);
+          _startStandaloneEnterAnimation(
+            node.key,
+            family: TreeAnimationFamily.enterExit,
+          );
         }
       }
     }
@@ -3251,7 +3257,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       // Mark all visible nodes as exiting
       for (final nodeId in nodesToRemove) {
         if (_order.contains(nodeId)) {
-          _startStandaloneExitAnimation(nodeId);
+          _startStandaloneExitAnimation(
+            nodeId,
+            family: TreeAnimationFamily.enterExit,
+          );
         }
       }
       // Animated path: the parent's child list is not mutated until exit
@@ -3958,14 +3967,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         if (_standaloneAt(nodeId) case final anim?
             when anim.type == AnimationType.exiting) {
           // Reverse the exit to an enter with speedMultiplier
-          _startStandaloneEnterAnimation(nodeId);
+          _startStandaloneEnterAnimation(
+            nodeId,
+            family: TreeAnimationFamily.expandCollapse,
+          );
         } else if (!_order.contains(nodeId)) {
           // New node not yet visible: insert at correct sibling position
           // and animate. _insertNodeIntoVisibleOrder appends at the end of
           // the grandparent's subtree, which drops the node past its
           // following siblings when they are already in the visible order.
           _insertNewNodeAmongSiblings(nodeId);
-          _startStandaloneEnterAnimation(nodeId);
+          _startStandaloneEnterAnimation(
+            nodeId,
+            family: TreeAnimationFamily.expandCollapse,
+          );
         }
       }
       _structureGeneration++;
@@ -4168,7 +4183,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         if (_isPendingDeletion(nodeId)) continue;
         if (existingGroup.members.containsKey(nodeId)) continue;
         // Create standalone exit animation with speedMultiplier
-        _startStandaloneExitAnimation(nodeId, triggeringAncestorId: key);
+        _startStandaloneExitAnimation(
+          nodeId,
+          family: TreeAnimationFamily.expandCollapse,
+          triggeringAncestorId: key,
+        );
       }
       _structureGeneration++;
       _notifyStructural(affectedKeys: <TKey>{key});
@@ -4382,7 +4401,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Reverse standalone exit animations smoothly
         for (final key in nodesToReverseExit) {
           if (!_hasOperationGroup(key)) {
-            _startStandaloneEnterAnimation(key);
+            _startStandaloneEnterAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
           }
         }
 
@@ -4411,7 +4433,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // the reverse branch applies to nodesToReverseExit.
         for (final key in nodesToReverseExit) {
           if (!_hasOperationGroup(key)) {
-            _startStandaloneEnterAnimation(key);
+            _startStandaloneEnterAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
           }
         }
         for (final key in nodesToShow) {
@@ -4422,7 +4447,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             if (st != null && st.type == AnimationType.entering) {
               continue;
             }
-            _startStandaloneEnterAnimation(key);
+            _startStandaloneEnterAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
           }
         }
         _bumpBulkGen();
@@ -4438,7 +4466,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         // Reverse standalone exit animations smoothly
         for (final key in nodesToReverseExit) {
           if (!_hasOperationGroup(key)) {
-            _startStandaloneEnterAnimation(key);
+            _startStandaloneEnterAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
           }
         }
 
@@ -4597,7 +4628,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           if (_isPendingDeletion(key)) continue;
           if (!_activeBulkGroup!.members.contains(key) &&
               !_hasOperationGroup(key)) {
-            _startStandaloneExitAnimation(key);
+            _startStandaloneExitAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
           }
         }
 
@@ -4626,7 +4660,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           if (st != null && st.type == AnimationType.exiting) {
             continue;
           }
-          _startStandaloneExitAnimation(key);
+          _startStandaloneExitAnimation(
+            key,
+            family: TreeAnimationFamily.expandCollapse,
+          );
         }
         _bumpBulkGen();
       } else {
@@ -4646,7 +4683,10 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           if (_hasOperationGroup(key)) continue;
           if (_hasStandalone(key)) {
             // Reverse standalone animation smoothly
-            _startStandaloneExitAnimation(key);
+            _startStandaloneExitAnimation(
+              key,
+              family: TreeAnimationFamily.expandCollapse,
+            );
           } else {
             _removeAnimation(key);
             _addBulkMember(key);

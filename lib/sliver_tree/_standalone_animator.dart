@@ -10,10 +10,10 @@
 /// completed.
 library;
 
-import 'package:flutter/animation.dart' show Curve;
 import 'package:flutter/scheduler.dart' show Ticker, TickerProvider;
 
 import '_node_id_registry.dart';
+import 'animation_style.dart';
 import 'types.dart';
 
 /// [AnimationState.targetExtent] value meaning the real target is not
@@ -38,30 +38,32 @@ const double _kUnknownExtent = -1.0;
 /// what [debugAssertConsistent] verifies.
 ///
 /// A zero effective duration is handled inside the tick rather than at the
-/// call sites: [_runTick] snaps every active state to completion and
-/// routes it through the normal completion handler.
+/// call sites: [_runTick] snaps the zero FAMILY's states to completion and
+/// routes them through the normal completion handler, while states whose
+/// declared family is non-zero keep running.
 class StandaloneAnimator<TKey> {
   StandaloneAnimator({
     required TickerProvider vsync,
     required NodeIdRegistry<TKey> nids,
     required void Function(Iterable<TKey> completedKeys) onTick,
-    required Curve Function() enterExitCurveGetter,
-    required Duration Function() enterExitDurationGetter,
+    required TreeAnimationStyle Function() styleGetter,
     required double? Function(int nid) fullExtentGetter,
     required double defaultExtent,
   }) : _vsync = vsync,
        _nids = nids,
        _onTick = onTick,
-       _enterExitCurveGetter = enterExitCurveGetter,
-       _enterExitDurationGetter = enterExitDurationGetter,
+       _styleGetter = styleGetter,
        _fullExtentGetter = fullExtentGetter,
        _defaultExtent = defaultExtent;
 
   final TickerProvider _vsync;
   final NodeIdRegistry<TKey> _nids;
   final void Function(Iterable<TKey> completedKeys) _onTick;
-  final Curve Function() _enterExitCurveGetter;
-  final Duration Function() _enterExitDurationGetter;
+
+  /// The live style. Each state's DECLARED [AnimationState.family] is
+  /// resolved through this on every tick (live-read semantics: restyling
+  /// a family at runtime retimes its in-flight standalone states).
+  final TreeAnimationStyle Function() _styleGetter;
   final double? Function(int nid) _fullExtentGetter;
 
   /// Fallback extent for unmeasured rows, injected from
@@ -184,7 +186,10 @@ class StandaloneAnimator<TKey> {
     final nid = _nids[key];
     final full =
         (nid != null ? _fullExtentGetter(nid) : null) ?? _defaultExtent;
-    final t = _enterExitCurveGetter().transform(state.progress.clamp(0.0, 1.0));
+    final t = _styleGetter()
+        .specFor(state.family)
+        .curve
+        .transform(state.progress.clamp(0.0, 1.0));
     return state.type == AnimationType.entering ? full * t : full * (1.0 - t);
   }
 
@@ -211,9 +216,10 @@ class StandaloneAnimator<TKey> {
   }
 
   /// Internal ticker callback. Per-tick steps:
-  /// 1. Stop early if nothing to animate; snap everything to completion
-  ///    if the effective enter/exit duration is zero.
-  /// 2. Compute dt and advance every active state's progress + extent.
+  /// 1. Stop early if nothing to animate.
+  /// 2. Resolve both standalone-carrying families ONCE, compute dt, and
+  ///    advance every active state's progress + extent on its DECLARED
+  ///    family's spec. A zero family snaps only ITS states to completion.
   /// 3. Collect newly-completed keys and forward them to the controller's
   ///    [onTick] callback (which drives `_finalizeAnimation` and fires
   ///    the listener channel).
@@ -222,52 +228,46 @@ class StandaloneAnimator<TKey> {
       _ticker?.stop();
       return;
     }
-    final duration = _enterExitDurationGetter();
-    if (duration.inMicroseconds == 0) {
-      // Zero duration means "animations complete instantly", the same
-      // convention every mutator applies on entry (`if (enter/exit spec
-      // == Duration.zero) animate = false`). Snap every active state to
-      // completion and route the full set through the completion handler
-      // (purge, order removal, structural notification). Stop-and-abandon
-      // here would strand rows at partial extent, leak pending-deletion
-      // nodes forever (this finalize path is the only purge path for
-      // standalone exits), and pin hasActiveAnimations true permanently.
-      final snapCurve = _enterExitCurveGetter();
-      _completedScratch.clear();
-      for (final nid in _activeNids) {
-        final state = _byNid[nid]!;
-        state.progress = 1.0;
-        state.updateExtent(snapCurve);
-        _completedScratch.add(_nids.keyOfUnchecked(nid));
-      }
-      _onTick(_completedScratch);
-      // The handler may have started fresh states, revert paths for one,
-      // so only stop when nothing is left; otherwise the next tick would
-      // snap the newcomers too.
-      if (_activeNids.isEmpty) {
-        _ticker?.stop();
-      }
-      return;
-    }
-
+    // Both families resolved ONCE per tick, never per node.
+    final style = _styleGetter();
+    final ee = style.effectiveEnterExit;
+    final ec = style.expandCollapse;
     final dt = _lastTickElapsed == null
         ? Duration.zero
         : elapsed - _lastTickElapsed!;
     _lastTickElapsed = elapsed;
-    final progressDelta = dt.inMicroseconds / duration.inMicroseconds;
-    final curve = _enterExitCurveGetter();
-
+    final int dtUs = dt.inMicroseconds;
+    final int eeUs = ee.duration.inMicroseconds;
+    final int ecUs = ec.duration.inMicroseconds;
+    // A zero family means "complete instantly", the same convention every
+    // mutator applies on entry. Snapping only that family's states, and
+    // routing them through the normal completion handler, keeps the other
+    // family running; stop-and-abandon would strand rows at partial extent
+    // and leak pending-deletion nodes (this finalize path is the only purge
+    // path for standalone exits).
+    final double eeDelta = eeUs == 0 ? double.infinity : dtUs / eeUs;
+    final double ecDelta = ecUs == 0 ? double.infinity : dtUs / ecUs;
     _completedScratch.clear();
     for (final nid in _activeNids) {
       final state = _byNid[nid]!;
-      state.progress += progressDelta * state.speedMultiplier;
-      state.updateExtent(curve);
+      final bool isEnterExit = state.family == TreeAnimationFamily.enterExit;
+      final double delta = isEnterExit ? eeDelta : ecDelta;
+      if (delta.isInfinite) {
+        state.progress = 1.0;
+      } else {
+        state.progress += delta * state.speedMultiplier;
+      }
+      state.updateExtent(isEnterExit ? ee.curve : ec.curve);
       if (state.isComplete) {
         _completedScratch.add(_nids.keyOfUnchecked(nid));
       }
     }
-
     _onTick(_completedScratch);
+    // The handler may have started fresh states (revert paths do), so only
+    // stop when nothing is left.
+    if (_activeNids.isEmpty) {
+      _ticker?.stop();
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────

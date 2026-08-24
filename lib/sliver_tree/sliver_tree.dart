@@ -10,7 +10,8 @@
 /// is internal regardless of its name.
 library;
 
-export 'animation_style.dart' show TreeAnimationSpec, TreeAnimationStyle;
+export 'animation_style.dart'
+    show TreeAnimationFamily, TreeAnimationSpec, TreeAnimationStyle;
 export 'render_sliver_tree.dart' show RenderSliverTree;
 export 'reorder_render_port.dart' show ReorderRenderPort;
 export 'sliver_reorderable_tree.dart'

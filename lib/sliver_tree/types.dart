@@ -7,6 +7,8 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/animation.dart' show AnimationController, Curve, Curves;
 import 'package:flutter/rendering.dart' show ParentData;
 
+import 'animation_style.dart' show TreeAnimationFamily;
+
 // ANIMATION TYPES
 
 /// The type of animation a node is currently undergoing.
@@ -52,6 +54,7 @@ enum AncestorExpansionMode {
 class AnimationState {
   AnimationState({
     required this.type,
+    required this.family,
     required this.startExtent,
     required this.targetExtent,
     this.progress = 0.0,
@@ -61,6 +64,13 @@ class AnimationState {
 
   /// The type of animation.
   final AnimationType type;
+
+  /// The animation family whose style spec times this state. Declared at
+  /// the install site and never re-derived downstream; the standalone
+  /// ticker resolves it through the live style on every tick. Required
+  /// (no default) so a new install site cannot silently inherit the
+  /// wrong family.
+  final TreeAnimationFamily family;
 
   /// The extent (height) at animation start. Mutable to allow updates
   /// when the actual size is measured.

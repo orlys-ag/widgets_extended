@@ -36,6 +36,16 @@ library;
 import 'package:flutter/animation.dart';
 import 'package:flutter/foundation.dart';
 
+/// The animation families a [TreeAnimationStyle] carries. Declared at the
+/// site that installs an animation and never re-derived downstream.
+enum TreeAnimationFamily {
+  expandCollapse,
+  enterExit,
+  reorderSlide,
+  makeRoom,
+  dropSettle,
+}
+
 /// A (duration, curve) pair for one animation family.
 @immutable
 class TreeAnimationSpec {
@@ -173,6 +183,23 @@ class TreeAnimationStyle {
   /// [dropSettle] resolved through its fallback to [reorderSlide].
   TreeAnimationSpec get effectiveDropSettle {
     return _dropSettle ?? reorderSlide;
+  }
+
+  /// Resolves [family] to its effective spec, applying the inheritance
+  /// chain. The ONE mapping from a declared family to its timing.
+  TreeAnimationSpec specFor(TreeAnimationFamily family) {
+    switch (family) {
+      case TreeAnimationFamily.expandCollapse:
+        return expandCollapse;
+      case TreeAnimationFamily.enterExit:
+        return effectiveEnterExit;
+      case TreeAnimationFamily.reorderSlide:
+        return reorderSlide;
+      case TreeAnimationFamily.makeRoom:
+        return effectiveMakeRoom;
+      case TreeAnimationFamily.dropSettle:
+        return effectiveDropSettle;
+    }
   }
 
   /// Debug validation at the injection boundary ([TreeController]'s
