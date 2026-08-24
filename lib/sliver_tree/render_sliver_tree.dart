@@ -704,9 +704,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   ///      ([isNodeRetained]).
   ///   2. A separate paint pass (Pass A.5), the standard pass iterates
   ///      visibleNodes, which excludes ghosts. An anchor-clipped ghost
-  ///      paints at the anchor's settled top (minus the direction-aware
-  ///      tuck) + its own slide delta; an edge ghost paints at the LIVE
-  ///      viewport edge (Pass A.6's model).
+  ///      paints at the anchor's SETTLED top (structural plus the
+  ///      anchor's HELD preview offset, EXCLUDING its FLIP delta, minus
+  ///      the direction-aware tuck; see
+  ///      [_exitGhostPaintedBaseScrollSpace]) plus its own COMPOSED slide
+  ///      delta; an edge ghost paints at the LIVE viewport edge (Pass
+  ///      A.6's model).
   ///   3. For on-screen anchors, a direction-aware EXIT clip
   ///      ([_ExitGhost.clipped]) so the row visually disappears INTO the
   ///      destination header; edge ghosts have no on-screen band to clip
@@ -714,8 +717,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   ///
   /// Written ONCE at consume (single-writer), reaped by Step 0a
   /// ([_pruneSettledPhantomExitGhosts]) under the dual settle criterion
-  /// (ghost AND anchor at rest), on key free, and on re-promotion to
-  /// visibility.
+  /// (ghost AND anchor at rest, FLIP-only: a HELD make-room preview
+  /// offset does not keep a record alive), on key free, and on
+  /// re-promotion to visibility.
   Map<TKey, _ExitGhost<TKey>>? _phantomExitGhosts;
 
   /// Debug-only, paint-time-only capture of each EXIT phantom ghost's
@@ -729,11 +733,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   ///  - `anchorBand`: the destination header's PAINTED band this frame.
   ///
   /// LIFETIME CONTRACT: cleared at the top of every `paint()` and
-  /// written ONLY for a ghost that is ACTIVELY SLIDING this
-  /// frame (Pass A.5 `continue`s a settled ghost before the write). It is
-  /// therefore EMPTY on any frame with no sliding ghost, including the
-  /// settle frame, after `_pruneSettledPhantomExitGhosts` reaps the
-  /// ghost. A test MUST `containsKey`-guard every read and MUST NOT
+  /// written ONLY for a ghost carrying a live FLIP delta this frame,
+  /// its own or its anchor's (Pass A.5 `continue`s a settled ghost
+  /// before the write, and that gate is FLIP-only). It is therefore
+  /// EMPTY on any frame with no such ghost, including the settle frame,
+  /// after `_pruneSettledPhantomExitGhosts` reaps the ghost. A ghost
+  /// displaced only by a HELD make-room preview is absent for the same
+  /// reason: it has already been reaped. A test MUST `containsKey`-guard every read and MUST NOT
   /// non-null-deref a key on the settle frame (it would throw). Never
   /// read by production code; cannot perturb layout, distance, or
   /// hit-testing.
@@ -1117,12 +1123,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           // Inject destination = anchor's SETTLED painted position + ghost
           // row's own slideDelta. The settled y is where the anchor lands
           // once in-flight extent animations (e.g. an entering placeholder
-          // above it) complete, the correct FLIP "after". Fall back to the
+          // above it) complete, the correct FLIP "after", PLUS the
+          // anchor's HELD make-room preview offset, which never decays and
+          // is therefore part of the resting position rather than
+          // something the FLIP will unwind (`_reorder_preview_engine.dart`).
+          // That held term is what makes this destination agree with the
+          // Pass A.5 base ([_exitGhostPaintedBaseScrollSpace]); omitting
+          // it at either one of the two sites snaps the ghost by exactly
+          // the preview offset at t=0. Fall back to the
           // current/animated y if the anchor is somehow absent from the
           // settled walk (defensive; should not happen for a visible anchor).
           // Indent (x) is already settled in `anchorCurrent`, so keep it.
           //
-          // STRUCTURAL-ONLY (load-bearing): this consume-time destination
+          // NO STICKY READ (load-bearing): this consume-time destination
           // MUST NOT read `_sticky.infoForNid` / `pinnedY`. The sticky set
           // is recomputed by `computeStickyHeaders` later in this same
           // `performLayout`, after this consume runs, so `_sticky` is
@@ -1134,7 +1147,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
           // convergence is applied at PAINT time via
           // `_anchorPaintedBounds` (Pass A.5 ghost paint + EXIT clip +
           // Pass A.7), never here.
-          final settledAnchorY = settled[anchorKey]?.y ?? anchorCurrent.y;
+          //
+          // The rule is about LAYOUT-DEPENDENT reads, not about the value
+          // being purely structural.
+          // [TreeController.getHeldPreviewDeltaNid] is a dense per-nid read
+          // with no layout dependency and no `_sticky` involvement, so
+          // adding it here is INSIDE the rule, not an exception to it.
+          final anchorNidForDest = controller.nidOf(anchorKey);
+          final settledAnchorY =
+              (settled[anchorKey]?.y ?? anchorCurrent.y) +
+              controller.getHeldPreviewDeltaNid(anchorNidForDest);
           // Direction-aware tuck. The card
           // slides toward a SMALLER y (from below) implies UPWARD / body-side
           // approach implies a card TALLER than the collapsed destination
@@ -1231,13 +1253,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       if (anchorOnScreen) {
         // Render-side fallback half: same settled-destination
         // substitution as the controller-staged exit-phantom block above,
-        // slide toward the anchor's settled y, not its current/animated y.
+        // slide toward the anchor's settled y, structural plus its HELD
+        // preview offset, not its current/animated y.
         //
-        // STRUCTURAL-ONLY (same contract as the controller-staged branch
+        // NO STICKY READ (same contract as the controller-staged branch
         // above): do NOT read `_sticky` here, it is stale at consume time
         // (before `computeStickyHeaders`). Sticky-pinned convergence is a
         // PAINT-time re-base via `_anchorPaintedBounds`.
-        final settledCursorY = settled[cursor]?.y ?? anchorCurrent.y;
+        final cursorNidForDest = controller.nidOf(cursor);
+        final settledCursorY =
+            (settled[cursor]?.y ?? anchorCurrent.y) +
+            controller.getHeldPreviewDeltaNid(cursorNidForDest);
         // Direction-aware tuck: same shared helper, same
         // consume/paint-must-agree discipline as the controller-staged
         // branch above, here using `cursor` (the deepest visible new
@@ -1502,15 +1528,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
   /// Whether the given node is retained by the current layout, i.e. it is
   /// explicitly pinned, in the cache region, a sticky header, or a
-  /// phantom-exit ghost mid-slide. Used by the element to decide whether
+  /// phantom-exit ghost mid-FLIP. Used by the element to decide whether
   /// an off-screen child can be evicted. O(1) (Map containsKey + Set
   /// lookup), no allocation.
   bool isNodeRetained(TKey id) {
     if (_pinnedNodes.contains(id)) return true;
     // Phantom-exit ghosts: retain past visible-order purge so their
-    // slide can finish. Removed from _phantomExitGhosts when their
-    // slide settles, after which the next stale eviction will release
-    // the render box normally.
+    // slide can finish. Removed from _phantomExitGhosts when their FLIP
+    // slide settles (Step 0a's criterion is FLIP-only, so a HELD
+    // make-room preview no longer extends this pin for the length of a
+    // drag), after which the next stale eviction will release the
+    // render box normally.
     final ghosts = _phantomExitGhosts;
     if (ghosts != null && ghosts.containsKey(id)) return true;
     // Edge-anchor exit ghosts: retain so the parallel ghost paint pass
@@ -1677,10 +1705,36 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// snap of exactly that many pixels.
   ///
   /// Two branches, mirroring Pass A.5's structure:
-  /// - Anchor mounted: the anchor's **settled** top (sticky `pinnedY` +
-  ///   scrollOffset when pinned, else `layoutOffset` WITHOUT the anchor's
-  ///   own slide, see the settled-top commentary in Pass A.5) minus the
+  /// - Anchor mounted: the anchor's **settled** top minus the
   ///   direction-aware tuck; x is the anchor's live painted indent.
+  ///   "Settled" means where the anchor comes to REST once its FLIP delta
+  ///   has decayed to zero, which is NOT the same as "structural": a
+  ///   make-room preview offset is HELD rather than decaying
+  ///   (`_reorder_preview_engine.dart`), so it is part of the resting
+  ///   position and the base must carry it. The two branches therefore
+  ///   SPLIT the composed delta exactly, rather than choosing a half of
+  ///   it:
+  ///     - sticky-pinned anchor: `info.pinnedY + constraints.scrollOffset`,
+  ///       with NO preview term. Pass B paints a pinned header at
+  ///       `pinnedY` with no slide delta at all, and [_anchorPaintedBounds]
+  ///       returns that same pinned band, so a preview term here would
+  ///       desync the base from the EXIT clip that consumes it.
+  ///     - otherwise: `layoutOffset +
+  ///       TreeController.getHeldPreviewDeltaNid(anchorNid)`, i.e.
+  ///       structural PLUS the anchor's HELD preview, EXCLUDING the
+  ///       anchor's own FLIP delta. (That accessor returns 0.0 for an
+  ///       unregistered nid, so the `anchorNid < 0` case needs no separate
+  ///       guard.) Adding the FLIP half instead would make an ADJACENT
+  ///       ghost double-count its anchor's slide and jump by
+  ///       `anchorSlideDelta + tuck` at t=0, which is the failure this
+  ///       shared base was written to prevent (see the ghost-augmentation
+  ///       commentary in [snapshotVisibleOffsets]).
+  ///   Because `getSlideDeltaNid == getFlipSlideDeltaNid +
+  ///   getHeldPreviewDeltaNid` holds by construction, this settled top and
+  ///   the EXIT clip's LIVE band (which stays COMPOSED, see
+  ///   [_anchorPaintedBounds]) differ by exactly the anchor's FLIP delta
+  ///   and never by a preview offset. See the Pass A.5 clip commentary for
+  ///   the paint-side half of the same statement.
   /// - Anchor unmounted with a persisted [ViewportEdge] on its
   ///   [_ExitGhost] record: the LIVE viewport edge base (mirroring the
   ///   paint fallback); x is the ghost's own indent.
@@ -1717,7 +1771,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // scrollOffset (paint) or use the value directly (snapshot).
     final double settledTopScrollSpace = anchorPinnedInfo != null
         ? anchorPinnedInfo.pinnedY + constraints.scrollOffset
-        : anchorParentData.layoutOffset;
+        : anchorParentData.layoutOffset +
+              controller.getHeldPreviewDeltaNid(anchorNid);
     final tuck = _exitTuckFor(
       ghostNid: ghostNid,
       anchorKey: anchorKey,
@@ -3614,13 +3669,31 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // So "settled" requires BOTH the ghost AND its anchor to be at rest.
         // (Edge ghosts: their off-screen anchor carries slide 0, so the
         // anchor term drops out and this reduces to the ghost's own delta.)
+        //
+        // "At rest" is FLIP-ONLY ([TreeController.getFlipSlideDeltaNid]),
+        // never the COMPOSED delta that feeds `paintedY` below. An exit
+        // ghost is an artifact of a FLIP slide exactly as an edge ghost is,
+        // and a make-room preview offset is HELD rather than decaying
+        // (`_reorder_preview_engine.dart`), so a composed read here
+        // never goes idle for the length of a drag: the ghost would keep
+        // painting, keep its unconditional [isNodeRetained] pin, and keep
+        // `findRowAtPaintedY` on its O(N) full scan. This gate and Step
+        // 0a's prune criterion ([_pruneSettledPhantomExitGhosts]) are a
+        // PAIR and MUST read the SAME delta: one decides whether a row
+        // stays a ghost, the other whether it paints as one. The
+        // edge-ghost side does the same thing, at the per-entry gate in
+        // the edge-ghost pass against `_ghost_registry.dart`'s
+        // `pruneSettled`.
+        //
+        // The X read needs no FLIP-only form: previews are Y offsets, so
+        // [TreeController.getSlideDeltaXNid] is already FLIP-only, the
+        // same argument `_ghost_registry.dart` makes for its own X read.
+        final ghostFlip = controller.getFlipSlideDeltaNid(ghostNid);
         final anchorNidForGate = controller.nidOf(anchorKey);
-        final anchorSlideForGate = anchorNidForGate >= 0
-            ? controller.getSlideDeltaNid(anchorNidForGate)
+        final anchorFlip = anchorNidForGate >= 0
+            ? controller.getFlipSlideDeltaNid(anchorNidForGate)
             : 0.0;
-        if (ghostSlide == 0.0 &&
-            ghostSlideX == 0.0 &&
-            anchorSlideForGate == 0.0) {
+        if (ghostFlip == 0.0 && ghostSlideX == 0.0 && anchorFlip == 0.0) {
           // Settled: Step 0a reaps on next layout.
           continue;
         }
@@ -3657,10 +3730,16 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // Apply the EXIT clip so the ghost is bounded to the destination
         // header's painted band on its trailing side (far overhang
         // killed; band occluded by the header repaint in Pass A.7/B).
-        // The clip reads the LIVE band (with the anchor's own slide) so
-        // occlusion tracks the header's on-screen position, NOT used
-        // for the ghost's convergence top (that's the settled top inside
-        // the shared base).
+        // The clip reads the LIVE band, which [_anchorPaintedBounds]
+        // builds with the anchor's COMPOSED delta (FLIP + held preview),
+        // so occlusion tracks the header exactly where it is drawn this
+        // frame. That is NOT the ghost's convergence top: the shared base
+        // uses the anchor's SETTLED top, which carries the HELD preview
+        // but not the decaying FLIP delta (see
+        // [_exitGhostPaintedBaseScrollSpace]). The two therefore differ by
+        // exactly the anchor's FLIP delta, and the preview term is COMMON
+        // to both, which is what stops a ghost drifting out of its own
+        // clip band for the length of a drag.
         final clipRect = _resolvePhantomAnchorBounds(
           nid: ghostNid,
           paintedY: paintedY,
@@ -3943,8 +4022,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   }
 
   /// Drops [_ExitGhost] records whose key has been freed (`nid < 0`),
-  /// was re-promoted to visibility, or whose slide has settled (dual
-  /// criterion: ghost AND anchor both at rest).
+  /// was re-promoted to visibility, or whose FLIP slide has settled (dual
+  /// criterion: ghost AND anchor both at rest, where "at rest" means a
+  /// zero FLIP delta and deliberately ignores a HELD make-room preview
+  /// offset; see the criterion's own commentary below).
   ///
   /// Called from the start of `performLayout` every frame so dead
   /// entries can't accumulate while other slides are still in flight.
@@ -3973,7 +4054,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         }
         return true;
       }
-      final dy = controller.getSlideDeltaNid(nid);
+      final dy = controller.getFlipSlideDeltaNid(nid);
       final dx = controller.getSlideDeltaXNid(nid);
       // Keep an ADJACENT (zero own-slide) exit-ghost alive while its anchor,
       // the destination header, is still sliding up to absorb it. Reaping on
@@ -3982,9 +4063,23 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       // anchor
       // both at rest. Edge ghosts: off-screen anchor slide is 0, so the
       // anchor term drops out and this reduces to the ghost's own delta.
+      //
+      // Both delta reads are FLIP-ONLY
+      // ([TreeController.getFlipSlideDeltaNid]), matching Pass A.5's
+      // per-ghost gate symbol for symbol, because the two are a PAIR: one
+      // decides whether a row stays a ghost, the other whether it paints
+      // as one, and splitting them makes the row vanish for a frame (a
+      // preview cancels a live FLIP delta) or paint at a displaced band
+      // after retiring. A preview offset is HELD, never decaying
+      // (`_reorder_preview_engine.dart`), so the COMPOSED read this
+      // replaces kept every exit ghost alive for the whole of a drag,
+      // pinned its render box through [isNodeRetained], and forced
+      // `findRowAtPaintedY` onto its O(N) full scan. `dx` needs no
+      // FLIP-only form: previews are Y offsets, so
+      // [TreeController.getSlideDeltaXNid] is already FLIP-only.
       final anchorNid = controller.nidOf(ghost.anchor);
       final anchorDy = anchorNid >= 0
-          ? controller.getSlideDeltaNid(anchorNid)
+          ? controller.getFlipSlideDeltaNid(anchorNid)
           : 0.0;
       return dy == 0.0 && dx == 0.0 && anchorDy == 0.0;
     });

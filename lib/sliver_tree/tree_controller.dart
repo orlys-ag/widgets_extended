@@ -1119,17 +1119,45 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// structural + FLIP + preview, which is [getSlideDeltaNid], and every
   /// paint, hit-test, snapshot and overreach site must keep using that.
   /// This exists for the one question that is genuinely FLIP-only:
-  /// whether an edge ghost still has a slide to animate. A ghost is an
-  /// artifact of a FLIP slide (`_ghost_registry.dart`), so a ghost whose
-  /// FLIP delta has reached zero is settled and must retire even while a
-  /// preview holds a non-zero offset on the same row. Reading the
-  /// composed delta there retained ghosts for the whole of a drag, which
-  /// forced every drop-target lookup onto the O(N) full scan
+  /// whether a ghost, EDGE or EXIT, still has a slide to animate. Both
+  /// kinds are artifacts of a FLIP slide, the edge ghosts in
+  /// `_ghost_registry.dart` and the exit ghosts in `RenderSliverTree`'s
+  /// `_ExitGhost` records, so a ghost whose FLIP delta has reached zero
+  /// is settled and must retire even while a preview holds a non-zero
+  /// offset on the same row. Reading the composed delta there retained
+  /// ghosts for the whole of a drag, which forced every drop-target
+  /// lookup onto the O(N) full scan
   /// (`RenderSliverTree.findRowAtPaintedY`).
+  ///
+  /// Its sibling [getHeldPreviewDeltaNid] answers the complementary
+  /// question and is NOT a competing lifecycle read: an exit ghost
+  /// converges on its anchor's SETTLED position, which under a held
+  /// preview is structural + preview, so that one site SPLITS the
+  /// composed delta rather than choosing a half of it. The identity
+  /// `getSlideDeltaNid == getFlipSlideDeltaNid + getHeldPreviewDeltaNid`
+  /// is what keeps the two halves from drifting.
   ///
   /// No X counterpart is needed: [getSlideDeltaXNid] is already FLIP-only
   /// because previews are Y offsets.
   double getFlipSlideDeltaNid(int nid) => _slide.deltaForNid(nid);
+
+  /// Internal-use-only: the HELD make-room preview offset for the live
+  /// [nid], EXCLUDING any in-flight FLIP delta. 0.0 when no drag preview
+  /// touches the row.
+  ///
+  /// GHOST-GEOMETRY READ. The identity
+  /// `getSlideDeltaNid == getFlipSlideDeltaNid + getHeldPreviewDeltaNid`
+  /// holds by construction, which is what keeps "painted position is
+  /// structural + FLIP + preview" intact at the one site that has to
+  /// SPLIT the composed delta rather than choose a half of it: an exit
+  /// ghost converges on its anchor's SETTLED position, so it must follow
+  /// the anchor's held displacement while ignoring its decaying one.
+  double getHeldPreviewDeltaNid(int nid) {
+    if (!_preview.hasActive) {
+      return 0.0;
+    }
+    return _preview.deltaForNid(nid);
+  }
 
   /// X-axis (cross-axis indent) slide delta for the live [nid], or 0.0
   /// when the node is not currently sliding. Hot-path equivalent of
@@ -1396,14 +1424,19 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// [getFlipSlideDeltaNid]. Because a preview offset is HELD rather than
   /// decaying, [hasActiveSlides] stays true from a drag's first resolve
   /// to its release; anything that must observe "the FLIP slides have
-  /// finished" has to read this instead. Two consumers depend on it: the
-  /// render object's edge-ghost cleanup (`clearAll` when no FLIP slide
-  /// remains) and the sliver element's settle-transition layout, which is
-  /// the only thing that schedules that cleanup.
+  /// finished" has to read this instead. Five consumers depend on it:
+  /// the render object's two edge-ghost `clearAll` gates (Step 9 and
+  /// layout Step 0b), the sliver element's settle-transition layout
+  /// (which is the only thing that schedules that cleanup), and the
+  /// element's two stale-eviction gates, FLIP-only because a held
+  /// preview would otherwise suspend eviction for a whole drag.
   ///
-  /// Every OTHER consumer must keep reading [hasActiveSlides]: retention,
-  /// eviction deferral, paint, hit-testing and the painted-truth snapshot
-  /// all care about where rows are painted, and a preview moves them.
+  /// Every OTHER consumer must keep reading [hasActiveSlides]: paint,
+  /// hit-testing and the painted-truth snapshot all care about where
+  /// rows are painted, and a preview moves them. Retention is the split
+  /// case: `RenderSliverTree.isNodeRetained`'s delta clause is FLIP-only
+  /// because layout ADMITS preview-shifted rows, so the ordinary
+  /// cache-region check already retains them.
   bool get hasActiveFlipSlides => _slide.hasActive;
 
   /// Whether any in-flight slide has a non-zero X-axis component

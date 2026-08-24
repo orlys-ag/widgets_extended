@@ -11,12 +11,21 @@
 /// re-baseline and settle protocols; composing the two engines' deltas at
 /// the `TreeController` read surface keeps both simple.
 ///
-/// The render layer needs NO changes for previews to work: every painted
-/// position, painted-truth snapshot (FLIP baselines!), painted-space hit
-/// test, retention check, and overreach bound reads slide deltas through
-/// `TreeController.getSlideDeltaNid` / `hasActiveSlides` /
-/// `composedSlideAbsDeltaBound`, and those delegators compose
-/// `slide + preview`. The free consequence is the seamless commit
+/// Painted positions need NO render-layer changes for previews to work:
+/// every painted position, the painted-truth snapshot of VISIBLE rows
+/// (FLIP baselines!), painted-space hit testing and the overreach bound
+/// all read slide deltas through `TreeController.getSlideDeltaNid` /
+/// `hasActiveSlides` / `composedSlideAbsDeltaBound`, and those delegators
+/// compose `slide + preview`. Two carve-outs are named rather than
+/// accidental. LIFECYCLE decisions (the edge- and exit-ghost prune and
+/// paint gates, stale eviction, and `RenderSliverTree.isNodeRetained`'s
+/// delta clause) read the FLIP-only accessors instead, because a HELD
+/// offset never goes idle and a composed read would suspend them for the
+/// length of a drag. And the exit ghost's painted-truth BASE reads
+/// `TreeController.getHeldPreviewDeltaNid` directly, because what it needs
+/// is the anchor's SETTLED position, which under a held preview is
+/// structural + preview
+/// (`RenderSliverTree._exitGhostPaintedBaseScrollSpace`). The free consequence is the seamless commit
 /// handoff: a FLIP baseline staged while a preview is held captures the
 /// SHIFTED painted positions; the commit clears the preview and mutates;
 /// the consume-time snapshot reads post-mutation structural positions, so
