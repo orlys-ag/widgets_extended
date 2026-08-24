@@ -43,7 +43,7 @@ with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
 not be worked in parallel. The plan creates 10 new test files.
 
-Landed so far: 26 implemented (H1, H2, H3, H4, H6, L6, L7, L13, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M14, M16, M20, M21, M22, M23); 1 partially implemented
+Landed so far: 27 implemented (H1, H2, H3, H4, H6, L6, L7, L13, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M14, M16, M20, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -61,7 +61,7 @@ Landed so far: 26 implemented (H1, H2, H3, H4, H6, L6, L7, L13, L24, L25, L27, M
 - **M6** (S) The bulk-only fast path falls off on every frame  **[DONE]**
 - **M7** (S) Paint-extent loop reads unwritten per-nid slots on bulk frames  **[DONE]**
 - **M8** (L) Bulk `collapseAll` never admits rows after the collapsing subtree  **[DONE]**
-- **M10** (M) Exit-ghost lifecycle reads the anchor's composed delta
+- **M10** (M) Exit-ghost lifecycle reads the anchor's composed delta  **[DONE]**
 - **M20** (M) `animateScrollToKey` ignores the sticky band  **[DONE]**
 
 Ordering constraints:

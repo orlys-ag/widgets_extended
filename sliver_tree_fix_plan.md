@@ -7185,6 +7185,34 @@ removes.
 
 ### M10. Exit-ghost lifecycle reads the anchor's composed delta
 
+**Status.** IMPLEMENTED 2026-08-24 in commit `634cf3a` (this paragraph was
+written after the fact: that commit regenerated the index but omitted the
+plan edit, so the index showed M10 open until 2026-08-24). Landed as the
+Solution prescribes: `getHeldPreviewDeltaNid` is the third carve-out
+accessor on `TreeController`; the Step 0a prune and the Pass A.5 paint gate
+(a PAIR) read `getFlipSlideDeltaNid` for the ghost and its anchor (items 1
+to 3), so a settled exit ghost retires during a held make-room preview
+instead of staying painted and pinned through `isNodeRetained` for the whole
+drag; the non-pinned painted base (item 5) and both consume-time
+destinations (item 7) add the held term, so base and destination carry the
+same offset and the ghost neither snaps at t=0 nor paints one preview lift
+above its anchor's band; the sticky-pinned branch (item 6) and the composed
+sites (items 4, 8, 9, 10, 11) are unchanged. The doc items landed on the
+render layer, the controller accessors, and the preview engine's library
+doc; the AGENTS.md carve-out bullet gained the third accessor and the
+exit-ghost lifecycle and geometry categories (later landings extended it to
+five categories). Inventory, by the block's own recipe re-run at each
+revision: 9 reads before the commit, 16 after, 21 at the head of
+`fixes-batch-2` (L6, L7, L24 and H1 added the rest). Test:
+`exit_ghost_prune_flip_only_test.dart`, modelled on the edge-ghost twin:
+a lifecycle case (a settled ghost retires under a held preview and releases
+its retention pin), a geometry case (a sliding ghost converges on the
+anchor's SETTLED band under the held preview), and a sum-identity GUARD
+(`getSlideDeltaNid == getFlipSlideDeltaNid + getHeldPreviewDeltaNid` for
+every visible row while both engines are active), green before and after
+by design, as the file header records. At landing: full suite 1131 passed,
+4 skipped; `flutter analyze` at the then 48-issue baseline.
+
 **Finding.** Three exit-ghost sites read `getSlideDeltaNid`, which is FLIP plus
 held make-room preview (`tree_controller.dart:1032-1041`): the prune criterion
 reads the ghost's delta at `render_sliver_tree.dart:3871` and the ANCHOR's at
