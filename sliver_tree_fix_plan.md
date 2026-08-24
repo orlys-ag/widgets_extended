@@ -8157,6 +8157,35 @@ still painted at 0 (the gap did not snap home). Release and assert the commit is
 
 ### M12. `syncRoots` computes root insert indices before deferred removals
 
+**Status.** IMPLEMENTED 2026-08-24, in one commit with M13 (chain 7), as
+written: step 1 removes eagerly and defers only a root in `moverAncestors`
+(its subtree strictly holds a desired key) or one that is itself in
+`desiredDescendants` (reparented, not deleted), both counted in
+`stillLiveRemovals`; step 3 keeps `survivorIndex` (Fenwick, `remaining`)
+and `targetIndex` (`insertRoot`, `moveNode`) distinct, converting through
+the one O(roots) `liveOffsetOf` pass built only when a still-live removal
+exists, and `remaining.insert` takes the survivor index; step 2' is the
+single drain shared with M13 under `stillUnwanted`, with the
+`getParent(key) != null` skip deleted as both blocks require. `toRemove`
+and `addedRoots` are declared above M13's publish scope because step 2' and
+step 7 read them after it closes (the first cut declared them inside and
+did not compile). Test `audit_repro_m12_test.dart`, both cases the block
+specifies; pre-fix reds exactly as traced, mid-exit `rootKeys` `[A, N, X]`
+against `[X, A, N]` in both. One assertion the block asks for was dropped
+as inert: `getIndexInParent("A") == 0` cannot fail in either case, because
+step 6's `reorderRoots` always normalizes the live order to the desired one
+(demos with the insert index forced to 0 and with the conversion removed
+both reached the `rootKeys` assertion instead); the post-settle `[A, N]`
+post-condition was dropped for the same reason (no construct reaches it red
+without a mid-exit assertion failing first, and
+`tree_sync_controller_test.dart`'s pending-removal case already pins the
+settled order). Every remaining assertion was shown red by its own mutation
+(seed changes, a 500 ms pump past the exit, `childrenOf` without the mover,
+the conversion removed). Verification: `flutter analyze` 47; the block's
+risk suites plus M13's two, 116 green (the "insertRoot index correctness
+while pending removals are in flight" case included); full suite 1154
+passed, 4 skipped; `dart format` clean, as the file was before.
+
 **Finding.** `_syncRootsImpl` defers every root removal to step 2'
 (`tree_sync_controller.dart:257` computes `toRemove`, `:401-420` performs it
 after step 5), while step 3 inserts new roots at `remainingBit.prefixSum(p)`
@@ -8422,6 +8451,25 @@ without the conversion the same call produces `["A", "N", "X"]`.
 **Effort.** M (land together with M13; they touch the same block).
 
 ### M13. `syncRoots` lacks the mover-subtree deferral
+
+**Status.** IMPLEMENTED 2026-08-24, in one commit with M12 (chain 7).
+`_collectMoverAncestors` extracted with the block's body and dartdoc;
+`syncMultipleChildren`'s inline walk replaced by the call; `_syncRootsImpl`
+computes the context before step 1 (seeded from `desiredSet` followed by
+`desiredDescendants`), publishes `_moverAncestors` and
+`_deferredSubtreeRemovals` around steps 1 to 5 in a try/finally, and drains
+the two captured locals at step 2' (roots first, then subtree deferrals)
+under `stillUnwanted`; the two field docs rewritten; the step-1 comment in
+`_syncChildrenImpl` now names both drains. Test `audit_repro_m13_test.dart`
+as specified: pre-fix red on the nid (`x` came back as nid 5 against 4;
+recycling did not mask it), with `y`'s nid, parent, children and the `B`
+drain as further assertions, each shown red by its own mutation, the `B`
+one by reinstating the `getParent(key) != null` skip in the drain (the
+exact hazard the block records; the check had to be ordered before
+`getChildren("A")` to be the one reached). The accepted artifact (a
+deferred key rides step 5's tail-sort slide before exiting under
+`animate: true`) is unchanged and untested here, as the block says.
+Verification shared with M12.
 
 **Finding.** The one-level-out deferral in `syncChildren`
 (`tree_sync_controller.dart:613-620`) is gated on BOTH `_deferredSubtreeRemovals`

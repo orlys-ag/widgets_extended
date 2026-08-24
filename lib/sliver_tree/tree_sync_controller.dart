@@ -104,30 +104,20 @@ class TreeSyncController<TKey, TData> {
   bool _deferExpansionRestore = false;
 
   /// Parents whose removal step 1 deferred because a DESCENDANT of theirs
-  /// is desired under another parent in the enclosing multi-parent call.
+  /// is desired under another parent in the enclosing call.
   ///
-  /// Non-null only inside [syncMultipleChildren], which drains it after
-  /// every parent has synced. Step 1's own deferral covers a removed key
-  /// that is itself a mover; this covers the key whose SUBTREE holds one,
-  /// because removing it first purges the mover's children out from under
-  /// the later move.
+  /// Non-null inside [syncMultipleChildren] and inside [_syncRootsImpl]'s
+  /// steps 1 to 5 (M13); each drains it once every parent has synced.
+  /// Step 1's own deferral covers a removed key that is itself a mover;
+  /// this covers the key whose SUBTREE holds one, because removing it
+  /// first purges the mover's children out from under the later move.
   List<TKey>? _deferredSubtreeRemovals;
 
-  /// Every ancestor of a mover, as of the start of the enclosing
-  /// multi-parent call. Non-null exactly when [_deferredSubtreeRemovals]
-  /// is, and the O(1) answer to "would removing this key purge a mover?".
-  ///
-  /// Built once by walking UP from each globally desired key that is
-  /// currently in the tree, which costs O(movers * depth) with an early
-  /// exit on an already-marked ancestor. The alternative, asking each
-  /// removal candidate whether its SUBTREE holds a mover, costs
-  /// O(removed subtree) per candidate and allocates a descendant list
-  /// every time.
-  ///
-  /// Computed pre-mutation, so it can name a parent whose mover has since
-  /// been moved out by an earlier parent's sync. That only defers a
-  /// removal the drain then performs anyway, inside the same
-  /// [TreeController.runBatch], so the outcome is unchanged.
+  /// Every ancestor of a mover, as of the start of the enclosing call.
+  /// Non-null exactly when [_deferredSubtreeRemovals] is, and the O(1)
+  /// answer to "would removing this key purge a mover?". Built by
+  /// [_collectMoverAncestors], whose doc carries the cost and the
+  /// pre-mutation caveat.
   Set<TKey>? _moverAncestors;
 
   /// The underlying [TreeController] being driven.
@@ -157,10 +147,13 @@ class TreeSyncController<TKey, TData> {
   /// being removed in this sync, but that appears elsewhere in the desired
   /// tree (under a different parent), is animated (slid) into its new
   /// position rather than purged with the old root. This is implemented
-  /// by deferring root removal until after the recursive children sync
-  /// has had a chance to call [TreeController.moveNode] for every
-  /// cross-parent reparent. The old root then exits as a clean separate
-  /// animation on the (now-empty or non-desired-residue) subtree it left.
+  /// by deferring the removal of a root whose subtree holds such a
+  /// descendant until after the recursive children sync has called
+  /// [TreeController.moveNode] for every cross-parent reparent; every
+  /// other unwanted root is removed first, so it exits in place and new
+  /// roots are inserted against the live order. The old root then exits
+  /// as a clean separate animation on the (now-empty or
+  /// non-desired-residue) subtree it left.
   ///
   /// Set [animate] to false to suppress animations (useful for initial setup).
   void syncRoots(
@@ -176,10 +169,13 @@ class TreeSyncController<TKey, TData> {
 
   /// The [syncRoots] body, already inside the caller's batch.
   ///
-  /// Eight ordered steps, and the ordering is the load-bearing part: root
-  /// removal is deferred to step 2' so step 5's recursive children sync
-  /// still sees soon-to-be-removed roots alive and can reparent
-  /// descendants out of them against a stable slide baseline.
+  /// Eight ordered steps, and the ordering is the load-bearing part: a
+  /// root whose subtree holds a mover (a key the desired tree wants
+  /// elsewhere) is removed at step 2', after step 5's recursive children
+  /// sync has reparented the mover out of it against a stable slide
+  /// baseline; every other unwanted root is removed eagerly at step 1, the
+  /// children path's shape, so step 3's insert indices see it already out
+  /// of the live set (M12).
   void _syncRootsImpl(
     List<TreeNode<TKey, TData>> desired, {
     List<TreeNode<TKey, TData>> Function(TKey key)? childrenOf,
@@ -241,140 +237,229 @@ class TreeSyncController<TKey, TData> {
       _collectDesiredDescendants(desiredDescendants, desired, resolveChildren);
     }
 
-    // 1. Compute which roots are no longer desired, but DEFER their actual
-    //    removal until after the recursive children sync (step 5). Reason:
-    //    when a child reparents from a soon-to-be-removed root into a
-    //    surviving root in the same sync, `moveNode` in step 5 needs to
-    //    see the old root still alive so it can resolve `getParent(child)`
-    //    and stage a clean FLIP slide. Removing the old root first marks
-    //    the entire subtree pending-deletion, which leaves the child's
-    //    slide composing against an ancestor-driven exit animation.
-    //
-    //    When childrenOf is provided, the `desiredDescendants.contains(key)`
-    //    check below in step 2' also skips removal of roots that appear
-    //    anywhere in the desired tree: they are being reparented, not
-    //    deleted.
+    // Mover context (M13): every ancestor of every key the desired tree
+    // wants, computed pre-mutation and published for step 5's
+    // `syncChildren` calls, which hold back the removal of a node whose
+    // subtree holds a mover until the drain at step 2'. Seeded from the
+    // desired ROOTS as well as the descendants, so a child promoted to
+    // root (step 3's `moveNode(key, null)` branch) also protects its
+    // current ancestors.
+    final moverAncestors = _collectMoverAncestors(
+      desiredDescendants == null
+          ? desiredSet
+          : desiredSet.followedBy(desiredDescendants),
+    );
+    final deferredRootRemovals = <TKey>[];
+    final deferredSubtreeRemovals = <TKey>[];
+    // Read by step 2' and step 7 after the publish scope below closes.
     final toRemove = currentSet.difference(desiredSet);
-
-    // 2. Build the post-removal list plus a Fenwick tree keyed by desired
-    //    position, seeded with 1s at retained keys' desired positions. The
-    //    insertion loop below reads each insertion index as a prefix sum,
-    //    so K insertions cost O(K log N) rather than O(K * N).
-    final desiredPos = <TKey, int>{
-      for (int i = 0; i < desiredKeys.length; i++) desiredKeys[i]: i,
-    };
-    final remaining = <TKey>[
-      for (final k in currentRoots)
-        if (!toRemove.contains(k)) k,
-    ];
-    final remainingBit = _Fenwick(desiredKeys.length);
-    for (final k in remaining) {
-      final p = desiredPos[k];
-      if (p != null) remainingBit.update(p, 1);
-    }
-
-    // 3. Insert new roots at their correct position. If a node already
-    //    exists in the controller (e.g., promoted from child to root), use
-    //    moveNode to preserve subtree state instead of insertRoot.
-    final toAdd = desiredSet.difference(currentSet);
     final addedRoots = <TKey>[];
-    for (final node in desired) {
-      if (!toAdd.contains(node.key)) continue;
-
-      final p = desiredPos[node.key]!;
-      final targetIndex = remainingBit.prefixSum(p);
-
-      if (_controller.getNodeData(node.key) != null) {
-        final oldParent = _controller.getParent(node.key);
-        if (oldParent == null) {
-          // Already a root: insertRoot handles relocation and, when the
-          // node is mid-exit, cancels the deletion and reverses the
-          // standalone exit into an enter. preservePendingSubtreeState is
-          // ignored when the node is not pending-deletion, so passing it
-          // unconditionally is safe and keeps the re-add path symmetric.
-          _controller.insertRoot(
-            node,
-            index: targetIndex,
-            animate: animate,
-            preservePendingSubtreeState: true,
-          );
-        } else {
-          // Reparenting a child up to root. moveNode composes a smooth
-          // extent reversal with the FLIP slide for any pending-deletion
-          // members of the moved subtree, so this path stays correct even
-          // when the moved node is mid-exit.
-          _controller.updateNode(node);
-          _controller.moveNode(
-            node.key,
-            null,
-            index: targetIndex,
-            animate: animate,
-            slideDuration: _controller.animationStyle.expandCollapse.duration,
-            slideCurve: _controller.animationStyle.expandCollapse.curve,
-          );
+    _moverAncestors = moverAncestors;
+    _deferredSubtreeRemovals = deferredSubtreeRemovals;
+    try {
+      // 1. Remove roots no longer desired, the children path's shape: remove
+      //    eagerly, defer only what has a reason to be deferred (M12). The
+      //    one reason is a root whose subtree STRICTLY contains a key the
+      //    desired tree wants: `moveNode` in step 5 needs that old root
+      //    alive to resolve `getParent(child)` and stage a clean FLIP slide,
+      //    and removing it first would mark the whole subtree
+      //    pending-deletion (or, without animation, purge the mover). A
+      //    root that itself appears anywhere in the desired tree is being
+      //    reparented, not deleted: step 3 or step 5 moves it.
+      //
+      //    No liveness guard on the eager branch: `currentRoots` is
+      //    controller truth read above and nothing has mutated the
+      //    controller yet.
+      // Keys in `toRemove` that this loop does NOT remove, and which are
+      // therefore still LIVE when step 3 inserts. Both kinds shift live
+      // space relative to survivor space by one each.
+      final stillLiveRemovals = <TKey>{};
+      for (final key in toRemove) {
+        if (desiredDescendants != null && desiredDescendants.contains(key)) {
+          stillLiveRemovals.add(key);
+          continue;
         }
-      } else {
-        _controller.insertRoot(node, index: targetIndex, animate: animate);
+        if (moverAncestors.contains(key)) {
+          deferredRootRemovals.add(key);
+          stillLiveRemovals.add(key);
+          continue;
+        }
+        _rememberExpansion(key);
+        _controller.remove(key: key, animate: animate);
       }
-      remaining.insert(targetIndex, node.key);
-      remainingBit.update(p, 1);
-      addedRoots.add(node.key);
+
+      // 2. Build the post-removal list plus a Fenwick tree keyed by desired
+      //    position, seeded with 1s at retained keys' desired positions. The
+      //    insertion loop below reads each insertion index as a prefix sum,
+      //    so K insertions cost O(K log N) rather than O(K * N).
+      final desiredPos = <TKey, int>{
+        for (int i = 0; i < desiredKeys.length; i++) desiredKeys[i]: i,
+      };
+      final remaining = <TKey>[
+        for (final k in currentRoots)
+          if (!toRemove.contains(k)) k,
+      ];
+      final remainingBit = _Fenwick(desiredKeys.length);
+      for (final k in remaining) {
+        final p = desiredPos[k];
+        if (p != null) remainingBit.update(p, 1);
+      }
+
+      // 3. Insert new roots at their correct position. If a node already
+      //    exists in the controller (e.g., promoted from child to root), use
+      //    moveNode to preserve subtree state instead of insertRoot.
+      //
+      //    Survivor space and live space stay distinct (M12). `remaining`
+      //    and `remainingBit` speak SURVIVOR space (current roots minus
+      //    every unwanted one); `insertRoot(index:)` and `moveNode(index:)`
+      //    speak LIVE space. They differ by exactly the number of still-live
+      //    removals before the insertion point, which this method already
+      //    knows. Never use one variable for both: `survivorIndex` indexes
+      //    `remaining` / `remainingBit`; `targetIndex` goes to the controller.
+      final toAdd = desiredSet.difference(currentSet);
+      // Live-space offset per survivor: how many still-live removals
+      // precede it in the current live root order. One O(roots) pass,
+      // built only when there is anything to correct for.
+      final liveOffsetOf = <TKey, int>{};
+      var stillLiveTotal = 0;
+      if (stillLiveRemovals.isNotEmpty) {
+        for (final k in currentRoots) {
+          if (stillLiveRemovals.contains(k)) {
+            stillLiveTotal++;
+            continue;
+          }
+          if (toRemove.contains(k)) {
+            continue; // removed at step 1: no longer live, shifts nothing.
+          }
+          liveOffsetOf[k] = stillLiveTotal;
+        }
+      }
+      for (final node in desired) {
+        if (!toAdd.contains(node.key)) continue;
+
+        final p = desiredPos[node.key]!;
+        final survivorIndex = remainingBit.prefixSum(p);
+        final int liveOffset;
+        if (stillLiveRemovals.isEmpty) {
+          liveOffset = 0;
+        } else if (survivorIndex >= remaining.length) {
+          liveOffset = stillLiveTotal;
+        } else {
+          liveOffset = liveOffsetOf[remaining[survivorIndex]]!;
+        }
+        // Live order is survivors (including roots inserted earlier in this
+        // loop) interleaved with still-live removals, so the anchor's live
+        // index is survivors-before-it plus still-live-removals-before-it,
+        // and inserting there lands directly above the anchor.
+        final targetIndex = survivorIndex + liveOffset;
+
+        if (_controller.getNodeData(node.key) != null) {
+          final oldParent = _controller.getParent(node.key);
+          if (oldParent == null) {
+            // Already a root: insertRoot handles relocation and, when the
+            // node is mid-exit, cancels the deletion and reverses the
+            // standalone exit into an enter. preservePendingSubtreeState is
+            // ignored when the node is not pending-deletion, so passing it
+            // unconditionally is safe and keeps the re-add path symmetric.
+            _controller.insertRoot(
+              node,
+              index: targetIndex,
+              animate: animate,
+              preservePendingSubtreeState: true,
+            );
+          } else {
+            // Reparenting a child up to root. moveNode composes a smooth
+            // extent reversal with the FLIP slide for any pending-deletion
+            // members of the moved subtree, so this path stays correct even
+            // when the moved node is mid-exit.
+            _controller.updateNode(node);
+            _controller.moveNode(
+              node.key,
+              null,
+              index: targetIndex,
+              animate: animate,
+              slideDuration: _controller.animationStyle.expandCollapse.duration,
+              slideCurve: _controller.animationStyle.expandCollapse.curve,
+            );
+          }
+        } else {
+          _controller.insertRoot(node, index: targetIndex, animate: animate);
+        }
+        remaining.insert(survivorIndex, node.key);
+        remainingBit.update(p, 1);
+        if (stillLiveRemovals.isNotEmpty) {
+          // The new root sits immediately before its anchor, so the same
+          // still-live removals precede it.
+          liveOffsetOf[node.key] = liveOffset;
+        }
+        addedRoots.add(node.key);
+      }
+
+      // 4. Update data for retained roots whose payload changed.
+      //
+      //    Exiting (pending-deletion) roots never reach this loop: the
+      //    live-filtered `currentSet` excludes them, so a desired key that
+      //    is mid-exit lands in `toAdd` and the branch above cancels the
+      //    deletion (the desired state is authoritative: asking for the
+      //    key means it should exist). Callers that want an imperative
+      //    `remove()` to keep animating out should mirror live state via
+      //    `liveRootKeys` so the exiting key drops out of `desired`.
+      final retained = desiredSet.intersection(currentSet);
+      for (final node in desired) {
+        if (!retained.contains(node.key)) continue;
+        final current = _controller.getNodeData(node.key);
+        if (current != null && current.data != node.data) {
+          _controller.updateNode(node);
+        }
+      }
+
+      // 5. Re-sync children recursively for all desired nodes.
+      //    The desired-descendants set was collected (and validated) at the
+      //    top of this method; it is published as _globallyDesiredChildren
+      //    only for the duration of this step, assigned immediately before
+      //    the try and cleared in the finally (the same shape
+      //    syncMultipleChildren uses). syncChildren reads it to defer
+      //    removal of nodes desired under a different parent.
+      //
+      //    This must run BEFORE step 2' (root removal) and BEFORE reorderRoots:
+      //    a former root being reparented into another root's subtree is still
+      //    a live root at this point, and reorderRoots asserts that orderedKeys
+      //    matches the current live roots exactly. The reparenting moveNode
+      //    happens inside this recursive pass. By keeping a mover's old root
+      //    alive until after this pass (step 1 deferred exactly those),
+      //    moveNode can resolve getParent(child) cleanly and stage a FLIP
+      //    slide against a stable baseline. This is the "reparent through
+      //    removed root" behavior [syncRoots] documents.
+      if (resolveChildren != null) {
+        _deferExpansionRestore = true;
+        _globallyDesiredChildren = desiredDescendants;
+        try {
+          // The memoized resolver, so this walk reuses the child lists the
+          // collection walk above already built rather than rebuilding them.
+          _syncChildrenRecursive(desired, resolveChildren, animate);
+        } finally {
+          _deferExpansionRestore = false;
+          _globallyDesiredChildren = null;
+        }
+      }
+    } finally {
+      _moverAncestors = null;
+      _deferredSubtreeRemovals = null;
     }
 
-    // 4. Update data for retained roots whose payload changed.
+    // 2'. Drain the deferred removals: the roots step 1 held back because
+    //     their subtree held a mover, then the intermediate nodes step 5's
+    //     `syncChildren` calls held back for the same reason (M13). Every
+    //     mover has been placed by step 3 or step 5, so what is left under
+    //     a deferred key is the remainder nobody asked for. The predicate
+    //     is "nothing in the desired tree wants this key": the desired
+    //     tree is the whole description here, so a key in neither
+    //     `desiredSet` nor `desiredDescendants` is unwanted everywhere,
+    //     and a key in either has already been placed.
     //
-    //    Exiting (pending-deletion) roots never reach this loop: the
-    //    live-filtered `currentSet` excludes them, so a desired key that
-    //    is mid-exit lands in `toAdd` and the branch above cancels the
-    //    deletion (the desired state is authoritative: asking for the
-    //    key means it should exist). Callers that want an imperative
-    //    `remove()` to keep animating out should mirror live state via
-    //    `liveRootKeys` so the exiting key drops out of `desired`.
-    final retained = desiredSet.intersection(currentSet);
-    for (final node in desired) {
-      if (!retained.contains(node.key)) continue;
-      final current = _controller.getNodeData(node.key);
-      if (current != null && current.data != node.data) {
-        _controller.updateNode(node);
-      }
-    }
-
-    // 5. Re-sync children recursively for all desired nodes.
-    //    The desired-descendants set was collected (and validated) at the
-    //    top of this method; it is published as _globallyDesiredChildren
-    //    only for the duration of this step, assigned immediately before
-    //    the try and cleared in the finally (the same shape
-    //    syncMultipleChildren uses). syncChildren reads it to defer
-    //    removal of nodes desired under a different parent.
-    //
-    //    This must run BEFORE step 2' (root removal) and BEFORE reorderRoots:
-    //    a former root being reparented into another root's subtree is still
-    //    a live root at this point, and reorderRoots asserts that orderedKeys
-    //    matches the current live roots exactly. The reparenting moveNode
-    //    happens inside this recursive pass. By keeping the old roots alive
-    //    until after this pass, moveNode can resolve getParent(child) cleanly
-    //    and stage a FLIP slide against a stable baseline. This is the
-    //    "reparent through removed root" behavior [syncRoots] documents.
-    if (resolveChildren != null) {
-      _deferExpansionRestore = true;
-      _globallyDesiredChildren = desiredDescendants;
-      try {
-        // The memoized resolver, so this walk reuses the child lists the
-        // collection walk above already built rather than rebuilding them.
-        _syncChildrenRecursive(desired, resolveChildren, animate);
-      } finally {
-        _deferExpansionRestore = false;
-        _globallyDesiredChildren = null;
-      }
-    }
-
-    // 2'. Now actually remove the orphan roots. Their desired descendants
-    //     have been reparented out by step 5; whatever non-desired descendants
-    //     remain under each toRemove root are correctly purged with it.
-    //
-    //     Read the captured local `desiredDescendants` here, NOT the
-    //     `_globallyDesiredChildren` field: the field is only non-null
-    //     inside step 5's try/finally and is already null again here.
+    //     Read the captured locals here, NOT the fields: the finally
+    //     above has nulled them, and `_globallyDesiredChildren` is only
+    //     non-null inside step 5's try/finally.
     assert(() {
       if (desiredDescendants != null) {
         for (final key in toRemove) {
@@ -398,23 +483,31 @@ class TreeSyncController<TKey, TData> {
       }
       return true;
     }());
-    for (final key in toRemove) {
-      if (desiredDescendants != null && desiredDescendants.contains(key)) {
-        // Skip: this root is being reparented (its key appears as a
-        // descendant in the desired tree). The reparent was handled in
-        // step 3 (former-child-to-root) or step 5 (cross-parent move).
-        continue;
+    bool stillUnwanted(TKey key) {
+      if (_controller.getNodeData(key) == null) {
+        return false;
       }
-      // Skip if already removed or moved by an earlier operation.
-      if (_controller.getNodeData(key) == null ||
-          _controller.getParent(key) != null) {
-        continue;
+      if (desiredSet.contains(key)) {
+        return false;
       }
+      return desiredDescendants == null || !desiredDescendants.contains(key);
+    }
+
+    // No `getParent(key) != null` skip here: every key in
+    // `deferredSubtreeRemovals` is a non-root child with a parent, and
+    // such a guard would leave it in the tree for good.
+    for (final key in deferredRootRemovals) {
+      if (!stillUnwanted(key)) continue;
       // _rememberExpansion walks the controller's current subtree under
       // `key`. By this point any reparented descendants have been pulled
       // out via moveNode at step 5, so their expansion is preserved
       // natively by the controller (not via memory). What remains under
       // `key` are non-desired descendants that are about to be purged.
+      _rememberExpansion(key);
+      _controller.remove(key: key, animate: animate);
+    }
+    for (final key in deferredSubtreeRemovals) {
+      if (!stillUnwanted(key)) continue;
       _rememberExpansion(key);
       _controller.remove(key: key, animate: animate);
     }
@@ -594,12 +687,13 @@ class TreeSyncController<TKey, TData> {
       // Same, one level out: a node whose SUBTREE holds a mover cannot be
       // removed yet either. `remove(animate: false)` purges the subtree
       // immediately, so the mover would be re-created as a fresh leaf at
-      // its destination with its own children gone. Deferred to the end
-      // of the multi-parent call, by which time the destination parent's
-      // sync has moved the mover out and only the genuinely unwanted
-      // remainder is left. (With `animate: true` the purge is deferred by
-      // the exit animation and `moveNode` revives the subtree, which is
-      // why this only ever bit the non-animated path.)
+      // its destination with its own children gone. Deferred to the
+      // enclosing call's drain (`syncMultipleChildren`'s, or
+      // `_syncRootsImpl`'s step 2'), by which time the destination
+      // parent's sync has moved the mover out and only the genuinely
+      // unwanted remainder is left. (With `animate: true` the purge is
+      // deferred by the exit animation and `moveNode` revives the
+      // subtree, which is why this only ever bit the non-animated path.)
       //
       // The `moverAncestors` test is a PRECISION choice, not a
       // correctness one: deferring every removal in a multi-parent call
@@ -818,18 +912,7 @@ class TreeSyncController<TKey, TData> {
           }
         }
         _deferredSubtreeRemovals = <TKey>[];
-        // See [_moverAncestors]: one upward pass per mover, rather than
-        // a downward subtree scan per removal candidate.
-        final moverAncestors = _moverAncestors = <TKey>{};
-        for (final moverKey in _globallyDesiredChildren!) {
-          if (_controller.getNodeData(moverKey) == null) {
-            continue;
-          }
-          var cursor = _controller.getParent(moverKey);
-          while (cursor != null && moverAncestors.add(cursor)) {
-            cursor = _controller.getParent(cursor);
-          }
-        }
+        _moverAncestors = _collectMoverAncestors(_globallyDesiredChildren!);
         for (final entry in desiredByParent.entries) {
           syncChildren(entry.key, entry.value, animate: animate);
         }
@@ -858,6 +941,40 @@ class TreeSyncController<TKey, TData> {
         _moverAncestors = null;
       }
     });
+  }
+
+  /// Every ancestor of every key in [moverKeys] that currently exists in
+  /// the controller, i.e. the O(1) answer to "would removing this key
+  /// purge a mover?". One helper for both entry points ([syncRoots] and
+  /// [syncMultipleChildren]), so they cannot diverge again (M13).
+  ///
+  /// Walks UP from each mover with an early exit as soon as an
+  /// already-marked ancestor is reached, so total work is one visit per
+  /// distinct ancestor EDGE rather than one per (mover, depth) pair. The
+  /// alternative, asking each removal candidate whether its SUBTREE holds
+  /// a mover, costs O(removed subtree) per candidate and allocates a
+  /// descendant list every time.
+  ///
+  /// Strict ancestors only: a mover is never its own ancestor, so the
+  /// caller's test reads "this key's subtree STRICTLY contains a key the
+  /// desired tree wants".
+  ///
+  /// Computed pre-mutation by every caller, so it can name a parent whose
+  /// mover has since been moved out by an earlier sync. That only defers a
+  /// removal the drain then performs anyway, inside the same
+  /// [TreeController.runBatch], so the outcome is unchanged.
+  Set<TKey> _collectMoverAncestors(Iterable<TKey> moverKeys) {
+    final out = <TKey>{};
+    for (final moverKey in moverKeys) {
+      if (_controller.getNodeData(moverKey) == null) {
+        continue;
+      }
+      var cursor = _controller.getParent(moverKey);
+      while (cursor != null && out.add(cursor)) {
+        cursor = _controller.getParent(cursor);
+      }
+    }
+    return out;
   }
 
   /// A no-op, and deliberately still called.
