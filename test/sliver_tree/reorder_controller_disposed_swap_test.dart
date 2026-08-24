@@ -100,10 +100,20 @@ void main() {
     expect(first.isDragging, isTrue, reason: "setup: a live session");
     expect(
       find.text("b"),
-      findsNWidgets(2),
-      reason: "setup: the in-place copy plus the floating proxy, which is "
-          "why the opacity helper below is only read once the proxy is "
-          "gone",
+      findsOneWidget,
+      reason:
+          "setup: the floating proxy holds the row's only mount (the "
+          "in-place copy is a placeholder), which is why the opacity helper "
+          "below is only read once the proxy is gone",
+    );
+    expect(
+      find.descendant(
+        of: find.byType(CustomScrollView),
+        matching: find.text("b"),
+      ),
+      findsNothing,
+      reason: "the in-place row is a sized placeholder while the proxy is "
+          "its mount (H5), so the one copy is the proxy's",
     );
 
     // The app disposes the controller and rebuilds with a fresh one.

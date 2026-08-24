@@ -151,14 +151,24 @@ void main() {
 
       final gesture = await _lift(tester, "c");
 
-      // THE PIN: the child is cloned into the overlay (in-place plus
-      // clone = 2), directly below the dragged row's clone, at its
+      // THE PIN: the child is cloned into the overlay (one mount, the
+      // clone; the in-place row is a placeholder), directly below the
+      // dragged row's clone, at its
       // captured 30px extent, indented +24 relative to the parent
       // clone. Fails today: no descendant clones exist.
       expect(
         find.text("g"),
-        findsNWidgets(2),
+        findsOneWidget,
         reason: "the proxy must clone the dragged row's visible child",
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.text("g"),
+        ),
+        findsNothing,
+        reason: "the in-place row is a sized placeholder while the proxy is "
+            "its mount (H5), so the one copy is the proxy's",
       );
       final cloneC = tester.getTopLeft(_clone("c"));
       final cloneG = tester.getTopLeft(_clone("g"));
@@ -195,8 +205,20 @@ void main() {
 
       final gesture = await _lift(tester, "c");
 
-      expect(find.text("c"), findsNWidgets(2),
-          reason: "in-place row plus its single clone");
+      expect(
+        find.text("c"),
+        findsOneWidget,
+        reason: "its single clone; the in-place row is a placeholder",
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.text("c"),
+        ),
+        findsNothing,
+        reason: "the in-place row is a sized placeholder while the proxy is "
+            "its mount (H5), so the one copy is the proxy's",
+      );
       expect(find.text("g"), findsNothing,
           reason: "hidden descendants must not be conjured into the proxy");
 

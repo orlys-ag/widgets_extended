@@ -200,6 +200,16 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
   /// travel structurally and in the settle handoff, they are just not
   /// drawn in the band.
   ///
+  /// While the preview is shown, the dragged subtree's IN-PLACE rows are
+  /// sized placeholders for the session (each at its cached extent, so
+  /// the make-room gap and the preview stay on one number): row content
+  /// is inflated exactly once, in the preview. A row's `State` is
+  /// therefore recreated at lift (in the preview) and again at drop (in
+  /// place), the contract `ReorderableListView` has; supply a `GlobalKey`
+  /// on the row content to have the SAME element migrate in place, to
+  /// the preview and back with its `State` intact. A `GlobalKey` inside a
+  /// row is supported.
+  ///
   /// The preview renders in the root [Overlay], OUTSIDE the row's original
   /// ancestry, the same contract as `Draggable.feedback`. Rows using
   /// inherited-ancestor-dependent widgets (e.g. Material ink widgets,
@@ -247,7 +257,9 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
   /// subscriptions for drag-state reactivity (a `ListenableBuilder` on
   /// the [TreeReorderController] rebuilds on every semantic target
   /// change; [TreeReorderController.pointerPosition] serves
-  /// pointer-reactive parts).
+  /// pointer-reactive parts). The dragged subtree's in-place rows are
+  /// placeholders meanwhile (see [showDragProxy]), so the returned
+  /// subtree is the row content's ONLY mount for the session.
   ///
   /// See [showDragProxy] for the overlay-ancestry contract (Material apps
   /// typically wrap the preview in a transparency `Material` here).
@@ -1030,7 +1042,22 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
   Widget build(BuildContext context) {
     final scope = _ReorderableScope.maybeOf<TKey>(context);
     final hidden = _inDraggedSubtree(scope?.draggedKey);
-    Widget content = widget.child;
+    // Placeholder only when the proxy is the subtree's mount (H5): the
+    // row content is then inflated exactly once, in the proxy, so a
+    // `GlobalKey` under it is never reachable from two live mounts (the
+    // lift frame's layout-phase rebuild used to retake it out of the
+    // overlay). With showDragProxy false nothing else inflates the row,
+    // so the live copy stays and the app's State survives. Sized to the
+    // cached extent, the same number the make-room gap re-sums and the
+    // proxy's frozen stack captured, so all three stay on one number; a
+    // never-measured descendant sizes to `defaultExtent` and is stored as
+    // measured at that height until the drop re-measures real content.
+    final placeholder = hidden && (scope?.dragProxyEnabled ?? false);
+    Widget content = placeholder
+        ? SizedBox(
+            height: _reorder.treeController.getEstimatedExtent(widget.nodeKey),
+          )
+        : widget.child;
 
     // Ask the policy HERE, not only at `startDrag`. A row that armed its
     // handles unconditionally would claim the gesture and then decline
@@ -1089,7 +1116,10 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // lift already accounts for every visible row of it, so their slots
     // close up underneath them and any residual paint (the dragged
     // row's or a descendant's) would overlap the rows shifting into
-    // that space. The drag proxy is the subtree's representation.
+    // that space. The drag proxy is the subtree's representation. With
+    // the proxy enabled the payload above is already a sized placeholder
+    // (H5), so the `Opacity(0)` is redundant over it and stays only
+    // because the wrapper's shape must not change across the drag.
     //
     // Applied AFTER the scope, so a handle is hidden along with the row
     // it belongs to. Wrapping only `widget.child` left a caller's grip

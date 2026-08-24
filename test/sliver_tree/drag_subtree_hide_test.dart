@@ -1,14 +1,16 @@
-/// Z1 repro pins: dragging an expanded parent hides its WHOLE visible
-/// subtree in place, not just the parent row.
+/// Z1 repro pins, restated for H5: dragging an expanded parent takes its
+/// WHOLE visible subtree out of the in-place surface, not just the parent
+/// row.
 ///
 /// The make-room gap already lifts the full subtree's extent and the
-/// dragged subtree's rows keep their painted positions, but the widget
-/// layer hid only the dragged row itself: an expanded parent's children
-/// lingered at their parked positions, painted at full opacity, while
-/// every other row shifted around them. Expected behavior, asserted
-/// here: every row of the dragged subtree is hidden (in-place opacity
-/// 0.0) for the duration of the drag, and restored on cancel and after
-/// a commit alike.
+/// dragged subtree's rows keep their painted slots, but the widget layer
+/// once left an expanded parent's children painting at their parked
+/// positions while every other row shifted around them. Expected
+/// behavior, asserted here: every row of the dragged subtree is replaced
+/// in place by a sized placeholder for the duration of the drag (its
+/// content is mounted exactly once, in the drag proxy), and its content is
+/// restored on cancel and after a commit alike; rows outside the subtree
+/// keep their content.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -93,18 +95,17 @@ Future<_Harness> _mount(WidgetTester tester) async {
   return _Harness(tree: tree, reorder: reorder);
 }
 
-/// The IN-PLACE row's drag-hide opacity. Scoped under the scroll view
-/// so the floating proxy's clones (which duplicate row keys) can never
-/// make the finder ambiguous.
-double _inPlaceOpacityOf(WidgetTester tester, String rowKey) {
+/// Whether the IN-PLACE row still mounts its content. Scoped under the
+/// scroll view so the floating proxy's clones (which duplicate row keys)
+/// can never make the finder ambiguous. A row of the dragged subtree is a
+/// sized placeholder for the drag (H5), so its content key is absent in
+/// place; every other row keeps its content.
+bool _inPlaceContentMounted(WidgetTester tester, String rowKey) {
   final inPlaceRow = find.descendant(
     of: find.byType(CustomScrollView),
     matching: find.byKey(ValueKey("row-$rowKey")),
   );
-  final op = tester.widget<Opacity>(
-    find.ancestor(of: inPlaceRow, matching: find.byType(Opacity)),
-  );
-  return op.opacity;
+  return tester.any(inPlaceRow);
 }
 
 Future<TestGesture> _lift(WidgetTester tester, String key) async {
@@ -128,35 +129,35 @@ void main() {
       final h = await _mount(tester);
 
       // Setup sanity: the dragged row genuinely has a visible subtree,
-      // and both rows start fully visible.
+      // and both rows start with their content in place.
       expect(h.tree.visibleSubtreeSize("c"), 2);
-      expect(_inPlaceOpacityOf(tester, "c"), 1.0);
-      expect(_inPlaceOpacityOf(tester, "g"), 1.0);
+      expect(_inPlaceContentMounted(tester, "c"), isTrue);
+      expect(_inPlaceContentMounted(tester, "g"), isTrue);
 
       final gesture = await _lift(tester, "c");
       await gesture.moveBy(const Offset(0, 30));
       await tester.pump();
 
-      // Sanity: the dragged row itself hides (existing behavior).
-      expect(_inPlaceOpacityOf(tester, "c"), 0.0);
+      // Sanity: the dragged row's own content leaves the in-place surface.
+      expect(_inPlaceContentMounted(tester, "c"), isFalse);
 
-      // THE PIN: the dragged row's visible CHILD hides with it. The
-      // make-room gap already lifts its extent; leaving it painted
-      // orphans it visually while the tree shifts around it.
+      // THE PIN: the dragged row's visible CHILD goes with it. The
+      // make-room gap already lifts its extent; leaving its content in
+      // place orphans it visually while the tree shifts around it.
       expect(
-        _inPlaceOpacityOf(tester, "g"),
-        0.0,
+        _inPlaceContentMounted(tester, "g"),
+        isFalse,
         reason:
-            "a dragged parent's visible descendants must hide in "
-            "place along with it",
+            "a dragged parent's visible descendants must leave the "
+            "in-place surface along with it",
       );
 
       h.reorder.cancelDrag();
       await gesture.up();
       await tester.pumpAndSettle();
 
-      expect(_inPlaceOpacityOf(tester, "c"), 1.0);
-      expect(_inPlaceOpacityOf(tester, "g"), 1.0);
+      expect(_inPlaceContentMounted(tester, "c"), isTrue);
+      expect(_inPlaceContentMounted(tester, "g"), isTrue);
       expect(h.tree.getParent("c"), "p", reason: "cancel must not mutate");
     },
   );
@@ -173,9 +174,9 @@ void main() {
       await tester.pump();
 
       expect(
-        _inPlaceOpacityOf(tester, "g"),
-        0.0,
-        reason: "the child must stay hidden right up to the drop",
+        _inPlaceContentMounted(tester, "g"),
+        isFalse,
+        reason: "the child must stay a placeholder right up to the drop",
       );
 
       await gesture.up();
@@ -185,8 +186,8 @@ void main() {
       // rows are visible again.
       expect(h.tree.getParent("c"), "q");
       expect(h.tree.getParent("g"), "c");
-      expect(_inPlaceOpacityOf(tester, "c"), 1.0);
-      expect(_inPlaceOpacityOf(tester, "g"), 1.0);
+      expect(_inPlaceContentMounted(tester, "c"), isTrue);
+      expect(_inPlaceContentMounted(tester, "g"), isTrue);
     },
   );
 
@@ -199,10 +200,10 @@ void main() {
       await gesture.moveBy(const Offset(0, 30));
       await tester.pump();
 
-      // Guard against over-hiding: "r" is not in c's subtree.
-      expect(_inPlaceOpacityOf(tester, "r"), 1.0);
-      expect(_inPlaceOpacityOf(tester, "q"), 1.0);
-      expect(_inPlaceOpacityOf(tester, "p"), 1.0);
+      // Guard against over-replacing: "r" is not in c's subtree.
+      expect(_inPlaceContentMounted(tester, "r"), isTrue);
+      expect(_inPlaceContentMounted(tester, "q"), isTrue);
+      expect(_inPlaceContentMounted(tester, "p"), isTrue);
 
       h.reorder.cancelDrag();
       await gesture.up();

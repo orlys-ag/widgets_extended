@@ -3529,6 +3529,29 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
             _inCacheRegionByNid[nid] != 0) {
           continue;
         }
+        // A stale child (mounted, not admitted this frame) may have been
+        // rebuilt this frame with a layout-affecting change: the make-room
+        // placeholder swap (H5) does exactly that to every mounted row of
+        // the dragged subtree, admitted or not. Post-frame eviction is too
+        // late for this frame's semantics flush, which asserts on any
+        // attached render object still needing layout, so lay it out here
+        // with the constraints [_layoutNodeChild] would use. A clean child
+        // early-outs inside `layout`, so the steady state pays a few
+        // comparisons per stale row. No extent write: the row is off the
+        // painted surface and its stored extent stays authoritative.
+        {
+          final indent = controller.getIndentNid(nid);
+          final w = math.max(0.0, constraints.crossAxisExtent - indent);
+          child.layout(
+            BoxConstraints(
+              minWidth: w,
+              maxWidth: w,
+              minHeight: 0.0,
+              maxHeight: double.infinity,
+            ),
+            parentUsesSize: true,
+          );
+        }
         final visIdx = _controller.visibleIndexOfNid(nid);
         if (visIdx < 0) {
           // Mounted but no longer in visible order, happens transiently

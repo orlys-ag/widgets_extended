@@ -43,7 +43,11 @@ with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
 not be worked in parallel. The plan creates 7 new test files.
 
-Landed so far: 32 implemented (H1, H2, H3, H4, H6, L2, L6, L7, L13, L21, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M16, M20, M21, M22, M23); 1 partially implemented
+NEW means not yet in `git ls-files`. 1 of those 7 already exist on disk,
+written for items that have landed but are not committed:
+`audit_repro_h5_test.dart`.
+
+Landed so far: 33 implemented (H1, H2, H3, H4, H5, H6, L2, L6, L7, L13, L21, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M16, M20, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -140,7 +144,7 @@ Existing tests touched: `audit_repro_f32_test.dart`, `audit_repro_f33_test.dart`
 
 ### Cluster 6: H5, M19
 
-- **H5** (L) A `GlobalKey` inside a row breaks dragging
+- **H5** (L) A `GlobalKey` inside a row breaks dragging  **[DONE]**
 - **M19** (M) `Opacity(1.0)` around every reorderable row
 
 Ordering constraints:

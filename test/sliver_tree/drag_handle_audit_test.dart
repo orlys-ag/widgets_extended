@@ -898,8 +898,17 @@ void main() {
     expect(reorder.isDragging, isTrue);
     expect(
       find.byKey(const ValueKey("grip-a")),
-      findsNWidgets(2),
-      reason: "one in place, one cloned into the overlay",
+      findsOneWidget,
+      reason: "cloned into the overlay; the in-place copy is a placeholder",
+    );
+    expect(
+      find.descendant(
+        of: find.byType(CustomScrollView),
+        matching: find.byKey(const ValueKey("grip-a")),
+      ),
+      findsNothing,
+      reason: "the in-place row is a sized placeholder while the proxy is "
+          "its mount (H5), so the one copy is the proxy's",
     );
     expect(tester.takeException(), isNull);
 

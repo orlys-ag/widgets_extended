@@ -2843,6 +2843,57 @@ One branch is specified but NOT exercised by the tests below, and I am marking i
 
 ### H5. A `GlobalKey` inside a row breaks dragging
 
+**Status.** IMPLEMENTED 2026-08-24 as the Solution prescribes:
+`_ReorderableRowState.build` swaps the payload to a `SizedBox` at
+`getEstimatedExtent` when `hidden && dragProxyEnabled`; everything below it
+stays (the `Opacity(0)` is now redundant over the placeholder and stays for
+shape stability, and its comment says so); `showDragProxy` and
+`dragProxyBuilder` gained the paragraph; changelog entry under Unreleased.
+One integration fix the block did not foresee, in
+`RenderSliverTree.performLayout`'s parentData refresh loop: a row that is
+MOUNTED but not admitted this frame (stale, awaiting post-frame eviction)
+is rebuilt in the lift frame like every mounted row of the dragged
+subtree, so its new placeholder render subtree was left needing layout and
+the frame's semantics flush asserted
+(`!childSemantics.renderObject._needsLayout`, `object.dart:5994`;
+semantics is on by default under `testWidgets`, and on in an app whenever
+assistive technology is active). The old `Opacity` flip needed no layout,
+which is why the hazard stayed latent. The loop now lays such a child out
+with `_layoutNodeChild`'s constraints and no extent write; a clean child
+early-outs inside `layout`. Probed, not assumed: a bisect showed the
+assertion needs the proxy AND a subtree larger than the mounted set (40
+children fail at 50 and 100 px rows; 4, 8 and 12 all-mounted children
+pass), and a post-frame walk found exactly the nine stale rows dirty (18
+mounted before the lift, 9 admitted per frame). Test
+`audit_repro_h5_test.dart`, the block's five cases with adjustments
+recorded after runs: exception checks are one accumulated `takeException`
+per drag (a per-frame repeat cannot be shown red on its own); case 5 jumps
+to `scrollOffsetOf("p30") - 100` rather than a constant, because rows past
+the cache region sit at estimated 48 px offsets (the block's 2800 overshot
+the whole list), and gains the stale-row exception assertion; the
+`liftSum` check was dropped as implied by the per-row extent checks (the
+sum IS those extents), and case 3's new-instance assertion as implied by
+its dispose count (a disposed State cannot return). Pre-fix, isolated per
+case (case 1's layout-phase crash corrupts the binding for the rest of the
+file): cases 1 and 2 throw the block's `object.dart` mutation assertions,
+case 3 reports 0 disposals against 1, case 5 stores 100 against 48, case 4
+passes as the control should. All 16 assertions shown red by their own
+mutation (the placeholder gate reverted or made proxy-blind, keys removed
+or moved, the stale-child layout removed, the drop-time clear removed,
+gesture and geometry constructs). `ReorderableListView`'s placeholder
+confirmed at `reorderable_list.dart:1293-1295`. Suites: of the two the
+block verified break, `drag_subtree_hide_test.dart` was rewritten to pin
+the new contract (content unmounted in place while dragged, restored
+after) and `drag_handle_hidden_test.dart` needed nothing, its harness runs
+`showDragProxy: false` so the placeholder gate never applies; the ten
+`findsNWidgets(2)` in-place-count assertions across nine drag-proxy suites
+were ported to `findsOneWidget` plus a scoped `findsNothing` under the
+`CustomScrollView`, reasons reworded. `hidden_row_hit_test.dart` passes
+unchanged (its `Opacity` commentary is M19's). Verification: `flutter
+analyze` 47; full suite 1164 passed, 4 skipped; the four ported files that
+were format-clean at HEAD reformatted, the rest left as they were. M19
+lands next on this shape.
+
 **Finding.** `_startDrag` hands the exact instance the `nodeBuilder` returned to the owner (`sliver_reorderable_tree.dart:1381`, `_onDragStartCallback(widget.nodeKey, widget.child)`, received at `:670`), and `_DragProxy.build` mounts that same instance in the root overlay (`:1550`, `:1559-1560`) while the in-place copy stays mounted, wrapped only in `IgnorePointer` + `Opacity(0)` (`:1127-1130`). The descendant clone stack has the same shape: `:1584` calls `nodeBuilder(context, row.key, row.depth)` for each frozen descendant while those descendants' in-place rows also stay mounted.
 
 **Root cause.** Two live inflations of one widget subtree, and the second one happens during LAYOUT. `Element.inflateWidget` routes a `GlobalKey` through `_retakeInactiveElement` (`C:\flutter_sdk\flutter\packages\flutter\lib\src\widgets\framework.dart:4572`, body at `:4481-4534`), which yanks the element out of its current parent with `parent.forgetChild(element); parent.deactivateChild(element);` (`:4528-4529`).

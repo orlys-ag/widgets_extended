@@ -189,10 +189,20 @@ void main() {
       );
       expect(
         find.text("a"),
-        findsNWidgets(2),
+        findsOneWidget,
         reason:
-            "setup: the proxy clones the dragged row's child into the "
-            "overlay (hidden in-place copy + floating copy)",
+            "setup: the proxy mounts the dragged row's child in the overlay "
+            "(the in-place copy is a placeholder)",
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.text("a"),
+        ),
+        findsNothing,
+        reason:
+            "the in-place row is a sized placeholder while the proxy is "
+            "its mount (H5), so the one copy is the proxy's",
       );
 
       // Swap the tree out (same MaterialApp, so the root overlay — where

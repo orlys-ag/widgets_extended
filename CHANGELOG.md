@@ -19,6 +19,13 @@ nor mid-extent-animation). A header row whose child paints outside its box (a
 shadow, an overflowing badge) now shows that overflow while pinned, matching
 how the same row paints in flow; an app that relied on the pinned clip to
 contain overflow should clip inside its own row widget.
+- Changed: while the drag preview is shown (`showDragProxy: true`, the
+default, or a `dragProxyBuilder`), the dragged subtree's in-place rows are
+sized placeholders for the drag instead of hidden live copies, so row content
+is inflated exactly once. Row `State` inside the dragged subtree is recreated
+at lift and at drop unless the row content carries a `GlobalKey`, which now
+migrates the element intact. A `GlobalKey` inside a row previously broke the
+lift with a layout-phase assertion.
 - Fix: a drag started on a sticky-pinned header resolved its drop target
 against the content scrolled beneath the pinned strip. The drop probe now
 consults the pinned band first, matching hit-testing, so the header itself is

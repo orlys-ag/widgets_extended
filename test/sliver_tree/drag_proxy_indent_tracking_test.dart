@@ -157,8 +157,19 @@ void main() {
       final gesture = await _lift(tester, "g");
       expect(
         find.text("g"),
-        findsNWidgets(2),
-        reason: "setup: in-place row plus the floating proxy clone",
+        findsOneWidget,
+        reason:
+            "setup: the floating proxy clone (the in-place row is a "
+            "placeholder)",
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.text("g"),
+        ),
+        findsNothing,
+        reason: "the in-place row is a sized placeholder while the proxy is "
+            "its mount (H5), so the one copy is the proxy's",
       );
 
       // The seed, on the proxy's FIRST rendered frame: the source row's

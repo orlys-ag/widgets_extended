@@ -338,10 +338,20 @@ void main() {
 
       expect(
         find.text("a"),
-        findsNWidgets(2),
+        findsOneWidget,
         reason:
-            "the default proxy clones the dragged row's child into "
-            "the overlay (in-tree dimmed copy + floating copy)",
+            "the default proxy mounts the dragged row's child in the overlay "
+            "(the in-tree copy is a placeholder)",
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.text("a"),
+        ),
+        findsNothing,
+        reason:
+            "the in-place row is a sized placeholder while the proxy is "
+            "its mount (H5), so the one copy is the proxy's",
       );
 
       await gesture.up();

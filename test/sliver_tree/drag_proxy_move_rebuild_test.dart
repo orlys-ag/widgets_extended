@@ -125,10 +125,22 @@ void main() {
       final gesture = await _lift(tester, "p");
 
       // Setup sanity: a genuine subtree drag with descendant clones in
-      // the overlay (in-place copy + clone = 2 per key).
+      // the overlay (one per key: the in-place copy is a placeholder).
       expect(h.reorder.isDragging, isTrue);
-      expect(find.text("a"), findsNWidgets(2),
-          reason: "setup: the proxy must be floating the descendant clones");
+      expect(
+        find.text("a"),
+        findsOneWidget,
+        reason: "setup: the proxy must be floating the descendant clones",
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.text("a"),
+        ),
+        findsNothing,
+        reason: "the in-place row is a sized placeholder while the proxy is "
+            "its mount (H5), so the one copy is the proxy's",
+      );
 
       final afterLift = Map<String, int>.of(h.builds);
       final topBefore = tester.getTopLeft(_clone("p")).dy;

@@ -130,8 +130,20 @@ void main() {
       );
       expect(
         find.text("a"),
-        findsNWidgets(2),
-        reason: "setup: in-place copy + floating proxy clone",
+        findsOneWidget,
+        reason:
+            "setup: the floating proxy clone (the in-place copy is a "
+            "placeholder)",
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.text("a"),
+        ),
+        findsNothing,
+        reason:
+            "the in-place row is a sized placeholder while the proxy is "
+            "its mount (H5), so the one copy is the proxy's",
       );
       expect(
         h.tree.hasActiveSlides,
