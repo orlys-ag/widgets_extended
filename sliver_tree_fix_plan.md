@@ -2974,6 +2974,38 @@ Every case using it asserts the hoist held, as a setup sanity check: capture `te
 
 ### M1. Re-insert of a mid-exit node under a collapsed parent leaves a permanent row
 
+**Status.** IMPLEMENTED 2026-08-24, three audit passes, 2 and 3 consecutively
+clean; pass 1 replaced a false absolute in the new test comment ("keeps the
+row visible forever": any later order rebuild drops it, since the completed
+enter leaves no standalone for the collapsed-parent branch to retain). Landed
+as the Solution prescribes, and this file's anchors were NOT stale: the three
+edits went in at the cited symbols with the gate verbatim
+(`_tree_controller_animation.dart:475-495`, flag default false at `:478`,
+gate at `:490-493`), `_cancelDeletion`'s root half routed through the policy
+with `explicitTarget: true` (`:410-415`) and the unconditional
+`_clearPendingDeletion` moved into the non-animate arm, and the case-1 doc
+and `_cancelDeletion` doc updated to the new contract. Descendant behavior is
+bit-identical: with the flag at its false default the new gate reduces to the
+old three-way conjunction.
+
+The regression test extends `tree_controller_test.dart`'s "honors parentKey
+when node is pending deletion under another parent" in place, per this
+block's prescription (`:1417-1441` after the edit): the destination-collapsed
+sanity plus the settle assertion. Pre-fix red exactly as predicted:
+`visibleNodes` settles to [a, b, x]. Both new assertions were shown red
+individually: the settle pin by the pre-fix run, the sanity by a test-side
+variant that expands the destination first, which itself surfaced a
+construction trap worth recording: `expand()` no-ops on a childless node
+(`tree_controller.dart:3818-3821`), so the variant only goes red once the
+destination is given a child. One measured gap, recorded deliberately: with
+`explicitTarget` flipped to false at the root call site, the ENTIRE suite
+stays green, so no existing test discriminates the flag; its justification
+is this block's Alternatives argument (a group-captured exit would snap
+instead of grow), which remains design-level and untested. The block's
+suites pass (121 tests), the full suite reads 1098 passed, 4 skipped (count
+unchanged: the repro extends an existing test), `flutter analyze` stays at
+the 48-issue baseline.
+
 **Finding.** `_cancelDeletion` unconditionally reverses the ROOT key into an
 enter (`_tree_controller_animation.dart:408-413`: `_clearPendingDeletion(key)`
 then `if (animate) _startStandaloneEnterAnimation(key)`), while every

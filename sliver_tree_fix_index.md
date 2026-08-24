@@ -41,13 +41,9 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The plan creates 23 new test files.
+not be worked in parallel. The plan creates 22 new test files.
 
-NEW means not yet in `git ls-files`. 1 of those 23 already exist on
-disk, written for items that have landed but are not committed:
-`audit_repro_m16_test.dart`.
-
-Landed so far: 9 implemented (H6, M3, M4, M9, M14, M16, M21, M22, M23); 1 partially implemented
+Landed so far: 10 implemented (H6, M1, M3, M4, M9, M14, M16, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -87,7 +83,7 @@ Existing tests touched: `adjacent_collapsed_exit_ghost_test.dart`, `animated_mov
 
 - **H4** (M) Depth-limited `expandAll` / `collapseAll` ignore post-flip visibility
 - **L27** (M) Bulk reversals re-target op-group envelopes without the Path-1 rebase
-- **M1** (S) Re-insert of a mid-exit node under a collapsed parent leaves a permanent row
+- **M1** (S) Re-insert of a mid-exit node under a collapsed parent leaves a permanent row  **[DONE]**
 - **M2** (M) Re-inserting a mid-exit node keeps its old subtree
 - **M5** (L) Standalone animations spawned by expand/collapse are timed by `enterExit`
 
@@ -223,7 +219,7 @@ reading that entry first.
 | L28 | M | Direction flip under a same-frame pending baseline drops the edge-to-edge composition | - | - | - |
 | L29 | M | Optional: capture InheritedTheme for the drag proxy | - | - | - |
 | M3 (+) | M | `expand(animate: false)` mid-collapse misorders new descendants | - | M23 | [DONE] |
-| M16 (+) | S | `moveNode` depth change does not dirty rows hidden under a collapsed node | `audit_repro_m16_test.dart` | M9 | [DONE] |
+| M16 (+) | S | `moveNode` depth change does not dirty rows hidden under a collapsed node | - | M9 | [DONE] |
 | M17 (+) | M | Drag proxy is sized and positioned in the viewport's cross-axis frame | `audit_repro_m17_test.dart` | M25 | - |
 | M22 | S | `expand` Path 1 leaves the animating mirror stale | - | - | [DONE] |
 | M23 (+) | M | Empty operation-group shells keep `hasActiveAnimations` true | - | M3 | [DONE] |

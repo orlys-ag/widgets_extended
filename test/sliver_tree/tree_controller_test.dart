@@ -1415,6 +1415,27 @@ void main() {
         expect(controller.getChildren("b"), ["x"]);
         expect(controller.getNodeData("x")!.data, "X-new");
         expect(controller.getDepth("x"), 1);
+
+        // M1: the reversal into an enter must be gated on the NEW parent's
+        // expansion. Reversing under collapsed 'b' installs a standalone
+        // enter that keeps 'x' in the visible order past the settle: the
+        // collapsed-parent rebuild branch retains any child with a
+        // standalone animation, and the completed enter is never finalized
+        // out, so nothing removes the row until some later mutation
+        // happens to rebuild the order.
+        expect(
+          controller.isExpanded("b"),
+          isFalse,
+          reason: "setup: the destination parent must be collapsed",
+        );
+        await tester.pumpAndSettle();
+        expect(
+          controller.visibleNodes,
+          ["a", "b"],
+          reason:
+              "a row re-added under a collapsed parent must not stay "
+              "visible after animations settle",
+        );
       },
     );
 

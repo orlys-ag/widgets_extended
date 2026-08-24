@@ -394,9 +394,11 @@ extension _TreeControllerAnimationOps<TKey, TData>
   /// Cancels a pending deletion for a node and all its descendants.
   ///
   /// Reverses the exit animation of [key] into an enter animation so the
-  /// re-inserted node animates back in. The root is always reversed (the
-  /// caller explicitly requested cancellation); descendants are routed
-  /// through [_revertSinglePendingDeletion] for the case-1/2/3 policy.
+  /// re-inserted node animates back in. Root and descendants all route
+  /// through [_revertSinglePendingDeletion]'s case-1/2/3 policy; the root
+  /// passes `explicitTarget: true` (the caller named it, so the mid-exit
+  /// requirement is relaxed), but its visibility gate still applies: a
+  /// key re-added under a collapsed chain must not enter (M1).
   void _cancelDeletion(
     TKey key, {
     bool animate = true,
@@ -405,10 +407,14 @@ extension _TreeControllerAnimationOps<TKey, TData>
     if (_animationStyle.effectiveEnterExit.duration == Duration.zero) {
       animate = false;
     }
-    _clearPendingDeletion(key);
     if (animate) {
-      _startStandaloneEnterAnimation(key);
+      _revertSinglePendingDeletion(
+        key,
+        preserveSubtreeState: true,
+        explicitTarget: true,
+      );
     } else {
+      _clearPendingDeletion(key);
       _removeAnimation(key);
     }
     final descendants = _getDescendants(key);
@@ -447,7 +453,8 @@ extension _TreeControllerAnimationOps<TKey, TData>
   ///    ancestor chain is expanded: reverse the exit into an enter
   ///    animation so the row animates back in from its current extent.
   ///    [_startStandaloneEnterAnimation] also detaches the node from any
-  ///    bulk/op group via [_captureAndRemoveFromGroups].
+  ///    bulk/op group via [_captureAndRemoveFromGroups]. [explicitTarget]
+  ///    relaxes only the mid-exit requirement, never the visibility gate.
   /// 2. The node was mid-exit but case 1 does not apply: clear its
   ///    pending-deletion marker but leave the exit animation running so the
   ///    row shrinks away smoothly under its (collapsed) ancestor chain.
@@ -468,6 +475,7 @@ extension _TreeControllerAnimationOps<TKey, TData>
   void _revertSinglePendingDeletion(
     TKey nodeId, {
     required bool preserveSubtreeState,
+    bool explicitTarget = false,
   }) {
     if (!_isPendingDeletion(nodeId)) {
       return;
@@ -475,9 +483,15 @@ extension _TreeControllerAnimationOps<TKey, TData>
     final animation = _standaloneAt(nodeId);
     final isStandaloneExiting =
         animation != null && animation.type == AnimationType.exiting;
-    if (preserveSubtreeState &&
-        isStandaloneExiting &&
-        _ancestorsExpandedFast(nodeId)) {
+    // `explicitTarget` relaxes ONLY the "was mid-exit" requirement: the
+    // caller named this key, so it comes back even if its exit had already
+    // been swallowed by a group. The visibility gate is NOT relaxed. A key
+    // re-added under a collapsed chain must not enter; entering there
+    // parks a permanent row under a collapsed parent (M1).
+    final bool reverseIntoEnter =
+        (explicitTarget || (preserveSubtreeState && isStandaloneExiting)) &&
+        _ancestorsExpandedFast(nodeId);
+    if (reverseIntoEnter) {
       _clearPendingDeletion(nodeId);
       _startStandaloneEnterAnimation(nodeId);
     } else if (isStandaloneExiting) {
