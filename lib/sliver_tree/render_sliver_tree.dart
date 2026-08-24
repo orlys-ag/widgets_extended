@@ -36,9 +36,12 @@ import 'types.dart';
 ///   repaint over this row, so the band/far-overhang rule MUST NOT reach
 ///   it.
 /// - [exit]: a row purged from `visibleNodes` sliding INTO a collapsed
-///   header to DISAPPEAR. The destination band is repainted on top by
-///   Pass A.7 / Pass B, so the clip bounds the FAR overhang of a tall
-///   card past the destination header's PAINTED band.
+///   header to DISAPPEAR. Reached ONLY for a CLIPPED ghost record, and
+///   both of its branches EXCLUDE the destination header's PAINTED band
+///   outright, which is also what bounds the FAR overhang of a tall card
+///   past that band. Nothing repaints the band on top of the ghost:
+///   Pass A.7 covers EDGE-painted ghosts only, and Pass B repaints a
+///   sticky anchor for its own reasons, not for this clip.
 enum PhantomClipRole { entry, exit }
 
 /// Consolidated per-ghost exit-phantom state.
@@ -2017,8 +2020,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// error that is invisible while scrolled to the top, which is exactly
   /// the shape of the bug this member exists to fix.
   ///
-  /// Call-phase note, and it relaxes [_anchorPaintedBounds]'s stated
-  /// "only from paint()" rule for one specific caller. This runs at
+  /// Call-phase note, and this is one of the two GESTURE-time callers
+  /// [_anchorPaintedBounds]'s call-phase bullet admits (the other is
+  /// `_computeA7Anchors`, reached from `hitTestChildren`). This runs at
   /// GESTURE time, which is neither layout nor paint, so `_sticky` holds
   /// the last PAINTED frame's values. That is not a tolerated staleness:
   /// it is precisely the geometry the user was looking at when they
@@ -3479,6 +3483,55 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     return low;
   }
 
+  /// The rows Pass A.7 will repaint this frame, and therefore exactly
+  /// the rows Pass A must skip. ONE definition, called from both
+  /// `paint` and `hitTestChildren`: a predicate applied on one side only
+  /// produces a row that no pass paints (an EXITING anchor is painted by
+  /// Pass A but would be skipped by an A.7-side filter). Iterates the
+  /// EXIT-ghost records' anchors ONLY (deduped), never
+  /// `_phantomClipAnchors.values`, which holds ENTRY-phantom anchors
+  /// that must NOT be repainted on top of an emerging entry row.
+  /// `hasSlides` is the COMPOSED flag at both call sites (M10's rule for
+  /// outer pre-filters: they only skip work, the per-entry state is
+  /// authoritative).
+  List<({TKey key, int nid, RenderBox child})>? _computeA7Anchors({
+    required double remainingPaintExtent,
+    required bool hasSlides,
+  }) {
+    if (_phantomExitGhosts == null ||
+        _phantomExitGhosts!.isEmpty ||
+        !hasSlides) {
+      return null;
+    }
+    List<({TKey key, int nid, RenderBox child})>? out;
+    final seenAnchors = <TKey>{};
+    for (final ghost in _phantomExitGhosts!.values) {
+      // Clipped ghosts are already excluded from the anchor's band by
+      // the EXIT clip (`_resolvePhantomAnchorBounds`, role: exit), so
+      // the header needs no repaint on top of them. Only an EDGE-painted
+      // ghost (which takes the unclipped tail of Pass A.5) can overlap
+      // the band.
+      if (ghost.clipped) continue;
+      final anchorKey = ghost.anchor;
+      if (!seenAnchors.add(anchorKey)) continue; // dedupe shared anchors
+      final anchorNid = controller.nidOf(anchorKey);
+      if (anchorNid < 0) continue; // freed key
+      if (_sticky.isSticky(anchorNid)) continue; // Pass B owns it
+      if (controller.isExitingNid(anchorNid)) continue; // animating out
+      final anchorChild = _children[anchorKey];
+      if (anchorChild == null) continue; // not mounted in-flow
+      if (anchorChild.parentData is! SliverTreeParentData) continue;
+      // The band is a CULLING input only: Pass A.7 paints through
+      // `_paintRow` and applies no band clip of its own.
+      final band = _anchorPaintedBounds(anchorKey);
+      if (band == null) continue;
+      if (band.top >= remainingPaintExtent) continue;
+      if (band.top + band.height <= 0) continue;
+      (out ??= []).add((key: anchorKey, nid: anchorNid, child: anchorChild));
+    }
+    return out;
+  }
+
   @override
   void paint(PaintingContext context, Offset offset) {
     // Debug capture is paint-time-scoped: cleared each frame, rewritten
@@ -3515,7 +3568,13 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     final slideOverreach = controller.composedSlideAbsDeltaBound;
     final startIndex = _findFirstVisibleIndex(scrollOffset - slideOverreach);
 
-    // Pass A: Paint non-sticky nodes. Rows with a non-zero slide delta are
+    // Pass A: Paint non-sticky nodes, MINUS the exit-ghost anchors
+    // `_computeA7Anchors` selected: Pass A.7 paints each of those exactly
+    // once, on top of the ghost. That skip and A.7's paint list are ONE
+    // list by construction, so no row falls between the two passes, and
+    // the skip sits ABOVE the sliding-bucket branch below so a row that
+    // is both an edge-ghost row and an exit-ghost anchor cannot be
+    // bucketed AND repainted. Rows with a non-zero slide delta are
     // deferred to a second sub-pass so they paint on top of static rows,
     // without this, an upward-moving row that hasn't yet crossed into its
     // final index slot would be covered by siblings sliding down past it.
@@ -3523,6 +3582,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // the most (typically the just-dropped row) paints last and lands on
     // top. Ties preserve natural iteration order.
     final hasEdgeGhosts = _composer.hasGhosts;
+    final a7Paints = _computeA7Anchors(
+      remainingPaintExtent: remainingPaintExtent,
+      hasSlides: hasSlides,
+    );
+    Set<int>? a7AnchorNids;
+    if (a7Paints != null) {
+      a7AnchorNids = <int>{for (final a in a7Paints) a.nid};
+    }
     // Bounded iteration end, symmetric to the widened start:
     // structural offsets are monotonic in visible order and painted y
     // differs from structural by at most `slideOverreach`, so nothing at
@@ -3547,6 +3614,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       }
       if (_sticky.isSticky(nid)) {
         continue;
+      }
+      if (a7AnchorNids?.contains(nid) ?? false) {
+        continue; // painted by Pass A.7, exactly once
       }
 
       final nodeId = visibleNodes[i];
@@ -3736,7 +3806,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         }
         // Apply the EXIT clip so the ghost is bounded to the destination
         // header's painted band on its trailing side (far overhang
-        // killed; band occluded by the header repaint in Pass A.7/B).
+        // killed; the band itself is EXCLUDED by the clip, which is why
+        // Pass A.7 skips clipped ghosts and repaints EDGE anchors only).
         // The clip reads the LIVE band, which [_anchorPaintedBounds]
         // builds with the anchor's COMPOSED delta (FLIP + held preview),
         // so occlusion tracks the header exactly where it is drawn this
@@ -3865,44 +3936,31 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       }
     }
 
-    // Pass A.7: Header-occludes-ghost. Repaint each NON-sticky
-    // EXIT-ghost destination/crossed header clipped to its painted band,
-    // so it lands ON TOP of the ghost painted in Pass A.5. This closes the
-    // gaps where no Pass-B repaint re-asserts the header (`maxStickyDepth:
-    // 0`, or a header dropped from sticky because it's animating / has no
-    // children). Sticky anchors are skipped, Pass B repaints them
-    // deepest-first below. A header is repainted by EXACTLY ONE of {Pass
-    // A.7 (non-sticky), Pass B (sticky)} per frame.
-    //
-    // Iterate the EXIT-ghost records' anchors ONLY (deduped), NOT
-    // `_phantomClipAnchors.values`, which holds ENTRY-phantom anchors
-    // that must NOT be repainted on top of an emerging entry row.
-    if (_phantomExitGhosts != null &&
-        _phantomExitGhosts!.isNotEmpty &&
-        hasSlides) {
-      final seenAnchors = <TKey>{};
-      for (final ghost in _phantomExitGhosts!.values) {
-        final anchorKey = ghost.anchor;
-        if (!seenAnchors.add(anchorKey)) continue; // dedupe shared anchors
-        final anchorNid = controller.nidOf(anchorKey);
-        if (anchorNid < 0) continue; // freed key
-        if (_sticky.isSticky(anchorNid)) continue; // Pass B owns it
-        if (controller.isExiting(anchorKey)) continue; // animating out
-        final anchorChild = _children[anchorKey];
-        if (anchorChild == null) continue; // not mounted in-flow
-        final anchorParentData = anchorChild.parentData;
-        if (anchorParentData is! SliverTreeParentData) continue;
-        final band = _anchorPaintedBounds(anchorKey);
-        if (band == null) continue;
-        // Skip if the band is fully outside the paint region.
-        if (band.top >= remainingPaintExtent) continue;
-        if (band.top + band.height <= 0) continue;
-        final paintOffset = offset + Offset(anchorParentData.indent, band.top);
-        context.pushClipRect(
-          needsCompositing,
-          paintOffset,
-          Rect.fromLTWH(0, 0, anchorChild.size.width, band.height),
-          (ctx, off) => ctx.paintChild(anchorChild, off),
+    // Pass A.7: Header-occludes-ghost, for EDGE-painted ghosts ONLY. An
+    // EDGE ghost takes the UNCLIPPED tail of Pass A.5, so it CAN paint
+    // inside its anchor's band; repaint the anchor here, through
+    // `_paintRow`, so it lands ON TOP. A CLIPPED ghost is skipped and
+    // needs no repaint: `_resolvePhantomAnchorBounds` (role: exit)
+    // already restricts it to the far side of the band in BOTH slide
+    // directions, so no ghost pixel falls inside the band and the
+    // anchor's Pass A paint stands unchallenged. `_ExitGhost` asserts
+    // `(edge != null) ^ clipped`, so the two cases are exhaustive.
+    // Sticky anchors are skipped here too, Pass B repaints them
+    // deepest-first below. Each anchor is painted EXACTLY ONCE per
+    // frame, by exactly one of {Pass A, Pass A.7 (non-sticky anchor of
+    // an EDGE ghost, which `_computeA7Anchors` removes from Pass A),
+    // Pass B (sticky)}.
+    if (a7Paints != null) {
+      for (final a in a7Paints) {
+        _paintRow(
+          context: context,
+          offset: offset,
+          nid: a.nid,
+          child: a.child,
+          slideDelta: hasSlides ? controller.getSlideDeltaNid(a.nid) : 0.0,
+          slideDeltaX: hasXSlides ? controller.getSlideDeltaXNid(a.nid) : 0.0,
+          scrollOffset: scrollOffset,
+          remainingPaintExtent: remainingPaintExtent,
         );
       }
     }
@@ -4153,18 +4211,30 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   ///    which is scroll space with the first row at 0. The two differ by
   ///    `constraints.scrollOffset`; mixing them yields an error that is
   ///    invisible while scrolled to the top.
-  ///  - ONLY safe to call from `paint()`. The sticky set is recomputed
-  ///    by `computeStickyHeaders` LATE in `performLayout`, strictly
-  ///    before any paint pass runs, so at paint time it reflects this
-  ///    frame's layout, animating or not: the recompute is unthrottled, so
-  ///    there is no stale-band window to tolerate. It MUST
-  ///    NOT be called from `_consumeSlideBaselineIfAny`, which runs at
-  ///    the START of `performLayout`, before that recompute, where
-  ///    `_sticky` holds the prior frame's value or null.
-  ///  - Consumed ONLY by the EXIT role (Pass A.5 ghost paint, the EXIT
-  ///    clip band, and Pass A.7 header repaint). The ENTRY role keeps the
-  ///    structural read in `_resolvePhantomAnchorBounds` and does NOT
-  ///    call this.
+  ///  - Safe from `paint()` and from GESTURE time. NEVER from layout.
+  ///    The sticky set is recomputed by `computeStickyHeaders` LATE in
+  ///    `performLayout`, strictly before any paint pass runs, so at paint
+  ///    time it reflects this frame's layout, animating or not: the
+  ///    recompute is unthrottled, so there is no stale-band window to
+  ///    tolerate. At GESTURE time (`paintedRowBounds` for grab capture,
+  ///    and `_computeA7Anchors` when `hitTestChildren` calls it) `_sticky`
+  ///    holds the LAST PAINTED frame's values, which is what both callers
+  ///    want: one wants the geometry the user pressed on, the other must
+  ///    agree with what was painted. `hitTestChildren` reads the same
+  ///    `_sticky` directly in its Phase 1 sticky pass, so this adds no
+  ///    dependency it does not already have. It MUST NOT be called from
+  ///    `_consumeSlideBaselineIfAny`, which runs at the START of
+  ///    `performLayout`, before that recompute, where `_sticky` holds the
+  ///    prior frame's value or null.
+  ///  - Four call sites, in two groups. EXIT role, consuming the band as
+  ///    GEOMETRY: Pass A.5 ghost paint, and the EXIT clip band in
+  ///    `_resolvePhantomAnchorBounds`. Selection and reporting, consuming
+  ///    it as a BOUND only: `_computeA7Anchors`, which uses it to CULL an
+  ///    anchor whose band is fully outside the paint region (Pass A.7
+  ///    paints through `_paintRow` and applies no band clip of its own),
+  ///    and `paintedRowBounds`, which converts it to sliver-local for
+  ///    [ReorderRenderPort]. The ENTRY role keeps the structural read in
+  ///    `_resolvePhantomAnchorBounds` and does NOT call this.
   ({double top, double height})? _anchorPaintedBounds(TKey anchorKey) {
     final anchorChild = _children[anchorKey];
     if (anchorChild == null) return null;
@@ -4230,8 +4300,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       // INTO a collapsed header to DISAPPEAR. Clip the ghost on its
       // TRAILING half-plane but bounded so NOTHING is visible on the FAR
       // side past the destination header's PAINTED band, kills the
-      // far overhang of a tall card. The band itself is occluded by the
-      // header repaint (Pass A.7 / Pass B). No minimum-visible floor.
+      // far overhang of a tall card. The band itself needs no occluder:
+      // this role is reached ONLY for a CLIPPED record (the null return
+      // above), and both branches below drop `[bandTop, bandBottom]`
+      // from the visible rect, which is exactly why Pass A.7 skips
+      // clipped ghosts. No minimum-visible floor.
       //
       // The painted band is read at PAINT time (sticky `pinnedY` when
       // pinned, else structural) via `_anchorPaintedBounds`, so this
@@ -4373,6 +4446,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // Hoist per-axis slide-activity checks (idle-state fast path).
     final hasSlides = controller.hasActiveSlides;
     final hasXSlides = hasSlides && controller.hasActiveXSlides;
+    // Pass A.7 anchors form a third z-order bucket; the same selection
+    // as paint, same COMPOSED `hasSlides` argument, same paint-region
+    // bound, so the two call sites ask one question.
+    final a7Paints = _computeA7Anchors(
+      remainingPaintExtent: constraints.remainingPaintExtent,
+      hasSlides: hasSlides,
+    );
+    Set<int>? a7AnchorNids;
+    if (a7Paints != null) {
+      a7AnchorNids = <int>{for (final a in a7Paints) a.nid};
+    }
     // Lazy viewport: only built if a ghost row is encountered.
     ViewportSnapshot? hitViewport;
 
@@ -4491,12 +4575,19 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       return false;
     }
 
-    // Slide-active path: match paint's z-order. Paint draws
-    // static rows first, then sliding rows in ASCENDING |delta| (the row
-    // that moved most paints last, on top), so hit priority is the
-    // reverse: sliding rows in DESCENDING |delta| first, then static
-    // rows. Ties preserve paint's natural-order rule (later index paints
-    // later, so tested first).
+    // Slide-active path: match paint's z-order, now in THREE buckets.
+    // Paint draws static rows first, then sliding rows in ASCENDING
+    // |delta| (the row that moved most paints last, on top), and LAST of
+    // the in-flow rows, Pass A.7 repaints the exit-ghost anchors that
+    // `_computeA7Anchors` removed from Pass A. Hit priority is the
+    // reverse of that order, so the A.7 anchors are tested FIRST: they
+    // paint after every Pass A row, static or sliding, which puts them
+    // on top of both. Then sliding rows in DESCENDING |delta|, then
+    // static rows. Ties preserve paint's natural-order rule (later index
+    // paints later, so tested first). Sticky rows are in none of the
+    // three buckets: Pass B paints them after A.7, and Phase 1 above
+    // tests them ahead of all three.
+    final a7Idx = <int>[];
     final slidingIdx = <int>[];
     final staticIdx = <int>[];
     for (int i = startIndex; i < visibleNodes.length; i++) {
@@ -4504,6 +4595,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       final nid = orderNids[i];
       if (_structuralOffsetAt(i, nid) > hitBound) break;
       if (_sticky.isSticky(nid)) continue;
+      if (a7AnchorNids?.contains(nid) ?? false) {
+        a7Idx.add(i);
+        continue;
+      }
       final dy = controller.getSlideDeltaNid(nid);
       final dx = hasXSlides ? controller.getSlideDeltaXNid(nid) : 0.0;
       if (dy != 0.0 || dx != 0.0) {
@@ -4519,6 +4614,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       if (cmp != 0) return cmp;
       return b.compareTo(a);
     });
+    for (final i in a7Idx) {
+      if (testRow(i)) return true;
+    }
     for (final i in slidingIdx) {
       if (testRow(i)) return true;
     }

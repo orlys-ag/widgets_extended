@@ -3,20 +3,23 @@
 /// During a between-section reparent slide the tall card paints BEHIND
 /// every section header it visually crosses — INCLUDING a header that is
 /// NOT in the sticky set. Three gaps are covered:
-///   1. `maxStickyDepth: 0` — the destination header is never sticky, so
-///      only the new Pass A.7 re-asserts it on top of the ghost.
-///   2. A header dropped from the sticky set while ANIMATING (sticky
-///      recompute is throttled during animation) — Pass A.7 still repaints
-///      it over the ghost in the early frames.
+///   1. `maxStickyDepth: 0`: the destination header is never sticky. For
+///      a CLIPPED ghost the EXIT clip, not a repaint, keeps the band
+///      free of ghost pixels, so the anchor is painted exactly once, by
+///      Pass A.
+///   2. A sticky destination header: the anchor stays in the sticky set
+///      on every sampled frame (the earlier "dropped while animating"
+///      premise was measured false), so Pass B paints it exactly once
+///      over the ghost.
 ///   3. The destination header is sticky-PINNED (scrolled) — the ghost
 ///      converges on / is clipped against the header's PAINTED (pinned)
 ///      band, read at paint time, not its structural offset.
 ///
-/// PAINT-ORDER ORACLE: a no-draw recording `PaintingContext` captures the
-/// order of `paintChild` calls. Using `debugLastPhantomGhostPaint["x"]`
-/// (the ghost's painted rect + the destination header's painted band) we
-/// locate the ghost's paint and the destination header's repaint and
-/// assert the header is painted AFTER (on top of) the ghost.
+/// PAINT-COUNT ORACLE: a no-draw recording `PaintingContext` captures
+/// every `paintChild` call. Using `debugLastPhantomGhostPaint["x"]` (the
+/// ghost's painted rect + the destination header's painted band) we
+/// count the paints landing on the band (exactly one) and assert the
+/// EXIT clip excludes the band, so no ghost pixel can enter it.
 library;
 
 import 'package:widgets_extended/sliver_tree/animation_style.dart';
@@ -28,6 +31,7 @@ import 'package:widgets_extended/sliver_tree/sliver_tree_widget.dart';
 import 'package:widgets_extended/sliver_tree/synced_sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/synced_tree_node.dart';
 import 'package:widgets_extended/sliver_tree/tree_controller.dart';
+import 'package:widgets_extended/sliver_tree/types.dart';
 
 const double _kHeader = 48.0;
 const double _kCard = 80.0;
@@ -129,22 +133,52 @@ class _HarnessState extends State<_Harness> {
   }
 }
 
-/// Re-paints through a recorder and asserts the destination header band is
-/// painted AFTER (on top of) the ghost. Reads the ghost rect + header band
-/// from the live `debugLastPhantomGhostPaint` capture.
-void _expectHeaderOverGhost(
+/// Re-paints through a recorder and asserts the destination header band
+/// is painted EXACTLY ONCE, and that the EXIT clip excludes the band so
+/// no ghost pixel can enter it. For a CLIPPED ghost the clip, not a
+/// repaint, is what keeps the band free, which is why Pass A.7 covers
+/// EDGE-painted ghosts only.
+void _expectAnchorPaintedOnceAndBandGhostFree(
   WidgetTester tester,
   RenderSliverTree<String, String> render,
-  String tag,
-) {
+  String tag, {
+  required bool anchorIsSticky,
+}) {
   expect(
     render.debugLastPhantomGhostPaint.containsKey("x"),
     isTrue,
     reason: "[$tag] ghost capture must be present mid-slide",
   );
   final cap = render.debugLastPhantomGhostPaint["x"]!;
-  final ghostTop = cap.ghostRect.top;
   final bandTop = cap.anchorBand.top;
+
+  // SANITY: the pass that owns the anchor must be the one the case
+  // claims, or a count of 1 could come from Pass B silently owning it.
+  if (anchorIsSticky) {
+    expect(
+      render.debugStickyHeaders.map((h) => h.nodeId),
+      contains("fav"),
+      reason: "[$tag] the anchor must be in the sticky set; Pass B owns "
+          "its single paint",
+    );
+    expect(
+      render.debugLastPaintedStickyKeys,
+      contains("fav"),
+      reason: "[$tag] Pass B must have painted the anchor",
+    );
+  } else {
+    expect(
+      render.debugStickyHeaders,
+      isEmpty,
+      reason: "[$tag] no header may be sticky, or Pass B would own the "
+          "anchor and the count would not test Pass A / A.7",
+    );
+    expect(
+      render.debugLastPaintedStickyKeys,
+      isNot(contains("fav")),
+      reason: "[$tag] Pass B must not have painted the anchor",
+    );
+  }
 
   final recorder = _Recorder(
     ContainerLayer(),
@@ -152,31 +186,35 @@ void _expectHeaderOverGhost(
   );
   render.paint(recorder, Offset.zero);
 
-  // Last paint of the ghost (at ghostTop, inside the EXIT clip).
-  int ghostIdx = -1;
-  // Last paint of the destination header (at the band top).
-  int headerIdx = -1;
-  for (int i = 0; i < recorder.order.length; i++) {
-    final rec = recorder.order[i];
-    if ((rec.top - ghostTop).abs() < 1.0) ghostIdx = i;
-    if ((rec.top - bandTop).abs() < 1.0) headerIdx = i;
+  // DISCRIMINATOR: exactly one paintChild lands on the band top.
+  int bandPaints = 0;
+  for (final rec in recorder.order) {
+    if ((rec.top - bandTop).abs() < 1.0) bandPaints++;
   }
   expect(
-    ghostIdx,
-    greaterThanOrEqualTo(0),
-    reason: "[$tag] ghost paint not recorded",
+    bandPaints,
+    1,
+    reason: "[$tag] the anchor must be painted exactly once per frame; "
+        "2 is the Pass A + Pass A.7 double paint (behind a "
+        "RepaintBoundary it degenerates to a layer move that destroys "
+        "Pass A's placement). order=${recorder.order}",
+  );
+
+  // CONTROL: the record is the CLIPPED kind and its clip excludes the
+  // band, the recorded reason the repaint was redundant.
+  expect(
+    cap.clipRect,
+    isNotNull,
+    reason: "[$tag] the ghost must be the CLIPPED kind (an edge ghost "
+        "records no clip)",
   );
   expect(
-    headerIdx,
-    greaterThanOrEqualTo(0),
-    reason: "[$tag] destination header paint not recorded",
-  );
-  expect(
-    headerIdx,
-    greaterThan(ghostIdx),
-    reason:
-        "[$tag] destination header must paint AFTER (on top of) the "
-        "ghost. ghostIdx=$ghostIdx headerIdx=$headerIdx order=${recorder.order}",
+    cap.clipRect!.overlaps(
+      Rect.fromLTWH(0, cap.anchorBand.top, 800, cap.anchorBand.height),
+    ),
+    isFalse,
+    reason: "[$tag] the EXIT clip must exclude the anchor's band; no "
+        "ghost pixel can land inside it",
   );
 }
 
@@ -205,17 +243,23 @@ void main() {
     await tester.pump();
 
     final render = _render(tester);
-    // Sample mid-slide (header is never sticky here, so only Pass A.7
-    // can put it over the ghost).
+    // Sample mid-slide. The header is never sticky here, and the ghost
+    // is CLIPPED, so the EXIT clip keeps the band ghost-free and the
+    // anchor's single paint is Pass A's.
     await tester.pump(const Duration(milliseconds: 120));
-    _expectHeaderOverGhost(tester, render, "maxStickyDepth0");
+    _expectAnchorPaintedOnceAndBandGhostFree(
+      tester,
+      render,
+      "maxStickyDepth0",
+      anchorIsSticky: false,
+    );
 
     await tester.pumpAndSettle();
     expect(c.visibleNodes.contains("x"), isFalse);
   });
 
   testWidgets(
-    "header dropped from sticky set while animating still occludes the card",
+    "sticky destination header paints once, by Pass B, over the ghost",
     (tester) async {
       var fav = false;
       List<SyncedTreeNode<String, String>> build() => fav
@@ -228,9 +272,12 @@ void main() {
               _n("others", [_n("x"), _n("o1")]),
             ];
 
-      // maxStickyDepth: 1 — but during the first frames after the reparent
-      // the destination header is animating, so it is dropped from the
-      // sticky set; Pass A.7 must still occlude the ghost.
+      // maxStickyDepth: 1. The case's original premise (the header is
+      // dropped from the sticky set while animating) was measured false:
+      // on every sampled frame the anchor IS in the sticky set, so Pass
+      // A and Pass A.7 both skip it and Pass B paints it exactly once
+      // over the ghost. Renamed per L24; kept as real coverage for the
+      // Pass B half of the exactly-once rule.
       await tester.pumpWidget(_Harness(builder: build, maxStickyDepth: 1));
       await tester.pumpAndSettle();
       final c = tester.state<_HarnessState>(find.byType(_Harness)).controller!;
@@ -247,7 +294,12 @@ void main() {
       for (int i = 0; i < 3; i++) {
         await tester.pump(const Duration(milliseconds: 16));
         if (render.debugLastPhantomGhostPaint.containsKey("x")) {
-          _expectHeaderOverGhost(tester, render, "dropped-from-sticky-frame$i");
+          _expectAnchorPaintedOnceAndBandGhostFree(
+            tester,
+            render,
+            "sticky-owned-frame$i",
+            anchorIsSticky: true,
+          );
           checked = true;
         }
       }
@@ -343,4 +395,242 @@ void main() {
       expect(c.visibleNodes.contains("x"), isFalse);
     },
   );
+
+  group("L24 legs: each anchor is painted by exactly one pass", () {
+    testWidgets(
+      "an EDGE-ghost anchor scrolled into view is painted exactly once "
+      "per frame",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
+        final scroll = ScrollController();
+        addTearDown(scroll.dispose);
+        final counts = <String, int>{};
+        String? lastTap;
+
+        controller.setRoots([
+          for (int i = 0; i < 30; i++) TreeNode(key: "n$i", data: "n$i"),
+        ]);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 600,
+                child: CustomScrollView(
+                  controller: scroll,
+                  slivers: [
+                    SliverTree<String, String>(
+                      controller: controller,
+                      addRepaintBoundaries: false,
+                      nodeBuilder: (context, key, depth) {
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => lastTap = key,
+                          child: SizedBox(
+                            height: 40,
+                            child: CustomPaint(
+                              painter: _CountPainter(counts, key),
+                              child: Text(key),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // n20 sits at y = 800, outside the viewport but inside the cache
+        // region; reparenting the visible n5 under it records an
+        // EDGE-painted exit ghost (the anchor is off screen at consume
+        // time), which is exactly the record Pass A.7 keeps serving.
+        controller.moveNode(
+          "n5",
+          "n20",
+          animate: true,
+          slideDuration: const Duration(milliseconds: 800),
+          slideCurve: Curves.linear,
+        );
+        await tester.pump();
+        final render = _render(tester);
+        expect(
+          controller.visibleNodes.contains("n5"),
+          isFalse,
+          reason: "setup: n5 must be hidden under the collapsed n20",
+        );
+        expect(
+          render.debugPhantomExitGhostCount,
+          1,
+          reason: "setup: exactly one exit ghost must install",
+        );
+
+        // Bring the anchor into view mid-slide, so Pass A and Pass A.7
+        // can both see it in the same frame.
+        scroll.jumpTo(400.0);
+        await tester.pump();
+        expect(
+          controller.hasActiveSlides,
+          isTrue,
+          reason: "setup: the ghost's FLIP must still be in flight",
+        );
+        expect(
+          render.debugStickyHeaders,
+          isEmpty,
+          reason: "setup: no sticky pass may own the anchor",
+        );
+
+        counts.clear();
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(
+          counts["n10"],
+          1,
+          reason: "control: an ordinary in-flow row paints exactly once",
+        );
+        expect(
+          counts["n20"],
+          1,
+          reason: "the EDGE-ghost anchor must be painted exactly once; 2 "
+              "is the Pass A + Pass A.7 double paint",
+        );
+
+        // Hit-test control (uninformative before the fix, pinned after):
+        // a tap inside the anchor's band lands on the anchor; the A.7
+        // bucket is tested first in the slide-active path. The band
+        // moves while the shifted rows' FLIP decays, so the tap point is
+        // read from the anchor's painted bounds at tap time.
+        expect(
+          controller.hasActiveSlides,
+          isTrue,
+          reason: "control setup: the ghost must still be live at tap "
+              "time",
+        );
+        final bounds = render.paintedRowBounds("n20")!;
+        final tapY = bounds.paintedOffset - scroll.offset + 20.0;
+        await tester.tapAt(Offset(400, tapY));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(
+          lastTap,
+          "n20",
+          reason: "control: the anchor receives a tap in its band",
+        );
+
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      "an EXITING anchor still paints exactly once, by Pass A",
+      (tester) async {
+        final controller = TreeController<String, String>(
+          vsync: tester,
+          animationStyle: const TreeAnimationStyle(
+            expandCollapse: TreeAnimationSpec(
+              duration: Duration(milliseconds: 400),
+              curve: Curves.linear,
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
+        final scroll = ScrollController();
+        addTearDown(scroll.dispose);
+        final counts = <String, int>{};
+
+        controller.setRoots([
+          for (int i = 0; i < 30; i++) TreeNode(key: "n$i", data: "n$i"),
+        ]);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 600,
+                child: CustomScrollView(
+                  controller: scroll,
+                  slivers: [
+                    SliverTree<String, String>(
+                      controller: controller,
+                      addRepaintBoundaries: false,
+                      nodeBuilder: (context, key, depth) {
+                        return SizedBox(
+                          height: 40,
+                          child: CustomPaint(
+                            painter: _CountPainter(counts, key),
+                            child: Text(key),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        controller.moveNode(
+          "n5",
+          "n20",
+          animate: true,
+          slideDuration: const Duration(milliseconds: 400),
+          slideCurve: Curves.linear,
+        );
+        await tester.pump();
+        scroll.jumpTo(400.0);
+        await tester.pump();
+
+        // Removing the anchor makes it EXITING; the same remove frees
+        // the hidden ghost subtree, so this leg pins the Pass A half of
+        // the exactly-once rule: an exiting row must never fall out of
+        // BOTH passes (A.7's selection excludes exiting anchors, so Pass
+        // A must keep painting them; 0 paints is the failure).
+        controller.remove(key: "n20", animate: true);
+        await tester.pump();
+        expect(
+          controller.isExiting("n20"),
+          isTrue,
+          reason: "setup: the anchor must be exiting",
+        );
+
+        counts.clear();
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(
+          counts["n20"],
+          1,
+          reason: "an EXITING row is painted exactly once, by Pass A, "
+              "never zero times",
+        );
+
+        await tester.pumpAndSettle();
+      },
+    );
+  });
+}
+
+class _CountPainter extends CustomPainter {
+  _CountPainter(this.counts, this.key);
+
+  final Map<String, int> counts;
+  final String key;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+
+  @override
+  bool shouldRepaint(covariant _CountPainter oldDelegate) => true;
 }
