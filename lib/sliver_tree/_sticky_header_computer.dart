@@ -73,6 +73,11 @@ class StickyHeaderComputer<TKey, TData> {
   /// cleared by [precomputeStableSubtreeBottoms].
   bool dirty = true;
 
+  /// Debug-only running count of rows visited by the non-bulk arm of the
+  /// per-candidate subtree-bottom fallback walk (L25.3). Cumulative; tests
+  /// read deltas across a frame.
+  int debugFallbackIterationCount = 0;
+
   /// Computed sticky headers for the current layout, ordered root to leaf.
   final List<StickyHeaderInfo<TKey>> _stickyHeaders = [];
 
@@ -439,6 +444,7 @@ class StickyHeaderComputer<TKey, TData> {
               nodeExtentsByNid,
               candidateEntering: candidateEntering,
               freshOffsetAt: freshOffsetAt,
+              saturateAt: scrollOffset + stackTop + extent,
             );
       final pushUpY = (subtreeBottom - scrollOffset) - extent;
       final pinnedY = math.min(stackTop, pushUpY);
@@ -476,6 +482,10 @@ class StickyHeaderComputer<TKey, TData> {
     Float64List nodeExtentsByNid, {
     bool candidateEntering = false,
     double Function(int visibleIndex)? freshOffsetAt,
+    // L25.3: once the running bottom reaches this line the caller's pin
+    // saturates at `stackTop`, so the non-bulk arm returns early. Null
+    // keeps the full walk. The bulk arm ignores it, deliberately.
+    double? saturateAt,
   }) {
     final index = _controller.getVisibleIndex(nodeId);
     if (index < 0) return 0.0;
@@ -508,6 +518,10 @@ class StickyHeaderComputer<TKey, TData> {
     for (int i = index + 1; i < visibleNodes.length; i++) {
       final childNid = orderNids[i];
       if (_controller.depthOfNid(childNid) <= nodeDepth) break;
+      assert(() {
+        debugFallbackIterationCount++;
+        return true;
+      }());
 
       final double childExtent;
       if (candidateEntering) {
@@ -524,6 +538,13 @@ class StickyHeaderComputer<TKey, TData> {
       final childEnd = stableOffset + childExtent;
       if (childEnd > bottom) bottom = childEnd;
       stableOffset += childExtent;
+      if (saturateAt != null && stableOffset >= saturateAt) {
+        // L25.3: the caller clamps `pinnedY = min(stackTop, pushUpY)` with
+        // `pushUpY = bottom - scrollOffset - extent`, and from here
+        // `pushUpY >= stackTop`, so more subtree cannot change the
+        // answer; extents are non-negative, so the bottom only grows.
+        return bottom;
+      }
     }
     return bottom;
   }

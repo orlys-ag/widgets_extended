@@ -101,6 +101,15 @@ class OperationGroupRegistry<TKey> {
     return nid == null ? null : _opGroupKeyByNid[nid];
   }
 
+  /// The operation key whose group [nid] is currently a member of, or
+  /// null. Nid-keyed twin of [groupKeyOf], for hot paths that already
+  /// hold the nid: [groupKeyOf] hashes the key back to the same nid.
+  TKey? groupKeyOfNid(int nid) {
+    return (nid >= 0 && nid < _opGroupKeyByNid.length)
+        ? _opGroupKeyByNid[nid]
+        : null;
+  }
+
   /// Whether [key] is currently a member of any operation group.
   bool hasGroup(TKey key) {
     final nid = _nids[key];

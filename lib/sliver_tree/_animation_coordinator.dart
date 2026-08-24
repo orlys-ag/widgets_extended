@@ -876,16 +876,15 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
       return full * bulk.group!.value;
     }
     // 2. Op group. Guard on `isNotEmpty` so the common no-op-group frame
-    // skips the `keyOfUnchecked` + `groupKeyOf` probe (including a TKey
-    // hash) entirely. `key` is resolved once and reused for both the
-    // membership probe and the member lookup.
+    // skips the reverse-index probe entirely. The probe is nid-keyed
+    // (L25.5: an array read, no TKey hash); the key is resolved only once
+    // a group claims the nid, for the member lookup.
     if (opGroups.isNotEmpty) {
-      final key = _nids.keyOfUnchecked(nid);
-      final opKey = opGroups.groupKeyOf(key);
+      final opKey = opGroups.groupKeyOfNid(nid);
       if (opKey != null) {
         final group = opGroups.groupAt(opKey);
         if (group != null) {
-          final member = group.members[key];
+          final member = group.members[_nids.keyOfUnchecked(nid)];
           if (member != null) {
             return member.computeExtent(group.curvedValue, full);
           }
@@ -916,15 +915,14 @@ class AnimationCoordinator<TKey> implements AnimationReader<TKey> {
     if (bulk.isMemberNid(nid) && bulk.group != null) {
       return fullExtent * bulk.group!.value;
     }
-    // 2. Op group; same guard and single key resolution as
+    // 2. Op group; same guard and nid-keyed probe as
     // [getCurrentExtentNid].
     if (opGroups.isNotEmpty) {
-      final key = _nids.keyOfUnchecked(nid);
-      final opKey = opGroups.groupKeyOf(key);
+      final opKey = opGroups.groupKeyOfNid(nid);
       if (opKey != null) {
         final group = opGroups.groupAt(opKey);
         if (group != null) {
-          final member = group.members[key];
+          final member = group.members[_nids.keyOfUnchecked(nid)];
           if (member != null) {
             return member.computeExtent(group.curvedValue, fullExtent);
           }

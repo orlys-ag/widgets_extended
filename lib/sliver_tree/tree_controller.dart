@@ -370,6 +370,9 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// fast path: incremental mutations must not trigger one.
   @visibleForTesting
   int get debugOrderResetIndexAllCount => _order.debugResetIndexAllCount;
+  int get debugOrderInsertSharedChainCount =>
+      _order.debugInsertSharedChainCount;
+  int get debugOrderInsertPerNidCount => _order.debugInsertPerNidCount;
 
   /// Opt-in: run the FULL cross-structure consistency sweep (whole order
   /// walk, nid-table walks, every animation mirror) after every

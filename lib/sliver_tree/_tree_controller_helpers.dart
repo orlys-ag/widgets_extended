@@ -419,7 +419,8 @@ extension _TreeControllerHelpers<TKey, TData> on TreeController<TKey, TData> {
       }
     }
     _clearPendingDeletion(key);
-    _order.clearIndexOf(key);
+    // L25.8: `_releaseNid` clears the reverse-index slot through
+    // `clearForNid`; a second clear by key here was a duplicate hash.
     _releaseNid(key);
   }
 

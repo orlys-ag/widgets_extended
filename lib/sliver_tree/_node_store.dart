@@ -384,6 +384,13 @@ class NodeStore<TKey, TData> {
   /// Short-circuits on descendants whose current bit already matches.
   /// Iterative (explicit worklist) so deep trees do not stack-overflow.
   void _propagateAncestorsExpandedToDescendants(TKey key, int childAe) {
+    // L25.9: a childless node (every leaf inserted under a collapsed
+    // parent) has nothing to propagate to; return before allocating the
+    // two worklists.
+    final rootChildren = childListOf(key);
+    if (rootChildren == null || rootChildren.isEmpty) {
+      return;
+    }
     final parents = <TKey>[key];
     final childAes = <int>[childAe];
     while (parents.isNotEmpty) {

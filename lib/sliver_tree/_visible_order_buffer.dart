@@ -183,6 +183,12 @@ class VisibleOrderBuffer<TKey> {
   /// exactly what the contiguous removal fast path exists to avoid.
   int debugResetIndexAllCount = 0;
 
+  /// Debug counters for [insertAllKeys]' two subtree-size bump branches
+  /// (L25.7): the shared-chain bump for a same-parent run, and the
+  /// per-nid fallback for a mixed-depth run or a run of roots.
+  int debugInsertSharedChainCount = 0;
+  int debugInsertPerNidCount = 0;
+
   /// Resets every reverse-index slot to [kNotVisible].
   void resetIndexAll() {
     debugResetIndexAllCount++;
@@ -471,8 +477,30 @@ class VisibleOrderBuffer<TKey> {
     }
     _len += n;
     if (!_suppress) {
-      for (int i = 0; i < n; i++) {
-        bumpFromSelf(_orderNids[index + i], 1);
+      // L25.7: a run of siblings shares its whole ancestor chain, so bump
+      // each inserted slot by one and the chain above the common parent
+      // ONCE by n, instead of walking the chain n times. A run with no
+      // shared parent (roots) or of mixed depth (an expand re-inserting a
+      // nested visible subtree) keeps the per-nid walk, which the
+      // subtree-size invariant needs there.
+      final firstParent = _parentByNidLookup(_orderNids[index]);
+      bool sameParent = firstParent != kNoParentNid;
+      for (int i = 1; sameParent && i < n; i++) {
+        if (_parentByNidLookup(_orderNids[index + i]) != firstParent) {
+          sameParent = false;
+        }
+      }
+      if (sameParent) {
+        debugInsertSharedChainCount++;
+        for (int i = 0; i < n; i++) {
+          _subtreeSizeByNid[_orderNids[index + i]] += 1;
+        }
+        bumpFromSelf(firstParent, n);
+      } else {
+        debugInsertPerNidCount++;
+        for (int i = 0; i < n; i++) {
+          bumpFromSelf(_orderNids[index + i], 1);
+        }
       }
     }
     _onMutated();
@@ -577,9 +605,8 @@ class VisibleOrderBuffer<TKey> {
   /// reverse index wholesale. The full "non-contiguous removal" protocol
   /// in one owner.
   void purgeCompact(Set<TKey> keys) {
-    for (final key in keys) {
-      clearIndexOf(key);
-    }
+    // L25.8: no per-key `clearIndexOf` here; `rebuildIndex` opens with
+    // `resetIndexAll`, which clears every slot before re-indexing.
     removeWhereKeyIn(keys);
     rebuildIndex();
   }

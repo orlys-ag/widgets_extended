@@ -73,4 +73,92 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    "a pinned header whose clip could not cut anything paints unclipped, "
+    "so a child that overflows its box shows the overflow (L25.1)",
+    (tester) async {
+      final controller = TreeController<String, String>(
+        vsync: tester,
+        animationStyle: TreeAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+      controller.setRoots([const TreeNode(key: "root", data: "root")]);
+      controller.setChildren("root", [
+        const TreeNode(key: "child", data: "child"),
+      ]);
+      controller.expand(key: "root", animate: false);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: CustomScrollView(
+                slivers: [
+                  SliverTree<String, String>(
+                    controller: controller,
+                    maxStickyDepth: 1,
+                    nodeBuilder: (_, key, depth) => SizedBox(
+                      key: ValueKey("row-$key"),
+                      height: depth == 0 ? 100 : 40,
+                      // The root's content paints 60 px past its own
+                      // 100 px box.
+                      child: depth == 0
+                          ? OverflowBox(
+                              alignment: Alignment.topLeft,
+                              maxHeight: 160,
+                              child: SizedBox(height: 160, child: Text(key)),
+                            )
+                          : Text(key),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final render = tester.renderObject<RenderSliverTree<String, String>>(
+        find.byType(SliverTree<String, String>),
+      );
+      final headers = render.debugStickyHeaders;
+      expect(
+        headers.map((h) => h.nodeId),
+        contains("root"),
+        reason: "setup: the root must be pinned",
+      );
+      final root = headers.firstWhere((h) => h.nodeId == "root");
+      expect(
+        render.geometry!.paintExtent - root.pinnedY,
+        greaterThanOrEqualTo(root.extent),
+        reason: "setup: the paint region must not clamp the header, so "
+            "the clip would cut nothing",
+      );
+
+      RenderObject rootBoundary = tester.renderObject(
+        find.byKey(const ValueKey("row-root")),
+      );
+      while (rootBoundary is! RenderRepaintBoundary) {
+        rootBoundary = rootBoundary.parent!;
+      }
+      RenderObject childBoundary = tester.renderObject(
+        find.byKey(const ValueKey("row-child")),
+      );
+      while (childBoundary is! RenderRepaintBoundary) {
+        childBoundary = childBoundary.parent!;
+      }
+      final rootLayerParent = rootBoundary.debugLayer!.parent;
+      final childLayerParent = childBoundary.debugLayer!.parent;
+      expect(
+        identical(rootLayerParent, childLayerParent),
+        isTrue,
+        reason: "the pinned header's layer must hang off the same parent as "
+            "an in-flow row's: no sliver-local clip layer wraps it, so its "
+            "overflow paints exactly as it does in flow",
+      );
+    },
+  );
 }

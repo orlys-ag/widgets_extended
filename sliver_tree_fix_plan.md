@@ -13399,7 +13399,53 @@ Leg 4, the regression the audit found, also a control that passes today: with an
 
 ### L25. Minor render-layer and buffer performance items
 
-**Status.** PARTIALLY IMPLEMENTED 2026-08-24: sub-items 25.4 and 25.6 landed with chain 1 per chain 11; everything else in this block remains open. 25.4: the `liveDead` hoist was re-derived against the unified two-view admit as the Sequencing paragraph requires; on the bulk arm the branch is unreachable (the walk breaks when the live view dies, floor aside), so the skip serves the non-bulk arm's exit runs. 25.6: slice 1's two `nidOf` sites were deleted outright by M8's sparse-track switch, as recorded on both sides; slices 2 and 3 landed (`_layoutNodeChild(TKey, int nid, double)` returning `({double extent, RenderBox child})` with both callers updated, `getIndentNid`, and `getAnimatedExtentNid` mirroring `getCurrentExtentNid`'s three-source precedence). No observable behavior change; the layout-counter suites and the full suite are green.
+**Status.** IMPLEMENTED 2026-08-24, in two landings. 25.4 and 25.6 landed
+with chain 1 per chain 11: 25.4's `liveDead` hoist re-derived against the
+unified two-view admit (on the bulk arm the branch is unreachable, the walk
+breaks when the live view dies, floor aside, so the skip serves the non-bulk
+arm's exit runs); 25.6's slice 1 deleted outright by M8's sparse-track
+switch, slices 2 and 3 as `_layoutNodeChild(TKey, int nid, double)`
+returning `({double extent, RenderBox child})`, `getIndentNid`, and
+`getAnimatedExtentNid` mirroring `getCurrentExtentNid`'s three-source
+precedence. The other seven landed together after M20 in the block's
+recommended order, each as written: 25.8 (both dead clears deleted;
+`clearIndexOf` keeps one caller, `_tree_controller_helpers.dart:122`), 25.9
+(early-out before the two worklists), 25.2 (the top-edge cull beside the
+bottom one in `_paintRow`), 25.1 (the push skipped when `clippedExtent >=
+child.size.height`, plus the changelog entry), 25.5 step one
+(`groupKeyOfNid`, used by BOTH `getCurrentExtentNid` and 25.6's
+`getAnimatedExtentNid`, which had copied the same round trip; the comment
+above the probe rewritten), 25.3 (a `saturateAt` parameter on the non-bulk
+arm, the caller passing `scrollOffset + stackTop + extent`; the bulk arm
+untouched, per the block's stated limit), and 25.7 (same-parent detection
+through `_parentByNidLookup`; roots and mixed-depth runs keep the per-nid
+walk). Tests, test-first, each assertion shown red by its own mutation.
+25.1's leg in `sticky_small_tree_max_paint_test.dart` pins that the pinned
+header's `RepaintBoundary` layer hangs off the SAME parent layer as an
+in-flow row's (read through `debugLayer`; `RenderObject.layer` is
+`@protected`, `object.dart:3142`), the relational form of "no sliver-local
+clip wraps it", chosen because the viewport's own container varies (it
+pushes a clip layer only under `hasVisualOverflow`, `viewport.dart:973-981`).
+Red before the fix (the parents differ), green after; the header's child is
+an `OverflowBox` painting 60 px past its box, the block's overflow leg.
+25.3's case in `sticky_offcache_cumulative_perf_test.dart` adds
+`StickyHeaderComputer.debugFallbackIterationCount` (exposed as
+`RenderSliverTree.debugStickyFallbackIterationCount`) and pins 210
+iterations per layout under a per-node animation elsewhere: two
+`computeStickyHeaders` probes per layout (`render_sliver_tree.dart:3112`,
+`:3251`) times 105 children per walk (running bottom 48, plus 48 per child,
+until it reaches 5000 + 0 + 48); 800 before the fix (2 x 400). 25.7 adds two
+branch counters on the buffer (`debugInsertSharedChainCount`,
+`debugInsertPerNidCount`, forwarded by the controller) and the fuzz script
+asserts both branches ran; the shared-chain assertion was red on the stub,
+the per-nid one was shown red by expanding the seed roots and disabling the
+expand and move ops. One assertion was dropped as inert (`isNotNull` on a
+layer parent: the `!` before it already throws). Verification: `flutter
+analyze` 47, unchanged; the block's risk suites 57 green; full suite 1151
+passed, 4 skipped; the `debugOrderResetIndexAllCount` pins unmoved.
+Recorded, unobserved by any test: 25.2 culls with the box, so a row whose
+child paints outside its box from above the viewport is culled too, the same
+rule the ghost passes already applied.
 
 **Read this as a batch, not as one finding.** L25 is nine independent micro-items. Each sub-item below carries its own Finding, Root cause and Solution inline in its own paragraph; the standard sections (Alternatives considered, Architecture fit, Risk, Test to add, Effort) are pooled at the END of the block, because per item they are one-liners. Do not look for a single Finding heading above; there is not one, deliberately. Nothing here changes observable behaviour except 25.3's early break (same answer, fewer iterations), 25.7's bump batching (same cache values, fewer walks), and 25.1, which IS a narrow visual change and says so in its own paragraph. Recommended order is at the end.
 

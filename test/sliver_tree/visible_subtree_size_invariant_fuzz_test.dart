@@ -136,5 +136,17 @@ void main() {
       await tester.pump();
       controller.debugAssertVisibleSubtreeSizeConsistency();
     }
+    expect(
+      controller.debugOrderInsertSharedChainCount,
+      greaterThan(0),
+      reason: "setup: the script must exercise insertAllKeys' shared-chain "
+          "bump (a same-parent run)",
+    );
+    expect(
+      controller.debugOrderInsertPerNidCount,
+      greaterThan(0),
+      reason: "setup: the script must exercise insertAllKeys' per-nid "
+          "fallback (a mixed-depth run, or roots)",
+    );
   });
 }

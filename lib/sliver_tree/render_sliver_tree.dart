@@ -554,6 +554,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   @visibleForTesting
   int debugStickyOffsetAuthorityMismatchCount = 0;
 
+  /// Running count of rows visited by the sticky subtree-bottom fallback
+  /// walk (L25.3); see `StickyHeaderComputer.debugFallbackIterationCount`.
+  int get debugStickyFallbackIterationCount =>
+      _sticky.debugFallbackIterationCount;
+
   /// Lifetime count of [performLayout] invocations. Perf oracle for
   /// slide-only paint routing: a pure FLIP slide must lay out only on its
   /// install and settle frames.
@@ -4105,14 +4110,27 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       }());
 
       final paintOffset = offset + Offset(sticky.indent, sticky.pinnedY);
-      context.pushClipRect(
-        needsCompositing,
-        paintOffset,
-        Rect.fromLTWH(0, 0, child.size.width, clippedExtent),
-        (context, offset) {
-          context.paintChild(child, offset);
-        },
-      );
+      if (clippedExtent >= child.size.height) {
+        // L25.1: the clip cannot cut anything (not clamped by the paint
+        // region, not mid-extent-animation), so skip the push; with
+        // RepaintBoundary rows it would allocate a ClipRectLayer per
+        // header per paint. Compared against `child.size.height`, not
+        // `sticky.extent`: the two diverge while the header animates,
+        // and the clip is load-bearing there. Deliberate visual change,
+        // recorded in the changelog: a child that paints outside its box
+        // now shows that overflow while pinned, as it already does in
+        // flow.
+        context.paintChild(child, paintOffset);
+      } else {
+        context.pushClipRect(
+          needsCompositing,
+          paintOffset,
+          Rect.fromLTWH(0, 0, child.size.width, clippedExtent),
+          (context, offset) {
+            context.paintChild(child, offset);
+          },
+        );
+      }
     }
   }
 
@@ -4134,6 +4152,14 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // visible; skip. The caller can't `break` on this, a later node might
     // have a negative slideDelta that puts it back in view.
     if (nodeOffset + slideDelta >= scrollOffset + remainingPaintExtent) {
+      return;
+    }
+    // Symmetric top-edge cull (L25.2): Pass A's start index is widened by
+    // the slide overreach, so a large FLIP or a held make-room preview
+    // reaches rows that sit entirely above the viewport with a zero
+    // delta. Same sliver-scroll-space comparison as the guard above, and
+    // the rule the ghost passes already apply.
+    if (nodeOffset + slideDelta + nodeExtent <= scrollOffset) {
       return;
     }
 

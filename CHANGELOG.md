@@ -13,6 +13,12 @@ false, keeps today's landings. `TreeController.stickyInsetOf` exposes the same
 settled-extent inset for callers composing their own scroll math, and
 `maxStickyDepthAcrossHosts` reports the largest `maxStickyDepth` among the
 attached slivers.
+- Changed: a pinned sticky header is no longer clipped to its own box when
+the clip would cut nothing (the header is neither clamped by the paint region
+nor mid-extent-animation). A header row whose child paints outside its box (a
+shadow, an overflowing badge) now shows that overflow while pinned, matching
+how the same row paints in flow; an app that relied on the pinned clip to
+contain overflow should clip inside its own row widget.
 - Fix: standalone animations spawned by expand/collapse mutators (partial
 reversals, nested-subtree exits, bulk continuations) ran on the `enterExit`
 family's timing while the mutator's own kill switch read `expandCollapse`.

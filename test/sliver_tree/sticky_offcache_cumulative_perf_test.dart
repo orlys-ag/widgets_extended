@@ -150,4 +150,92 @@ void main() {
       );
     }
   });
+
+  testWidgets("the pinned header's subtree-bottom fallback stops once the "
+      "pin is saturated (L25.3)", (tester) async {
+    final controller = TreeController<String, String>(
+      vsync: tester,
+      animationStyle: const TreeAnimationStyle(
+        expandCollapse: TreeAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
+    controller.setRoots([
+      const TreeNode(key: "root", data: "ROOT"),
+      const TreeNode(key: "other", data: "OTHER"),
+    ]);
+    controller.setChildren("root", [
+      for (int i = 0; i < 400; i++) TreeNode(key: "k$i", data: "K$i"),
+    ]);
+    controller.setChildren("other", [
+      for (int i = 0; i < 5; i++) TreeNode(key: "o$i", data: "O$i"),
+    ]);
+    controller.expand(key: "root", animate: false);
+
+    final scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            controller: scrollController,
+            slivers: [
+              SliverTree<String, String>(
+                controller: controller,
+                maxStickyDepth: 1,
+                nodeBuilder: (context, key, depth) {
+                  return SizedBox(height: 48, child: Text(key));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final render = tester.renderObject<RenderSliverTree<String, String>>(
+      find.byType(SliverTree<String, String>),
+    );
+
+    scrollController.jumpTo(5000);
+    await tester.pump();
+    expect(
+      render.debugLastPaintedStickyKeys,
+      contains("root"),
+      reason: "setup: the header is pinned deep inside its subtree",
+    );
+
+    // A per-node animation elsewhere invalidates the precompute, so every
+    // layout during it takes the fallback walk for the pinned candidate.
+    controller.expand(key: "other", animate: true);
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(
+      controller.hasActiveAnimations,
+      isTrue,
+      reason: "setup: the expansion must still be running",
+    );
+    final iterationsBefore = render.debugStickyFallbackIterationCount;
+    final layoutsBefore = render.debugPerformLayoutCount;
+    await tester.pump(const Duration(milliseconds: 16));
+    final layouts = render.debugPerformLayoutCount - layoutsBefore;
+    final delta = render.debugStickyFallbackIterationCount - iterationsBefore;
+    expect(layouts, 1, reason: "setup: exactly one layout in the frame");
+    expect(delta, greaterThan(0), reason: "setup: the fallback walk ran");
+    // Two probes per layout (the sticky block's force-create pass and the
+    // final compute both call `computeStickyHeaders`), each walking 105
+    // children: the running bottom starts at the root's 48 and grows 48
+    // per child until it reaches the saturation line scrollOffset (5000)
+    // + stackTop (0) + extent (48) = 5048. Before L25.3 each walk visited
+    // all 400 children (800 per layout).
+    expect(
+      delta,
+      210,
+      reason: "the walk must stop once the running bottom passes the "
+          "saturation line instead of visiting all 400 children",
+    );
+    await tester.pumpAndSettle();
+  });
 }
