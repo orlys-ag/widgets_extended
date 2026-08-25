@@ -1,4 +1,4 @@
-## Unreleased
+## 0.0.35
 
 - **BREAKING** `AnimationState` gains a required `family` field
 (`TreeAnimationFamily`, newly exported): the animation family whose style
