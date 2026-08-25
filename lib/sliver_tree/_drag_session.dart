@@ -38,8 +38,10 @@ enum SessionExit { commit, cancel, dispose }
 ///   [ReorderRenderPort.findRowAtPaintedY] consumes (first tree row at
 ///   0). Differs from viewport scroll space by the tree sliver's
 ///   `precedingScrollExtent`.
-/// - [sliverX]: viewport-local x, identical to sliver-local x for a
-///   vertical-axis tree. Consumed by the depth hint.
+/// - [sliverX]: sliver-local x, measured from the tree sliver's own
+///   cross-axis origin ([ReorderRenderPort.crossAxisGlobalOrigin]), which
+///   a `SliverPadding` insets from the viewport's edge. Consumed by the
+///   depth hint.
 /// - [viewportDy] / [viewportHeight]: viewport-local vertical position
 ///   and extent, consumed by autoscroll edge-zone evaluation.
 typedef PointerSample = ({
@@ -139,7 +141,7 @@ class PointerSpace<TKey> {
     }
     final local = box.globalToLocal(globalPointer);
     return (
-      sliverX: local.dx,
+      sliverX: globalPointer.dx - _renderPort.crossAxisGlobalOrigin,
       sliverY:
           _scrollable.position.pixels +
           local.dy -

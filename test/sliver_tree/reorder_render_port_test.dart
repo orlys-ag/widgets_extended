@@ -38,6 +38,12 @@ class _FakePort implements ReorderRenderPort<String> {
   ({double paintedOffset, double extent})? Function(String key)? boundsOf;
 
   @override
+  double get crossAxisGlobalOrigin => 0.0;
+
+  @override
+  double get crossAxisExtent => 0.0;
+
+  @override
   bool get isLaidOut {
     return laidOut;
   }

@@ -1567,6 +1567,27 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   }
 
   @override
+  double get crossAxisExtent {
+    if (geometry == null) {
+      return 0.0;
+    }
+    return constraints.crossAxisExtent;
+  }
+
+  @override
+  double get crossAxisGlobalOrigin {
+    // getTransformTo asserts `attached`, and there is no frame to speak
+    // of before the first layout. The ancestor chain applies each
+    // sliver's paint offset (a SliverPadding's cross-axis inset included)
+    // and the viewport's own placement; taking only `.dx` is safe because
+    // performLayout refuses every non-vertical, non-forward configuration.
+    if (geometry == null || !attached) {
+      return 0.0;
+    }
+    return MatrixUtils.transformPoint(getTransformTo(null), Offset.zero).dx;
+  }
+
+  @override
   bool drivesController(Object treeController) {
     return identical(_controller, treeController);
   }

@@ -16,7 +16,10 @@ import 'package:flutter/animation.dart' show Curve;
 ///
 /// All y-coordinates are **sliver-local**: distance from the start of the
 /// tree sliver's scroll extent (first tree row at 0). Viewport scroll space
-/// differs by [precedingScrollExtent].
+/// differs by [precedingScrollExtent]. The cross axis has the same shape:
+/// x is measured from the tree sliver's own cross-axis origin
+/// ([crossAxisGlobalOrigin]), which is where rows are laid out from, not
+/// from the viewport's edge.
 ///
 /// **Internal contract**: external code should not implement this
 /// interface. Its shape follows the reorder controller's needs and may
@@ -36,6 +39,21 @@ abstract interface class ReorderRenderPort<TKey> {
   /// Adding this converts sliver-local y to viewport scroll-space y (and
   /// subtracting, the reverse).
   double get precedingScrollExtent;
+
+  /// Global x of the tree sliver's own cross-axis origin, i.e. where
+  /// sliver-local x = 0 lands on screen, or `0.0` when [isLaidOut] is
+  /// false.
+  ///
+  /// NOT the viewport's left edge: a `SliverPadding` (or any sliver that
+  /// insets its child in the cross axis) shifts the tree's band inside
+  /// the viewport, and a presentation layer that anchors on the viewport
+  /// paints the drag proxy in a frame the rows do not live in.
+  double get crossAxisGlobalOrigin;
+
+  /// The tree sliver's cross-axis extent (its band width for a vertical
+  /// tree), or `0.0` when [isLaidOut] is false. This is the width rows
+  /// are laid out against, before their own indent.
+  double get crossAxisExtent;
 
   /// Whether this render object is currently driven by [treeController]
   /// (identity comparison).

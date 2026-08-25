@@ -226,13 +226,19 @@ class SliverReorderableTree<TKey, TData> extends StatefulWidget {
   /// `Overlay`, where a handle finds no [TreeRowDragScope] and is
   /// therefore inert. When null and
   /// [showDragProxy] is true, the default preview renders the row's child
-  /// at 90% opacity, sized to the row's extent and viewport width.
+  /// at 90% opacity, sized to the row's extent and the tree sliver's
+  /// cross-axis extent (the viewport width minus whatever a wrapping
+  /// `SliverPadding` insets).
   ///
   /// The returned widget is wrapped in the indent-tracking left padding
   /// described on [showDragProxy], default and custom builders alike:
-  /// the content lays out at `viewportWidth - indent`, matching the
-  /// real row's render-applied width at the tracked depth, so text
-  /// wrapping matches at handoff. Do not add a depth indent of your own
+  /// the content lays out at `sliverCrossAxisExtent - indent`, matching
+  /// the real row's render-applied width at the tracked depth (the render
+  /// layer lays rows out against the sliver's cross-axis extent, never the
+  /// viewport's), so text wrapping matches at handoff. Under a
+  /// `SliverPadding` the band starts at the padded origin and is narrower
+  /// than the viewport by the padding; an unpadded tree keeps identical
+  /// numbers. Do not add a depth indent of your own
   /// inside the builder. The builder's portion is pinned to the
   /// grab-time row extent, so a row whose extent would change at the
   /// target width clips until handoff.
@@ -668,8 +674,12 @@ class _SliverReorderableTreeState<TKey, TData>
         nodeBuilder: (context, key, depth) {
           return widget.nodeBuilder(context, key, depth);
         },
-        scrollableFinder: () {
-          return Scrollable.maybeOf(this.context);
+        renderPortFinder: () {
+          // Element.renderObject walks down to the first render object
+          // element, and this state builds _ReorderableScope > SliverTree,
+          // so this resolves the tree's own render object.
+          final Object? ro = this.context.findRenderObject();
+          return ro is ReorderRenderPort<TKey> ? ro : null;
         },
       ),
     );
@@ -1553,7 +1563,7 @@ class _DragProxy<TKey> extends StatelessWidget {
     required this.rowChildResolver,
     required this.stackResolver,
     required this.nodeBuilder,
-    required this.scrollableFinder,
+    required this.renderPortFinder,
   });
 
   final TreeReorderController<TKey> reorderController;
@@ -1562,7 +1572,7 @@ class _DragProxy<TKey> extends StatelessWidget {
 
   /// The animated indent applied as left padding to the proxy content,
   /// default and [SliverReorderableTree.dragProxyBuilder] output alike.
-  /// The padding narrows the content to `viewportWidth - indent`,
+  /// The padding narrows the content to `sliverCrossAxisExtent - indent`,
   /// matching the real row's render-applied layout width at the tracked
   /// depth, so text wrapping matches at handoff.
   final ValueListenable<double> proxyIndent;
@@ -1585,7 +1595,12 @@ class _DragProxy<TKey> extends StatelessWidget {
   /// finds no [TreeRowDragScope] and is inert.
   final Widget Function(BuildContext context, TKey key, int depth) nodeBuilder;
 
-  final ScrollableState? Function() scrollableFinder;
+  /// Resolves the tree's render port per move: the band the proxy spans
+  /// is the TREE SLIVER's cross-axis frame ([ReorderRenderPort
+  /// .crossAxisGlobalOrigin] and [ReorderRenderPort.crossAxisExtent]),
+  /// which a `SliverPadding` insets from the viewport's edges; anchoring
+  /// on the viewport painted the card in a frame the rows do not live in.
+  final ReorderRenderPort<TKey>? Function() renderPortFinder;
 
   @override
   Widget build(BuildContext context) {
@@ -1685,29 +1700,26 @@ class _DragProxy<TKey> extends StatelessWidget {
         if (reorderController.draggedKey != capturedKey) {
           return const SizedBox.shrink();
         }
-        // The scrollable/viewport resolution stays PER MOVE on purpose:
-        // the viewport can shift mid-drag (keyboard inset, window
-        // resize), and a defunct scrollable must shrink the proxy.
-        final scrollable = scrollableFinder();
-        if (scrollable == null) return const SizedBox.shrink();
-        final viewport = scrollable.context.findRenderObject() as RenderBox?;
-        if (viewport == null || !viewport.attached) {
+        // The port resolution stays PER MOVE on purpose: the sliver's
+        // frame can shift mid-drag (keyboard inset, window resize), and a
+        // tree that is gone or not laid out must shrink the proxy.
+        final port = renderPortFinder();
+        if (port == null || !port.isLaidOut) {
           return const SizedBox.shrink();
         }
 
-        // Horizontal: span the viewport (the row's own width), with the
-        // animated indent applied as left padding INSIDE the full-width
-        // band, narrowing the content the same way the render layer
-        // narrows the real row. Vertical: the pointer minus the grab
-        // offset, in global space, pixel distances survive the global
-        // mapping unscaled.
-        final viewportGlobalLeft = viewport.localToGlobal(Offset.zero).dx;
+        // Horizontal: span the tree sliver's band (the row's own width),
+        // with the animated indent applied as left padding INSIDE the
+        // full-width band, narrowing the content the same way the render
+        // layer narrows the real row. Vertical: the pointer minus the
+        // grab offset, in global space, pixel distances survive the
+        // global mapping unscaled.
         return Stack(
           children: [
             Positioned(
-              left: viewportGlobalLeft,
+              left: port.crossAxisGlobalOrigin,
               top: pointer.dy - geometry.grabDy,
-              width: viewport.size.width,
+              width: port.crossAxisExtent,
               height: bandHeight > 0 ? bandHeight : null,
               child: child!,
             ),

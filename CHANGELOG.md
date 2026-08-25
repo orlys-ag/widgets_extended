@@ -129,6 +129,13 @@ sample and autoscroll tick, and the new
 `TreeReorderController.notifyScrollableChanged` (called by
 `SliverReorderableTree` from the dragged row's `didChangeDependencies`)
 re-binds it in the swap's own frame.
+- Fix: under a `SliverPadding` (or any sliver that insets the tree in the cross
+axis) the drag proxy spanned the whole viewport instead of the tree's band,
+the x-aware drop resolution read the pointer offset by the inset, and the card
+jumped by the inset at release. `ReorderRenderPort` gains
+`crossAxisGlobalOrigin` and `crossAxisExtent`, which the proxy band and the
+depth hint now use; `dragProxyBuilder`'s documented content width is
+`sliverCrossAxisExtent - indent` (identical numbers for an unpadded tree).
 
 ## 0.0.34
 

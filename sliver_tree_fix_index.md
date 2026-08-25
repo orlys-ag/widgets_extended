@@ -41,14 +41,14 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The open items propose 5 new test files
+not be worked in parallel. The open items propose 4 new test files
 (NEW: not yet in `git ls-files`).
 
-NEW means the plan proposes the file. 1 of those 5 exist on disk (1 not
-yet committed: `drag_position_swap_test.dart`):
-`drag_position_swap_test.dart`.
+NEW means the plan proposes the file. 1 of those 4 exist on disk (1 not
+yet committed: `audit_repro_m17_test.dart`):
+`audit_repro_m17_test.dart`.
 
-Landed so far: 35 implemented (H1, H2, H3, H4, H5, H6, L2, L6, L7, L13, L21, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M16, M19, M20, M21, M22, M23, M25); 1 partially implemented
+Landed so far: 36 implemented (H1, H2, H3, H4, H5, H6, L2, L6, L7, L13, L21, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M16, M17, M19, M20, M21, M22, M23, M25); 1 partially implemented
 (L26). Everything else is open.
 
 ## Coupled clusters
@@ -215,9 +215,9 @@ reading that entry first.
 | L29 | M | Optional: capture InheritedTheme for the drag proxy | - | - | - |
 | M3 (+) | M | `expand(animate: false)` mid-collapse misorders new descendants | - | M23 | [DONE] |
 | M16 (+) | S | `moveNode` depth change does not dirty rows hidden under a collapsed node | - | M9 | [DONE] |
-| M17 (+) | M | Drag proxy is sized and positioned in the viewport's cross-axis frame | `audit_repro_m17_test.dart` | M25 | - |
+| M17 (+) | M | Drag proxy is sized and positioned in the viewport's cross-axis frame | `audit_repro_m17_test.dart` | M25 | [DONE] |
 | M22 | S | `expand` Path 1 leaves the animating mirror stale | - | - | [DONE] |
 | M23 (+) | M | Empty operation-group shells keep `hasActiveAnimations` true | - | M3 | [DONE] |
-| M25 (+) | M | Scroll subscription bound to the `ScrollPosition` captured at `startDrag` | `drag_position_swap_test.dart` | M17 | [DONE] |
+| M25 (+) | M | Scroll subscription bound to the `ScrollPosition` captured at `startDrag` | - | M17 | [DONE] |
 | M26 | S | Hot reload does not refresh rows when the `SliverTree` instance is hoisted | `audit_repro_m26_test.dart` | - | [NOT AUDITED] |
 

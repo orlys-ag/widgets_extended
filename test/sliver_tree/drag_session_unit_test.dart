@@ -42,6 +42,12 @@ class _FakeRenderPort implements ReorderRenderPort<String> {
   final List<double> lookups = <double>[];
 
   @override
+  double get crossAxisGlobalOrigin => 0.0;
+
+  @override
+  double get crossAxisExtent => 0.0;
+
+  @override
   bool get isLaidOut => true;
 
   @override

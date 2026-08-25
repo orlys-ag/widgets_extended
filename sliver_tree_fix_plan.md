@@ -9113,6 +9113,37 @@ and that C's element was never unmounted (its `State` identity, or
 
 ### M17. Drag proxy is sized and positioned in the viewport's cross-axis frame
 
+**Status.** IMPLEMENTED 2026-08-25, own commit, after M25 (the adjacency pair
+landed in sequence). Landed as the Solution prescribes: `ReorderRenderPort`
+gains `crossAxisGlobalOrigin` and `crossAxisExtent`
+(`reorder_render_port.dart:51`, `:56`, the port doc extended to the cross
+axis); `RenderSliverTree` implements them beside `precedingScrollExtent`
+(`render_sliver_tree.dart:1570`, `:1578`, the origin through
+`getTransformTo(null)` guarded on `attached`); `_DragProxy` takes a
+`renderPortFinder` in place of `scrollableFinder` (wired at
+`sliver_reorderable_tree.dart:677`, declared `Object?` so the `is` check
+promotes) and positions the band at `port.crossAxisGlobalOrigin` with
+`port.crossAxisExtent` (`:1720`, `:1722`); `PointerSpace.sample` sets
+`sliverX` from the port's origin (`_drag_session.dart:144`) with the
+`PointerSample` doc corrected; the three documented `viewportWidth` passages
+now say the sliver's cross-axis extent and name the `SliverPadding`
+difference; the seven in-repo fakes carry both getters at 0.0. Consumer 2
+needed no change, as the block says. Repro `audit_repro_m17_test.dart`, the
+block's two cases; unfixed reds: case A at the proxy's `left` (0.0 against
+100.0), case B at the indent pin (-70 against 30), every setup sanity green.
+The block's two `parentKey` assertions were dropped: on this tree depth 0
+implies a null parent and depth 1 implies `p`, so neither could go red by its
+own mutation. Every remaining assertion shown red by its own mutation (11: the
+viewport frame restored on `left`, read by case A's band pin and case B's
+indent pin; the width widened; the scrollable x restored in the hint; the
+settle baseline x shifted for the continuity pin, 140 against 130; padding 50
+and left-only padding for the two row sanities; the pointer over `c`; the
+pointer mid-row, `into`; x = 105 in case B, depth 0; padding 50 for
+`crossOrigin`). Verification: `flutter analyze` 47; full suite 1177 passed, 4
+skipped, the block's Risk suites among them,
+`default_indent_pointer_mapping_test.dart` and `x_aware_below_zone_test.dart`
+unchanged and green.
+
 **Finding.** The proxy positions itself in the VIEWPORT's frame:
 `viewport = scrollable.context.findRenderObject()`
 (`sliver_reorderable_tree.dart:1640`), `left: viewportGlobalLeft` derived from
