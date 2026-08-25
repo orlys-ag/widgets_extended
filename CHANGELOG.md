@@ -43,6 +43,83 @@ family's timing while the mutator's own kill switch read `expandCollapse`.
 Each install site now declares its family and the standalone ticker resolves
 the declared family through the live style, so restyling either family at
 runtime retimes exactly its own in-flight states.
+- Fix: measuring rows above the viewport shifted the content under the user by
+the estimate-versus-measured residual, and `animateScrollToKey` landed off by
+it. Layout now emits an anchor-preserving `scrollOffsetCorrection` for that
+residual and `animateScrollToKey` snaps to the settled offset after the frame.
+- Fix: a row taller than the cache extent left a viewport-sized hole below it,
+because layout admission charged the leading row's out-of-window part against
+the cache budget.
+- Fix: `animateScrollToKey` issued right after a mutation (`insertRoot`,
+`expand`) clamped to the pre-layout `maxScrollExtent` and rode its whole
+duration to the wrong place. It now waits one frame for stale geometry and
+follows in-flight tree animations to settled geometry.
+- Fix: a superseded `animateScrollToKey` reported true while the position landed
+elsewhere. Every scroll the controller starts is now single-flight in both
+directions; a cancelled scroll resolves false.
+- Fix: `expandAll(maxDepth:)` and `collapseAll(maxDepth:)` acted on group
+direction instead of post-flip visibility, growing rows back under parents
+that stayed collapsed or dragging still-visible rows to zero;
+`collapseAll(maxDepth: 0, animate: false)` no longer empties the order.
+- Fix: `expandAll` or `collapseAll` reversing an in-flight group re-targeted the
+rows' animation envelopes without rebasing them, so the surviving rows popped
+at the reversal. All four reversal sites now capture each row's painted extent
+first.
+- Fix: a row resized while a reversal was collapsing it (`collapse` during its
+own `expand`, or `collapseAll`) jumped up to its new height mid-collapse; the
+captured extent now stays the terminus.
+- Fix: `expand` reversing an in-flight collapse left the animation caches stale
+until the group completed, so the reversed rows were not treated as animating.
+- Fix: an `expand` or `collapse` whose members were all pending deletion still
+ran an empty animation group for a full duration (render cache off, one forced
+layout per frame).
+- Fix: `expand(animate: false)` during that subtree's collapse spliced the new
+descendants as one block after the parent, misordering them against the
+children still in the order.
+- Fix: re-inserting a mid-exit node under a collapsed parent left a permanent
+visible row.
+- Fix: re-inserting an existing key under a comparator placed it one slot to the
+right of its sorted position.
+- Fix: a same-parent relocation notified only the moved key, so displaced
+siblings kept stale positional inputs.
+- Fix: `moveNode` to a different depth left rows collapsed earlier in the same
+handler rendering at their pre-move depth.
+- Fix: an inherited-widget read inside `nodeBuilder` (`Theme.of`) never
+refreshed mounted rows when the inherited value changed.
+- Fix: moving a `GlobalKey`-carrying widget out of a row dropped the row's
+render box twice, once by the element and once by the framework.
+- Fix: `syncRoots` computed root insert indices before its deferred removals, so
+an exiting root was teleported to the bottom by the final reorder. Root
+removals are now eager except for a root whose subtree holds a node moving
+elsewhere.
+- Fix: `syncRoots` purged a node moving out of a removed intermediate root
+instead of deferring that removal until after the move.
+- Fix: during bulk `expandAll`/`collapseAll` frames the sliver under-reported
+its paint extent from stale per-row slots, rejecting taps below it and letting
+a following sliver paint inside the tree.
+- Fix: rows after the collapsing subtree were never admitted to layout during a
+bulk `collapseAll`.
+- Fix: the drop-target lookup over a slot the make-room preview had closed
+resolved to the hidden dragged row instead of the row painted there.
+- Fix: a settled exit ghost stayed painted and pinned for the whole of a drag
+while a make-room preview was held.
+- Fix: a settled edge ghost under a held make-room preview was painted by
+neither paint pass, vanishing until the next layout.
+- Fix: an exit-ghost anchor was painted twice per frame, the second paint
+replacing the first's placement (no horizontal slide, wrong clip and z-order).
+- Fix: a row sliding into a collapsed on-screen parent reported its stale
+pre-move slot to `localToGlobal`, semantics and focus traversal for the
+slide's duration.
+- Perf: the bulk-only layout fast path fell off on every frame because its
+per-row extent estimate never matched the measurement; the estimate is now the
+measurement's own product form.
+- Perf: K inserts under one parent inside `runBatch` built the sibling refresh
+set K times (O(K * S)); it is built once per parent at batch exit.
+- Perf: `syncChildren` no longer performs an O(N) list insert per inserted key.
+- Changed: re-adding a mid-exit node with default flags restores the node, not
+its in-flight subtree, matching `remove(animate: false)` followed by a fresh
+add. Pass `preservePendingSubtreeState: true` to restore the subtree (the
+declarative sync layers already do).
 
 ## 0.0.34
 
