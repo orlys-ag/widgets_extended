@@ -136,6 +136,12 @@ jumped by the inset at release. `ReorderRenderPort` gains
 `crossAxisGlobalOrigin` and `crossAxisExtent`, which the proxy band and the
 depth hint now use; `dragProxyBuilder`'s documented content width is
 `sliverCrossAxisExtent - indent` (identical numbers for an unpadded tree).
+- Fix: hot reload left mounted rows rendering the old `nodeBuilder` output
+whenever an ancestor handed the same `SliverTree` instance down (the `child`
+pass-through of `AnimatedBuilder`, `ValueListenableBuilder` and
+`AnimatedTheme`), and when the ancestor built a fresh instance the reload
+re-inflated every row, discarding row `State`. Rows now refresh in place on
+every reload in both shapes and keep their `State`.
 
 ## 0.0.34
 

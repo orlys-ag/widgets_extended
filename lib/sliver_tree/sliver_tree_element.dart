@@ -61,9 +61,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   /// queue one callback per frame (each of which would walk [_children]).
   bool _staleEvictionScheduled = false;
 
-  /// Set by [reassemble] to signal that [update] should invalidate children.
-  bool _didReassemble = false;
-
   /// Keys whose mounted widget may be stale and needs refresh.
   ///
   /// Populated by four sources:
@@ -140,10 +137,28 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     super.unmount();
   }
 
+  /// Hot reload: re-run [SliverTree.nodeBuilder] for every mounted row.
+  ///
+  /// `Element.reassemble` marks this element dirty and recurses into the
+  /// rows, but neither step re-invokes the builder, whose closure body is
+  /// what a reload replaces. When the ancestor hands down a fresh
+  /// `SliverTree`, [update]'s parent-rebuild queue covers it; when it
+  /// hands down the IDENTICAL instance (`AnimatedBuilder`,
+  /// `ValueListenableBuilder` and `AnimatedTheme` all pass `child`
+  /// through), `Element.updateChild` short-circuits and [update] never
+  /// runs, so the cause queues its own keys here, per the rule stated in
+  /// [performRebuild]. Rows refresh in place through [createChild]'s
+  /// `updateChild`, which is hot reload's contract: a row whose widget
+  /// type is unchanged keeps its `State`, a changed type is re-inflated.
+  /// Reload-only; no cost in any other frame.
   @override
   void reassemble() {
     super.reassemble();
-    _didReassemble = true;
+    if (_children.isEmpty) {
+      return;
+    }
+    _dirtyKeys.addAll(_children.keys);
+    renderObject.markNeedsLayout();
   }
 
   @override
@@ -175,13 +190,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       // dead rows participating in find/semantics/focus until the next
       // structural notification on the new controller fires GC.
       _scheduleGarbageCollection();
-    }
-
-    if (_didReassemble) {
-      _didReassemble = false;
-      _invalidateAllChildren();
-      renderObject.markStructureChanged();
-      return;
     }
 
     // Parent rebuild: the `nodeBuilder` closure may have captured new
@@ -225,18 +233,10 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     //     framework.dart:5386-5390). Nothing is left to do.
     //   - `Element.reassemble`, which calls `markNeedsBuild()`
     //     (framework.dart:3754-3759) and reaches this element through
-    //     [reassemble]'s `super` call. When the reassemble makes the
-    //     ancestor hand down a FRESH `SliverTree`, [update] runs and its
-    //     `_didReassemble` branch handles the cause more strongly, via
-    //     [_invalidateAllChildren]. When the ancestor hands down the
-    //     IDENTICAL instance instead, which `Element.updateChild`
-    //     short-circuits (framework.dart:4014), [update] does not run
-    //     that frame: `_didReassemble` stays set and the mounted rows
-    //     stay stale until some later [update]. Measured in that shape,
-    //     0 rows rebuild on the reassemble frame. Queueing here WOULD
-    //     close that gap, because the element is dirty either way, but
-    //     the cause belongs at its own call site ([reassemble]) rather
-    //     than at this shared sink. Tracked as M26; hot-reload only.
+    //     [reassemble]'s `super` call; [reassemble] has queued every
+    //     mounted key and marked layout by then, whichever instance the
+    //     ancestor hands down (a fresh `SliverTree` additionally runs
+    //     [update], whose queue is the same set). Nothing is left to do.
     //
     // The parent-rebuild path does not reach this method at all:
     // `RenderObjectElement.update` calls the private `_performRebuild()`
@@ -247,22 +247,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     // keys at its own call site. Landing here queues nothing, and the
     // next layout finds every mounted row clean, because [createChild]
     // early-returns for an existing, non-dirty key.
-  }
-
-  /// Deactivates all existing children so they are recreated with the
-  /// current widget's [SliverTree.nodeBuilder] on the next layout pass.
-  ///
-  /// Called from [update] (under `_didReassemble`), which already runs
-  /// inside the framework's build scope, so no additional
-  /// [BuildOwner.buildScope] call is needed.
-  void _invalidateAllChildren() {
-    final childrenToDeactivate = Map.of(_children);
-    _children.clear();
-    _dirtyKeys.clear();
-
-    for (final entry in childrenToDeactivate.entries) {
-      updateChild(entry.value, null, entry.key);
-    }
   }
 
   /// Handles structural notifications from the controller.

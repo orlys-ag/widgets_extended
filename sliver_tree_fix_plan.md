@@ -10943,7 +10943,37 @@ regression cannot be blamed on the harness.
 
 ### M26. Hot reload does not refresh rows when the `SliverTree` instance is hoisted
 
-**Status.** NEWLY FILED 2026-08-22, during the implementation review of H6. It has NOT been through this plan's three-pass readiness audit, unlike the other 57 items, and the Solution below still carries an open decision. Treat it as a recorded finding, not as ready-to-implement.
+**Status.** IMPLEMENTED 2026-08-25, own commit. This block was filed after the
+readiness audit and carried an open decision; the investigation that closed it
+(probe plus prototypes of both candidates against the H6 suites) found a
+second defect the block did not record: a fresh-instance reload ran
+`_invalidateAllChildren` from `update` and disposed every mounted row's
+`State` (measured: 18 of 18), against hot reload's contract. Decision:
+candidate 1, with the recreate-on-reload path DELETED rather than kept beside
+it. `reassemble` queues every mounted key and marks layout
+(`sliver_tree_element.dart:155-161`), so rows refresh in place through
+`createChild`'s `updateChild` in both ancestor shapes; `_didReassemble`, the
+`update` branch and `_invalidateAllChildren` are gone (23 insertions, 39
+deletions), and the `performRebuild` comment records the cause as handled
+(`:236`). Candidate 2 was measured, not only argued: deactivating from
+`reassemble` trips no framework assertion (`deactivateChild` carries none,
+`framework.dart:4632-4644`; inactive elements are skipped by `rebuild`,
+`:5505`), but it disposed every row `State` in both shapes, which disqualifies
+it. The block's "weaker" objection to candidate 1 describes the framework's
+own `updateChild` semantics (in place under `Widget.canUpdate`,
+`framework.dart:4022`; deactivate and inflate otherwise, `:4048-4053`), which
+is also how `SliverMultiBoxAdaptorElement` refreshes on reload
+(`widgets/sliver.dart:963`, `:1071`). Repro `audit_repro_m26_test.dart`, four
+cases: the hoisted refresh, the fresh-instance control, and row-`State`
+survival in both shapes, measured by `dispose` counts because the reload's
+layout admits rows the estimate-based first layout did not (18 mounted became
+20, so `initState` counts cannot serve). Unfixed reds: cases 1, 3 and 4. Every
+assertion shown red by its own mutation (13: the initial suffix, the
+absent-value matcher, the shape swapped in each direction, the reassemble
+queue removed twice, five keys queued, both queues removed twice, no roots
+twice, recreation re-introduced in `reassemble` and in `update`).
+Verification: `flutter analyze` 47; full suite 1181 passed, 4 skipped, the H6
+suites among them.
 
 **Finding.** After a hot reload that changes a `nodeBuilder` body, mounted rows keep rendering the OLD closure output whenever the ancestor hands `SliverTree` down as a hoisted child. Measured this session with a probe driving `buildOwner.reassemble(rootElement)` on a 20-root tree, 18 rows mounted:
 
