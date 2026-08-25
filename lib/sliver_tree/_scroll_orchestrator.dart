@@ -446,7 +446,10 @@ class ScrollOrchestrator<TKey, TData> {
     // single-flight slot. This hoists the existing `sliverOffset == null`
     // test rather than inventing a new one; the null check below stays,
     // now unreachable for a visible key. L13's plain-path session
-    // install, when it lands, must sit BELOW this guard.
+    // install sits ABOVE this guard behind a key-existence check: an
+    // unknown key returns false before it can cancel anything, a
+    // known-but-hidden key registers there, and this guard stays the
+    // post-expansion backstop.
     if (_controller.getVisibleIndex(key) < 0) {
       return false;
     }

@@ -52,7 +52,8 @@ void main() {
       expect(
         controller.rootKeys,
         ["X", "A", "N"],
-        reason: "X must exit IN PLACE at the top with N entering below A; "
+        reason:
+            "X must exit IN PLACE at the top with N entering below A; "
             "an insert index computed in survivor space lands N above the "
             "still-live X and step 6 then teleports X to the bottom",
       );
@@ -101,7 +102,8 @@ void main() {
       expect(
         controller.rootKeys,
         ["X", "A", "N"],
-        reason: "X is deferred (its subtree held the mover m) and is still "
+        reason:
+            "X is deferred (its subtree held the mover m) and is still "
             "LIVE when N is inserted, so N's survivor-space index 1 must be "
             "converted to live-space index 2; without the conversion N "
             "lands at raw index 1 and step 6 teleports X to the bottom",

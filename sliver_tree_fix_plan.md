@@ -11,12 +11,17 @@ Scope: `lib/sliver_tree` at commit `4d15c0c` (0.0.34).
 ## Line citations are stale in the working tree. Re-derive before trusting one.
 
 Every `file:line` in the BLOCK BODIES below was read against commit
-`4d15c0c`. Four items have since landed in the working tree WITHOUT being
-committed (H6, M14, M22, M23, M3), and they moved code in seven files.
-Measured 2026-08-23 over the block bodies only, excluding the Status
-paragraphs of landed items (which are maintained against the working tree
-instead) and excluding this section, comparing each cited line at HEAD
-against the same line now:
+`4d15c0c`. Since then 34 items have landed and are COMMITTED on the branch
+`fixes-batch-2` (commits `100035f` through `9405727`, one per item or
+per required chain; see each block's Status paragraph for its commit), plus
+three sub-items of L26. They moved code in every file the landed items
+name. The measurement below is the one taken on 2026-08-23 after the FIRST
+five landings (H6, M14, M22, M23, M3, then still uncommitted); it is kept
+as the record of how the drift begins, not as its current size, which is
+larger and has not been re-measured. Measured over the block bodies only,
+excluding the Status paragraphs of landed items (which are maintained
+against the working tree instead) and excluding this section, comparing
+each cited line at `4d15c0c` against the same line in the working tree:
 
 | File | Cited lines | Still correct | STALE | Line delta |
 | --- | --- | --- | --- | --- |
@@ -41,15 +46,25 @@ and the next landed item would stale them again. Instead:
   named symbol rather than trusting the number. Every citation names the
   construct as well as the line.
 - Treat `git show 4d15c0c:<path>` as the authority for what a citation MEANT.
-- Committing the four landed items and regenerating anchors is the permanent
+- Regenerating the body anchors against the branch head is the permanent
   fix. That is a maintainer decision, not something an implementer should do
-  in the middle of a block.
+  in the middle of a block; the landed items themselves are committed.
 
 The Status paragraphs of LANDED items are exempt: they describe the current
 working tree, and their citations are kept correct against it.
 
 
-Baseline at `4d15c0c`, both re-run on a clean tree:
+Baseline at the head of `fixes-batch-2` (`9405727`, 2026-08-24, after the
+34 landings), both re-run on a clean tree:
+
+- `flutter test`: 1167 passed, 4 skipped, exit 0.
+- `flutter analyze`: 47 issues, 0 of them errors. One fewer than at
+  `4d15c0c`: the `prefer_function_declarations_over_variables` lint on
+  `render_sliver_tree.dart`'s `_hostCallback` closure went with the closure
+  when M20 replaced it by the `TreeRenderHost` interface method. Compare
+  against 47 and 0.
+
+Baseline at `4d15c0c`, both re-run on a clean tree at the time:
 
 - `flutter test`: 1070 passed, 4 skipped, exit 0.
 - `flutter analyze`: 48 issues, 0 of them errors. 5 are in `lib/` and all are
@@ -448,8 +463,11 @@ paragraphs).**
   only the declarations yields 12.
 - `M5` corrects the animation-family boundary rule's own example list once
   standalone installs carry a family.
-- `M9` and `M11` touch the `affectedKeys` contract paragraph and the drag
-  session's `PointerSpace` rule respectively.
+- `M9` touches the `affectedKeys` contract paragraph. `M11` as landed
+  touches the `ReorderRenderPort` member list instead (its lifted-range
+  skip on `findRowAtPaintedY`, joined there by L21's
+  `findPinnedRowAtPaintedY`); its block prescribes no `PointerSpace`
+  change, and the carve-out count it names stays at twenty-one.
 - `L26` repairs seven documentation drifts, two of which (the element and
   controller comments) describe behavior that only becomes true once `H6` and
   `M14` land, so they follow those items rather than leading them. It also
@@ -512,6 +530,7 @@ leaving it open: `L3`, `L12`, `L22`.
 ### H1. Scroll position is never corrected for estimate vs measured row height
 
 **Status.** IMPLEMENTED 2026-08-24. `audit_repro_h1_test.dart` red on unfixed code exactly as the block derives: case 1 anchor painted at +304 (off by the 312 px band residual) with `pixels` still 8000, case 2 landing +312 below the target. Part (a) landed as printed: the offset-form anchor test in the sparse measurement loop, the sticky mirror through the structural authority, the budgeted emit with the self-resetting per-frame counter and follow-up scheduler, epsilon 0.01, and the FLIP-only re-entrancy gate. Part (b) landed with one addition the block does not print: a fourth repro case pins the settle snap through an ANIMATED scroll (absolute ticks overwrite mid-flight corrections; red with the snap disabled), because nothing else discriminated part (b). One probe recorded: removing the `!isAnimatingNid` filter leaves case 3 green in its own scenario, because Pass 1's per-frame walk keeps animating rows' slots current and the measurement loop then sees no residual for them; the filter stays as specified, and case 3's red direction is demonstrated by an unconditional-emit correction storm instead (the budget caps it at 3 layouts per pump and the assert catches the growth). Nine demo states shown red individually. Inventory: category (e) SCROLL-CORRECTION RE-ENTRANCY added; recipe re-run at landing returns 24 non-comment lines minus 3 declarations = twenty-one reads, eighteen FLIP-only. The widget suite's three pixel pins pass via the snap exactly as the block traces; the full suite shifted nothing (1138 passed, 4 skipped); analyze at the 48-issue baseline.
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** `RenderSliverTree.performLayout` never produces a
 `SliverGeometry.scrollOffsetCorrection` (`grep -rn "scrollOffsetCorrection" lib`
@@ -1259,6 +1278,7 @@ than `defaultExtent` 48):
 ### H2. Admission starves the viewport below a row taller than the cache extent
 
 **Status.** IMPLEMENTED 2026-08-24, chain 1 commit, landed last as specified. Part (d) landed first (the repro reads the pin); `audit_repro_h2_test.dart` pre-fix reds: case 1 at r11, scroll 600 (the first refused intersecting row), case 2 at f9, matching the block's f9..f17 against the post-M8 admission (f0..f8 admitted). Parts (a) and (b) landed in `LayoutAdmissionPolicy.admit`: the seed (its first term on the bulk arm from the view, as the Sequencing paragraph requires, shared with `postOffsetOrigin`), the hoisted animation reads, the guarded floor on both the two-view stop and M8's bulk live-cut break, and the widened admit decision; the collapse phase's threshold folds to `budgetCap - seed`. Part (c) withdrawn exactly as written (M8's Step 2a deleted its target). The two direct unit cases Risk requires were added to `layout_admission_policy_test.dart` and each shown red under targeted disablement (seed zeroed: end 7 not 8; floor forced false: end 1 not 7); the three existing call sites gained the new arguments with unchanged expectations. Doc items landed per the ownership split. Full suite green.
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** `LayoutAdmissionPolicy.admit` seeds both accumulators at 0 at
 `cacheStartIndex` (`_layout_admission_policy.dart:67-68`) and charges a
@@ -2469,6 +2489,11 @@ Both must be accompanied by an unchanged run of
 ### H3. `animateScrollToKey` after a mutation clamps to the pre-layout `maxScrollExtent`
 
 **Status.** IMPLEMENTED 2026-08-24. `audit_repro_h3_test.dart` red on unfixed code at the JOURNEY, not the landing: with H1's settle snap already landed, the zero-duration landing self-heals a frame later, so both cases discriminate mid-flight (case 1 riding to the stale 400 clamp, 200.0 against the greater-than-500 pin; case 2 pinned at 0.0). Case 1 starts from a NONZERO stale max, because a clamp equal to the current pixels completes instantly, goes idle, and lets the snap mask the defect. (a0), (a) with `waitForQuiescence`, and (b) landed as printed; the animated-ancestor call site passes false and its token-based exit is unchanged; the controller doc gained the two clauses. One harness finding recorded: a Ticker's epoch is its FIRST tick, so a ride started between frames (which (b)'s wait forces) banks no time by the next pump; both cases give it an epoch-setting tick before sampling. Case 2's mid-flight literal is 50, the tracked value depending on the clamp against the mid-expansion max (measured 95.1 at the sample). Case 3 is the (a0) guard, red with the guard removed (the routed call cancels the in-flight scroll, whose future then resolves false). Six demo states shown red individually. Risk suites 42 green; full suite 1142 passed, 4 skipped; analyze at the 48-issue baseline.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found one defect, the (a0) comment in `_scroll_orchestrator.dart` still
+describing L13's plain-path session install as unlanded and due BELOW the
+guard, reworded to the landed placement (above it, behind the key-existence
+check).
 
 **Finding.** `_scroll_orchestrator.dart:236-253` waits one frame ONLY when
 the orchestrator itself expanded ancestors
@@ -2846,8 +2871,9 @@ One branch is specified but NOT exercised by the tests below, and I am marking i
 **Status.** IMPLEMENTED 2026-08-24 as the Solution prescribes:
 `_ReorderableRowState.build` swaps the payload to a `SizedBox` at
 `getEstimatedExtent` when `hidden && dragProxyEnabled`; everything below it
-stays (the `Opacity(0)` is now redundant over the placeholder and stays for
-shape stability, and its comment says so); `showDragProxy` and
+stays (the hide, `Opacity(0)` at landing and `Visibility` since M19, is
+redundant over the placeholder and stays for shape stability, and its
+comment says so); `showDragProxy` and
 `dragProxyBuilder` gained the paragraph; changelog entry under Unreleased.
 One integration fix the block did not foresee, in
 `RenderSliverTree.performLayout`'s parentData refresh loop: a row that is
@@ -2877,10 +2903,11 @@ its dispose count (a disposed State cannot return). Pre-fix, isolated per
 case (case 1's layout-phase crash corrupts the binding for the rest of the
 file): cases 1 and 2 throw the block's `object.dart` mutation assertions,
 case 3 reports 0 disposals against 1, case 5 stores 100 against 48, case 4
-passes as the control should. All 16 assertions shown red by their own
+passes as the control should. All 17 assertions shown red by their own
 mutation (the placeholder gate reverted or made proxy-blind, keys removed
-or moved, the stale-child layout removed, the drop-time clear removed,
-gesture and geometry constructs). `ReorderableListView`'s placeholder
+or moved, the stale-child layout removed, the drop-time clear removed, a
+row removed and re-added before its setup check, gesture and geometry
+constructs). `ReorderableListView`'s placeholder
 confirmed at `reorderable_list.dart:1293-1295`. Suites: of the two the
 block verified break, `drag_subtree_hide_test.dart` was rewritten to pin
 the new contract (content unmounted in place while dragged, restored
@@ -2893,6 +2920,12 @@ unchanged (its `Opacity` commentary is M19's). Verification: `flutter
 analyze` 47; full suite 1164 passed, 4 skipped; the four ported files that
 were format-clean at HEAD reformatted, the rest left as they were. M19
 lands next on this shape.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found three defects: this paragraph still called the hide `Opacity(0)`
+after M19 replaced it, two of the file's 17 assertions had never been given
+their own red (both since demonstrated), and the stale-child comment in
+`render_sliver_tree.dart` overstated the semantics flush's assertion, which
+checks the children being merged rather than every attached render object.
 
 **Finding.** `_startDrag` hands the exact instance the `nodeBuilder` returned to the owner (`sliver_reorderable_tree.dart:1381`, `_onDragStartCallback(widget.nodeKey, widget.child)`, received at `:670`), and `_DragProxy.build` mounts that same instance in the root overlay (`:1550`, `:1559-1560`) while the in-place copy stays mounted, wrapped only in `IgnorePointer` + `Opacity(0)` (`:1127-1130`). The descendant clone stack has the same shape: `:1584` calls `nodeBuilder(context, row.key, row.depth)` for each frozen descendant while those descendants' in-place rows also stay mounted.
 
@@ -2973,6 +3006,10 @@ The one consumer that does depend on the hidden row's render box measuring from 
 ### H6. Inherited-widget reads in `nodeBuilder` never refresh rows
 
 **Status.** IMPLEMENTED 2026-08-22, landed together with L26 (g)2 as chain 10 requires. `lib/sliver_tree/sliver_tree_element.dart` gains the `didChangeDependencies` override and the corrected `performRebuild` comment, `lib/sliver_tree/sliver_tree_widget.dart` gains the `nodeBuilder` cost note, and `test/sliver_tree/audit_repro_h6_test.dart` is the regression test.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found one defect, the `didChangeDependencies` comment in
+`sliver_tree_element.dart` citing render line numbers that later landings had
+moved, replaced by the construct's name.
 
 Verified by seven independent audit passes, each with no knowledge of the others; passes 6 and 7 were consecutively clean. Three defects were found and fixed along the way: a missing hoist assertion in the test's case 4 (it discriminated only by accident), a false absolute in the (g)2 comment (carried verbatim from this plan, corrected in both), and a false claim that `createChild` rebuilds ONLY what the cache region admits (it also force-creates sticky rows the cache region rejected, `render_sliver_tree.dart:2928-2934`, `:2952`; demonstrated by probe).
 
@@ -4508,6 +4545,11 @@ on `enterExit`, so the fix cannot be "route everything to expandCollapse".
 ### M6. The bulk-only fast path falls off on every frame
 
 **Status.** IMPLEMENTED 2026-08-24, chain 1 (one commit with M7, M8, H2). The counter landed first; `bulk_fast_path_stability_test.dart` failed on unfixed code exactly as derived (case 1: expected 1, actual 10, one rebuild per frame from frame 3 on; case 2 pre-flip sanity: actual 5). Fix landed as specified (product-form extent write plus the `bulkData` parameter); M8's Step 3a then carried the arithmetic verbatim into the admit callback in the same sitting, deleting `_admitBulkFastPath` as both blocks record. All six assertion sites were shown to fail individually: two via the pre-fix reds, four via temporary mutations (`bulkOnly` forced false, counter seeded to 1, signal disabled, out-of-band finder). Risk suites and the full suite green; analyze at the 48-issue baseline.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found one defect, the sticky force-create comment in
+`render_sliver_tree.dart` naming the deleted `_admitBulkFastPath` in the
+present tense, reworded to attribute the slot writes to the bulk admission's
+`onAdmit` callback.
 
 **Finding.** `_admitBulkFastPath` writes the per-row estimate as a difference
 of two cumulative offsets, `_nodeExtentsByNid[nid] = _offsetAtVisibleIndex(i +
@@ -4787,7 +4829,11 @@ edits no dartdoc, so there is no competing edit to that range.
 
 ### M7. Paint-extent loop reads unwritten per-nid slots on bulk frames
 
-**Status.** IMPLEMENTED 2026-08-24, chain 1 commit. `bulk_paint_extent_test.dart` pre-fix reds: case 1 paintExtent 480.0 against 600.0 (the review's number), case 2 rebuild counter 3 against 1, case 3 mismatch counter 1 against 0 after landing `debugStickyOffsetAuthorityMismatchCount` against the old write, per the promoted flow. Two test-side corrections against the block, both measured: the pinned header at the jump frame is C9, not C10 (the block's arithmetic evaluates the probe at v = 0.5, but the pump after the jump advances v), so case 3 asserts on the actually-pinned pre-measured header; and its pre-jump sanity was rewritten to a pre-jump snapshot, because force-creation itself builds the row, so a post-jump `buildCounts` lookup could never fail in the direction its reason claimed. Every assertion shown red individually; parts 1 to 3 landed as printed (part 2's loop later gained M8/L25.6's nid-threaded `_layoutNodeChild` record form). Risk suites and the full suite green.
+**Status.** IMPLEMENTED 2026-08-24, chain 1 commit. `bulk_paint_extent_test.dart` pre-fix reds: case 1 paintExtent 480.0 against 600.0 (the review's number), case 2 rebuild counter 3 against 1, case 3 mismatch counter 1 against 0 after landing `debugStickyOffsetAuthorityMismatchCount` against the old write, per the promoted flow. Two test-side corrections against the block, both measured: the pinned header at the jump frame is C9, not C10 (the block's arithmetic evaluates the probe at v = 0.5, but the pump after the jump advances v), so case 3 reads the pinned key from `debugStickyHeaders` instead of naming one and asserts that it was pre-measured; and its pre-jump sanity was rewritten to a pre-jump snapshot, because force-creation itself builds the row, so a post-jump `buildCounts` lookup could never fail in the direction its reason claimed. Every assertion shown red individually; parts 1 to 3 landed as printed (part 2's loop later gained M8/L25.6's nid-threaded `_layoutNodeChild` record form). Risk suites and the full suite green.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found one wording defect in this paragraph: it read as if case 3 named
+C9, where the test reads the pinned key from `debugStickyHeaders` and C9 is
+the measured value.
 
 **Finding.** The paint-extent loop at `render_sliver_tree.dart:3035-3055` reads
 `_nodeOffsetsByNid[nid]` and `_nodeExtentsByNid[nid]` directly for every
@@ -5287,6 +5333,7 @@ off-cache extent slots whose staleness the second case is about.
 ### M8. Bulk `collapseAll` never admits rows after the collapsing subtree
 
 **Status.** IMPLEMENTED 2026-08-24, chain 1 commit. `bulk_collapse_admission_test.dart` pre-fix: case 1 red (B still unbuilt at 250 ms), cases 2 and 3 green, exactly as the block states. Steps 1 to 5 landed as specified: `isCollapsing`, `BulkAdmissionView`, `fullCacheEnd` deleted whole, the callback widened to `(nid, visibleIndex)` with both slot writes in the dispatch closure, the per-nid materialize skip, the sparse-track create/measure/rewrite loops with `firstChangedTrackPos`, and the collapse prefix with survivor hops plus the zero-extent linear fallback. One consequence Step 3 implies but never prints, found when the phase-2 teeth demo refused to go red: the phase-1 walk must break on the LIVE view alone on the bulk arm, because members keep the post accumulator flat, so the dual-view stop would walk the whole collapsing subtree (the naive O(N) the hop exists to avoid) and leave phase 2 dead code; landed as a bulk-only break beside the two-view stop. The returned `cacheEndIndex` then has no reader and is discarded at the call site. Demos recorded: range-keyed freshness (scrollExtent off by 190.08 px), first-survivor-only (C unbuilt), full-charge removal (frame-1 mount 2001), non-bulk arm, huge-cache sanities. Doc items 1 to 19 landed per the ownership split with H2. Full suite green.
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** `_admitBulkFastPath` breaks on
 `_stableCumulative[i] + _bulkFullCumulative[i] >= fullCacheEnd`
@@ -7263,6 +7310,7 @@ anchor's SETTLED band under the held preview), and a sum-identity GUARD
 every visible row while both engines are active), green before and after
 by design, as the file header records. At landing: full suite 1131 passed,
 4 skipped; `flutter analyze` at the then 48-issue baseline.
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** Three exit-ghost sites read `getSlideDeltaNid`, which is FLIP plus
 held make-room preview (`tree_controller.dart:1032-1041`): the prune criterion
@@ -8024,6 +8072,7 @@ unverified question (does a pinned-band lookup reach the lifted row, and
 should it skip it) is answered by L21's Decision: it reaches it and
 deliberately does not skip it; L21 lands next and pins that. The FLIP-only
 carve-out inventory is unchanged (this is a composed-state read).
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** `setReorderPreviewAtIndex` skips the dragged visible range when it
 builds shift targets (`tree_controller.dart:1765-1767`, inside the scan at
@@ -8265,6 +8314,7 @@ the conversion removed). Verification: `flutter analyze` 47; the block's
 risk suites plus M13's two, 116 green (the "insertRoot index correctness
 while pending removals are in flight" case included); full suite 1154
 passed, 4 skipped; `dart format` clean, as the file was before.
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** `_syncRootsImpl` defers every root removal to step 2'
 (`tree_sync_controller.dart:257` computes `toRemove`, `:401-420` performs it
@@ -8550,6 +8600,7 @@ exact hazard the block records; the check had to be ordered before
 deferred key rides step 5's tail-sort slide before exiting under
 `animate: true`) is unchanged and untested here, as the block says.
 Verification shared with M12.
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** The one-level-out deferral in `syncChildren`
 (`tree_sync_controller.dart:613-620`) is gated on BOTH `_deferredSubtreeRemovals`
@@ -8783,7 +8834,11 @@ re-registers the whole subtree.
 
 ### M14. `forgetChild` drops the render box, then the framework drops it again
 
-**Status.** IMPLEMENTED 2026-08-23, landed with L26 (g)3 as chain 10 requires. The eager drop was deleted from `lib/sliver_tree/sliver_tree_element.dart`, leaving `forgetChild` in the shape this block prescribes, which matches the STRUCTURE of the framework's own `SliverMultiBoxAdaptorElement.forgetChild` (`widgets/sliver.dart:1097-1102`): clear the map entry, call super, touch nothing in the render tree. It is not byte-identical, and an earlier draft of this line was wrong to imply it was: the framework version also asserts `child.slot != null` (`:1098`) and `_childElements.containsKey(child.slot)` (`:1099`), where this one instead guards on a nullable slot and then removes without a containment precondition. Three auditors read that clause as ambiguous, so to be exact: the removal IS conditional, on `nodeId != null`; what it lacks is the framework's `containsKey` check, not a guard. `test/sliver_tree/audit_repro_m14_test.dart` is the regression test; on unfixed code it fails with the predicted `rendering/object.dart:2193 'child._parent == this'` assertion, after all THREE of its sanity assertions pass: the row is mounted, its box is genuinely adopted by the `RenderSliverTree`, and the element was RETAKEN rather than rebuilt. The third sits above the failing expectation so a broken harness fails there rather than passing the expectation vacuously. Be precise about what it proves WHERE, because an earlier draft of this line overstated it: on the FIXED run it establishes the full retake-and-move; on the UNFIXED run it establishes only that no fresh element replaced the row. The retake does not complete on the unfixed run at all, since `deactivateChild` is called by `_retakeInactiveElement` (`framework.dart:4529`) and throws at `:4635`. It passes there because the throw precedes `_inactiveElements.add` (`:4636`), so the original element is never unmounted and the global-key registry (`:173`, `:179`, written at `:4356`, cleared at `:4859`) still returns it. `getChildForNode` retains 15 references (14 call sites plus the declaration), so nothing became unused, and the plan's Risk suites plus the full suite are green (1075 passed, 4 skipped).
+**Status.** IMPLEMENTED 2026-08-23, landed with L26 (g)3 as chain 10 requires. The eager drop was deleted from `lib/sliver_tree/sliver_tree_element.dart`, leaving `forgetChild` in the shape this block prescribes, which matches the STRUCTURE of the framework's own `SliverMultiBoxAdaptorElement.forgetChild` (`widgets/sliver.dart:1097-1102`): clear the map entry, call super, touch nothing in the render tree. It is not byte-identical, and an earlier draft of this line was wrong to imply it was: the framework version also asserts `child.slot != null` (`:1098`) and `_childElements.containsKey(child.slot)` (`:1099`), where this one instead guards on a nullable slot and then removes without a containment precondition. Three auditors read that clause as ambiguous, so to be exact: the removal IS conditional, on `nodeId != null`; what it lacks is the framework's `containsKey` check, not a guard. `test/sliver_tree/audit_repro_m14_test.dart` is the regression test; on unfixed code it fails with the predicted `rendering/object.dart:2193 'child._parent == this'` assertion, after all THREE of its sanity assertions pass: the row is mounted, its box is genuinely adopted by the `RenderSliverTree`, and the element was RETAKEN rather than rebuilt. The third sits above the failing expectation so a broken harness fails there rather than passing the expectation vacuously. Be precise about what it proves WHERE, because an earlier draft of this line overstated it: on the FIXED run it establishes the full retake-and-move; on the UNFIXED run it establishes only that no fresh element replaced the row. The retake does not complete on the unfixed run at all, since `deactivateChild` is called by `_retakeInactiveElement` (`framework.dart:4529`) and throws at `:4635`. It passes there because the throw precedes `_inactiveElements.add` (`:4636`), so the original element is never unmounted and the global-key registry (`:173`, `:179`, written at `:4356`, cleared at `:4859`) still returns it. `getChildForNode` retained 15 references at landing (14 call sites plus the declaration); chain 1 (`625af85`, M8's sparse-track measurement loop) removed one call site, so HEAD has 14, so nothing became unused, and the plan's Risk suites plus the full suite are green (1075 passed, 4 skipped).
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found one defect, the `getChildForNode` reference count stated as 15
+against the working tree's 14 (chain 1's sparse-track loop had removed one
+call site after this item landed).
 
 Verified by six independent audit passes, each with no knowledge of the others; passes 5 and 6 were consecutively clean. The CODE was clean from pass 1 and never changed after landing: nine deleted lines, the root-cause chain re-derived from the framework source by every pass, and three separate demonstrations that the repro fails on M14's deletion alone (H6 present, only these nine lines reverted). Every defect the later passes found was in PROSE ABOUT the change, not the change: a wrong sanity-assertion count, and two successive false mechanisms in the test's Sanity 3 comment. The second of those is worth recording because it is a trap: the first correction was prescribed by an auditor and adopted verbatim, and was itself wrong, because `_retakeInactiveElement` does not complete on the unfixed run at all. A correction is not self-verifying just because what it corrects was real.
 
@@ -9346,9 +9401,11 @@ unique again.)
 wrapper is `Visibility(visible: !hidden, maintainSize: true, maintainState:
 true, maintainAnimation: true)`; the comment block rewritten (why
 `Visibility`, why not `Opacity` or `Offstage`, and the two facts that still
-matter); the eight probe files ported (`double` 1.0/0.0 to `bool`
-true/false through `Visibility.visible`, helpers renamed `_isVisible` and
-`_rowVisible`); the comment sites updated (`hidden_row_hit_test.dart`'s
+matter); the seven probe files that still carried an `Opacity` probe
+ported (`double` 1.0/0.0 to `bool` true/false through
+`Visibility.visible`, helpers renamed `_isVisible` and `_rowVisible`; the
+block's eighth, `drag_subtree_hide_test.dart`, lost its probe with H5's
+rewrite); the comment sites updated (`hidden_row_hit_test.dart`'s
 ordering pin now names `_RenderVisibility.visitChildrenForSemantics` with
 `maintainSemantics` false, `drag_handle_hidden_test.dart`'s in-flight-drag
 note, and the two historical `Opacity(0)` mentions reworded as history);
@@ -9377,6 +9434,11 @@ press, a doubled probe). Verification: `flutter analyze` 47; full suite
 1167 passed, 4 skipped; `repaint_boundary_test.dart` untouched and green,
 as the block resolves; of the edited test files, the five that were not
 format-clean at HEAD were left so and the rest are clean.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found two defects: this paragraph counted eight ported probe files
+where the commit ports seven (the eighth had lost its probe with H5), and the
+hide-wrapper comment said the render object only skips paint while hidden,
+omitting that it also drops the subtree from semantics.
 
 **Finding.** Every reorderable row is wrapped unconditionally in
 `IgnorePointer(ignoring: hidden, child: Opacity(opacity: hidden ? 0.0 : 1.0, ...))`
@@ -9950,8 +10012,9 @@ mid-flight assertion pins the slot top at `48 + getCurrentExtent(r3c1)`
 minus the sliver scroll offset), not the row widget: an entering row's widget
 top sat at 48.64 while its slot was at 72.32; the two agree once settled.
 Reds: the stub-first landing (full API surface, inset core returning 0.0)
-failed the one-shot pin and the animated pin at 0.0 against 48.0; each of the
-19 assertions was then shown red by its own mutation (the flag forced on the
+failed the one-shot pin and the animated pin at 0.0 against 48.0; that stub
+run is the one-shot pin's red, and each of the other 19 of the file's 20
+assertions was then shown red by its own mutation (the flag forced on the
 default path; `maxStickyDepth` 0 with and without a hardcoded walk limit;
 unknown keys; a 452 px push so `r4` displaces `r3`; 60 px rows;
 viewport-instead-of-usable in the plain plus snap formulas; pump counts of 1,
@@ -9965,10 +10028,15 @@ Verification: `flutter analyze` 48 to 47, the removed issue being
 repros) 61 green; full suite 1149 passed, 4 skipped. Also: the
 `_slide_composer.dart` library doc no longer calls the registration a
 callback, a changelog entry under Unreleased, and the overlap limitation
-stated on the parameter doc as item 3 asks (`_sticky_header_computer.dart:336`
+stated on the parameter doc as item 3 asks (`_sticky_header_computer.dart:341`
 read this session). Residual, unverified: the overlap limitation under a
 preceding pinned sliver, no such test exists. `TreeRenderHost` stays
 barrel-private (`sliver_tree.dart:24` exports only `TreeController`).
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found two defects in this paragraph: the `_sticky_header_computer.dart`
+citation had drifted to `:341` after L25.3 landed, and the assertion count
+read 19 where the file holds 20 (the stub run's red is the one-shot pin's,
+counted separately).
 
 ### M21. Same-parent relocation notifies only the moved key
 
@@ -10954,12 +11022,17 @@ insert loop). The roots copy keeps its list untouched: M12's live-space
 conversion anchors on `remaining[survivorIndex]` and its
 `remaining.insert(survivorIndex, ...)` keeps it aligned, so the roots-side
 insert is load-bearing, as both blocks record. After the change
-`grep -n "remaining"` over the file returns the roots copy's list (its
+`grep -n "remaining\b"` over the file returns the roots copy's list (its
 declaration, seed loop, the two conversion reads, the insert) plus prose
 only. No test added (no observable change, per the block);
 `tree_sync_controller_test.dart` and `tree_sync_deep_tree_test.dart`
 unchanged and green with the rest of the sync suites (92) and the full
 suite (1154 passed, 4 skipped); `flutter analyze` 47; `dart format` clean.
+Audit trail: four passes on 2026-08-24, passes 3 and 4 consecutively clean;
+pass 1 found one defect, a backspace byte where the grep's `\b` was meant (the
+shell transport had mangled the escape when this paragraph was written), and
+pass 2 found it still present because the first two rewrites re-emitted the
+same byte; fixed at the byte level.
 
 **Finding.** `lib/sliver_tree/tree_sync_controller.dart:266-269` builds
 `remaining`, :271-274 reads it once to seed `remainingBit`, and :319 then pays
@@ -11371,7 +11444,10 @@ expect no throw, `getSlideDelta("a") != 0.0`, and `getSlideDelta("ghost") == 0.0
 
 ### L6. `applyPaintTransform` has no branch for anchor-based exit ghosts
 
-**Status.** IMPLEMENTED 2026-08-24. Repro appended to `phantom_exit_reparent_test.dart`: pre-fix the transform reported the stale slot plus the composed delta (24.0) against the painted 72.0, differing by exactly the 48 px slot offset. The branch landed as printed, mirroring M10's FLIP-only Pass A.5 gate symbol for symbol (ghost and anchor `getFlipSlideDeltaNid` reads) and translating by the shared base plus the composed delta with no `yAdjust`; the hoisted cast sits beside the branch, before the edge-ghost section, an equivalent placement both ghost branches read. One compile fix: `typedNodeId != null` joins the guard so the key promotes into `ghostKey:`. The inventory recipe re-run returns 21 non-comment lines minus 3 declarations = eighteen reads, category (c) six, fifteen FLIP-only; the AGENTS.md bullet carries those figures. Sanity demos shown red individually (oracle emptiness past settle; distinguishability at t = 0.005, 0.24 against the 0.5 tolerance). `childMainAxisPosition` carries no ghost term and stays a recorded follow-up as the block states. Risk suites 19 green; full suite 1132 passed, 4 skipped; analyze at the 48-issue baseline.
+**Status.** IMPLEMENTED 2026-08-24. Repro appended to `phantom_exit_reparent_test.dart`: pre-fix the transform reported the stale slot plus the composed delta (24.0) against the painted 72.0, differing by exactly the 48 px slot offset. The branch landed as printed, mirroring M10's FLIP-only Pass A.5 gate symbol for symbol (ghost and anchor `getFlipSlideDeltaNid` reads) and translating by the shared base plus the composed delta with no `yAdjust`; the hoisted cast sits beside the branch, before the edge-ghost section, an equivalent placement both ghost branches read. One compile fix: `typedNodeId != null` joins the guard so the key promotes into `ghostKey:`. The inventory recipe re-run returns 21 non-comment lines minus 3 declarations = eighteen reads, category (c) six, fifteen FLIP-only; the AGENTS.md bullet carried those figures at landing (after L7, L24 and H1 it reads twenty-one reads across five categories). Sanity demos shown red individually (oracle emptiness past settle; distinguishability at t = 0.005, 0.24 against the 0.5 tolerance). `childMainAxisPosition` carries no ghost term and stays a recorded follow-up as the block states. Risk suites 19 green; full suite 1132 passed, 4 skipped; analyze at the 48-issue baseline.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found one defect in this paragraph, the AGENTS.md carve-out figures
+stated in the present tense after later landings had changed them.
 
 **Finding.** Pass A.5 paints a phantom exit ghost at
 `_exitGhostPaintedBaseScrollSpace(...)` plus the ghost's own slide delta
@@ -11551,7 +11627,10 @@ otherwise the test proves nothing.
 
 ### L7. Pass A's edge-ghost skip must ask the FLIP-only question
 
-**Status.** IMPLEMENTED 2026-08-24. New `ghost_flip_only_pass_a_skip_test.dart` builds exactly the block's geometry (leading-edge ghost from the n12 move, the 3 s n55 FLIP keeping frames paint-only, n20's 200 px held lift); pre-fix red at the main assert with the n17 control advancing, pinning the row painted by neither pass on a paint-only frame. The skip landed as printed; the break comment gained the composed-overreach clause; and, L6 having landed first, this block carried the recorded reconciliation: `applyPaintTransform`'s edge-ghost `useGhost` gate is now FLIP-only with the same PAIR rationale. Inventory recipe re-run at landing: 23 non-comment lines minus 3 declarations = twenty reads, category (a) eight, seventeen FLIP-only; the AGENTS.md bullet carries those figures (the block's recipe-tightening note is satisfied by the recipe wording M10 landed). Twelve demo states shown red individually; the control's reject-state is a skipped frame, because a pumped no-op frame still paints under this harness (measured). Risk suites 18 green; full suite 1133 passed, 4 skipped; analyze at the 48-issue baseline.
+**Status.** IMPLEMENTED 2026-08-24. New `ghost_flip_only_pass_a_skip_test.dart` builds exactly the block's geometry (leading-edge ghost from the n12 move, the 3 s n55 FLIP keeping frames paint-only, n20's 200 px held lift); pre-fix red at the main assert with the n17 control advancing, pinning the row painted by neither pass on a paint-only frame. The skip landed as printed; the break comment gained the composed-overreach clause; and, L6 having landed first, this block carried the recorded reconciliation: `applyPaintTransform`'s edge-ghost `useGhost` gate is now FLIP-only with the same PAIR rationale. Inventory recipe re-run at landing: 23 non-comment lines minus 3 declarations = twenty reads, category (a) eight, seventeen FLIP-only; the AGENTS.md bullet carried those figures at landing (after L24 and H1 it reads twenty-one reads across five categories; the block's recipe-tightening note is satisfied by the recipe wording M10 landed). Twelve demo states shown red individually; the control's reject-state is a skipped frame, because a pumped no-op frame still paints under this harness (measured). Risk suites 18 green; full suite 1133 passed, 4 skipped; analyze at the 48-issue baseline.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found one defect in this paragraph, the AGENTS.md carve-out figures
+stated in the present tense after later landings had changed them.
 
 **Finding.** Pass A skips a row that has a registry ghost entry when the
 COMPOSED delta is non-zero (`lib/sliver_tree/render_sliver_tree.dart:3417-3421`,
@@ -12196,6 +12275,7 @@ direct `moveNode`, and the converse case (`reorderSlide: zero`,
 ### L13. Make every scroll the orchestrator starts single-flight, both directions
 
 **Status.** IMPLEMENTED 2026-08-24. New `scroll_single_flight_test.dart`, three cases, all red on unfixed code (true against false at each): a plain scroll now cancels a live animated session, registers a resource-less session of its own, and reports `!session.cancelled`; the animated path and `dispose` share the extracted `_cancelActiveScroll`; `_ActiveScroll` gained the nullable pair and `plain()` constructor with the retitled doc; both single-flight docs widened. As second lander after H3, the ordering rule is honored in spirit with one recorded deviation: the install sits where this block places it (before the expansion wait, so the whole path is covered), guarded by a key-EXISTENCE check rather than sitting below (a0), because (a0)'s visibility test would reject known-but-hidden keys the expansion exists to reveal; an unknown key still cannot cancel a live scroll, and H3's guard case goes red when the existence guard is removed (demonstrated). The block's post-wait cancelled check landed and was probed INERT in case 3, whose false comes from the terminal `!session.cancelled` either way; the check's remaining contribution, preventing a stray jump between the wait and the return, is recorded as untested. Cases that cancel mid-expansion settle before ending (ticker hygiene). Five demo states shown red individually. Risk suites 42 green; full suite 1145 passed, 4 skipped; analyze at the 48-issue baseline.
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** The plain path
 (`lib/sliver_tree/_scroll_orchestrator.dart:236-276`) never reads
@@ -13038,16 +13118,21 @@ BEFORE the first pointer-move resolve; the "apply the skip" mutation
 therefore went red at the first resolve, and the case pins the
 lifted-range precondition (`previewLiftedStartIndex ==
 getVisibleIndex("s1")`) ahead of ONE `targetKey` assertion that both the
-positional-only and the skip-applied mutations turn red. All seven
-assertions shown red individually (no pinning scrolled 10 px, scrolled 30
-px, scrolled 350 px so the row beneath is `i6`, a short press, the
-positional-only lookup, the lifted record removed, the skip applied).
+positional-only and the skip-applied mutations turn red. All six
+assertions shown red individually, by seven mutations (no pinning scrolled
+10 px, scrolled 30 px, scrolled 350 px so the row beneath is `i6`, a short
+press, the lifted record removed, and two that turn the one `targetKey`
+assertion red: the positional-only lookup and the skip applied).
 Verification: `flutter analyze` 47; risk suites (both sticky suites, the
-two sectioned reorder suites, the seven fake-hosting files, M11's repro) 83
-green; full suite 1159 passed, 4 skipped; touched files format-clean as at
+three sectioned suites whose names contain reorder, the seven fake-hosting
+files, M11's repro) 83 green; full suite 1159 passed, 4 skipped; touched files format-clean as at
 HEAD (the render object and controller were not format-clean before and
 were left so). M11's open sequencing question is closed as this block's
 Decision says.
+Audit trail: three passes on 2026-08-24, passes 2 and 3 consecutively clean;
+pass 1 found two wording defects: seven mutations over six assertions were
+stated as seven assertions, and the 83-green suite list under-named the
+sectioned suites by one.
 
 **Finding.** `DragProbe.captureGrab` asks `_renderPort.paintedRowBounds(_draggedKey)` (`_drag_session.dart:171`), which substitutes the pinned band (`render_sliver_tree.dart:1945-1954` delegating to `_anchorPaintedBounds`, whose sticky branch returns `info.pinnedY`/`info.extent` at `:3969-3974`). `DragProbe.resolveTarget` asks `_renderPort.findRowAtPaintedY(probeY)` (`_drag_session.dart:219`), which has no sticky awareness (`render_sliver_tree.dart:1871-1925`). The port's own doc says the two are "NOT interchangeable at a sticky header" (`reorder_render_port.dart:62-73`).
 
@@ -13246,6 +13331,7 @@ if (_sticky.isSticky(nid)) {
 ### L24. Pass A.7 repaints an exit-ghost anchor a second time per frame
 
 **Status.** IMPLEMENTED 2026-08-24. Test-first as a rewrite: the helper became `_expectAnchorPaintedOnceAndBandGhostFree` (band painted exactly once; sticky-ownership sanities; clip-excludes-band control), red pre-fix in case 1 at 2 paints, exactly the measured A.7 double paint; case 2 renamed with its measured-false premise corrected and green both sides (Pass B owns the anchor); the new leg red pre-fix at 2 paints for an EDGE-ghost anchor scrolled into view mid-slide. Steps 1 to 4 landed as printed: `_computeA7Anchors` shared by paint and hit test with the composed `hasSlides` per M10's item 9, the Pass A skip above the sliding-bucket branch per the L7 composition rule, A.7 painting through `_paintRow`, and the `a7Idx` bucket drained first. Doc items 1 to 9 landed; the not-falsified list re-checked. Leg 2 skipped as the block allows (no X slide constructible on this anchor); leg 4's construct found that removing the anchor also frees its ghost, so the widget leg pins the Pass A half and the fall-out-of-both state is constructed lib-side in its demo. The tap control cannot detect bucket reordering in this geometry (uniformly shifted bands never overlap the anchor's), recorded as a smoke check. Sixteen demo states shown red individually. Contributes zero to the carve-out inventory, re-verified by the recipe (23 non-comment lines, twenty reads, unchanged). Risk suites 32 green; full suite 1135 passed, 4 skipped; analyze at the 48-issue baseline.
+Audit trail: three passes on 2026-08-24, all three clean.
 
 **Finding.** Pass A paints every non-sticky in-flow row (`render_sliver_tree.dart:3378-3438` plus the sliding sub-pass), and Pass A.7 then calls `context.paintChild(anchorChild, off)` on the same row again at `:3710-3715`. With rows wrapped in `RepaintBoundary` (`sliver_tree_element.dart:539-541`, default true), `PaintingContext.paintChild` routes through `_compositeChild`, which sets `childOffsetLayer.offset = offset` and `appendLayer(childOffsetLayer)`; `appendLayer` calls `layer.remove()` first (`flutter/packages/flutter/lib/src/rendering/object.dart:289-291`, `:304-308`).
 
@@ -13677,8 +13763,8 @@ an `OverflowBox` painting 60 px past its box, the block's overflow leg.
 `StickyHeaderComputer.debugFallbackIterationCount` (exposed as
 `RenderSliverTree.debugStickyFallbackIterationCount`) and pins 210
 iterations per layout under a per-node animation elsewhere: two
-`computeStickyHeaders` probes per layout (`render_sliver_tree.dart:3112`,
-`:3251`) times 105 children per walk (running bottom 48, plus 48 per child,
+`computeStickyHeaders` probes per layout (`render_sliver_tree.dart:3185`,
+`:3325`) times 105 children per walk (running bottom 48, plus 48 per child,
 until it reaches 5000 + 0 + 48); 800 before the fix (2 x 400). 25.7 adds two
 branch counters on the buffer (`debugInsertSharedChainCount`,
 `debugInsertPerNidCount`, forwarded by the controller) and the fuzz script
@@ -13691,6 +13777,11 @@ passed, 4 skipped; the `debugOrderResetIndexAllCount` pins unmoved.
 Recorded, unobserved by any test: 25.2 culls with the box, so a row whose
 child paints outside its box from above the viewport is culled too, the same
 rule the ghost passes already applied.
+Audit trail: four passes on 2026-08-24, passes 3 and 4 consecutively clean;
+pass 1 found the two `computeStickyHeaders` probe citations in this paragraph
+drifted by the later landings (`:3112` and `:3251` to `:3185` and `:3324`),
+and pass 2 found the second one line short again because pass 1's own comment
+fix for M6 sits above it (`:3325`).
 
 **Read this as a batch, not as one finding.** L25 is nine independent micro-items. Each sub-item below carries its own Finding, Root cause and Solution inline in its own paragraph; the standard sections (Alternatives considered, Architecture fit, Risk, Test to add, Effort) are pooled at the END of the block, because per item they are one-liners. Do not look for a single Finding heading above; there is not one, deliberately. Nothing here changes observable behaviour except 25.3's early break (same answer, fewer iterations), 25.7's bump batching (same cache values, fewer walks), and 25.1, which IS a narrow visual change and says so in its own paragraph. Recommended order is at the end.
 
@@ -14049,10 +14140,10 @@ Enumerated cost, measured rather than estimated: 62 generic declarations in `lib
 ONE commit; the audit trail is shared with H4's Status. Edits 0 through 3
 landed as prescribed inside the merged branch scripts: the expandAll rebase
 with `?? defaultExtent` and the unmeasured-member flag clear (merged branch,
-`tree_controller.dart:4497-4517`), the collapseAll mirror with the
-compute-first write order (`:4754-4770`), edit 2 absorbed into H4's
+`tree_controller.dart:4612-4640`), the collapseAll mirror with the
+compute-first write order (`:4880-4901`), edit 2 absorbed into H4's
 `_routeShownNodesToStandaloneEnters` carrying `expandCollapse`, and edit 3's
-second site at expand Path 1 (`:3965-3977`). The predicted breakage happened
+second site at expand Path 1 (`:4077-4109`). The predicted breakage happened
 exactly as derived: `tree_controller_test.dart`'s expandAll-reversal test
 failed at 21.75 against greaterThan(28), and the prescribed pump-schedule
 repair (50 ms to 200 ms, comment included) landed in the same commit, along
@@ -14060,6 +14151,13 @@ with the recommended 30-to-200 ms widen in the collapseAll mirror test and
 the two coverage notes in `op_group_iteration_snapshot_test.dart`. Under a
 mutation that drops the targetExtent restore, the repaired read point goes
 red at the derived capped 21.0, so the threshold keeps its meaning.
+Audit trail: four passes on 2026-08-24, passes 3 and 4 consecutively clean;
+pass 1 found the three merged-branch citations drifted after later landings,
+pass 2 found the collapseAll mirror's range ending two lines before the writes
+it names. Recorded lead, out of scope and unverified here: the collapse-side
+captured `targetExtent` is written without setting `targetIsCaptured`, as the
+block prescribes, so a later `setFullExtent` re-target is not shielded from
+it.
 
 Legs (a) through (f) landed in `bulk_reentry_continuation_test.dart` with a
 new file-local off-cache harness shared by (d), (e1), (e2) and (f). Every

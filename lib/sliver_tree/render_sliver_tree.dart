@@ -3237,10 +3237,11 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // child.size.height)`. `_nodeExtentsByNid[nid]` is not that value
         // for an off-cache ANIMATING nid on a bulk frame; these nids were
         // selected precisely because `_inCacheRegionByNid[nid] == 0`, and
-        // `_admitBulkFastPath` writes extent slots only from
-        // `cacheStartIndex` to its break, so a pinned bulk member holds a
-        // previous frame's product (or a never-written 0.0) and the exact
-        // `!=` below fires on nothing.
+        // the bulk admission's `onAdmit` callback writes extent slots only
+        // for the nids it admits (the deleted `_admitBulkFastPath` wrote
+        // them only from `cacheStartIndex` to its break), so a pinned bulk
+        // member holds a previous frame's product (or a never-written 0.0)
+        // and the exact `!=` below fires on nothing.
         final priorExtent = controller.getCurrentExtentNid(nid);
         final measured = _layoutNodeChild(nodeId, nid, crossAxisExtent);
         if (measured != null) {
@@ -3533,9 +3534,10 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // rebuilt this frame with a layout-affecting change: the make-room
         // placeholder swap (H5) does exactly that to every mounted row of
         // the dragged subtree, admitted or not. Post-frame eviction is too
-        // late for this frame's semantics flush, which asserts on any
-        // attached render object still needing layout, so lay it out here
-        // with the constraints [_layoutNodeChild] would use. A clean child
+        // late for this frame's semantics flush, which asserts, while
+        // merging a node's semantics children, that none of their render
+        // objects still needs layout, so lay it out here with the
+        // constraints [_layoutNodeChild] would use. A clean child
         // early-outs inside `layout`, so the steady state pays a few
         // comparisons per stale row. No extent write: the row is off the
         // painted surface and its stored extent stays authoritative.

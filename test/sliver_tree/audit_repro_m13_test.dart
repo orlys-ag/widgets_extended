@@ -71,13 +71,15 @@ void main() {
       expect(
         controller.nidOf("x"),
         xNid,
-        reason: "x must be MOVED out of B, not purged with B and re-created "
+        reason:
+            "x must be MOVED out of B, not purged with B and re-created "
             "as a fresh node at Q",
       );
       expect(
         controller.nidOf("y"),
         yNid,
-        reason: "y rides along with x; a purge-and-recreate re-registers "
+        reason:
+            "y rides along with x; a purge-and-recreate re-registers "
             "the whole subtree",
       );
       expect(controller.getParent("x"), "Q");

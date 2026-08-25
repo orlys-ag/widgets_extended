@@ -88,7 +88,8 @@ void main() {
       expect(
         hit!.key,
         "b",
-        reason: "the row PAINTED at y 40 is b; the lifted a is laid out "
+        reason:
+            "the row PAINTED at y 40 is b; the lifted a is laid out "
             "there but hidden, and must be skipped like a pending-deletion "
             "row",
       );
@@ -113,7 +114,8 @@ void main() {
       expect(
         below!.key,
         "c",
-        reason: "the lifted row's extent must keep accumulating into the "
+        reason:
+            "the lifted row's extent must keep accumulating into the "
             "structural offsets of the rows after it",
       );
       expect(below.paintedOffset, 50.0);
@@ -121,7 +123,8 @@ void main() {
       expect(
         hit!.key,
         "b",
-        reason: "the full scan must skip the lifted range on its inclusion "
+        reason:
+            "the full scan must skip the lifted range on its inclusion "
             "test",
       );
     });
@@ -153,7 +156,8 @@ void main() {
       expect(
         hit!.key,
         "b",
-        reason: "with nothing shifted, the first painted row below the "
+        reason:
+            "with nothing shifted, the first painted row below the "
             "lifted block is b, so a parked pointer resolves above it "
             "(the own-slot gap), never to the hidden a",
       );
@@ -236,7 +240,8 @@ void main() {
     expect(
       reorder.currentTarget?.targetKey,
       "b",
-      reason: "the pointer is over b as painted; the hidden a must not "
+      reason:
+          "the pointer is over b as painted; the hidden a must not "
           "shadow it",
     );
     expect(reorder.currentTarget?.gapVisibleIndex, 2);

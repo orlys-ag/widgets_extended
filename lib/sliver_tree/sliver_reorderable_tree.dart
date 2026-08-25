@@ -1132,8 +1132,9 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // on top of the package's own `RepaintBoundary`, and
     // `addRepaintBoundaries: false` could not remove it.
     // `Visibility(maintainSize: true)` renders through a plain
-    // `RenderProxyBox` that only skips `paint` while hidden: layout and
-    // the measured extent are untouched, no layer is added, and it emits
+    // `RenderProxyBox` that skips `paint` while hidden (and drops the
+    // subtree from semantics, below): layout and the measured extent are
+    // untouched, no layer is added, and it emits
     // the `IgnorePointer` this hide needs (an invisible row must not be
     // hit-testable: while the drag rests in its own slot the preview
     // holds no offsets, the hidden copy is the only thing under its band,

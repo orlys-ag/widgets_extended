@@ -205,7 +205,8 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     // [createChild] rebuild the cache-region and sticky rows the next
     // layout reaches (see [_dirtyKeys]). NOT only the cache region:
     // sticky headers the cache region rejected are force-created too
-    // (render_sliver_tree.dart:2928-2934, :2952).
+    // (the sticky block's force-create measurement in
+    // `RenderSliverTree.performLayout`).
     if (_children.isEmpty) {
       return;
     }

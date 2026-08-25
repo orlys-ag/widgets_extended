@@ -10,8 +10,8 @@ regenerate rather than hand-edit.
 
 BEFORE trusting any file:line in a block, read the plan's section
 "Line citations are stale in the working tree". Items have landed
-without being committed, so most body citations into the files they
-touched now point at the wrong line. Re-derive by grepping the named
+since the blocks were written, so most body citations into the files
+they touched now point at the wrong line. Re-derive by grepping the named
 symbol. That section carries the measured per-file counts; they are
 deliberately not repeated here, so there is one number to maintain.
 
@@ -41,11 +41,8 @@ missing marker means the plan does not claim the work is done.
 Measured: 58 items in 34 units, being 7 coupled clusters plus 27 items
 with no chain. 18 chains in total, of which 2 require a single commit
 (chains 1 and 15), plus 4 adjacency pairs that constrain nothing but should
-not be worked in parallel. The plan creates 6 new test files.
-
-NEW means not yet in `git ls-files`. 1 of those 6 already exist on disk,
-written for items that have landed but are not committed:
-`reorder_row_layer_and_focus_test.dart`.
+not be worked in parallel. The open items propose 5 new test files
+(NEW: not yet in `git ls-files`).
 
 Landed so far: 34 implemented (H1, H2, H3, H4, H5, H6, L2, L6, L7, L13, L21, L24, L25, L27, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M16, M19, M20, M21, M22, M23); 1 partially implemented
 (L26). Everything else is open.
@@ -153,9 +150,7 @@ Ordering constraints:
 
 Adjacent to items outside this cluster (see the adjacency list): H5 with L26.
 
-New tests: `reorder_row_layer_and_focus_test.dart`.
-
-Existing tests touched: `audit_repro_h5_test.dart`, `caller_placed_handle_modes_test.dart`, `caller_placed_handle_test.dart`, `can_reorder_flip_mid_drag_test.dart`, `drag_backstop_deactivate_test.dart`, `drag_handle_audit_test.dart`, `drag_handle_hidden_test.dart`, `drag_proxy_indent_tracking_test.dart`, `drag_proxy_move_rebuild_test.dart`, `drag_proxy_test.dart`, `drag_subtree_hide_test.dart`, `drag_subtree_proxy_test.dart`, `external_cancel_drag_test.dart`, `hidden_row_hit_test.dart`, `policy_flip_preserves_row_state_test.dart`, `reorder_controller_disposed_swap_test.dart`, `reorder_controller_swap_mid_drag_test.dart`, `reorder_enabled_toggle_test.dart`, `repaint_boundary_test.dart`, `sliver_reorderable_tree_widget_test.dart`, `synced_reorder_test.dart`.
+Existing tests touched: `audit_repro_h5_test.dart`, `caller_placed_handle_modes_test.dart`, `caller_placed_handle_test.dart`, `can_reorder_flip_mid_drag_test.dart`, `drag_backstop_deactivate_test.dart`, `drag_handle_audit_test.dart`, `drag_handle_hidden_test.dart`, `drag_proxy_indent_tracking_test.dart`, `drag_proxy_move_rebuild_test.dart`, `drag_proxy_test.dart`, `drag_subtree_hide_test.dart`, `drag_subtree_proxy_test.dart`, `external_cancel_drag_test.dart`, `hidden_row_hit_test.dart`, `policy_flip_preserves_row_state_test.dart`, `reorder_controller_disposed_swap_test.dart`, `reorder_controller_swap_mid_drag_test.dart`, `reorder_enabled_toggle_test.dart`, `reorder_row_layer_and_focus_test.dart`, `repaint_boundary_test.dart`, `sliver_reorderable_tree_widget_test.dart`, `synced_reorder_test.dart`.
 
 ### Cluster 7: L21, M11
 
