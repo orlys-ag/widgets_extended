@@ -14139,11 +14139,12 @@ Enumerated cost, measured rather than estimated: 62 generic declarations in `lib
 **Status.** IMPLEMENTED 2026-08-24, landed with H4 as chain 15 requires, in
 ONE commit; the audit trail is shared with H4's Status. Edits 0 through 3
 landed as prescribed inside the merged branch scripts: the expandAll rebase
-with `?? defaultExtent` and the unmeasured-member flag clear (merged branch,
-`tree_controller.dart:4612-4640`), the collapseAll mirror with the
-compute-first write order (`:4880-4901`), edit 2 absorbed into H4's
-`_routeShownNodesToStandaloneEnters` carrying `expandCollapse`, and edit 3's
-second site at expand Path 1 (`:4077-4109`). The predicted breakage happened
+with `?? defaultExtent` and the flag clear (merged branch,
+`tree_controller.dart:4617-4643`; unconditional since the follow-up below), the
+collapseAll mirror with the compute-first write order (`:4882-4906`), edit 2
+absorbed into H4's `_routeShownNodesToStandaloneEnters` carrying
+`expandCollapse`, and edit 3's second site at expand Path 1 (`:4077-4110`;
+also unconditional now). The predicted breakage happened
 exactly as derived: `tree_controller_test.dart`'s expandAll-reversal test
 failed at 21.75 against greaterThan(28), and the prescribed pump-schedule
 repair (50 ms to 200 ms, comment included) landed in the same commit, along
@@ -14154,10 +14155,23 @@ red at the derived capped 21.0, so the threshold keeps its meaning.
 Audit trail: four passes on 2026-08-24, passes 3 and 4 consecutively clean;
 pass 1 found the three merged-branch citations drifted after later landings,
 pass 2 found the collapseAll mirror's range ending two lines before the writes
-it names. Recorded lead, out of scope and unverified here: the collapse-side
-captured `targetExtent` is written without setting `targetIsCaptured`, as the
-block prescribes, so a later `setFullExtent` re-target is not shielded from
-it.
+it names. Recorded lead, verified and fixed on 2026-08-24 in its own commit:
+the collapse-side captured `targetExtent` was written without setting
+`targetIsCaptured`, as the block prescribes, so `setFullExtent`'s re-target
+(`_animation_coordinator.dart:468-469`) overwrote the capture on the row's
+next differing measurement and the collapsing row popped up (135.47 px
+against the expected 42.33 in the repro). Fix: `targetIsCaptured = true`
+beside both captures (`collapse` Path 1, `tree_controller.dart:4334`; the
+collapseAll mirror, `:4906`), and the expand-side clears made unconditional
+(`:4110`, `:4643`), because a member arriving from a collapse reversal now
+carries the flag and its target there is the natural full reference. Repro
+`collapse_reversal_capture_flag_test.dart`: four cases, each ending with a
+160 px resize of a 100 px row mid-animation; cases 1 and 2 red on the
+unfixed code at the two collapse sites, cases 3 and 4 red under the
+collapse-side half of the fix alone (53.43 against 62.63, the stale-full
+regression that half would have introduced), all ten setup assertions red by
+their own mutation. Verification: `flutter analyze` 47; full suite 1171
+passed, 4 skipped.
 
 Legs (a) through (f) landed in `bulk_reentry_continuation_test.dart` with a
 new file-local off-cache harness shared by (d), (e1), (e2) and (f). Every

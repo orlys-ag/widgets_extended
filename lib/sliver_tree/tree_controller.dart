@@ -4094,20 +4094,20 @@ class TreeController<TKey, TData> extends ChangeNotifier {
       }
       final preReversalCurvedValue = existingGroup.curvedValue;
       for (final entry in existingGroup.members.entries) {
-        final measured = _fullExtentOf(entry.key);
-        final full = measured ?? defaultExtent;
+        final full = _fullExtentOf(entry.key) ?? defaultExtent;
         final currentExtent = entry.value.computeExtent(
           preReversalCurvedValue,
           full,
         );
         entry.value.startExtent = currentExtent;
         entry.value.targetExtent = full;
-        if (measured == null) {
-          // `full` is a GUESS, not a capture: leave setFullExtent free to
-          // re-target it on the first measurement (a captured flag would
-          // hold the default-extent terminus for the whole animation).
-          entry.value.targetIsCaptured = false;
-        }
+        // `full` is a natural reference (the measurement, or the default
+        // guess for an unmeasured row), not a capture: leave setFullExtent
+        // free to re-target it on a resize or on the first measurement.
+        // Unconditional, because the collapse-side reversals set the flag
+        // and this member may be arriving from one; a flag left set would
+        // hold a stale terminus for the whole animation.
+        entry.value.targetIsCaptured = false;
       }
       _anim.opGroups.runWithGroupDetached(key, (group) {
         group.controller.value = 0.0;
@@ -4327,6 +4327,11 @@ class TreeController<TKey, TData> extends ChangeNotifier {
         );
         entry.value.startExtent = 0.0;
         entry.value.targetExtent = currentExtent;
+        // `currentExtent` is a genuine capture: mark it so setFullExtent
+        // keeps it as the terminus when the row's measurement changes
+        // mid-collapse (a re-target onto the new full extent would pop
+        // the row up).
+        entry.value.targetIsCaptured = true;
         existingGroup.pendingRemoval.add(entry.key);
       }
       _anim.opGroups.runWithGroupDetached(key, (group) {
@@ -4627,18 +4632,15 @@ class TreeController<TKey, TData> extends ChangeNotifier {
           // returning full * preReversalCurvedValue, the member's true
           // painted extent, so the sentinel leaves the record here.
           for (final member in group.members.entries) {
-            final measured = _fullExtentOf(member.key);
-            final full = measured ?? defaultExtent;
+            final full = _fullExtentOf(member.key) ?? defaultExtent;
             member.value.startExtent = member.value.computeExtent(
               preReversalCurvedValue,
               full,
             );
             member.value.targetExtent = full;
-            if (measured == null) {
-              // `full` is a GUESS, not a capture: leave setFullExtent
-              // free to re-target it on the first measurement.
-              member.value.targetIsCaptured = false;
-            }
+            // A natural reference, not a capture: cleared unconditionally
+            // for the reason stated at expand Path 1.
+            member.value.targetIsCaptured = false;
           }
           _anim.opGroups.runWithGroupDetached(entry.key, (g) {
             g.controller.value = 0.0;
@@ -4887,18 +4889,21 @@ class TreeController<TKey, TData> extends ChangeNotifier {
             // COMPUTE FIRST, into a local, BEFORE either write:
             // computeExtent READS startExtent, so zeroing it first would
             // capture lerp(0, oldTarget, cv) instead of the pre-reversal
-            // painted extent. No targetIsCaptured write on this side:
-            // targetExtent IS a genuine capture here, which is what the
-            // flag exists to protect. This write is also what clears an
-            // incoming sentinel out of the record before the reset to 1.0
-            // could read it (a surviving sentinel would paint the whole
-            // default row for a frame).
+            // painted extent. targetExtent IS a genuine capture here,
+            // which is what targetIsCaptured exists to protect, so the
+            // flag is set beside it: without it, setFullExtent re-targets
+            // the member onto the row's next differing measurement and
+            // the collapsing row pops up. The targetExtent write is also
+            // what clears an incoming sentinel out of the record before
+            // the reset to 1.0 could read it (a surviving sentinel would
+            // paint the whole default row for a frame).
             final currentExtent = member.value.computeExtent(
               preReversalCurvedValue,
               _fullExtentOf(member.key) ?? defaultExtent,
             );
             member.value.startExtent = 0.0;
             member.value.targetExtent = currentExtent;
+            member.value.targetIsCaptured = true;
           }
           _anim.opGroups.runWithGroupDetached(entry.key, (g) {
             g.controller.value = 1.0;
