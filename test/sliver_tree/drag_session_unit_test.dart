@@ -497,6 +497,79 @@ void main() {
       expect(space.position, isNull);
       expect(space.sample(const Offset(0.0, 0.0)), isNull);
     });
+
+    // M25, mechanism (i): with no widget layer above the controller, the
+    // subscription must still follow a ScrollPosition swap, and the only
+    // hook a headless session has is its own sample.
+    testWidgets("bindScroll follows a ScrollPosition swap on the next sample", (
+      tester,
+    ) async {
+      final physics = ValueNotifier<ScrollPhysics>(
+        const ClampingScrollPhysics(),
+      );
+      addTearDown(physics.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<ScrollPhysics>(
+              valueListenable: physics,
+              builder: (context, value, child) {
+                return ListView(
+                  physics: value,
+                  children: [
+                    for (int i = 0; i < 30; i++)
+                      SizedBox(height: 50.0, child: Text("row $i")),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+      final space = PointerSpace<String>(
+        scrollable: scrollable,
+        renderPort: _FakeRenderPort(threeRows()),
+      );
+      var notifications = 0;
+      space.bindScroll(() => notifications++);
+      final before = scrollable.position;
+      before.jumpTo(10.0);
+      expect(
+        notifications,
+        1,
+        reason: "setup sanity: the listener sits on the current position",
+      );
+
+      physics.value = const NeverScrollableScrollPhysics();
+      await tester.pump();
+      final after = scrollable.position;
+      expect(
+        identical(before, after),
+        isFalse,
+        reason:
+            "setup sanity: a physics runtimeType change must swap the "
+            "position",
+      );
+
+      space.sample(const Offset(0.0, 0.0));
+      after.jumpTo(20.0);
+      expect(
+        notifications,
+        2,
+        reason:
+            "sample() must re-point the subscription at the live position; "
+            "a listener left on the swapped-out position never fires again",
+      );
+
+      space.unbindScroll();
+      after.jumpTo(30.0);
+      expect(
+        notifications,
+        2,
+        reason: "unbindScroll must detach from the live position",
+      );
+    });
   });
 
   group("DwellExpander fake-clock", () {

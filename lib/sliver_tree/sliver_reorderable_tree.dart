@@ -916,9 +916,18 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // this State's first dependency update (no drag can have started),
     // and same-controller notifications (draggedKey flips, indent
     // changes) never trip the identity check.
-    if (_isDraggingThisRow &&
-        !identical(scope!.reorderController, _reorder)) {
+    if (_isDraggingThisRow && !identical(scope!.reorderController, _reorder)) {
       _endOrphanedSessionAfterFrame();
+    }
+    // A ScrollPosition swap (physics runtimeType flip while dragging) is
+    // published through the scrollable's inherited scope, which this row
+    // depends on via the `Scrollable.maybeOf` in [_startDrag]. Re-point
+    // the session's subscription now, in the same build phase as the
+    // swap, instead of on the next pointer event. Reads [_reorder] BEFORE
+    // the re-cache below: the session belongs to the controller that
+    // started it.
+    if (_isDraggingThisRow) {
+      _reorder.notifyScrollableChanged();
     }
     _reorder = scope!.reorderController;
     _indentWidth = scope.indentWidth;
@@ -1387,6 +1396,11 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
   /// inner list.
   bool _startDrag(Offset globalPosition) {
     final renderPort = _findRenderPort(context);
+    // Load-bearing beyond the lookup: `Scrollable.maybeOf` registers this
+    // row as a dependent of the scrollable's inherited scope, which is what
+    // routes a mid-drag ScrollPosition swap to [didChangeDependencies]
+    // (pinned by drag_position_swap_test.dart). Caching the ScrollableState
+    // instead would silently kill that trigger.
     final scrollable = Scrollable.maybeOf(context);
     if (renderPort == null || scrollable == null) {
       return false;

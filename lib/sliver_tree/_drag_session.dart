@@ -4,11 +4,11 @@
 /// to live in `_drag_session_behaviors.dart`.
 ///
 /// [PointerSpace] is the ONLY component that touches the scrollable:
-/// every coordinate conversion and every liveness question goes through
-/// it, and its reads are NULLABLE. A null sample means the scrollable's
-/// `State` is unmounted, at which point even reading `.context` throws,
-/// so the nullability forces every consumer to handle the defunct case at
-/// the type level.
+/// every coordinate conversion, every liveness question and the scroll
+/// subscription go through it, and its reads are NULLABLE. A null sample
+/// means the scrollable's `State` is unmounted, at which point even
+/// reading `.context` throws, so the nullability forces every consumer to
+/// handle the defunct case at the type level.
 ///
 /// Class names are public despite the underscore-prefixed file: Dart
 /// makes an underscore-prefixed CLASS name library-private, which would
@@ -73,10 +73,63 @@ class PointerSpace<TKey> {
     return _scrollable.position;
   }
 
+  VoidCallback? _scrollListener;
+  ScrollPosition? _subscribedPosition;
+
+  /// Subscribes [listener] to the scrollable's CURRENT position and keeps
+  /// the subscription glued to it. `ScrollableState` swaps its
+  /// `ScrollPosition` whenever the physics runtimeType changes
+  /// (`_shouldUpdatePosition`, applied by `_updatePosition`, in
+  /// scrollable.dart), so the identity is re-checked on every [sample]
+  /// and on every [syncScrollSubscription] call; a listener left on the
+  /// dead position would never fire again. [unbindScroll] detaches.
+  void bindScroll(VoidCallback listener) {
+    _scrollListener = listener;
+    syncScrollSubscription();
+  }
+
+  /// Re-points the subscription at the live position when it has been
+  /// swapped. Idempotent and allocation-free: on the no-swap path it
+  /// returns after one identity compare. A null live position (unmounted
+  /// scrollable) detaches without re-attaching.
+  void syncScrollSubscription() {
+    final listener = _scrollListener;
+    if (listener == null) {
+      return;
+    }
+    final live = position;
+    if (identical(live, _subscribedPosition)) {
+      return;
+    }
+    // Safe on a position the scrollable has since disposed and during
+    // that position's own dispatch: ChangeNotifier.removeListener
+    // documents both.
+    _subscribedPosition?.removeListener(listener);
+    _subscribedPosition = live;
+    live?.addListener(listener);
+  }
+
+  /// Detaches the listener installed by [bindScroll], if any.
+  void unbindScroll() {
+    final listener = _scrollListener;
+    if (listener != null) {
+      _subscribedPosition?.removeListener(listener);
+    }
+    _scrollListener = null;
+    _subscribedPosition = null;
+  }
+
   /// Converts [globalPointer] into every coordinate the drag pipeline
   /// needs, or `null` when the scrollable is unmounted (or its viewport
   /// box is detached mid-teardown).
+  ///
+  /// Every path that resolves a target samples first, so this is also the
+  /// correctness floor for the scroll subscription: a swapped position is
+  /// re-bound here even with no widget layer above the controller (the
+  /// widget's `didChangeDependencies` edge trigger only removes the
+  /// latency until the next event).
   PointerSample? sample(Offset globalPointer) {
+    syncScrollSubscription();
     if (!_scrollable.mounted) {
       return null;
     }
@@ -312,27 +365,25 @@ class DragSession<TKey> {
   /// can re-evaluate without extra callback plumbing.
   Offset pointerGlobal;
 
-  /// The scroll position this session subscribed to and the listener it
-  /// subscribed with. Held so teardown detaches the SAME pair even if
-  /// `scrollable.position` is swapped mid-drag.
-  ScrollPosition? _subscribedPosition;
-  VoidCallback? _scrollListener;
-
   /// The slot the last resolution landed on, and the slot a commit uses.
   /// Null when no row sits under the probe, but deliberately HELD when
   /// the scrollable is gone, since [DragProbe.resolveTarget] returns the
   /// previous target rather than dropping it.
   TreeDropTarget<TKey>? currentTarget;
 
-  /// Subscribes [listener] to [position] for the session's lifetime:
-  /// wheel/trackpad/second-finger scrolls move content under a
-  /// stationary pointer, and the autoscroll ticker's own `jumpTo`
-  /// notifies this same listener, giving one re-resolution path for every
-  /// scroll source. [detachAll] unsubscribes.
-  void subscribeScroll(ScrollPosition position, VoidCallback listener) {
-    _subscribedPosition = position;
-    _scrollListener = listener;
-    position.addListener(listener);
+  /// Installs the session's scroll listener through [PointerSpace], the
+  /// one owner of the subscription: wheel/trackpad/second-finger scrolls
+  /// move content under a stationary pointer, and the autoscroll ticker's
+  /// own `jumpTo` notifies this same listener, giving one re-resolution
+  /// path for every scroll source. [detachAll] unsubscribes.
+  void bindScroll(VoidCallback listener) {
+    pointerSpace.bindScroll(listener);
+  }
+
+  /// Re-points the scroll subscription at the scrollable's current
+  /// position (see [PointerSpace.syncScrollSubscription]).
+  void resyncScroll() {
+    pointerSpace.syncScrollSubscription();
   }
 
   /// THE choreography site: one [PointerSpace.sample] per event (the
@@ -373,12 +424,7 @@ class DragSession<TKey> {
   /// controller-owned and nulled by the caller.
   void detachAll(SessionExit exit) {
     autoScroller.detach(exit);
-    final listener = _scrollListener;
-    if (listener != null) {
-      _subscribedPosition?.removeListener(listener);
-    }
-    _subscribedPosition = null;
-    _scrollListener = null;
+    pointerSpace.unbindScroll();
     dwell.detach(exit);
     makeRoomDriver?.detach(exit);
     settler?.detach(exit);

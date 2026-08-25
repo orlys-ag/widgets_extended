@@ -120,6 +120,15 @@ set K times (O(K * S)); it is built once per parent at batch exit.
 its in-flight subtree, matching `remove(animate: false)` followed by a fresh
 add. Pass `preservePendingSubtreeState: true` to restore the subtree (the
 declarative sync layers already do).
+- Fix: a drag whose scrollable swapped its `ScrollPosition` mid-drag (the
+`physics: isDragging ? const NeverScrollableScrollPhysics() : ...` pattern
+does this on the first drag notification) stopped re-resolving the drop target
+on external scrolls, because the session's listener stayed on the old
+position. The subscription now follows the live position on every pointer
+sample and autoscroll tick, and the new
+`TreeReorderController.notifyScrollableChanged` (called by
+`SliverReorderableTree` from the dragged row's `didChangeDependencies`)
+re-binds it in the swap's own frame.
 
 ## 0.0.34
 

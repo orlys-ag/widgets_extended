@@ -10586,6 +10586,39 @@ matching the two sub-fixes.
 
 ### M25. Scroll subscription bound to the `ScrollPosition` captured at `startDrag`
 
+**Status.** IMPLEMENTED 2026-08-25, own commit. Both mechanisms landed as the
+Decision prescribes. `PointerSpace` owns the subscription: `bindScroll`
+(`_drag_session.dart:86`), `syncScrollSubscription` (`:95`, one identity
+compare on the no-swap path) and `unbindScroll` (`:113`), and `sample`
+re-validates first (`:132`); `DragSession` forwards
+`bindScroll`/`resyncScroll` and its single teardown site calls
+`pointerSpace.unbindScroll()` (`:427`). `startDrag` subscribes through
+`session.bindScroll(_onScrollPositionChanged)`
+(`tree_reorder_controller.dart:375`), which removes the controller's last
+`scrollable.position` read (grep: zero hits); `notifyScrollableChanged`
+(`:480`) is the public edge trigger, called from
+`_ReorderableRowState.didChangeDependencies` after the controller-swap
+backstop and before the re-cache (`sliver_reorderable_tree.dart:930`), with
+the `Scrollable.maybeOf` in `_startDrag` annotated as load-bearing (`:1399`).
+One correction to this block's test design, measured: its scripted sequence
+(physics flipped on the drag-start notification, then a pointer move, then
+`jumpTo`) does NOT isolate mechanism (2), because the move after the flip is a
+pointer sample and mechanism (i) re-binds there; with the widget call removed
+that case stays green. The repro therefore adds a case in which the flip lands
+AFTER the last pointer event and an external scroll follows with the finger at
+rest, which is red on unfixed code and red again with only the widget call
+removed: the mechanism-(2) pin this block wanted. Repro
+`drag_position_swap_test.dart` (the textbook pattern, the stable-physics
+control, the swap-after-rest case) plus the headless case in
+`drag_session_unit_test.dart` (bind, swap, sample, notified; unbind, silent).
+Unfixed reds: cases 1 and 3 at `r15` against a target stuck at `r5`. Every
+assertion shown red by its own mutation (13 mutations: the widget call
+removed, the sample re-validation removed, `unbindScroll` not detaching, the
+`bindScroll` call removed, a short press, the listener not wired, the pointer
+at y=225 in each case, a pre-drag flip in the control, no flip in case 3, no
+first `jumpTo`, an unchanged physics type). Verification: `flutter analyze`
+47; full suite 1175 passed, 4 skipped, the block's Risk suites among them.
+
 **Finding.** `startDrag` subscribes the session to the position captured at
 that instant: `session.subscribeScroll(scrollable.position, _onScrollPositionChanged)`
 (`tree_reorder_controller.dart:375`), stored on the session at

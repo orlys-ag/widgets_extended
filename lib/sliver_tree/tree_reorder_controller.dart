@@ -372,7 +372,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     // evict the row, its `Drag`'s end/cancel would never fire, and the
     // session (plus the autoscroll ticker) would run forever.
     renderPort.pinNode(key);
-    session.subscribeScroll(scrollable.position, _onScrollPositionChanged);
+    session.bindScroll(_onScrollPositionChanged);
     _pointerPosition.value = pointerGlobal;
     // One choreography site: probe + resolver + every behavior. The
     // make-room gap of a session born over a valid slot opens here, and
@@ -462,6 +462,23 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     session.pointerGlobal = pointerGlobal;
     _pointerPosition.value = pointerGlobal;
     _resolveAndNotify(session);
+  }
+
+  /// Re-points the live drag session's scroll subscription at the
+  /// scrollable's current `ScrollPosition`.
+  ///
+  /// `ScrollableState` swaps its position when the physics runtimeType
+  /// changes (the `physics: isDragging ? const NeverScrollableScrollPhysics()
+  /// : ...` pattern does this on the first drag notification) and
+  /// publishes the swap through its inherited scope, so call this from
+  /// `didChangeDependencies` in any widget that resolved the scrollable
+  /// with `Scrollable.of`/`maybeOf`. Optional for correctness (the session
+  /// also re-validates the position on every pointer sample and autoscroll
+  /// tick); it removes the latency between the swap and the next pointer
+  /// event, during which an external scroll would leave the target stale.
+  /// A no-op without a live session. [SliverReorderableTree] calls it.
+  void notifyScrollableChanged() {
+    _session?.resyncScroll();
   }
 
   /// Commits the drop: mutates [treeController] (via [TreeController.moveNode],
