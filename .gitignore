@@ -29,8 +29,16 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
-CLAUDE.md
-AGENTS.md
 examples
-/plans
+
+# The agent-instruction layer is shared with the team: CLAUDE.md, the
+# AGENTS.md it imports, and the audit method those two point at.
+#
+# Working plans stay local. `/plans/*` rather than `/plans` is load-bearing:
+# git cannot re-include a file whose parent DIRECTORY is excluded, so the two
+# negations below only work when the directory itself stays un-ignored and its
+# contents are excluded instead.
+/plans/*
+!/plans/AUDIT-METHOD.md
+!/plans/check_citations.py
 /doc
