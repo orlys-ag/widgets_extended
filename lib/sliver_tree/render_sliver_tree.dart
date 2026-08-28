@@ -619,6 +619,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   @visibleForTesting
   final Set<TKey> debugLastPaintedStickyKeys = <TKey>{};
 
+  /// The band each key in [debugLastPaintedStickyKeys] was painted in, in
+  /// sliver PAINT space (NOT offset by the paint `offset`), after Pass B's
+  /// top and bottom cuts.
+  ///
+  /// Same contract and lifetime as [debugLastPaintedStickyKeys], written
+  /// and cleared beside it, and key-consistent with it by construction. A
+  /// test MUST therefore gate every read on that set and MUST NOT
+  /// non-null-deref a key merely because [debugStickyHeaders] lists it,
+  /// the rule [debugLastPhantomGhostPaint] states above.
+  @visibleForTesting
+  final Map<TKey, Rect> debugLastPaintedStickyBands = <TKey, Rect>{};
+
   /// Grows all nid-indexed layout arrays to match the controller's current
   /// nid capacity. Doubles on each realloc so amortized growth is O(1)
   /// per node insertion.
@@ -3423,10 +3435,17 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     for (final sticky in _sticky.headers) {
       final stickyBottom = sticky.pinnedY + sticky.extent;
       if (stickyBottom > remainingPaintExtent) {
-        // This header would extend past our paint budget and overlap the
-        // next sliver. We cannot relocate it here (pinnedY is final), but
-        // flagging visual overflow ensures the viewport clips us to
-        // paintExtent so it doesn't bleed through.
+        // This header wants more than our paint budget. We cannot relocate
+        // it here (pinnedY is final), so flag visual overflow.
+        //
+        // What that flag does NOT do is bound us to `paintExtent`: the
+        // viewport's clip is to its OWN rect (`Offset.zero & size` in
+        // `RenderViewportBase.paint`), not to any sliver's paint extent, so
+        // it can never stop one sliver painting into a neighbour's band.
+        // The bleed into the next sliver is prevented by Pass B's
+        // `bottomCut` clamp against `paintExtent`, which is unconditional;
+        // this flag only decides whether the viewport clips at its own
+        // edges.
         stickyInflationClamped = true;
       }
       if (stickyBottom > paintExtent) paintExtent = stickyBottom;
@@ -3772,6 +3791,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     assert(() {
       debugLastPhantomGhostPaint.clear();
       debugLastPaintedStickyKeys.clear();
+      debugLastPaintedStickyBands.clear();
       return true;
     }());
     if (geometry == null || geometry!.paintExtent == 0) return;
@@ -4212,39 +4232,70 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
       // Don't paint a header that has been pushed entirely past the sliver's
       // paint region (e.g. by a tiny remainingPaintExtent near the bottom).
-      if (sticky.pinnedY >= paintExtent) continue;
+      if (sticky.pinnedY >= paintExtent) {
+        continue;
+      }
 
-      // Clip to whichever is smaller: the header's natural extent, or the
-      // remaining paint region. Without this clamp the header would spill
-      // into the next sliver when pinnedY + extent > paintExtent.
-      final clippedExtent = math.min(
+      // The header's visible band inside the sliver's paint region
+      // [0, paintExtent), in the child's local coordinates. A retiring
+      // header slides up through negative pinnedY (see
+      // `_sticky_header_computer.dart`), and the sliver must not paint
+      // above its own origin: with no overflow declared the viewport
+      // pushes no clip, and even when it does, the region above this
+      // sliver belongs to the preceding one.
+      final double topCut = sticky.pinnedY < 0.0 ? -sticky.pinnedY : 0.0;
+      // Bottom bound: the header's natural extent, or the remaining paint
+      // region. Without this the header would spill into the next sliver
+      // when pinnedY + extent > paintExtent.
+      final double bottomCut = math.min(
         sticky.extent,
         paintExtent - sticky.pinnedY,
       );
-      if (clippedExtent <= 0) continue;
+      // For pinnedY >= 0 this is the old `clippedExtent <= 0`; for
+      // pinnedY < 0 it reduces to the probe's own retirement gate. It
+      // MUST NOT clamp to `child.size.height`: that drops the key from
+      // `debugLastPaintedStickyKeys`, which `sticky_root_diff_repro_test`
+      // asserts is never empty mid-diff.
+      if (bottomCut <= topCut) {
+        continue;
+      }
 
       assert(() {
         debugLastPaintedStickyKeys.add(sticky.nodeId);
+        debugLastPaintedStickyBands[sticky.nodeId] = Rect.fromLTRB(
+          sticky.indent,
+          sticky.pinnedY + topCut,
+          sticky.indent + child.size.width,
+          sticky.pinnedY + math.min(bottomCut, child.size.height),
+        );
         return true;
       }());
 
       final paintOffset = offset + Offset(sticky.indent, sticky.pinnedY);
-      if (clippedExtent >= child.size.height) {
-        // L25.1: the clip cannot cut anything (not clamped by the paint
-        // region, not mid-extent-animation), so skip the push; with
-        // RepaintBoundary rows it would allocate a ClipRectLayer per
-        // header per paint. Compared against `child.size.height`, not
-        // `sticky.extent`: the two diverge while the header animates,
-        // and the clip is load-bearing there. Deliberate visual change,
-        // recorded in the changelog: a child that paints outside its box
-        // now shows that overflow while pinned, as it already does in
-        // flow.
+      if (topCut <= 0.0 && bottomCut >= child.size.height) {
+        // L25.1: the clip cannot cut anything (not pushed up past the
+        // origin, not clamped by the paint region, not
+        // mid-extent-animation), so skip the push; with RepaintBoundary
+        // rows it would allocate a ClipRectLayer per header per paint.
+        // The three conditions are the three ways the band can be
+        // narrower than the child, and the `topCut` one is why a
+        // retiring header takes the clipped arm.
+        //
+        // Compared against `child.size.height`, not `sticky.extent`: the
+        // two diverge while the header animates, and the clip is
+        // load-bearing there. Deliberate visual change, recorded in the
+        // changelog: a child that paints outside its box now shows that
+        // overflow while pinned, as it already does in flow. That still
+        // holds for a SETTLED header, which is the case it was written
+        // about; mid-push-up the top of the overflow is now cut at the
+        // sliver's origin, which is what the viewport clip already did
+        // whenever it happened to be active.
         context.paintChild(child, paintOffset);
       } else {
         context.pushClipRect(
           needsCompositing,
           paintOffset,
-          Rect.fromLTWH(0, 0, child.size.width, clippedExtent),
+          Rect.fromLTRB(0, topCut, child.size.width, bottomCut),
           (context, offset) {
             context.paintChild(child, offset);
           },

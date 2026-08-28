@@ -1,3 +1,14 @@
+## Unreleased
+
+- Fix: a sticky header retiring by push-up painted above the tree sliver's own
+paint origin, with no clip. In a tree short enough to fit its viewport the
+sliver declares no visual overflow, so the viewport pushes no clip either and
+the header was drawn over whatever sat above the scroll view; with a sliver
+above the tree it was drawn over that sliver even when the viewport did clip.
+The header is now clipped to the sliver's paint region at the top as it already
+was at the bottom. The 0.0.35 no-clip fast path is unchanged for settled
+headers; the clip appears only while a header slides up out of the band.
+
 ## 0.0.35
 
 - **BREAKING** `AnimationState` gains a required `family` field
