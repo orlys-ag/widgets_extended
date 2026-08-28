@@ -1,7 +1,7 @@
 name: widgets_extended
 description: "Collection of rich utility widgets for common Flutter UI needs."
 repository: https://github.com/orlys-ag/widgets_extended
-version: 0.0.35
+version: 0.0.36
 
 environment:
   sdk: ^3.11.4
