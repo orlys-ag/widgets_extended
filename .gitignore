@@ -41,4 +41,13 @@ examples
 /plans/*
 !/plans/AUDIT-METHOD.md
 !/plans/check_citations.py
-/doc
+# Same shape as /plans above: the directory stays un-ignored so the
+# negation can reach inside it. Agent guidance under doc/agents/ is
+# shared; working plan drafts in doc/ stay local.
+/doc/*
+!/doc/agents/
+!/doc/synced_sliver_tree_tutorial.md
+
+# Per-developer Claude Code overrides. The shared config is
+# .claude/settings.json, which IS tracked.
+.claude/settings.local.json
