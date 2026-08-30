@@ -199,8 +199,31 @@ class RenderTrialViewport extends RenderTwoDimensionalViewport {
   /// Cap from section 11. Exceeding it is a defect, not a slow path.
   static const int kMaxPasses = 5;
 
+  /// Vicinities already obtained during the CURRENT `layoutChildSequence`.
+  ///
+  /// This set is what makes a second placement pass legal.
+  /// `buildOrObtainChildFor` is not idempotent within one pass: for an
+  /// already-built vicinity it routes to `_reuseChild`, which does
+  /// `_vicinityToChild.remove(vicinity)` and asserts the element was still
+  /// present (`widgets/two_dimensional_viewport.dart:373-378`). It is a
+  /// MOVE from the old child map to the new one, so calling it twice for
+  /// one vicinity in one pass trips that assert. The first version of this
+  /// trial did exactly that and failed; see the commit that precedes this
+  /// one.
+  final Set<ChildVicinity> _obtainedThisLayout = <ChildVicinity>{};
+
+  /// Obtains a child at most once per `layoutChildSequence`, reading it
+  /// back directly on any later request in the same call.
+  RenderBox? _obtainOnce(ChildVicinity vicinity) {
+    if (_obtainedThisLayout.add(vicinity)) {
+      return buildOrObtainChildFor(vicinity);
+    }
+    return getChildFor(vicinity);
+  }
+
   @override
   void layoutChildSequence() {
+    _obtainedThisLayout.clear();
     var passes = 0;
     while (true) {
       passes++;
@@ -218,6 +241,13 @@ class RenderTrialViewport extends RenderTwoDimensionalViewport {
       "Correction loop hit its $kMaxPasses-pass cap without settling.",
     );
 
+    // Final positioning sweep over EVERY vicinity obtained during this
+    // call, not just the last pass's window. A correction moves the window,
+    // so a child obtained by pass 1 can fall outside pass 2's range while
+    // still being active for the frame; without this it would paint at an
+    // offset computed against a superseded scroll position.
+    _repositionAll();
+
     verticalOffset.applyContentDimensions(
       0.0,
       math.max(0.0, axis.totalExtent - viewportDimension.height),
@@ -226,31 +256,42 @@ class RenderTrialViewport extends RenderTwoDimensionalViewport {
   }
 
   /// One placement pass. Builds and lays out the tracks intersecting the
-  /// viewport plus a leading cache band, records any extent it discovers,
-  /// and returns the scroll correction needed to hold the anchor still.
+  /// viewport, records any extent it discovers, and returns the scroll
+  /// correction needed to hold the anchor still.
   ///
-  /// The anchor is the first track intersecting the viewport, and the
-  /// quantity held constant is its painted y. If measuring a track BEFORE
-  /// the anchor changed the anchor's structural offset by `delta`, then
-  /// holding painted y constant requires `pixels` to move by the same
-  /// `delta`, which is what is returned.
+  /// THE ANCHOR IS THE FIRST ALREADY-MEASURED TRACK in the window, not the
+  /// first visible one. That distinction is the whole correction. Scrolling
+  /// up reveals tracks that have never been measured; measuring them is
+  /// what shifts everything below. Anchoring on the first VISIBLE track
+  /// would anchor on one of the newly revealed ones, whose own offset
+  /// depends only on tracks before it that this pass never touched, so the
+  /// computed correction would always be zero and the content already on
+  /// screen would jump. Anchoring on the first track whose extent was
+  /// already known measures exactly the displacement the user must not see.
   double _placeAndMeasure() {
     final scroll = verticalOffset.pixels;
-    final anchorTrack = axis.trackAt(scroll);
-    final anchorOffsetBefore = axis.offsetOf(anchorTrack);
-
-    // A leading cache band is what pulls not-yet-measured tracks ABOVE the
-    // anchor into this pass. Without it nothing before the anchor is ever
-    // measured and no correction can arise, which would make the trial
-    // assert on a path the real design does not have.
-    final leadingTrack = math.max(0, axis.trackAt(math.max(0.0, scroll - 250.0)));
+    final firstTrack = axis.trackAt(scroll);
     final bottom = scroll + viewportDimension.height;
 
-    for (var track = leadingTrack; track < kTrackCount; track++) {
+    var anchorTrack = -1;
+    for (var track = firstTrack; track < kTrackCount; track++) {
       if (axis.offsetOf(track) >= bottom) {
         break;
       }
-      final child = buildOrObtainChildFor(ChildVicinity(xIndex: 0, yIndex: track));
+      if (axis.isMeasured(track)) {
+        anchorTrack = track;
+        break;
+      }
+    }
+    final anchorOffsetBefore = anchorTrack < 0
+        ? 0.0
+        : axis.offsetOf(anchorTrack);
+
+    for (var track = firstTrack; track < kTrackCount; track++) {
+      if (axis.offsetOf(track) >= bottom) {
+        break;
+      }
+      final child = _obtainOnce(ChildVicinity(xIndex: 0, yIndex: track));
       if (child == null) {
         continue;
       }
@@ -261,18 +302,32 @@ class RenderTrialViewport extends RenderTwoDimensionalViewport {
         ),
         parentUsesSize: true,
       );
-      // MEASUREMENT. This is the step that can invalidate offsets already
-      // used earlier in this same pass.
+      // MEASUREMENT. The step that can invalidate offsets already used.
       if (!axis.isMeasured(track)) {
         axis.record(track, child.size.height);
       }
-      parentDataOf(child).layoutOffset = Offset(
-        0.0,
-        axis.offsetOf(track) - scroll,
-      );
     }
 
+    if (anchorTrack < 0) {
+      return 0.0;
+    }
     return axis.offsetOf(anchorTrack) - anchorOffsetBefore;
+  }
+
+  /// Writes every obtained child's `layoutOffset` from the settled axis
+  /// state and the settled scroll position.
+  void _repositionAll() {
+    final scroll = verticalOffset.pixels;
+    for (final vicinity in _obtainedThisLayout) {
+      final child = getChildFor(vicinity);
+      if (child == null) {
+        continue;
+      }
+      parentDataOf(child).layoutOffset = Offset(
+        0.0,
+        axis.offsetOf(vicinity.yIndex) - scroll,
+      );
+    }
   }
 }
 
@@ -363,7 +418,7 @@ int topmostMountedTrack(WidgetTester tester) {
 }
 
 void main() {
-  const double scrollUpBy = 200.0;
+  const double scrollUpBy = 300.0;
   const double startOffset = 20000.0;
 
   testWidgets("SETUP SANITY: the scroll script measures tracks above the "
@@ -490,6 +545,14 @@ void main() {
       worst = math.max(worst, render.debugLastPassCount);
     }
 
+    expect(
+      worst,
+      greaterThanOrEqualTo(2),
+      reason: "At least one jump in this script must actually need a "
+          "correction. If every layout settled in one pass, the cap "
+          "assertion below would hold vacuously on a viewport that never "
+          "corrects anything.",
+    );
     expect(
       worst,
       lessThan(RenderTrialViewport.kMaxPasses),
