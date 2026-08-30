@@ -133,12 +133,40 @@ the diff). Auditing without it reliably produces a plan that reads correct and
 fails on contact.
 
 Plan citations are bare `path:line` and are verified by a generated ledger, not
-by eye. After any change under `lib/`, or any edit to a plan:
+by eye. The ledger records the TEXT at each cited line, so `--update` re-records
+whatever currently sits at the line numbers the plan states. It does not follow
+a construct that moved. That makes the order matter, and it differs by what
+changed:
 
 ```bash
-python plans/check_citations.py plans/<plan>.md --update   # record
-python plans/check_citations.py plans/<plan>.md            # verify, exits non-zero on a miss
+python plans/check_citations.py plans/<plan>.md            # verify, non-zero on a miss
+python plans/check_citations.py plans/<plan>.md --repoint  # fix lines that moved
+python plans/check_citations.py plans/<plan>.md --update   # (re)record
 ```
+
+- **After any change under `lib/`**: `--repoint`. Your edit shifted every
+  citation below it, and almost all of that is a stale NUMBER against text that
+  still exists. `--repoint` rewrites those line numbers to where the recorded
+  text actually is, and moves a citation ONLY when that text is found at exactly
+  one place. It backs up the plan and the ledger first.
+- **After adding citations to a plan**: `--update`, then verify.
+
+What `--repoint` deliberately leaves behind is the point of the whole tool.
+A citation whose recorded text is now GONE, or now appears at several lines,
+keeps its old entry and keeps reporting as drifted. Those are the ones where
+the plan may actually be wrong, and they need a human.
+
+Never reach for `--update` to make a failing check pass. It re-records whatever
+currently sits at the line numbers the plan states, so on drifted code it
+anchors every citation to the wrong text and then reports a clean ledger,
+including the ones `--repoint` refused to touch. That is unrecoverable without
+going back through git history for the tree the ledger was recorded against.
+
+A LANDED plan is a different case: its citations describe a tree that no longer
+exists, so drift is expected forever and checking it is noise. Retire it by
+renaming the ledger to `<plan>.md.citations.tsv.retired`, and say in the plan
+which commit its citations are against. The `.retired` suffix is what stops
+both the checker and the Stop hook from globbing it.
 
 Spell each cited path one way: repo files by bare filename (`render_sliver_tree.dart:4215`),
 Flutter SDK files as `<subdir>/<file>.dart:NNN` (`rendering/viewport.dart:973`). A

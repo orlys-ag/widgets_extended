@@ -47,10 +47,13 @@ each unswept, and work down it. A usable default set:
 3. Consumers and call sites (everything that must change, enumerated)
 4. Contracts with dependent or dependency documents
 5. The test list as a deliverable (is each test writable, will it fail
-   on unfixed code, does it follow house conventions)
+   on unfixed code, does it follow house conventions, and is each new
+   test seam justified against an existing one)
 6. Citations and claims (section 4 below)
-7. House-convention compliance (CLAUDE.md: style, testing patterns,
-   naming, debug-counter conventions)
+7. House-convention compliance (`AGENTS.md` for style and the
+   verified-claims rules, `doc/agents/testing-patterns.md` for test
+   conventions and debug counters, `doc/agents/sliver-tree-architecture.md`
+   for module contracts)
 8. Degradation and failure paths (what happens when a precondition is
    not met)
 9. Lifecycle and disposal (creation, teardown, and every site that
@@ -155,6 +158,18 @@ clauses, so it would have been unnameable by app code.
 If the change touches multiple widgets, files, or public names, say what
 lands together and what can follow, and call out any grouping that is
 forced by correctness rather than convenience.
+
+Each step also names the test that goes green when it lands. A step that
+cannot name one is marked NOT INDEPENDENTLY VERIFIABLE with the reason,
+which is a real category here: a paint change and its hit-test mirror
+must land together or a row is unclickable for a commit. The point is
+not to forbid the grouping, it is to make an unexamined one visible.
+Without this rule a plan spanning controller, render object and element
+splits by layer, and nothing is testable until the last step lands.
+
+Where a plan contains a pure restructuring that makes the behaviour
+change small, it lands first and in its own commit, so the behaviour
+diff is reviewable on its own.
 
 ---
 

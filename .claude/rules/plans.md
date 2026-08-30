@@ -53,16 +53,29 @@ is the signal.
   it lives, whether it is exported. This package exports through explicit
   `show` clauses, so an undeclared symbol can be unnameable by app code.
 - **State the landing order** when the work spans layers, and call out any
-  grouping forced by correctness rather than convenience.
+  grouping forced by correctness rather than convenience. Each step names the
+  test that goes green when it lands, or is marked NOT INDEPENDENTLY VERIFIABLE
+  with the reason. Pure restructuring lands first, in its own commit.
+- **Justify a new test seam** against an existing one before adding a `debug*`
+  counter or a `@visibleForTesting` member.
 
 ## Citations
 
 Bare `path:line`, verified by a generated ledger, never by eye:
 
 ```bash
-python plans/check_citations.py plans/<plan>.md --update   # record
 python plans/check_citations.py plans/<plan>.md            # verify
+python plans/check_citations.py plans/<plan>.md --repoint  # fix lines that moved
+python plans/check_citations.py plans/<plan>.md --update   # (re)record
 ```
+
+**The rule is normative and it lives in `AGENTS.md` ("Plans and audits").**
+After changing `lib/`, run `--repoint`: it rewrites the line numbers whose
+recorded text it can find at exactly one place, and leaves the rest reporting
+as drifted, because those are where the plan may be wrong. Never run `--update`
+to make a failing check pass; it anchors every citation to whatever moved into
+place and then reports itself clean. Retire a landed plan's ledger by renaming
+it to `.citations.tsv.retired` rather than letting it drift forever.
 
 The ledger is derived: regenerate it, never hand-edit it. Repo files are cited
 by bare filename, SDK files as `<subdir>/<file>.dart:NNN`. Spell each path one
