@@ -12,8 +12,9 @@ A Flutter package (`widgets_extended`) providing rich utility widgets. Two modul
 
 - **sliver_tree**: a high-performance sliver-based tree widget with animated expand/collapse, FLIP reorder slides, node diffing, drag-and-drop reordering, and sticky headers.
 - **sectioned_sliver_list**: a sectioned list (sections + items) built on top of the sliver_tree stack (`SectionedListController` wraps a `TreeController` + `TreeSyncController` with section/item-typed keys).
+- **board**: a two-axis lattice viewport built on `RenderTwoDimensionalViewport`, with spanning items, overlap lanes, animated enter/exit and slides, drag-and-drop moves and resizes, cell and range selection, and frozen tracks.
 
-The barrel file `lib/widgets_extended.dart` re-exports both modules.
+The barrel file `lib/widgets_extended.dart` re-exports all three modules.
 
 ## Commands
 
@@ -64,13 +65,14 @@ Prefer running the check to reasoning toward the answer. A grep, a test run, or 
 
 ## Guidance map
 
-Loaded on demand. Claude Code also loads the first two automatically
+Loaded on demand. Claude Code also loads the first three automatically
 via `.claude/rules/`, scoped to the paths they govern; other agent
 tools should read them when the When column applies.
 
 | Read | When |
 |---|---|
 | [sliver_tree architecture](doc/agents/sliver-tree-architecture.md) | Editing `lib/sliver_tree/**` or `lib/sectioned_sliver_list/**` |
+| [board architecture](doc/agents/board-architecture.md) | Editing `lib/board/**` |
 | [Testing patterns](doc/agents/testing-patterns.md) | Writing or changing tests under `test/**` |
 | [Audit method](plans/AUDIT-METHOD.md) | Writing or auditing a plan in `plans/` |
 | [Feature workflow contracts](doc/agents/feature-workflow-contracts.md) | Producing or consuming a workflow plan or checklist |
@@ -129,6 +131,21 @@ What `--repoint` deliberately leaves behind is the point of the whole tool.
 A citation whose recorded text is now GONE, or now appears at several lines,
 keeps its old entry and keeps reporting as drifted. Those are the ones where
 the plan may actually be wrong, and they need a human.
+
+`--repoint` also rewrites LINE ENDINGS on Windows, and this is a property of
+the tool, not of any plan it touches. It reads with `read_text` and writes with
+`write_text`: the plan at `plans/check_citations.py:258`, the plan's `.bak` at
+`plans/check_citations.py:253`, the ledger's `.bak` at
+`plans/check_citations.py:254`, the rewritten ledger at
+`plans/check_citations.py:270`. `write_text` opens with the default
+`newline=None`, which translates every `\n` to `os.linesep`, so on Windows an
+LF plan comes back CRLF wholesale and the backup written first gets the same
+treatment, which means that backup is not evidence of the original bytes. The
+agent-written plans in this repository are LF; the CRLF ones are the ones the
+checker has repointed. Put the file back to LF after a repoint, and if a pass
+rewrites a plan with python, write with `newline=""` and check
+`open(p, 'rb').read().count(b'\r\n')` against a sibling document before and
+after.
 
 Never reach for `--update` to make a failing check pass. It re-records whatever
 currently sits at the line numbers the plan states, so on drifted code it

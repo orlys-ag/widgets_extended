@@ -87,9 +87,18 @@ Optional, appended later:
 
 | Heading | Slug |
 |---|---|
+| `Audit log` | `audit-log` |
 | `Round N Revision` | `round-2-revision` |
 | `Trial Log` | `trial-log` |
 | `Approval` | `approval` |
+
+The first of those is not an ordinary section: `plans/check_citations.py`
+treats that exact heading text as the end of the live document and verifies no
+citation at or below it, so a plan that adds it puts its round records under it
+and keeps every live rule above it. The match is an unanchored substring split,
+so writing that heading text into a sentence above the section truncates
+verification silently and still exits 0. Refer to the section in words when
+prose has to mention it.
 
 Note that `&` is non-alphanumeric, so `Goals & Non-Goals` collapses to
 `goals-non-goals`, not `goals--non-goals` and not `goals-and-non-goals`.
