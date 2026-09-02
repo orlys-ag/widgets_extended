@@ -1017,9 +1017,67 @@ class BoardController<TKey, TItem> {
   /// Internal-use channel for the render object; not part of the
   /// supported surface. The one route from the track-sizing step of
   /// layout to the resize animator, which lives in a library the render
-  /// object cannot name. Forwards and decides nothing.
-  void animateTrackResize(Axis axis, int track, double from, double to) {
-    _anim.trackResize.animateTrackResize(axis, track, from, to);
+  /// object cannot name. Forwards and decides nothing: [family],
+  /// [duration] and [curve] are the sizing step's, and the hand-off arm
+  /// is the one caller that passes them.
+  void animateTrackResize(
+    Axis axis,
+    int track,
+    double from,
+    double to, {
+    BoardAnimationFamily family = BoardAnimationFamily.trackResize,
+    Duration? duration,
+    Curve? curve,
+  }) {
+    _anim.trackResize.animateTrackResize(
+      axis,
+      track,
+      from,
+      to,
+      family: family,
+      duration: duration,
+      curve: curve,
+    );
+  }
+
+  /// Internal-use channel for the drag layer; not part of the supported
+  /// surface. The COMMIT HAND-OFF's continuation for one displaced
+  /// neighbour: a slide starting [delta] from the item's structural
+  /// position, which the drag layer computes as where the item painted
+  /// before the snap minus where it rests after the report's mutation,
+  /// riding the slide engine under the makeRoom family with the snap's
+  /// remaining [duration] and curve tail. Composes onto any slide the
+  /// mutation installed, so the item never leaves its painted position.
+  void animateMakeRoomHandOff(
+    TKey key,
+    Offset delta, {
+    required Duration duration,
+    required Curve curve,
+  }) {
+    _assertNotDisposed();
+    final id = _liveIdOrThrow(key, "animateMakeRoomHandOff");
+    _anim.slide.animateSlideFrom(
+      id,
+      delta,
+      family: BoardAnimationFamily.makeRoom,
+      duration: duration,
+      curve: curve,
+    );
+  }
+
+  /// Internal-use channel for the drag layer; not part of the supported
+  /// surface. The keys holding a make-room offset this instant, for the
+  /// commit's painted-truth capture before the snap.
+  List<TKey> get makeRoomHeldKeys {
+    _assertNotDisposed();
+    final keys = <TKey>[];
+    for (final id in _anim.makeRoom.activeIds) {
+      final key = keyOfId(id);
+      if (key != null) {
+        keys.add(key);
+      }
+    }
+    return keys;
   }
 
   /// Internal-use channel for the render object; not part of the

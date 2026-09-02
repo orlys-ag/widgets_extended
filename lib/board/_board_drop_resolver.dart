@@ -14,9 +14,9 @@ import 'board_config.dart';
 import 'board_render_port.dart';
 
 /// Which drag a session is running. Resolved ONCE at `startDrag` from the
-/// handle's `edge` argument, carried on every [BoardDropTarget] the
-/// session produces, and read by `endDrag` to decide which callback
-/// fires.
+/// handle's `edge` and `axis` arguments, carried on every
+/// [BoardDropTarget] the session produces, and read by `endDrag` to
+/// decide which callback fires.
 enum BoardDragKind {
   move,
   resizeRowStart,

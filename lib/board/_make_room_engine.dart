@@ -8,9 +8,12 @@
 ///
 /// Beside the offsets the engine holds prospective lane SLOTS for the
 /// LIFTED item: a slot has no paint half at all and exists only so the
-/// track-sizing walk can count the lane the drop would occupy. An
-/// install is IDEMPOTENT for an unchanged target, which is what lets a
-/// closing entry ever retire under a per-frame re-resolve.
+/// track-sizing walk can count the lane the drop would occupy. The
+/// contribution reaches the SOURCE track as well as the prospective one,
+/// because the dry run re-sweeps the stored bucket; the one term held
+/// still is the lifted item's own band, which its in-place widget keeps
+/// painting. An install is IDEMPOTENT for an unchanged target, which is
+/// what lets a closing entry ever retire under a per-frame re-resolve.
 ///
 /// Not exported from the module barrel.
 library;
@@ -21,6 +24,34 @@ import 'package:flutter/scheduler.dart';
 
 import '_board_span.dart';
 import 'board_animation_style.dart';
+
+/// What a SNAP discarded: the clock left on the unsnapped motion it
+/// dropped, and the make-room curve's tail from where that motion stood,
+/// so a continuation runs the rest of the same ramp. Published by every
+/// snap arm, null when the snap discarded nothing unsnapped.
+typedef MakeRoomHandOff = ({Duration remaining, Curve curve});
+
+/// The TAIL of a curve from [_from]: maps `[0, 1]` onto the curve's
+/// `[from, 1]` segment, renormalised, so a motion interrupted at [_from]
+/// and re-run on this curve over its remaining time traces exactly what
+/// the uninterrupted curve would have, with no velocity kink at the
+/// join. A curve already at 1 by [_from] has no tail and reports 1.
+class _CurveTail extends Curve {
+  const _CurveTail(this._inner, this._from);
+
+  final Curve _inner;
+  final double _from;
+
+  @override
+  double transformInternal(double t) {
+    final at = _inner.transform(_from);
+    final span = 1.0 - at;
+    if (span <= 1e-9) {
+      return 1.0;
+    }
+    return (_inner.transform(_from + (1.0 - _from) * t) - at) / span;
+  }
+}
 
 class _HeldOffset {
   _HeldOffset({
@@ -165,14 +196,58 @@ class MakeRoomEngine {
     return _generation;
   }
 
-  /// Bumped when a snap arm or [clearForId] discards a SLOT whose
-  /// [_Slot.snapped] flag is FALSE, and for nothing else. NEVER by an
-  /// offset, on any arm: an offset has a paint half, so discarding one
-  /// steps the term and the item's painted position in the same frame,
-  /// and routing that step to a trackResize would animate the track's
-  /// edge behind content that has already moved.
+  /// Bumped exactly when a snap arm publishes a non-null [handOff]: it
+  /// discarded an offset or a slot that was unsnapped, mid-clock, and
+  /// moving (`from != target`). An offset counts as much as a slot,
+  /// because the discard no longer steps anything: the drag layer
+  /// continues the item's painted position from where it was, on
+  /// [handOff]'s clock, and the render's hand-off arm continues the
+  /// track's term on the same clock, so the two must move together.
+  /// NEVER by [clearForId], which is a removal and not a snap.
   int get snapGeneration {
     return _snapGeneration;
+  }
+
+  /// The hand-off the LAST snap published; see [MakeRoomHandOff].
+  MakeRoomHandOff? get handOff {
+    return _handOff;
+  }
+
+  MakeRoomHandOff? _handOff;
+
+  /// Folds one discarded entry's clock into the running minimum [minT]:
+  /// an entry that was unsnapped, below clock 1 and actually moving had
+  /// motion left, and the EARLIEST such clock is the one the hand-off
+  /// continues from. Anything else folds to [minT] unchanged.
+  double? _foldClock(
+    double? minT,
+    bool snapped,
+    double t,
+    double from,
+    double target,
+  ) {
+    if (snapped || t >= 1.0 || from == target) {
+      return minT;
+    }
+    return minT == null || t < minT ? t : minT;
+  }
+
+  /// Publishes a snap's hand-off from the folded clock: the time left on
+  /// the family's duration and the curve's tail from there, plus the
+  /// snap generation bump the render's hand-off arm keys on. A null
+  /// [minT] publishes null, so a stale record never outlives the snap
+  /// that produced it.
+  void _publishSnap(double? minT) {
+    if (minT == null) {
+      _handOff = null;
+      return;
+    }
+    final duration = _styleOf().effectiveMakeRoom.duration;
+    _handOff = (
+      remaining: duration * (1.0 - minT),
+      curve: _CurveTail(_curve, minT),
+    );
+    _snapGeneration += 1;
   }
 
   /// The id whose prospective occupancy the slots carry, or null.
@@ -213,33 +288,36 @@ class MakeRoomEngine {
         (slot.target - slot.from) * _curve.transform(slot.t.clamp(0.0, 1.0));
   }
 
-  /// Drops every slot and the lifecycle key with them, bumping the snap
-  /// generation when any discarded slot was still unsnapped. The two
-  /// callers are a LIFTED first install for a DIFFERENT id and the snap
-  /// release arm.
-  void _discardSlots() {
-    var discardedUnsnapped = false;
+  /// Drops every slot and the lifecycle key with them, folding each
+  /// slot's clock into [minT] for the caller to publish. The callers are
+  /// a LIFTED first install for a DIFFERENT id, the snap release arm and
+  /// [clearForId], which discards the fold.
+  double? _discardSlots(double? minT) {
     for (final slots in _slots.values) {
       for (final slot in slots) {
-        if (!slot.snapped) {
-          discardedUnsnapped = true;
-        }
+        minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
       }
     }
     _slots.clear();
     _liftedId = null;
-    if (discardedUnsnapped) {
-      _snapGeneration += 1;
-    }
+    return minT;
   }
 
   /// Re-targets one slot, LEAVING IT UNTOUCHED when its target already
   /// equals [target] and the install is not a snap. That idempotence is
   /// what lets a closing slot decay on the schedule it started on, so
   /// `_tick` can retire it under a per-frame re-resolve.
-  void _retargetSlot(_Slot slot, double target, bool snap) {
+  ///
+  /// A SNAP folds the slot's clock into [minT] BEFORE the re-target
+  /// resets it: the snap tail reads the flag after this has set it, so
+  /// the discard has to be folded from here or the hand-off never learns
+  /// of it. Returns the fold.
+  double? _retargetSlot(_Slot slot, double target, bool snap, double? minT) {
     if (!snap && slot.target == target) {
-      return;
+      return minT;
+    }
+    if (snap) {
+      minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
     }
     final current = _valueOfSlot(slot);
     slot
@@ -247,6 +325,7 @@ class MakeRoomEngine {
       ..target = target
       ..snapped = snap
       ..t = 0.0;
+    return minT;
   }
 
   /// The held delta for [id], on the lane axis, zero for no entry.
@@ -344,6 +423,11 @@ class MakeRoomEngine {
         return 0.0;
       });
     }
+    // The hand-off fold: the earliest clock among everything this call
+    // discards mid-motion. A snapped install discards every entry it
+    // replaces and every slot it snaps; a live install discards only a
+    // previous session's closing slots.
+    double? minT;
     targets.forEach((id, target) {
       final existing = _held[id];
       if (target == 0.0 && existing == null) {
@@ -360,6 +444,15 @@ class MakeRoomEngine {
       }
       final from = existing == null ? 0.0 : _valueOf(existing);
       if (snap) {
+        if (existing != null) {
+          minT = _foldClock(
+            minT,
+            existing.snapped,
+            existing.t,
+            existing.from,
+            existing.target,
+          );
+        }
         _held[id] = _HeldOffset(target: target, from: target, snapped: true);
       } else {
         _held[id] = _HeldOffset(target: target, from: from, snapped: false);
@@ -371,7 +464,7 @@ class MakeRoomEngine {
         // down. Snap-drop it, or its phantom occupancy outlives the
         // session that owned it, on a track it never reached. A LIFTED
         // install for the SAME id takes the re-target path below.
-        _discardSlots();
+        minT = _discardSlots(minT);
       }
       // Both halves of the desired slot's identity come from inputs this
       // method already has: the TRACK from `prospective` on the lane
@@ -387,7 +480,7 @@ class MakeRoomEngine {
                   slot.lane == desiredLane
               ? 1.0
               : 0.0;
-          _retargetSlot(slot, desired, snap);
+          minT = _retargetSlot(slot, desired, snap, minT);
         }
       });
       if (desiredLane != null) {
@@ -418,38 +511,39 @@ class MakeRoomEngine {
       _held.removeWhere((id, entry) {
         return entry.target == 0.0;
       });
-      _snapSlots();
+      minT = _snapSlots(minT);
+      _publishSnap(minT);
       _notifyNow();
       return;
+    }
+    if (minT != null) {
+      // Only a discard publishes on the live arm: a live install that
+      // discarded nothing must leave the last snap's record standing
+      // for the layout that has not yet read it.
+      _publishSnap(minT);
     }
     _ensureTicking();
   }
 
   /// The install's snap tail for slots: every slot lands on its target,
-  /// and a slot at 0 is removed. A removal of a slot that was still
-  /// UNSNAPPED steps the term without ramping it there, which is the one
-  /// case that bumps the snap generation.
-  void _snapSlots() {
-    var discardedUnsnapped = false;
+  /// and a slot at 0 is removed. Either lands a slot that was still
+  /// mid-motion without ramping it there, so both fold into [minT].
+  double? _snapSlots(double? minT) {
     _slots.removeWhere((track, slots) {
       slots.removeWhere((slot) {
+        minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
         if (slot.target != 0.0) {
           slot.snapped = true;
           return false;
-        }
-        if (!slot.snapped) {
-          discardedUnsnapped = true;
         }
         return true;
       });
       return slots.isEmpty;
     });
-    if (discardedUnsnapped) {
-      _snapGeneration += 1;
-    }
     if (_slots.isEmpty) {
       _liftedId = null;
     }
+    return minT;
   }
 
   /// Closes every held offset. The release side reads the SAME snap
@@ -467,8 +561,21 @@ class MakeRoomEngine {
     final resolved = duration ?? spec.duration;
     final snap = spec.duration == Duration.zero || resolved == Duration.zero;
     if (snap) {
+      // The commit's snap: fold every offset and slot it drops, so the
+      // hand-off carries the clock of whatever was still moving.
+      double? minT;
+      for (final entry in _held.values) {
+        minT = _foldClock(
+          minT,
+          entry.snapped,
+          entry.t,
+          entry.from,
+          entry.target,
+        );
+      }
       _held.clear();
-      _discardSlots();
+      minT = _discardSlots(minT);
+      _publishSnap(minT);
       _generation += 1;
       _stopIfIdle();
       _notifyNow();
@@ -487,7 +594,7 @@ class MakeRoomEngine {
       for (final slot in slots) {
         // One already closing keeps the schedule it started on, the same
         // idempotence rule the install applies and for the same reason.
-        _retargetSlot(slot, 0.0, false);
+        _retargetSlot(slot, 0.0, false, null);
       }
     });
     if (_slots.isEmpty) {
@@ -505,7 +612,7 @@ class MakeRoomEngine {
     var removed = _held.remove(id) != null;
     if (id == _liftedId) {
       removed = removed || _slots.isNotEmpty;
-      _discardSlots();
+      _discardSlots(null);
     }
     if (removed) {
       // Conditional: this runs on every exit release, and an

@@ -185,14 +185,25 @@ void main() {
         animationStyle: BoardAnimationStyle.disabled,
       );
       addTearDown(controller.dispose);
-      controller.addItem(const _Item("a"), _chip(0, 2, 2));
-      controller.addItem(const _Item("b"), _chip(0, 2, 2));
+      // The cluster sits in the LAST row and the board is scrolled, so
+      // the row sanity below rides the window's LEADING edge: the make-room
+      // term grows the cluster's row by exactly the offset the window is
+      // widened by, so a trailing-edge sanity (more rows obtained below)
+      // is cancelled by that growth and would pass or fail by the obtain
+      // loop's round order alone.
+      controller.addItem(const _Item("a"), _chip(29, 2, 2));
+      controller.addItem(const _Item("b"), _chip(29, 2, 2));
       controller.addItem(const _Item("d"), _chip(3, 0, 2));
       await tester.pumpWidget(_board(controller, height: 200.0));
       // One more layout, so the children the first frame over-obtained
       // under the raw estimates are released before the baseline count.
       await tester.pumpWidget(_board(controller, height: 200.0));
+      controller.jumpToCell(20, 0);
+      await tester.pump();
+      await tester.pump();
       final viewport = _viewport(tester);
+      // Setup sanity: scrolled, so rows exist above the visible top.
+      expect(viewport.verticalOffset.pixels, 484.0);
 
       ({Set<int> rows, Set<int> cols}) built() {
         final rows = <int>{};
@@ -212,7 +223,7 @@ void main() {
       final before = built();
       controller.previewMakeRoomGap(
         draggedKey: "d",
-        prospective: _chip(0, 0, 3),
+        prospective: _chip(29, 0, 3),
       );
       await tester.pump();
       // Setup sanity: the held offset is one full lane extent, vertical.
@@ -222,7 +233,10 @@ void main() {
       );
       final after = built();
       expect(after.cols, before.cols);
-      expect(after.rows.length, greaterThan(before.rows.length));
+      // The vertical bound admitted four rows ABOVE the visible top that
+      // the un-widened window did not, and released none.
+      expect(after.rows.difference(before.rows), <int>{3, 4, 5, 6});
+      expect(before.rows.difference(after.rows), isEmpty);
 
       controller.releaseMakeRoomPreview();
       await tester.pump();

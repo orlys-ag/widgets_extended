@@ -8,16 +8,33 @@
 /// Not exported from the module barrel.
 library;
 
+import 'package:flutter/animation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'board_animation_style.dart';
 
 class _TrackResizeState {
-  _TrackResizeState({required this.from, required this.to});
+  _TrackResizeState({
+    required this.from,
+    required this.to,
+    required this.family,
+    required this.explicitDuration,
+    required this.explicitCurve,
+  });
 
   final double from;
   final double to;
+
+  /// The family whose spec times and shapes this state: trackResize for
+  /// a settled-structure resize, makeRoom for a residue the track-sizing
+  /// hand-off arm continues on the make-room clock. Read live at every
+  /// tick, so the family's zero dominates [explicitDuration].
+  final BoardAnimationFamily family;
+
+  /// A captured duration and curve, or null for the family's own.
+  final Duration? explicitDuration;
+  final Curve? explicitCurve;
 
   /// The 0-to-1 animation clock, advanced by tick deltas.
   double t = 0.0;
@@ -54,17 +71,35 @@ class TrackResizeAnimator {
     return _vertical.isNotEmpty || _horizontal.isNotEmpty;
   }
 
-  /// Installs or RE-TARGETS a resize. Refuses under a zero family: the
-  /// axis already holds the target, so a refusal lands the new geometry
-  /// on the same frame. A re-target overwrites rather than stacking; the
-  /// caller captures [from] from the currently painted extent, which is
-  /// what makes the overwrite compose.
-  void animateTrackResize(Axis axis, int track, double from, double to) {
-    final spec = _styleOf().specFor(BoardAnimationFamily.trackResize);
-    if (spec.duration == Duration.zero) {
+  /// Installs or RE-TARGETS a resize. Refuses under a zero [family] or a
+  /// zero [duration]: the axis already holds the target, so a refusal
+  /// lands the new geometry on the same frame. A re-target overwrites
+  /// rather than stacking; the caller captures [from] from the currently
+  /// painted extent, which is what makes the overwrite compose. [family]
+  /// defaults to trackResize; the track-sizing hand-off arm passes
+  /// makeRoom with the snap's remaining [duration] and curve tail, so a
+  /// residue runs on the clock the gap was on.
+  void animateTrackResize(
+    Axis axis,
+    int track,
+    double from,
+    double to, {
+    BoardAnimationFamily family = BoardAnimationFamily.trackResize,
+    Duration? duration,
+    Curve? curve,
+  }) {
+    final spec = _styleOf().specFor(family);
+    if (spec.duration == Duration.zero ||
+        (duration ?? spec.duration) == Duration.zero) {
       return;
     }
-    _statesOf(axis)[track] = _TrackResizeState(from: from, to: to);
+    _statesOf(axis)[track] = _TrackResizeState(
+      from: from,
+      to: to,
+      family: family,
+      explicitDuration: duration,
+      explicitCurve: curve,
+    );
     _ensureTicking();
   }
 
@@ -74,7 +109,8 @@ class TrackResizeAnimator {
     if (state == null) {
       return _settledExtentOf(axis, track);
     }
-    final curve = _styleOf().specFor(BoardAnimationFamily.trackResize).curve;
+    final curve =
+        state.explicitCurve ?? _styleOf().specFor(state.family).curve;
     final eased = curve.transform(state.t.clamp(0.0, 1.0));
     return state.from + (state.to - state.from) * eased;
   }
@@ -140,17 +176,23 @@ class TrackResizeAnimator {
   void _tick(Duration elapsed) {
     final dt = elapsed - _lastElapsed;
     _lastElapsed = elapsed;
-    final spec = _styleOf().specFor(BoardAnimationFamily.trackResize);
-    final durationUs = spec.duration.inMicroseconds;
-    final delta = durationUs == 0
-        ? double.infinity
-        : dt.inMicroseconds / durationUs;
+    final style = _styleOf();
     for (final states in <Map<int, _TrackResizeState>>[
       _vertical,
       _horizontal,
     ]) {
       states.forEach((track, state) {
-        state.t += delta;
+        final spec = style.specFor(state.family);
+        // The family's zero dominates the state's explicit duration: a
+        // restyle to zero between two ticks drives every state past 1
+        // here rather than dividing by zero.
+        final effective = spec.duration == Duration.zero
+            ? Duration.zero
+            : (state.explicitDuration ?? spec.duration);
+        final durationUs = effective.inMicroseconds;
+        state.t += durationUs == 0
+            ? double.infinity
+            : dt.inMicroseconds / durationUs;
       });
       states.removeWhere((track, state) {
         return state.t >= 1.0;

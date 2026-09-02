@@ -31,6 +31,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import '_board_axis.dart';
+import 'board_animation_style.dart';
 import 'board_background.dart';
 import 'board_controller.dart';
 import 'board_render_port.dart';
@@ -220,15 +221,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   final Set<int> _rampWroteCols = <int>{};
 
   /// Content-axis tracks whose settled extent the last sizing step wrote
-  /// from a MAKE-ROOM contribution of EITHER kind, and the narrower set
-  /// written from a SLOT alone. Two sets and not one, because the
-  /// hand-off has to know whether the contribution that VANISHED had a
-  /// paint half: an offset does, a slot does not, and only a slot's
-  /// disappearance can leave the term ahead of what paints.
+  /// from a MAKE-ROOM contribution, an offset's or a slot's alike. The
+  /// hand-off arm does not ask which kind vanished: a snap hands both
+  /// kinds on to the same published clock.
   final Set<int> _makeRoomWroteRows = <int>{};
   final Set<int> _makeRoomWroteCols = <int>{};
-  final Set<int> _slotWroteRows = <int>{};
-  final Set<int> _slotWroteCols = <int>{};
 
   /// The engine generations the last layout ran against, recorded at the
   /// END of `layoutChildSequence` so every pass of one layout compares
@@ -867,16 +864,16 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   ///
   /// Five arms per track. A first measurement replaces the estimate and
   /// clears every latch set. A RAMPING or MAKE-ROOM CONTRIBUTOR records
-  /// per pass and maintains all three latch sets symmetrically, each
-  /// against its own condition, and at the make-room latch EDGE it hands
-  /// the track's in-flight trackResize in: while a make-room latch entry
+  /// per pass and maintains both latch sets symmetrically, each against
+  /// its own condition, and at the make-room latch EDGE it hands the
+  /// track's in-flight trackResize in: while a make-room latch entry
   /// stands the animator holds no state for that track, or every recorded
   /// term would be invisible until the state was dropped. The latch's
-  /// hand-off then either RECORDS the residue or, on all four of a
-  /// residue past tolerance, a bumped SNAP generation, a vanished
-  /// PAINTLESS contribution and a SHRINK, installs a resize for it. A
-  /// changed settled extent records the target and installs the resize
-  /// that animates toward it.
+  /// hand-off then either RECORDS the residue or, when the SNAP
+  /// generation moved and the engine published the discarded motion's
+  /// clock, installs a makeRoom-family resize for a residue past
+  /// tolerance on that clock. A changed settled extent records the
+  /// target and installs the resize that animates toward it.
   void _sizeContentTracks(BoardAxis axis) {
     final contentAxis = _contentAxis!;
     final config = contentAxis == Axis.vertical
@@ -889,16 +886,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final makeRoomLatch = contentAxis == Axis.vertical
         ? _makeRoomWroteRows
         : _makeRoomWroteCols;
-    final slotLatch = contentAxis == Axis.vertical
-        ? _slotWroteRows
-        : _slotWroteCols;
     final anim = _controller.anim;
     for (final entry in _contentTrackExtents.entries) {
       final track = entry.key;
       var to = entry.value;
       var contributorRamping = false;
       var makeRoomContributes = false;
-      var slotContributes = false;
       if (laneAxisIsContent) {
         // The item-cluster term: the track must hold its deepest
         // cluster's lanes, each member's ceiling SCALED by its enter/exit
@@ -941,7 +934,6 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           // the max takes one or the other, never their sum.
           seen = true;
           makeRoomContributes = true;
-          slotContributes = true;
           final ceiling = (slot.lane + slot.value) * config.laneExtent!;
           if (ceiling > deepest) {
             deepest = ceiling;
@@ -979,7 +971,6 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         _passMeasuredNewTrack = true;
         ramps.remove(track);
         makeRoomLatch.remove(track);
-        slotLatch.remove(track);
         continue;
       }
       if (contributorRamping || makeRoomContributes) {
@@ -1017,44 +1008,49 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         } else {
           makeRoomLatch.remove(track);
         }
-        if (slotContributes) {
-          slotLatch.add(track);
-        } else {
-          slotLatch.remove(track);
-        }
         continue;
       }
       final endedRamp = ramps.remove(track);
       final endedMakeRoom = makeRoomLatch.remove(track);
-      // Removed unconditionally, so no set keeps an entry past the pass
-      // that stopped contributing.
-      final endedSlot = slotLatch.remove(track);
       if (endedRamp || endedMakeRoom) {
         // The frame a latch ENDED. A natural settle leaves a residue of
         // at most one tick's motion, which RECORDS: an install would keep
-        // layout dirty for a resize duration. The four terms that route
-        // it to an install instead are a residue worth acting on, a SNAP
-        // generation that moved (so the residue came from a discard of
-        // unsnapped state and not from a settle), a vanished PAINTLESS
-        // contribution (an offset's discard steps the item's painted
-        // position in the same frame, so its term step must land in that
-        // frame too), and a SHRINK (a growth here came from settled
-        // structure, and recording it can only leave the track too tall,
-        // which never overlaps, while animating it would hold the edge
-        // below a landing item for a whole resize).
+        // layout dirty for a resize duration. A SNAP that discarded
+        // motion is the other way here: the engine bumped its snap
+        // generation and published the discarded motion's remaining
+        // clock and curve tail, the drag layer is continuing every
+        // displaced neighbour's painted position on that clock, and a
+        // residue worth acting on continues the track's edge on the same
+        // clock, growth and shrink alike, so the edge and the content
+        // inside it arrive together. A growth is not recorded either:
+        // the landing item is gliding in from the proxy for the whole
+        // dropSettle window, and the remaining make-room time is at most
+        // one make-room duration, which the default style makes the same
+        // window. The install rides the makeRoom family, whose kill
+        // switch is the one that governs the motion being continued.
         //
-        // `stored` is the floor-corrected value, for the reason the
-        // ordinary arm below gives.
+        // `painted` is read BEFORE the record: the animator holds no
+        // state for a latched track, so it answers the settled extent,
+        // which the record is about to replace. `stored` is the
+        // floor-corrected value, for the reason the ordinary arm below
+        // gives.
         final stored = to < axis.minTrackExtent ? axis.minTrackExtent : to;
         final painted = anim.animatedExtentOf(contentAxis, track);
-        if ((stored - painted).abs() > precisionErrorTolerance &&
-            anim.makeRoomSnapGeneration != _laidOutSnapGeneration &&
-            endedSlot &&
-            stored < painted) {
-          axis.recordMeasurement(track, to);
-          _controller.animateTrackResize(contentAxis, track, painted, stored);
-        } else {
-          axis.recordMeasurement(track, to);
+        final handOff = anim.makeRoomSnapGeneration != _laidOutSnapGeneration
+            ? anim.makeRoomHandOff
+            : null;
+        axis.recordMeasurement(track, to);
+        if (handOff != null &&
+            (stored - painted).abs() > precisionErrorTolerance) {
+          _controller.animateTrackResize(
+            contentAxis,
+            track,
+            painted,
+            stored,
+            family: BoardAnimationFamily.makeRoom,
+            duration: handOff.remaining,
+            curve: handOff.curve,
+          );
         }
         continue;
       }

@@ -24,13 +24,15 @@ class BoardItemDragScope extends InheritedWidget {
 
   /// Carries the RECOGNIZER, not just a position: the publishing `State`
   /// takes ownership of it, and its `onStart` is what yields the `Drag`
-  /// whose updates reach the drag controller. [BoardResizeEdges] is the
-  /// one argument beyond the tree's shape, so one handle can start a
-  /// move or a resize.
+  /// whose updates reach the drag controller. [BoardResizeEdges] and the
+  /// axis are the two arguments beyond the tree's shape, so one handle
+  /// can start a move or a resize on either axis; a null axis is the
+  /// span axis.
   final void Function(
     PointerDownEvent event,
     MultiDragGestureRecognizer recognizer,
     BoardResizeEdges edge,
+    Axis? axis,
   )
   startDrag;
 
@@ -56,6 +58,7 @@ class BoardDragHandle extends StatelessWidget {
     required this.child,
     this.enabled = true,
     this.edge = BoardResizeEdges.none,
+    this.axis,
     this.behavior = HitTestBehavior.deferToChild,
     super.key,
   });
@@ -72,6 +75,13 @@ class BoardDragHandle extends StatelessWidget {
   /// Which drag this handle starts. `none` starts a move; anything else
   /// starts a resize on that edge.
   final BoardResizeEdges edge;
+
+  /// The axis a resize [edge] is on, or null for the SPAN axis, the
+  /// non-primary one, which is the convention an axis-less edge value
+  /// was defined against. A time grid whose rows are primary names
+  /// `Axis.vertical` here for the strip that drags an event's end.
+  /// Ignored for a move.
+  final Axis? axis;
 
   /// The extension point the delayed subclass overrides. Must return a
   /// [MultiDragGestureRecognizer]: the item's `State` services exactly
@@ -96,6 +106,7 @@ class BoardDragHandle extends StatelessWidget {
           event,
           createRecognizer()..gestureSettings = settings,
           edge,
+          axis,
         );
       },
       child: child,
@@ -111,6 +122,7 @@ class BoardDelayedDragHandle extends BoardDragHandle {
     required super.child,
     super.enabled,
     super.edge,
+    super.axis,
     super.behavior,
     super.key,
   });

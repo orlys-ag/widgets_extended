@@ -87,6 +87,10 @@ class BoardDragController<TKey> extends ChangeNotifier {
   _DragSession<TKey>? _session;
   BoardDropTarget? _currentTarget;
 
+  /// Whether a post-frame re-resolve is already scheduled for this
+  /// frame, so a frame with several animation dispatches resolves once.
+  bool _resolvePending = false;
+
   /// The pointer's viewport-paint position while a session is live, one
   /// write per move event; null between sessions.
   ValueListenable<Offset?> get pointerPosition {
@@ -124,27 +128,35 @@ class BoardDragController<TKey> extends ChangeNotifier {
     return session.port.rectOfItem(session.key)?.size;
   }
 
-  /// Fixes the session's kind from the handle's [edge]: `none` starts a
-  /// move; `leading` and `trailing` start a resize on the SPAN axis, the
-  /// non-primary one, which is the convention that lets an axis-less
-  /// edge value name one of the four kinds. `both` is a set-valued
-  /// policy, uninterpretable per session, and refuses.
-  BoardDragKind? _kindFor(BoardResizeEdges edge) {
-    final spanAxisVertical = boardController.primaryAxis == Axis.horizontal;
+  /// Fixes the session's kind from the handle's [edge] and [axis]:
+  /// `none` starts a move; `leading` and `trailing` start a resize on
+  /// [axis], or on the SPAN axis (the non-primary one) when [axis] is
+  /// null, which is the convention that lets an axis-less edge value
+  /// name one of the four kinds. `both` is a set-valued policy,
+  /// uninterpretable per session, and refuses.
+  BoardDragKind? _kindFor(BoardResizeEdges edge, Axis? axis) {
+    final vertical = (axis ?? _spanAxis) == Axis.vertical;
     switch (edge) {
       case BoardResizeEdges.none:
         return BoardDragKind.move;
       case BoardResizeEdges.leading:
-        return spanAxisVertical
+        return vertical
             ? BoardDragKind.resizeRowStart
             : BoardDragKind.resizeColStart;
       case BoardResizeEdges.trailing:
-        return spanAxisVertical
+        return vertical
             ? BoardDragKind.resizeRowEnd
             : BoardDragKind.resizeColEnd;
       case BoardResizeEdges.both:
         return null;
     }
+  }
+
+  /// The span axis: the one the controller's primary axis is not.
+  Axis get _spanAxis {
+    return boardController.primaryAxis == Axis.horizontal
+        ? Axis.vertical
+        : Axis.horizontal;
   }
 
   static bool _edgeAccepted(BoardResizeEdges policy, BoardResizeEdges edge) {
@@ -163,14 +175,17 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// Starts a session. Returns false for a POLICY refusal: disabled
   /// config, unknown or refused key, a board that has not laid out, a
   /// resize this config could not report (a null `onItemResized` would
-  /// move pixels and then vanish), or a resize kind `resizeEdges` does
-  /// not accept. Throws [ArgumentError] only for cross-controller
-  /// misuse: a [renderPort] not driven by [boardController].
+  /// move pixels and then vanish), or a resize edge its axis's policy
+  /// does not accept: `resizeEdges` on the span axis, which a null
+  /// [axis] names, and `primaryResizeEdges` on the primary axis. Throws
+  /// [ArgumentError] only for cross-controller misuse: a [renderPort]
+  /// not driven by [boardController].
   bool startDrag({
     required TKey key,
     required BoardRenderPort<TKey> renderPort,
     required Offset pointerGlobal,
     BoardResizeEdges edge = BoardResizeEdges.none,
+    Axis? axis,
   }) {
     if (!renderPort.drivesController(boardController)) {
       throw ArgumentError(
@@ -188,7 +203,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     if (config.canDrag != null && !config.canDrag!(key)) {
       return false;
     }
-    final kind = _kindFor(edge);
+    final kind = _kindFor(edge, axis);
     if (kind == null) {
       return false;
     }
@@ -196,7 +211,12 @@ class BoardDragController<TKey> extends ChangeNotifier {
       if (config.onItemResized == null) {
         return false;
       }
-      if (!_edgeAccepted(config.resizeEdges, edge)) {
+      // Each axis carries its own policy, so a config that opens the
+      // span axis leaves the primary one closed and the reverse.
+      final policy = (axis ?? _spanAxis) == _spanAxis
+          ? config.resizeEdges
+          : config.primaryResizeEdges;
+      if (!_edgeAccepted(policy, edge)) {
         return false;
       }
     }
@@ -254,6 +274,11 @@ class BoardDragController<TKey> extends ChangeNotifier {
     );
     _session = session;
     _bindScrollSubscriptions(session);
+    // The animation channel is the third route into the resolution core,
+    // beside pointer events and scroll notifications: a track resizing
+    // above a stationary pointer moves the cell under it, and nothing
+    // else re-resolves for that.
+    boardController.addAnimationListener(_handleAnimationTick);
     if (config.hapticsOnDrag) {
       HapticFeedback.mediumImpact();
     }
@@ -311,13 +336,21 @@ class BoardDragController<TKey> extends ChangeNotifier {
             );
       }
     }
+    Map<TKey, Offset>? paintedByKey;
     if (report) {
+      // The COMMIT HAND-OFF's painted truth, captured BEFORE the snap:
+      // where every item the preview holds paints this instant. The
+      // session's own key is the glide's below, not the hand-off's.
+      paintedByKey = _capturePaintedByKey(session);
       // snapForCommit: the report's mutation reassigns the displaced
       // neighbours' structure by exactly the held amounts, so the
       // offsets must vanish in this same synchronous sequence; an
       // animated release would double-count against the reassignment
       // for its whole window and the neighbours would overshoot a lane
-      // and glide back. A cancel keeps the animated close below.
+      // and glide back. What the snap discards MID-MOTION is handed on
+      // below, from the painted truth captured above, so structure
+      // lands now and nothing painted steps. A cancel keeps the
+      // animated close in teardown.
       boardController.releaseMakeRoomPreview(duration: Duration.zero);
     }
     // Captured before teardown nulls the pointer: the glide's FROM is
@@ -331,7 +364,73 @@ class BoardDragController<TKey> extends ChangeNotifier {
         config.onItemResized!(session.key, target.span);
       }
     }
+    if (paintedByKey != null) {
+      _installMakeRoomHandOff(session, paintedByKey);
+    }
     _installDropSettle(session, release, paintedBefore);
+  }
+
+  /// The hand-off's capture: the painted top-left corner of every item
+  /// the make-room preview holds an offset for, except the session's
+  /// own. Paint space, composed with every animation offset, which is
+  /// what makes it painted truth rather than structure.
+  Map<TKey, Offset> _capturePaintedByKey(_DragSession<TKey> session) {
+    final painted = <TKey, Offset>{};
+    for (final key in boardController.makeRoomHeldKeys) {
+      if (key == session.key) {
+        continue;
+      }
+      final rect = session.port.rectOfItem(key);
+      if (rect == null) {
+        continue;
+      }
+      painted[key] =
+          rect.topLeft +
+          boardController.anim.offsetOfItem(boardController.idOfKey(key));
+    }
+    return painted;
+  }
+
+  /// The hand-off's continuation, AFTER the report's mutation: every
+  /// captured item that still exists gets a slide from where it painted
+  /// to where it now rests, on the clock the snap published, whatever
+  /// the app's mutation did (a declined report re-lands them where they
+  /// came from, on the same clock). Nothing is installed when the snap
+  /// discarded no motion, which is a settled gap or a zero family's
+  /// instant one: the structure the report produced is then already
+  /// where everything paints. The render's track-sizing hand-off arm
+  /// continues each track's residue on this same published clock, so
+  /// the row edge and the content inside it arrive together. Reads the
+  /// port after teardown through the session's own reference.
+  void _installMakeRoomHandOff(
+    _DragSession<TKey> session,
+    Map<TKey, Offset> paintedByKey,
+  ) {
+    final handOff = boardController.anim.makeRoomHandOff;
+    if (handOff == null) {
+      return;
+    }
+    paintedByKey.forEach((key, painted) {
+      if (!boardController.contains(key)) {
+        return;
+      }
+      final rect = session.port.rectOfItem(key);
+      if (rect == null) {
+        return;
+      }
+      final id = boardController.idOfKey(key);
+      final delta =
+          painted - (rect.topLeft + boardController.anim.offsetOfItem(id));
+      if (delta == Offset.zero) {
+        return;
+      }
+      boardController.animateMakeRoomHandOff(
+        key,
+        delta,
+        duration: handOff.remaining,
+        curve: handOff.curve,
+      );
+    });
   }
 
   /// The drop-settle glide, installed LAST so it overrides whatever
@@ -404,6 +503,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     }
     session.autoScroller.dispose();
     _unbindScrollSubscriptions(session);
+    boardController.removeAnimationListener(_handleAnimationTick);
     _currentTarget = null;
     _pointerPosition.value = null;
     notifyListeners();
@@ -496,6 +596,31 @@ class BoardDragController<TKey> extends ChangeNotifier {
   }
 
   void _handleScroll() {
+    _resolveFromLastPointer();
+  }
+
+  /// An animation dispatch: schedule ONE post-frame re-resolve. Post-frame
+  /// and not in the tick, because a ticker's callback runs before this
+  /// frame's layout re-records the axis a resize moved, so only a
+  /// post-frame resolve reads the geometry that painted. Scheduling it
+  /// also keeps `previewMakeRoomGap` out of the make-room engine's own
+  /// tick dispatch.
+  void _handleAnimationTick() {
+    if (_resolvePending) {
+      return;
+    }
+    _resolvePending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _resolvePending = false;
+      _resolveFromLastPointer();
+    }, debugLabel: "BoardDragController.resolve");
+  }
+
+  /// The shared body of the scroll and animation routes. `_session` is
+  /// read FIRST and in the callback's own body, never captured: a
+  /// post-frame resolve pending across `dispose` finds the session null
+  /// and touches neither the disposed pointer notifier nor the port.
+  void _resolveFromLastPointer() {
     final session = _session;
     if (session == null) {
       return;

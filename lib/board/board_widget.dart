@@ -453,6 +453,15 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
   /// ownership checks below must follow the session, not the widget.
   TKey? _ownedKey;
 
+  /// The session's pointer, tracked by DELTA from where the drag started.
+  /// Inside a scrollable the handle's recognizer shares the arena with
+  /// the scrollable's own and is accepted on the first move past the
+  /// slop, and the multi-drag recognizer reports that accepting move as a
+  /// delta against the INITIAL position (`gestures/multidrag.dart:139-153`),
+  /// so an update's position alone would drop it. The framework's drag
+  /// avatar accumulates the same way (`widgets/drag_target.dart:873-876`).
+  Offset _dragPosition = Offset.zero;
+
   bool get _canDrag {
     final config = widget.dragController.config;
     if (!config.enabled) {
@@ -466,6 +475,7 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
     PointerDownEvent event,
     MultiDragGestureRecognizer recognizer,
     BoardResizeEdges edge,
+    Axis? axis,
   ) {
     // The replacement leg: a second handle pressed while the first's
     // recognizer is still armed disposes the first, so no orphaned
@@ -482,12 +492,12 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
     _recognizer?.dispose();
     _recognizer = recognizer
       ..onStart = (position) {
-        return _beginDrag(position, edge);
+        return _beginDrag(position, edge, axis);
       }
       ..addPointer(event);
   }
 
-  Drag? _beginDrag(Offset position, BoardResizeEdges edge) {
+  Drag? _beginDrag(Offset position, BoardResizeEdges edge, Axis? axis) {
     final viewport = context
         .findAncestorRenderObjectOfType<RenderBoardViewport<TKey>>();
     if (viewport == null) {
@@ -498,6 +508,7 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
       renderPort: viewport,
       pointerGlobal: position,
       edge: edge,
+      axis: axis,
     );
     if (!started) {
       // The null-on-refusal return: no Drag exists, so nothing can
@@ -506,11 +517,13 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
     }
     _ownsSession = true;
     _ownedKey = widget.itemKey;
+    _dragPosition = position;
     return _ItemDrag<TKey>(this);
   }
 
   void _handleDragUpdate(DragUpdateDetails details) {
-    widget.dragController.updateDrag(details.globalPosition);
+    _dragPosition += details.delta;
+    widget.dragController.updateDrag(_dragPosition);
   }
 
   void _handleDragEnd({required bool cancel}) {
@@ -559,59 +572,60 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
     if (config.buildDefaultDragHandles) {
       // The MOVE handle wraps the whole item, delayed so touch scrolling
       // that starts on an item still works; resize handles are edge
-      // strips on the SPAN axis only.
+      // strips, on the SPAN axis under `resizeEdges` and on the PRIMARY
+      // axis under `primaryResizeEdges`, each strip naming its axis.
       child = BoardDelayedDragHandle(child: child);
       final strips = <Widget>[];
-      void addStrip(BoardResizeEdges edge, Alignment alignment) {
-        strips.add(
-          Align(
-            alignment: alignment,
-            child: BoardDragHandle(
-              edge: edge,
-              // An empty strip defers to a child that is never hit;
-              // opaque makes the band itself the target and stops the
-              // pointer from falling through to the move wrap below.
-              behavior: HitTestBehavior.opaque,
-              child: SizedBox(
-                width: widget.spanAxisVertical ? double.infinity : 12.0,
-                height: widget.spanAxisVertical ? 12.0 : double.infinity,
+      void addStrips(BoardResizeEdges policy, Axis axis) {
+        final vertical = axis == Axis.vertical;
+        void addStrip(BoardResizeEdges edge) {
+          final leading = edge == BoardResizeEdges.leading;
+          final Alignment alignment;
+          if (vertical) {
+            alignment = leading ? Alignment.topCenter : Alignment.bottomCenter;
+          } else {
+            alignment = leading ? Alignment.centerLeft : Alignment.centerRight;
+          }
+          strips.add(
+            Align(
+              alignment: alignment,
+              child: BoardDragHandle(
+                edge: edge,
+                axis: axis,
+                // An empty strip defers to a child that is never hit;
+                // opaque makes the band itself the target and stops the
+                // pointer from falling through to the move wrap below.
+                behavior: HitTestBehavior.opaque,
+                child: SizedBox(
+                  width: vertical ? double.infinity : 12.0,
+                  height: vertical ? 12.0 : double.infinity,
+                ),
               ),
             ),
-          ),
-        );
+          );
+        }
+
+        switch (policy) {
+          case BoardResizeEdges.none:
+            break;
+          case BoardResizeEdges.leading:
+            addStrip(BoardResizeEdges.leading);
+          case BoardResizeEdges.trailing:
+            addStrip(BoardResizeEdges.trailing);
+          case BoardResizeEdges.both:
+            addStrip(BoardResizeEdges.leading);
+            addStrip(BoardResizeEdges.trailing);
+        }
       }
 
-      switch (config.resizeEdges) {
-        case BoardResizeEdges.none:
-          break;
-        case BoardResizeEdges.leading:
-          addStrip(
-            BoardResizeEdges.leading,
-            widget.spanAxisVertical
-                ? Alignment.topCenter
-                : Alignment.centerLeft,
-          );
-        case BoardResizeEdges.trailing:
-          addStrip(
-            BoardResizeEdges.trailing,
-            widget.spanAxisVertical
-                ? Alignment.bottomCenter
-                : Alignment.centerRight,
-          );
-        case BoardResizeEdges.both:
-          addStrip(
-            BoardResizeEdges.leading,
-            widget.spanAxisVertical
-                ? Alignment.topCenter
-                : Alignment.centerLeft,
-          );
-          addStrip(
-            BoardResizeEdges.trailing,
-            widget.spanAxisVertical
-                ? Alignment.bottomCenter
-                : Alignment.centerRight,
-          );
-      }
+      final spanAxis = widget.spanAxisVertical
+          ? Axis.vertical
+          : Axis.horizontal;
+      final primaryAxis = widget.spanAxisVertical
+          ? Axis.horizontal
+          : Axis.vertical;
+      addStrips(config.resizeEdges, spanAxis);
+      addStrips(config.primaryResizeEdges, primaryAxis);
       if (strips.isNotEmpty) {
         child = Stack(
           fit: StackFit.passthrough,
@@ -775,6 +789,13 @@ class _SelectionLayerState<TKey, TItem>
     extends State<_SelectionLayer<TKey, TItem>> {
   ({int row, int col})? _anchor;
 
+  /// The range gesture's pointer, tracked by DELTA from where it began,
+  /// for the reason `_BoardItemHostState._dragPosition` gives: the
+  /// recognizer's first update reports the accepting move as a delta
+  /// against the initial position, so reading the position alone would
+  /// leave the focus on the anchor cell for that move.
+  Offset _dragPosition = Offset.zero;
+
   RenderBoardViewport<TKey>? _viewport() {
     RenderObject? render = context.findRenderObject();
     while (render != null) {
@@ -828,6 +849,7 @@ class _SelectionLayerState<TKey, TItem>
       return null;
     }
     _anchor = anchor;
+    _dragPosition = global;
     widget.controller.setSelection(
       BoardSelection(anchor: anchor, focus: anchor),
     );
@@ -901,7 +923,8 @@ class _SelectionDrag<TKey, TItem> extends Drag {
 
   @override
   void update(DragUpdateDetails details) {
-    _layer._extendTo(details.globalPosition);
+    _layer._dragPosition += details.delta;
+    _layer._extendTo(_layer._dragPosition);
   }
 
   @override

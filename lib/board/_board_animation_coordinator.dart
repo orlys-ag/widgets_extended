@@ -32,9 +32,12 @@ import 'board_animation_style.dart';
 /// controller and never injected separately, so there is exactly one
 /// binding to swap.
 abstract interface class BoardAnimationReader<TKey> {
-  /// Union of the LAYOUT-DRIVING sources only: trackResize and
-  /// itemEnterExit. Deliberately excludes itemSlide, makeRoom and
-  /// dropSettle, which are paint-only.
+  /// Union of the coordinator's LAYOUT-DRIVING sources: trackResize and
+  /// itemEnterExit. Excludes itemSlide and dropSettle, which are
+  /// paint-only, and makeRoom, whose classification the RENDER decides:
+  /// its motion moves a track's extent on a content-sized lane axis and
+  /// nowhere else, so the render composes [hasMakeRoomMotion] with that
+  /// predicate itself rather than reading it here.
   bool get hasLayoutDrivingAnimations;
 
   /// Union of the PAINT-ONLY sources: itemSlide (which carries dropSettle
@@ -81,11 +84,18 @@ abstract interface class BoardAnimationReader<TKey> {
   /// against, which is the only route a SNAPPED slot-only install has.
   int get makeRoomGeneration;
 
-  /// Bumped when a snap arm or a per-id clear discards a make-room SLOT
-  /// that was still unsnapped: prospective occupancy installed TO
-  /// ANIMATE. NEVER by an offset, on any arm, because an offset has a
-  /// paint half and its discard steps term and paint in one frame.
+  /// Bumped exactly when a snap arm publishes a non-null
+  /// [makeRoomHandOff]: it discarded an offset or a slot that was still
+  /// mid-motion. Never by a per-id clear, which is a removal and not a
+  /// snap.
   int get makeRoomSnapGeneration;
+
+  /// The hand-off the last make-room snap published: the clock left on
+  /// the unsnapped motion it discarded and the curve tail to run it on,
+  /// or null when that snap discarded nothing unsnapped. Read by the
+  /// render's track-sizing hand-off arm and by the drag layer's commit,
+  /// which continue the discarded motion on it.
+  MakeRoomHandOff? get makeRoomHandOff;
 
   /// The held make-room delta ALONE, both axes, zero for no entry.
   /// [offsetOfItem] composes it with slides; the track-sizing term must
@@ -228,6 +238,11 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   @override
   int get makeRoomSnapGeneration {
     return makeRoom.snapGeneration;
+  }
+
+  @override
+  MakeRoomHandOff? get makeRoomHandOff {
+    return makeRoom.handOff;
   }
 
   @override

@@ -72,6 +72,7 @@ class BoardDragConfig<TKey> {
     this.canDropAt,
     this.snap = const BoardSnap.track(),
     this.resizeEdges = BoardResizeEdges.none,
+    this.primaryResizeEdges = BoardResizeEdges.none,
     this.buildDefaultDragHandles = true,
     this.dragProxyBuilder,
     this.semanticsActionsBuilder,
@@ -92,7 +93,19 @@ class BoardDragConfig<TKey> {
   final bool Function(TKey key)? canDrag;
   final bool Function(TKey key, BoardSpan span)? canDropAt;
   final BoardSnap snap;
+
+  /// Which resize handles this config accepts on the SPAN axis, the
+  /// non-primary one: the column axis on every board whose column axis
+  /// is not content-sized, since the row axis is primary there.
   final BoardResizeEdges resizeEdges;
+
+  /// Which resize handles this config accepts on the PRIMARY axis: the
+  /// row axis unless the column axis is content-sized. A time grid whose
+  /// rows are time gives this `trailing` so an event's bottom edge drags
+  /// its end. Defaults to `none`, which leaves the span axis the only
+  /// resize axis; the default handles build a strip per admitted edge on
+  /// each axis.
+  final BoardResizeEdges primaryResizeEdges;
   final bool buildDefaultDragHandles;
   final Widget Function(BuildContext, TKey, Widget)? dragProxyBuilder;
   final BoardSemanticsActionsBuilder<TKey>? semanticsActionsBuilder;
