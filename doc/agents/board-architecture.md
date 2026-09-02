@@ -40,10 +40,12 @@ range selection, frozen tracks, and a paintable background.
   back to `itemSlide` is the blunder the style doc names), and
   `makeRoom`/`dropSettle` inherit `itemSlide`. A family's zero duration is a kill switch read live at
   every install; per-call durations are captured values the switch
-  dominates. Restyling `itemSlide` to zero PURGES in-flight slides
-  (paint-only, items land structurally); restyling `trackResize` to zero
-  FINALIZES each state at its target (layout-driving, a dropped state
-  would strand a partial extent).
+  dominates. Restyling `itemSlide` to zero PURGES in-flight slides and
+  fires an empty structural notification when any stood, because a purge
+  before a record's first tick leaves the render where the install frame
+  left it; restyling `trackResize` to zero FINALIZES each state at its
+  target (layout-driving, a dropped state would strand a partial
+  extent).
 - **Retention is obtaining.** An exiting item that must outlive the built
   window stays mounted because `_obtainRetained` obtains its vicinity
   every layout: head release (drop entries whose id no longer reports
@@ -92,8 +94,13 @@ range selection, frozen tracks, and a paintable background.
   because while a make-room latch entry stands the animator must hold no
   state for that track), `ItemEnterExitAnimator` (0-to-1
   clock; an exit starts from the ramp value an interrupted enter reached),
-  `ItemSlideEngine` (transient composed paint deltas; installs compose
-  in place), `MakeRoomEngine` (HELD offsets from the dry run; the
+  `ItemSlideEngine` (transient composed RECT deltas, a lead and an
+  extent on one clock; installs compose in place, and a record carries a
+  RELANE mark saying every lead composed into it was an intra-track shift
+  on the lane axis, which a compose mixing the two kinds drops. The lead
+  is paint-only; the EXTENT is layout-driving, the geometry rule adding
+  it to the item's extent so the child is laid out at the animated size),
+  `MakeRoomEngine` (HELD offsets from the dry run; the
   session's `lifted` argument discriminates move from resize, and the
   de-lane arm carries a resized item out of its slice; beside the offsets
   it holds a prospective lane SLOT for the lifted item, paintless, so
@@ -137,17 +144,22 @@ range selection, frozen tracks, and a paintable background.
   measurements, and leaves the retention map alone. The tick router has
   five arms: it composes the coordinator's layout-driving union with
   make-room motion ON A CONTENT-SIZED LANE AXIS and lays out on a
-  make-room generation change there, while on a FIXED lane axis it never
-  CLASSIFIES make-room motion as layout-driving (a gap that displaces a
-  neighbour still lays out through the admitted-bound arm). The sizing
-  step's cluster term reads each member's held make-room delta, the
-  number paint adds, plus the engine's slots, so a track's edge follows
-  what paints; it records per pass under two latch sets (ramp,
+  make-room generation change there, and composes a RELANE slide the same
+  way, while on a FIXED lane axis it never CLASSIFIES either as
+  layout-driving (a gap that displaces a neighbour still lays out through
+  the admitted-bound arm). The sizing step's cluster term reads the two
+  intra-track numbers paint adds to each member, its held make-room delta
+  and its relane slide's lead, plus the engine's slots, so a track's edge
+  follows what paints; a cross-track slide carries no relane mark and
+  never reaches the term. It records per pass under two latch sets (ramp,
   make-room contribution), hands a track's in-flight trackResize in at
   the make-room latch's edge, and at the hand-off installs a
   makeRoom-family resize for a residue past tolerance whenever the
   engine's snap generation moved, on the remaining clock and curve tail
-  the snap published, recording a natural settle's residue instead.
+  the snap published, recording a natural settle's residue instead. The
+  ITEM window is widened by the composed offset bound, which folds each
+  id's extent delta where an animated trailing edge reaches further than
+  its lead, because items are obtained by their STRUCTURAL span.
 - **`Board`** (`board_widget.dart`): owns the delegate (cached, rebuilt
   only when a builder identity changes, disposed when replaced), the drag
   controller's lifetime (`didUpdateWidget` cancels before disposing and
@@ -186,11 +198,16 @@ range selection, frozen tracks, and a paintable background.
   controller captures every held item's painted position through the
   port before the snap and, after the mutation, installs a makeRoom-family
   slide from there to where each now rests, on the clock the engine
-  published (the gap's remaining time and its curve's tail), while the
-  render's sizing step continues each track's residue on that same
-  clock, so the row edge and the content inside it arrive together and
-  nothing painted steps at release; a committed resize's glide runs from
-  the painted corner captured before the snap; a cancel closes the gap
+  published (the gap's remaining time and its curve's tail) and marked
+  RELANE, so a content-sized track holding such a neighbour is
+  term-driven on that clock while a track with none takes the sizing
+  step's hand-off arm, and the row edge and the content inside it arrive
+  together with nothing painted stepping at release. The report itself
+  runs inside `withoutRelaneLeads`, so the mutation's own re-lane
+  installs no second LEAD for those neighbours in any door, `setItems`
+  included, while their extents install as everywhere else; a committed
+  resize's glide runs from the painted corner captured before the snap
+  and composes whenever an extent record stands; a cancel closes the gap
   by animation. `BoardDropResolver` turns a pointer into a
   span: a track-snap move commits the cell UNDER THE POINTER minus a
   whole-cell grab offset (item geometry never enters it), a

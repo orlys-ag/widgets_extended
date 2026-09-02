@@ -8,8 +8,8 @@
 /// - [BoardAnimationStyle.itemEnterExit]: item insert and remove. Inherits
 ///   [BoardAnimationStyle.trackResize] when unset, because both animate an
 ///   EXTENT and because adding an item can grow its own track.
-/// - [BoardAnimationStyle.itemSlide]: FLIP for span changes, meaning move,
-///   resize, and lane reflow after a commit. A ROOT family.
+/// - [BoardAnimationStyle.itemSlide]: RECT FLIP for span changes, meaning
+///   move, resize, and the re-lane a mutation causes. A ROOT family.
 /// - [BoardAnimationStyle.makeRoom]: the drag make-room preview, meaning gap
 ///   open, re-target and release. Inherits [BoardAnimationStyle.itemSlide]
 ///   when unset.
@@ -18,9 +18,11 @@
 ///
 /// The unset-to-root mapping above is the whole of it, and the error it
 /// exists to prevent is reading [BoardAnimationStyle.itemEnterExit] as
-/// falling back to [BoardAnimationStyle.itemSlide]: enter/exit is
-/// layout-driving and slide is paint-only, so that reading routes an item's
-/// enter/exit through the wrong half of every rule below.
+/// falling back to [BoardAnimationStyle.itemSlide]: enter/exit scales an
+/// item's whole extent as it arrives or leaves, where a slide moves a
+/// rectangle that already exists, so that reading routes an item's
+/// enter/exit through the wrong half of every rule below. (A slide's LEAD
+/// is paint-only; its EXTENT is layout-driving, as enter/exit is.)
 ///
 /// Inheritance is by UNSET-NESS and is resolved at READ time. Leaving one of
 /// the three fallback families null keeps it tracking later restyles of its
@@ -56,8 +58,8 @@ enum BoardAnimationFamily {
   /// Item insert and remove. Inherits [trackResize] when unset.
   itemEnterExit,
 
-  /// FLIP for span changes: move, resize, and lane reflow after a commit.
-  /// A root family.
+  /// RECT FLIP for span changes: move, resize, and the re-lane a
+  /// mutation causes. A root family.
   itemSlide,
 
   /// The drag make-room preview: gap open, re-target and release. Inherits
@@ -148,9 +150,11 @@ class BoardAnimationStyle {
   /// Content-sized track resize timing. A root family.
   final BoardAnimationSpec trackResize;
 
-  /// FLIP slide timing for span changes: move, resize, and lane reflow
-  /// after a commit. A root family, and what a null `duration` or `curve`
-  /// argument to `moveItem` or `resizeItem` resolves against.
+  /// RECT FLIP timing for span changes: an item's corner and extent
+  /// decay together from its old rectangle to its new one, and so does
+  /// the rectangle of every neighbour the change re-lanes. A root
+  /// family, and what a null `duration` or `curve` argument to
+  /// `moveItem` or `resizeItem` resolves against.
   final BoardAnimationSpec itemSlide;
 
   final BoardAnimationSpec? _itemEnterExit;
