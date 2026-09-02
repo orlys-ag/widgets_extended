@@ -409,10 +409,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   ///    prior-tick disjunct IS the latch: a settle tick's record is
   ///    already gone, and this is the one layout that reads the settled
   ///    extent and progress.
-  /// 2. The make-room generation moved on a content-sized lane axis:
-  ///    relayout. A SNAPPED slot-only install carries no motion and
-  ///    displaces nobody, so no other arm can fire for it, and the same
-  ///    arm carries that gap's close.
+  /// 2. The make-room generation moved, on a content-sized lane axis or
+  ///    on any board holding a resize EXTENT preview: relayout. A
+  ///    SNAPPED slot-only install carries no motion and displaces
+  ///    nobody, so no other arm can fire for it, and the same arm
+  ///    carries that gap's close; a settled extent preview's re-target
+  ///    is the other case with no motion to route it.
   /// 3. Offsets just went idle: one relayout, to re-narrow the window
   ///    the admitted bound widened.
   /// 4. Offsets active: relayout only past the admitted bound, repaint
@@ -436,7 +438,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final hasOffsets = anim.hasActiveOffsets;
     if (hasLayoutDriving || _priorTickHadLayoutDriving) {
       markNeedsLayout();
-    } else if (laneAxisIsContent &&
+    } else if ((laneAxisIsContent || anim.hasMakeRoomExtent) &&
         anim.makeRoomGeneration != _laidOutMakeRoomGeneration) {
       markNeedsLayout();
     } else if (_priorTickHadOffsets && !hasOffsets) {

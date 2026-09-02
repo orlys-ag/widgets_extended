@@ -102,7 +102,12 @@ range selection, frozen tracks, and a paintable background.
   it to the item's extent so the child is laid out at the animated size),
   `MakeRoomEngine` (HELD offsets from the dry run; the
   session's `lifted` argument discriminates move from resize, and the
-  de-lane arm carries a resized item out of its slice; beside the offsets
+  de-lane arm carries a resized item out of its slice; a RESIZE session
+  also gets a HELD EXTENT, the length its prospective span would give it
+  minus the length it has, installed BEFORE the lane-axis gate because an
+  extent needs no lane geometry and is the whole of the in-place feedback
+  on a board with none, so the block follows the finger while the model
+  stays unwritten; beside the offsets
   it holds a prospective lane SLOT for the lifted item, paintless, so
   track sizing can count the lane the drop would occupy, with a lifecycle
   key that is non-null exactly while a slot exists; the make-room
@@ -145,7 +150,10 @@ range selection, frozen tracks, and a paintable background.
   five arms: it composes the coordinator's layout-driving union with
   make-room motion ON A CONTENT-SIZED LANE AXIS and lays out on a
   make-room generation change there, and composes a RELANE slide the same
-  way, while on a FIXED lane axis it never CLASSIFIES either as
+  way; it lays out on that generation change on ANY axis while a resize
+  EXTENT preview stands, and the coordinator's layout-driving union counts
+  such a preview only while it MOVES, a settled one being a constant.
+  On a FIXED lane axis the router never CLASSIFIES a gap or a relane as
   layout-driving (a gap that displaces a neighbour still lays out through
   the admitted-bound arm). The sizing step's cluster term reads the two
   intra-track numbers paint adds to each member, its held make-room delta
@@ -206,8 +214,12 @@ range selection, frozen tracks, and a paintable background.
   runs inside `withoutRelaneLeads`, so the mutation's own re-lane
   installs no second LEAD for those neighbours in any door, `setItems`
   included, while their extents install as everywhere else; a committed
-  resize's glide runs from the painted corner captured before the snap
-  and composes whenever an extent record stands; a cancel closes the gap
+  resize's glide runs from the painted corner captured before the snap,
+  carries the item's EXTENT continuation beside it (the painted extent
+  captured before the snap minus the painted extent after the mutation,
+  both read through `rectOfItem`, which composes the preview and any
+  in-flight FLIP, so the continuation cancels the report's own FLIP by
+  construction), and composes whenever either half is non-zero; a cancel closes the gap
   by animation. `BoardDropResolver` turns a pointer into a
   span: a track-snap move commits the cell UNDER THE POINTER minus a
   whole-cell grab offset (item geometry never enters it), a

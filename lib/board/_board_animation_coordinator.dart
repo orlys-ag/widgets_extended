@@ -114,9 +114,16 @@ abstract interface class BoardAnimationReader<TKey> {
 
   /// The in-flight EXTENT delta for an item, `dx` on the horizontal axis
   /// and `dy` on the vertical, a content-space LENGTH per axis the
-  /// painted extent adds to the structural one. Zero for an id with no
-  /// record, at one boolean's cost when the engine holds none.
+  /// painted extent adds to the structural one: a slide's TRANSIENT
+  /// delta composed with the make-room engine's HELD resize preview,
+  /// exactly as [offsetOfItem] composes the two leads. Zero for an id
+  /// neither holds, at two booleans' cost when neither holds anything.
   Offset extentDeltaOf(int itemId);
+
+  /// Whether the make-room engine holds a resize extent preview at all.
+  /// The render lays out on a generation change while one stands, on any
+  /// axis: an extent changes layout wherever it is, unlike a gap.
+  bool get hasMakeRoomExtent;
 
   /// The lead delta of a RELANE record, zero for every other record and
   /// for no record: an intra-track shift on the lane axis, which is what
@@ -148,6 +155,13 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     )
     dryRunOf,
     required double Function(int id, int lane, int laneCount) laneOriginOfId,
+    required Offset Function(
+      int id,
+      BoardSpan prospective,
+      int? lane,
+      int laneCount,
+    )
+    prospectiveExtentOf,
     required int Function(int id) laneOfId,
     required int Function(int id) laneCountOfId,
   }) : _store = store,
@@ -180,6 +194,7 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
       laneAxisOf: laneAxisOf,
       dryRunOf: dryRunOf,
       laneOriginOfId: laneOriginOfId,
+      prospectiveExtentOf: prospectiveExtentOf,
       laneOfId: laneOfId,
       laneCountOfId: laneCountOfId,
     );
@@ -207,7 +222,12 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   bool get hasLayoutDrivingAnimations {
     return trackResize.hasActive ||
         enterExit.hasActive ||
-        slide.hasExtentActive;
+        slide.hasExtentActive ||
+        // A resize preview in MOTION changes the child's constraints per
+        // tick on any axis. A SETTLED one is a constant and is not here,
+        // or a whole drag would lay out per tick; its install reaches
+        // layout through the render's generation arm.
+        makeRoom.hasExtentMotion;
   }
 
   @override
@@ -231,7 +251,7 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
       // so both edges are inside a window widened by the larger
       // magnitude. One site: this is the number layout widens the obtain
       // window by and records.
-      final extent = slide.extentDeltaOf(id);
+      final extent = extentDeltaOf(id);
       final leadX = offset.dx.abs();
       final trailX = (offset.dx + extent.dx).abs();
       final maxX = leadX > trailX ? leadX : trailX;
@@ -297,9 +317,16 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   @override
   Offset extentDeltaOf(int itemId) {
     if (!slide.hasActive) {
-      return Offset.zero;
+      return makeRoom.hasHeldExtent
+          ? makeRoom.extentDeltaOf(itemId)
+          : Offset.zero;
     }
-    return slide.extentDeltaOf(itemId);
+    return slide.extentDeltaOf(itemId) + makeRoom.extentDeltaOf(itemId);
+  }
+
+  @override
+  bool get hasMakeRoomExtent {
+    return makeRoom.hasHeldExtent;
   }
 
   @override

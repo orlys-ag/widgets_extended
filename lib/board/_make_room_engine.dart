@@ -6,6 +6,12 @@
 /// come from a DRY-RUN lane resolution over at most two lane-axis
 /// buckets, supplied by the controller; the model is never written.
 ///
+/// Beside the offsets the engine holds a HELD EXTENT for a RESIZE
+/// session's own item, the length its prospective span would give it
+/// minus the length it has now, so the block follows the finger while
+/// the model stays unwritten; it rides the offsets' clock and their two
+/// doors.
+///
 /// Beside the offsets the engine holds prospective lane SLOTS for the
 /// LIFTED item: a slot has no paint half at all and exists only so the
 /// track-sizing walk can count the lane the drop would occupy. The
@@ -51,6 +57,27 @@ class _CurveTail extends Curve {
     }
     return (_inner.transform(_from + (1.0 - _from) * t) - at) / span;
   }
+}
+
+/// A HELD EXTENT preview for the item a RESIZE session holds: the
+/// length its prospective span would give it, minus the length its
+/// stored span gives it now, per axis. Paint adds it to the item's
+/// extent exactly as a held offset is added to its lead, so the block
+/// follows the finger while the model stays unwritten.
+///
+/// Zero means this entry is CLOSING and is removed when it settles, the
+/// rule its sibling below uses.
+class _HeldExtent {
+  _HeldExtent({
+    required this.target,
+    required this.from,
+    required this.snapped,
+  });
+
+  Offset target;
+  Offset from;
+  bool snapped;
+  double t = 0.0;
 }
 
 class _HeldOffset {
@@ -117,6 +144,13 @@ class MakeRoomEngine {
     )
     dryRunOf,
     required double Function(int id, int lane, int laneCount) laneOriginOfId,
+    required Offset Function(
+      int id,
+      BoardSpan prospective,
+      int? lane,
+      int laneCount,
+    )
+    prospectiveExtentOf,
     required int Function(int id) laneOfId,
     required int Function(int id) laneCountOfId,
   }) : _styleOf = styleOf,
@@ -124,6 +158,7 @@ class MakeRoomEngine {
        _laneAxisOf = laneAxisOf,
        _dryRunOf = dryRunOf,
        _laneOriginOfId = laneOriginOfId,
+       _prospectiveExtentOf = prospectiveExtentOf,
        _laneOfId = laneOfId,
        _laneCountOfId = laneCountOfId {
     _ticker = vsync.createTicker(_tick);
@@ -144,6 +179,18 @@ class MakeRoomEngine {
   )
   _dryRunOf;
   final double Function(int id, int lane, int laneCount) _laneOriginOfId;
+
+  /// The EXTENT the geometry rule would give an id under a prospective
+  /// span and lane assignment, minus the one it gives it now. The
+  /// controller answers, that rule being its own; a null [lane] means
+  /// the dry run did not lane the id.
+  final Offset Function(
+    int id,
+    BoardSpan prospective,
+    int? lane,
+    int laneCount,
+  )
+  _prospectiveExtentOf;
   final int Function(int id) _laneOfId;
   final int Function(int id) _laneCountOfId;
 
@@ -151,6 +198,9 @@ class MakeRoomEngine {
   Duration _lastElapsed = Duration.zero;
 
   final Map<int, _HeldOffset> _held = <int, _HeldOffset>{};
+
+  /// At most one entry: the item a resize session holds.
+  final Map<int, _HeldExtent> _heldExtent = <int, _HeldExtent>{};
 
   /// KEYED BY LANE-AXIS TRACK, and an emptied bucket is removed, so
   /// `_slots.isEmpty` is exactly "no slot exists". The sizing walk asks
@@ -172,8 +222,43 @@ class MakeRoomEngine {
     return _held.isNotEmpty;
   }
 
+  /// Whether an extent preview stands at all. The render lays out on a
+  /// generation change while one does, on any axis: an extent changes
+  /// layout wherever it is, unlike a gap.
+  bool get hasHeldExtent {
+    return _heldExtent.isNotEmpty;
+  }
+
+  /// Whether an extent preview is MOVING. Only then is it
+  /// layout-driving; a settled one is a constant and would otherwise
+  /// lay the board out per tick for a whole drag.
+  bool get hasExtentMotion {
+    for (final entry in _heldExtent.values) {
+      if (!entry.snapped && entry.t < 1.0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// The held extent preview for [id], zero for no entry.
+  Offset extentDeltaOf(int id) {
+    final entry = _heldExtent[id];
+    if (entry == null) {
+      return Offset.zero;
+    }
+    if (entry.snapped) {
+      return entry.target;
+    }
+    final eased = _curve.transform(entry.t.clamp(0.0, 1.0));
+    return entry.from + (entry.target - entry.from) * eased;
+  }
+
   /// Any offset or slot unsnapped with clock below 1.
   bool get hasMotion {
+    if (hasExtentMotion) {
+      return true;
+    }
     for (final entry in _held.values) {
       if (!entry.snapped && entry.t < 1.0) {
         return true;
@@ -373,16 +458,61 @@ class MakeRoomEngine {
     Curve? curve,
   }) {
     final laneAxis = _laneAxisOf();
-    if (laneAxis == null) {
-      // No lane geometry exists to open; the drag proxy is the whole of
-      // the feedback on such a board.
-      return;
-    }
     final spec = _styleOf().effectiveMakeRoom;
     final resolved = duration ?? spec.duration;
     final snap = spec.duration == Duration.zero || resolved == Duration.zero;
     _curve = curve ?? spec.curve;
-    final dry = _dryRunOf(draggedId, prospective);
+    // The dry run needs lane geometry; without it nothing is laned and
+    // no gap exists to open, but the EXTENT preview below still does.
+    final dry = laneAxis == null
+        ? const <int, ({int lane, int laneCount})>{}
+        : _dryRunOf(draggedId, prospective);
+    if (!lifted) {
+      // THE EXTENT PREVIEW, a resize session's alone: a move changes no
+      // span extent. Re-targeted from where it currently paints, and
+      // left alone for an unchanged target, the two rules the offsets
+      // use and for the same reasons. BEFORE the lane-axis gate: an
+      // extent needs no lane geometry, and on a board with none it is
+      // the whole of the drag's in-place feedback.
+      final assignment = dry[draggedId];
+      final extent = _prospectiveExtentOf(
+        draggedId,
+        prospective,
+        assignment?.lane,
+        assignment?.laneCount ?? _laneCountOfId(draggedId),
+      );
+      final existing = _heldExtent[draggedId];
+      if (extent == Offset.zero && existing == null) {
+        // Nothing to hold.
+      } else if (snap) {
+        _heldExtent[draggedId] = _HeldExtent(
+          target: extent,
+          from: extent,
+          snapped: true,
+        );
+      } else if (existing == null || existing.target != extent) {
+        _heldExtent[draggedId] = _HeldExtent(
+          target: extent,
+          from: existing == null ? Offset.zero : extentDeltaOf(draggedId),
+          snapped: false,
+        );
+      }
+    }
+    if (laneAxis == null) {
+      // No lane geometry exists to open a gap in; the extent preview
+      // above is the whole of the in-place feedback on such a board, and
+      // the drag proxy is the rest of it.
+      _heldExtent.removeWhere((id, entry) {
+        return snap && entry.target == Offset.zero;
+      });
+      _generation += 1;
+      if (snap) {
+        _notifyNow();
+      } else {
+        _ensureTicking();
+      }
+      return;
+    }
     final targets = <int, double>{};
     dry.forEach((id, assignment) {
       if (id == draggedId && lifted) {
@@ -511,6 +641,9 @@ class MakeRoomEngine {
       _held.removeWhere((id, entry) {
         return entry.target == 0.0;
       });
+      _heldExtent.removeWhere((id, entry) {
+        return entry.target == Offset.zero;
+      });
       minT = _snapSlots(minT);
       _publishSnap(minT);
       _notifyNow();
@@ -554,7 +687,10 @@ class MakeRoomEngine {
     // all, and an `_held`-only guard would return without clearing the
     // slots, leaving the target track's phantom occupancy standing for
     // the rest of the board's life.
-    if (_held.isEmpty && _slots.isEmpty && _liftedId == null) {
+    if (_held.isEmpty &&
+        _slots.isEmpty &&
+        _liftedId == null &&
+        _heldExtent.isEmpty) {
       return;
     }
     final spec = _styleOf().effectiveMakeRoom;
@@ -573,7 +709,17 @@ class MakeRoomEngine {
           entry.target,
         );
       }
+      for (final entry in _heldExtent.values) {
+        // The same fold the offsets get, on the same three terms: an
+        // entry unsnapped, below clock 1 and actually moving had motion
+        // left, and the earliest such clock is the one the hand-off
+        // continues from.
+        if (!entry.snapped && entry.t < 1.0 && entry.from != entry.target) {
+          minT = minT == null || entry.t < minT ? entry.t : minT;
+        }
+      }
       _held.clear();
+      _heldExtent.clear();
       minT = _discardSlots(minT);
       _publishSnap(minT);
       _generation += 1;
@@ -586,6 +732,14 @@ class MakeRoomEngine {
       final current = _valueOf(entry);
       entry
         ..target = 0.0
+        ..from = current
+        ..snapped = false
+        ..t = 0.0;
+    });
+    _heldExtent.forEach((id, entry) {
+      final current = extentDeltaOf(id);
+      entry
+        ..target = Offset.zero
         ..from = current
         ..snapped = false
         ..t = 0.0;
@@ -610,6 +764,7 @@ class MakeRoomEngine {
     // THIS REMOVAL NEVER BUMPS THE SNAP GENERATION, on either branch: an
     // offset has a paint half.
     var removed = _held.remove(id) != null;
+    removed = _heldExtent.remove(id) != null || removed;
     if (id == _liftedId) {
       removed = removed || _slots.isNotEmpty;
       _discardSlots(null);
@@ -649,6 +804,15 @@ class MakeRoomEngine {
         ? double.infinity
         : dt.inMicroseconds / durationUs;
     var anyClosed = false;
+    _heldExtent.forEach((id, entry) {
+      if (entry.snapped || entry.t >= 1.0) {
+        return;
+      }
+      entry.t += delta;
+      if (entry.t >= 1.0 && entry.target == Offset.zero) {
+        anyClosed = true;
+      }
+    });
     _held.forEach((id, entry) {
       if (entry.snapped || entry.t >= 1.0) {
         return;
@@ -677,6 +841,9 @@ class MakeRoomEngine {
     if (anyClosed) {
       _held.removeWhere((id, entry) {
         return entry.t >= 1.0 && entry.target == 0.0;
+      });
+      _heldExtent.removeWhere((id, entry) {
+        return entry.t >= 1.0 && entry.target == Offset.zero;
       });
       _slots.removeWhere((track, slots) {
         slots.removeWhere((slot) {

@@ -198,6 +198,33 @@ BoardDragController<String> _drag(
   return drag;
 }
 
+/// itemSlide and makeRoom both live, for the resize preview cases.
+const BoardAnimationStyle _previewStyle = BoardAnimationStyle(
+  trackResize: _zero,
+  itemSlide: _ms200,
+  itemEnterExit: _zero,
+  makeRoom: _ms200,
+);
+
+/// A trailing-edge resize session that commits through `resizeItem`.
+BoardDragController<String> _resizeDrag(
+  WidgetTester tester,
+  BoardController<String, _Item> controller,
+) {
+  return _drag(
+    tester,
+    controller,
+    BoardDragConfig<String>(
+      autoScrollEdgeZone: 0.0,
+      onItemMoved: (key, span) {},
+      onItemResized: (key, span) {
+        controller.resizeItem(key, span);
+      },
+      resizeEdges: BoardResizeEdges.trailing,
+    ),
+  );
+}
+
 RenderBoardViewport<String> _viewport(WidgetTester tester) {
   return tester.allRenderObjects
       .whereType<RenderBoardViewport<String>>()
@@ -668,15 +695,17 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  // T9. A committed RESIZE composes its corner correction onto the rect
-  // FLIP, so the extent runs on the drop-settle record's clock. The
-  // de-lane fixture of `board_drag_test.dart`: growing b past a re-ranks
-  // b into lane 0, so the correction is a real intra-track lead and the
-  // composed lead is zero.
-  // Falsification: without the extent half the width snaps on the drop
-  // frame; without the compose it runs on the itemSlide record instead.
-  testWidgets("a committed resize drag runs its extent on the "
-      "drop-settle record", (tester) async {
+  // T9, rewritten for the resize extent preview: a SETTLED preview has
+  // already shown the committed extent, so the commit is CONTINUOUS on
+  // both halves. The de-lane fixture of `board_drag_test.dart`: growing
+  // b past a re-ranks b into lane 0, so the corner correction is a real
+  // intra-track lead and it cancels the FLIP's, while the extent needs
+  // no continuation at all. Its mid-preview twin is T9b.
+  // Falsification: without the preview the width is still 80 through the
+  // drag and steps at the drop; without the report's extent suppression
+  // it snaps back to 80 on the drop frame and re-animates.
+  testWidgets("a committed resize on a laned item is continuous from its "
+      "preview", (tester) async {
     final controller = _contentLane(
       tester,
       const BoardAnimationStyle(
@@ -727,34 +756,41 @@ void main() {
     drag.updateDrag(_global(tester, Offset(240.0, edge.top + 2.0)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
+    // Setup sanity: the preview SETTLED at the prospective four columns
+    // while the model kept its two.
+    expect(tester.getSize(find.byKey(_itemKey("b"))).width, closeTo(160.0, 0.01));
+    expect(controller.spanOf("b")!.colSpan, 2);
+
     drag.endDrag(cancel: false);
     await tester.pump();
-    // TARGET: the corner correction cancelled the FLIP's lead and the
-    // extent rode onto the same record.
+    // TARGET: nothing steps. The corner correction cancelled the FLIP's
+    // lead, and the extent was already where the commit puts it.
+    expect(controller.spanOf("b")!.colSpan, 4);
     expect(controller.anim.offsetOfItem(bId), Offset.zero);
-    expect(controller.anim.extentDeltaOf(bId), const Offset(-80.0, 0.0));
-    expect(tester.getSize(find.byKey(_itemKey("b"))).width, closeTo(80.0, 0.01));
-    await tester.pump(const Duration(milliseconds: 150));
-    expect(
-      tester.getSize(find.byKey(_itemKey("b"))).width,
-      closeTo(120.0, 0.5),
-    );
+    expect(controller.anim.extentDeltaOf(bId), Offset.zero);
+    expect(tester.getSize(find.byKey(_itemKey("b"))).width, closeTo(160.0, 0.01));
     await tester.pump(const Duration(milliseconds: 150));
     expect(
       tester.getSize(find.byKey(_itemKey("b"))).width,
       closeTo(160.0, 0.01),
     );
     await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byKey(_itemKey("b"))).width,
+      closeTo(160.0, 0.01),
+    );
   });
 
   // T9b. An UNLANED item's committed resize has a zero corner
-  // correction, there being no de-lane hold to correct off, so the
-  // compose runs only because an extent record stands. Its dropSettle is
-  // explicit and longer than itemSlide, which is what tells the two
-  // clocks apart.
-  // Falsification: the pre-existing early return on a zero correction
-  // leaves the extent on the 200ms itemSlide record, so the width is
-  // already 120 at 200ms.
+  // correction, there being no de-lane hold to correct off, so the glide
+  // runs only because an extent continuation stands. Released one frame
+  // after the move, so the preview is barely started and the whole
+  // remainder is what the glide carries: the MID-preview twin of T9. Its
+  // dropSettle is explicit and longer than itemSlide, which is what
+  // tells the two clocks apart.
+  // Falsification: the early return on a zero correction drops the
+  // continuation, so the extent stays on the 200ms itemSlide record and
+  // the width is already 120 at 200ms.
   testWidgets("an unlaned resize drag composes its extent onto the glide",
       (tester) async {
     final controller = _plain(
@@ -819,6 +855,234 @@ void main() {
       tester.getSize(find.byKey(_itemKey("m"))).width,
       closeTo(120.0, 0.01),
     );
+    await tester.pumpAndSettle();
+  });
+
+  // ------------------------------------------------------------------
+  // The resize extent preview
+  // (`plans/2026-09-02-resize-extent-preview-plan.md`).
+  // ------------------------------------------------------------------
+
+  // P1 and P2. The block follows the finger: the resolved span's extent
+  // is PREVIEWED on the makeRoom clock while the pointer holds, without
+  // the model being written, and it re-aims and closes like the gap.
+  // Falsification: before the preview the painted width stays at its
+  // structural 80 for the whole gesture, which is what the baseline
+  // probe showed.
+  testWidgets("a resize drag previews the prospective extent on the "
+      "makeRoom clock", (tester) async {
+    final controller = _plain(tester, style: _previewStyle);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final drag = _resizeDrag(tester, controller);
+    double painted() {
+      return tester.getSize(find.byKey(_itemKey("m"))).width;
+    }
+
+    final edge = viewport.rectOfItem("m")!;
+    expect(painted(), 80.0);
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, Offset(edge.right, edge.center.dy)),
+        edge: BoardResizeEdges.trailing,
+      ),
+      isTrue,
+    );
+    // Three columns outward: the resolver reports five columns, 200.
+    drag.updateDrag(_global(tester, Offset(240.0, edge.center.dy)));
+    await tester.pump();
+    // Setup sanity: the target resolved and the MODEL is untouched.
+    expect(drag.currentTarget!.span.colSpan, 5);
+    expect(controller.spanOf("m")!.colSpan, 2);
+    // TARGET: the painted extent animates onto the prospective one.
+    expect(painted(), closeTo(80.0, 0.01));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(painted(), closeTo(140.0, 1.0));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(painted(), closeTo(200.0, 0.01));
+    expect(controller.spanOf("m")!.colSpan, 2);
+
+    // P2, re-aim: back to four columns, from where it paints.
+    drag.updateDrag(_global(tester, Offset(200.0, edge.center.dy)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(painted(), closeTo(160.0, 0.01));
+
+    // P2, cancel: the preview closes by animation, as the gap does.
+    drag.endDrag(cancel: true);
+    await tester.pump();
+    expect(painted(), closeTo(160.0, 1.0));
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(painted(), closeTo(80.0, 0.01));
+    expect(controller.spanOf("m")!.colSpan, 2);
+    await tester.pumpAndSettle();
+  });
+
+  // P3. The commit is CONTINUOUS: what the preview showed, the report
+  // does not re-animate. The report's own FLIP does install the whole
+  // 80-to-200 change, and the glide's continuation, read from painted
+  // truth on BOTH sides (the painted extent before the snap, the painted
+  // extent after the mutation), composes onto it and cancels it exactly.
+  // Falsification: dropping that continuation leaves the FLIP standing,
+  // so the drop frame reads 80 and the resize replays.
+  testWidgets("a committed resize is continuous from the preview",
+      (tester) async {
+    final controller = _plain(tester, style: _previewStyle);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final drag = _resizeDrag(tester, controller);
+    double painted() {
+      return tester.getSize(find.byKey(_itemKey("m"))).width;
+    }
+
+    final edge = viewport.rectOfItem("m")!;
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, Offset(edge.right, edge.center.dy)),
+        edge: BoardResizeEdges.trailing,
+      ),
+      isTrue,
+    );
+    drag.updateDrag(_global(tester, Offset(240.0, edge.center.dy)));
+    await tester.pump();
+    // A SETTLED preview: the painted extent is already the committed one.
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(painted(), closeTo(200.0, 0.01));
+
+    drag.endDrag(cancel: false);
+    await tester.pump();
+    // TARGET: no step at the drop frame, and none after it.
+    expect(controller.spanOf("m")!.colSpan, 5);
+    expect(painted(), closeTo(200.0, 0.01));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(painted(), closeTo(200.0, 0.01));
+    await tester.pumpAndSettle();
+    expect(painted(), closeTo(200.0, 0.01));
+  });
+
+  // P3, the moving half: a release MID-preview finishes the remainder
+  // rather than stepping, the drop-settle record carrying it.
+  // Falsification: dropping the glide's continuation, or returning early
+  // from it on a zero corner correction, steps the item at the drop.
+  testWidgets("a resize committed mid-preview finishes from where it "
+      "painted", (tester) async {
+    final controller = _plain(tester, style: _previewStyle);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final drag = _resizeDrag(tester, controller);
+    double painted() {
+      return tester.getSize(find.byKey(_itemKey("m"))).width;
+    }
+
+    final edge = viewport.rectOfItem("m")!;
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, Offset(edge.right, edge.center.dy)),
+        edge: BoardResizeEdges.trailing,
+      ),
+      isTrue,
+    );
+    drag.updateDrag(_global(tester, Offset(240.0, edge.center.dy)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    // Setup sanity: mid-preview, half way from 80 to 200.
+    final held = painted();
+    expect(held, closeTo(140.0, 1.0));
+
+    drag.endDrag(cancel: false);
+    await tester.pump();
+    // TARGET: the drop frame keeps the painted width, and the remainder
+    // runs on from there.
+    expect(painted(), closeTo(held, 1.0));
+    await tester.pumpAndSettle();
+    expect(painted(), closeTo(200.0, 0.01));
+  });
+
+  // P4. A preview in MOTION lays out per tick, because the child's
+  // constraints change; a SETTLED one does not, or every tick of every
+  // other source would lay the board out for a constant number. The
+  // second half needs another source TICKING to be observable at all,
+  // the engine's own ticker having stopped at the settle, so a lead-only
+  // slide on a second item runs beside it.
+  // Falsification: putting a held extent in the layout-driving union
+  // unconditionally makes that slide's every tick a layout.
+  testWidgets("a resize preview lays out per tick while it moves and not "
+      "once settled", (tester) async {
+    final controller = _plain(tester, style: _previewStyle);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final drag = _resizeDrag(tester, controller);
+    final edge = viewport.rectOfItem("m")!;
+    drag.startDrag(
+      key: "m",
+      renderPort: viewport,
+      pointerGlobal: _global(tester, Offset(edge.right, edge.center.dy)),
+      edge: BoardResizeEdges.trailing,
+    );
+    drag.updateDrag(_global(tester, Offset(240.0, edge.center.dy)));
+    await tester.pump();
+    final moving = viewport.debugPerformLayoutCount;
+    await tester.pump(const Duration(milliseconds: 100));
+    // TARGET: laying out while it moves.
+    expect(viewport.debugPerformLayoutCount, greaterThan(moving));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(
+      tester.getSize(find.byKey(_itemKey("m"))).width,
+      closeTo(200.0, 0.01),
+    );
+    // A lead-only slide on ANOTHER item, so something ticks while the
+    // preview stands settled.
+    controller.addItem(
+      const _Item("t"),
+      const BoardSpan(rowStart: 0, colStart: 0),
+    );
+    controller.moveItem(
+      "t",
+      const BoardSpan(rowStart: 0, colStart: 3),
+    );
+    await tester.pump();
+    final settled = viewport.debugPerformLayoutCount;
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+    // TARGET: the settled preview adds no layout, though a paint-only
+    // slide is ticking beside it.
+    expect(controller.anim.hasActiveOffsets, isTrue);
+    expect(viewport.debugPerformLayoutCount, settled);
+    expect(
+      tester.getSize(find.byKey(_itemKey("m"))).width,
+      closeTo(200.0, 0.01),
+    );
+    drag.endDrag(cancel: true);
     await tester.pumpAndSettle();
   });
 

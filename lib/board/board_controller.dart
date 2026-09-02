@@ -102,6 +102,7 @@ class BoardController<TKey, TItem> {
       },
       dryRunOf: _dryRunLanes,
       laneOriginOfId: _laneOriginOfId,
+      prospectiveExtentOf: _prospectiveExtentDelta,
       laneOfId: laneOfId,
       laneCountOfId: laneCountOfId,
     );
@@ -1117,6 +1118,7 @@ class BoardController<TKey, TItem> {
     Offset delta, {
     required Duration duration,
     required Curve curve,
+    Offset extentDelta = Offset.zero,
     bool relane = false,
   }) {
     _assertNotDisposed();
@@ -1127,6 +1129,7 @@ class BoardController<TKey, TItem> {
       family: BoardAnimationFamily.dropSettle,
       duration: duration,
       curve: curve,
+      extentDelta: extentDelta,
       relane: relane,
     );
   }
@@ -1796,6 +1799,77 @@ class BoardController<TKey, TItem> {
     final end = _store.endTrackOf(id, axis);
     return boardAxis.offsetOfFraction(end < count ? end : count) -
         boardAxis.offsetOfFraction(start < count ? start : count);
+  }
+
+  /// The EXTENT the geometry rule would give [id] under [prospective]
+  /// and the dry run's lane assignment, minus the one it gives it now:
+  /// what a RESIZE session's extent preview holds.
+  ///
+  /// Per axis, and the same two arms the settled read uses. An item
+  /// LANED on the lane axis under BOTH spans has the same slice under
+  /// both, so its delta there is zero and the cluster's own preview owns
+  /// it; a span that crosses between the arms takes each arm's answer on
+  /// its own side.
+  Offset _prospectiveExtentDelta(
+    int id,
+    BoardSpan prospective,
+    int? lane,
+    int laneCount,
+  ) {
+    return Offset(
+      _prospectiveExtentOn(Axis.horizontal, id, prospective, lane, laneCount),
+      _prospectiveExtentOn(Axis.vertical, id, prospective, lane, laneCount),
+    );
+  }
+
+  double _prospectiveExtentOn(
+    Axis axis,
+    int id,
+    BoardSpan prospective,
+    int? lane,
+    int laneCount,
+  ) {
+    final config = axis == Axis.vertical ? _rows : _columns;
+    final boardAxis = config.axis;
+    final isLaneAxis = _lanes.laneAxis == axis;
+    final wasLaned = isLaneAxis && _lanes.isLaned(id);
+    // The dry run lanes an id exactly when the resolver's own criterion
+    // holds for the prospective span, which is what `lane` reports.
+    final willBeLaned = isLaneAxis && lane != null;
+    if (wasLaned && willBeLaned) {
+      return 0.0;
+    }
+    final count = boardAxis.trackCount.toDouble();
+    double spanExtent(double start, double end) {
+      return boardAxis.offsetOfFraction(end < count ? end : count) -
+          boardAxis.offsetOfFraction(start < count ? start : count);
+    }
+
+    double lanedExtent(int forLaneCount) {
+      if (boardAxis.acceptsMeasurements) {
+        return config.laneExtent!;
+      }
+      final track = _store.startTrackOf(id, axis).floor();
+      if (track < 0 || track >= boardAxis.trackCount) {
+        return 0.0;
+      }
+      return (boardAxis.extentOf(track) - config.lanePadding).clamp(
+            0.0,
+            double.infinity,
+          ) /
+          forLaneCount;
+    }
+
+    final now = wasLaned
+        ? lanedExtent(laneCountOfId(id))
+        : spanExtent(
+            _store.startTrackOf(id, axis),
+            _store.endTrackOf(id, axis),
+          );
+    final next = willBeLaned
+        ? lanedExtent(laneCount)
+        : spanExtent(prospective.startTrackOn(axis), prospective.endTrackOn(axis));
+    return _extentDeltaOn(next, now);
   }
 
   /// The two-mode lane origin, measured from the item's lane-axis

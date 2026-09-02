@@ -326,6 +326,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // clears its de-lane hold: the commit's own FLIP slide starts from
     // its old lane origin, and the glide below corrects onto this.
     Offset? paintedBefore;
+    Offset? paintedExtentBefore;
     if (report && session.kind != BoardDragKind.move) {
       final rect = session.port.rectOfItem(session.key);
       if (rect != null) {
@@ -334,6 +335,11 @@ class BoardDragController<TKey> extends ChangeNotifier {
             boardController.anim.offsetOfItem(
               boardController.idOfKey(session.key),
             );
+        // The PAINTED extent, which the resize preview has been holding:
+        // `rectOfItem` already carries it, the geometry rule composing
+        // the preview into the extent it reports. The glide continues
+        // from here, and the report's own FLIP is suppressed for it.
+        paintedExtentBefore = Offset(rect.width, rect.height);
       }
     }
     Map<TKey, Offset>? paintedByKey;
@@ -376,7 +382,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     if (paintedByKey != null) {
       _installMakeRoomHandOff(session, paintedByKey);
     }
-    _installDropSettle(session, release, paintedBefore);
+    _installDropSettle(session, release, paintedBefore, paintedExtentBefore);
   }
 
   /// The hand-off's capture: the painted top-left corner of every item
@@ -453,8 +459,9 @@ class BoardDragController<TKey> extends ChangeNotifier {
   void _installDropSettle(
     _DragSession<TKey> session,
     Offset? release,
-    Offset? paintedBefore,
-  ) {
+    Offset? paintedBefore, [
+    Offset? paintedExtentBefore,
+  ]) {
     final key = session.key;
     if (!boardController.contains(key)) {
       return;
@@ -478,18 +485,30 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final id = boardController.idOfKey(key);
     final current = boardController.anim.offsetOfItem(id);
     final delta = desired - current;
+    // The extent continuation: from the painted extent the preview held
+    // to the one the report's mutation produced, zero when the app
+    // committed exactly what was previewed and the preview had settled,
+    // which is the quiet half of a continuous commit.
+    final extentDelta = paintedExtentBefore == null
+        ? Offset.zero
+        : Offset(
+            paintedExtentBefore.dx - rect.width,
+            paintedExtentBefore.dy - rect.height,
+          );
     // A ZERO correction still composes when the item holds an extent
     // record: the compose is what carries that extent onto the
     // drop-settle clock, and a committed resize of an UNLANED item has a
     // zero correction by construction, there having been no de-lane hold
     // to correct off.
     if (delta == Offset.zero &&
+        extentDelta == Offset.zero &&
         boardController.anim.extentDeltaOf(id) == Offset.zero) {
       return;
     }
     boardController.animateDropSettle(
       key,
       delta,
+      extentDelta: extentDelta,
       duration: session.dropSettleDuration,
       curve: session.dropSettleCurve,
       // A RESIZE's correction is the de-lane hold's intra-track lead, so
