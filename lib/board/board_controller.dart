@@ -230,8 +230,19 @@ class BoardController<TKey, TItem> {
     // handler, and makeRoom's held gap is not motion.
     if (old.itemSlide.duration != Duration.zero &&
         value.itemSlide.duration == Duration.zero) {
+      final hadRecords = _anim.slide.hasActive;
       _anim.slide.purgeActive();
       _anim.notifyNow();
+      if (hadRecords) {
+        // Before a record's FIRST tick no router mirror has latched, so
+        // the notify alone routes neither a layout nor a paint: an
+        // extent record would leave the child laid out at the animated
+        // size and a lead-only one would leave it painted displaced. An
+        // empty structural dirties layout without naming a key. The
+        // trackResize arm below does the same for the same reason, its
+        // installs being made in layout.
+        _notifyStructural(<TKey>{});
+      }
     }
     if (old.trackResize.duration != Duration.zero &&
         value.trackResize.duration == Duration.zero) {

@@ -668,6 +668,46 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  // T7. A purge before a record's FIRST tick leaves the render where
+  // the install frame left it: no router mirror has latched, and with
+  // every level false the purge's notify routes neither a layout nor a
+  // paint. Reachable only when the install runs INSIDE a frame before
+  // its layout, which a transient-phase frame callback produces (a
+  // ticker started there takes the frame's timestamp and first ticks a
+  // frame later, `scheduler/ticker.dart:204`).
+  // Falsification: without the empty structural notification the child
+  // keeps its install-frame width for as long as nothing else lays out.
+  testWidgets("restyling itemSlide to zero before the first tick lands "
+      "extents", (tester) async {
+    final controller = _plain(tester);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      controller.resizeItem(
+        "m",
+        const BoardSpan(rowStart: 2, colStart: 1, colSpan: 4),
+      );
+    });
+    await tester.pump();
+    // Setup sanity: the install ran inside the frame and its layout read
+    // the record, so the child is at the OLD width with no tick yet.
+    expect(tester.getSize(find.byKey(_itemKey("m"))).width, closeTo(80.0, 0.01));
+
+    controller.animationStyle = BoardAnimationStyle.disabled;
+    await tester.pump();
+    // TARGET: the purge re-dirtied layout, so the child lands.
+    expect(
+      tester.getSize(find.byKey(_itemKey("m"))).width,
+      closeTo(160.0, 0.01),
+    );
+    await tester.pumpAndSettle();
+  });
+
   // T8. The window bound, not the geometry rule, is what keeps a
   // shrinking item BUILT: items are obtained by their STRUCTURAL span's
   // intersection with the widened track range, and after the write that
