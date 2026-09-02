@@ -6,6 +6,12 @@
 /// come from a DRY-RUN lane resolution over at most two lane-axis
 /// buckets, supplied by the controller; the model is never written.
 ///
+/// Beside the offsets the engine holds prospective lane SLOTS for the
+/// LIFTED item: a slot has no paint half at all and exists only so the
+/// track-sizing walk can count the lane the drop would occupy. An
+/// install is IDEMPOTENT for an unchanged target, which is what lets a
+/// closing entry ever retire under a per-frame re-resolve.
+///
 /// Not exported from the module barrel.
 library;
 
@@ -32,6 +38,34 @@ class _HeldOffset {
   double from;
 
   /// A snapped entry sits at its target with no motion.
+  bool snapped;
+
+  /// The 0-to-1 animation clock, advanced by tick deltas.
+  double t = 0.0;
+}
+
+/// A prospective LANE OCCUPANCY on one lane-axis track, identity
+/// `(the track it is filed under, lane)`. It contributes
+/// `(lane + value) * laneExtent` to that track's cluster term, the
+/// enter/exit formula with [t]'s curved value in the role of progress.
+///
+/// No slot ever VACATES: nothing creates one at an item's stored
+/// `(track, lane)`, so a slot at target 0 is always one that is CLOSING.
+class _Slot {
+  _Slot({
+    required this.lane,
+    required this.target,
+    required this.from,
+    required this.snapped,
+  });
+
+  final int lane;
+
+  /// Zero means this slot is CLOSING and is removed when it settles.
+  double target;
+
+  double from;
+
   bool snapped;
 
   /// The 0-to-1 animation clock, advanced by tick deltas.
@@ -86,10 +120,75 @@ class MakeRoomEngine {
   Duration _lastElapsed = Duration.zero;
 
   final Map<int, _HeldOffset> _held = <int, _HeldOffset>{};
+
+  /// KEYED BY LANE-AXIS TRACK, and an emptied bucket is removed, so
+  /// `_slots.isEmpty` is exactly "no slot exists". The sizing walk asks
+  /// for one track at a time, once per track per obtain round per
+  /// correction pass, so a flat list would be a full scan per ask.
+  final Map<int, List<_Slot>> _slots = <int, List<_Slot>>{};
+
+  /// The slots' lifecycle key, and it carries no other duty. ONE RULE
+  /// governs it and it is total: non-null exactly while [_slots] is
+  /// non-empty.
+  int? _liftedId;
+
+  int _generation = 0;
+  int _snapGeneration = 0;
+
   Curve _curve = Curves.linear;
 
   bool get hasActive {
     return _held.isNotEmpty;
+  }
+
+  /// Any offset or slot unsnapped with clock below 1.
+  bool get hasMotion {
+    for (final entry in _held.values) {
+      if (!entry.snapped && entry.t < 1.0) {
+        return true;
+      }
+    }
+    for (final slots in _slots.values) {
+      for (final slot in slots) {
+        if (!slot.snapped && slot.t < 1.0) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Bumped by [previewGap], [releasePreview] and [clearForId]. The
+  /// render lays out when it differs from the value it last laid out
+  /// against.
+  int get generation {
+    return _generation;
+  }
+
+  /// Bumped when a snap arm or [clearForId] discards a SLOT whose
+  /// [_Slot.snapped] flag is FALSE, and for nothing else. NEVER by an
+  /// offset, on any arm: an offset has a paint half, so discarding one
+  /// steps the term and the item's painted position in the same frame,
+  /// and routing that step to a trackResize would animate the track's
+  /// edge behind content that has already moved.
+  int get snapGeneration {
+    return _snapGeneration;
+  }
+
+  /// The id whose prospective occupancy the slots carry, or null.
+  int? get liftedId {
+    return _liftedId;
+  }
+
+  /// The slots on lane-axis track [track]; `value` is in `[0, 1]`.
+  Iterable<({int lane, double value})> slotsOn(int track) {
+    final slots = _slots[track];
+    if (slots == null) {
+      return const <({int lane, double value})>[];
+    }
+    return slots.map((slot) {
+      return (lane: slot.lane, value: _valueOfSlot(slot));
+    });
   }
 
   /// The ids holding entries, for the composed per-id bound.
@@ -104,6 +203,50 @@ class MakeRoomEngine {
     return entry.from +
         (entry.target - entry.from) *
             _curve.transform(entry.t.clamp(0.0, 1.0));
+  }
+
+  double _valueOfSlot(_Slot slot) {
+    if (slot.snapped) {
+      return slot.target;
+    }
+    return slot.from +
+        (slot.target - slot.from) * _curve.transform(slot.t.clamp(0.0, 1.0));
+  }
+
+  /// Drops every slot and the lifecycle key with them, bumping the snap
+  /// generation when any discarded slot was still unsnapped. The two
+  /// callers are a LIFTED first install for a DIFFERENT id and the snap
+  /// release arm.
+  void _discardSlots() {
+    var discardedUnsnapped = false;
+    for (final slots in _slots.values) {
+      for (final slot in slots) {
+        if (!slot.snapped) {
+          discardedUnsnapped = true;
+        }
+      }
+    }
+    _slots.clear();
+    _liftedId = null;
+    if (discardedUnsnapped) {
+      _snapGeneration += 1;
+    }
+  }
+
+  /// Re-targets one slot, LEAVING IT UNTOUCHED when its target already
+  /// equals [target] and the install is not a snap. That idempotence is
+  /// what lets a closing slot decay on the schedule it started on, so
+  /// `_tick` can retire it under a per-frame re-resolve.
+  void _retargetSlot(_Slot slot, double target, bool snap) {
+    if (!snap && slot.target == target) {
+      return;
+    }
+    final current = _valueOfSlot(slot);
+    slot
+      ..from = snap ? target : current
+      ..target = target
+      ..snapped = snap
+      ..t = 0.0;
   }
 
   /// The held delta for [id], on the lane axis, zero for no entry.
@@ -150,7 +293,8 @@ class MakeRoomEngine {
     Duration? duration,
     Curve? curve,
   }) {
-    if (_laneAxisOf() == null) {
+    final laneAxis = _laneAxisOf();
+    if (laneAxis == null) {
       // No lane geometry exists to open; the drag proxy is the whole of
       // the feedback on such a board.
       return;
@@ -205,6 +349,15 @@ class MakeRoomEngine {
       if (target == 0.0 && existing == null) {
         return;
       }
+      if (!snap && existing != null && existing.target == target) {
+        // IDEMPOTENT FOR AN UNCHANGED TARGET. A free or fraction snap
+        // re-enters this method on every frame of the resize it caused,
+        // and restarting every clock there means the gap never settles
+        // and the ticker never stops. The SNAP arm still replaces
+        // unconditionally: the kill switch dominates a captured value,
+        // so a re-send under a zero family must force instant arrival.
+        return;
+      }
       final from = existing == null ? 0.0 : _valueOf(existing);
       if (snap) {
         _held[id] = _HeldOffset(target: target, from: target, snapped: true);
@@ -212,21 +365,102 @@ class MakeRoomEngine {
         _held[id] = _HeldOffset(target: target, from: from, snapped: false);
       }
     });
+    if (lifted) {
+      if (_liftedId != null && _liftedId != draggedId) {
+        // A PREVIOUS session's item, whose closing slot is still ramping
+        // down. Snap-drop it, or its phantom occupancy outlives the
+        // session that owned it, on a track it never reached. A LIFTED
+        // install for the SAME id takes the re-target path below.
+        _discardSlots();
+      }
+      // Both halves of the desired slot's identity come from inputs this
+      // method already has: the TRACK from `prospective` on the lane
+      // axis, the LANE from the dry run, present exactly when the run
+      // laned the dragged id.
+      final prospectiveTrack = prospective.startTrackOn(laneAxis).floor();
+      final desiredLane = dry[draggedId]?.lane;
+      _slots.forEach((track, slots) {
+        for (final slot in slots) {
+          final desired =
+              desiredLane != null &&
+                  track == prospectiveTrack &&
+                  slot.lane == desiredLane
+              ? 1.0
+              : 0.0;
+          _retargetSlot(slot, desired, snap);
+        }
+      });
+      if (desiredLane != null) {
+        final slots = _slots.putIfAbsent(prospectiveTrack, () {
+          return <_Slot>[];
+        });
+        var held = false;
+        for (final slot in slots) {
+          if (slot.lane == desiredLane) {
+            held = true;
+            break;
+          }
+        }
+        if (!held) {
+          slots.add(
+            _Slot(lane: desiredLane, target: 1.0, from: 0.0, snapped: snap),
+          );
+        }
+      }
+      _liftedId = _slots.isEmpty ? null : draggedId;
+    }
+    // BEFORE either tail: the snap arm ends in a notify and a return, so
+    // a bump written after it would never run on a snapped install, and
+    // the snapped install is the one the router's generation arm exists
+    // for.
+    _generation += 1;
     if (snap) {
       _held.removeWhere((id, entry) {
         return entry.target == 0.0;
       });
+      _snapSlots();
       _notifyNow();
       return;
     }
     _ensureTicking();
   }
 
+  /// The install's snap tail for slots: every slot lands on its target,
+  /// and a slot at 0 is removed. A removal of a slot that was still
+  /// UNSNAPPED steps the term without ramping it there, which is the one
+  /// case that bumps the snap generation.
+  void _snapSlots() {
+    var discardedUnsnapped = false;
+    _slots.removeWhere((track, slots) {
+      slots.removeWhere((slot) {
+        if (slot.target != 0.0) {
+          slot.snapped = true;
+          return false;
+        }
+        if (!slot.snapped) {
+          discardedUnsnapped = true;
+        }
+        return true;
+      });
+      return slots.isEmpty;
+    });
+    if (discardedUnsnapped) {
+      _snapGeneration += 1;
+    }
+    if (_slots.isEmpty) {
+      _liftedId = null;
+    }
+  }
+
   /// Closes every held offset. The release side reads the SAME snap
   /// disjunction as the install, so a zero-family drag's gap opens and
   /// closes instantly as a pair.
   void releasePreview({Duration? duration, Curve? curve}) {
-    if (_held.isEmpty) {
+    // THREE COLLECTIONS, not one: a slot-only hover holds no offset at
+    // all, and an `_held`-only guard would return without clearing the
+    // slots, leaving the target track's phantom occupancy standing for
+    // the rest of the board's life.
+    if (_held.isEmpty && _slots.isEmpty && _liftedId == null) {
       return;
     }
     final spec = _styleOf().effectiveMakeRoom;
@@ -234,6 +468,8 @@ class MakeRoomEngine {
     final snap = spec.duration == Duration.zero || resolved == Duration.zero;
     if (snap) {
       _held.clear();
+      _discardSlots();
+      _generation += 1;
       _stopIfIdle();
       _notifyNow();
       return;
@@ -247,23 +483,41 @@ class MakeRoomEngine {
         ..snapped = false
         ..t = 0.0;
     });
+    _slots.forEach((track, slots) {
+      for (final slot in slots) {
+        // One already closing keeps the schedule it started on, the same
+        // idempotence rule the install applies and for the same reason.
+        _retargetSlot(slot, 0.0, false);
+      }
+    });
+    if (_slots.isEmpty) {
+      // The release of a session that never got a slot; otherwise the
+      // key is cleared at the settle, when `_tick` removes the last one.
+      _liftedId = null;
+    }
+    _generation += 1;
     _ensureTicking();
   }
 
   void clearForId(int id) {
-    _held.remove(id);
+    // THIS REMOVAL NEVER BUMPS THE SNAP GENERATION, on either branch: an
+    // offset has a paint half.
+    var removed = _held.remove(id) != null;
+    if (id == _liftedId) {
+      removed = removed || _slots.isNotEmpty;
+      _discardSlots();
+    }
+    if (removed) {
+      // Conditional: this runs on every exit release, and an
+      // unconditional bump would cost a layout per settle on every board
+      // with a content-sized lane axis.
+      _generation += 1;
+    }
     _stopIfIdle();
   }
 
   void _ensureTicking() {
-    var animating = false;
-    for (final entry in _held.values) {
-      if (!entry.snapped && entry.t < 1.0) {
-        animating = true;
-        break;
-      }
-    }
-    if (animating && !_ticker.isActive) {
+    if (hasMotion && !_ticker.isActive) {
       _lastElapsed = Duration.zero;
       _ticker.start();
     }
@@ -273,10 +527,8 @@ class MakeRoomEngine {
     if (!_ticker.isActive) {
       return;
     }
-    for (final entry in _held.values) {
-      if (!entry.snapped && entry.t < 1.0) {
-        return;
-      }
+    if (hasMotion) {
+      return;
     }
     _ticker.stop();
   }
@@ -299,6 +551,18 @@ class MakeRoomEngine {
         anyClosed = true;
       }
     });
+    // Both iterations complete before the first dispatch.
+    _slots.forEach((track, slots) {
+      for (final slot in slots) {
+        if (slot.snapped || slot.t >= 1.0) {
+          continue;
+        }
+        slot.t += delta;
+        if (slot.t >= 1.0 && slot.target == 0.0) {
+          anyClosed = true;
+        }
+      }
+    });
     // Same settle protocol as the slide engine: deltas observed at their
     // settled values before a closing entry is removed, then the
     // idle transition.
@@ -307,6 +571,17 @@ class MakeRoomEngine {
       _held.removeWhere((id, entry) {
         return entry.t >= 1.0 && entry.target == 0.0;
       });
+      _slots.removeWhere((track, slots) {
+        slots.removeWhere((slot) {
+          return slot.t >= 1.0 && slot.target == 0.0;
+        });
+        // An emptied bucket goes, which is what keeps `_slots.isEmpty`
+        // meaning "no slot exists".
+        return slots.isEmpty;
+      });
+      if (_slots.isEmpty) {
+        _liftedId = null;
+      }
       _notifyNow();
     }
     _stopIfIdle();

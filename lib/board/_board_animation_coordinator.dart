@@ -69,6 +69,32 @@ abstract interface class BoardAnimationReader<TKey> {
   /// live item. Layout MULTIPLIES the item's lane-axis extent and its
   /// intrinsic track-sizing contribution by this.
   double enterExitProgressOf(int itemId);
+
+  /// Any held make-room offset or slot is unsnapped with clock below 1.
+  /// The render's tick router composes it with the content-sized lane
+  /// predicate; the track-sizing latch reads the CONTRIBUTION instead, so
+  /// a snapped gap still latches.
+  bool get hasMakeRoomMotion;
+
+  /// Bumped by every make-room install, release and per-id clear. The
+  /// render lays out when it differs from the value it last laid out
+  /// against, which is the only route a SNAPPED slot-only install has.
+  int get makeRoomGeneration;
+
+  /// Bumped when a snap arm or a per-id clear discards a make-room SLOT
+  /// that was still unsnapped: prospective occupancy installed TO
+  /// ANIMATE. NEVER by an offset, on any arm, because an offset has a
+  /// paint half and its discard steps term and paint in one frame.
+  int get makeRoomSnapGeneration;
+
+  /// The held make-room delta ALONE, both axes, zero for no entry.
+  /// [offsetOfItem] composes it with slides; the track-sizing term must
+  /// not.
+  Offset makeRoomDeltaOf(int itemId);
+
+  /// The prospective lane occupancies on lane-axis track [track].
+  /// `value` is in `[0, 1]`.
+  Iterable<({int lane, double value})> makeRoomSlotsOn(int track);
 }
 
 /// The facade. Owns the four sources, the bit writes, the settle handler
@@ -187,6 +213,31 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   @override
   bool get hasActiveTrackResize {
     return trackResize.hasActive;
+  }
+
+  @override
+  bool get hasMakeRoomMotion {
+    return makeRoom.hasMotion;
+  }
+
+  @override
+  int get makeRoomGeneration {
+    return makeRoom.generation;
+  }
+
+  @override
+  int get makeRoomSnapGeneration {
+    return makeRoom.snapGeneration;
+  }
+
+  @override
+  Offset makeRoomDeltaOf(int itemId) {
+    return makeRoom.deltaOf(itemId);
+  }
+
+  @override
+  Iterable<({int lane, double value})> makeRoomSlotsOn(int track) {
+    return makeRoom.slotsOn(track);
   }
 
   @override

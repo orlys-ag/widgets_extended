@@ -44,6 +44,11 @@ const BoardAnimationSpec _ms400 = BoardAnimationSpec(
   curve: Curves.linear,
 );
 
+const BoardAnimationSpec _ms600 = BoardAnimationSpec(
+  duration: Duration(milliseconds: 600),
+  curve: Curves.linear,
+);
+
 const BoardAnimationSpec _zero = BoardAnimationSpec(
   duration: Duration.zero,
   curve: Curves.linear,
@@ -207,7 +212,7 @@ void main() {
     controller.releaseMakeRoomPreview();
     await tester.pump();
     expect(viewport.rectOfCell(0, 0)!.height, 40.0);
-  }, skip: true); // Until plan 2026-09-01-make-room-track-sizing lands.
+  });
 
   // T1. Distinct family durations: makeRoom (through itemSlide) 200ms,
   // trackResize 400ms. At 100ms the gap is half open; a row that follows
@@ -253,5 +258,281 @@ void main() {
     expect(viewport.rectOfCell(0, 0)!.height, closeTo(58.0, 0.5));
     controller.releaseMakeRoomPreview();
     await tester.pumpAndSettle();
-  }, skip: true); // Until plan 2026-09-01-make-room-track-sizing lands.
+  });
+
+  // T2. Slot-only. The prospective span shares the cluster's exact
+  // columns, so the dry run ranks the dragged id LAST by the id tie-break
+  // and displaces nobody: the row grows only because the engine holds a
+  // prospective lane SLOT for the lifted item.
+  testWidgets("the lifted item's slot grows a target row with no "
+      "displaced neighbour", (tester) async {
+    final controller = _controller(
+      tester,
+      const BoardAnimationStyle(trackResize: _ms300, itemSlide: _ms300),
+    );
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+    );
+    controller.addItem(
+      const _Item("b"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+    );
+    controller.addItem(
+      const _Item("d"),
+      const BoardSpan(rowStart: 2, colStart: 2, colSpan: 4),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    expect(viewport.rectOfCell(0, 0)!.height, 40.0);
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+      lifted: true,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    // Setup sanity: nothing is displaced, so no held offset exists and
+    // the slot is the only make-room contribution on this row.
+    expect(controller.anim.offsetOfItem(controller.idOfKey("a")), Offset.zero);
+    expect(controller.anim.offsetOfItem(controller.idOfKey("b")), Offset.zero);
+    // TARGET: half the slot's lane, on the make-room clock.
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(49.0, 0.5));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(58.0, 0.5));
+    controller.releaseMakeRoomPreview();
+    await tester.pumpAndSettle();
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(40.0, 0.5));
+  });
+
+  // T3b. The SOURCE bucket re-lanes when the dragged item leaves it. Row
+  // 2 holds sweep-axis intervals [0, 5), [1, 4) (the dragged one) and
+  // [2, 6) on lanes 0, 1, 2; the dry run drops the dragged id, re-sweeps
+  // the survivors, and the third takes lane 1. Its held offset carries
+  // the source row's term down on the make-room clock.
+  testWidgets("a source neighbour that re-lanes shrinks the source row "
+      "with the gap", (tester) async {
+    final controller = _controller(
+      tester,
+      const BoardAnimationStyle(trackResize: _ms400, itemSlide: _ms200),
+    );
+    // f is ADDED BEFORE b, so the id tie-break ranks b after it in row 0
+    // and the dry run lanes b at 1 there.
+    controller.addItem(
+      const _Item("f"),
+      const BoardSpan(rowStart: 0, colStart: 1, colSpan: 3),
+    );
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 2, colStart: 0, colSpan: 5),
+    );
+    controller.addItem(
+      const _Item("b"),
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 3),
+    );
+    controller.addItem(
+      const _Item("c"),
+      const BoardSpan(rowStart: 2, colStart: 2, colSpan: 4),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final cId = controller.idOfKey("c");
+    // Setup sanity: three lanes on the source row, one on the target row.
+    expect(controller.laneOf("c"), 2);
+    expect(viewport.rectOfCell(2, 0)!.height, 58.0);
+    expect(viewport.rectOfCell(0, 0)!.height, 22.0);
+    expect(controller.anim.offsetOfItem(cId), Offset.zero);
+    controller.previewMakeRoomGap(
+      draggedKey: "b",
+      prospective: const BoardSpan(rowStart: 0, colStart: 1, colSpan: 3),
+      lifted: true,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    // Setup sanity: the dry run re-laned a SOURCE-bucket member, which is
+    // what the height assertions below measure the term against.
+    expect(controller.anim.offsetOfItem(cId).dy, closeTo(-9.0, 0.5));
+    // TARGET: the source row follows that offset, on the make-room clock.
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(49.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(controller.anim.offsetOfItem(cId).dy, closeTo(-18.0, 0.5));
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(40.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    controller.releaseMakeRoomPreview();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(49.0, 0.5));
+    await tester.pumpAndSettle();
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(58.0, 0.5));
+  });
+
+  // T-settle. T2's script, whose slot IS the row's deepest ceiling, so on
+  // the frame the tick retires it the term steps by the fraction of a
+  // lane the slot still held. A NATURAL settle bumps no snap generation,
+  // so the hand-off RECORDS that residue instead of installing a resize.
+  //
+  // THE CADENCE IS LOAD-BEARING and is 50ms steps into a 400ms close, not
+  // the plan's 50ms into 300ms. A ticker's first callback after `start`
+  // reports elapsed 0 (`scheduler/ticker.dart`, `_startTime ??=
+  // timeStamp`), so the close's clock runs 0, 1/6, ... and its seventh
+  // step sums to 0.9999999999999999 rather than 1.0. The slot is
+  // therefore retired one frame LATER than the frame whose value was a
+  // sixth of a lane, and the term the previous frame recorded is already
+  // the settled one: no residue survives to the hand-off, and the case
+  // stops discriminating against the scratch it names. 50ms into 400ms
+  // divides exactly, so the retirement lands on the tick that first
+  // reaches 1.0 and the residue is the eighth of a lane the frame before
+  // it recorded.
+  testWidgets("a gap that settles installs no trackResize", (tester) async {
+    final controller = _controller(
+      tester,
+      const BoardAnimationStyle(trackResize: _ms300, itemSlide: _ms400),
+    );
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+    );
+    controller.addItem(
+      const _Item("b"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+    );
+    controller.addItem(
+      const _Item("d"),
+      const BoardSpan(rowStart: 2, colStart: 2, colSpan: 4),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+      lifted: true,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    // Setup sanity: the slot is fully open and owns the row's ceiling.
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(58.0, 0.5));
+    controller.releaseMakeRoomPreview();
+    final heights = <double>[];
+    for (var i = 0; i < 9; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      heights.add(viewport.rectOfCell(0, 0)!.height);
+      // TARGET: no frame of the close installs a resize.
+      expect(controller.anim.hasActiveTrackResize, isFalse);
+    }
+    expect(heights.first, closeTo(58.0, 0.5));
+    // The frame before the settle still held an eighth of a lane, which
+    // is the residue the hand-off has to route.
+    expect(heights[7], closeTo(42.25, 0.01));
+    // TARGET: the residue is RECORDED, so the settle frame already sits
+    // at the settled term rather than animating toward it.
+    expect(heights.last, closeTo(40.0, 0.01));
+    final laidOut = viewport.debugPerformLayoutCount;
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(40.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    expect(viewport.debugPerformLayoutCount, laidOut);
+  });
+
+  // T5b. `effectiveMakeRoom` is `_makeRoom ?? itemSlide`, so a zero
+  // itemSlide with a LIVE trackResize snaps every make-room install. The
+  // latch reads the CONTRIBUTION and not its motion, so the snapped term
+  // is recorded on the frame it appears instead of being handed to a
+  // trackResize that animates behind the painted gap.
+  testWidgets("a zero makeRoom family with a live trackResize lands the "
+      "row without installing a resize", (tester) async {
+    final controller = _controller(
+      tester,
+      const BoardAnimationStyle(trackResize: _ms400, itemSlide: _zero),
+    );
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+    );
+    controller.addItem(
+      const _Item("b"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+    );
+    controller.addItem(
+      const _Item("d"),
+      const BoardSpan(rowStart: 2, colStart: 2, colSpan: 4),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+      lifted: true,
+    );
+    await tester.pump();
+    // TARGET: the snapped term lands whole, on the next frame.
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(58.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(58.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    controller.releaseMakeRoomPreview();
+    await tester.pump();
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(40.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+  });
+
+  // T-handin. C2 arm 2's TRACK-RESIZE HAND-IN. A track whose extent is
+  // about to become TERM-DRIVEN cannot leave a trackResize state in
+  // flight: paint would read the animator's captured from/to pair, so
+  // every recorded term would be invisible until the state is dropped and
+  // would then pop. The in-flight state is CONSTRUCTED through the
+  // existing internal-use channel rather than raced for.
+  testWidgets("a gap opening on a resizing row hands that resize in "
+      "rather than painting behind it", (tester) async {
+    final controller = _controller(
+      tester,
+      const BoardAnimationStyle(trackResize: _ms600, itemSlide: _ms300),
+    );
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+    );
+    controller.addItem(
+      const _Item("b"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+    );
+    controller.addItem(
+      const _Item("d"),
+      const BoardSpan(rowStart: 2, colStart: 2, colSpan: 4),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    expect(viewport.rectOfCell(0, 0)!.height, 40.0);
+    controller.animateTrackResize(Axis.vertical, 0, 76.0, 40.0);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    // Setup sanity: row 0 genuinely paints from the ANIMATOR, not from
+    // the stored 40, and the state does not touch the axis.
+    expect(controller.anim.hasActiveTrackResize, isTrue);
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(70.0, 0.5));
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+      lifted: true,
+    );
+    await tester.pump();
+    // TARGET: the latch EDGE handed the state in, so the row paints the
+    // recorded term from this frame on.
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    expect(viewport.rectOfCell(0, 0)!.height, inInclusiveRange(40.0, 41.5));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(49.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(58.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    controller.releaseMakeRoomPreview();
+    await tester.pumpAndSettle();
+  });
 }

@@ -113,6 +113,17 @@ class TrackResizeAnimator {
     _stopIfIdle();
   }
 
+  /// [finalizeAll]'s body narrowed to ONE track: the door the track
+  /// sizing step's make-room latch EDGE hands an in-flight resize in
+  /// through. A track holding no state is a no-op, so no caller needs a
+  /// residue test. It dispatches NOTHING, which is what makes it callable
+  /// from inside layout like the install beside it; the only reachable
+  /// side effect is the ticker stop.
+  void finalizeTrack(Axis axis, int track) {
+    _statesOf(axis).remove(track);
+    _stopIfIdle();
+  }
+
   void _ensureTicking() {
     if (!_ticker.isActive && hasActive) {
       _lastElapsed = Duration.zero;

@@ -219,6 +219,23 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   final Set<int> _rampWroteRows = <int>{};
   final Set<int> _rampWroteCols = <int>{};
 
+  /// Content-axis tracks whose settled extent the last sizing step wrote
+  /// from a MAKE-ROOM contribution of EITHER kind, and the narrower set
+  /// written from a SLOT alone. Two sets and not one, because the
+  /// hand-off has to know whether the contribution that VANISHED had a
+  /// paint half: an offset does, a slot does not, and only a slot's
+  /// disappearance can leave the term ahead of what paints.
+  final Set<int> _makeRoomWroteRows = <int>{};
+  final Set<int> _makeRoomWroteCols = <int>{};
+  final Set<int> _slotWroteRows = <int>{};
+  final Set<int> _slotWroteCols = <int>{};
+
+  /// The engine generations the last layout ran against, recorded at the
+  /// END of `layoutChildSequence` so every pass of one layout compares
+  /// against the same values.
+  int _laidOutMakeRoomGeneration = 0;
+  int _laidOutSnapGeneration = 0;
+
   /// The window's first track per axis, from the last obtain walk: the
   /// animated accumulation anchors THERE at its settled offset, which is
   /// what keeps a resize before the window invisible.
@@ -378,24 +395,45 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   /// An animation tick.
   ///
-  /// The four-branch routing. The callback carries no payload, so the
+  /// The five-branch routing. The callback carries no payload, so the
   /// discriminators are the level reads plus the two prior-tick mirrors,
   /// written unconditionally at the bottom so a tick that matches no
   /// branch still advances them.
   ///
-  /// 1. Layout-driving now OR on the prior tick: relayout. The disjunct
-  ///    IS the latch: a settle tick's record is already gone, and this is
-  ///    the one layout that reads the settled extent and progress.
-  /// 2. Offsets just went idle: one relayout, to re-narrow the window
+  /// 1. Layout-driving now OR on the prior tick: relayout. The flag is
+  ///    the COMPOSED one, the coordinator's layout-driving union widened
+  ///    by make-room motion ON A CONTENT-SIZED LANE AXIS, where a gap
+  ///    moves a track's extent. The disjunct IS the latch: a settle
+  ///    tick's record is already gone, and this is the one layout that
+  ///    reads the settled extent and progress.
+  /// 2. The make-room generation moved on a content-sized lane axis:
+  ///    relayout. A SNAPPED slot-only install carries no motion and
+  ///    displaces nobody, so no other arm can fire for it, and the same
+  ///    arm carries that gap's close.
+  /// 3. Offsets just went idle: one relayout, to re-narrow the window
   ///    the admitted bound widened.
-  /// 3. Offsets active: relayout only past the admitted bound, repaint
+  /// 4. Offsets active: relayout only past the admitted bound, repaint
   ///    otherwise.
-  /// 4. Otherwise nothing.
+  /// 5. Otherwise nothing.
+  ///
+  /// On a FIXED lane axis this router never CLASSIFIES make-room motion
+  /// as layout-driving. That is a claim about the classification and not
+  /// about every make-room tick: a gap that displaces a neighbour still
+  /// lays out through the admitted-bound arm, because a held offset
+  /// ramping up exceeds the bound the last layout recorded.
   void _handleAnimationTick() {
     final anim = _controller.anim;
-    final hasLayoutDriving = anim.hasLayoutDrivingAnimations;
+    final contentAxis = _contentAxis;
+    final laneAxisIsContent =
+        contentAxis != null && _controller.laneAxis == contentAxis;
+    final hasLayoutDriving =
+        anim.hasLayoutDrivingAnimations ||
+        (laneAxisIsContent && anim.hasMakeRoomMotion);
     final hasOffsets = anim.hasActiveOffsets;
     if (hasLayoutDriving || _priorTickHadLayoutDriving) {
+      markNeedsLayout();
+    } else if (laneAxisIsContent &&
+        anim.makeRoomGeneration != _laidOutMakeRoomGeneration) {
       markNeedsLayout();
     } else if (_priorTickHadOffsets && !hasOffsets) {
       markNeedsLayout();
@@ -526,6 +564,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // being active for the frame.
     _positionObtainedChildren();
     _sweepRetention();
+    // AFTER the pass loop, so every pass of one layout compared against
+    // the same values.
+    _laidOutMakeRoomGeneration = _controller.anim.makeRoomGeneration;
+    _laidOutSnapGeneration = _controller.anim.makeRoomSnapGeneration;
   }
 
   void _obtainRetained() {
@@ -823,10 +865,18 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// The TRACK SIZING step: writes this pass's resolved extents into the
   /// content-sized axis.
   ///
-  /// Five arms per track: a first measurement replaces the estimate; a
-  /// ramping contributor records and latches; the latch's hand-off
-  /// records the ramp's residue; and a changed settled extent records
-  /// the target and installs the resize that animates toward it.
+  /// Five arms per track. A first measurement replaces the estimate and
+  /// clears every latch set. A RAMPING or MAKE-ROOM CONTRIBUTOR records
+  /// per pass and maintains all three latch sets symmetrically, each
+  /// against its own condition, and at the make-room latch EDGE it hands
+  /// the track's in-flight trackResize in: while a make-room latch entry
+  /// stands the animator holds no state for that track, or every recorded
+  /// term would be invisible until the state was dropped. The latch's
+  /// hand-off then either RECORDS the residue or, on all four of a
+  /// residue past tolerance, a bumped SNAP generation, a vanished
+  /// PAINTLESS contribution and a SHRINK, installs a resize for it. A
+  /// changed settled extent records the target and installs the resize
+  /// that animates toward it.
   void _sizeContentTracks(BoardAxis axis) {
     final contentAxis = _contentAxis!;
     final config = contentAxis == Axis.vertical
@@ -836,33 +886,68 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final ramps = contentAxis == Axis.vertical
         ? _rampWroteRows
         : _rampWroteCols;
+    final makeRoomLatch = contentAxis == Axis.vertical
+        ? _makeRoomWroteRows
+        : _makeRoomWroteCols;
+    final slotLatch = contentAxis == Axis.vertical
+        ? _slotWroteRows
+        : _slotWroteCols;
     final anim = _controller.anim;
     for (final entry in _contentTrackExtents.entries) {
       final track = entry.key;
       var to = entry.value;
       var contributorRamping = false;
+      var makeRoomContributes = false;
+      var slotContributes = false;
       if (laneAxisIsContent) {
         // The item-cluster term: the track must hold its deepest
         // cluster's lanes, each member's ceiling SCALED by its enter/exit
-        // ramp, so a cluster of n with one member mid-animation
-        // contributes (n - 1 + progress) lane extents rather than n.
-        // Zero members contribute NO term; an itemless track keeps its
-        // cells-only measurement. Lane resolution ran at the layout head.
+        // ramp and SHIFTED by the held make-room delta paint adds to the
+        // same member, so the track's edge is a function of what paints.
+        // Zero members and no slot contribute NO term; an itemless track
+        // keeps its cells-only measurement. NO MEMBER IS SKIPPED, the
+        // lifted one included: nothing collapses the dragged item's
+        // in-place widget, so the track must keep holding it, and the
+        // engine answers a zero delta for a lifted id anyway.
+        // Lane resolution ran at the layout head.
         final members = _controller.laneBucketMembersOn(track);
-        if (members.isNotEmpty) {
-          var deepest = 0.0;
-          for (final member in members) {
-            if (anim.isEnteringItem(member) || anim.isExitingItem(member)) {
-              contributorRamping = true;
-            }
-            final ceiling =
-                (_controller.laneOfId(member) +
-                    anim.enterExitProgressOf(member)) *
-                config.laneExtent!;
-            if (ceiling > deepest) {
-              deepest = ceiling;
-            }
+        var deepest = 0.0;
+        var seen = false;
+        for (final member in members) {
+          seen = true;
+          if (anim.isEnteringItem(member) || anim.isExitingItem(member)) {
+            contributorRamping = true;
           }
+          // Content space, on the lane axis; a delta is the same number
+          // in both spaces.
+          final delta = contentAxis == Axis.vertical
+              ? anim.makeRoomDeltaOf(member).dy
+              : anim.makeRoomDeltaOf(member).dx;
+          if (delta != 0.0) {
+            makeRoomContributes = true;
+          }
+          final ceiling =
+              _controller.laneOfId(member) * config.laneExtent! +
+              delta +
+              anim.enterExitProgressOf(member) * config.laneExtent!;
+          if (ceiling > deepest) {
+            deepest = ceiling;
+          }
+        }
+        for (final slot in anim.makeRoomSlotsOn(track)) {
+          // A PROSPECTIVE lane occupancy: the enter/exit formula with the
+          // slot's value in the role of progress. On the lifted item's
+          // own track its member ceiling and its slot can both appear and
+          // the max takes one or the other, never their sum.
+          seen = true;
+          makeRoomContributes = true;
+          slotContributes = true;
+          final ceiling = (slot.lane + slot.value) * config.laneExtent!;
+          if (ceiling > deepest) {
+            deepest = ceiling;
+          }
+        }
+        if (seen) {
           final term = deepest + config.lanePadding;
           if (term > to) {
             to = term;
@@ -886,26 +971,91 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         // A FIRST measurement replacing an estimate: record, install
         // nothing. Making that transition invisible is what the
         // correction loop is for, and an install here would fight it on
-        // every scroll into new territory.
+        // every scroll into new territory. EVERY latch set drops the
+        // track: a first measurement is not a hand-off and must not
+        // become one on the next pass, and a controller swap can reach
+        // this arm with latch entries standing.
         axis.recordMeasurement(track, to);
         _passMeasuredNewTrack = true;
         ramps.remove(track);
+        makeRoomLatch.remove(track);
+        slotLatch.remove(track);
         continue;
       }
-      if (contributorRamping) {
-        // The enter/exit ramp IS this track's animation: `to` already
+      if (contributorRamping || makeRoomContributes) {
+        // The ramp or the gap IS this track's animation: `to` already
         // carries it and changes every tick, so record and latch. An
         // install here would re-target a resize once per tick and leave
         // layout dirty for a resize duration after the settle.
+        //
+        // THE TRACK-RESIZE HAND-IN, at the latch EDGE and nowhere else.
+        // From this pass on the extent is TERM-DRIVEN, recorded once per
+        // pass, while a trackResize in flight makes paint read the
+        // animator's captured from and to for both this track's extent
+        // and the following tracks' offsets. Nothing re-targets that
+        // state while the latch holds, since this arm's `continue` puts
+        // the one install site out of reach, so the recorded term would
+        // be invisible for the rest of the state's duration and would
+        // then pop when the animator dropped it. Finalizing lands the
+        // extent the axis already stores. Unconditional at the edge: a
+        // track holding no state is a no-op.
+        if (makeRoomContributes && !makeRoomLatch.contains(track)) {
+          _controller.finalizeTrackResize(contentAxis, track);
+        }
         axis.recordMeasurement(track, to);
-        ramps.add(track);
+        // SYMMETRIC, not add-only: a track can lose one kind of
+        // contribution while another keeps it on this arm, and an entry
+        // carried past the pass that stopped contributing would make the
+        // hand-off read the wrong kind as having vanished.
+        if (contributorRamping) {
+          ramps.add(track);
+        } else {
+          ramps.remove(track);
+        }
+        if (makeRoomContributes) {
+          makeRoomLatch.add(track);
+        } else {
+          makeRoomLatch.remove(track);
+        }
+        if (slotContributes) {
+          slotLatch.add(track);
+        } else {
+          slotLatch.remove(track);
+        }
         continue;
       }
-      if (ramps.remove(track)) {
-        // The frame the ramp ENDED: the residue between the last tick's
-        // value and full progress is up to one tick of the ramp, not a
-        // resize. Record it and hand off.
-        axis.recordMeasurement(track, to);
+      final endedRamp = ramps.remove(track);
+      final endedMakeRoom = makeRoomLatch.remove(track);
+      // Removed unconditionally, so no set keeps an entry past the pass
+      // that stopped contributing.
+      final endedSlot = slotLatch.remove(track);
+      if (endedRamp || endedMakeRoom) {
+        // The frame a latch ENDED. A natural settle leaves a residue of
+        // at most one tick's motion, which RECORDS: an install would keep
+        // layout dirty for a resize duration. The four terms that route
+        // it to an install instead are a residue worth acting on, a SNAP
+        // generation that moved (so the residue came from a discard of
+        // unsnapped state and not from a settle), a vanished PAINTLESS
+        // contribution (an offset's discard steps the item's painted
+        // position in the same frame, so its term step must land in that
+        // frame too), and a SHRINK (a growth here came from settled
+        // structure, and recording it can only leave the track too tall,
+        // which never overlaps, while animating it would hold the edge
+        // below a landing item for a whole resize).
+        //
+        // `stored` is the floor-corrected value, for the reason the
+        // ordinary arm below gives.
+        final stored = to < axis.minTrackExtent ? axis.minTrackExtent : to;
+        final painted = anim.animatedExtentOf(contentAxis, track);
+        if ((stored - painted).abs() > precisionErrorTolerance &&
+            anim.makeRoomSnapGeneration != _laidOutSnapGeneration &&
+            endedSlot &&
+            stored < painted) {
+          axis.recordMeasurement(track, to);
+          _controller.animateTrackResize(contentAxis, track, painted, stored);
+        } else {
+          axis.recordMeasurement(track, to);
+        }
         continue;
       }
       // Compared against what the axis WOULD STORE, not against the raw

@@ -1022,6 +1022,23 @@ class BoardController<TKey, TItem> {
     _anim.trackResize.animateTrackResize(axis, track, from, to);
   }
 
+  /// Internal-use channel for the render object; not part of the
+  /// supported surface. The track-sizing step's make-room latch EDGE
+  /// hands the track's in-flight resize in here, because from that pass
+  /// on the extent is TERM-DRIVEN and a state in flight would make paint
+  /// read the animator instead of the recorded term. Forwards and decides
+  /// nothing.
+  void finalizeTrackResize(Axis axis, int track) {
+    _anim.trackResize.finalizeTrack(axis, track);
+  }
+
+  /// Debug-only: the id whose prospective make-room occupancy the slots
+  /// carry, or null. Non-null exactly while a slot exists, which is the
+  /// only observable separating a leaked lifecycle key from a clean one.
+  int? get debugMakeRoomLiftedId {
+    return _anim.makeRoom.liftedId;
+  }
+
   /// Debug-only: successful slide installs, for the reflow contract.
   int get debugSlideInstallCount {
     return _anim.slide.debugInstallCount;
