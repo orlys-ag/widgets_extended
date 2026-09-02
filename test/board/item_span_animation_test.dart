@@ -406,6 +406,56 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  // T8. The window bound, not the geometry rule, is what keeps a
+  // shrinking item BUILT: items are obtained by their STRUCTURAL span's
+  // intersection with the widened track range, and after the write that
+  // span no longer reaches the window.
+  // Falsification: a bound folding the lead alone leaves the obtain
+  // window at 450, the structural span 200 to 400 never reaches it, and
+  // the item is not built at all.
+  testWidgets("the window bound covers an animated trailing edge past "
+      "the obtain window", (tester) async {
+    final controller = BoardController<String, _Item>(
+      vsync: tester,
+      rows: BoardAxisConfig(axis: UniformAxis(6, 50.0)),
+      columns: BoardAxisConfig(axis: UniformAxis(30, 40.0)),
+      keyOf: (item) {
+        return item.key;
+      },
+      animationStyle: _slideOnly,
+    );
+    addTearDown(controller.dispose);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 5, colSpan: 16),
+    );
+    final horizontal = ScrollController();
+    addTearDown(horizontal.dispose);
+    await tester.pumpWidget(_board(controller, horizontal: horizontal));
+    await tester.pumpAndSettle();
+    // Columns 5 to 21 of 40: content 200 to 840, 640 wide.
+    expect(tester.getSize(find.byKey(_itemKey("m"))).width, 640.0);
+
+    // The visible window becomes 700 to 980; the obtain window starts at
+    // 450 with the default 250 cache extent.
+    horizontal.jumpTo(700.0);
+    await tester.pumpAndSettle();
+    // Setup sanity: the item is still built, its span reaching past 700.
+    expect(find.byKey(_itemKey("m")), findsOneWidget);
+
+    // SHRINK to columns 5 to 10: content 200 to 400, which is past the
+    // obtain window's leading edge.
+    controller.resizeItem(
+      "m",
+      const BoardSpan(rowStart: 2, colStart: 5, colSpan: 5),
+    );
+    await tester.pump();
+    // TARGET: still built, still painting its old width.
+    expect(find.byKey(_itemKey("m")), findsOneWidget);
+    expect(tester.getSize(find.byKey(_itemKey("m"))).width, closeTo(640.0, 0.01));
+    await tester.pumpAndSettle();
+  });
+
   // T5. `setItems` re-spans through the same path, which its own doc
   // already claims.
   // Falsification: a `setItems` that keeps writing the span directly

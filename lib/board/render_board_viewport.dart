@@ -1191,9 +1191,20 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// fractions on that axis are ignored, because its position inside the
   /// track is decided by its lane); everything else takes the exact
   /// fractional endpoints, which is the only arm that consumes them.
+  ///
+  /// THE ONE SITE THAT ADDS THE IN-FLIGHT EXTENT DELTA, on every arm,
+  /// before the enter/exit ramp multiplies. Layout's tight constraints
+  /// and `rectOfItem` both read this rule, so a child is laid out at the
+  /// size the port reports; splitting them would report one size and
+  /// paint another. The delta is SIGNED, a growth carrying a negative
+  /// one, so the floor is on the SUM and never on the delta alone. The
+  /// LEAD takes no such term: a slide's lead is the paint shift.
   ({double lead, double extent}) _itemSpanGeometry(int id, Axis axis) {
     final config = axis == Axis.vertical ? _controller.rows : _controller.columns;
     final boardAxis = config.axis;
+    final extentDelta = axis == Axis.vertical
+        ? _controller.anim.extentDeltaOf(id).dy
+        : _controller.anim.extentDeltaOf(id).dx;
     final laned =
         _controller.laneAxis == axis && _controller.isLanedId(id);
     if (laned) {
@@ -1217,7 +1228,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         // ramps with the item's own enter/exit progress.
         return (
           lead: trackLead + padding + lane * laneExtent!,
-          extent: laneExtent * _controller.anim.enterExitProgressOf(id),
+          extent:
+              math.max(0.0, laneExtent + extentDelta) *
+              _controller.anim.enterExitProgressOf(id),
         );
       }
       // Fixed lane axis: the track's extent past the padding is divided
@@ -1230,8 +1243,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           : boardAxis.extentOf(track);
       final slice = math.max(0.0, trackExtent - padding) / laneCount;
       return (
+        // The lead reads the SETTLED slice: the lane origin is where
+        // the item's own animated extent does not reach.
         lead: trackLead + padding + lane * slice,
-        extent: slice * _controller.anim.enterExitProgressOf(id),
+        extent:
+            math.max(0.0, slice + extentDelta) *
+            _controller.anim.enterExitProgressOf(id),
       );
     }
     final startTrack = axis == Axis.vertical
@@ -1259,7 +1276,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         endTrack.floor(),
       );
     }
-    var extent = math.max(0.0, trail - lead);
+    var extent = math.max(0.0, trail - lead + extentDelta);
     if (_controller.laneAxis == axis) {
       // The third form of the scaled lane-axis extent: a non-laned item
       // on the lane axis ramps over its own full extent. The span axis
