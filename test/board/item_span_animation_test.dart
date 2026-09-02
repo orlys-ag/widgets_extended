@@ -668,6 +668,160 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  // T9. A committed RESIZE composes its corner correction onto the rect
+  // FLIP, so the extent runs on the drop-settle record's clock. The
+  // de-lane fixture of `board_drag_test.dart`: growing b past a re-ranks
+  // b into lane 0, so the correction is a real intra-track lead and the
+  // composed lead is zero.
+  // Falsification: without the extent half the width snaps on the drop
+  // frame; without the compose it runs on the itemSlide record instead.
+  testWidgets("a committed resize drag runs its extent on the "
+      "drop-settle record", (tester) async {
+    final controller = _contentLane(
+      tester,
+      const BoardAnimationStyle(
+        trackResize: _zero,
+        itemSlide: BoardAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+        itemEnterExit: _zero,
+      ),
+    );
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 2),
+    );
+    controller.addItem(
+      const _Item("b"),
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller, cellHeight: 20.0));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final bId = controller.idOfKey("b");
+    final drag = _drag(
+      tester,
+      controller,
+      BoardDragConfig<String>(
+        autoScrollEdgeZone: 0.0,
+        onItemMoved: (key, span) {},
+        onItemResized: (key, span) {
+          controller.resizeItem(key, span);
+        },
+        resizeEdges: BoardResizeEdges.trailing,
+      ),
+    );
+    final edge = viewport.rectOfItem("b")!;
+    // Setup sanity: two columns of 40.
+    expect(edge.width, 80.0);
+    expect(
+      drag.startDrag(
+        key: "b",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, Offset(edge.right, edge.top + 2.0)),
+        edge: BoardResizeEdges.trailing,
+      ),
+      isTrue,
+    );
+    drag.updateDrag(_global(tester, Offset(240.0, edge.top + 2.0)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    drag.endDrag(cancel: false);
+    await tester.pump();
+    // TARGET: the corner correction cancelled the FLIP's lead and the
+    // extent rode onto the same record.
+    expect(controller.anim.offsetOfItem(bId), Offset.zero);
+    expect(controller.anim.extentDeltaOf(bId), const Offset(-80.0, 0.0));
+    expect(tester.getSize(find.byKey(_itemKey("b"))).width, closeTo(80.0, 0.01));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(
+      tester.getSize(find.byKey(_itemKey("b"))).width,
+      closeTo(120.0, 0.5),
+    );
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(
+      tester.getSize(find.byKey(_itemKey("b"))).width,
+      closeTo(160.0, 0.01),
+    );
+    await tester.pumpAndSettle();
+  });
+
+  // T9b. An UNLANED item's committed resize has a zero corner
+  // correction, there being no de-lane hold to correct off, so the
+  // compose runs only because an extent record stands. Its dropSettle is
+  // explicit and longer than itemSlide, which is what tells the two
+  // clocks apart.
+  // Falsification: the pre-existing early return on a zero correction
+  // leaves the extent on the 200ms itemSlide record, so the width is
+  // already 120 at 200ms.
+  testWidgets("an unlaned resize drag composes its extent onto the glide",
+      (tester) async {
+    final controller = _plain(
+      tester,
+      style: const BoardAnimationStyle(
+        trackResize: _zero,
+        itemSlide: _ms200,
+        itemEnterExit: _zero,
+        dropSettle: BoardAnimationSpec(
+          duration: Duration(milliseconds: 400),
+          curve: Curves.linear,
+        ),
+      ),
+    );
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final id = controller.idOfKey("m");
+    final drag = _drag(
+      tester,
+      controller,
+      BoardDragConfig<String>(
+        autoScrollEdgeZone: 0.0,
+        onItemMoved: (key, span) {},
+        onItemResized: (key, span) {
+          controller.resizeItem(key, span);
+        },
+        resizeEdges: BoardResizeEdges.trailing,
+      ),
+    );
+    final edge = viewport.rectOfItem("m")!;
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, Offset(edge.right, edge.center.dy)),
+        edge: BoardResizeEdges.trailing,
+      ),
+      isTrue,
+    );
+    // One column outward: 80 to 120.
+    drag.updateDrag(_global(tester, Offset(160.0, edge.center.dy)));
+    await tester.pump();
+    drag.endDrag(cancel: false);
+    await tester.pump();
+    // Setup sanity: the correction is zero, so only the extent record
+    // can carry this.
+    expect(controller.anim.offsetOfItem(id), Offset.zero);
+    expect(controller.anim.extentDeltaOf(id), const Offset(-40.0, 0.0));
+    // TARGET: the 400ms dropSettle clock, not the 200ms itemSlide one.
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(
+      tester.getSize(find.byKey(_itemKey("m"))).width,
+      closeTo(100.0, 0.5),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(
+      tester.getSize(find.byKey(_itemKey("m"))).width,
+      closeTo(120.0, 0.01),
+    );
+    await tester.pumpAndSettle();
+  });
+
   // T7. A purge before a record's FIRST tick leaves the render where
   // the install frame left it: no router mirror has latched, and with
   // every level false the purge's notify routes neither a layout nor a
