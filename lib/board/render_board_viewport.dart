@@ -400,7 +400,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   ///
   /// 1. Layout-driving now OR on the prior tick: relayout. The flag is
   ///    the COMPOSED one, the coordinator's layout-driving union widened
-  ///    by make-room motion and by RELANE slides ON A CONTENT-SIZED LANE
+  ///    by make-room motion and by relane slides ON A CONTENT-SIZED LANE
   ///    AXIS, where a gap or a re-laned neighbour moves a track's
   ///    extent. A relane slide is lead-only there, so without the
   ///    disjunct it would take arm 4 while the sizing step, which runs
@@ -870,9 +870,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// content-sized axis.
   ///
   /// Five arms per track. A first measurement replaces the estimate and
-  /// clears every latch set. A RAMPING or MAKE-ROOM CONTRIBUTOR records
-  /// per pass and maintains both latch sets symmetrically, each against
-  /// its own condition, and at the make-room latch EDGE it hands the
+  /// clears every latch set. A RAMPING contributor, or one holding a
+  /// make-room delta or a RELANE lead, records per pass and maintains
+  /// both latch sets symmetrically, each against its own condition, and
+  /// at the make-room latch EDGE it hands the
   /// track's in-flight trackResize in: while a make-room latch entry
   /// stands the animator holds no state for that track, or every recorded
   /// term would be invisible until the state was dropped. The latch's
@@ -902,8 +903,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       if (laneAxisIsContent) {
         // The item-cluster term: the track must hold its deepest
         // cluster's lanes, each member's ceiling SCALED by its enter/exit
-        // ramp and SHIFTED by the held make-room delta paint adds to the
-        // same member, so the track's edge is a function of what paints.
+        // ramp and SHIFTED by the two intra-track numbers paint adds to
+        // the same member, its held make-room delta and its RELANE
+        // slide's lead, so the track's edge is a function of what paints.
         // Zero members and no slot contribute NO term; an itemless track
         // keeps its cells-only measurement. NO MEMBER IS SKIPPED, the
         // lifted one included: nothing collapses the dragged item's
@@ -923,12 +925,21 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           final delta = contentAxis == Axis.vertical
               ? anim.makeRoomDeltaOf(member).dy
               : anim.makeRoomDeltaOf(member).dx;
-          if (delta != 0.0) {
+          // A RELANE lead is the second number paint adds to a member's
+          // lane origin: an intra-track shift, so it belongs to THIS
+          // track's term. A cross-track slide never reaches here, which
+          // is what the relane mark decides and what keeps the reader's
+          // "the term must not compose non-relane slides" rule whole.
+          final relane = contentAxis == Axis.vertical
+              ? anim.relaneDeltaOf(member).dy
+              : anim.relaneDeltaOf(member).dx;
+          if (delta != 0.0 || relane != 0.0) {
             makeRoomContributes = true;
           }
           final ceiling =
               _controller.laneOfId(member) * config.laneExtent! +
               delta +
+              relane +
               anim.enterExitProgressOf(member) * config.laneExtent!;
           if (ceiling > deepest) {
             deepest = ceiling;

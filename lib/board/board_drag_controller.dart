@@ -358,11 +358,20 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final release = _pointerPosition.value;
     _teardown(session);
     if (report && target != null) {
-      if (target.kind == BoardDragKind.move) {
-        config.onItemMoved(session.key, target.span);
-      } else {
-        config.onItemResized!(session.key, target.span);
-      }
+      // The report's mutation re-lanes exactly the neighbours the
+      // preview displaced, whose landing the hand-off below owns, so
+      // their relane LEADS are suppressed for its duration, in whatever
+      // door the app mutates through. Their extents install as
+      // everywhere else, the preview having held none. The widget's
+      // built-in semantics move action reports outside any session and
+      // is deliberately not wrapped: nothing is held there.
+      boardController.withoutRelaneLeads(() {
+        if (target.kind == BoardDragKind.move) {
+          config.onItemMoved(session.key, target.span);
+        } else {
+          config.onItemResized!(session.key, target.span);
+        }
+      });
     }
     if (paintedByKey != null) {
       _installMakeRoomHandOff(session, paintedByKey);
@@ -466,11 +475,16 @@ class BoardDragController<TKey> extends ChangeNotifier {
       }
       desired = paintedBefore - rect.topLeft;
     }
-    final current = boardController.anim.offsetOfItem(
-      boardController.idOfKey(key),
-    );
+    final id = boardController.idOfKey(key);
+    final current = boardController.anim.offsetOfItem(id);
     final delta = desired - current;
-    if (delta == Offset.zero) {
+    // A ZERO correction still composes when the item holds an extent
+    // record: the compose is what carries that extent onto the
+    // drop-settle clock, and a committed resize of an UNLANED item has a
+    // zero correction by construction, there having been no de-lane hold
+    // to correct off.
+    if (delta == Offset.zero &&
+        boardController.anim.extentDeltaOf(id) == Offset.zero) {
       return;
     }
     boardController.animateDropSettle(
@@ -478,6 +492,10 @@ class BoardDragController<TKey> extends ChangeNotifier {
       delta,
       duration: session.dropSettleDuration,
       curve: session.dropSettleCurve,
+      // A RESIZE's correction is the de-lane hold's intra-track lead, so
+      // the item stays a term of its own track; a MOVE's runs from the
+      // proxy and is cross-track.
+      relane: session.kind != BoardDragKind.move,
     );
   }
 

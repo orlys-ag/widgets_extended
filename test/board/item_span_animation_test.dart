@@ -24,7 +24,9 @@ import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/_item_slide_engine.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
+import 'package:widgets_extended/board/board_config.dart';
 import 'package:widgets_extended/board/board_controller.dart';
+import 'package:widgets_extended/board/board_drag_controller.dart';
 import 'package:widgets_extended/board/board_widget.dart';
 import 'package:widgets_extended/board/render_board_viewport.dart';
 
@@ -80,6 +82,7 @@ Widget _board(
   BoardController<String, _Item> controller, {
   double width = 280.0,
   double height = 300.0,
+  double cellHeight = 50.0,
   ScrollController? horizontal,
 }) {
   return MaterialApp(
@@ -96,7 +99,7 @@ Widget _board(
                 ? const ScrollableDetails.horizontal()
                 : ScrollableDetails.horizontal(controller: horizontal),
             cellBuilder: (context, cell) {
-              return const SizedBox(width: 40.0, height: 50.0);
+              return SizedBox(width: 40.0, height: cellHeight);
             },
             itemBuilder: (context, item) {
               return ColoredBox(
@@ -109,6 +112,90 @@ Widget _board(
       ),
     ),
   );
+}
+
+/// FIXED-LANE: the same rows, and columns carrying a lane extent with no
+/// padding, so a day slices to 40 alone and 20 shared.
+BoardController<String, _Item> _fixedLane(WidgetTester tester) {
+  final controller = BoardController<String, _Item>(
+    vsync: tester,
+    rows: BoardAxisConfig(axis: UniformAxis(6, 50.0)),
+    columns: BoardAxisConfig(
+      axis: UniformAxis(7, 40.0),
+      laneExtent: 18.0,
+      lanePadding: 0.0,
+    ),
+    keyOf: (item) {
+      return item.key;
+    },
+    animationStyle: _slideOnly,
+  );
+  addTearDown(controller.dispose);
+  return controller;
+}
+
+/// CONTENT-LANE: the lattice of `make_room_track_sizing_test.dart`, rows
+/// content-sized and carrying the lanes.
+BoardController<String, _Item> _contentLane(
+  WidgetTester tester,
+  BoardAnimationStyle style,
+) {
+  final controller = BoardController<String, _Item>(
+    vsync: tester,
+    rows: BoardAxisConfig(
+      axis: LazyContentAxis(6, 80.0),
+      laneExtent: 18.0,
+      lanePadding: 4.0,
+    ),
+    columns: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
+    keyOf: (item) {
+      return item.key;
+    },
+    animationStyle: style,
+  );
+  addTearDown(controller.dispose);
+  return controller;
+}
+
+/// Row 0 holds `f`; row 2 holds `a`, `b`, `c` on lanes 0, 1 and 2. A copy
+/// of the relaning fixture in `make_room_track_sizing_test.dart`: moving
+/// `b` out re-lanes `c` from lane 2 to lane 1.
+void _addRelaningFixture(BoardController<String, _Item> controller) {
+  controller.addItem(
+    const _Item("f"),
+    const BoardSpan(rowStart: 0, colStart: 1, colSpan: 3),
+  );
+  controller.addItem(
+    const _Item("a"),
+    const BoardSpan(rowStart: 2, colStart: 0, colSpan: 5),
+  );
+  controller.addItem(
+    const _Item("b"),
+    const BoardSpan(rowStart: 2, colStart: 1, colSpan: 3),
+  );
+  controller.addItem(
+    const _Item("c"),
+    const BoardSpan(rowStart: 2, colStart: 2, colSpan: 4),
+  );
+}
+
+Offset _global(WidgetTester tester, Offset local) {
+  return tester.getRect(find.byKey(_frameKey)).topLeft + local;
+}
+
+/// A drag controller on [config], torn down with the test.
+BoardDragController<String> _drag(
+  WidgetTester tester,
+  BoardController<String, _Item> controller,
+  BoardDragConfig<String> config,
+) {
+  final drag = BoardDragController<String>(
+    boardController: controller,
+    vsync: tester,
+    config: config,
+  );
+  addTearDown(drag.dispose);
+  return drag;
 }
 
 RenderBoardViewport<String> _viewport(WidgetTester tester) {
@@ -403,6 +490,181 @@ void main() {
     expect(viewport.itemAt(Offset(rect.left + 140.0, y)), isNull);
     // Inside the animated rect, past the new structural edge.
     expect(viewport.itemAt(Offset(rect.left + 100.0, y)), "m");
+    await tester.pumpAndSettle();
+  });
+
+  // T6. A mutation re-lanes a neighbour, whose slice narrows: the
+  // neighbour FLIPs from its old rectangle like the moved item does.
+  // Falsification: without the neighbour install A steps to half a day
+  // with no record at all.
+  testWidgets("a mutation that re-lanes a neighbour slides and resizes "
+      "the neighbour", (tester) async {
+    final controller = _fixedLane(tester);
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 1, colStart: 2, rowSpan: 3),
+    );
+    controller.addItem(
+      const _Item("b"),
+      const BoardSpan(rowStart: 4, colStart: 3, rowSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final aId = controller.idOfKey("a");
+    final bId = controller.idOfKey("b");
+    // Setup sanity: each alone in its day, so each takes the full 40.
+    expect(controller.laneCountOf("a"), 1);
+    expect(tester.getSize(find.byKey(_itemKey("a"))).width, 40.0);
+
+    // B joins A's day and overlaps it on the sweep axis: two lanes, A
+    // first by the start sort, so A keeps lane 0 and B takes lane 1.
+    controller.moveItem(
+      "b",
+      const BoardSpan(rowStart: 2, colStart: 2, rowSpan: 2),
+    );
+    expect(controller.laneOf("a"), 0);
+    expect(controller.laneOf("b"), 1);
+    // TARGET: A's slice halves through a record, its lane origin
+    // unchanged, and B carries the same narrowing with its own move.
+    expect(controller.anim.extentDeltaOf(aId), const Offset(20.0, 0.0));
+    expect(controller.anim.offsetOfItem(aId), Offset.zero);
+    expect(controller.anim.extentDeltaOf(bId), const Offset(20.0, 0.0));
+    expect(controller.anim.offsetOfItem(bId), const Offset(20.0, 100.0));
+
+    await tester.pump();
+    expect(tester.getSize(find.byKey(_itemKey("a"))).width, closeTo(40.0, 0.01));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getSize(find.byKey(_itemKey("a"))).width, closeTo(30.0, 0.5));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getSize(find.byKey(_itemKey("a"))).width, closeTo(20.0, 0.01));
+    expect(controller.anim.extentDeltaOf(aId), Offset.zero);
+    await tester.pumpAndSettle();
+  });
+
+  // T6b. On a CONTENT-SIZED lane axis a re-laned neighbour's slide is
+  // lead-only, so the track's edge follows it only if the sizing term
+  // reads that lead AND the router lays out per tick for it.
+  // Falsification: leaving the router's relane term out holds row 2 at
+  // 58 until the settle; leaving the sizing term out runs the row on the
+  // 600ms trackResize instead, reading about 55 at 100ms.
+  testWidgets("a re-laned neighbour's slide holds its content-sized "
+      "track's edge per tick", (tester) async {
+    final controller = _contentLane(
+      tester,
+      const BoardAnimationStyle(
+        trackResize: BoardAnimationSpec(
+          duration: Duration(milliseconds: 600),
+          curve: Curves.linear,
+        ),
+        itemSlide: _ms200,
+        itemEnterExit: _zero,
+      ),
+    );
+    _addRelaningFixture(controller);
+    // 20px cells, so a row's extent is its lane term rather than its
+    // cells: the lattice of `make_room_track_sizing_test.dart`.
+    await tester.pumpWidget(_board(controller, cellHeight: 20.0));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final cId = controller.idOfKey("c");
+    // Setup sanity: three lanes on row 2, one on row 0.
+    expect(controller.laneOf("c"), 2);
+    expect(viewport.rectOfCell(2, 0)!.height, 58.0);
+    expect(viewport.rectOfCell(0, 0)!.height, 22.0);
+
+    // `b` leaves row 2 for row 0, at columns 4 to 6: it TOUCHES `f`
+    // (columns 1 to 3) without overlapping it, so row 0 keeps one lane
+    // and installs no resize of its own.
+    controller.moveItem(
+      "b",
+      const BoardSpan(rowStart: 0, colStart: 4, colSpan: 3),
+    );
+    expect(controller.laneOf("c"), 1);
+    expect(controller.laneCountOf("b"), 1);
+    // TARGET: the row holds its painted edge and follows the slide.
+    expect(controller.anim.relaneDeltaOf(cId), const Offset(0.0, 18.0));
+    await tester.pump();
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(58.0, 0.01));
+    expect(viewport.rectOfCell(0, 0)!.height, closeTo(22.0, 0.01));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(controller.anim.relaneDeltaOf(cId).dy, closeTo(9.0, 0.5));
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(49.0, 0.5));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(40.0, 0.01));
+    expect(controller.anim.hasActiveTrackResize, isFalse);
+    await tester.pumpAndSettle();
+  });
+
+  // T12. The drag layer's suppression must reach the `setItems` door,
+  // which is the one the package's own week example reports through.
+  // Falsification: a suppression that only guards `_reSpan` lets the
+  // bulk install carry c's lead, and c jumps back a lane on the drop
+  // frame.
+  testWidgets("a commit reported through setItems over a settled gap "
+      "keeps the neighbour where the preview held it", (tester) async {
+    final controller = _contentLane(
+      tester,
+      const BoardAnimationStyle(trackResize: _zero, itemSlide: _ms200),
+    );
+    _addRelaningFixture(controller);
+    // The app's model, re-sent whole on every report, as the week
+    // example does.
+    final spans = <String, BoardSpan>{
+      "f": const BoardSpan(rowStart: 0, colStart: 1, colSpan: 3),
+      "a": const BoardSpan(rowStart: 2, colStart: 0, colSpan: 5),
+      "b": const BoardSpan(rowStart: 2, colStart: 1, colSpan: 3),
+      "c": const BoardSpan(rowStart: 2, colStart: 2, colSpan: 4),
+    };
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final cId = controller.idOfKey("c");
+    final drag = _drag(
+      tester,
+      controller,
+      BoardDragConfig<String>(
+        autoScrollEdgeZone: 0.0,
+        onItemMoved: (key, span) {
+          spans[key] = span;
+          controller.setItems(
+            spans.entries.map((entry) {
+              return BoardPlacement<_Item>(_Item(entry.key), entry.value);
+            }),
+          );
+        },
+      ),
+    );
+    final lift = viewport.rectOfItem("b")!.center;
+    expect(
+      drag.startDrag(
+        key: "b",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, lift),
+      ),
+      isTrue,
+    );
+    drag.updateDrag(_global(tester, Offset(lift.dx, 11.0)));
+    await tester.pump();
+    // Let the gap SETTLE, which is the arm that publishes no hand-off.
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(controller.anim.hasMakeRoomMotion, isFalse);
+    final heldTop = tester.getRect(find.byKey(_itemKey("c"))).top;
+
+    drag.endDrag(cancel: false);
+    await tester.pump();
+    // Setup sanity: the commit landed through setItems and re-laned c.
+    expect(controller.spanOf("b")!.rowStart, 0);
+    expect(controller.laneOf("c"), 1);
+    // TARGET: nothing was handed on, and nothing moved c.
+    expect(controller.anim.makeRoomHandOff, isNull);
+    expect(controller.anim.relaneDeltaOf(cId), Offset.zero);
+    expect(
+      tester.getRect(find.byKey(_itemKey("c"))).top,
+      closeTo(heldTop, 0.01),
+    );
     await tester.pumpAndSettle();
   });
 

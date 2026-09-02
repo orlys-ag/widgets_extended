@@ -894,17 +894,21 @@ void main() {
     expect(viewport.rectOfCell(2, 0)!.height, 40.0);
   });
 
-  // T3c. DERIVED name: the plan's T3c pinned the pre-hand-off contract,
-  // where the source row RECORDED its shrink because c's paint stepped in
-  // the same frame. The commit hand-off inverted that: a snap that
-  // discards motion publishes its remaining clock, and the hand-off arm
-  // continues the residue on it for an OFFSET's discard as much as a
-  // slot's. CONTROLLER-ONLY, so this pins the render arm alone: by hand
-  // there is no painted-truth capture and c steps to lane 1, while the
-  // row's edge continues; the drag path's coherent version is
-  // `make_room_commit_handoff_test.dart`.
-  testWidgets("a commit mid-gap continues the source row's shrink on the "
-      "published clock", (tester) async {
+  // T3c. DERIVED name, rewritten twice: for the commit hand-off, and
+  // again for the item span animation plan, whose C4 step 5 gives the
+  // re-laned neighbour its own RELANE slide and whose C3b makes the
+  // source row's term read that slide's lead.
+  //
+  // CONTROLLER-ONLY, so the drag layer's relane-lead suppression does
+  // not apply: `moveItem` by hand re-lanes c and animates it, and row 2
+  // is TERM-DRIVEN on c's itemSlide clock with no trackResize of its
+  // own. The TARGET row keeps the hand-off arm, its slot having been
+  // discarded and no member of it holding a relane lead, which is what
+  // this case still pins about that arm. The drag path's coherent
+  // version is `make_room_commit_handoff_test.dart`.
+  testWidgets("a commit mid-gap continues the source row on its "
+      "neighbour's clock and the target row on the published one",
+      (tester) async {
     final controller = _controller(
       tester,
       const BoardAnimationStyle(trackResize: _ms400, itemSlide: _ms200),
@@ -941,21 +945,33 @@ void main() {
       const BoardSpan(rowStart: 0, colStart: 1, colSpan: 3),
     );
     await tester.pump();
-    // TARGET: the source row keeps its painted extent in the drop frame
-    // and continues to the committed term over the 100ms the gap had
-    // left, not over the 400ms trackResize family.
-    expect(viewport.rectOfCell(2, 0)!.height, closeTo(49.0, 0.01));
-    expect(controller.anim.hasActiveTrackResize, isTrue);
+    // TARGET, the SOURCE row: c re-lanes 2 to 1 and slides its one lane
+    // on the 200ms itemSlide clock, and the row's term reads that lead,
+    // so the row holds 58 in the drop frame and follows c down with no
+    // resize of its own. Its pre-commit 49 was the gap's, and the gap is
+    // gone.
+    expect(controller.anim.offsetOfItem(cId), const Offset(0.0, 18.0));
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(58.0, 0.01));
+    // TARGET, the TARGET row: its slot was discarded mid-ramp and no
+    // member holds a relane lead, so the hand-off arm continues its
+    // residue on the 100ms the gap had left, not on the 400ms
+    // trackResize family.
     expect(controller.anim.makeRoomHandOff!.remaining,
         const Duration(milliseconds: 100));
-    expect(controller.anim.offsetOfItem(cId), Offset.zero);
+    expect(controller.anim.hasActiveTrackResize, isTrue);
     expect(viewport.rectOfCell(0, 0)!.height, closeTo(31.0, 0.01));
     await tester.pump(const Duration(milliseconds: 50));
-    expect(viewport.rectOfCell(2, 0)!.height, closeTo(44.5, 0.01));
+    expect(controller.anim.offsetOfItem(cId).dy, closeTo(13.5, 0.01));
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(53.5, 0.01));
     expect(viewport.rectOfCell(0, 0)!.height, closeTo(35.5, 0.01));
     await tester.pump(const Duration(milliseconds: 50));
-    expect(viewport.rectOfCell(2, 0)!.height, closeTo(40.0, 0.01));
+    expect(controller.anim.offsetOfItem(cId).dy, closeTo(9.0, 0.01));
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(49.0, 0.01));
+    // The target row has landed; only c's own clock is left running.
     expect(viewport.rectOfCell(0, 0)!.height, closeTo(40.0, 0.01));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(controller.anim.offsetOfItem(cId), Offset.zero);
+    expect(viewport.rectOfCell(2, 0)!.height, closeTo(40.0, 0.01));
     await tester.pump(const Duration(milliseconds: 16));
     expect(controller.anim.hasActiveTrackResize, isFalse);
     await tester.pumpAndSettle();

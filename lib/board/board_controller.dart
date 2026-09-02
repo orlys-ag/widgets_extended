@@ -700,14 +700,35 @@ class BoardController<TKey, TItem> {
               bool frozen,
               int? laneTrack,
             })>{};
+      final reSpanned = <int>{};
+      final allocated = <int>{};
       if (_installsSlide(null)) {
+        // Every bucket this call disturbs: the tracks a changed span
+        // leaves and arrives in, the track an entering placement lands
+        // on, the track an exiting item leaves, and the track a ghost
+        // retired by a re-added key leaves.
+        final laneAxis = _lanes.laneAxis;
+        final tracks = <int?>[];
+        for (final key in exiting) {
+          tracks.add(_laneStartTrackOf(_store.idOf(key)));
+        }
         for (final entry in desired.entries) {
           final id = _liveIdOf(entry.key);
-          if (id == BoardStore.noId ||
-              _spanEquals(id, entry.value.span) ||
-              !_canReadItemGeometry(id)) {
+          if (laneAxis != null) {
+            tracks.add(entry.value.span.startTrackOn(laneAxis).floor());
+          }
+          if (id == BoardStore.noId) {
+            final ghost = _store.idOf(entry.key);
+            if (ghost != BoardStore.noId && _store.isExiting(ghost)) {
+              tracks.add(_laneStartTrackOf(ghost));
+            }
             continue;
           }
+          tracks.add(_laneStartTrackOf(id));
+          if (_spanEquals(id, entry.value.span) || !_canReadItemGeometry(id)) {
+            continue;
+          }
+          reSpanned.add(id);
           captured[id] = (
             key: entry.key,
             lead: _itemLeadOfId(id),
@@ -716,6 +737,7 @@ class BoardController<TKey, TItem> {
             laneTrack: _laneStartTrackOf(id),
           );
         }
+        captured.addAll(_captureLaneBuckets(tracks, skip: reSpanned));
       }
       for (final key in exiting) {
         _exitOrRetire(key, _store.idOf(key), notify: false);
@@ -727,6 +749,7 @@ class BoardController<TKey, TItem> {
         if (existing == BoardStore.noId) {
           _retireGhostOf(key);
           final id = _store.allocate(key);
+          allocated.add(id);
           if (_store.lastAllocationWasRecycled) {
             _anim.clearForId(id);
           }
@@ -754,10 +777,21 @@ class BoardController<TKey, TItem> {
       // One lane resolve serves every install: no site inside the loop
       // above reads a lane.
       captured.forEach((id, rect) {
-        if (_store.keyOf(id) == rect.key) {
+        if (reSpanned.contains(id) &&
+            !allocated.contains(id) &&
+            _store.keyOf(id) == rect.key) {
           _installReSpan(id, rect);
         }
       });
+      _installRelanes(
+        Map<int, ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})>
+            .fromEntries(
+          captured.entries.where((entry) {
+            return !reSpanned.contains(entry.key);
+          }),
+        ),
+        allocated: allocated,
+      );
       // A clean no-op diff notifies nothing: nothing retired, nothing
       // entered, nothing changed, and the lane accumulator drains empty.
       // An EMPTY delivered set is reserved for real structural changes
@@ -793,6 +827,19 @@ class BoardController<TKey, TItem> {
     if (_liveIdOf(key) != BoardStore.noId) {
       _throwDuplicateKey("addItem", key);
     }
+    // Captured BEFORE the retire and the register, both of which
+    // re-lane a bucket: the arriving item's, and the one a ghost of this
+    // same key is leaving.
+    final laneAxis = _lanes.laneAxis;
+    final ghost = _store.idOf(key);
+    final neighbours = _installsSlide(null)
+        ? _captureLaneBuckets(<int?>[
+            laneAxis == null ? null : span.startTrackOn(laneAxis).floor(),
+            ghost == BoardStore.noId || !_store.isExiting(ghost)
+                ? null
+                : _laneStartTrackOf(ghost),
+          ])
+        : null;
     _retireGhostOf(key);
     final id = _store.allocate(key);
     if (_store.lastAllocationWasRecycled) {
@@ -809,6 +856,12 @@ class BoardController<TKey, TItem> {
     if (_animationStyle.effectiveItemEnterExit.duration != Duration.zero) {
       _anim.animateEnter(id);
     }
+    if (neighbours != null) {
+      // The id this call ALLOCATED is excluded: it may be the ghost's,
+      // recycled straight back, and the entering item must not FLIP from
+      // the dead one's rectangle.
+      _installRelanes(neighbours, allocated: <int>{id});
+    }
     _notifyStructural(<TKey>{key});
   }
 
@@ -819,7 +872,18 @@ class BoardController<TKey, TItem> {
   void removeItem(TKey key) {
     _assertNotDisposed();
     final id = _liveIdOrThrow(key, "removeItem");
+    // A SYNCHRONOUS retire re-lanes the survivors at once and they
+    // animate; an ANIMATED exit keeps the id registered until its
+    // settle, so no survivor's rectangle changes here and the install
+    // below finds nothing to do. The settle's own re-lane has no
+    // mutation site to capture at and steps; a follow-up.
+    final neighbours = _installsSlide(null)
+        ? _captureLaneBuckets(<int?>[_laneStartTrackOf(id)])
+        : null;
     _exitOrRetire(key, id, notify: true);
+    if (neighbours != null) {
+      _installRelanes(neighbours);
+    }
   }
 
   /// The shared removal route for [removeItem] and [setItems]'s exits.
@@ -1033,12 +1097,16 @@ class BoardController<TKey, TItem> {
   /// Internal-use channel for the drag layer; not part of the supported
   /// surface. The drop-settle glide, riding the slide engine with its own
   /// family; [duration] and [curve] are the session's captured spec,
-  /// while the family's zero kill switch reads the live style.
+  /// while the family's zero kill switch reads the live style. [relane]
+  /// declares the correction an intra-track shift, which a committed
+  /// RESIZE's is (it corrects onto the de-lane hold) and a committed
+  /// move's is not (it runs from the proxy).
   void animateDropSettle(
     TKey key,
     Offset delta, {
     required Duration duration,
     required Curve curve,
+    bool relane = false,
   }) {
     _assertNotDisposed();
     final id = _liveIdOrThrow(key, "animateDropSettle");
@@ -1048,8 +1116,33 @@ class BoardController<TKey, TItem> {
       family: BoardAnimationFamily.dropSettle,
       duration: duration,
       curve: curve,
+      relane: relane,
     );
   }
+
+  /// Internal-use channel for the drag layer; not part of the supported
+  /// surface. Runs [body] with the LEAD half of every neighbour relane
+  /// install suppressed, in every door: inside a commit's report the
+  /// preview has already moved those neighbours and the make-room
+  /// hand-off owns their landing, so a second lead would fight it. Their
+  /// EXTENT halves still install, the preview holding no extents.
+  ///
+  /// Restores the PRIOR value rather than false, so a nested call and a
+  /// throwing body both leave the flag as they found it. A mutation an
+  /// app makes inside its report beyond the reported span, re-laning a
+  /// neighbour the preview never held, steps that neighbour; accepted.
+  T withoutRelaneLeads<T>(T Function() body) {
+    _assertNotDisposed();
+    final saved = _relaneLeadsSuppressed;
+    _relaneLeadsSuppressed = true;
+    try {
+      return body();
+    } finally {
+      _relaneLeadsSuppressed = saved;
+    }
+  }
+
+  bool _relaneLeadsSuppressed = false;
 
   /// Internal-use channel for the render object; not part of the
   /// supported surface. The one route from the track-sizing step of
@@ -1099,6 +1192,11 @@ class BoardController<TKey, TItem> {
       family: BoardAnimationFamily.makeRoom,
       duration: duration,
       curve: curve,
+      // Intra-track by the snap's own premise: the mutation reassigned
+      // the displaced neighbours' structure by exactly the amounts the
+      // preview held them at, so this correction moves each within its
+      // own lane-axis track and the track's term may read it.
+      relane: true,
     );
   }
 
@@ -1430,8 +1528,95 @@ class BoardController<TKey, TItem> {
       frozen: _isFrozenPrimaryStart(id),
       laneTrack: _laneStartTrackOf(id),
     );
+    // The two buckets the write disturbs: the one the item LEAVES and
+    // the one it ARRIVES in, the second read off the argument because
+    // the capture precedes the write.
+    final laneAxis = _lanes.laneAxis;
+    final neighbours = _captureLaneBuckets(<int?>[
+      captured.laneTrack,
+      laneAxis == null ? null : span.startTrackOn(laneAxis).floor(),
+    ], skip: <int>{id});
     _applySpan(id, span);
     _installReSpan(id, captured, duration: duration, curve: curve);
+    _installRelanes(neighbours, duration: duration, curve: curve);
+  }
+
+  /// Captures the settled rectangle of every member of the lane buckets
+  /// on [tracks], for the install after the write. A null or
+  /// out-of-range track contributes nothing, which is the strand guard
+  /// applied to a whole bucket; [skip] is the written id, whose own
+  /// capture carries its own rule.
+  ///
+  /// The members are COPIED out of the resolver's live list, which the
+  /// write mutates in place.
+  Map<int, ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})>
+  _captureLaneBuckets(Iterable<int?> tracks, {Set<int> skip = const <int>{}}) {
+    final captured =
+        <int,
+          ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})>{};
+    final axis = _lanes.laneAxis;
+    if (axis == null) {
+      return captured;
+    }
+    final config = axis == Axis.vertical ? _rows : _columns;
+    final trackCount = config.axis.trackCount;
+    for (final track in tracks) {
+      if (track == null || track < 0 || track >= trackCount) {
+        continue;
+      }
+      for (final id in _lanes.laneBucketMembers(track)) {
+        if (skip.contains(id) ||
+            captured.containsKey(id) ||
+            !_canReadItemGeometry(id)) {
+          continue;
+        }
+        final key = _store.keyOf(id);
+        if (key == null) {
+          continue;
+        }
+        captured[id] = (
+          key: key,
+          lead: _itemLeadOfId(id),
+          extent: _itemExtentOfId(id),
+          frozen: _isFrozenPrimaryStart(id),
+          laneTrack: _laneStartTrackOf(id),
+        );
+      }
+    }
+    return captured;
+  }
+
+  /// Installs one RELANE FLIP per captured neighbour whose rectangle the
+  /// write changed.
+  ///
+  /// Three tests decide whether a captured entry still names the item it
+  /// was captured from: the id must still map to its captured KEY, must
+  /// not have been ALLOCATED by this call (an id recycles off a LIFO
+  /// free list, so a released one comes back to another key, or to the
+  /// same key when a re-added key's ghost was retired first), and must
+  /// not be the item a drag session holds.
+  void _installRelanes(
+    Map<int, ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})>
+    captured, {
+    Set<int> allocated = const <int>{},
+    Duration? duration,
+    Curve? curve,
+  }) {
+    captured.forEach((id, rect) {
+      if (allocated.contains(id) ||
+          _store.keyOf(id) != rect.key ||
+          _store.isDragging(id) ||
+          !_canReadItemGeometry(id)) {
+        return;
+      }
+      _installReSpan(
+        id,
+        rect,
+        duration: duration,
+        curve: curve,
+        neighbour: true,
+      );
+    });
   }
 
   /// The install half of [_reSpan], reading the POST-mutation rectangle
@@ -1443,6 +1628,7 @@ class BoardController<TKey, TItem> {
     captured, {
     Duration? duration,
     Curve? curve,
+    bool neighbour = false,
   }) {
     if (!_canReadItemGeometry(id)) {
       return;
@@ -1451,8 +1637,11 @@ class BoardController<TKey, TItem> {
     // not share the scroll subtraction, so the content-space difference
     // is not the painted one for a POSITION: drop the lead. A LENGTH is
     // the same number in both spaces, so the extent installs regardless.
+    // A neighbour's LEAD is suppressed inside a drag commit's report:
+    // the preview already moved it and the hand-off owns its landing.
+    // Its EXTENT is not, the preview never having held one.
     final crossesFrozen = captured.frozen || _isFrozenPrimaryStart(id);
-    final delta = crossesFrozen
+    final delta = crossesFrozen || (neighbour && _relaneLeadsSuppressed)
         ? Offset.zero
         : captured.lead - _itemLeadOfId(id);
     final extentDelta = _extentDelta(captured.extent, _itemExtentOfId(id));
@@ -1467,9 +1656,10 @@ class BoardController<TKey, TItem> {
       duration: duration,
       curve: curve,
       extentDelta: extentDelta,
-      // An item re-laned WITHIN its lane-axis track by its own move is a
-      // term of that track; one that changed track is not.
-      relane: laneTrack != null && laneTrack == captured.laneTrack,
+      // An item re-laned WITHIN its lane-axis track is a term of that
+      // track; one that changed track is not. A neighbour never changed
+      // track: the write it is reacting to was another item's.
+      relane: neighbour || (laneTrack != null && laneTrack == captured.laneTrack),
     );
   }
 
