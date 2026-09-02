@@ -1,10 +1,20 @@
 /// Internal: the itemSlide animation source, which also carries dropSettle
 /// glides through the same records.
 ///
-/// TRANSIENT paint-only deltas: each record runs from a displaced position
-/// TOWARD the item's structural position, so purging one lands the item
-/// where it belongs. A repeat install COMPOSES from the record's current
-/// interpolated delta rather than replacing it.
+/// TRANSIENT deltas: each record runs from a displaced RECTANGLE toward
+/// the item's structural one, so purging one lands the item where it
+/// belongs. A repeat install COMPOSES from the record's current
+/// interpolated deltas rather than replacing them.
+///
+/// A record carries two deltas and one mark. The LEAD is paint-only, a
+/// shift the render composes at paint. The EXTENT is LAYOUT-DRIVING: the
+/// geometry rule adds it to the item's extent, so the child is laid out
+/// at the animated size and the coordinator's layout-driving union
+/// counts a record that holds one. The RELANE mark says every lead
+/// composed into the record was an INTRA-TRACK shift on the lane axis,
+/// which is what lets the track-sizing term read that lead as a term of
+/// its own track; the install site decides it, and a compose that mixes
+/// the two kinds drops it.
 ///
 /// Not exported from the module barrel.
 library;
@@ -17,13 +27,25 @@ import 'board_animation_style.dart';
 class _SlideRecord {
   _SlideRecord({
     required this.start,
+    required this.startExtent,
+    required this.relane,
     required this.family,
     required this.explicitDuration,
     required this.explicitCurve,
   });
 
-  /// The delta at clock 0. The painted delta decays from this to zero.
+  /// The LEAD delta at clock 0. The painted delta decays from this to
+  /// zero.
   Offset start;
+
+  /// The EXTENT delta at clock 0, `dx` the width and `dy` the height,
+  /// both content-space LENGTHS the painted extent adds to the
+  /// structural one. Decays on the same clock as [start].
+  Offset startExtent;
+
+  /// Whether every lead composed into this record was an intra-track
+  /// shift on the lane axis. See the library doc.
+  final bool relane;
 
   final BoardAnimationFamily family;
 
@@ -61,9 +83,9 @@ class ItemSlideEngine {
   final Map<int, _SlideRecord> _records = <int, _SlideRecord>{};
 
   /// Debug-only: successful (non-refused) installs. Pins the
-  /// zero-installs-per-reflow contract, which the painted rects cannot:
-  /// a resize moving every following item looks identical to one slide
-  /// per item.
+  /// zero-installs-per-TRACK-RESIZE-reflow contract, which the painted
+  /// rects cannot: a track resize moving every following item looks
+  /// identical to one slide per item.
   int debugInstallCount = 0;
 
   bool get hasActive {
@@ -75,6 +97,32 @@ class ItemSlideEngine {
     return _records.keys;
   }
 
+  /// Whether any record holds a non-zero EXTENT delta. Read once per
+  /// tick by the coordinator's layout-driving union, so a SCAN rather
+  /// than a counter: a counter is a derived aggregate with four
+  /// maintenance sites, and one drift upward would make every tick of
+  /// every source a layout for the board's life.
+  bool get hasExtentActive {
+    for (final record in _records.values) {
+      if (record.startExtent != Offset.zero) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Whether any RELANE record stands. Same scan rule as
+  /// [hasExtentActive]; the render composes it with its content-sized
+  /// lane axis predicate.
+  bool get hasRelaneActive {
+    for (final record in _records.values) {
+      if (record.relane) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// The painted delta for [id]: its start delta decayed by the eased
   /// clock, zero for an id with no record.
   Offset deltaOf(int id) {
@@ -82,25 +130,59 @@ class ItemSlideEngine {
     if (record == null) {
       return Offset.zero;
     }
-    final curve =
-        record.explicitCurve ?? _styleOf().specFor(record.family).curve;
-    final eased = curve.transform(record.t.clamp(0.0, 1.0));
-    return record.start * (1.0 - eased);
+    return record.start * (1.0 - _easedOf(record));
   }
 
-  /// Installs a slide whose painted position starts displaced by [delta]
-  /// and decays to zero, or COMPOSES onto an active record: the new start
-  /// is the record's current interpolated delta plus [delta], the clock
-  /// resets, and the spec is re-read. Returns false for a REFUSED
-  /// install: a zero family, or a zero resolved duration, leaves the item
-  /// at its structural position, which for a transient delta is where it
-  /// belongs.
+  /// The in-flight EXTENT delta for [id], zero for an id with no record.
+  /// The geometry rule adds it to the item's structural extent.
+  Offset extentDeltaOf(int id) {
+    final record = _records[id];
+    if (record == null) {
+      return Offset.zero;
+    }
+    return record.startExtent * (1.0 - _easedOf(record));
+  }
+
+  /// [deltaOf] for a RELANE record and zero for every other, which is
+  /// what the track-sizing term reads: a lead it may add to its own
+  /// track's extent.
+  Offset relaneDeltaOf(int id) {
+    final record = _records[id];
+    if (record == null || !record.relane) {
+      return Offset.zero;
+    }
+    return record.start * (1.0 - _easedOf(record));
+  }
+
+  double _easedOf(_SlideRecord record) {
+    final curve =
+        record.explicitCurve ?? _styleOf().specFor(record.family).curve;
+    return curve.transform(record.t.clamp(0.0, 1.0));
+  }
+
+  /// Installs a slide whose painted RECTANGLE starts displaced by
+  /// [delta] and [extentDelta] and decays to the structural one, or
+  /// COMPOSES onto an active record: each new start is the record's
+  /// current interpolated value plus the argument, the clock resets, and
+  /// the spec is re-read. Returns false for a REFUSED install: a zero
+  /// family, or a zero resolved duration, leaves the item at its
+  /// structural rectangle, which for a transient delta is where it
+  /// belongs. The refusal drops BOTH deltas, never one without the
+  /// other.
+  ///
+  /// [relane] declares that [delta] is an intra-track shift on the lane
+  /// axis (see the library doc). The composed record keeps the mark only
+  /// when both the record and this install carry it, so a compose that
+  /// mixes an intra-track lead with a cross-track one drops it and the
+  /// track-sizing term stops reading a lead that is no longer one.
   bool animateSlideFrom(
     int id,
     Offset delta, {
     required BoardAnimationFamily family,
     Duration? duration,
     Curve? curve,
+    Offset extentDelta = Offset.zero,
+    bool relane = false,
   }) {
     final spec = _styleOf().specFor(family);
     if (spec.duration == Duration.zero ||
@@ -108,9 +190,13 @@ class ItemSlideEngine {
       return false;
     }
     debugInstallCount += 1;
+    final existing = _records[id];
     final composedStart = deltaOf(id) + delta;
+    final composedExtent = extentDeltaOf(id) + extentDelta;
     _records[id] = _SlideRecord(
       start: composedStart,
+      startExtent: composedExtent,
+      relane: existing == null ? relane : (relane && existing.relane),
       family: family,
       explicitDuration: duration,
       explicitCurve: curve,
@@ -119,25 +205,11 @@ class ItemSlideEngine {
     return true;
   }
 
-  /// PER-AXIS magnitudes over the active set, independently.
-  ({double dx, double dy}) get bound {
-    var dx = 0.0;
-    var dy = 0.0;
-    for (final id in _records.keys) {
-      final delta = deltaOf(id);
-      if (delta.dx.abs() > dx) {
-        dx = delta.dx.abs();
-      }
-      if (delta.dy.abs() > dy) {
-        dy = delta.dy.abs();
-      }
-    }
-    return (dx: dx, dy: dy);
-  }
-
-  /// Drops every record, landing every item at its structural position.
-  /// The restyle-to-zero transition; the caller notifies afterwards so
-  /// items painted mid-delta repaint snapped.
+  /// Drops every record, landing every item at its structural
+  /// RECTANGLE. The restyle-to-zero transition; the caller notifies
+  /// afterwards, and re-dirties layout when a record stood, because a
+  /// purge before a record's first tick leaves the render where the
+  /// install frame left it.
   void purgeActive() {
     _records.clear();
     _stopIfIdle();

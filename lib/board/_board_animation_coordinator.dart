@@ -32,27 +32,32 @@ import 'board_animation_style.dart';
 /// controller and never injected separately, so there is exactly one
 /// binding to swap.
 abstract interface class BoardAnimationReader<TKey> {
-  /// Union of the coordinator's LAYOUT-DRIVING sources: trackResize and
-  /// itemEnterExit. Excludes itemSlide and dropSettle, which are
-  /// paint-only, and makeRoom, whose classification the RENDER decides:
-  /// its motion moves a track's extent on a content-sized lane axis and
-  /// nowhere else, so the render composes [hasMakeRoomMotion] with that
-  /// predicate itself rather than reading it here.
+  /// Union of the coordinator's LAYOUT-DRIVING sources: trackResize,
+  /// itemEnterExit, and a slide record holding an EXTENT delta, which
+  /// changes the child's constraints per tick. Excludes a slide's LEAD,
+  /// which is paint-only, and makeRoom and a slide's RELANE mark, whose
+  /// classification the RENDER decides: their motion moves a track's
+  /// extent on a content-sized lane axis and nowhere else, so the render
+  /// composes [hasMakeRoomMotion] and [hasRelaneActive] with that
+  /// predicate itself rather than reading them here.
   bool get hasLayoutDrivingAnimations;
 
-  /// Union of the PAINT-ONLY sources: itemSlide (which carries dropSettle
-  /// glides) composed with the held makeRoom offsets.
+  /// Union of the PAINT-ONLY sources: a slide's LEAD (which carries
+  /// dropSettle glides) composed with the held makeRoom offsets. A
+  /// slide's extent is layout-driving and is not here.
   bool get hasActiveOffsets;
 
   /// Composed paint-only offset for an item, both axes symmetric.
   Offset offsetOfItem(int itemId);
 
-  /// PER-AXIS magnitudes: `dx` is the largest `offsetOfItem(id).dx.abs()`
-  /// over the active set and `dy` the largest `.dy.abs()`, independently.
-  /// Both are non-negative and neither is a position. Two numbers, not
-  /// one, because a single magnitude widening both axes multiplies the
-  /// admitted child AREA. Layout records the bounds it admitted; a
-  /// paint-only tick exceeding either forces layout.
+  /// PER-AXIS magnitudes over the active set, independently: for each
+  /// id the larger of `|lead|` and `|lead + extent|` per axis, so an
+  /// item shrinking from a painted rectangle larger than its structural
+  /// one is still obtained while its trailing edge lies past the
+  /// structural window. Both are non-negative and neither is a position.
+  /// Two numbers, not one, because a single magnitude widening both axes
+  /// multiplies the admitted child AREA. Layout records the bounds it
+  /// admitted; a tick exceeding either forces layout.
   ({double dx, double dy}) get composedOffsetBound;
 
   /// Animated extent of a track during a trackResize; the settled extent
@@ -99,12 +104,29 @@ abstract interface class BoardAnimationReader<TKey> {
 
   /// The held make-room delta ALONE, both axes, zero for no entry.
   /// [offsetOfItem] composes it with slides; the track-sizing term must
-  /// not.
+  /// not compose non-relane slides, whose leads can be cross-track, and
+  /// reads [relaneDeltaOf] for the ones that cannot.
   Offset makeRoomDeltaOf(int itemId);
 
   /// The prospective lane occupancies on lane-axis track [track].
   /// `value` is in `[0, 1]`.
   Iterable<({int lane, double value})> makeRoomSlotsOn(int track);
+
+  /// The in-flight EXTENT delta for an item, `dx` on the horizontal axis
+  /// and `dy` on the vertical, a content-space LENGTH per axis the
+  /// painted extent adds to the structural one. Zero for an id with no
+  /// record, at one boolean's cost when the engine holds none.
+  Offset extentDeltaOf(int itemId);
+
+  /// The lead delta of a RELANE record, zero for every other record and
+  /// for no record: an intra-track shift on the lane axis, which is what
+  /// lets the track-sizing term add it to its own track's extent.
+  Offset relaneDeltaOf(int itemId);
+
+  /// Whether any relane record stands. The render composes it with its
+  /// content-sized lane axis predicate, exactly as it composes
+  /// [hasMakeRoomMotion].
+  bool get hasRelaneActive;
 }
 
 /// The facade. Owns the four sources, the bit writes, the settle handler
@@ -183,7 +205,9 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
 
   @override
   bool get hasLayoutDrivingAnimations {
-    return trackResize.hasActive || enterExit.hasActive;
+    return trackResize.hasActive ||
+        enterExit.hasActive ||
+        slide.hasExtentActive;
   }
 
   @override
@@ -202,11 +226,23 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     var dy = 0.0;
     void fold(int id) {
       final offset = offsetOfItem(id);
-      if (offset.dx.abs() > dx) {
-        dx = offset.dx.abs();
+      // The item's painted LEADING edge sits `offset` from its
+      // structural one and its painted TRAILING edge `offset + extent`,
+      // so both edges are inside a window widened by the larger
+      // magnitude. One site: this is the number layout widens the obtain
+      // window by and records.
+      final extent = slide.extentDeltaOf(id);
+      final leadX = offset.dx.abs();
+      final trailX = (offset.dx + extent.dx).abs();
+      final maxX = leadX > trailX ? leadX : trailX;
+      if (maxX > dx) {
+        dx = maxX;
       }
-      if (offset.dy.abs() > dy) {
-        dy = offset.dy.abs();
+      final leadY = offset.dy.abs();
+      final trailY = (offset.dy + extent.dy).abs();
+      final maxY = leadY > trailY ? leadY : trailY;
+      if (maxY > dy) {
+        dy = maxY;
       }
     }
 
@@ -253,6 +289,30 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   @override
   Iterable<({int lane, double value})> makeRoomSlotsOn(int track) {
     return makeRoom.slotsOn(track);
+  }
+
+  /// The two per-item slide reads, behind ONE boolean: an idle board
+  /// pays that boolean per read and never a map lookup, which matters
+  /// because the geometry rule makes two per item child per layout.
+  @override
+  Offset extentDeltaOf(int itemId) {
+    if (!slide.hasActive) {
+      return Offset.zero;
+    }
+    return slide.extentDeltaOf(itemId);
+  }
+
+  @override
+  Offset relaneDeltaOf(int itemId) {
+    if (!slide.hasActive) {
+      return Offset.zero;
+    }
+    return slide.relaneDeltaOf(itemId);
+  }
+
+  @override
+  bool get hasRelaneActive {
+    return slide.hasRelaneActive;
   }
 
   @override

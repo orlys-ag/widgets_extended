@@ -219,8 +219,9 @@ class BoardController<TKey, TItem> {
     final old = _animationStyle;
     _animationStyle = value;
     // The two ROOT-family transitions this setter owns. itemSlide to
-    // zero PURGES: the family is paint-only, so dropping a delta lands
-    // the item at its structural position. trackResize to zero
+    // zero PURGES: dropping a record lands the item at its structural
+    // rectangle, its lead being paint-only and its extent read live by
+    // the geometry rule. trackResize to zero
     // FINALIZES instead: the family is layout-driving and an abandoned
     // state would strand a partial extent, so each state lands at the
     // target the axis already stores. The other three families need no

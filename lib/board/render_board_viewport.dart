@@ -177,8 +177,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// entry (`widgets/two_dimensional_viewport.dart:1332`).
   final Set<ChildVicinity> _obtainedThisLayout = <ChildVicinity>{};
 
-  /// The PER-AXIS paint-only offset magnitudes the last layout WIDENED its
-  /// obtain window by, and recorded.
+  /// The PER-AXIS animation magnitudes the last layout WIDENED its
+  /// obtain window by, and recorded: a slide's lead composed with the
+  /// held make-room offsets, and its extent where that reaches further.
   ///
   /// The widen and the record are one statement site, in
   /// [layoutChildSequence]; written without the widening half the gate
@@ -399,10 +400,15 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   ///
   /// 1. Layout-driving now OR on the prior tick: relayout. The flag is
   ///    the COMPOSED one, the coordinator's layout-driving union widened
-  ///    by make-room motion ON A CONTENT-SIZED LANE AXIS, where a gap
-  ///    moves a track's extent. The disjunct IS the latch: a settle
-  ///    tick's record is already gone, and this is the one layout that
-  ///    reads the settled extent and progress.
+  ///    by make-room motion and by RELANE slides ON A CONTENT-SIZED LANE
+  ///    AXIS, where a gap or a re-laned neighbour moves a track's
+  ///    extent. A relane slide is lead-only there, so without the
+  ///    disjunct it would take arm 4 while the sizing step, which runs
+  ///    only inside layout, read its lead at the install layout and the
+  ///    settle layout alone: the track's edge would hold and pop. The
+  ///    prior-tick disjunct IS the latch: a settle tick's record is
+  ///    already gone, and this is the one layout that reads the settled
+  ///    extent and progress.
   /// 2. The make-room generation moved on a content-sized lane axis:
   ///    relayout. A SNAPPED slot-only install carries no motion and
   ///    displaces nobody, so no other arm can fire for it, and the same
@@ -425,7 +431,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         contentAxis != null && _controller.laneAxis == contentAxis;
     final hasLayoutDriving =
         anim.hasLayoutDrivingAnimations ||
-        (laneAxisIsContent && anim.hasMakeRoomMotion);
+        (laneAxisIsContent &&
+            (anim.hasMakeRoomMotion || anim.hasRelaneActive));
     final hasOffsets = anim.hasActiveOffsets;
     if (hasLayoutDriving || _priorTickHadLayoutDriving) {
       markNeedsLayout();
@@ -1677,10 +1684,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     }
   }
 
-  /// The ANIMATION term of the window rule: the per-axis magnitudes of the
-  /// composed paint-only offsets in flight. The window is widened by it
-  /// and [_admittedOffsetBound] records it in the same statement site, so
-  /// the pair is whole.
+  /// The ANIMATION term of the window rule: the per-axis magnitudes of
+  /// the composed offsets in flight, each folded with the extent delta
+  /// where an animated trailing edge reaches further than the lead. The
+  /// window is widened by it and [_admittedOffsetBound] records it in the
+  /// same statement site, so the pair is whole.
   ({double dx, double dy}) _composedOffsetBound() {
     return _controller.anim.composedOffsetBound;
   }
