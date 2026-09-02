@@ -687,6 +687,36 @@ class BoardController<TKey, TItem> {
         }
       }
       final affected = <TKey>{};
+      // CAPTURED BEFORE ANY MUTATION, and installed once after the loop:
+      // this call's exits and enters re-lane buckets in caller order and
+      // lanes resolve lazily, so a per-placement capture would read a
+      // rectangle an earlier placement had already moved.
+      final captured =
+          <int,
+            ({
+              TKey key,
+              Offset lead,
+              Offset extent,
+              bool frozen,
+              int? laneTrack,
+            })>{};
+      if (_installsSlide(null)) {
+        for (final entry in desired.entries) {
+          final id = _liveIdOf(entry.key);
+          if (id == BoardStore.noId ||
+              _spanEquals(id, entry.value.span) ||
+              !_canReadItemGeometry(id)) {
+            continue;
+          }
+          captured[id] = (
+            key: entry.key,
+            lead: _itemLeadOfId(id),
+            extent: _itemExtentOfId(id),
+            frozen: _isFrozenPrimaryStart(id),
+            laneTrack: _laneStartTrackOf(id),
+          );
+        }
+      }
       for (final key in exiting) {
         _exitOrRetire(key, _store.idOf(key), notify: false);
       }
@@ -717,11 +747,17 @@ class BoardController<TKey, TItem> {
           affected.add(key);
         }
         if (!_spanEquals(existing, placement.span)) {
-          _cancelDragIfDragged(existing);
-          _applySpan(existing, placement.span);
+          _reSpan(existing, placement.span, bulk: true);
           affected.add(key);
         }
       }
+      // One lane resolve serves every install: no site inside the loop
+      // above reads a lane.
+      captured.forEach((id, rect) {
+        if (_store.keyOf(id) == rect.key) {
+          _installReSpan(id, rect);
+        }
+      });
       // A clean no-op diff notifies nothing: nothing retired, nothing
       // entered, nothing changed, and the lane accumulator drains empty.
       // An EMPTY delivered set is reserved for real structural changes
@@ -1348,31 +1384,156 @@ class BoardController<TKey, TItem> {
     Curve? curve,
   }) {
     final id = _liveIdOrThrow(key, method);
+    _reSpan(id, span, duration: duration, curve: curve);
+    _notifyStructural(<TKey>{key});
+  }
+
+  /// A captured rectangle rides with its KEY because an id is not
+  /// identity across a bulk call: ids are recycled off a LIFO free list,
+  /// so a released id can come back allocated to another key, or to the
+  /// SAME key when a re-added key's ghost is retired first, and only the
+  /// key catches that. Its `laneTrack` is the lane-axis start track, or
+  /// null when there is no lane axis; an install whose track is
+  /// unchanged is a RELANE, an intra-track shift the track-sizing term
+  /// may read.
+
+  /// The three ordered steps of a span change that ANIMATES: capture the
+  /// settled rectangle, write, install the rect FLIP from the captured
+  /// one to the new one.
+  ///
+  /// [bulk] runs the write alone, for a caller that captures and
+  /// installs once for a whole batch rather than per item; a
+  /// per-placement capture inside such a batch would read a rectangle an
+  /// earlier placement already re-laned.
+  ///
+  /// Two guards decide whether anything is captured at all. The install
+  /// PREDICATE is the slide engine's own refusal, evaluated once here so
+  /// a board under a zero itemSlide family pays no capture. The STRAND
+  /// guard is [_canReadItemGeometry], on the old span and again on the
+  /// new one.
+  void _reSpan(
+    int id,
+    BoardSpan span, {
+    Duration? duration,
+    Curve? curve,
+    bool bulk = false,
+  }) {
     _cancelDragIfDragged(id);
-    // The OLD content-space leading corner, captured BEFORE the write:
-    // read afterwards it is the new corner and the delta is a silent
-    // zero.
-    final oldLead = _itemLeadOfId(id);
-    final oldFrozen = _isFrozenPrimaryStart(id);
+    if (bulk || !_installsSlide(duration) || !_canReadItemGeometry(id)) {
+      _applySpan(id, span);
+      return;
+    }
+    final captured = (
+      key: _store.keyOf(id) as TKey,
+      lead: _itemLeadOfId(id),
+      extent: _itemExtentOfId(id),
+      frozen: _isFrozenPrimaryStart(id),
+      laneTrack: _laneStartTrackOf(id),
+    );
     _applySpan(id, span);
-    // The NEW corner reads the POST-mutation lane through the read API,
-    // whose entry flush resolves the buckets the write dirtied.
-    final newLead = _itemLeadOfId(id);
-    final delta = oldLead - newLead;
+    _installReSpan(id, captured, duration: duration, curve: curve);
+  }
+
+  /// The install half of [_reSpan], reading the POST-mutation rectangle
+  /// through the same two accessors, whose lane reads flush the buckets
+  /// the write dirtied.
+  void _installReSpan(
+    int id,
+    ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})
+    captured, {
+    Duration? duration,
+    Curve? curve,
+  }) {
+    if (!_canReadItemGeometry(id)) {
+      return;
+    }
     // A span whose primary start track is frozen at either endpoint does
     // not share the scroll subtraction, so the content-space difference
-    // is not the painted one: install nothing and land without a slide.
-    final crossesFrozen = oldFrozen || _isFrozenPrimaryStart(id);
-    if (delta != Offset.zero && !crossesFrozen) {
-      _anim.slide.animateSlideFrom(
-        id,
-        delta,
-        family: BoardAnimationFamily.itemSlide,
-        duration: duration,
-        curve: curve,
-      );
+    // is not the painted one for a POSITION: drop the lead. A LENGTH is
+    // the same number in both spaces, so the extent installs regardless.
+    final crossesFrozen = captured.frozen || _isFrozenPrimaryStart(id);
+    final delta = crossesFrozen
+        ? Offset.zero
+        : captured.lead - _itemLeadOfId(id);
+    final extentDelta = _extentDelta(captured.extent, _itemExtentOfId(id));
+    if (delta == Offset.zero && extentDelta == Offset.zero) {
+      return;
     }
-    _notifyStructural(<TKey>{key});
+    final laneTrack = _laneStartTrackOf(id);
+    _anim.slide.animateSlideFrom(
+      id,
+      delta,
+      family: BoardAnimationFamily.itemSlide,
+      duration: duration,
+      curve: curve,
+      extentDelta: extentDelta,
+      // An item re-laned WITHIN its lane-axis track by its own move is a
+      // term of that track; one that changed track is not.
+      relane: laneTrack != null && laneTrack == captured.laneTrack,
+    );
+  }
+
+  /// Whether an install would be refused anyway, so the capture beside
+  /// it is waste. The engine's own rule, read here once.
+  bool _installsSlide(Duration? duration) {
+    final spec = _animationStyle.itemSlide;
+    return spec.duration != Duration.zero &&
+        (duration ?? spec.duration) != Duration.zero;
+  }
+
+  /// Whether the two geometry reads are legal for [id].
+  ///
+  /// Their LANED arms index the lane axis unclamped, so an item stranded
+  /// past a shrunken lane axis (a legal state the render clamps for on
+  /// purpose) would assert. The fractional arms clamp, so an unlaned id
+  /// always reads.
+  bool _canReadItemGeometry(int id) {
+    final axis = _lanes.laneAxis;
+    if (axis == null || !_lanes.isLaned(id)) {
+      return true;
+    }
+    final config = axis == Axis.vertical ? _rows : _columns;
+    final track = _store.startTrackOf(id, axis).floor();
+    return track >= 0 && track < config.axis.trackCount;
+  }
+
+  /// [id]'s lane-axis start track, or null when there is no lane axis.
+  int? _laneStartTrackOf(int id) {
+    final axis = _lanes.laneAxis;
+    if (axis == null) {
+      return null;
+    }
+    return _store.startTrackOf(id, axis).floor();
+  }
+
+  /// The extent difference with pure floating-point RESIDUE zeroed, per
+  /// axis and RELATIVE to the magnitudes compared.
+  ///
+  /// The fractional arm is a difference of two offsets, each a product
+  /// or a prefix sum, so on an axis whose extents are not exactly
+  /// representable an equal-width move leaves a residue that scales with
+  /// the content offset: an absolute epsilon holds near the origin and
+  /// fails far from it, and a residue reaching an install would make
+  /// every such move layout-driving. A relative one holds everywhere,
+  /// and a genuine extent change of even a millionth of a pixel survives
+  /// it.
+  Offset _extentDelta(Offset oldExtent, Offset newExtent) {
+    return Offset(
+      _extentDeltaOn(oldExtent.dx, newExtent.dx),
+      _extentDeltaOn(oldExtent.dy, newExtent.dy),
+    );
+  }
+
+  double _extentDeltaOn(double oldExtent, double newExtent) {
+    final delta = oldExtent - newExtent;
+    var scale = oldExtent.abs();
+    if (newExtent.abs() > scale) {
+      scale = newExtent.abs();
+    }
+    if (scale < 1.0) {
+      scale = 1.0;
+    }
+    return delta.abs() <= precisionErrorTolerance * scale ? 0.0 : delta;
   }
 
   /// The item-geometry rule's leading corner in CONTENT space, both axes.
@@ -1396,6 +1557,44 @@ class BoardController<TKey, TItem> {
         ? start
         : boardAxis.trackCount.toDouble();
     return boardAxis.offsetOfFraction(clamped);
+  }
+
+  /// The item-geometry rule's EXTENT in CONTENT space, both axes: the
+  /// mirror of [_itemLeadOfId], arm for arm, and settled for the reason
+  /// the lead is.
+  Offset _itemExtentOfId(int id) {
+    return Offset(
+      _itemExtentOn(Axis.horizontal, id),
+      _itemExtentOn(Axis.vertical, id),
+    );
+  }
+
+  double _itemExtentOn(Axis axis, int id) {
+    final config = axis == Axis.vertical ? _rows : _columns;
+    final boardAxis = config.axis;
+    if (_lanes.laneAxis == axis && _lanes.isLaned(id)) {
+      // A LANED item on the lane axis takes its lane's slice, not its
+      // span: one lane extent where the axis is content-sized, and the
+      // track's extent past the padding divided by the cluster's lane
+      // count where it is not. The same two modes [_laneOriginOfId]
+      // multiplies by the lane index.
+      if (boardAxis.acceptsMeasurements) {
+        return config.laneExtent!;
+      }
+      final track = _store.startTrackOf(id, axis).floor();
+      return (boardAxis.extentOf(track) - config.lanePadding).clamp(
+            0.0,
+            double.infinity,
+          ) /
+          laneCountOfId(id);
+    }
+    // Both endpoints clamped exactly as the fractional lead arm clamps
+    // its start, so an axis swap that strands a span reads total.
+    final count = boardAxis.trackCount.toDouble();
+    final start = _store.startTrackOf(id, axis);
+    final end = _store.endTrackOf(id, axis);
+    return boardAxis.offsetOfFraction(end < count ? end : count) -
+        boardAxis.offsetOfFraction(start < count ? start : count);
   }
 
   /// The two-mode lane origin, measured from the item's lane-axis
