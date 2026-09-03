@@ -157,6 +157,141 @@ class _BouncingBehavior extends ScrollBehavior {
 }
 
 void main() {
+
+  // The GESTURE'S ITEM is the one the pointer went down on, not the one
+  // its element happens to host when the gesture is accepted.
+  //
+  // The host is deliberately un-keyed, so a rank shift re-keys its
+  // widget in place and its `State`, which owns the armed recognizer,
+  // survives (`board_widget.dart`, the `_ownedKey` note). A recognizer
+  // therefore outlives the identity it was armed for: anything that
+  // changes which item occupies a vicinity between the pointer going
+  // down and the gesture being accepted used to hand the session a
+  // different item, and the app's report then mutated an item the user
+  // never touched.
+  //
+  // The window is `kLongPressTimeout` for the default move wrap and the
+  // touch slop for an immediate strip, and the trigger is any add,
+  // remove or re-span on the same primary track, which a live board does
+  // on its own.
+  //
+  // Asserts: the pressed item is the dragged one, and the report names
+  // it. On unfixed code both cases drag and report the OTHER item.
+  testWidgets(
+    "a rank shift during the long-press delay keeps the drag on the "
+    "pressed item",
+    (tester) async {
+      final controller = _plainController(tester);
+      controller.addItem(
+        const _Item("b"),
+        const BoardSpan(rowStart: 2, colStart: 3),
+      );
+      final moves = <String>[];
+      await tester.pumpWidget(
+        _board(
+          controller,
+          drag: BoardDragConfig<String>(
+            onItemMoved: (key, span) {
+              moves.add(key);
+              controller.moveItem(key, span);
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(_itemKey("b"))),
+      );
+      // Mid-delay, an item that sorts EARLIER on the same row arrives,
+      // which shifts b's ordinal and re-keys the element whose `State`
+      // holds the armed recognizer.
+      await tester.pump(const Duration(milliseconds: 100));
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 2, colStart: 1),
+      );
+      await tester.pump();
+      // Setup sanity: the shift really happened.
+      expect(controller.vicinityOrdinalOfId(controller.idOfKey("a")), 0);
+      expect(controller.vicinityOrdinalOfId(controller.idOfKey("b")), 1);
+
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 20));
+      // TARGET.
+      expect(controller.isDragging("b"), isTrue);
+      expect(controller.isDragging("a"), isFalse);
+
+      await gesture.moveBy(const Offset(40.0, 0.0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(moves, <String>["b"]);
+      expect(controller.spanOf("a")!.colStart, 1);
+      expect(controller.spanOf("b")!.colStart, 4);
+    },
+  );
+
+  // The same defect through an IMMEDIATE strip. Its window exists only
+  // where the arena is CONTESTED: on a board that scrolls, the strip's
+  // recognizer shares the arena with the scrollable's and is accepted on
+  // the first move past the slop, so a shift in between lands inside the
+  // window. On a board that fits its viewport the strip wins at pointer
+  // down and there is no window at all, which is why this case scrolls.
+  testWidgets(
+    "a rank shift before an immediate strip is accepted keeps the resize "
+    "on the pressed item",
+    (tester) async {
+      final controller = _plainController(tester);
+      controller.addItem(
+        const _Item("b"),
+        const BoardSpan(rowStart: 2, colStart: 3),
+      );
+      final resizes = <String>[];
+      await tester.pumpWidget(
+        _board(
+          controller,
+          drag: BoardDragConfig<String>(
+            onItemMoved: (key, span) {},
+            onItemResized: (key, span) {
+              resizes.add(key);
+              controller.resizeItem(key, span);
+            },
+            resizeEdges: BoardResizeEdges.trailing,
+          ),
+          // Shorter than its content, so the vertical scrollable
+          // contends for the arena.
+          height: 200.0,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final viewport = _viewport(tester);
+      expect(viewport.verticalPosition!.maxScrollExtent, greaterThan(0.0));
+      final rect = viewport.rectOfItem("b")!;
+
+      final gesture = await tester.startGesture(
+        _global(tester, Offset(rect.right - 3.0, rect.center.dy)),
+      );
+      await tester.pump();
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 2, colStart: 1),
+      );
+      await tester.pump();
+      // Setup sanity: the shift really happened, and it lands before the
+      // arena resolves this strip's recognizer, which is what puts the
+      // re-key inside the window.
+      expect(controller.vicinityOrdinalOfId(controller.idOfKey("b")), 1);
+
+      await gesture.moveBy(const Offset(60.0, 0.0));
+      await tester.pump();
+      // TARGET.
+      expect(controller.isDragging("b"), isTrue);
+      expect(controller.isDragging("a"), isFalse);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(resizes, <String>["b"]);
+    },
+  );
   // AC18 drag move.
   // Asserts: onItemMoved called exactly once with the expected BoardSpan;
   // after pumpAndSettle, rectOfItem equals rectOfCell(2, 4).

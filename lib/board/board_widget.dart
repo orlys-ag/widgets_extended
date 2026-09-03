@@ -451,6 +451,8 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
   /// host is un-keyed, so a rank insert can re-key this element's widget
   /// in place while the session stays on the lifted item, and both
   /// ownership checks below must follow the session, not the widget.
+  /// [_armRecognizer] captures the same key one step earlier, when the
+  /// pointer goes down, for the same reason.
   TKey? _ownedKey;
 
   /// The session's pointer, tracked by DELTA from where the drag started.
@@ -490,21 +492,40 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
       widget.dragController.endDrag(cancel: true);
     }
     _recognizer?.dispose();
+    // THE KEY IS CAPTURED HERE, with the edge and the axis: the three
+    // things this pointer's gesture is about, fixed when it goes down.
+    //
+    // Not re-read at `onStart`, which runs a long-press delay or a touch
+    // slop later. This host is deliberately un-keyed, so a rank shift
+    // re-keys its widget IN PLACE while this `State`, which owns the
+    // armed recognizer, survives (see [_ownedKey]); re-reading would
+    // hand the session whatever item the element hosts by then, and the
+    // app's report would mutate an item the user never pressed. The same
+    // rule [_ownedKey] states for the session, one step earlier.
+    final armedKey = widget.itemKey;
     _recognizer = recognizer
       ..onStart = (position) {
-        return _beginDrag(position, edge, axis);
+        return _beginDrag(position, edge, axis, armedKey);
       }
       ..addPointer(event);
   }
 
-  Drag? _beginDrag(Offset position, BoardResizeEdges edge, Axis? axis) {
+  Drag? _beginDrag(
+    Offset position,
+    BoardResizeEdges edge,
+    Axis? axis,
+    TKey key,
+  ) {
     final viewport = context
         .findAncestorRenderObjectOfType<RenderBoardViewport<TKey>>();
     if (viewport == null) {
       return null;
     }
+    // A key whose item left during the window is refused by `startDrag`'s
+    // own liveness check, which drops the gesture rather than starting a
+    // session on whatever replaced it.
     final started = widget.dragController.startDrag(
-      key: widget.itemKey,
+      key: key,
       renderPort: viewport,
       pointerGlobal: position,
       edge: edge,
@@ -516,7 +537,7 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
       return null;
     }
     _ownsSession = true;
-    _ownedKey = widget.itemKey;
+    _ownedKey = key;
     _dragPosition = position;
     return _ItemDrag<TKey>(this);
   }

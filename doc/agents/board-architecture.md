@@ -179,7 +179,12 @@ range selection, frozen tracks, and a paintable background.
   its axis (a null axis on a handle or on `startDrag` is the span axis,
   and each axis has its own policy), built-in semantics move
   actions, and the deferred deactivate backstop validated against the key
-  the session STARTED with), and `_SelectionLayer` (immediate multi-drag
+  the session STARTED with. The host is un-keyed, so a rank shift re-keys
+  its widget IN PLACE while the `State` holding the armed recognizer
+  survives: the key is therefore CAPTURED when the pointer goes down,
+  beside the edge and the axis, and never re-read at the gesture's
+  acceptance, which a long-press delay or a contested touch slop later
+  would resolve to whatever item the element hosts by then), and `_SelectionLayer` (immediate multi-drag
   for range inside the scrollable, tap for cell; fraction snap quantizes
   then floors). Both the host and the selection layer track the pointer
   by DELTA from where the gesture began: a multi-drag recognizer accepted
