@@ -172,13 +172,24 @@ range selection, frozen tracks, and a paintable background.
   only when a builder identity changes, disposed when replaced), the drag
   controller's lifetime (`didUpdateWidget` cancels before disposing and
   only rebuilds when controller or config identity changed), the selection
-  forwarding listener, the drag-proxy overlay, `_BoardItemHost` (publishes
+  forwarding listener, the drag-proxy overlay (gated on the SESSION's
+  kind through `draggedKind`, never on the target's, so the moved visual
+  keeps following the pointer across a `canDropAt`-refused cell, where
+  the target is null by design), `_BoardItemHost` (publishes
   the drag scope, owns the armed recognizer, default handles: a delayed
   move wrap plus opaque resize strips on the span axis under `resizeEdges`
   and on the primary axis under `primaryResizeEdges`, each handle naming
   its axis (a null axis on a handle or on `startDrag` is the span axis,
   and each axis has its own policy), built-in semantics move
-  actions, and the deferred deactivate backstop validated against the key
+  actions (gated by the SAME drag policy the pointer path applies: the
+  host asks `enabled` and `canDrag` ONCE per build and threads the
+  answer to both the scope and the actions, and ONE predicate applies
+  the exact lattice bounds and `canDropAt` at BUILD, deciding what is
+  advertised, and again at ACTIVATION, so a policy that changed its
+  answer between the two degrades to a no-op; the `Semantics` wrapper
+  is unconditional and its payload is null rather than empty, an empty
+  map raising the `customAction` bit for actions that do not exist),
+  and the deferred deactivate backstop validated against the key
   the session STARTED with. The host is un-keyed, so a rank shift re-keys
   its widget IN PLACE while the `State` holding the armed recognizer
   survives: the key is therefore CAPTURED when the pointer goes down,
