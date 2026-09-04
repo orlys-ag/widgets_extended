@@ -717,15 +717,19 @@ void main() {
     },
   );
 
-  // DERIVED name. The whole-cell grab offset: the grabbed cell of a
-  // multi-column item stays under the pointer, so the start commits
-  // pointer cell minus grabbed-cell offset, not any item-corner
-  // rounding.
-  // Asserts: grabbed in its second column near that cell's right edge
-  // and dropped with the pointer just inside column 5, the item's start
-  // commits column 4.
+  // DERIVED name. THE RULE REVERSED HERE. This case pinned the old
+  // whole-cell grab offset, where the start committed the pointer's
+  // cell minus the grabbed cell and item geometry never entered it. A
+  // multi-cell item is the shape that made the two rules disagree
+  // most, and the coverage below is why the corner now wins: the item
+  // paints across x 90 to 210, of which columns 2 to 4 hold 110 pixels
+  // and columns 3 to 5 hold 90. What is given up is the grabbed cell
+  // staying pinned under the finger; what is bought is a commit the
+  // user can see before releasing.
+  // Asserts: grabbed in its second column and dragged 50 pixels, the
+  // item's start commits column 2.
   testWidgets(
-    "the grabbed cell of a multi-column item stays under the pointer",
+    "a multi-column move commits the placement the item covers",
     (tester) async {
       final controller = _plainController(tester);
       controller.addItem(
@@ -755,11 +759,11 @@ void main() {
         ),
         isTrue,
       );
-      // Pointer to (162, 125), just inside column 4: the grabbed cell
-      // offset is one column, so the start is column 3, clear of the
-      // endpoint clamp (an offset dropped to zero would give 4, and
-      // corner rounding would have committed 2, so each defect lands on
-      // a different in-lattice answer).
+      // Pointer to (162, 125), just inside column 4. The corner is at
+      // 90, which rounds to column 2; each rejected rule lands on a
+      // different in-lattice answer, so this discriminates all three
+      // (the old pointer rule gives 3, and a grab offset dropped to
+      // zero gives 4).
       drag.updateDrag(_global(tester, const Offset(162.0, 125.0)));
       await tester.pump();
       drag.endDrag(cancel: false);
@@ -768,7 +772,7 @@ void main() {
       expect(moves, hasLength(1));
       expect(
         moves.single,
-        const BoardSpan(rowStart: 2, colStart: 3, colSpan: 3),
+        const BoardSpan(rowStart: 2, colStart: 2, colSpan: 3),
       );
     },
   );
@@ -2265,4 +2269,63 @@ void main() {
     await tester.pump();
     expect(drag.draggedKind, isNull);
   });
+
+  // THE COMMITTED PLACEMENT IS THE ONE THE ITEM COVERS, not the one the
+  // pointer's cell names.
+  //
+  // A whole-track move used to floor the pointer's track and subtract a
+  // grab cell floored at lift. Two floors of the same continuous
+  // quantity differ by one depending on where inside a cell the item was
+  // grabbed, so the placement flipped when the POINTER crossed a cell
+  // boundary while the item itself had barely moved.
+  //
+  // Columns are 40 wide, so column 2 spans x 80 to 120 and the item
+  // below spans columns 2 and 3, x 80 to 160. Grabbing at x 115 puts the
+  // finger 35 into the item and 5 short of column 3's boundary.
+  //
+  // Asserts: a 10 pixel drag, which leaves the item covering 70 of its
+  // 80 pixels over columns 2 and 3, commits columns 2 and 3. On unfixed
+  // code it commits columns 3 and 4, which cover 50.
+  testWidgets(
+    "a whole-track move commits the columns the item covers, not the "
+    "pointer's",
+    (tester) async {
+      final controller = _plainController(tester);
+      controller.addItem(
+        const _Item("m"),
+        const BoardSpan(rowStart: 2, colStart: 2, colSpan: 2),
+      );
+      await tester.pumpWidget(_board(controller));
+      final drag = _drag(
+        tester,
+        controller,
+        BoardDragConfig<String>(onItemMoved: (key, span) {}),
+      );
+      final viewport = _viewport(tester);
+      // Setup sanity: the item is where the arithmetic above assumes.
+      expect(viewport.rectOfItem("m")!.left, 80.0);
+      expect(
+        drag.startDrag(
+          key: "m",
+          renderPort: viewport,
+          pointerGlobal: _global(tester, const Offset(115.0, 125.0)),
+        ),
+        isTrue,
+      );
+      drag.updateDrag(_global(tester, const Offset(125.0, 125.0)));
+      await tester.pump();
+      // TARGET: the corner sits at 90, which rounds to track 2.
+      expect(drag.currentTarget!.span.colStart, 2);
+
+      // And it DOES advance once the item's body passes the halfway
+      // line: a corner at 110 rounds to track 3. This fails for a rule
+      // that pins the placement to the lift column.
+      drag.updateDrag(_global(tester, const Offset(145.0, 125.0)));
+      await tester.pump();
+      expect(drag.currentTarget!.span.colStart, 3);
+
+      drag.endDrag(cancel: true);
+      await tester.pump();
+    },
+  );
 }

@@ -86,6 +86,10 @@ class BoardDropResolver {
     }
   }
 
+  /// [pointerAnchoredAxis] is the axis whose start a whole-track move
+  /// takes from the POINTER rather than from the item's painted corner,
+  /// or null when neither axis does. The caller passes the lane axis of
+  /// a LANED item and nothing else; see [_resolveMove].
   static BoardDropTarget? resolve({
     required BoardRenderPort<Object?> port,
     required Offset anchorLocal,
@@ -97,6 +101,7 @@ class BoardDropResolver {
     required BoardSnap snap,
     required int rowCount,
     required int colCount,
+    required Axis? pointerAnchoredAxis,
   }) {
     if (kind == BoardDragKind.move) {
       return _resolveMove(
@@ -109,6 +114,7 @@ class BoardDropResolver {
         snap: snap,
         rowCount: rowCount,
         colCount: colCount,
+        pointerAnchoredAxis: pointerAnchoredAxis,
       );
     }
     return _resolveResize(
@@ -132,20 +138,41 @@ class BoardDropResolver {
     required BoardSnap snap,
     required int rowCount,
     required int colCount,
+    required Axis? pointerAnchoredAxis,
   }) {
     if (snap.mode == BoardSnapMode.track) {
-      // The POINTER decides under a whole-cell snap: the cell under the
-      // finger, minus the whole-cell grab offset, is the start. Item
-      // geometry never enters it, so a lane-thin item low in a tall
-      // cell stays in the cell the user is pointing at, and the grabbed
-      // cell of a multi-track item stays under the pointer.
-      final track = port.trackSpaceAt(pointerLocal);
-      if (track == null) {
+      // The ITEM'S CORNER decides under a whole-cell snap, ROUNDED to
+      // the nearest track: a straddling item covers more of the aligned
+      // placement its corner rounds to than of any other, so the cells
+      // committed are the cells the user sees it over. This is the same
+      // rule the fraction and free arm below applies, which quantizes
+      // the same corner.
+      //
+      // Flooring the POINTER's track and subtracting a grab cell floored
+      // at lift quantized TWICE, and two floors of one continuous
+      // quantity disagree by one depending on where inside a cell the
+      // item was grabbed, so the placement flipped when the finger
+      // crossed a cell boundary rather than when the item's body did.
+      //
+      // [pointerAnchoredAxis] is the one exception, and the caller
+      // passes the lane axis of a LANED item: its painted lead there is
+      // a lane origin inside ONE track rather than its span, so rounding
+      // that corner would carry a chip lying wholly inside a tall row
+      // into the next row the moment its top passed the midpoint. There
+      // the cell under the finger decides, minus the whole-cell grab
+      // offset, which keeps the grabbed cell under the pointer.
+      final corner = port.trackSpaceAt(anchorLocal);
+      final pointer = port.trackSpaceAt(pointerLocal);
+      if (corner == null || pointer == null) {
         return null;
       }
       final cell = (
-        row: track.row.floor() - grabCellRow,
-        col: track.col.floor() - grabCellCol,
+        row: pointerAnchoredAxis == Axis.vertical
+            ? pointer.row.floor() - grabCellRow
+            : corner.row.round(),
+        col: pointerAnchoredAxis == Axis.horizontal
+            ? pointer.col.floor() - grabCellCol
+            : corner.col.round(),
       );
       final rowExtent = draggedSpan.rowSpan + draggedSpan.rowSpanFraction;
       final colExtent = draggedSpan.colSpan + draggedSpan.colSpanFraction;

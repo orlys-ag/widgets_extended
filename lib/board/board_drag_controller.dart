@@ -573,6 +573,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       snap: config.snap,
       rowCount: boardController.rows.axis.trackCount,
       colCount: boardController.columns.axis.trackCount,
+      pointerAnchoredAxis: _pointerAnchoredAxis(session),
     );
     if (target == null || target == _currentTarget) {
       return;
@@ -599,6 +600,24 @@ class BoardDragController<TKey> extends ChangeNotifier {
       curve: session.makeRoomCurve,
     );
     notifyListeners();
+  }
+
+  /// The axis a whole-track move takes from the POINTER rather than
+  /// from the item's painted corner: the LANE axis, and only while the
+  /// dragged item is laned on it, whose painted lead is a lane origin
+  /// inside one track rather than its span. Null everywhere else, which
+  /// is every board with no lane axis and every unlaned item on one.
+  /// The rule this feeds lives at `BoardDropResolver.resolve`.
+  Axis? _pointerAnchoredAxis(_DragSession<TKey> session) {
+    final laneAxis = boardController.laneAxis;
+    if (laneAxis == null) {
+      return null;
+    }
+    final id = boardController.idOfKey(session.key);
+    if (id < 0 || !boardController.isLanedId(id)) {
+      return null;
+    }
+    return laneAxis;
   }
 
   // The scroll-subscription triple: BIND at startDrag, RE-POINT on every
