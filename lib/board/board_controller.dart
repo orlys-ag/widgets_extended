@@ -1,12 +1,16 @@
 /// The board's L2 controller: the single owner of item state, of the two
-/// spatial indices over it, of the three notification channels and of the
-/// selection value.
+/// spatial indices over it, of the three notification channels, of the
+/// selection value, and of the two collaborators it delegates to, the
+/// animation coordinator and the scroll orchestrator.
 ///
-/// Deliberately carries no animation source yet. The members that route
-/// to one (`anim`, `previewMakeRoomGap`, `releaseMakeRoomPreview`,
-/// `animateDropSettle`, `animateTrackResize`), the three scroll members
-/// and `markDragging` arrive with the components they reach, so this file
-/// declares none of them yet.
+/// The coordinator owns the four animation sources and is the single
+/// writer of the store's entering and exiting bits; the members that
+/// reach it are `anim`, `previewMakeRoomGap`, `releaseMakeRoomPreview`,
+/// `animateDropSettle`, `animateMakeRoomHandOff`, `animateTrackResize`
+/// and `finalizeTrackResize`. The orchestrator answers
+/// `animateScrollToCell`, `jumpToCell` and `frozenInsetOf`. The drag
+/// state that lives HERE is `markDragging`'s bit and the
+/// mutation-cancel hook whose lifetime is the bit's.
 library;
 
 import 'package:flutter/animation.dart';
@@ -45,8 +49,11 @@ import 'board_render_port.dart';
 ///   the only mutator that fires it, because it is the only one that
 ///   writes the payload without writing a span. Structural SUBSUMES data:
 ///   no single mutation fires both for one key.
-/// - [addAnimationListener] ticks while animations run. It has no producer
-///   until the animation sources land.
+/// - [addAnimationListener] ticks while animations run. Its producer is
+///   the animation coordinator, which coalesces to one dispatch per
+///   frame inside the transient-callbacks phase, with an uncoalesced
+///   carve-out for the two engines whose settle notify carries a
+///   synchronous ordering contract.
 ///
 /// Inside [runBatch] the first two coalesce to one dispatch at batch exit
 /// and the third is NOT deferred; see [runBatch].
@@ -57,11 +64,10 @@ class BoardController<TKey, TItem> {
   /// a `laneExtent`. Both are re-asserted by the [rows] and [columns]
   /// setters, which are the runtime route to the same violation.
   ///
-  /// [vsync] is the [TickerProvider] the five animation sources tick
-  /// against. It is required here so the constructor's shape is settled
-  /// before those sources exist; nothing in this step holds a ticker, and
-  /// the field that stores it lands with the first source rather than
-  /// sitting here unread.
+  /// [vsync] is the [TickerProvider] the four animation sources tick
+  /// against. It is FORWARDED to the coordinator and never stored here:
+  /// each source creates its own ticker from it, and this class holds no
+  /// vsync field.
   BoardController({
     required TickerProvider vsync,
     required BoardAxisConfig rows,

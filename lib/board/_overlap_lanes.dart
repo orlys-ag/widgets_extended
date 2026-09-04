@@ -95,15 +95,6 @@ class OverlapLaneResolver {
     return _dirtyBuckets.isNotEmpty;
   }
 
-  /// Whether [id] is laned: [laneAxis] is non-null AND the item's
-  /// lane-axis interval lies inside ONE integer track.
-  ///
-  /// A lane is a SLICE OF a lane-axis track, so an item covering two of
-  /// them has no single track to be sliced within, while an item covering
-  /// ten PRIMARY tracks inside one lane-axis track has exactly one. The
-  /// criterion is the LANE axis: neither the primary axis nor the content
-  /// axis, whose own exclusion is a different test over a different axis
-  /// selecting a different set.
   /// The largest resolved lane count among [track]'s laned members, or 0
   /// when the bucket is absent or empty, so a track with no cluster
   /// contributes NO term rather than one empty lane's worth. Callers
@@ -123,6 +114,15 @@ class OverlapLaneResolver {
     return max;
   }
 
+  /// Whether [id] is laned: [laneAxis] is non-null AND the item's
+  /// lane-axis interval lies inside ONE integer track.
+  ///
+  /// A lane is a SLICE OF a lane-axis track, so an item covering two of
+  /// them has no single track to be sliced within, while an item covering
+  /// ten PRIMARY tracks inside one lane-axis track has exactly one. The
+  /// criterion is the LANE axis: neither the primary axis nor the content
+  /// axis, whose own exclusion is a different test over a different axis
+  /// selecting a different set.
   bool isLaned(int id) {
     final axis = _laneAxis;
     if (axis == null) {

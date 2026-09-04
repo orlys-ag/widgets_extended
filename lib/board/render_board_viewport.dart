@@ -2,9 +2,13 @@
 /// child per lattice CELL, sizes content-sized tracks from what those
 /// cells measure, and holds the scroll anchor still while it does.
 ///
-/// Not yet present: every animation read, and the drag pin's effect on
-/// keep-alive retention. Each site that would otherwise read as an
-/// omission says so.
+/// It reads the animation coordinator throughout: the tick router decides
+/// per dispatch whether a tick lays out or only paints, the animated
+/// geometry reads answer what a track and an item PAINT while a resize is
+/// in flight, and the item paint pass composes the per-item offset.
+/// RETENTION IS OBTAINING, never keep-alive: an exiting item's child and
+/// the drag pin's are obtained on every layout, and nothing here writes
+/// `parentData.keepAlive`.
 ///
 /// COORDINATE SPACES. Three, and
 /// mixing them is invisible at scroll offset 0:
@@ -196,9 +200,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// The item a drag session holds, or null when no session is live. At
   /// most one, because at most one session is live.
   ///
-  /// Written only by [pinItem] and [unpinItem]. What CONSUMES it is the
-  /// keep-alive sweep's pin leg, which retains unconditionally; no drag
-  /// layer exists yet to take a pin.
+  /// Written only by [pinItem] and [unpinItem], which a drag session calls
+  /// at its start and in its single teardown. What CONSUMES it is
+  /// [_obtainRetained], which re-derives the key's vicinity from its id's
+  /// CURRENT ordinal on every layout and obtains it, so a rank shift
+  /// under a live drag cannot strand the pin on a stale vicinity; an item
+  /// an axis swap left outside the lattice is simply not obtained.
   TKey? _pinnedDragKey;
 
   /// Vicinity of every child retained for an exit animation, to the
@@ -1730,9 +1737,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   // -----------------------------------------------------------------
 
   /// The paint-only shift an item child is drawn at, beyond its
-  /// `paintOffset`. Zero until the animation sources land; declared with
-  /// its three mirrors (paint, hit-test, [applyPaintTransform]) so the
-  /// pairing exists before the first non-zero value does.
+  /// `paintOffset`: the coordinator's composed offset, a slide's LEAD
+  /// plus the held make-room delta.
+  ///
+  /// FOUR sites read it and they must agree, or a child is drawn at one
+  /// place and found at another: the item paint pass, the item hit-test
+  /// walk, [applyPaintTransform], and [itemAt]'s painted-rect probe.
   Offset _paintShiftOf(ChildVicinity vicinity) {
     final id = _vicinityToItemId[vicinity];
     if (id == null) {
