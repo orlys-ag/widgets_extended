@@ -15,6 +15,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/gestures.dart';
 
 import '_board_axis.dart';
+import '_board_span.dart';
 import 'board_background.dart';
 import 'board_config.dart';
 import 'board_controller.dart';
@@ -593,6 +594,11 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
   @override
   Widget build(BuildContext context) {
     final config = widget.dragController.config;
+    // The drag policy is asked ONCE per build and threaded to both the
+    // handle scope and the semantics actions below, rather than read
+    // again in each: a policy is app code on a per-item build path, and
+    // two reads of a stateful predicate can disagree within one build.
+    final canDrag = _canDrag;
     Widget child = widget.child;
     if (config.buildDefaultDragHandles) {
       // The MOVE handle wraps the whole item, delayed so touch scrolling
@@ -658,9 +664,9 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
         );
       }
     }
-    child = _wrapSemantics(child, config);
+    child = _wrapSemantics(child, config, canDrag: canDrag);
     return BoardItemDragScope(
-      canDrag: _canDrag,
+      canDrag: canDrag,
       startDrag: _armRecognizer,
       child: child,
     );
@@ -668,45 +674,94 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
 
   /// The built-in semantics move actions, one track per activation, plus
   /// whatever the config's builder adds or replaces.
-  Widget _wrapSemantics(Widget child, BoardDragConfig<TKey> config) {
-    final controller = widget.dragController.boardController;
+  ///
+  /// Gated by the SAME drag policy the pointer path applies: [canDrag]
+  /// is the build's one answer to `enabled` and `canDrag`, and each
+  /// destination passes [_semanticsMoveSpan], which applies the lattice
+  /// bounds and `canDropAt`. A refused item advertises nothing and its
+  /// builder is not consulted; an admitted item advertises exactly the
+  /// destinations the predicate admits, and the builder may add to or
+  /// replace that set.
+  ///
+  /// The WRAPPER is unconditional and only its payload varies, so the
+  /// item's widget shape is the same across every policy flip. The
+  /// payload is null, never an empty map: `RenderObject` installs the map
+  /// whenever it is non-null and the semantics config's setter raises the
+  /// `customAction` bit unconditionally, so an empty map would advertise
+  /// a node that claims custom actions and offers none.
+  Widget _wrapSemantics(
+    Widget child,
+    BoardDragConfig<TKey> config, {
+    required bool canDrag,
+  }) {
     final key = widget.itemKey;
-    Map<CustomSemanticsAction, VoidCallback> actions =
-        <CustomSemanticsAction, VoidCallback>{};
-    void addMove(String label, int rowDelta, int colDelta) {
-      actions[CustomSemanticsAction(label: label)] = () {
-        final span = controller.spanOf(key);
-        if (span == null) {
+    Map<CustomSemanticsAction, VoidCallback>? actions;
+    if (canDrag) {
+      final builtIn = <CustomSemanticsAction, VoidCallback>{};
+      void addMove(String label, int rowDelta, int colDelta) {
+        // Advertised only for a destination admitted NOW, and re-checked
+        // at activation: a policy that changed its answer in between
+        // degrades the activation to a no-op rather than a wrong move.
+        if (_semanticsMoveSpan(key, rowDelta, colDelta) == null) {
           return;
         }
-        final rowStart = span.rowStart + rowDelta;
-        final colStart = span.colStart + colDelta;
-        if (rowStart < 0 ||
-            colStart < 0 ||
-            rowStart + span.rowSpan > controller.rows.axis.trackCount ||
-            colStart + span.colSpan > controller.columns.axis.trackCount) {
-          return;
-        }
-        config.onItemMoved(
-          key,
-          span.copyWith(rowStart: rowStart, colStart: colStart),
-        );
-      };
-    }
+        builtIn[CustomSemanticsAction(label: label)] = () {
+          final span = _semanticsMoveSpan(key, rowDelta, colDelta);
+          if (span == null) {
+            return;
+          }
+          config.onItemMoved(key, span);
+        };
+      }
 
-    addMove("Move up", -1, 0);
-    addMove("Move down", 1, 0);
-    addMove("Move left", 0, -1);
-    addMove("Move right", 0, 1);
-    final builder = config.semanticsActionsBuilder;
-    if (builder != null) {
-      actions = builder(key, actions);
+      addMove("Move up", -1, 0);
+      addMove("Move down", 1, 0);
+      addMove("Move left", 0, -1);
+      addMove("Move right", 0, 1);
+      final builder = config.semanticsActionsBuilder;
+      final built = builder == null ? builtIn : builder(key, builtIn);
+      if (built.isNotEmpty) {
+        actions = built;
+      }
     }
     return Semantics(
       container: true,
       customSemanticsActions: actions,
       child: child,
     );
+  }
+
+  /// The span moving [key] by one track per non-zero delta would give it,
+  /// or null when the drag policy refuses it: the item is not live, the
+  /// moved span leaves the lattice, or `canDropAt` declines. The ONE
+  /// predicate behind both the advertised set and an activation.
+  ///
+  /// The bounds test reads the EXACT trailing endpoint, as the drop
+  /// resolver's clamp does, so a fractional span is kept inside the
+  /// lattice; the start is tested before the span is built, because
+  /// `BoardSpan` asserts a non-negative start.
+  BoardSpan? _semanticsMoveSpan(TKey key, int rowDelta, int colDelta) {
+    final controller = widget.dragController.boardController;
+    final span = controller.spanOf(key);
+    if (span == null) {
+      return null;
+    }
+    final rowStart = span.rowStart + rowDelta;
+    final colStart = span.colStart + colDelta;
+    if (rowStart < 0 || colStart < 0) {
+      return null;
+    }
+    final moved = span.copyWith(rowStart: rowStart, colStart: colStart);
+    if (moved.endTrackOn(Axis.vertical) > controller.rows.axis.trackCount ||
+        moved.endTrackOn(Axis.horizontal) >
+            controller.columns.axis.trackCount) {
+      return null;
+    }
+    final canDropAt = widget.dragController.config.canDropAt;
+    if (canDropAt != null && !canDropAt(key, moved)) {
+      return null;
+    }
+    return moved;
   }
 }
 
