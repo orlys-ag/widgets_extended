@@ -361,9 +361,13 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
   /// pointer, sized to the dragged item's rect. The item's in-place
   /// widget stays live with `isDragging` true; the proxy is the moved
   /// visual.
+  ///
+  /// Gated on the SESSION's kind, never on the target's: a canDropAt
+  /// refusal nulls `currentTarget` while the session stays live, and the
+  /// moved visual must keep following the pointer across that cell.
   Widget _buildDragProxy(BoardDragController<TKey> drag) {
     final key = drag.draggedKey;
-    if (key == null || drag.currentTarget?.kind != BoardDragKind.move) {
+    if (key == null || drag.draggedKind != BoardDragKind.move) {
       return const SizedBox.shrink();
     }
     return ValueListenableBuilder<Offset?>(

@@ -107,6 +107,14 @@ class BoardDragController<TKey> extends ChangeNotifier {
     return _session?.key;
   }
 
+  /// The live session's kind, or null between sessions. Non-null exactly
+  /// when [draggedKey] is: both read the session and store nothing, which
+  /// is what makes it the proxy's gate rather than [currentTarget], whose
+  /// kind is unreadable over a canDropAt-refused cell by design.
+  BoardDragKind? get draggedKind {
+    return _session?.kind;
+  }
+
   /// The proxy's would-be top-left in viewport-paint space: the pointer
   /// minus the session's grab offset. Null between sessions.
   Offset? get proxyTopLeft {

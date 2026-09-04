@@ -2171,4 +2171,98 @@ void main() {
       const BoardSpan(rowStart: 2, colStart: 4),
     );
   });
+
+  // Source: plans/2026-09-04-board-drag-policy-and-proxy-plan.md, T7.
+  // The proxy is the moved visual for a MOVE session and must follow the
+  // pointer whether or not a target exists; a canDropAt refusal nulls the
+  // target while the session stays live.
+  // Asserts: two widgets carry the item's key over an allowed cell (in
+  // place plus proxy, the setup sanity) and still two over a refused one.
+  // On unfixed code the second count is one.
+  testWidgets("the proxy follows the pointer across a canDropAt-refused cell", (
+    tester,
+  ) async {
+    final controller = _plainController(tester);
+    controller.addItem(
+      const _Item("d"),
+      const BoardSpan(rowStart: 2, colStart: 0),
+    );
+    await tester.pumpWidget(
+      _board(
+        controller,
+        drag: BoardDragConfig<String>(
+          onItemMoved: (key, span) {},
+          canDropAt: (key, span) {
+            return span.colStart < 4;
+          },
+        ),
+      ),
+    );
+    final item = find.byKey(_itemKey("d"));
+    final center = tester.getCenter(item);
+    final gesture = await tester.startGesture(center);
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 20));
+    // Allowed: col 1.
+    await gesture.moveTo(center + const Offset(40.0, 0.0));
+    await tester.pump();
+    expect(item, findsNWidgets(2));
+    // Refused: col 5.
+    await gesture.moveTo(center + const Offset(200.0, 0.0));
+    await tester.pump();
+    expect(item, findsNWidgets(2));
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  // Source: plans/2026-09-04-board-drag-policy-and-proxy-plan.md, T8.
+  // Asserts: draggedKind is null between sessions, names a move session
+  // and a trailing-edge resize session, and is null again after endDrag.
+  // On unfixed code this does not compile.
+  testWidgets("draggedKind is null between sessions and names the session's kind", (
+    tester,
+  ) async {
+    final controller = _plainController(tester);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    final drag = _drag(
+      tester,
+      controller,
+      BoardDragConfig<String>(
+        onItemMoved: (key, span) {},
+        onItemResized: (key, span) {},
+        resizeEdges: BoardResizeEdges.trailing,
+      ),
+    );
+    final viewport = _viewport(tester);
+    expect(drag.draggedKind, isNull);
+    final rect = viewport.rectOfItem("m")!;
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, rect.center),
+      ),
+      isTrue,
+    );
+    expect(drag.draggedKind, BoardDragKind.move);
+    drag.endDrag(cancel: true);
+    await tester.pump();
+    expect(drag.draggedKind, isNull);
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, Offset(rect.right - 1.0, rect.center.dy)),
+        edge: BoardResizeEdges.trailing,
+      ),
+      isTrue,
+    );
+    expect(drag.draggedKind, BoardDragKind.resizeColEnd);
+    drag.endDrag(cancel: true);
+    await tester.pump();
+    expect(drag.draggedKind, isNull);
+  });
 }
