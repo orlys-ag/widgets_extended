@@ -247,11 +247,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   int _shiftFloorRow = 0;
   int _shiftFloorCol = 0;
 
-  /// The two prior-tick mirrors of the animation-listener routing: a
+  /// The three prior-tick mirrors of the animation-listener routing: a
   /// settle tick reads idle on every level, so only the prior tick's
   /// levels can route it to the one layout that reads the settled state.
   bool _priorTickHadLayoutDriving = false;
   bool _priorTickHadOffsets = false;
+  bool _priorTickHadExtent = false;
 
   bool _subscribed = false;
 
@@ -417,22 +418,31 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   ///    already gone, and this is the one layout that reads the settled
   ///    extent and progress.
   /// 2. The make-room generation moved, on a content-sized lane axis or
-  ///    on any board holding a resize EXTENT preview: relayout. A
+  ///    on any board holding a held EXTENT preview: relayout. A
   ///    SNAPPED slot-only install carries no motion and displaces
   ///    nobody, so no other arm can fire for it, and the same arm
   ///    carries that gap's close; a settled extent preview's re-target
   ///    is the other case with no motion to route it.
   /// 3. Offsets just went idle: one relayout, to re-narrow the window
   ///    the admitted bound widened.
-  /// 4. Offsets active: relayout only past the admitted bound, repaint
+  /// 4. A held extent just VANISHED WITHOUT MOTION: one relayout, to
+  ///    return every child laid out at a previewed size to its
+  ///    structural one. The commit snap clears the extents before it
+  ///    notifies, so arm 2 cannot see them, and a settled preview has
+  ///    no motion for arm 1's latch; when the report mutates, the
+  ///    mutation's own layout covers this, and when it declines or
+  ///    mutates nothing, this arm is the one route.
+  /// 5. Offsets active: relayout only past the admitted bound, repaint
   ///    otherwise.
-  /// 5. Otherwise nothing.
+  /// 6. Otherwise nothing.
   ///
-  /// On a FIXED lane axis this router never CLASSIFIES make-room motion
-  /// as layout-driving. That is a claim about the classification and not
-  /// about every make-room tick: a gap that displaces a neighbour still
-  /// lays out through the admitted-bound arm, because a held offset
-  /// ramping up exceeds the bound the last layout recorded.
+  /// On a FIXED lane axis this router never CLASSIFIES make-room OFFSET
+  /// or SLOT motion as layout-driving; a held EXTENT in motion is
+  /// layout-driving on every axis, through the coordinator's union. That
+  /// is a claim about the classification and not about every make-room
+  /// tick: a gap that displaces a neighbour still lays out through the
+  /// admitted-bound arm, because a held offset ramping up exceeds the
+  /// bound the last layout recorded.
   void _handleAnimationTick() {
     final anim = _controller.anim;
     final contentAxis = _contentAxis;
@@ -450,6 +460,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       markNeedsLayout();
     } else if (_priorTickHadOffsets && !hasOffsets) {
       markNeedsLayout();
+    } else if (_priorTickHadExtent && !anim.hasMakeRoomExtent) {
+      markNeedsLayout();
     } else if (hasOffsets) {
       final bound = anim.composedOffsetBound;
       if (bound.dx > _admittedOffsetBound.dx ||
@@ -461,6 +473,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     }
     _priorTickHadLayoutDriving = hasLayoutDriving;
     _priorTickHadOffsets = hasOffsets;
+    _priorTickHadExtent = anim.hasMakeRoomExtent;
   }
 
   /// The measurement half of a controller swap's reset: extents measured

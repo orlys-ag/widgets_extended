@@ -1141,28 +1141,31 @@ class BoardController<TKey, TItem> {
   }
 
   /// Internal-use channel for the drag layer; not part of the supported
-  /// surface. Runs [body] with the LEAD half of every neighbour relane
-  /// install suppressed, in every door: inside a commit's report the
-  /// preview has already moved those neighbours and the make-room
-  /// hand-off owns their landing, so a second lead would fight it. Their
-  /// EXTENT halves still install, the preview holding no extents.
+  /// surface. Runs [body] with BOTH halves of every neighbour relane
+  /// install suppressed, lead and extent, in every door: inside a
+  /// commit's report the preview has already moved those neighbours and
+  /// sized them to their prospective slices, and the make-room hand-off
+  /// owns their landing, so a second lead or a second extent would fight
+  /// it. The written item's own FLIP is not suppressed; the drop-settle
+  /// glide's continuation cancels it from painted truth.
   ///
   /// Restores the PRIOR value rather than false, so a nested call and a
   /// throwing body both leave the flag as they found it. A mutation an
-  /// app makes inside its report beyond the reported span, re-laning a
-  /// neighbour the preview never held, steps that neighbour; accepted.
-  T withoutRelaneLeads<T>(T Function() body) {
+  /// app makes inside its report beyond the reported span, re-laning or
+  /// resizing a neighbour the preview never held, steps that neighbour;
+  /// accepted.
+  T withoutRelaneSlides<T>(T Function() body) {
     _assertNotDisposed();
-    final saved = _relaneLeadsSuppressed;
-    _relaneLeadsSuppressed = true;
+    final saved = _relaneSlidesSuppressed;
+    _relaneSlidesSuppressed = true;
     try {
       return body();
     } finally {
-      _relaneLeadsSuppressed = saved;
+      _relaneSlidesSuppressed = saved;
     }
   }
 
-  bool _relaneLeadsSuppressed = false;
+  bool _relaneSlidesSuppressed = false;
 
   /// Internal-use channel for the render object; not part of the
   /// supported surface. The one route from the track-sizing step of
@@ -1196,13 +1199,18 @@ class BoardController<TKey, TItem> {
   /// position, which the drag layer computes as where the item painted
   /// before the snap minus where it rests after the report's mutation,
   /// riding the slide engine under the makeRoom family with the snap's
-  /// remaining [duration] and curve tail. Composes onto any slide the
-  /// mutation installed, so the item never leaves its painted position.
+  /// remaining [duration] and curve tail. [extentDelta] is the same
+  /// continuation for the item's EXTENT, the painted size before the snap
+  /// minus the size it rests at after the mutation, so a neighbour whose
+  /// slice the preview held finishes shrinking or widening on the same
+  /// clock. Composes onto any slide the mutation installed, so the item
+  /// never leaves its painted rectangle.
   void animateMakeRoomHandOff(
     TKey key,
     Offset delta, {
     required Duration duration,
     required Curve curve,
+    Offset extentDelta = Offset.zero,
   }) {
     _assertNotDisposed();
     final id = _liveIdOrThrow(key, "animateMakeRoomHandOff");
@@ -1212,6 +1220,7 @@ class BoardController<TKey, TItem> {
       family: BoardAnimationFamily.makeRoom,
       duration: duration,
       curve: curve,
+      extentDelta: extentDelta,
       // Intra-track by the snap's own premise: the mutation reassigned
       // the displaced neighbours' structure by exactly the amounts the
       // preview held them at, so this correction moves each within its
@@ -1221,8 +1230,8 @@ class BoardController<TKey, TItem> {
   }
 
   /// Internal-use channel for the drag layer; not part of the supported
-  /// surface. The keys holding a make-room offset this instant, for the
-  /// commit's painted-truth capture before the snap.
+  /// surface. The keys holding a make-room offset OR extent this instant,
+  /// for the commit's painted-truth capture before the snap.
   List<TKey> get makeRoomHeldKeys {
     _assertNotDisposed();
     final keys = <TKey>[];
@@ -1656,15 +1665,18 @@ class BoardController<TKey, TItem> {
     // A span whose primary start track is frozen at either endpoint does
     // not share the scroll subtraction, so the content-space difference
     // is not the painted one for a POSITION: drop the lead. A LENGTH is
-    // the same number in both spaces, so the extent installs regardless.
-    // A neighbour's LEAD is suppressed inside a drag commit's report:
-    // the preview already moved it and the hand-off owns its landing.
-    // Its EXTENT is not, the preview never having held one.
+    // the same number in both spaces, so the extent installs regardless
+    // of the frozen band. BOTH halves of a neighbour's install are
+    // suppressed inside a drag commit's report: the preview already moved
+    // it and sized it, and the hand-off owns its landing.
     final crossesFrozen = captured.frozen || _isFrozenPrimaryStart(id);
-    final delta = crossesFrozen || (neighbour && _relaneLeadsSuppressed)
+    final suppressed = neighbour && _relaneSlidesSuppressed;
+    final delta = crossesFrozen || suppressed
         ? Offset.zero
         : captured.lead - _itemLeadOfId(id);
-    final extentDelta = _extentDelta(captured.extent, _itemExtentOfId(id));
+    final extentDelta = suppressed
+        ? Offset.zero
+        : _extentDelta(captured.extent, _itemExtentOfId(id));
     if (delta == Offset.zero && extentDelta == Offset.zero) {
       return;
     }
@@ -1809,16 +1821,21 @@ class BoardController<TKey, TItem> {
 
   /// The EXTENT the geometry rule would give [id] under [prospective]
   /// and the dry run's lane assignment, minus the one it gives it now:
-  /// what a RESIZE session's extent preview holds.
+  /// what the make-room extent preview holds, for a RESIZE session's own
+  /// item and for every dry-run member. A null [prospective] is the
+  /// item's own stored span, which is what a neighbour's install passes:
+  /// its span is unchanged and only its lane count moves.
   ///
   /// Per axis, and the same two arms the settled read uses. An item
-  /// LANED on the lane axis under BOTH spans has the same slice under
-  /// both, so its delta there is zero and the cluster's own preview owns
-  /// it; a span that crosses between the arms takes each arm's answer on
-  /// its own side.
+  /// LANED on the lane axis under BOTH spans takes the slice its
+  /// prospective lane count gives it minus the slice its stored one
+  /// does, both on the stored track, which is the prospective one
+  /// whenever this arm runs (a neighbour's span is its own, and a resize
+  /// moves one edge while the other pins the track); a span that
+  /// crosses between the arms takes each arm's answer on its own side.
   Offset _prospectiveExtentDelta(
     int id,
-    BoardSpan prospective,
+    BoardSpan? prospective,
     int? lane,
     int laneCount,
   ) {
@@ -1831,7 +1848,7 @@ class BoardController<TKey, TItem> {
   double _prospectiveExtentOn(
     Axis axis,
     int id,
-    BoardSpan prospective,
+    BoardSpan? prospective,
     int? lane,
     int laneCount,
   ) {
@@ -1842,9 +1859,6 @@ class BoardController<TKey, TItem> {
     // The dry run lanes an id exactly when the resolver's own criterion
     // holds for the prospective span, which is what `lane` reports.
     final willBeLaned = isLaneAxis && lane != null;
-    if (wasLaned && willBeLaned) {
-      return 0.0;
-    }
     final count = boardAxis.trackCount.toDouble();
     double spanExtent(double start, double end) {
       return boardAxis.offsetOfFraction(end < count ? end : count) -
@@ -1872,9 +1886,17 @@ class BoardController<TKey, TItem> {
             _store.startTrackOf(id, axis),
             _store.endTrackOf(id, axis),
           );
-    final next = willBeLaned
-        ? lanedExtent(laneCount)
-        : spanExtent(prospective.startTrackOn(axis), prospective.endTrackOn(axis));
+    final double next;
+    if (willBeLaned) {
+      next = lanedExtent(laneCount);
+    } else if (prospective == null) {
+      next = now;
+    } else {
+      next = spanExtent(
+        prospective.startTrackOn(axis),
+        prospective.endTrackOn(axis),
+      );
+    }
     return _extentDeltaOn(next, now);
   }
 

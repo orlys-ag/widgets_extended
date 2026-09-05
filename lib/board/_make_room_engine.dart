@@ -6,11 +6,14 @@
 /// come from a DRY-RUN lane resolution over at most two lane-axis
 /// buckets, supplied by the controller; the model is never written.
 ///
-/// Beside the offsets the engine holds a HELD EXTENT for a RESIZE
+/// Beside the offsets the engine holds a HELD EXTENT per id: for a RESIZE
 /// session's own item, the length its prospective span would give it
 /// minus the length it has now, so the block follows the finger while
-/// the model stays unwritten; it rides the offsets' clock and their two
-/// doors.
+/// the model stays unwritten; and for every member the dry run touched,
+/// the slice its prospective lane count would give it minus the slice it
+/// has, so a neighbour on a FIXED lane axis shrinks or widens with the
+/// gap instead of after the drop. Extents ride the offsets' clock and
+/// their two doors.
 ///
 /// Beside the offsets the engine holds prospective lane SLOTS for the
 /// LIFTED item: a slot has no paint half at all and exists only so the
@@ -59,11 +62,12 @@ class _CurveTail extends Curve {
   }
 }
 
-/// A HELD EXTENT preview for the item a RESIZE session holds: the
-/// length its prospective span would give it, minus the length its
-/// stored span gives it now, per axis. Paint adds it to the item's
-/// extent exactly as a held offset is added to its lead, so the block
-/// follows the finger while the model stays unwritten.
+/// A HELD EXTENT preview for one item: the length its prospective span
+/// and lane count would give it, minus the length its stored ones give
+/// it now, per axis. Paint adds it to the item's extent exactly as a
+/// held offset is added to its lead, so a resized block follows the
+/// finger and a displaced neighbour takes its prospective slice while
+/// the model stays unwritten.
 ///
 /// Zero means this entry is CLOSING and is removed when it settles, the
 /// rule its sibling below uses.
@@ -146,7 +150,7 @@ class MakeRoomEngine {
     required double Function(int id, int lane, int laneCount) laneOriginOfId,
     required Offset Function(
       int id,
-      BoardSpan prospective,
+      BoardSpan? prospective,
       int? lane,
       int laneCount,
     )
@@ -183,10 +187,11 @@ class MakeRoomEngine {
   /// The EXTENT the geometry rule would give an id under a prospective
   /// span and lane assignment, minus the one it gives it now. The
   /// controller answers, that rule being its own; a null [lane] means
-  /// the dry run did not lane the id.
+  /// the dry run did not lane the id, and a null span means the id's
+  /// own stored span, which is what a neighbour's install passes.
   final Offset Function(
     int id,
-    BoardSpan prospective,
+    BoardSpan? prospective,
     int? lane,
     int laneCount,
   )
@@ -199,7 +204,10 @@ class MakeRoomEngine {
 
   final Map<int, _HeldOffset> _held = <int, _HeldOffset>{};
 
-  /// At most one entry: the item a resize session holds.
+  /// One entry per id whose extent the preview holds: a resize session's
+  /// own item and every dry-run member whose slice would change. Empty
+  /// on a content-sized lane axis for a pure lane change, where every
+  /// slice is the one lane extent and the delta is exactly zero.
   final Map<int, _HeldExtent> _heldExtent = <int, _HeldExtent>{};
 
   /// KEYED BY LANE-AXIS TRACK, and an emptied bucket is removed, so
@@ -351,9 +359,16 @@ class MakeRoomEngine {
     });
   }
 
-  /// The ids holding entries, for the composed per-id bound.
+  /// The ids holding entries, offset or extent, for the composed per-id
+  /// bound and the commit's painted-truth capture. A lane-0 neighbour
+  /// holds a zero offset and a non-zero extent, so an offset-only
+  /// enumeration would leave it out of both.
   Iterable<int> get activeIds {
-    return _held.keys;
+    return _held.keys.followedBy(
+      _heldExtent.keys.where((id) {
+        return !_held.containsKey(id);
+      }),
+    );
   }
 
   double _valueOf(_HeldOffset entry) {
@@ -427,22 +442,6 @@ class MakeRoomEngine {
     return axis == Axis.vertical ? Offset(0.0, value) : Offset(value, 0.0);
   }
 
-  /// PER-AXIS magnitudes over the held set, independently.
-  ({double dx, double dy}) get bound {
-    var dx = 0.0;
-    var dy = 0.0;
-    for (final id in _held.keys) {
-      final delta = deltaOf(id);
-      if (delta.dx.abs() > dx) {
-        dx = delta.dx.abs();
-      }
-      if (delta.dy.abs() > dy) {
-        dy = delta.dy.abs();
-      }
-    }
-    return (dx: dx, dy: dy);
-  }
-
   /// Opens (or re-targets) the gap for a drag of [draggedId] resolving to
   /// [prospective]. Never refuses: under a zero family it INSTALLS AND
   /// SNAPS, because the gap IS the target state and section 9.5 names no
@@ -467,41 +466,83 @@ class MakeRoomEngine {
     final dry = laneAxis == null
         ? const <int, ({int lane, int laneCount})>{}
         : _dryRunOf(draggedId, prospective);
+    // The hand-off fold: the earliest clock among everything this call
+    // discards mid-motion. A snapped install discards every entry it
+    // replaces and every slot it snaps; a live install discards only a
+    // previous session's closing slots.
+    double? minT;
+    // THE EXTENT PREVIEW. Three sources of targets, one install loop:
+    // a RESIZE session's own item under its prospective span (a move
+    // changes no span extent, and a LIFTED item paints as the proxy);
+    // every other dry-run member under its OWN span and prospective lane
+    // count, which is what shrinks or widens a neighbour's slice on a
+    // fixed lane axis; and every held entry neither re-targeted, which
+    // closes back to zero. Re-targeted from where it currently paints,
+    // and left alone for an unchanged target, the two rules the offsets
+    // use and for the same reasons. BEFORE the lane-axis gate: an extent
+    // needs no lane geometry, and on a board with none it is the whole
+    // of the drag's in-place feedback.
+    final extentTargets = <int, Offset>{};
     if (!lifted) {
-      // THE EXTENT PREVIEW, a resize session's alone: a move changes no
-      // span extent. Re-targeted from where it currently paints, and
-      // left alone for an unchanged target, the two rules the offsets
-      // use and for the same reasons. BEFORE the lane-axis gate: an
-      // extent needs no lane geometry, and on a board with none it is
-      // the whole of the drag's in-place feedback.
       final assignment = dry[draggedId];
-      final extent = _prospectiveExtentOf(
+      extentTargets[draggedId] = _prospectiveExtentOf(
         draggedId,
         prospective,
         assignment?.lane,
         assignment?.laneCount ?? _laneCountOfId(draggedId),
       );
-      final existing = _heldExtent[draggedId];
+    }
+    dry.forEach((id, assignment) {
+      if (id == draggedId) {
+        return;
+      }
+      extentTargets[id] = _prospectiveExtentOf(
+        id,
+        null,
+        assignment.lane,
+        assignment.laneCount,
+      );
+    });
+    for (final id in _heldExtent.keys) {
+      extentTargets.putIfAbsent(id, () {
+        return Offset.zero;
+      });
+    }
+    extentTargets.forEach((id, extent) {
+      final existing = _heldExtent[id];
       if (extent == Offset.zero && existing == null) {
         // Nothing to hold.
-      } else if (snap) {
-        _heldExtent[draggedId] = _HeldExtent(
+        return;
+      }
+      if (snap) {
+        // The same fold the offsets' snap arm makes, in the inline form
+        // the release arm uses for an Offset entry.
+        if (existing != null &&
+            !existing.snapped &&
+            existing.t < 1.0 &&
+            existing.from != existing.target) {
+          final current = minT;
+          minT = current == null || existing.t < current ? existing.t : current;
+        }
+        _heldExtent[id] = _HeldExtent(
           target: extent,
           from: extent,
           snapped: true,
         );
       } else if (existing == null || existing.target != extent) {
-        _heldExtent[draggedId] = _HeldExtent(
+        _heldExtent[id] = _HeldExtent(
           target: extent,
-          from: existing == null ? Offset.zero : extentDeltaOf(draggedId),
+          from: existing == null ? Offset.zero : extentDeltaOf(id),
           snapped: false,
         );
       }
-    }
+    });
     if (laneAxis == null) {
       // No lane geometry exists to open a gap in; the extent preview
       // above is the whole of the in-place feedback on such a board, and
-      // the drag proxy is the rest of it.
+      // the drag proxy is the rest of it. The fold is discarded
+      // unpublished here, as it always was on this branch: the case is a
+      // restyle to zero mid-drag on a board with no lanes.
       _heldExtent.removeWhere((id, entry) {
         return snap && entry.target == Offset.zero;
       });
@@ -553,11 +594,6 @@ class MakeRoomEngine {
         return 0.0;
       });
     }
-    // The hand-off fold: the earliest clock among everything this call
-    // discards mid-motion. A snapped install discards every entry it
-    // replaces and every slot it snaps; a live install discards only a
-    // previous session's closing slots.
-    double? minT;
     targets.forEach((id, target) {
       final existing = _held[id];
       if (target == 0.0 && existing == null) {

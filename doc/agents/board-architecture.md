@@ -102,12 +102,19 @@ range selection, frozen tracks, and a paintable background.
   it to the item's extent so the child is laid out at the animated size),
   `MakeRoomEngine` (HELD offsets from the dry run; the
   session's `lifted` argument discriminates move from resize, and the
-  de-lane arm carries a resized item out of its slice; a RESIZE session
-  also gets a HELD EXTENT, the length its prospective span would give it
-  minus the length it has, installed BEFORE the lane-axis gate because an
-  extent needs no lane geometry and is the whole of the in-place feedback
-  on a board with none, so the block follows the finger while the model
-  stays unwritten; beside the offsets
+  de-lane arm carries a resized item out of its slice; beside each
+  offset the engine holds a HELD EXTENT per id: a RESIZE session's own
+  item gets the length its prospective span would give it minus the
+  length it has, and EVERY dry-run member but the lifted item gets the
+  slice its prospective lane count would give it minus the slice it has,
+  so on a FIXED lane axis a neighbour shrinks or widens WITH the gap
+  rather than after the drop (on a content-sized lane axis every slice
+  is the one lane extent and no entry is created); extents are installed
+  BEFORE the lane-axis gate because an extent needs no lane geometry and
+  is the whole of the in-place feedback on a board with none, so the
+  block follows the finger while the model stays unwritten, and an
+  extent that vanishes without motion (the commit snap) reaches layout
+  through the render router's own settle latch for it; beside the offsets
   it holds a prospective lane SLOT for the lifted item, paintless, so
   track sizing can count the lane the drop would occupy, with a lifecycle
   key that is non-null exactly while a slot exists; the make-room
@@ -226,10 +233,13 @@ range selection, frozen tracks, and a paintable background.
   RELANE, so a content-sized track holding such a neighbour is
   term-driven on that clock while a track with none takes the sizing
   step's hand-off arm, and the row edge and the content inside it arrive
-  together with nothing painted stepping at release. The report itself
-  runs inside `withoutRelaneLeads`, so the mutation's own re-lane
-  installs no second LEAD for those neighbours in any door, `setItems`
-  included, while their extents install as everywhere else; a committed
+  together with nothing painted stepping at release; the hand-off
+  captures each held neighbour's painted RECT and carries its EXTENT
+  continuation beside the lead, so a slice still shrinking at the drop
+  finishes on the same clock. The report itself runs inside
+  `withoutRelaneSlides`, so the mutation's own re-lane installs neither a
+  second LEAD nor a second EXTENT for those neighbours in any door,
+  `setItems` included; a committed
   resize's glide runs from the painted corner captured before the snap,
   carries the item's EXTENT continuation beside it (the painted extent
   captured before the snap minus the painted extent after the mutation,

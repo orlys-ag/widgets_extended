@@ -359,11 +359,12 @@ class BoardDragController<TKey> extends ChangeNotifier {
         paintedExtentBefore = Offset(rect.width, rect.height);
       }
     }
-    Map<TKey, Offset>? paintedByKey;
+    Map<TKey, Rect>? paintedByKey;
     if (report) {
       // The COMMIT HAND-OFF's painted truth, captured BEFORE the snap:
-      // where every item the preview holds paints this instant. The
-      // session's own key is the glide's below, not the hand-off's.
+      // where, and how large, every item the preview holds paints this
+      // instant. The session's own key is the glide's below, not the
+      // hand-off's.
       paintedByKey = _capturePaintedByKey(session);
       // snapForCommit: the report's mutation reassigns the displaced
       // neighbours' structure by exactly the held amounts, so the
@@ -382,13 +383,12 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _teardown(session);
     if (report && target != null) {
       // The report's mutation re-lanes exactly the neighbours the
-      // preview displaced, whose landing the hand-off below owns, so
-      // their relane LEADS are suppressed for its duration, in whatever
-      // door the app mutates through. Their extents install as
-      // everywhere else, the preview having held none. The widget's
-      // built-in semantics move action reports outside any session and
-      // is deliberately not wrapped: nothing is held there.
-      boardController.withoutRelaneLeads(() {
+      // preview displaced and re-sized, whose landing the hand-off below
+      // owns, so their relane slides, LEAD and EXTENT, are suppressed
+      // for its duration, in whatever door the app mutates through. The
+      // widget's built-in semantics move action reports outside any
+      // session and is deliberately not wrapped: nothing is held there.
+      boardController.withoutRelaneSlides(() {
         if (target.kind == BoardDragKind.move) {
           config.onItemMoved(session.key, target.span);
         } else {
@@ -402,12 +402,13 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _installDropSettle(session, release, paintedBefore, paintedExtentBefore);
   }
 
-  /// The hand-off's capture: the painted top-left corner of every item
-  /// the make-room preview holds an offset for, except the session's
-  /// own. Paint space, composed with every animation offset, which is
-  /// what makes it painted truth rather than structure.
-  Map<TKey, Offset> _capturePaintedByKey(_DragSession<TKey> session) {
-    final painted = <TKey, Offset>{};
+  /// The hand-off's capture: the painted RECT of every item the make-room
+  /// preview holds an offset or an extent for, except the session's own.
+  /// Paint space, the corner composed with every animation offset and
+  /// the size read through the geometry rule, which composes the held
+  /// extent; that is what makes it painted truth rather than structure.
+  Map<TKey, Rect> _capturePaintedByKey(_DragSession<TKey> session) {
+    final painted = <TKey, Rect>{};
     for (final key in boardController.makeRoomHeldKeys) {
       if (key == session.key) {
         continue;
@@ -416,9 +417,10 @@ class BoardDragController<TKey> extends ChangeNotifier {
       if (rect == null) {
         continue;
       }
-      painted[key] =
+      final corner =
           rect.topLeft +
           boardController.anim.offsetOfItem(boardController.idOfKey(key));
+      painted[key] = corner & rect.size;
     }
     return painted;
   }
@@ -436,7 +438,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// port after teardown through the session's own reference.
   void _installMakeRoomHandOff(
     _DragSession<TKey> session,
-    Map<TKey, Offset> paintedByKey,
+    Map<TKey, Rect> paintedByKey,
   ) {
     final handOff = boardController.anim.makeRoomHandOff;
     if (handOff == null) {
@@ -452,8 +454,18 @@ class BoardDragController<TKey> extends ChangeNotifier {
       }
       final id = boardController.idOfKey(key);
       final delta =
-          painted - (rect.topLeft + boardController.anim.offsetOfItem(id));
-      if (delta == Offset.zero) {
+          painted.topLeft -
+          (rect.topLeft + boardController.anim.offsetOfItem(id));
+      // The EXTENT continuation, read from painted truth on both sides
+      // exactly as the resize glide's is: the size the preview held it
+      // at, minus the size it rests at now. The neighbour's own relane
+      // extent was suppressed in the report, so this composes onto no
+      // record and starts where the preview left the item.
+      final extentDelta = Offset(
+        painted.width - rect.width,
+        painted.height - rect.height,
+      );
+      if (delta == Offset.zero && extentDelta == Offset.zero) {
         return;
       }
       boardController.animateMakeRoomHandOff(
@@ -461,6 +473,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
         delta,
         duration: handOff.remaining,
         curve: handOff.curve,
+        extentDelta: extentDelta,
       );
     });
   }
