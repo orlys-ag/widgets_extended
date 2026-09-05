@@ -50,3 +50,22 @@ Cheap mechanical sweeps that reproduce:
    (`board_drag_controller.dart:439-447`). Any plan that adds a NEW trigger for
    re-resolution (a frame callback, an animation tick) has to cross it with the
    proxy, not only with the target.
+10. **An item's painted BOX is the gesture-arena boundary, and geometry plans
+    forget it.** `_SelectionLayer` "decides the arena outcome by hit-test
+    order: an item handle's recognizer is deeper and enters the arena first,
+    so it beats this layer on items" (`board_widget.dart:844-850`), and
+    `hitTestChildren` walks items before cells
+    (`render_board_viewport.dart:1825-1836`). `itemAt`
+    (`render_board_viewport.dart:2117-2150`) probes the same painted rect.
+    So ANY plan that changes an item's extent also moves the boundary
+    between the item host's recognizers and cell selection / cell-drag
+    create flows, with no lane read anywhere in that path. Cross it
+    explicitly: "nothing else reads a lane for geometry" is a claim about
+    lane READS and says nothing about the consumers of the BOX.
+11. **Two in-code sentences COUNT the item view's inputs and go stale
+    whenever a plan adds a `BoardItemView` field.** `board_views.dart:91-94`
+    ("has just read all five from the controller") and
+    `board_controller.dart:43-47` (a built child's RENDERED inputs are "its
+    payload, its span, its lane and its lane count"). Neither is in the
+    usual doc-edit list, which names `board-architecture.md` plus the
+    geometry-rule comments.

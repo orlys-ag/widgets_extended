@@ -122,3 +122,25 @@ frame and (b) makes a track extent change per frame builds a loop:
 (`:272-282`) never stops the ticker, and layout runs every frame for the whole
 session. Check every "costs one `trackSpaceAt`" claim against the free and
 fraction snap modes, not the `BoardSnap.track()` default.
+
+## 10. `board-architecture.md` states non-existence of state UNCONDITIONALLY
+
+Several bullets end in a parenthetical asserting that some record is never
+created: `board-architecture.md:111-112` "(on a content-sized lane axis every
+slice is the one lane extent and no entry is created)" for `MakeRoomEngine`'s
+`_heldExtent`, and `:165-168` "so a track's edge follows what paints" for the
+sizing term. A plan that makes a NEW quantity feed `_prospectiveExtentOf` or
+the cluster term falsifies those without touching the sentence the doc-update
+section cites, because the cited RANGE usually stops one line short of the
+parenthetical. Whenever a plan creates state a normative doc says cannot
+exist, grep the doc for "no entry", "never", "always", "exactly zero" around
+the bullet it edits, not just the clause it quotes.
+
+## 11. A board plan that changes LANE GEOMETRY changes 17 test fixtures
+
+`grep -rln "laneExtent" test/board/` returns 17 files; the lane-READ grep
+(`laneOf|laneCountOf`) returns 6. A plan whose blast-radius claim is scoped to
+the lane reads has not covered the painted-geometry assertions
+(`tester.getSize`/`getRect`) in the other eleven. Ask any unconditional
+geometry change ("this is the lane geometry, unconditionally") for a landing
+step that names the existing suite as its gate.

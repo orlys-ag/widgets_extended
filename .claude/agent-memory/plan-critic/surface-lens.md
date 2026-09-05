@@ -95,3 +95,15 @@
   has mis-priced the alternative; `BoardAnimationReader` is
   `abstract interface class` at `_board_animation_coordinator.dart:34`, so every
   member added there is permanent app-facing surface.
+
+- **`testing-patterns.md`'s seam counts are STALE, and plans copy them as if run.**
+  The doc says "52 distinct `debug*` identifiers"; the command it quotes,
+  `grep -rhoE '\bdebug[A-Z][A-Za-z0-9_]*' lib --include=*.dart | sort -u | wc -l`,
+  returned 66 on 2026-09-05. Re-run any seam-justification count a plan states
+  rather than trusting the match to the doc; a plan quoting 52 has quoted the
+  document, not the tree. (`@visibleForTesting` was 19 in the doc; check it the
+  same way.)
+- **Two-level barrel: `lib/widgets_extended.dart` re-exports `board/board.dart`
+  with NO show clause**, so the board module's only gate is `board.dart`'s own
+  `show` list. A new MEMBER on an already-exported class needs no edit at either
+  level; only a new top-level name does.

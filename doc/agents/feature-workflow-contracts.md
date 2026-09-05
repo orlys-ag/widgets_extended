@@ -329,8 +329,13 @@ is what `agentType` resolves against. Across 222 subagent transcripts under
 on `claude-sonnet-5`, in the same sessions where every `general-purpose`,
 `Explore` and `Plan` agent ran on the session's own model.
 
-What is not yet observed is that resolution on the WORKFLOW path, because no
-workflow has run in this project. The authoring reference calls `agentType`
+Observed on the workflow path on 2026-09-05 (run `wf_b478c79b-2fc`, the
+lane span expansion feature): every agent transcript under
+`subagents/` records `message.model` as `claude-opus-5` and the effort the
+agent's frontmatter sets (`xhigh` for the architect, critics and
+implementer, `medium` for the checklist agent), in a session whose own model
+was `claude-fable-5-1`. The frontmatter wins there too. The paragraph below
+is kept as the reasoning that predicted it. The authoring reference calls `agentType`
 "resolved from the same registry as the Agent tool", which is the link; its
 `opts.model` bullet separately says an agent omitting it "inherits the main-loop
 model", written without an `agentType` caveat. Settle it by observation on the
