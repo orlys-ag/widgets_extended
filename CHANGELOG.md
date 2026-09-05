@@ -1,5 +1,6 @@
 ## 0.0.36
 
+- Board 2D-scrollable.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and
