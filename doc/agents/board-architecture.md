@@ -237,15 +237,42 @@ range selection, frozen tracks, and a paintable background.
   in-flight FLIP, so the continuation cancels the report's own FLIP by
   construction), and composes whenever either half is non-zero; a cancel closes the gap
   by animation. `BoardDropResolver` turns a pointer into a
-  span: a track-snap move commits the cell UNDER THE POINTER minus a
-  whole-cell grab offset (item geometry never enters it), a
-  fraction/free move quantizes the item's corner, both endpoint-clamped;
-  resizes move only the dragged edge, floored at one quantum. `BoardAutoScroller` (internal) integrates two-axis edge-zone
+  span: EVERY move quantizes the ITEM'S PAINTED CORNER, a track snap
+  rounding it to the nearest track and a fraction snap to the nearest
+  quantum, both endpoint-clamped, so the cells committed are the cells
+  the item covers. The one exception is the LANE axis of a LANED item,
+  whose painted lead there is a lane origin inside one track rather than
+  its span: that axis keeps the cell under the POINTER minus a whole-cell
+  grab offset, or a thin chip lying wholly inside a tall row would round
+  into the next row the moment its top passed the midpoint. Resizes move
+  only the dragged edge, floored at one quantum. `clampStart` and
+  `quantumOf` are non-private because the drop-fit search reads the same
+  two rules.
+  A refusal is where `_board_drop_fit.dart` gets its one chance, and only
+  under a `BoardDragConfig.dropFit` policy: when `canDropAt` refuses a
+  move, the board measures what share of the refused box no other item
+  covers, by CONTENT-SPACE area over the UNION of the obstacles (summing
+  them double-counts the overlapping occupants a laned board has by the
+  dozen), and slides the placement to the nearest one holding the whole
+  box clear. The gate has TWO terms and only the second is configurable:
+  the box must MEET an occupant, so a refusal for an app rule the board
+  cannot read never moves anything, and the free share must reach
+  `minFreeFraction`. The scan steps by the snap's quantum, capped at four
+  per direction per axis, orders candidates by content-space distance
+  under a TOTAL order so equidistant ones cannot swap between resolves,
+  and translates by re-splitting the exact endpoint rather than adding to
+  a leading fraction, which a span's own assert forbids. `canDropAt`
+  vetoes every candidate the scan proposes, so the board proposes and the
+  app disposes; the nudged span becomes the target, so the make-room gap
+  previews the landing and the commit reports it. The gather is ONE
+  `itemsIn` over the box widened by the radii on BOTH sides of each axis,
+  minus the dragged key. `BoardAutoScroller` (internal) integrates
+  two-axis edge-zone
   velocities and is evaluated at `startDrag` and per move.
 - **`board_views.dart` / `board_config.dart` / `board_background.dart`**:
   the builder view values (`select()` routes through the controller), the
   config and report types, and the geometry-fed background painters.
-- **`board.dart`**: the barrel; 38 names by explicit `show`, and anything
+- **`board.dart`**: the barrel; 39 names by explicit `show`, and anything
   omitted is internal regardless of its name.
 
 ### Usage patterns
