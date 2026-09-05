@@ -101,6 +101,7 @@ class BoardItemView<TKey, TItem> {
     required this.span,
     required this.lane,
     required this.laneCount,
+    required this.laneSpan,
     required this.isDragging,
     required this.controller,
   });
@@ -122,6 +123,11 @@ class BoardItemView<TKey, TItem> {
   /// `controller.laneCountOf` reports it. 1 when the board has no lane
   /// axis.
   final int laneCount;
+
+  /// The number of consecutive lanes the item occupies, counting upward
+  /// from [lane], as `controller.laneSpanOf` reports it. 1 when the
+  /// board has no lane axis and when the lane above the item is taken.
+  final int laneSpan;
 
   /// Whether a drag session currently holds this item.
   final bool isDragging;

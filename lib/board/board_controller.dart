@@ -379,6 +379,18 @@ class BoardController<TKey, TItem> {
     return _store.laneCountOf(id);
   }
 
+  /// The number of consecutive lanes [key] occupies, counting upward
+  /// from [laneOf], or 1 when it is not in the live set or is not laned.
+  /// Flushes first; see [laneOf].
+  int laneSpanOf(TKey key) {
+    _ensureLanesResolved();
+    final id = _liveIdOf(key);
+    if (id == BoardStore.noId) {
+      return 1;
+    }
+    return _store.laneSpanOf(id);
+  }
+
   /// Whether [key] is in the live set. False for a key whose only
   /// incarnation is animating out.
   bool contains(TKey key) {
@@ -476,6 +488,12 @@ class BoardController<TKey, TItem> {
   int laneCountOfId(int id) {
     _ensureLanesResolved();
     return _store.laneCountOf(id);
+  }
+
+  /// [id]'s lane span. Flushes first; see [laneOfId].
+  int laneSpanOfId(int id) {
+    _ensureLanesResolved();
+    return _store.laneSpanOf(id);
   }
 
   /// Whether [id] is the item a drag session currently holds.
@@ -1795,20 +1813,24 @@ class BoardController<TKey, TItem> {
     final config = axis == Axis.vertical ? _rows : _columns;
     final boardAxis = config.axis;
     if (_lanes.laneAxis == axis && _lanes.isLaned(id)) {
-      // A LANED item on the lane axis takes its lane's slice, not its
-      // span: one lane extent where the axis is content-sized, and the
-      // track's extent past the padding divided by the cluster's lane
-      // count where it is not. The same two modes [_laneOriginOfId]
-      // multiplies by the lane index.
+      // A LANED item on the lane axis takes its lane BAND, not its
+      // fractional span: its own slice multiplied by the number of
+      // consecutive lanes the resolver gave it. One slice is one lane
+      // extent where the axis is content-sized, and the track's extent
+      // past the padding divided by the cluster's lane count where it is
+      // not. The same two modes [_laneOriginOfId] multiplies by the lane
+      // index, and the span enters HERE and never there.
+      final span = laneSpanOfId(id);
       if (boardAxis.acceptsMeasurements) {
-        return config.laneExtent!;
+        return config.laneExtent! * span;
       }
       final track = _store.startTrackOf(id, axis).floor();
       return (boardAxis.extentOf(track) - config.lanePadding).clamp(
             0.0,
             double.infinity,
           ) /
-          laneCountOfId(id);
+          laneCountOfId(id) *
+          span;
     }
     // Both endpoints clamped exactly as the fractional lead arm clamps
     // its start, so an axis swap that strands a span reads total.
@@ -1836,12 +1858,11 @@ class BoardController<TKey, TItem> {
   Offset _prospectiveExtentDelta(
     int id,
     BoardSpan? prospective,
-    int? lane,
-    int laneCount,
+    ({int lane, int laneCount, int laneSpan})? assignment,
   ) {
     return Offset(
-      _prospectiveExtentOn(Axis.horizontal, id, prospective, lane, laneCount),
-      _prospectiveExtentOn(Axis.vertical, id, prospective, lane, laneCount),
+      _prospectiveExtentOn(Axis.horizontal, id, prospective, assignment),
+      _prospectiveExtentOn(Axis.vertical, id, prospective, assignment),
     );
   }
 
@@ -1849,25 +1870,25 @@ class BoardController<TKey, TItem> {
     Axis axis,
     int id,
     BoardSpan? prospective,
-    int? lane,
-    int laneCount,
+    ({int lane, int laneCount, int laneSpan})? assignment,
   ) {
     final config = axis == Axis.vertical ? _rows : _columns;
     final boardAxis = config.axis;
     final isLaneAxis = _lanes.laneAxis == axis;
     final wasLaned = isLaneAxis && _lanes.isLaned(id);
     // The dry run lanes an id exactly when the resolver's own criterion
-    // holds for the prospective span, which is what `lane` reports.
-    final willBeLaned = isLaneAxis && lane != null;
+    // holds for the prospective span, which is what a non-null
+    // assignment reports.
+    final willBeLaned = isLaneAxis && assignment != null;
     final count = boardAxis.trackCount.toDouble();
     double spanExtent(double start, double end) {
       return boardAxis.offsetOfFraction(end < count ? end : count) -
           boardAxis.offsetOfFraction(start < count ? start : count);
     }
 
-    double lanedExtent(int forLaneCount) {
+    double lanedExtent(int forLaneCount, int forLaneSpan) {
       if (boardAxis.acceptsMeasurements) {
-        return config.laneExtent!;
+        return config.laneExtent! * forLaneSpan;
       }
       final track = _store.startTrackOf(id, axis).floor();
       if (track < 0 || track >= boardAxis.trackCount) {
@@ -1877,18 +1898,23 @@ class BoardController<TKey, TItem> {
             0.0,
             double.infinity,
           ) /
-          forLaneCount;
+          forLaneCount *
+          forLaneSpan;
     }
 
+    // P2: BOTH sides read a span, the stored one and the dry run's. One
+    // side alone yields a preview delta that is a pure artifact of the
+    // two rules disagreeing, held for the whole hover, and steps the
+    // item by that much at the commit.
     final now = wasLaned
-        ? lanedExtent(laneCountOfId(id))
+        ? lanedExtent(laneCountOfId(id), laneSpanOfId(id))
         : spanExtent(
             _store.startTrackOf(id, axis),
             _store.endTrackOf(id, axis),
           );
     final double next;
     if (willBeLaned) {
-      next = lanedExtent(laneCount);
+      next = lanedExtent(assignment.laneCount, assignment.laneSpan);
     } else if (prospective == null) {
       next = now;
     } else {
@@ -1932,13 +1958,13 @@ class BoardController<TKey, TItem> {
   /// The dry-run lane resolution the make-room gap derives its offsets
   /// from: the dragged item's intervals overridden by [prospective], the
   /// laning predicate applied to it, and nothing written to the model.
-  Map<int, ({int lane, int laneCount})> _dryRunLanes(
+  Map<int, ({int lane, int laneCount, int laneSpan})> _dryRunLanes(
     int draggedId,
     BoardSpan prospective,
   ) {
     final laneAxis = _lanes.laneAxis;
     if (laneAxis == null) {
-      return const <int, ({int lane, int laneCount})>{};
+      return const <int, ({int lane, int laneCount, int laneSpan})>{};
     }
     _ensureLanesResolved();
     final sweepAxis = laneAxis == Axis.vertical

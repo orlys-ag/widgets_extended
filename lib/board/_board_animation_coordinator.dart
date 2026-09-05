@@ -149,7 +149,7 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     required void Function(Set<TKey> affected) fireStructural,
     required double Function(Axis axis, int track) settledExtentOf,
     required Axis? Function() laneAxisOf,
-    required Map<int, ({int lane, int laneCount})> Function(
+    required Map<int, ({int lane, int laneCount, int laneSpan})> Function(
       int draggedId,
       BoardSpan prospective,
     )
@@ -158,8 +158,7 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     required Offset Function(
       int id,
       BoardSpan? prospective,
-      int? lane,
-      int laneCount,
+      ({int lane, int laneCount, int laneSpan})? assignment,
     )
     prospectiveExtentOf,
     required int Function(int id) laneOfId,

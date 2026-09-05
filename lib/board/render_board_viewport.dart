@@ -958,11 +958,19 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           if (delta != 0.0 || relane != 0.0) {
             makeRoomContributes = true;
           }
+          // A LANE BAND measure and not an extent: the band's position
+          // (the lane origin plus the two intra-track LEAD numbers paint
+          // adds) plus the band's SIZE, the member's stored span, scaled
+          // by its ramp. It reads no in-flight extent, so it agrees with
+          // paint AT REST and can lag it while an extent animates on a
+          // different clock.
           final ceiling =
               _controller.laneOfId(member) * config.laneExtent! +
               delta +
               relane +
-              anim.enterExitProgressOf(member) * config.laneExtent!;
+              anim.enterExitProgressOf(member) *
+                  _controller.laneSpanOfId(member) *
+                  config.laneExtent!;
           if (ceiling > deepest) {
             deepest = ceiling;
           }
@@ -1220,10 +1228,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   /// An item's content-space leading edge and extent on [axis], the
   /// two-arm rule: a LANED item on the lane axis takes its track's edge
-  /// plus the lane term and the lane slice for its extent (its own
-  /// fractions on that axis are ignored, because its position inside the
-  /// track is decided by its lane); everything else takes the exact
-  /// fractional endpoints, which is the only arm that consumes them.
+  /// plus the lane term and its whole lane BAND, the slice multiplied by
+  /// its lane span, for its extent (its own fractions on that axis are
+  /// ignored, because its position inside the track is decided by its
+  /// lane); everything else takes the exact fractional endpoints, which
+  /// is the only arm that consumes them.
   ///
   /// THE ONE SITE THAT ADDS THE IN-FLIGHT EXTENT DELTA, on every arm,
   /// before the enter/exit ramp multiplies. Layout's tight constraints
@@ -1252,17 +1261,21 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       );
       final lane = _controller.laneOfId(id);
       final laneCount = _controller.laneCountOfId(id);
+      final laneSpan = _controller.laneSpanOfId(id);
       final trackLead = _animatedOffsetOf(axis, boardAxis, track);
       final laneExtent = config.laneExtent;
       final padding = config.lanePadding;
       if (boardAxis.acceptsMeasurements) {
         // Content-sized lane axis: fixed slices from the padded edge; the
-        // track grew to hold them through the cluster term. The extent
-        // ramps with the item's own enter/exit progress.
+        // track grew to hold them through the cluster term. The item
+        // takes its whole BAND, the span multiplying INSIDE the floor and
+        // BEFORE the ramp, so the delta and the progress compose exactly
+        // as they did on one slice. The extent ramps with the item's own
+        // enter/exit progress.
         return (
           lead: trackLead + padding + lane * laneExtent!,
           extent:
-              math.max(0.0, laneExtent + extentDelta) *
+              math.max(0.0, laneExtent * laneSpan + extentDelta) *
               _controller.anim.enterExitProgressOf(id),
         );
       }
@@ -1276,11 +1289,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           : boardAxis.extentOf(track);
       final slice = math.max(0.0, trackExtent - padding) / laneCount;
       return (
-        // The lead reads the SETTLED slice: the lane origin is where
-        // the item's own animated extent does not reach.
+        // The lead reads the SETTLED slice and takes NO span: the lane
+        // origin is the item's OWN lane's, and is where the item's own
+        // animated extent does not reach.
         lead: trackLead + padding + lane * slice,
         extent:
-            math.max(0.0, slice + extentDelta) *
+            math.max(0.0, slice * laneSpan + extentDelta) *
             _controller.anim.enterExitProgressOf(id),
       );
     }

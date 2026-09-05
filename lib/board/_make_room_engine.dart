@@ -142,7 +142,7 @@ class MakeRoomEngine {
     required BoardAnimationStyle Function() styleOf,
     required void Function() notifyNow,
     required Axis? Function() laneAxisOf,
-    required Map<int, ({int lane, int laneCount})> Function(
+    required Map<int, ({int lane, int laneCount, int laneSpan})> Function(
       int draggedId,
       BoardSpan prospective,
     )
@@ -151,8 +151,7 @@ class MakeRoomEngine {
     required Offset Function(
       int id,
       BoardSpan? prospective,
-      int? lane,
-      int laneCount,
+      ({int lane, int laneCount, int laneSpan})? assignment,
     )
     prospectiveExtentOf,
     required int Function(int id) laneOfId,
@@ -177,7 +176,7 @@ class MakeRoomEngine {
   final void Function() _notifyNow;
 
   final Axis? Function() _laneAxisOf;
-  final Map<int, ({int lane, int laneCount})> Function(
+  final Map<int, ({int lane, int laneCount, int laneSpan})> Function(
     int draggedId,
     BoardSpan prospective,
   )
@@ -186,14 +185,13 @@ class MakeRoomEngine {
 
   /// The EXTENT the geometry rule would give an id under a prospective
   /// span and lane assignment, minus the one it gives it now. The
-  /// controller answers, that rule being its own; a null [lane] means
-  /// the dry run did not lane the id, and a null span means the id's
-  /// own stored span, which is what a neighbour's install passes.
+  /// controller answers, that rule being its own; a null assignment
+  /// means the dry run did not lane the id, and a null span means the
+  /// id's own stored span, which is what a neighbour's install passes.
   final Offset Function(
     int id,
     BoardSpan? prospective,
-    int? lane,
-    int laneCount,
+    ({int lane, int laneCount, int laneSpan})? assignment,
   )
   _prospectiveExtentOf;
   final int Function(int id) _laneOfId;
@@ -464,7 +462,7 @@ class MakeRoomEngine {
     // The dry run needs lane geometry; without it nothing is laned and
     // no gap exists to open, but the EXTENT preview below still does.
     final dry = laneAxis == null
-        ? const <int, ({int lane, int laneCount})>{}
+        ? const <int, ({int lane, int laneCount, int laneSpan})>{}
         : _dryRunOf(draggedId, prospective);
     // The hand-off fold: the earliest clock among everything this call
     // discards mid-motion. A snapped install discards every entry it
@@ -488,20 +486,14 @@ class MakeRoomEngine {
       extentTargets[draggedId] = _prospectiveExtentOf(
         draggedId,
         prospective,
-        assignment?.lane,
-        assignment?.laneCount ?? _laneCountOfId(draggedId),
+        assignment,
       );
     }
     dry.forEach((id, assignment) {
       if (id == draggedId) {
         return;
       }
-      extentTargets[id] = _prospectiveExtentOf(
-        id,
-        null,
-        assignment.lane,
-        assignment.laneCount,
-      );
+      extentTargets[id] = _prospectiveExtentOf(id, null, assignment);
     });
     for (final id in _heldExtent.keys) {
       extentTargets.putIfAbsent(id, () {

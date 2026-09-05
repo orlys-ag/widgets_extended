@@ -58,6 +58,7 @@ class BoardStore<TKey, TItem> {
   Float64List _colSpanFraction = Float64List(0);
   Int32List _lane = Int32List(0);
   Int32List _laneCount = Int32List(0);
+  Int32List _laneSpan = Int32List(0);
   Uint8List _flags = Uint8List(0);
 
   /// Every registered id, in ascending id order. Allocates, so it is for
@@ -256,14 +257,24 @@ class BoardStore<TKey, TItem> {
     return _laneCount[id];
   }
 
-  /// Writes [id]'s lane pair. The lane resolver is the only caller.
-  void setLane(int id, int lane, int laneCount) {
+  /// The number of CONSECUTIVE lanes [id] occupies, counting upward from
+  /// [laneOf]. Written only by the lane resolver, and 1 for an unlaned
+  /// item and for a member whose next lane up is occupied.
+  int laneSpanOf(int id) {
+    return _laneSpan[id];
+  }
+
+  /// Writes [id]'s lane record. The lane resolver is the only caller.
+  void setLane(int id, int lane, int laneCount, int laneSpan) {
     assert(id >= 0 && id < _lane.length);
     assert(lane >= 0);
     assert(laneCount >= 1);
     assert(lane < laneCount);
+    assert(laneSpan >= 1);
+    assert(lane + laneSpan <= laneCount);
     _lane[id] = lane;
     _laneCount[id] = laneCount;
+    _laneSpan[id] = laneSpan;
   }
 
   /// Whether [id] is animating out.
@@ -293,7 +304,8 @@ class BoardStore<TKey, TItem> {
   }
 
   /// Resets [id]'s slot to the state a fresh allocation expects: no data,
-  /// a one-by-one span at the origin, lane 0 of 1, and no flags. Recycled
+  /// a one-by-one span at the origin, lane 0 of 1 spanning one lane, and
+  /// no flags. Recycled
   /// slots carry the previous occupant's data, which is what this exists
   /// for.
   void _resetSlot(int id) {
@@ -308,6 +320,7 @@ class BoardStore<TKey, TItem> {
     _colSpanFraction[id] = 0.0;
     _lane[id] = 0;
     _laneCount[id] = 1;
+    _laneSpan[id] = 1;
     _flags[id] = 0;
   }
 
@@ -332,6 +345,7 @@ class BoardStore<TKey, TItem> {
     _colSpanFraction = _grownFloat64(_colSpanFraction, grown);
     _lane = _grownInt32(_lane, grown);
     _laneCount = _grownInt32(_laneCount, grown);
+    _laneSpan = _grownInt32(_laneSpan, grown);
     _flags = _grownUint8(_flags, grown);
   }
 

@@ -50,6 +50,21 @@ class OverlapLaneResolver {
   /// Cleared only by [drainLaneChangedIds]; no flush clears it.
   final Set<int> _laneChangedIds = <int>{};
 
+  /// The sweep's four scratch buffers, fields rather than locals so a
+  /// steady-state resolve allocates nothing. Grown together by
+  /// [_ensureSweepScratch] and safe to reuse because every index a
+  /// cluster close reads is written earlier in the same sweep, and
+  /// because [_sweep] is not re-entrant: neither close callback calls
+  /// back into it.
+  ///
+  /// The first three are indexed by MEMBER INDEX and the fourth by LANE
+  /// INDEX; one length serves both roles because a cluster's lane count
+  /// never exceeds its member count.
+  Int32List _assignedScratch = Int32List(0);
+  Int32List _spanScratch = Int32List(0);
+  Int32List _nextInLaneScratch = Int32List(0);
+  Int32List _laneCursorScratch = Int32List(0);
+
   /// Debug-only: lane-axis buckets [ensureResolved] has actually
   /// processed, whichever arm called it. Rejects the seam of asserting the
   /// resolved lane values, which are identical under a correct incremental
@@ -226,7 +241,25 @@ class OverlapLaneResolver {
     if (_store.laneOf(id) != 0 || _store.laneCountOf(id) != 1) {
       _laneChangedIds.add(id);
     }
-    _store.setLane(id, 0, 1);
+    // Span 1 needs no third term here: lane 0 of 1 forces it under I1, so
+    // a span test could never be the term that fires.
+    _store.setLane(id, 0, 1, 1);
+  }
+
+  /// Grows the four sweep buffers so each holds at least [length]
+  /// entries, doubling in the store's idiom.
+  void _ensureSweepScratch(int length) {
+    if (_assignedScratch.length >= length) {
+      return;
+    }
+    var grown = _assignedScratch.isEmpty ? 8 : _assignedScratch.length * 2;
+    while (grown < length) {
+      grown *= 2;
+    }
+    _assignedScratch = Int32List(grown);
+    _spanScratch = Int32List(grown);
+    _nextInLaneScratch = Int32List(grown);
+    _laneCursorScratch = Int32List(grown);
   }
 
   /// The four steps of the sweep, over HALF-OPEN intervals on the
@@ -281,8 +314,8 @@ class OverlapLaneResolver {
       (id) {
         return _store.endTrackOf(id, sweep);
       },
-      (from, until, laneCount, assigned) {
-        _closeCluster(bucket, assigned, from, until, laneCount);
+      (from, until, laneCount, assigned, spans) {
+        _closeCluster(bucket, assigned, spans, from, until, laneCount);
       },
     );
   }
@@ -294,14 +327,21 @@ class OverlapLaneResolver {
     List<int> members,
     double Function(int id) startOf,
     double Function(int id) endOf,
-    void Function(int from, int until, int laneCount, List<int> assigned)
-        close,
+    void Function(
+      int from,
+      int until,
+      int laneCount,
+      List<int> assigned,
+      List<int> spans,
+    )
+    close,
   ) {
     // Assigned lane per member index. Consumed only at a cluster close,
     // so the store-writing arm's change test compares against the values
     // the items held BEFORE this resolve rather than against a
     // provisional count written mid-sweep.
-    final assigned = List<int>.filled(members.length, 0);
+    _ensureSweepScratch(members.length);
+    final assigned = _assignedScratch;
     // Trailing edge of the last occupant of each open lane, sweep axis.
     final laneEnds = <double>[];
     var clusterStart = 0;
@@ -317,7 +357,8 @@ class OverlapLaneResolver {
       // reading a 1e-10 overlap as a touch costs one shared lane nobody
       // can see.
       if (i > clusterStart && start >= maxActiveEnd - precisionErrorTolerance) {
-        close(clusterStart, i, laneEnds.length, assigned);
+        _expandCluster(members, clusterStart, i, laneEnds.length, startOf, endOf);
+        close(clusterStart, i, laneEnds.length, assigned, _spanScratch);
         clusterStart = i;
         laneEnds.clear();
         maxActiveEnd = double.negativeInfinity;
@@ -346,7 +387,83 @@ class OverlapLaneResolver {
         maxActiveEnd = end;
       }
     }
-    close(clusterStart, members.length, laneEnds.length, assigned);
+    _expandCluster(
+      members,
+      clusterStart,
+      members.length,
+      laneEnds.length,
+      startOf,
+      endOf,
+    );
+    close(clusterStart, members.length, laneEnds.length, assigned, _spanScratch);
+  }
+
+  /// THE RULE: a member's span is the number of consecutive lanes from
+  /// its own upward that no sweep-axis-overlapping cluster member
+  /// occupies, capped at the cluster's lane count. Formally
+  /// `span_i = min({lane_j : j overlaps i, lane_j > lane_i} union
+  /// {laneCount}) - lane_i`.
+  ///
+  /// Runs at CLUSTER CLOSE, inside the shared sweep, so the committed
+  /// resolve and the dry run get one implementation. Lane ASSIGNMENT is
+  /// untouched: this only READS what the sweep assigned.
+  ///
+  /// Three properties, each load-bearing:
+  ///
+  /// - The lane cursors are MONOTONE, which is what makes the probe O(1)
+  ///   amortized. Members arrive in start-ascending order, so the
+  ///   sequence of items probing any one lane has non-decreasing start
+  ///   and an occupant dropped for one is dropped for every later one.
+  /// - A lane's occupants are start-ordered and DISJOINT, which is what
+  ///   lets the first non-dropped occupant decide the probe: the sweep
+  ///   places an item in a lane whose last occupant has already ended.
+  /// - The block test uses the sweep's tolerance in the sweep's
+  ///   DIRECTION. `start >= end_j - tolerance` is "j does not reach i",
+  ///   exactly the form the lane-reuse test uses; a stricter test would
+  ///   let a grazing pair block a third item, a looser one would overlap
+  ///   two bands.
+  void _expandCluster(
+    List<int> members,
+    int from,
+    int until,
+    int laneCount,
+    double Function(int id) startOf,
+    double Function(int id) endOf,
+  ) {
+    if (laneCount == 1) {
+      for (var i = from; i < until; i++) {
+        _spanScratch[i] = 1;
+      }
+      return;
+    }
+    for (var lane = 0; lane < laneCount; lane++) {
+      _laneCursorScratch[lane] = -1;
+    }
+    for (var i = until - 1; i >= from; i--) {
+      final lane = _assignedScratch[i];
+      _nextInLaneScratch[i] = _laneCursorScratch[lane];
+      _laneCursorScratch[lane] = i;
+    }
+    for (var i = from; i < until; i++) {
+      final start = startOf(members[i]);
+      final end = endOf(members[i]);
+      final lane = _assignedScratch[i];
+      var span = 1;
+      for (var probe = lane + 1; probe < laneCount; probe++) {
+        var cursor = _laneCursorScratch[probe];
+        while (cursor >= 0 &&
+            start >= endOf(members[cursor]) - precisionErrorTolerance) {
+          cursor = _nextInLaneScratch[cursor];
+        }
+        _laneCursorScratch[probe] = cursor;
+        if (cursor >= 0 &&
+            startOf(members[cursor]) < end - precisionErrorTolerance) {
+          break;
+        }
+        span = probe - lane + 1;
+      }
+      _spanScratch[i] = span;
+    }
   }
 
   /// A read-only view of one lane-axis bucket's members, or an empty list
@@ -365,14 +482,14 @@ class OverlapLaneResolver {
   /// A member absent from the result kept its stored lane; the dragged
   /// item is in the result only where prospectively laned. At most two
   /// buckets, which is what bounds a re-target's cost.
-  Map<int, ({int lane, int laneCount})> resolveDryRun({
+  Map<int, ({int lane, int laneCount, int laneSpan})> resolveDryRun({
     required int draggedId,
     required double prospectiveLaneStart,
     required double prospectiveLaneEnd,
     required double prospectiveSweepStart,
     required double prospectiveSweepEnd,
   }) {
-    final result = <int, ({int lane, int laneCount})>{};
+    final result = <int, ({int lane, int laneCount, int laneSpan})>{};
     final axis = _laneAxis;
     if (axis == null) {
       return result;
@@ -424,9 +541,19 @@ class OverlapLaneResolver {
         }
         return a.compareTo(b);
       });
-      _sweep(members, startOf, endOf, (from, until, laneCount, assigned) {
+      _sweep(members, startOf, endOf, (
+        from,
+        until,
+        laneCount,
+        assigned,
+        spans,
+      ) {
         for (var i = from; i < until; i++) {
-          result[members[i]] = (lane: assigned[i], laneCount: laneCount);
+          result[members[i]] = (
+            lane: assigned[i],
+            laneCount: laneCount,
+            laneSpan: spans[i],
+          );
         }
       });
     }
@@ -439,6 +566,7 @@ class OverlapLaneResolver {
   void _closeCluster(
     List<int> bucket,
     List<int> assigned,
+    List<int> spans,
     int from,
     int to,
     int laneCount,
@@ -447,10 +575,17 @@ class OverlapLaneResolver {
     for (var i = from; i < to; i++) {
       final id = bucket[i];
       final lane = assigned[i];
-      if (_store.laneOf(id) != lane || _store.laneCountOf(id) != laneCount) {
+      final span = spans[i];
+      // THREE numbers, not two: a span-only change is what puts the key
+      // in the structural notification's affectedKeys and what lets the
+      // capture-and-install pair see a non-zero extent delta and install
+      // the relane FLIP.
+      if (_store.laneOf(id) != lane ||
+          _store.laneCountOf(id) != laneCount ||
+          _store.laneSpanOf(id) != span) {
         _laneChangedIds.add(id);
       }
-      _store.setLane(id, lane, laneCount);
+      _store.setLane(id, lane, laneCount, span);
     }
   }
 }

@@ -14,6 +14,8 @@
 /// file calls explicitly.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_span.dart';
@@ -402,6 +404,222 @@ void main() {
     expect(drained, contains(b));
     expect(store.laneOf(b), 0);
     expect(store.laneCountOf(b), 1);
+  });
+
+  // T1 and T2 of `plans/2026-09-05-lane-span-expansion-plan.md`, the
+  // Testing Plan section (anchor `testing-plan`). Case names are the
+  // plan's names VERBATIM.
+  //
+  // T1. Asserts: the two arms that never expand report span 1.
+  // Falsification: red before Landing Order step 1, where `laneSpanOf`
+  // does not exist, and green forever after, because a one-lane
+  // cluster's only member has `span == laneCount - lane == 1`.
+  test("an unlaned item and a one-lane cluster report span 1", () {
+    final store = BoardStore<String, String>();
+    final resolver = OverlapLaneResolver(
+      store: store,
+      laneAxis: Axis.horizontal,
+    );
+
+    // Two lane-axis tracks wide, so the laning predicate refuses it.
+    final wide = _add(
+      store,
+      resolver,
+      "wide",
+      const BoardSpan(rowStart: 0, colStart: 0, colSpan: 2),
+    );
+    final lone = _add(
+      store,
+      resolver,
+      "lone",
+      const BoardSpan(rowStart: 0, colStart: 4),
+    );
+
+    // Setup sanity, falsifiable in both directions: the two arms are
+    // genuinely different, one laned and one not.
+    expect(resolver.isLaned(wide), isFalse);
+    expect(resolver.isLaned(lone), isTrue);
+
+    resolver.ensureResolved();
+    expect(store.laneSpanOf(wide), 1);
+    expect(store.laneSpanOf(lone), 1);
+    expect(store.laneCountOf(lone), 1);
+  });
+
+  // T2 (AC1). Asserts: an item with free lanes above it spans them.
+  // Falsification: red against step 1's tree, where every span is 1.
+  test("an item with free lanes above it spans them", () {
+    final store = BoardStore<String, String>();
+    // Columns carry the lane extent, so the LANE axis is the columns and
+    // the sweep runs along the rows.
+    final resolver = OverlapLaneResolver(
+      store: store,
+      laneAxis: Axis.horizontal,
+    );
+
+    // THE AC1 SET as row intervals in column 2: A [0, 7), B [1, 4),
+    // C [2, 4), D [2, 4), E [4, 6).
+    final a = _add(
+      store,
+      resolver,
+      "a",
+      const BoardSpan(rowStart: 0, colStart: 2, rowSpan: 7),
+    );
+    final b = _add(
+      store,
+      resolver,
+      "b",
+      const BoardSpan(rowStart: 1, colStart: 2, rowSpan: 3),
+    );
+    final c = _add(
+      store,
+      resolver,
+      "c",
+      const BoardSpan(rowStart: 2, colStart: 2, rowSpan: 2),
+    );
+    final d = _add(
+      store,
+      resolver,
+      "d",
+      const BoardSpan(rowStart: 2, colStart: 2, rowSpan: 2),
+    );
+    final e = _add(
+      store,
+      resolver,
+      "e",
+      const BoardSpan(rowStart: 4, colStart: 2, rowSpan: 2),
+    );
+
+    // Setup sanity, all falsifiable: the five are laned and land in ONE
+    // bucket, and the sweep assigns the lanes the spans below are
+    // computed against. Perturbing E's interval to rows [3, 6) moves it
+    // to lane 4 and takes laneCount to 5, which is the perturbation that
+    // shows these can fail.
+    expect(resolver.isLaned(a), isTrue);
+    expect(resolver.isLaned(e), isTrue);
+    expect(resolver.bucketCount, 1);
+
+    resolver.ensureResolved();
+    expect(store.laneOf(a), 0);
+    expect(store.laneOf(b), 1);
+    expect(store.laneOf(c), 2);
+    expect(store.laneOf(d), 3);
+    expect(store.laneOf(e), 1);
+    expect(store.laneCountOf(e), 4);
+
+    // TARGET: E starts where lane 1's last occupant ended and nothing
+    // overlapping it sits above lane 1, so its band is lanes 1 to 3.
+    expect(store.laneSpanOf(e), 3);
+    // The other four are each blocked by the item one lane above, D by
+    // `lane + span == laneCount`.
+    expect(store.laneSpanOf(a), 1);
+    expect(store.laneSpanOf(b), 1);
+    expect(store.laneSpanOf(c), 1);
+    expect(store.laneSpanOf(d), 1);
+  });
+
+  // T3 (AC4). Asserts I2 (disjoint bands) and I3 (maximal bands) over a
+  // seeded corpus, in the seeding style of `span_index_test.dart`'s
+  // oracle fuzz. INTEGER sweep-axis endpoints throughout, which keeps the
+  // oracle out of the tolerance question P6 owns and the AC1 case covers
+  // exactly.
+  // Falsification, both halves separately: maximality is red against
+  // Landing Order step 1's tree, where every span is 1 and an E-shaped
+  // item reports 1 with a free lane above it; disjointness is red
+  // against a scratch variant writing `laneCount - lane` as every span,
+  // which is maximal by construction and overlaps everywhere.
+  test("a seeded random cluster keeps its bands disjoint and maximal", () {
+    final random = math.Random(20260905);
+    // Setup sanity counters, each asserted non-zero at the end: without
+    // the third the maximality half could pass on an all-span-1 corpus.
+    var multiLaneRounds = 0;
+    var overlappingPairs = 0;
+    var expandedItems = 0;
+
+    for (var round = 0; round < 200; round++) {
+      final store = BoardStore<String, String>();
+      final resolver = OverlapLaneResolver(
+        store: store,
+        laneAxis: Axis.horizontal,
+      );
+      final count = 3 + random.nextInt(10);
+      final ids = <int>[];
+      final starts = <int>[];
+      final ends = <int>[];
+      for (var i = 0; i < count; i++) {
+        final start = random.nextInt(12);
+        final span = 1 + random.nextInt(5);
+        ids.add(
+          _add(
+            store,
+            resolver,
+            "r${round}i$i",
+            BoardSpan(rowStart: start, colStart: 0, rowSpan: span),
+          ),
+        );
+        starts.add(start);
+        ends.add(start + span);
+      }
+      resolver.ensureResolved();
+
+      final laneCount = store.laneCountOf(ids[0]);
+      if (laneCount > 1) {
+        multiLaneRounds++;
+      }
+      for (var i = 0; i < count; i++) {
+        if (store.laneSpanOf(ids[i]) > 1) {
+          expandedItems++;
+        }
+        // I1: the band is inside the cluster.
+        expect(store.laneSpanOf(ids[i]), greaterThanOrEqualTo(1));
+        expect(
+          store.laneOf(ids[i]) + store.laneSpanOf(ids[i]),
+          lessThanOrEqualTo(store.laneCountOf(ids[i])),
+        );
+      }
+      for (var i = 0; i < count; i++) {
+        final laneI = store.laneOf(ids[i]);
+        final spanI = store.laneSpanOf(ids[i]);
+        var blocker = false;
+        for (var j = 0; j < count; j++) {
+          if (i == j) {
+            continue;
+          }
+          if (starts[i] >= ends[j] || starts[j] >= ends[i]) {
+            continue;
+          }
+          overlappingPairs++;
+          final laneJ = store.laneOf(ids[j]);
+          final spanJ = store.laneSpanOf(ids[j]);
+          // I2: two overlapping members hold disjoint half-open bands.
+          expect(
+            laneI + spanI <= laneJ || laneJ + spanJ <= laneI,
+            isTrue,
+            reason:
+                "round $round: bands [$laneI, ${laneI + spanI}) and "
+                "[$laneJ, ${laneJ + spanJ}) overlap for members that "
+                "overlap on the sweep axis",
+          );
+          if (laneJ == laneI + spanI) {
+            blocker = true;
+          }
+        }
+        // I3: the band runs to the cluster's lane count, or an
+        // overlapping member sits at exactly the lane above it.
+        expect(
+          laneI + spanI == store.laneCountOf(ids[i]) || blocker,
+          isTrue,
+          reason:
+              "round $round: band [$laneI, ${laneI + spanI}) of "
+              "${store.laneCountOf(ids[i])} stops short of a lane nobody "
+              "occupies",
+        );
+      }
+    }
+
+    expect(multiLaneRounds, greaterThan(0));
+    expect(overlappingPairs, greaterThan(0));
+    expect(expandedItems, greaterThan(0));
   });
 }
 
