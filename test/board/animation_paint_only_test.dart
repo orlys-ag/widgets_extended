@@ -193,7 +193,11 @@ void main() {
       // loop's round order alone.
       controller.addItem(const _Item("a"), _chip(29, 2, 2));
       controller.addItem(const _Item("b"), _chip(29, 2, 2));
-      controller.addItem(const _Item("d"), _chip(3, 0, 2));
+      // Three columns wide ALREADY: a non-lifted preview also holds the
+      // dragged item's own EXTENT delta, and a prospective span wider than
+      // the stored one would be a genuine horizontal growth the bound must
+      // count. This case is about the vertical OFFSET alone.
+      controller.addItem(const _Item("d"), _chip(3, 0, 3));
       await tester.pumpWidget(_board(controller, height: 200.0));
       // One more layout, so the children the first frame over-obtained
       // under the raw estimates are released before the baseline count.
