@@ -781,8 +781,16 @@ const checklist = await agent(
 // handed `checklistPath` and aborts on its own precondition 2 when the file is
 // not there or its CHECKLIST-FOR does not pair, so a checklist written
 // somewhere else is the same outcome one agent later.
-if (!checklist || typeof checklist.checklist_path !== 'string'
-    || checklist.checklist_path !== checklistPath) {
+// The agent may report the path absolute or with backslashes, and both name
+// the same file. Normalise separators and accept a path that ends with the
+// expected repo-relative one; a mismatch on the trailing segments is still a
+// checklist written somewhere else.
+const reportedChecklist = typeof checklist?.checklist_path === 'string'
+  ? checklist.checklist_path.split(String.fromCharCode(92)).join('/')
+  : null
+const checklistPathMatches = reportedChecklist !== null
+  && (reportedChecklist === checklistPath || reportedChecklist.endsWith('/' + checklistPath))
+if (!checklist || !checklistPathMatches) {
   return {
     status: 'checklist-failed',
     planPath,
