@@ -28,6 +28,7 @@ export 'board_background.dart'
 export 'board_config.dart'
     show
         BoardDragConfig,
+        BoardDropFit,
         BoardResizeEdges,
         BoardSelection,
         BoardSelectionConfig,

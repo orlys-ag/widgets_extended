@@ -61,6 +61,50 @@ typedef BoardSemanticsActionsBuilder<TKey> =
       Map<CustomSemanticsAction, VoidCallback> builtIn,
     );
 
+/// When and how far a refused move may slide onto nearby free space.
+///
+/// It acts ONLY on a refusal, so it does nothing at all without a
+/// [BoardDragConfig.canDropAt] that issues one: the board has no opinion
+/// of its own about whether two items may share a cell, and overlapping
+/// spans are laned rather than rejected. Setting this and leaving the
+/// predicate null is inert, not an error.
+///
+/// The gate has TWO terms and only the second is configurable. The first
+/// is that the refused box must MEET an occupant, so a refusal for a
+/// reason the board cannot see, a business rule of the app's own, never
+/// slides anything.
+@immutable
+class BoardDropFit {
+  /// Creates a fit policy. The defaults help a box that is at least half
+  /// free and search one track on each axis.
+  const BoardDropFit({
+    this.minFreeFraction = 0.5,
+    this.rowRadius = 1.0,
+    this.colRadius = 1.0,
+  }) : assert(minFreeFraction >= 0.0 && minFreeFraction <= 1.0),
+       assert(rowRadius >= 0.0),
+       assert(colRadius >= 0.0);
+
+  /// The share of the refused box, by content-space AREA, that must be
+  /// free of other items before the board will slide it.
+  ///
+  /// 1.0 disables the nudge while leaving the policy present, the two
+  /// gate terms being unsatisfiable together; 0.0 is the other endpoint,
+  /// admitting every refusal that is an overlap however little of the box
+  /// survives it. Both ends are legal because the first term still holds
+  /// the feature to overlaps.
+  final double minFreeFraction;
+
+  /// How far the search may slide the placement along the ROW axis, in
+  /// tracks. Zero pins the axis, which is what a calendar wants on its
+  /// day axis: slide within the day, never to another day.
+  final double rowRadius;
+
+  /// The same along the COLUMN axis. The two are separate because the
+  /// useful configuration is asymmetric; see [rowRadius].
+  final double colRadius;
+}
+
 /// Policy for the drag layer. Its PRESENCE on `Board.drag` is fixed at
 /// widget creation; [enabled] is what may change at runtime.
 class BoardDragConfig<TKey> {
@@ -70,6 +114,7 @@ class BoardDragConfig<TKey> {
     this.enabled = true,
     this.canDrag,
     this.canDropAt,
+    this.dropFit,
     this.snap = const BoardSnap.track(),
     this.resizeEdges = BoardResizeEdges.none,
     this.primaryResizeEdges = BoardResizeEdges.none,
@@ -92,6 +137,12 @@ class BoardDragConfig<TKey> {
   final bool enabled;
   final bool Function(TKey key)? canDrag;
   final bool Function(TKey key, BoardSpan span)? canDropAt;
+
+  /// Whether a move [canDropAt] refuses may slide onto nearby free
+  /// space, and how far. Null, the default, refuses as before; see
+  /// [BoardDropFit], which still fires only on a [canDropAt] refusal.
+  final BoardDropFit? dropFit;
+
   final BoardSnap snap;
 
   /// Which resize handles this config accepts on the SPAN axis, the
