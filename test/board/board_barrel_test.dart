@@ -124,6 +124,7 @@ void main() {
       "MakeRoomEngine",
       "BoardAnimationCoordinator",
       "BoardDropResolver",
+      "BoardDropFitter",
       "BoardAutoScroller",
     };
     expect(shown.intersection(internals), isEmpty);
