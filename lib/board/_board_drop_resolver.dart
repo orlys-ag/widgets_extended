@@ -71,11 +71,16 @@ class BoardDropTarget {
 class BoardDropResolver {
   BoardDropResolver._();
 
-  /// The minimum extent, in track space, a resize may leave: one quantum
-  /// under `track` and `fraction`, and a VISIBLE quarter track under
-  /// `free`, where an epsilon extent would satisfy the span asserts while
+  /// The snap's QUANTUM in track space: one track under `track`, the
+  /// configured fraction under `fraction`, and a VISIBLE quarter track
+  /// under `free`, where an epsilon would satisfy the span asserts while
   /// leaving nothing paintable or grabbable.
-  static double _quantumOf(BoardSnap snap) {
+  ///
+  /// TWO READERS, and the name is the general one because they want the
+  /// same number for different reasons: this file floors a resize at it,
+  /// and `_board_drop_fit.dart` steps its candidate scan by it. Neither
+  /// may keep a second copy of the three cases.
+  static double quantumOf(BoardSnap snap) {
     switch (snap.mode) {
       case BoardSnapMode.track:
         return 1.0;
@@ -176,8 +181,8 @@ class BoardDropResolver {
       );
       final rowExtent = draggedSpan.rowSpan + draggedSpan.rowSpanFraction;
       final colExtent = draggedSpan.colSpan + draggedSpan.colSpanFraction;
-      final row = _clampStart(cell.row.toDouble(), rowExtent, rowCount);
-      final col = _clampStart(cell.col.toDouble(), colExtent, colCount);
+      final row = clampStart(cell.row.toDouble(), rowExtent, rowCount);
+      final col = clampStart(cell.col.toDouble(), colExtent, colCount);
       return BoardDropTarget(
         span: draggedSpan.copyWith(
           rowStart: row.floor(),
@@ -198,8 +203,8 @@ class BoardDropResolver {
     // the span's end stays inside the lattice, with the start clamped
     // inclusively at 0, which keeps the last legal placement REACHABLE
     // and every evaluation inside offsetOfFraction's domain.
-    final row = _clampStart(snap.quantize(track.row), rowExtent, rowCount);
-    final col = _clampStart(snap.quantize(track.col), colExtent, colCount);
+    final row = clampStart(snap.quantize(track.row), rowExtent, rowCount);
+    final col = clampStart(snap.quantize(track.col), colExtent, colCount);
     // A move never changes an item's extent: the span fractions carry
     // across unchanged.
     return BoardDropTarget(
@@ -213,7 +218,13 @@ class BoardDropResolver {
     );
   }
 
-  static double _clampStart(double q, double extent, int trackCount) {
+  /// Clamps a leading track coordinate so a span of [extent] stays inside
+  /// `[0, trackCount]`, moving the START and never the extent.
+  ///
+  /// Non-private because `_board_drop_fit.dart` clamps its candidates by
+  /// the same rule; two copies of an endpoint rule is how the two
+  /// disagree at the lattice edge.
+  static double clampStart(double q, double extent, int trackCount) {
     var start = q;
     if (start + extent > trackCount) {
       start = trackCount - extent;
@@ -252,7 +263,7 @@ class BoardDropResolver {
         ? lead + draggedSpan.rowSpan + draggedSpan.rowSpanFraction
         : lead + draggedSpan.colSpan + draggedSpan.colSpanFraction;
     final pointer = vertical ? track.row : track.col;
-    final quantum = _quantumOf(snap);
+    final quantum = quantumOf(snap);
     if (leadingKind) {
       lead = snap.quantize(pointer).clamp(0.0, trackCount.toDouble());
       // Floor the extent at one quantum by moving the DRAGGED edge,
