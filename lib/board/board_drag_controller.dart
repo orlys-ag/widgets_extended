@@ -14,7 +14,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '_board_drop_fit.dart';
 import '_board_drop_resolver.dart';
+import '_board_span.dart';
 import 'board_config.dart';
 import 'board_controller.dart';
 import 'board_render_port.dart';
@@ -86,6 +88,13 @@ class BoardDragController<TKey> extends ChangeNotifier {
 
   _DragSession<TKey>? _session;
   BoardDropTarget? _currentTarget;
+
+  /// The span the RESOLVER last returned, which is not always what
+  /// [_currentTarget] holds: a nudged target is a different span by
+  /// construction. The early-out in [_resolve] compares against this so
+  /// it compares like with like, and a pointer that has not left its
+  /// resolved placement re-runs neither the gate nor the scan.
+  BoardSpan? _lastResolvedSpan;
 
   /// Whether a post-frame re-resolve is already scheduled for this
   /// frame, so a frame with several animation dispatches resolves once.
@@ -550,6 +559,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _unbindScrollSubscriptions(session);
     boardController.removeAnimationListener(_handleAnimationTick);
     _currentTarget = null;
+    _lastResolvedSpan = null;
     _pointerPosition.value = null;
     notifyListeners();
   }
@@ -562,7 +572,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final anchor = session.kind == BoardDragKind.move
         ? local - session.grabOffset
         : local;
-    final target = BoardDropResolver.resolve(
+    final resolved = BoardDropResolver.resolve(
       port: session.port,
       anchorLocal: anchor,
       pointerLocal: local,
@@ -575,21 +585,35 @@ class BoardDragController<TKey> extends ChangeNotifier {
       colCount: boardController.columns.axis.trackCount,
       pointerAnchoredAxis: _pointerAnchoredAxis(session),
     );
-    if (target == null || target == _currentTarget) {
+    if (resolved == null || resolved.span == _lastResolvedSpan) {
       return;
     }
+    // Recorded for every NON-NULL resolver answer, before the refusal
+    // branch and whatever that branch decides: a pointer parked over a
+    // refused placement resolves the same span on every move, and a
+    // field written only on the accepted path would re-run the gate and
+    // the scan for each of them.
+    _lastResolvedSpan = resolved.span;
+    var target = resolved;
     // A canDropAt refusal at RESOLUTION, not just at commit: a refused
     // target leaves currentTarget null and releases the gap, so nothing
     // previews a drop endDrag would refuse. The commit-side check stays
     // as re-validation against a predicate that changed its answer.
+    //
+    // A refusal is also where the NUDGE gets its one chance; a null
+    // answer from it leaves the arm exactly as it was.
     final canDropAt = config.canDropAt;
     if (canDropAt != null && !canDropAt(session.key, target.span)) {
-      if (_currentTarget != null) {
-        _currentTarget = null;
-        boardController.releaseMakeRoomPreview();
-        notifyListeners();
+      final fitted = _fitRefusal(session, target);
+      if (fitted == null) {
+        if (_currentTarget != null) {
+          _currentTarget = null;
+          boardController.releaseMakeRoomPreview();
+          notifyListeners();
+        }
+        return;
       }
-      return;
+      target = fitted;
     }
     _currentTarget = target;
     boardController.previewMakeRoomGap(
@@ -618,6 +642,109 @@ class BoardDragController<TKey> extends ChangeNotifier {
       return null;
     }
     return laneAxis;
+  }
+
+  /// The NUDGE: a refused MOVE whose box mostly misses the occupants it
+  /// meets slides onto the nearest nearby placement that holds the whole
+  /// box and that the app admits. Null leaves the refusal exactly as it
+  /// was, which is what the policy's absence, a resize, a policy with no
+  /// step, a closed gate and an empty search all produce.
+  BoardDropTarget? _fitRefusal(
+    _DragSession<TKey> session,
+    BoardDropTarget refused,
+  ) {
+    final policy = config.dropFit;
+    final canDropAt = config.canDropAt;
+    if (policy == null ||
+        canDropAt == null ||
+        session.kind != BoardDragKind.move) {
+      return null;
+    }
+    // THE STEP COUNTS COME FIRST. A policy that admits no step can
+    // produce no candidate, so it must not pay a span-index query or the
+    // gate to discover that.
+    final steps = BoardDropFitter.stepsOf(policy: policy, snap: config.snap);
+    if (steps.rows == 0 && steps.cols == 0) {
+      return null;
+    }
+    final rowAxis = boardController.rows.axis;
+    final colAxis = boardController.columns.axis;
+    final obstacles = _obstaclesAround(session, refused.span, policy);
+    final free = BoardDropFitter.freeFractionOf(
+      box: refused.span,
+      obstacles: obstacles,
+      rowAxis: rowAxis,
+      colAxis: colAxis,
+    );
+    // BOTH gate terms, and the first is the one that keeps this feature
+    // to overlaps: exactly 1.0 means the box meets no occupant at all,
+    // so the refusal came from a rule of the app's own that the board
+    // cannot read, and sliding the item would move it for a reason
+    // nothing here understands.
+    if (free >= 1.0 || free < policy.minFreeFraction) {
+      return null;
+    }
+    final fitted = BoardDropFitter.nearestFit(
+      box: refused.span,
+      policy: policy,
+      snap: config.snap,
+      rowAxis: rowAxis,
+      colAxis: colAxis,
+      obstacles: obstacles,
+      accepts: (candidate) {
+        return canDropAt(session.key, candidate);
+      },
+    );
+    if (fitted == null) {
+      return null;
+    }
+    return BoardDropTarget(span: fitted, kind: refused.kind);
+  }
+
+  /// Every live item meeting the search region, MINUS the dragged one.
+  ///
+  /// ONE query, serving both the gate and the scan, over the box widened
+  /// by the policy's radius on BOTH sides of each axis. Widening one side
+  /// only would leave a candidate displaced toward the other tested
+  /// against an incomplete set, and it could then be declared free while
+  /// overlapping an item nobody fetched. The read excludes exiting items
+  /// already; the dragged item it deliberately does not, so that
+  /// exclusion is here.
+  List<BoardSpan> _obstaclesAround(
+    _DragSession<TKey> session,
+    BoardSpan box,
+    BoardDropFit policy,
+  ) {
+    final rowCount = boardController.rows.axis.trackCount;
+    final colCount = boardController.columns.axis.trackCount;
+    final rowStart = (box.startTrackOn(Axis.vertical) - policy.rowRadius)
+        .floor()
+        .clamp(0, rowCount);
+    final rowEnd = (box.endTrackOn(Axis.vertical) + policy.rowRadius)
+        .ceil()
+        .clamp(0, rowCount);
+    final colStart = (box.startTrackOn(Axis.horizontal) - policy.colRadius)
+        .floor()
+        .clamp(0, colCount);
+    final colEnd = (box.endTrackOn(Axis.horizontal) + policy.colRadius)
+        .ceil()
+        .clamp(0, colCount);
+    final spans = <BoardSpan>[];
+    for (final key in boardController.itemsIn(
+      rowStart,
+      rowEnd,
+      colStart,
+      colEnd,
+    )) {
+      if (key == session.key) {
+        continue;
+      }
+      final span = boardController.spanOf(key);
+      if (span != null) {
+        spans.add(span);
+      }
+    }
+    return spans;
   }
 
   // The scroll-subscription triple: BIND at startDrag, RE-POINT on every

@@ -2328,4 +2328,311 @@ void main() {
       await tester.pump();
     },
   );
+
+  // THE NUDGE. A refused move whose box mostly misses the occupant it
+  // meets slides onto the nearest placement that holds the whole box.
+  //
+  // The item spans columns 0 and 1 of row 2; an occupant sits at column
+  // 3; the predicate refuses any span meeting another item. Dropping the
+  // item's corner on column 2 leaves it covering columns 2 and 3, half
+  // of it free, so the gate admits and the scan takes the nearest
+  // placement that fits, columns 1 and 2, one column away at 40 pixels
+  // against the 50 a row step would cost.
+  //
+  // Asserts: with the policy the commit is column 1, and the same drag
+  // with a null policy reports nothing at all, which is where G2 is
+  // pinned.
+  testWidgets(
+    "a move mostly over free cells slides clear of the occupant",
+    (tester) async {
+      Future<List<BoardSpan>> runDrag({required bool withPolicy}) async {
+        final controller = _plainController(tester);
+        controller.addItem(
+          const _Item("m"),
+          const BoardSpan(rowStart: 2, colStart: 0, colSpan: 2),
+        );
+        controller.addItem(
+          const _Item("o"),
+          const BoardSpan(rowStart: 2, colStart: 3),
+        );
+        await tester.pumpWidget(_board(controller));
+        final moves = <BoardSpan>[];
+        final drag = _drag(
+          tester,
+          controller,
+          BoardDragConfig<String>(
+            onItemMoved: (key, span) {
+              moves.add(span);
+            },
+            canDropAt: (key, span) {
+              for (final other in controller.itemsIn(
+                span.rowStart,
+                span.rowStart + span.rowSpan,
+                span.colStart,
+                span.colStart + span.colSpan,
+              )) {
+                if (other != key) {
+                  return false;
+                }
+              }
+              return true;
+            },
+            dropFit: withPolicy ? const BoardDropFit() : null,
+          ),
+        );
+        final viewport = _viewport(tester);
+        expect(
+          drag.startDrag(
+            key: "m",
+            renderPort: viewport,
+            pointerGlobal: _global(tester, const Offset(40.0, 125.0)),
+          ),
+          isTrue,
+        );
+        drag.updateDrag(_global(tester, const Offset(120.0, 125.0)));
+        await tester.pump();
+        drag.endDrag(cancel: false);
+        await tester.pump();
+        return moves;
+      }
+
+      final nudged = await runDrag(withPolicy: true);
+      expect(nudged, hasLength(1));
+      expect(nudged.single.colStart, 1);
+      expect(nudged.single.rowStart, 2);
+
+      final refused = await runDrag(withPolicy: false);
+      expect(refused, isEmpty);
+    },
+  );
+
+  // The GATE's second term. The same shape as the case above, except the
+  // occupant covers both columns the box would land on, so nothing of it
+  // is free and the drop stays refused. It fails for an implementation
+  // that searches without gating.
+  testWidgets("a move mostly over an occupant is still refused", (
+    tester,
+  ) async {
+    final controller = _plainController(tester);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 0, colSpan: 2),
+    );
+    controller.addItem(
+      const _Item("o"),
+      const BoardSpan(rowStart: 2, colStart: 2, colSpan: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    final moves = <BoardSpan>[];
+    final drag = _drag(
+      tester,
+      controller,
+      BoardDragConfig<String>(
+        onItemMoved: (key, span) {
+          moves.add(span);
+        },
+        canDropAt: (key, span) {
+          for (final other in controller.itemsIn(
+            span.rowStart,
+            span.rowStart + span.rowSpan,
+            span.colStart,
+            span.colStart + span.colSpan,
+          )) {
+            if (other != key) {
+              return false;
+            }
+          }
+          return true;
+        },
+        dropFit: const BoardDropFit(),
+      ),
+    );
+    final viewport = _viewport(tester);
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, const Offset(40.0, 125.0)),
+      ),
+      isTrue,
+    );
+    drag.updateDrag(_global(tester, const Offset(120.0, 125.0)));
+    await tester.pump();
+    expect(drag.currentTarget, isNull);
+    drag.endDrag(cancel: false);
+    await tester.pump();
+    expect(moves, isEmpty);
+  });
+
+  // The nudged placement is the TARGET, not just the commit, so the gap
+  // previews where the item will land before the finger lifts.
+  testWidgets("the preview shows the nudged placement", (tester) async {
+    final controller = _plainController(tester);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 0, colSpan: 2),
+    );
+    controller.addItem(
+      const _Item("o"),
+      const BoardSpan(rowStart: 2, colStart: 3),
+    );
+    await tester.pumpWidget(_board(controller));
+    final drag = _drag(
+      tester,
+      controller,
+      BoardDragConfig<String>(
+        onItemMoved: (key, span) {},
+        canDropAt: (key, span) {
+          for (final other in controller.itemsIn(
+            span.rowStart,
+            span.rowStart + span.rowSpan,
+            span.colStart,
+            span.colStart + span.colSpan,
+          )) {
+            if (other != key) {
+              return false;
+            }
+          }
+          return true;
+        },
+        dropFit: const BoardDropFit(),
+      ),
+    );
+    final viewport = _viewport(tester);
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, const Offset(40.0, 125.0)),
+      ),
+      isTrue,
+    );
+    drag.updateDrag(_global(tester, const Offset(120.0, 125.0)));
+    await tester.pump();
+    // TARGET: the nudged span, not the resolved column 2.
+    expect(drag.currentTarget, isNotNull);
+    expect(drag.currentTarget!.span.colStart, 1);
+    drag.endDrag(cancel: true);
+    await tester.pump();
+  });
+
+  // The GATE's FIRST term, which no other case reaches. The predicate
+  // blocks column 2 for a reason of its own, with nothing occupying it,
+  // and admits column 1 and column 3. A one-term gate would see a box
+  // that is entirely free, scan, and report a neighbour; the first term
+  // is what keeps this feature to overlaps.
+  testWidgets("a refusal that is not an overlap moves nothing", (
+    tester,
+  ) async {
+    final controller = _plainController(tester);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 0),
+    );
+    await tester.pumpWidget(_board(controller));
+    final moves = <BoardSpan>[];
+    final drag = _drag(
+      tester,
+      controller,
+      BoardDragConfig<String>(
+        onItemMoved: (key, span) {
+          moves.add(span);
+        },
+        canDropAt: (key, span) {
+          return span.colStart != 2;
+        },
+        dropFit: const BoardDropFit(),
+      ),
+    );
+    final viewport = _viewport(tester);
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, const Offset(20.0, 125.0)),
+      ),
+      isTrue,
+    );
+    // Corner on column 2, which is empty and which the predicate blocks.
+    drag.updateDrag(_global(tester, const Offset(100.0, 125.0)));
+    await tester.pump();
+    expect(drag.currentTarget, isNull);
+    drag.endDrag(cancel: false);
+    await tester.pump();
+    expect(moves, isEmpty);
+  });
+
+  // The early-out field. With a nudge standing, the resolver's answer
+  // and the current target are different spans by construction, so
+  // without the field every later move would re-run the gate, the scan
+  // and a notification for a pointer that has not left its placement.
+  // The seam is the controller's own ChangeNotifier.
+  testWidgets(
+    "a pointer that has not left its resolved placement re-resolves "
+    "nothing",
+    (tester) async {
+      final controller = _plainController(tester);
+      controller.addItem(
+        const _Item("m"),
+        const BoardSpan(rowStart: 2, colStart: 0, colSpan: 2),
+      );
+      controller.addItem(
+        const _Item("o"),
+        const BoardSpan(rowStart: 2, colStart: 3),
+      );
+      await tester.pumpWidget(_board(controller));
+      final drag = _drag(
+        tester,
+        controller,
+        BoardDragConfig<String>(
+          onItemMoved: (key, span) {},
+          canDropAt: (key, span) {
+            for (final other in controller.itemsIn(
+              span.rowStart,
+              span.rowStart + span.rowSpan,
+              span.colStart,
+              span.colStart + span.colSpan,
+            )) {
+              if (other != key) {
+                return false;
+              }
+            }
+            return true;
+          },
+          dropFit: const BoardDropFit(),
+        ),
+      );
+      final viewport = _viewport(tester);
+      expect(
+        drag.startDrag(
+          key: "m",
+          renderPort: viewport,
+          pointerGlobal: _global(tester, const Offset(40.0, 125.0)),
+        ),
+        isTrue,
+      );
+      drag.updateDrag(_global(tester, const Offset(120.0, 125.0)));
+      await tester.pump();
+      // Setup sanity: the nudge is standing, so the target and the
+      // resolver's answer are different spans.
+      expect(drag.currentTarget!.span.colStart, 1);
+
+      var notifications = 0;
+      void count() {
+        notifications += 1;
+      }
+
+      drag.addListener(count);
+      // Three moves that all round to the same column and row.
+      for (final dx in <double>[5.0, 10.0, 15.0]) {
+        drag.updateDrag(_global(tester, Offset(120.0 + dx, 125.0)));
+        await tester.pump();
+      }
+      drag.removeListener(count);
+      expect(notifications, 0);
+
+      drag.endDrag(cancel: true);
+      await tester.pump();
+    },
+  );
 }
