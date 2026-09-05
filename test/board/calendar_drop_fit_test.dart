@@ -203,4 +203,154 @@ void main() {
     expect(moves.single.startTrackOn(Axis.vertical), 7.0);
     expect(moves.single.endTrackOn(Axis.vertical), 8.5);
   });
+
+  // THE EXAMPLE'S OWN LATTICE, not a simplification of it: a frozen
+  // header row and a frozen hour gutter, explicit per-track extents, the
+  // day axis carrying the lane extent, and fifteen minute increments, so
+  // row `1 + minutes / 15` is a time and column `1 + weekday` is a day.
+  //
+  // The scene is the screenshot's. Standup is a MULTI-DAY block across
+  // Monday to Thursday at 09:00, which the example's predicate refuses
+  // to share a slot with, and Design review is a single-day event
+  // dragged up from 09:30 so its block covers 07:45 to 09:15 and clips
+  // Standup by one increment.
+  //
+  // Asserts: the commit is 07:30 to 09:00, ending exactly where Standup
+  // begins. The policy is the asymmetric one a calendar wants, an hour
+  // of slack in time and none across days.
+  testWidgets("the week view example's lattice slides the block to 07:30", (
+    tester,
+  ) async {
+    const header = 28.0;
+    const gutter = 56.0;
+    const rowHeight = 16.0;
+    const dayWidth = 90.0;
+    int rowOf(int minutes) {
+      return 1 + minutes ~/ 15;
+    }
+
+    final controller = BoardController<String, _Event>(
+      vsync: tester,
+      rows: BoardAxisConfig(
+        axis: ExplicitAxis(<double>[
+          header,
+          ...List<double>.filled(96, rowHeight),
+        ]),
+        frozenStart: 1,
+      ),
+      columns: BoardAxisConfig(
+        axis: ExplicitAxis(<double>[
+          gutter,
+          ...List<double>.filled(7, dayWidth),
+        ]),
+        frozenStart: 1,
+        laneExtent: dayWidth,
+      ),
+      keyOf: (item) {
+        return item.key;
+      },
+      animationStyle: BoardAnimationStyle.disabled,
+    );
+    addTearDown(controller.dispose);
+    controller.addItem(
+      const _Event("gym"),
+      BoardSpan(rowStart: rowOf(7 * 60), colStart: 1, rowSpan: 4),
+    );
+    controller.addItem(
+      const _Event("standup"),
+      BoardSpan(rowStart: rowOf(9 * 60), colStart: 1, colSpan: 4),
+    );
+    controller.addItem(
+      const _Event("design"),
+      BoardSpan(rowStart: rowOf(9 * 60 + 30), colStart: 2, rowSpan: 6),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 700.0,
+              height: 700.0,
+              child: Board<String, _Event>(
+                controller: controller,
+                cellBuilder: (context, cell) {
+                  return const SizedBox.expand();
+                },
+                itemBuilder: (context, item) {
+                  return const ColoredBox(color: Color(0xFF7E57C2));
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final moves = <BoardSpan>[];
+    final drag = BoardDragController<String>(
+      boardController: controller,
+      vsync: tester,
+      config: BoardDragConfig<String>(
+        onItemMoved: (key, span) {
+          moves.add(span);
+        },
+        // The example's own rule: never the header or the gutter, and a
+        // single-day event may not share a slot with a multi-day block.
+        canDropAt: (key, span) {
+          if (span.rowStart < 1 || span.colStart < 1) {
+            return false;
+          }
+          final rowEnd =
+              span.rowStart +
+              span.rowSpan +
+              (span.rowSpanFraction > 0.0 ? 1 : 0);
+          final others = controller.itemsIn(
+            span.rowStart,
+            rowEnd,
+            span.colStart,
+            span.colStart + span.colSpan,
+          )..remove(key);
+          if (span.colSpan > 1) {
+            return others.isEmpty;
+          }
+          for (final other in others) {
+            if (controller.spanOf(other)!.colSpan > 1) {
+              return false;
+            }
+          }
+          return true;
+        },
+        // One hour of slack in time, none across days.
+        dropFit: const BoardDropFit(rowRadius: 4.0, colRadius: 0.0),
+      ),
+    );
+    addTearDown(drag.dispose);
+    final viewport = tester.allRenderObjects
+        .whereType<RenderBoardViewport<String>>()
+        .single;
+    final origin = tester.getRect(find.byType(Board<String, _Event>)).topLeft;
+    final rect = viewport.rectOfItem("design")!;
+    final grab = rect.topLeft + const Offset(20.0, 6.0);
+    drag.startDrag(
+      key: "design",
+      renderPort: viewport,
+      pointerGlobal: origin + grab,
+    );
+    // Move the block's corner to 07:45, which clips Standup at 09:00.
+    final topOf0745 = header + (rowOf(7 * 60 + 45) - 1) * rowHeight;
+    drag.updateDrag(
+      origin + Offset(grab.dx, topOf0745 + (grab.dy - rect.top)),
+    );
+    await tester.pump();
+    // Setup sanity: the nudge is what answers, not the raw resolve.
+    expect(drag.currentTarget!.span.rowStart, rowOf(7 * 60 + 30));
+    drag.endDrag(cancel: false);
+    await tester.pump();
+
+    expect(moves, hasLength(1));
+    // 07:30 to 09:00, ending exactly where Standup begins.
+    expect(moves.single.rowStart, rowOf(7 * 60 + 30));
+    expect(moves.single.rowStart + moves.single.rowSpan, rowOf(9 * 60));
+    expect(moves.single.colStart, 2);
+  });
 }
