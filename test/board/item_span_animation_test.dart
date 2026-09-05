@@ -242,6 +242,75 @@ class _TestVSync implements TickerProvider {
 }
 
 void main() {
+  // N7, the item span animation plan's deferred non-goal, promoted to a
+  // repro: an ANIMATED exit re-lanes the survivors when it SETTLES, and
+  // that settle is not a mutation site, so nothing captures their
+  // rectangles and nothing installs a relane slide. They step.
+  //
+  // Every other re-lane in the module animates: a span write captures
+  // its lane buckets and installs one relane FLIP per member whose
+  // rectangle changed (C4 step 5), and a drag commit hands its
+  // neighbours to the make-room hand-off. Only the exit settle, which
+  // runs inside the animation coordinator rather than at a door, has no
+  // capture.
+  //
+  // Asserts the EXPECTED behaviour: the survivor holds its painted
+  // position through the exit AND through the settle frame, then slides
+  // its one lane on the itemSlide clock. On unfixed code the settle
+  // frame steps it a whole lane at once.
+  testWidgets("a survivor of an animated exit slides its re-lane",
+      (tester) async {
+    final controller = _contentLane(
+      tester,
+      const BoardAnimationStyle(
+        trackResize: _zero,
+        itemSlide: _ms200,
+        itemEnterExit: _ms200,
+      ),
+    );
+    _addRelaningFixture(controller);
+    await tester.pumpWidget(_board(controller, cellHeight: 20.0));
+    await tester.pumpAndSettle();
+    final cId = controller.idOfKey("c");
+    double topOfC() {
+      return tester.getRect(find.byKey(_itemKey("c"))).top;
+    }
+
+    // Setup sanity: three lanes on row 2, c deepest.
+    expect(controller.laneOf("c"), 2);
+    final held = topOfC();
+
+    controller.removeItem("b");
+    await tester.pump();
+    // Setup sanity: b is EXITING, not gone, so it still holds its lane
+    // and c has not re-laned yet.
+    expect(controller.anim.isExitingItem(controller.idOfKey("b")), isTrue);
+    expect(controller.laneOf("c"), 2);
+    expect(topOfC(), closeTo(held, 0.01));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(topOfC(), closeTo(held, 0.01));
+
+    // The settle: b's exit finishes, its lane entry is deregistered and
+    // c re-lanes 2 to 1.
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(controller.laneOf("c"), 1);
+    // TARGET: the re-lane is an animation, not a step.
+    expect(controller.anim.relaneDeltaOf(cId), const Offset(0.0, 18.0));
+    expect(topOfC(), closeTo(held, 0.5));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(topOfC(), closeTo(held - 9.0, 0.5));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(topOfC(), closeTo(held - 18.0, 0.01));
+    expect(controller.anim.relaneDeltaOf(cId), Offset.zero);
+    await tester.pumpAndSettle();
+    // SEEDED, SKIPPED: this is the repro for N7, red on the tree that
+    // seeded it. Both TARGET assertions were shown to fail on their own:
+    // `relaneDeltaOf` reads zero where one lane is required, and the
+    // painted top steps the whole lane in the settle frame. Unskip with
+    // the fix that gives the exit settle a capture site.
+  }, skip: true);
+
   // T0. The engine's own contract, the one case that reaches it directly
   // (no test imported `_item_slide_engine.dart` before this one).
   // Falsification: a `hasExtentActive` that scans `start` instead of
