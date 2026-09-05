@@ -305,9 +305,8 @@ class BoardStore<TKey, TItem> {
 
   /// Resets [id]'s slot to the state a fresh allocation expects: no data,
   /// a one-by-one span at the origin, lane 0 of 1 spanning one lane, and
-  /// no flags. Recycled
-  /// slots carry the previous occupant's data, which is what this exists
-  /// for.
+  /// no flags. Recycled slots carry the previous occupant's data, which
+  /// is what this exists for.
   void _resetSlot(int id) {
     _data[id] = null;
     _rowStart[id] = 0;

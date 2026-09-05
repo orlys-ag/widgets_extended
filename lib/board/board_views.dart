@@ -90,7 +90,7 @@ class BoardCellView<TKey, TItem> {
 ///
 /// Every value here is CAPTURED at construction rather than resolved on
 /// read, because the site that constructs it is layout, which has just
-/// read all five from the controller and would otherwise pay for them
+/// read all six from the controller and would otherwise pay for them
 /// again per build.
 @immutable
 class BoardItemView<TKey, TItem> {

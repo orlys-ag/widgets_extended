@@ -1465,7 +1465,8 @@ class BoardController<TKey, TItem> {
   /// The door to the resolver's own work, called from two kinds of site:
   /// the start of layout, before track sizing, and the ENTRY of every read
   /// that reports a lane value, which is [laneOf], [laneCountOf],
-  /// [laneOfId], [laneCountOfId] and the `affectedKeys` computation.
+  /// [laneSpanOf], [laneOfId], [laneCountOfId], [laneSpanOfId] and the
+  /// `affectedKeys` computation.
   /// Both, not one: a layout-head-only flush would make a lane value
   /// unobservable before the first layout, and there is no layout in a
   /// controller-only test at all. The layout arm is the render object's

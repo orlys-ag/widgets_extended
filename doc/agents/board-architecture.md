@@ -81,8 +81,14 @@ range selection, frozen tracks, and a paintable background.
 - **`OverlapLaneResolver`** (`_overlap_lanes.dart`): one sweep core shared
   by the committed resolve and `resolveDryRun` (the make-room preview's
   prospective assignment). Lanes are resolved before track sizing every
-  layout, and an exiting item holds its lane ASSIGNMENT whole until settle, while
-  its track-extent contribution scales down with its ramp.
+  layout. Each member also gets a LANE SPAN at cluster close, inside that
+  same sweep so the two arms cannot disagree: THE RULE is the number of
+  consecutive lanes from its own upward that no sweep-axis-overlapping
+  cluster member occupies, capped at the cluster's lane count, and lane
+  ASSIGNMENT is untouched by it, the expansion only READING what the
+  sweep assigned. An exiting item holds its lane RECORD, assignment and
+  span alike, whole until settle, while its track-extent contribution
+  scales its whole BAND down with its ramp rather than one slice.
 - **`BoardAnimationCoordinator`** (`_board_animation_coordinator.dart`):
   single writer of the enter/exit flag bits; `finalizeEnterExit` is the
   one site that clears bit 0 and frees the id (exactly-one-bit assert,
@@ -106,11 +112,14 @@ range selection, frozen tracks, and a paintable background.
   offset the engine holds a HELD EXTENT per id: a RESIZE session's own
   item gets the length its prospective span would give it minus the
   length it has, and EVERY dry-run member but the lifted item gets the
-  slice its prospective lane count would give it minus the slice it has,
-  so on a FIXED lane axis a neighbour shrinks or widens WITH the gap
-  rather than after the drop (on a content-sized lane axis every slice
-  is the one lane extent and no entry is created); extents are installed
-  BEFORE the lane-axis gate because an extent needs no lane geometry and
+  BAND its prospective lane count and prospective LANE SPAN would give
+  it minus the band it has, so on a FIXED lane axis a neighbour shrinks
+  or widens WITH the gap rather than after the drop (on a content-sized
+  lane axis a slice is the one lane extent, so a pure prospective
+  LANE-COUNT change still creates no entry there, while a prospective
+  SPAN change does: the band is the lane extent times the span, and the
+  install loop keeps any non-zero target); extents are installed BEFORE
+  the lane-axis gate because an extent needs no lane geometry and
   is the whole of the in-place feedback on a board with none, so the
   block follows the finger while the model stays unwritten, and an
   extent that vanishes without motion (the commit snap) reaches layout
@@ -162,12 +171,15 @@ range selection, frozen tracks, and a paintable background.
   such a preview only while it MOVES, a settled one being a constant.
   On a FIXED lane axis the router never CLASSIFIES a gap or a relane as
   layout-driving (a gap that displaces a neighbour still lays out through
-  the admitted-bound arm). The sizing step's cluster term reads the two
-  intra-track numbers paint adds to each member, its held make-room delta
-  and its relane slide's lead, plus the engine's slots, so a track's edge
-  follows what paints; a cross-track slide carries no relane mark and
-  never reaches the term. It records per pass under two latch sets (ramp,
-  make-room contribution), hands a track's in-flight trackResize in at
+  the admitted-bound arm). The sizing step's cluster term reads each member's
+  LANE BAND: the lane origin plus the two intra-track LEAD numbers paint
+  adds to it, its held make-room delta and its relane slide's lead, plus
+  the member's STORED span scaled by its ramp, plus the engine's slots.
+  It reads no in-flight EXTENT, so a track's edge follows what paints AT
+  REST and can lag it while an extent animates on a different clock; a
+  cross-track slide carries no relane mark and never reaches the term. It
+  records per pass under two latch sets (ramp, make-room contribution),
+  hands a track's in-flight trackResize in at
   the make-room latch's edge, and at the hand-off installs a
   makeRoom-family resize for a residue past tolerance whenever the
   engine's snap generation moved, on the remaining clock and curve tail
