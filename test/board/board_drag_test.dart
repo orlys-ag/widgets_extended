@@ -2406,21 +2406,27 @@ void main() {
     },
   );
 
-  // The GATE's second term. The same shape as the case above, except the
-  // occupant covers both columns the box would land on, so nothing of it
-  // is free and the drop stays refused. It fails for an implementation
-  // that searches without gating.
-  testWidgets("a move mostly over an occupant is still refused", (
+  // The GATE's second term, which measures the REGION rather than the
+  // box: a drop into a crowded neighbourhood gets no help, because the
+  // free share of the area around it is a third and the policy asks for
+  // a half. The occupant covers six of the nine cells the search region
+  // spans, and it covers the box's own cell, so the first term holds and
+  // the second is what refuses.
+  //
+  // It fails for an implementation that drops the second term, and it
+  // fails for the box-share measure this replaced, which saw a wholly
+  // covered box and refused for the wrong reason.
+  testWidgets("a move into a crowded region is still refused", (
     tester,
   ) async {
     final controller = _plainController(tester);
     controller.addItem(
       const _Item("m"),
-      const BoardSpan(rowStart: 2, colStart: 0, colSpan: 2),
+      const BoardSpan(rowStart: 2, colStart: 0),
     );
     controller.addItem(
       const _Item("o"),
-      const BoardSpan(rowStart: 2, colStart: 2, colSpan: 2),
+      const BoardSpan(rowStart: 1, colStart: 1, rowSpan: 3, colSpan: 2),
     );
     await tester.pumpWidget(_board(controller));
     final moves = <BoardSpan>[];
@@ -2452,16 +2458,83 @@ void main() {
       drag.startDrag(
         key: "m",
         renderPort: viewport,
-        pointerGlobal: _global(tester, const Offset(40.0, 125.0)),
+        pointerGlobal: _global(tester, const Offset(20.0, 125.0)),
       ),
       isTrue,
     );
-    drag.updateDrag(_global(tester, const Offset(120.0, 125.0)));
+    drag.updateDrag(_global(tester, const Offset(100.0, 125.0)));
     await tester.pump();
     expect(drag.currentTarget, isNull);
     drag.endDrag(cancel: false);
     await tester.pump();
     expect(moves, isEmpty);
+  });
+
+  // THE SHAPE THE FEATURE SHIPPED BROKEN FOR. A single-cell item on a
+  // whole-track board is either entirely on an occupant or entirely off
+  // it, so the box-share measure this replaced could never land between
+  // its threshold and 1 and the nudge was unreachable for the commonest
+  // board there is. The region's free share is eight ninths here, so the
+  // gate admits and the scan takes the nearer of the two free columns
+  // beside the occupant, which the total order settles as the left one.
+  //
+  // Asserts: the drop commits column 1. On the box-share measure nothing
+  // is reported at all.
+  testWidgets("a single-cell move onto an occupied cell slides beside it", (
+    tester,
+  ) async {
+    final controller = _plainController(tester);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 0),
+    );
+    controller.addItem(
+      const _Item("o"),
+      const BoardSpan(rowStart: 2, colStart: 2),
+    );
+    await tester.pumpWidget(_board(controller));
+    final moves = <BoardSpan>[];
+    final drag = _drag(
+      tester,
+      controller,
+      BoardDragConfig<String>(
+        onItemMoved: (key, span) {
+          moves.add(span);
+        },
+        canDropAt: (key, span) {
+          for (final other in controller.itemsIn(
+            span.rowStart,
+            span.rowStart + span.rowSpan,
+            span.colStart,
+            span.colStart + span.colSpan,
+          )) {
+            if (other != key) {
+              return false;
+            }
+          }
+          return true;
+        },
+        dropFit: const BoardDropFit(),
+      ),
+    );
+    final viewport = _viewport(tester);
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, const Offset(20.0, 125.0)),
+      ),
+      isTrue,
+    );
+    // Corner onto column 2, which "o" occupies outright.
+    drag.updateDrag(_global(tester, const Offset(100.0, 125.0)));
+    await tester.pump();
+    expect(drag.currentTarget!.span.colStart, 1);
+    drag.endDrag(cancel: false);
+    await tester.pump();
+    expect(moves, hasLength(1));
+    expect(moves.single.colStart, 1);
+    expect(moves.single.rowStart, 2);
   });
 
   // The nudged placement is the TARGET, not just the commit, so the gap

@@ -669,19 +669,32 @@ class BoardDragController<TKey> extends ChangeNotifier {
     }
     final rowAxis = boardController.rows.axis;
     final colAxis = boardController.columns.axis;
-    final obstacles = _obstaclesAround(session, refused.span, policy);
+    final region = _searchRegion(refused.span, policy);
+    final obstacles = _obstaclesIn(session, region);
+    // BOTH gate terms, and they ask about DIFFERENT rectangles.
+    //
+    // The FIRST is about the BOX and keeps this feature to overlaps: a
+    // box meeting no occupant was refused for a rule of the app's own
+    // that the board cannot read, and sliding it would move the item for
+    // a reason nothing here understands.
+    if (!BoardDropFitter.meetsAny(refused.span, obstacles)) {
+      return null;
+    }
+    // The SECOND is about the REGION, and measuring it there rather than
+    // on the box is what makes the threshold mean anything. A box on
+    // whole tracks against occupants on whole tracks is either wholly
+    // free or wholly covered, never in between, so a box-share gate is
+    // unreachable for a single-cell item and the commonest board on
+    // earth gets no help at all. The region asks the question the
+    // feature is actually for: is the neighbourhood being dropped into
+    // mostly empty.
     final free = BoardDropFitter.freeFractionOf(
-      box: refused.span,
+      box: region,
       obstacles: obstacles,
       rowAxis: rowAxis,
       colAxis: colAxis,
     );
-    // BOTH gate terms, and the first is the one that keeps this feature
-    // to overlaps: exactly 1.0 means the box meets no occupant at all,
-    // so the refusal came from a rule of the app's own that the board
-    // cannot read, and sliding the item would move it for a reason
-    // nothing here understands.
-    if (free >= 1.0 || free < policy.minFreeFraction) {
+    if (free < policy.minFreeFraction) {
       return null;
     }
     final fitted = BoardDropFitter.nearestFit(
@@ -701,20 +714,17 @@ class BoardDragController<TKey> extends ChangeNotifier {
     return BoardDropTarget(span: fitted, kind: refused.kind);
   }
 
-  /// Every live item meeting the search region, MINUS the dragged one.
+  /// The SEARCH REGION: the refused box widened by the policy's radius
+  /// on BOTH sides of each axis, snapped out to whole tracks and clamped
+  /// to the lattice.
   ///
-  /// ONE query, serving both the gate and the scan, over the box widened
-  /// by the policy's radius on BOTH sides of each axis. Widening one side
-  /// only would leave a candidate displaced toward the other tested
-  /// against an incomplete set, and it could then be declared free while
-  /// overlapping an item nobody fetched. The read excludes exiting items
-  /// already; the dragged item it deliberately does not, so that
-  /// exclusion is here.
-  List<BoardSpan> _obstaclesAround(
-    _DragSession<TKey> session,
-    BoardSpan box,
-    BoardDropFit policy,
-  ) {
+  /// One rectangle serving three purposes, which is why it is computed
+  /// once and passed around: it bounds the obstacle query, it is what
+  /// the gate's second term measures, and widening it on one side only
+  /// would leave a candidate displaced toward the other tested against
+  /// an incomplete set, free in the arithmetic while overlapping an item
+  /// nobody fetched.
+  BoardSpan _searchRegion(BoardSpan box, BoardDropFit policy) {
     final rowCount = boardController.rows.axis.trackCount;
     final colCount = boardController.columns.axis.trackCount;
     final rowStart = (box.startTrackOn(Axis.vertical) - policy.rowRadius)
@@ -729,12 +739,25 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final colEnd = (box.endTrackOn(Axis.horizontal) + policy.colRadius)
         .ceil()
         .clamp(0, colCount);
+    return BoardSpan(
+      rowStart: rowStart,
+      colStart: colStart,
+      rowSpan: rowEnd - rowStart,
+      colSpan: colEnd - colStart,
+    );
+  }
+
+  /// Every live item meeting [region], MINUS the dragged one. ONE query,
+  /// serving both the gate and the scan. The read excludes exiting items
+  /// already; the dragged item it deliberately does not, so that
+  /// exclusion is here.
+  List<BoardSpan> _obstaclesIn(_DragSession<TKey> session, BoardSpan region) {
     final spans = <BoardSpan>[];
     for (final key in boardController.itemsIn(
-      rowStart,
-      rowEnd,
-      colStart,
-      colEnd,
+      region.rowStart,
+      region.rowStart + region.rowSpan,
+      region.colStart,
+      region.colStart + region.colSpan,
     )) {
       if (key == session.key) {
         continue;

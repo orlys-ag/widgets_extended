@@ -250,14 +250,19 @@ range selection, frozen tracks, and a paintable background.
   two rules.
   A refusal is where `_board_drop_fit.dart` gets its one chance, and only
   under a `BoardDragConfig.dropFit` policy: when `canDropAt` refuses a
-  move, the board measures what share of the refused box no other item
-  covers, by CONTENT-SPACE area over the UNION of the obstacles (summing
-  them double-counts the overlapping occupants a laned board has by the
-  dozen), and slides the placement to the nearest one holding the whole
-  box clear. The gate has TWO terms and only the second is configurable:
-  the box must MEET an occupant, so a refusal for an app rule the board
-  cannot read never moves anything, and the free share must reach
-  `minFreeFraction`. The scan steps by the snap's quantum, capped at four
+  move, the board slides the placement to the nearest one holding the
+  whole box clear. The gate has TWO terms over TWO DIFFERENT
+  rectangles, and only the second is configurable: the BOX must MEET an
+  occupant, so a refusal for an app rule the board cannot read never
+  moves anything, and the free share of the SEARCH REGION, the box
+  widened by the radii, must reach `minFreeFraction`. The region and
+  not the box, because a box on whole tracks against occupants on whole
+  tracks is wholly free or wholly covered and never in between, so a
+  box-share threshold is unreachable for a single-cell item; the region
+  asks whether the neighbourhood is mostly empty, which every shape can
+  answer. That share is CONTENT-SPACE area over the UNION of the
+  obstacles, summing them double-counting the overlapping occupants a
+  laned board has by the dozen. The scan steps by the snap's quantum, capped at four
   per direction per axis, orders candidates by content-space distance
   under a TOTAL order so equidistant ones cannot swap between resolves,
   and translates by re-splitting the exact endpoint rather than adding to

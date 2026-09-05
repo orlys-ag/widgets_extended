@@ -78,12 +78,17 @@ class BoardDropFitter {
 
   /// The share of [box] that no obstacle covers, by CONTENT-SPACE area.
   ///
-  /// [obstacles] may cover a region wider than [box], because the caller
+  /// The caller passes the SEARCH REGION here, not the item's own box:
+  /// measuring the box asks what share of the item is free, which for a
+  /// box aligned to whole tracks against occupants also aligned to whole
+  /// tracks is only ever 0 or 1, so a threshold between them can never be
+  /// met and the gate is unreachable for a single-cell item. Measuring
+  /// the region asks whether the neighbourhood being dropped into is
+  /// mostly empty, which is a question every shape can answer.
+  ///
+  /// [obstacles] may cover ground outside [box], because the caller
   /// gathers once for the whole search region, so the first step is a
-  /// clip that drops everything not meeting the box. Exactly 1.0 means
-  /// nothing was clipped, which is the caller's test for the gate's first
-  /// term and is exact: with nothing covered the free area IS the box
-  /// area.
+  /// clip that drops everything not meeting it.
   ///
   /// The covered area is the area of the UNION of the clipped obstacles,
   /// by coordinate compression. Summing their areas instead would double
@@ -244,7 +249,7 @@ class BoardDropFitter {
     });
 
     for (final candidate in candidates) {
-      if (_meetsAny(candidate.span, obstacles)) {
+      if (meetsAny(candidate.span, obstacles)) {
         continue;
       }
       if (!accepts(candidate.span)) {
@@ -256,7 +261,12 @@ class BoardDropFitter {
   }
 
   /// Whether any obstacle intersects [span], half-open on both axes.
-  static bool _meetsAny(BoardSpan span, List<BoardSpan> obstacles) {
+  ///
+  /// The gate's FIRST term reads this rather than comparing an area
+  /// against 1.0: it answers the same question in `O(n)` where the area
+  /// is cubic, and it answers it about the BOX while the second term
+  /// measures the REGION.
+  static bool meetsAny(BoardSpan span, List<BoardSpan> obstacles) {
     for (final obstacle in obstacles) {
       if (span.startTrackOn(Axis.vertical) <
               obstacle.endTrackOn(Axis.vertical) &&

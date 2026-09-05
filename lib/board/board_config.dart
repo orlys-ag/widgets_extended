@@ -85,14 +85,22 @@ class BoardDropFit {
        assert(rowRadius >= 0.0),
        assert(colRadius >= 0.0);
 
-  /// The share of the refused box, by content-space AREA, that must be
-  /// free of other items before the board will slide it.
+  /// The share of the SEARCH REGION, by content-space AREA, that must be
+  /// free of other items before the board will slide the item into it.
   ///
-  /// 1.0 disables the nudge while leaving the policy present, the two
-  /// gate terms being unsatisfiable together; 0.0 is the other endpoint,
-  /// admitting every refusal that is an overlap however little of the box
-  /// survives it. Both ends are legal because the first term still holds
-  /// the feature to overlaps.
+  /// The region is the refused box widened by [rowRadius] and
+  /// [colRadius], so this asks whether the neighbourhood being dropped
+  /// into is mostly empty. It deliberately does NOT measure the box: a
+  /// box on whole tracks against occupants on whole tracks is either
+  /// wholly free or wholly covered and never in between, so a box-share
+  /// threshold is unreachable for a single-cell item and no whole-track
+  /// board would ever be helped.
+  ///
+  /// 1.0 asks for a neighbourhood with nothing in it at all, which the
+  /// first term then forbids, so it disables the nudge while leaving the
+  /// policy present; 0.0 is the other endpoint, admitting every refusal
+  /// that is an overlap however crowded the surroundings. Both ends are
+  /// legal because the first term still holds the feature to overlaps.
   final double minFreeFraction;
 
   /// How far the search may slide the placement along the ROW axis, in
