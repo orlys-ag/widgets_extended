@@ -75,8 +75,8 @@ links to these slugs and a mismatch breaks navigation silently.
 | 1 | `Overview` | `overview` | 2 to 3 sentences, the key decisions with one-line rationale, and every file created or modified |
 | 2 | `Goals & Non-Goals` | `goals-non-goals` | Non-goals prevent scope creep |
 | 3 | `Public Surface` | `public-surface` | Per `AUDIT-METHOD.md` 3.5: name, signature, where it lives, and whether it is exported. This package exports through explicit `show` clauses, so an undeclared symbol is unnameable by app code |
-| 4 | `Components & State` | `components-state` | New per-nid arrays, controller fields, parent-data fields: exact name, type, growth path via `onCapacityGrew`, and who writes each |
-| 5 | `Coordinate Spaces` | `coordinate-spaces` | Every geometric value the plan introduces, tagged with which of the three spaces it is in (sliver scroll, sliver paint, viewport scroll). A plan that does not tag them is incomplete, not merely terse |
+| 4 | `Components & State` | `components-state` | New per-nid arrays (sliver_tree) or per-id store arrays (board), controller fields, parent-data fields: exact name, type, growth path (`onCapacityGrew` in sliver_tree; the store's lockstep growth in board), and who writes each |
+| 5 | `Coordinate Spaces` | `coordinate-spaces` | Every geometric value the plan introduces, tagged with its space: in sliver_tree one of the three (sliver scroll, sliver paint, viewport scroll), in board content, viewport-paint, or track space. A plan that does not tag them is incomplete, not merely terse |
 | 6 | `Invariants & Pair Rules` | `invariants-pair-rules` | Every invariant preserved, and every PAIR whose halves must read the same value (prune criterion and paint skip; paint gate and `applyPaintTransform`) |
 | 7 | `Landing Order` | `landing-order` | Per `AUDIT-METHOD.md` 3.6: numbered, dependency-ordered. Each step names the test that goes green when it lands, or is marked NOT INDEPENDENTLY VERIFIABLE with the reason. Pure restructuring lands first, in its own commit |
 | 8 | `Testing Plan` | `testing-plan` | Exact test names, what each asserts, and the seam each attaches at. A new seam names the existing seam it rejected and why |
@@ -290,6 +290,13 @@ Recorded so the differences are not mistaken for drift.
   Every agent runs on the same model (section 11), so the reading lists are the
   only thing holding critic context down.
 
+- **The run is module-scoped.** `args.module` (`sliver_tree` or `board`),
+  derived from `modules_touched` when omitted and required when those paths
+  name both modules or neither, selects the architecture document every lens
+  `reads` entry and every architect, trial and implementer prompt names, and
+  adds one module-vocabulary line to each prompt. Before this, every lens read
+  the sliver_tree document for a board plan, which is the wrong contract for
+  the `contracts` lens and dead context for the rest.
 - **A trial phase exists.** The source had none. See section 9.
 - **Citations are ledgered, not eyeballed.** Critics verify `path:line`
   citations, and Phase 4 requires `check_citations.py` to exit 0. Implementation

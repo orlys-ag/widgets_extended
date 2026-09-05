@@ -33,3 +33,20 @@ Cheap mechanical sweeps that reproduce:
    gesture path") is never crossed with `Scrollable`'s own drag recognizers
    (`scrollable.dart:789`, `scrollable.dart:812`), which a two-dimensional
    scroll view installs on both axes.
+8. **A record-only latch arm never re-targets an in-flight animation state.**
+   In `lib/board/`, `animateTrackResize` has exactly ONE install site, the
+   sizing walk's ordinary arm (`render_board_viewport.dart:930`), and
+   `_TrackResizeState` captures its `to` at install
+   (`_track_resize_animator.dart:16-24`, read at `:71-79`), while paint takes
+   both extent and offset from the animator (`render_board_viewport.dart:1250`,
+   `:1098-1103`). Any plan that adds a latch whose arm RECORDS and `continue`s
+   therefore suppresses the only re-target for as long as the latch holds:
+   cross it with a track that already carries a live resize, and check for the
+   pop when the stale state expires (`_track_resize_animator.dart:143-145`).
+9. **The drag proxy's visibility is a function of `currentTarget`.**
+   `Board._buildDragProxy` returns `SizedBox.shrink()` whenever
+   `currentTarget?.kind != BoardDragKind.move` (`board_widget.dart:364-368`),
+   and `_resolve` nulls the target on a `canDropAt` refusal
+   (`board_drag_controller.dart:439-447`). Any plan that adds a NEW trigger for
+   re-resolution (a frame callback, an animation tick) has to cross it with the
+   proxy, not only with the target.

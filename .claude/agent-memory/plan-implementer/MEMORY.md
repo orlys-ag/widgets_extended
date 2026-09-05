@@ -11,3 +11,6 @@ One line per topic. Detail lives in the sibling file; read it on demand.
 - board step 5, L3 render plus L4 widget: the parent-rebuild trap that
   leaves cell builders stale, unused_field as a staging constraint, and the
   dispose-assert detach check - `board-step5-render-and-widget.md`
+- animation clock cadence in tests: the zero-elapsed first tick, binary-
+  dividing step sizes, and why a settle-frame assertion passes for the
+  wrong reason - `animation-clock-cadence-in-tests.md`

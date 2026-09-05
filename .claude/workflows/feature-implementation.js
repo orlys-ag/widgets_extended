@@ -70,6 +70,46 @@ if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
   throw new Error('feature-implementation requires args.date: a YYYY-MM-DD string. Workflow scripts cannot call new Date(), so the caller supplies it; the feature-start skill does this for you.')
 }
 
+// The module decides which architecture document the architect, the critics
+// and the implementer read. `doc/agents/sliver-tree-architecture.md` governs
+// lib/sliver_tree and lib/sectioned_sliver_list; `doc/agents/board-architecture.md`
+// governs lib/board. Loading the wrong one into five parallel critics is both
+// the largest avoidable cost in a run and a source of contract findings against
+// a document the plan never touched. Explicit `args.module` wins; otherwise it
+// is derived from `modules_touched`, and a mix of both modules is an error the
+// caller resolves rather than a guess this scope makes.
+const MODULES = {
+  sliver_tree: {
+    archDoc: 'doc/agents/sliver-tree-architecture.md',
+    vocabulary: 'Module vocabulary: nids and the *Nid hot-path variants, three coordinate spaces (sliver scroll, sliver paint, viewport scroll), five animation sources under AnimationCoordinator, exit and edge ghosts, sticky pins, pending-deletion nodes, TreeAnimationStyle families with a per-family zero kill switch.',
+  },
+  board: {
+    archDoc: 'doc/agents/board-architecture.md',
+    vocabulary: 'Module vocabulary: dense item ids in BoardStore with idOfKey/keyOfId (there are no nids and no onCapacityGrew; per-id arrays grow in lockstep in the store), TWO coordinate spaces (content and viewport-paint, plus track space for spans), the animation sources under BoardAnimationCoordinator (TrackResizeAnimator, ItemEnterExitAnimator, ItemSlideEngine, MakeRoomEngine), obtain-to-retain retention, OverlapLaneResolver lanes, the BoardDragController drag layer with BoardDropResolver, and BoardAnimationStyle families with a per-family zero kill switch. Where a lens focus names a sliver_tree construct (exit ghost, sticky pin, pending-deletion node, defunct scrollable), read it as the board analogue: an exiting item held by retention, a frozen track, an item mid-exit, an unlaid or detached port.',
+  },
+}
+function deriveModule(paths) {
+  const hits = new Set()
+  for (const p of paths) {
+    if (/^lib\/board\//.test(p)) hits.add('board')
+    if (/^lib\/(sliver_tree|sectioned_sliver_list)\//.test(p)) hits.add('sliver_tree')
+  }
+  return [...hits]
+}
+let moduleKey = argsObj?.module
+if (moduleKey !== undefined && !(moduleKey in MODULES)) {
+  throw new Error(`args.module must be one of ${Object.keys(MODULES).join(', ')}, got ${JSON.stringify(moduleKey)}`)
+}
+if (moduleKey === undefined) {
+  const derived = deriveModule(requirements.modules_touched)
+  if (derived.length !== 1) {
+    throw new Error(`args.module is required when modules_touched does not name exactly one module (derived: ${derived.join(', ') || 'none'}). Pass "sliver_tree" or "board".`)
+  }
+  moduleKey = derived[0]
+}
+const MODULE = MODULES[moduleKey]
+const ARCH_DOC = MODULE.archDoc
+
 const planPath = `plans/${date}-${slug}-plan.md`
 const checklistPath = `plans/${date}-${slug}-checklist.md`
 const trialBranch = `${slug}-trial`
@@ -136,7 +176,7 @@ const requirementsMarkdown = renderRequirements(requirements)
 const LENSES = [
   {
     key: 'mechanism',
-    reads: ['doc/agents/sliver-tree-architecture.md'],
+    reads: [ARCH_DOC],
     focus: 'Angles 1, 8 and 9. Will the design do what the goals say? Logical gaps where something reads state nothing writes, ordering violations, re-entrancy (anything that can abort and re-run a layout), frame ordering and settle transitions. Lifecycle: creation, teardown, and every site that destroys the thing, including dispose, ticker cancellation and recognizer disposal. Degradation: what happens when a precondition is not met, on empty and single-element cases, under a zero-duration animation family (a kill switch that dominates explicit per-call durations), with a defunct scrollable, a pending-deletion node, hot reload, or a mutation issued mid-animation, mid-drag or inside a batch.',
   },
   {
@@ -146,8 +186,8 @@ const LENSES = [
   },
   {
     key: 'contracts',
-    reads: ['doc/agents/sliver-tree-architecture.md'],
-    focus: 'Angles 4, 6 and 7. Does the plan contradict doc/agents/sliver-tree-architecture.md, or change a documented contract without saying so? House conventions from AGENTS.md: double quotes except on imports, braces on every block, block bodies, no non-plain-text symbols anywhere. Does the plan obey AUDIT-METHOD.md 3.1 to 3.6, and is every geometric value tagged with its coordinate space? Citations: run python plans/check_citations.py on the plan (a non-zero exit is itself a finding), then spot-check that the cited lines say what the plan says they say. Every count carries the command that produced it, and every because, so, therefore, never, only, exactly and cannot carries its own citation.',
+    reads: [ARCH_DOC],
+    focus: 'Angles 4, 6 and 7. Does the plan contradict the module architecture document named in the Also read line, or change a documented contract without saying so? House conventions from AGENTS.md: double quotes except on imports, braces on every block, block bodies, no non-plain-text symbols anywhere. Does the plan obey AUDIT-METHOD.md 3.1 to 3.6, and is every geometric value tagged with its coordinate space? Citations: run python plans/check_citations.py on the plan (a non-zero exit is itself a finding), then spot-check that the cited lines say what the plan says they say. Every count carries the command that produced it, and every because, so, therefore, never, only, exactly and cannot carries its own citation.',
   },
   {
     key: 'tests',
@@ -156,7 +196,7 @@ const LENSES = [
   },
   {
     key: 'perf',
-    reads: ['doc/agents/sliver-tree-architecture.md'],
+    reads: [ARCH_DOC],
     focus: 'Angle 10. What is O(what), and is the stated bound the one that can actually blow up. Hot paths that hash keys instead of using the Nid method variants. Anything that turns a targeted lookup into a full scan. Per-frame allocation. Whether a debug counter exists to pin the contract the plan claims, and whether the plan names the counter and the expected value.',
   },
 ]
@@ -175,12 +215,12 @@ const LENSES = [
 const FRESH_POOL = [
   {
     key: 'interaction',
-    reads: ['doc/agents/sliver-tree-architecture.md'],
+    reads: [ARCH_DOC],
     focus: 'AUDIT-METHOD.md section 8, first unsettleable class: the feature crossed with every animation source, paint pass, mutator, widget layer and entry point. Look for the crossings the plan does not mention AT ALL rather than the ones it handles badly. A plan silent on what happens when its change coincides with a bulk animation, a reorder preview, an exit ghost or a sticky pin has not covered it.',
   },
   {
     key: 'timing',
-    reads: ['doc/agents/sliver-tree-architecture.md'],
+    reads: [ARCH_DOC],
     focus: 'AUDIT-METHOD.md section 8, second unsettleable class: behaviour under real timing. The mechanism lens already swept frame ordering and re-entrancy as design questions, so do NOT repeat that. Ask section 8\'s own question instead: which of this plan\'s timing risks can only be closed by running a frame, and does the plan convert each one into a named test rather than into prose that argues it is fine? Section 8 says the remedy is skipped test stubs, so that "does the plan cover X" becomes a grep. Name every timing risk the plan settles by assertion instead of by a test: a settle transition whose notify order is described but not asserted, a scroll correction whose re-entrancy is reasoned about but not exercised, a tick whose paint-only or layout-triggering status is claimed but not pinned by a debug counter.',
   },
 ]
@@ -314,6 +354,7 @@ function critiqueRound(lensSet, phaseTitle, round) {
       agent(
         [
           `Plan path: ${planPath}`,
+          `Module: ${moduleKey}. ${MODULE.vocabulary}`,
           `Lens: ${lens.key}`,
           `Focus: ${lens.focus}`,
           ``,
@@ -345,6 +386,7 @@ async function revise(findings, round, note, advisory = []) {
     [
       `Mode: revision (round ${round}).`,
       `Existing plan path: ${planPath}`,
+      `Module: ${moduleKey}; its architecture document is ${ARCH_DOC}.`,
       note ? `Context: ${note}` : ``,
       ``,
       `Blocking findings to address:`,
@@ -392,6 +434,7 @@ if (priorFindings.length > 0) {
     [
       `Mode: initial draft.`,
       `Feature slug: ${slug}`,
+      `Module: ${moduleKey}. The architecture document for this plan is ${ARCH_DOC}; read it instead of the other module's document. ${MODULE.vocabulary}`,
       `Output plan path: ${planPath}`,
       ``,
       // This scope has no filesystem access, so it cannot check for a collision
@@ -622,6 +665,7 @@ if (runTrial) {
   trial = await agent(
     [
       `Apply plans/AUDIT-METHOD.md section 10 to the approved plan at ${planPath}.`,
+      `Module: ${moduleKey}. The module contracts are in ${ARCH_DOC}; read that document, not the other module's.`,
       ``,
       `A trial is the strongest form of auditing a solution: apply it, and see whether the code agrees with the text. Reading does not catch a plan whose text reads correctly and whose code does not.`,
       ``,
@@ -712,6 +756,7 @@ const checklist = await agent(
   [
     `Plan path: ${planPath}`,
     `Checklist path: ${checklistPath}`,
+    `Module: ${moduleKey}.`,
     ``,
     `Verify the plan is ready-to-implement, then emit the grouped checklist per your system prompt and doc/agents/feature-workflow-contracts.md section 5.`,
     `Confirm every anchor you link actually exists in the plan before emitting the link.`,
@@ -792,6 +837,7 @@ const implementationReport = await agent(
   [
     `Plan path: ${planPath}`,
     `Checklist path: ${checklistPath}`,
+    `Module: ${moduleKey}. The module contracts are in ${ARCH_DOC}; read that document, not the other module's.`,
     runTrial ? `A trial of one section is already committed on ${effectiveTrialBranch}. Work from that branch so the trial is not duplicated or reverted.` : ``,
     ``,
     `Execute the checklist in order per your system prompt.`,
@@ -807,6 +853,7 @@ const implementationReport = await agent(
 
 return {
   status: 'implementation-attempted',
+  module: moduleKey,
   planPath,
   checklistPath,
   trialBranch: effectiveTrialBranch,

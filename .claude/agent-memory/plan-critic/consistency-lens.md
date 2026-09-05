@@ -86,3 +86,85 @@ citation instead of reducing it to a cross-reference. Two copies of the same
 "the framework does X (`sdk/file.dart:NNN`)" sentence is a one-normative-site
 violation even when they agree, and the copy left behind is usually the one
 missing an intermediate hop.
+
+## Ordinal cross-references resolve against the FILE's own numbering
+
+"`track_resize_test.dart`'s third case" is not the third `testWidgets` in
+source order: that file numbers a SUBSET in its own comments
+(`test/board/track_resize_test.dart:257` says "the THIRD case, which pins the
+enter carve-out", above the fifth `testWidgets`). Read the comment block above
+the candidate case before filing an ordinal cross-reference as broken; the
+plan is usually citing the file's convention.
+
+## The three cheap counted claims that go stale every round
+
+- The baseline paragraph's "each of the N `lib/board/` files cited here":
+  re-run `cut -f1 <plan>.md.citations.tsv | grep ".dart$" | sort -u | wc -l`
+  and subtract the SDK rows. A round that cites one new module file falsifies
+  N and nothing else in the plan notices.
+- The Testing Plan's "the three demonstrated rows carry (demonstrated)":
+  `grep -n "(demonstrated)"` and compare against the rows the paragraph names.
+- Enumerations of "which scratch variants could not have been run": count the
+  rows whose "Fails against" column names a scratch, not the rows the
+  paragraph lists.
+
+## Quoted old vocabulary re-registers its citations
+
+The consistency paragraph each round appends quotes the replaced vocabulary,
+so a replaced CITATION (`"render_board_viewport.dart:356"`) is still parsed as
+a live citation, gets a ledger row, and verifies clean forever while the plan
+asserts nothing about that line. Harmless, but it means a ledger row is not
+evidence that any section still cites the line.
+
+## "X gains N members" is a claim about EXISTING code
+
+The Public Surface preamble in these plans says a class "gains six members",
+then a component section cites the implementation of one of them as already
+existing (`MakeRoomEngine` already has `deltaOf` at `_make_room_engine.dart:110`,
+cited by the plan itself). Grep the class for each member name before
+accepting the count: the reader interface and the engine behind it gain
+DIFFERENT numbers, and the plan states one number for both.
+
+## The .bak is not always there
+
+`plans/<plan>.md.bak` exists only if a `--repoint`/`--update` ran since the
+last cleanup. When it is absent there is no diff at all, so say in the summary
+that revision scope was checked by reading the revision section's own bullets,
+not verified mechanically.
+
+## A round's own consistency paragraph carries an arithmetic claim
+
+"Ten returned nothing. Two returned one hit each" against a twelve-item
+vocabulary list whose last three items the same paragraph then says DID
+survive. Count the quoted items in the list and compare against the split;
+the T-label items are usually counted twice.
+
+## Two sorts in `_overlap_lanes.dart`, and rounds pick the wrong one
+
+The committed resolve sorts at `_overlap_lanes.dart:245-257`; `resolveDryRun`
+sorts at `_overlap_lanes.dart:414-426` AFTER `members.remove(draggedId)`
+(`:407`). A fixture claim about the PRE-LIFT lanes of all three items is the
+committed sort; a claim about what the preview lanes is the dry run. A test
+row and its fixture recipe citing different ones for the same fact is the
+usual shape.
+
+## The session's `gitStatus` snapshot lies about the board branch
+
+The system-prompt `gitStatus` block is a snapshot from session start and can be
+several commits stale: on `board-view-correction-trial` it showed HEAD at
+`6cce4c8` with `lib/board/` and every `test/board/*.dart` UNTRACKED, which would
+falsify the board plans' baseline paragraph ("the module is committed at
+`fde7b90`", "`git status --porcelain lib test` prints nothing") and read as a
+blocking finding. `git log --oneline -3` showed HEAD is actually `bd52f7f` with
+`git ls-files lib/board` returning 24 and a clean `git status --porcelain lib
+test`. Always re-run the plan's own stated commands before filing a baseline or
+clean-tree contradiction.
+
+## "X is NOT modified by this plan" outlives the file list
+
+A round that adds one member to a previously untouched file updates **Overview**'s
+Files-modified list and **Public Surface** and leaves a component section's flat
+"`<file>` is NOT modified by this plan" standing (seen: C5 vs `board_controller.dart`
+after round 6 moved the lifecycle key onto `BoardController`). Grep every file in
+the Files-modified list for "NOT modified" and for "gains no", not just the
+sections the round's bullets name.

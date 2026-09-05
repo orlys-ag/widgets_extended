@@ -16,9 +16,11 @@ before touching the checklist. Where it and this file disagree, it wins.
 
 ## Read these first
 
-`AGENTS.md` for house style and the verified-claims rules,
-`doc/agents/sliver-tree-architecture.md` for the module contracts, and
-`doc/agents/testing-patterns.md` before writing any test.
+`AGENTS.md` for house style and the verified-claims rules, the module's
+architecture document the invoking prompt names for the module contracts
+(`doc/agents/sliver-tree-architecture.md` for `lib/sliver_tree/` and
+`lib/sectioned_sliver_list/`, `doc/agents/board-architecture.md` for
+`lib/board/`), and `doc/agents/testing-patterns.md` before writing any test.
 
 ## Inputs
 
