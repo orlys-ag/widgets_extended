@@ -56,6 +56,13 @@ class BoardScrollOrchestrator<TKey> {
   _pendingSnap;
   bool _snapScheduled = false;
 
+  /// The intent generation of the NEWEST landing that wrote
+  /// [_pendingSnap]. Newest wins here as it does for the slot: a second
+  /// landing in the frame an earlier one already scheduled the callback
+  /// for overwrites both, so the callback compares the generation of the
+  /// snap it is about to apply rather than the one it was scheduled under.
+  int _snapGeneration = 0;
+
   /// The one deferred-jump slot for a not-yet-laid-out `jumpToCell`.
   ({int row, int col, bool avoid})? _pendingJump;
   bool _jumpScheduled = false;
@@ -235,6 +242,7 @@ class BoardScrollOrchestrator<TKey> {
   }
 
   void _scheduleSnap(int generation) {
+    _snapGeneration = generation;
     if (_snapScheduled) {
       return;
     }
@@ -243,7 +251,7 @@ class BoardScrollOrchestrator<TKey> {
       _snapScheduled = false;
       final snap = _pendingSnap;
       _pendingSnap = null;
-      if (snap == null || _disposed || generation != _intentGeneration) {
+      if (snap == null || _disposed || _snapGeneration != _intentGeneration) {
         return;
       }
       final port = _portOf();
