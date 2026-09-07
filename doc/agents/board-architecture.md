@@ -32,8 +32,13 @@ range selection, frozen tracks, and a paintable background.
 - **Two coordinate spaces.** Content space (distance from the lattice
   origin, per axis) and viewport-paint space (content minus the scroll
   offset, axis-direction aware). `_contentFromPaint` and
-  `_paintFromContent` are the only converters; the port's queries take
-  paint space, the axes speak content space.
+  `_paintFromContent` convert POSITIONS; a per-item DELTA (the animation
+  coordinator stores its slide leads and make-room offsets in content
+  space) converts through `_paintShiftOf`, a per-axis negation under
+  reversal that the port also offers as `contentDeltaFromPaint`, so the
+  drag layer's hand-off and drop-settle installs never compose the two
+  spaces by hand. The port's queries take paint space, the axes speak
+  content space.
 - **One immutable `BoardAnimationStyle`,** five families over two roots:
   `trackResize` and `itemSlide` are the roots; `itemEnterExit` inherits
   `trackResize` when unset (both animate an EXTENT; reading it as falling
