@@ -1767,15 +1767,44 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// `paintOffset`: the coordinator's composed offset, a slide's LEAD
   /// plus the held make-room delta.
   ///
-  /// FOUR sites read it and they must agree, or a child is drawn at one
-  /// place and found at another: the item paint pass, the item hit-test
-  /// walk, [applyPaintTransform], and [itemAt]'s painted-rect probe.
+  /// The readers must agree, or a child is drawn at one place and
+  /// found at another: [_paintedRectOf], which the item paint pass,
+  /// the item hit-test walk and [itemAt]'s painted-rect probe all
+  /// read, and [applyPaintTransform].
   Offset _paintShiftOf(ChildVicinity vicinity) {
     final id = _vicinityToItemId[vicinity];
     if (id == null) {
       return Offset.zero;
     }
     return _controller.anim.offsetOfItem(id);
+  }
+
+  /// The rect an item child PAINTS at: its `paintOffset` composed with
+  /// [_paintShiftOf], and its laid-out size. The ONE producer of that
+  /// rect; the item paint gate, the item hit-test gate and [itemAt] read
+  /// it. Reads `paintOffset!` exactly as the paint
+  /// walk does: every child in a paint list has been positioned by the
+  /// base's `updateChildPaintData` before paint runs. [itemAt] keeps its
+  /// own null guard in front, because it is the one reader that can meet
+  /// a child obtained this layout but not yet positioned.
+  Rect _paintedRectOf(RenderBox child) {
+    final childParentData = parentDataOf(child);
+    return (childParentData.paintOffset! +
+            _paintShiftOf(childParentData.vicinity)) &
+        child.size;
+  }
+
+  /// Whether an item child paints this frame: its PAINTED rect overlaps
+  /// the viewport. The base's `isVisible` is computed from the
+  /// structural `layoutOffset` at layout, and the shift moves on
+  /// paint-only ticks, so a lead-only slide across the viewport edge
+  /// would otherwise stop painting the moment its structural rect left
+  /// while its painted one was still inside. The paint walk and the
+  /// hit-test walk read THIS predicate and no other, so an item paints
+  /// exactly where it can be tapped. Cells and frozen children carry no
+  /// shift and keep the base's flag.
+  bool _paintsItem(RenderBox child) {
+    return _paintedRectOf(child).overlaps(Offset.zero & viewportDimension);
   }
 
   @override
@@ -1817,14 +1846,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       }
     }
     for (final child in _itemPaintOrder) {
-      final childParentData = parentDataOf(child);
-      if (childParentData.isVisible) {
-        context.paintChild(
-          child,
-          offset +
-              childParentData.paintOffset! +
-              _paintShiftOf(childParentData.vicinity),
-        );
+      // The PAINTED rect gates, not the base's `isVisible`: see
+      // [_paintsItem].
+      if (_paintsItem(child)) {
+        context.paintChild(child, offset + _paintedRectOf(child).topLeft);
       }
     }
     for (final child in _frozenPaintOrder) {
@@ -1841,36 +1866,57 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // child that takes the pointer: frozen (corner first), then items,
     // then cells.
     for (var i = _frozenPaintOrder.length - 1; i >= 0; i--) {
-      if (_hitTestChild(_frozenPaintOrder[i], result, position, Offset.zero)) {
+      final child = _frozenPaintOrder[i];
+      final childParentData = parentDataOf(child);
+      if (childParentData.isVisible &&
+          _hitTestChild(
+            child,
+            result,
+            position,
+            childParentData.paintOffset!,
+          )) {
         return true;
       }
     }
     for (var i = _itemPaintOrder.length - 1; i >= 0; i--) {
       final child = _itemPaintOrder[i];
-      final shift = _paintShiftOf(parentDataOf(child).vicinity);
-      if (_hitTestChild(child, result, position, shift)) {
+      // The same predicate and the same rect the paint walk reads, so an
+      // item is found exactly where it is drawn.
+      if (_paintsItem(child) &&
+          _hitTestChild(
+            child,
+            result,
+            position,
+            _paintedRectOf(child).topLeft,
+          )) {
         return true;
       }
     }
     for (var i = _cellPaintOrder.length - 1; i >= 0; i--) {
-      if (_hitTestChild(_cellPaintOrder[i], result, position, Offset.zero)) {
+      final child = _cellPaintOrder[i];
+      final childParentData = parentDataOf(child);
+      if (childParentData.isVisible &&
+          _hitTestChild(
+            child,
+            result,
+            position,
+            childParentData.paintOffset!,
+          )) {
         return true;
       }
     }
     return false;
   }
 
+  /// Hit-tests one child drawn at [paintOffset]; the caller has already
+  /// decided the child paints, by the base's flag for a cell or a frozen
+  /// child and by [_paintsItem] for an item.
   bool _hitTestChild(
     RenderBox child,
     BoxHitTestResult result,
     Offset position,
-    Offset shift,
+    Offset paintOffset,
   ) {
-    final childParentData = parentDataOf(child);
-    if (!childParentData.isVisible) {
-      return false;
-    }
-    final paintOffset = childParentData.paintOffset! + shift;
     return result.addWithPaintOffset(
       offset: paintOffset,
       position: position,
@@ -2138,17 +2184,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     for (var i = _itemPaintOrder.length - 1; i >= 0; i--) {
       final child = _itemPaintOrder[i];
       final childParentData = parentDataOf(child);
-      final paintOffset = childParentData.paintOffset;
-      if (paintOffset == null) {
+      if (childParentData.paintOffset == null) {
         continue;
       }
-      // Composed with the paint shift, the same offset hit-testing
-      // composes: a probe must agree with what paints, held gaps
-      // included.
-      final rect =
-          (paintOffset + _paintShiftOf(childParentData.vicinity)) &
-          child.size;
-      if (rect.contains(local)) {
+      // The painted rect, the same one hit-testing reads: a probe must
+      // agree with what paints, held gaps included.
+      if (_paintedRectOf(child).contains(local)) {
         final id = _vicinityToItemId[childParentData.vicinity];
         if (id == null) {
           continue;

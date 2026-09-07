@@ -18,6 +18,10 @@ giving the item left behind a treatment of its own watches this rather than
 documented as such: that item comes from the viewport's delegate, and a
 session edge fires no structural notification, so nothing rebuilds it
 between the lift and the commit.
+- Fix: a board item whose paint-only slide carried it across the viewport
+edge stopped painting and hit-testing the moment its structural rect left
+the viewport, while `itemAt` still reported it there. The item paint and
+hit-test walks now gate on the painted rect, the one `itemAt` probes.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and
