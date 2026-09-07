@@ -274,4 +274,62 @@ void main() {
     expect(rest, isNot(first));
   });
 
+  testWidgets("F11 a glide from outside the viewport is clipped", (
+    tester,
+  ) async {
+    final controller = _controller(tester, rows: 3, cols: 3);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 1, colStart: 1),
+    );
+    await tester.pumpWidget(
+      _board(
+        controller,
+        frame: const Size(280.0, 300.0),
+        drag: BoardDragConfig<String>(
+          onItemMoved: (key, span) {
+            controller.moveItem(key, span);
+          },
+        ),
+      ),
+    );
+
+    // Setup sanity: the 120 x 150 lattice sits inside the 280 x 300
+    // viewport, and the item is at rest at (40, 50).
+    expect(
+      tester.getTopLeft(find.byKey(_itemKey("m"))),
+      const Offset(40.0, 50.0),
+    );
+    final restClips = _clipRectLayerCount(tester);
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(_itemKey("m"))),
+    );
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    // Beyond the frame on both axes: the pointer is outside the viewport
+    // and the drop target is clamped into the lattice.
+    await gesture.moveTo(_global(tester, const Offset(400.0, 400.0)));
+    await tester.pump();
+    expect(controller.isDragging("m"), isTrue);
+
+    await gesture.up();
+    await tester.pump();
+
+    // Setup sanity: the glide starts at the proxy's corner, (400, 400)
+    // minus the (20, 25) grab offset, which is outside the viewport.
+    expect(controller.isDragging("m"), isFalse);
+    final first = tester.getTopLeft(find.byKey(_itemKey("m")));
+    expect(first.dx, moreOrLessEquals(380.0));
+    expect(first.dy, moreOrLessEquals(375.0));
+    // TARGET. One more clip layer than at rest: the board clips the item
+    // gliding in from outside.
+    expect(_clipRectLayerCount(tester), restClips + 1);
+
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byKey(_itemKey("m"))),
+      const Offset(80.0, 100.0),
+    );
+    expect(_clipRectLayerCount(tester), restClips);
+  });
 }

@@ -1777,10 +1777,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// delta from content to paint space; [contentDeltaFromPaint] is the
   /// same involution offered to the drag layer for the reverse trip.
   ///
-  /// FOUR sites read it and they must agree, or a child is drawn at one
+  /// FIVE sites read it and they must agree, or a child is drawn at one
   /// place and found at another: [_paintedRectOf], which the item paint
-  /// pass, the item hit-test walk and [itemAt]'s painted-rect probe all
-  /// read, [applyPaintTransform], and [paintedRectOfItem].
+  /// pass, the item hit-test walk, [itemAt]'s painted-rect probe and the
+  /// clip decision in [paint] all read, [applyPaintTransform], and
+  /// [paintedRectOfItem].
   Offset _paintShiftOf(ChildVicinity vicinity) {
     final id = _vicinityToItemId[vicinity];
     if (id == null) {
@@ -1810,8 +1811,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   /// The rect an item child PAINTS at: its `paintOffset` composed with
   /// [_paintShiftOf], and its laid-out size. The ONE producer of that
-  /// rect; the item paint gate, the item hit-test gate and [itemAt] read
-  /// it. Reads `paintOffset!` exactly as the paint
+  /// rect; the item paint gate, the item hit-test gate, [itemAt] and the
+  /// clip decision read it. Reads `paintOffset!` exactly as the paint
   /// walk does: every child in a paint list has been positioned by the
   /// base's `updateChildPaintData` before paint runs. [itemAt] keeps its
   /// own null guard in front, because it is the one reader that can meet
@@ -1836,6 +1837,23 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     return _paintedRectOf(child).overlaps(Offset.zero & viewportDimension);
   }
 
+  /// Whether any item child's PAINTED rect is not wholly inside the
+  /// viewport: the item half of the clip decision in [paint]. One rect
+  /// test per mounted item per paint.
+  bool _anyItemPaintsOutsideViewport() {
+    final extent = viewportDimension;
+    for (final child in _itemPaintOrder) {
+      final rect = _paintedRectOf(child);
+      if (rect.left < 0.0 ||
+          rect.top < 0.0 ||
+          rect.right > extent.width ||
+          rect.bottom > extent.height) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   void paint(PaintingContext context, Offset offset) {
     if (_cellPaintOrder.isEmpty &&
@@ -1851,7 +1869,14 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       _paintBackground(context, offset);
       return;
     }
-    if (_hasVisualOverflow && clipBehavior != Clip.none) {
+    // The layout flag counts cells only: the positioning sweep's item arm
+    // `continue`s before the overflow test. Items are decided HERE, at
+    // paint, because their shift moves on paint-only ticks with no
+    // layout: a drop-settle glide from a proxy released outside the
+    // viewport starts outside it, and a lattice smaller than its
+    // viewport has no overflowing cell to raise the flag for it.
+    final overflow = _hasVisualOverflow || _anyItemPaintsOutsideViewport();
+    if (overflow && clipBehavior != Clip.none) {
       _clipRectLayer.layer = context.pushClipRect(
         needsCompositing,
         offset,

@@ -30,6 +30,11 @@ object now converts per-item deltas at one site. `BoardRenderPort` gains
 `paintedRectOfItem` and `contentDeltaFromPaint`, and the drag layer reads
 painted rects and converts its hand-off and drop-settle deltas through them
 instead of composing the two spaces by hand.
+- Fix: the board viewport decided its clip from cells alone, so an item
+painting outside the viewport (a drop-settle glide from a proxy released
+beyond the board, on a lattice smaller than its viewport) painted over
+whatever sat beside the board. Items now count in the clip decision, at
+paint, where their shift moves.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and
