@@ -558,13 +558,35 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
     return _ItemDrag<TKey>(this);
   }
 
+  /// Whether the live session is still the one this host started: the
+  /// same rule [_armRecognizer] and [deactivate] apply. A span mutator on
+  /// the dragged key cancels the session through the controller's hook
+  /// without telling this host, and a later session another host starts
+  /// must not be driven or committed by this host's pointer. On a
+  /// mismatch ownership is dropped here, so the stale pointer's
+  /// remaining events are inert.
+  bool _stillOwnsSession() {
+    if (!_ownsSession) {
+      return false;
+    }
+    if (widget.dragController.draggedKey == _ownedKey) {
+      return true;
+    }
+    _ownsSession = false;
+    _ownedKey = null;
+    return false;
+  }
+
   void _handleDragUpdate(DragUpdateDetails details) {
     _dragPosition += details.delta;
+    if (!_stillOwnsSession()) {
+      return;
+    }
     widget.dragController.updateDrag(_dragPosition);
   }
 
   void _handleDragEnd({required bool cancel}) {
-    if (!_ownsSession) {
+    if (!_stillOwnsSession()) {
       return;
     }
     _ownsSession = false;

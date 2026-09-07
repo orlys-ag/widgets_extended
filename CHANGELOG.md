@@ -50,6 +50,11 @@ DISPOSED controller: the next long-press threw "used after being
 disposed", left `isDragging` stuck true and reported nothing. A replaced
 drag controller now replaces the delegate, which is the one route that
 rebuilds every mounted host.
+- Fix: a board item host whose drag session a span mutator had cancelled
+kept forwarding its pointer, so once another host started a session that
+stale pointer drove it and its lift committed the other item. The update
+and end handlers now apply the same ownership check the other two sites
+do, dropping ownership on a mismatch.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and

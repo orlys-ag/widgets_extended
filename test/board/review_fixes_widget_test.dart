@@ -157,4 +157,76 @@ void main() {
   // F8. A host whose session was cancelled by a span mutator keeps
   // `_ownsSession`; its pointer's later moves and lift must not reach a
   // session another host started.
+  testWidgets("F8 a cancelled host's pointer cannot drive a later session", (
+    tester,
+  ) async {
+    final controller = _controller(tester);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1),
+    );
+    controller.addItem(
+      const _Item("n"),
+      const BoardSpan(rowStart: 4, colStart: 1),
+    );
+    final moves = <(String, BoardSpan)>[];
+    await tester.pumpWidget(
+      _board(
+        controller,
+        drag: BoardDragConfig<String>(
+          onItemMoved: (key, span) {
+            moves.add((key, span));
+          },
+        ),
+      ),
+    );
+
+    // Pointer 1 lifts "m" (x 40..80, y 100..150).
+    final first = await tester.startGesture(
+      tester.getCenter(find.byKey(_itemKey("m"))),
+      pointer: 1,
+    );
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    expect(controller.isDragging("m"), isTrue);
+
+    // A span mutator on the dragged key cancels the session. Widening
+    // "m" inside its own row keeps its vicinity, so the host that owns
+    // pointer 1 stays mounted and is never told.
+    controller.resizeItem(
+      "m",
+      const BoardSpan(rowStart: 2, colStart: 1, colSpan: 2),
+    );
+    await tester.pump();
+    // Setup sanity: the session is gone and the host survived in place.
+    expect(controller.isDragging("m"), isFalse);
+    expect(_inPlace("m"), findsOneWidget);
+
+    // Pointer 2 lifts "n" (x 40..80, y 200..250) and starts a session.
+    final second = await tester.startGesture(
+      tester.getCenter(find.byKey(_itemKey("n"))),
+      pointer: 2,
+    );
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    // Setup sanity: the second session is live before pointer 1 moves.
+    expect(controller.isDragging("n"), isTrue);
+
+    // Pointer 1 moves and lifts. Unfixed, its moves drive "n"'s session
+    // and its lift commits it.
+    await first.moveTo(_global(tester, const Offset(220.0, 275.0)));
+    await tester.pump();
+    await first.up();
+    await tester.pump();
+    // TARGET: no commit until pointer 2 lifts.
+    expect(moves, isEmpty);
+    expect(controller.isDragging("n"), isTrue);
+
+    await second.moveTo(_global(tester, const Offset(180.0, 225.0)));
+    await tester.pump();
+    await second.up();
+    await tester.pumpAndSettle();
+    // TARGET: pointer 2's own lift commits, once, and it is "n".
+    expect(moves, hasLength(1));
+    expect(moves.single.$1, "n");
+    expect(controller.isDragging("n"), isFalse);
+  });
 }
