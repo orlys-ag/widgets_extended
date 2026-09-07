@@ -70,6 +70,21 @@ abstract interface class BoardRenderPort<TKey> {
   /// has not been laid out or [key] is not live.
   Rect? rectOfItem(TKey key);
 
+  /// [rectOfItem] shifted by the item's PAINTED shift: the coordinator's
+  /// composed offset (a slide's lead plus the held make-room delta)
+  /// converted to paint space. Where the item is drawn this instant, in
+  /// the same space as every other rect here. Null exactly when
+  /// [rectOfItem] is.
+  Rect? paintedRectOfItem(TKey key);
+
+  /// Converts a per-item DELTA between viewport-paint space and content
+  /// space: per axis, negated when that axis is reversed, unchanged
+  /// otherwise. An involution, so the one function serves both
+  /// directions. The animation coordinator stores content-space deltas,
+  /// so a paint-space difference (proxy corner minus painted corner)
+  /// passes through here before an install.
+  Offset contentDeltaFromPaint(Offset paintDelta);
+
   /// Nearest cell for a pointer, clamped into the lattice: the
   /// fractional track-space coordinate rounded per axis, by the same
   /// rule `BoardSnap.track`'s quantize applies, so the cell route and

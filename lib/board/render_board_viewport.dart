@@ -1765,18 +1765,47 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   /// The paint-only shift an item child is drawn at, beyond its
   /// `paintOffset`: the coordinator's composed offset, a slide's LEAD
-  /// plus the held make-room delta.
+  /// plus the held make-room delta, CONVERTED to paint space.
   ///
-  /// The readers must agree, or a child is drawn at one place and
-  /// found at another: [_paintedRectOf], which the item paint pass,
-  /// the item hit-test walk and [itemAt]'s painted-rect probe all
-  /// read, and [applyPaintTransform].
+  /// The coordinator's offset is a content-space delta (a FLIP lead is
+  /// the captured content lead minus the current one), while
+  /// `paintOffset` is already reversed by the base
+  /// (`widgets/two_dimensional_viewport.dart:1626`, which puts a child
+  /// at `viewportDimension - (layoutOffset + size)` on a reversed axis).
+  /// Adding the raw delta to it would move the child the wrong way on a
+  /// reversed axis, so this is the ONE site that converts a per-item
+  /// delta from content to paint space; [contentDeltaFromPaint] is the
+  /// same involution offered to the drag layer for the reverse trip.
+  ///
+  /// FOUR sites read it and they must agree, or a child is drawn at one
+  /// place and found at another: [_paintedRectOf], which the item paint
+  /// pass, the item hit-test walk and [itemAt]'s painted-rect probe all
+  /// read, [applyPaintTransform], and [paintedRectOfItem].
   Offset _paintShiftOf(ChildVicinity vicinity) {
     final id = _vicinityToItemId[vicinity];
     if (id == null) {
       return Offset.zero;
     }
-    return _controller.anim.offsetOfItem(id);
+    return _paintShiftOfId(id);
+  }
+
+  /// [_paintShiftOf] by item id, for the port's key-addressed reader.
+  Offset _paintShiftOfId(int id) {
+    return contentDeltaFromPaint(_controller.anim.offsetOfItem(id));
+  }
+
+  /// Per-axis negation under reversal. An involution, so the one
+  /// function converts a delta either way.
+  @override
+  Offset contentDeltaFromPaint(Offset paintDelta) {
+    return Offset(
+      horizontalAxisDirection == AxisDirection.left
+          ? -paintDelta.dx
+          : paintDelta.dx,
+      verticalAxisDirection == AxisDirection.up
+          ? -paintDelta.dy
+          : paintDelta.dy,
+    );
   }
 
   /// The rect an item child PAINTS at: its `paintOffset` composed with
@@ -2221,6 +2250,20 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       horizontal.extent,
       vertical.extent,
     );
+  }
+
+  @override
+  Rect? paintedRectOfItem(TKey key) {
+    final rect = rectOfItem(key);
+    if (rect == null) {
+      return null;
+    }
+    // Total over live keys rather than mounted children: the drag layer
+    // captures every key the make-room preview holds, mounted or not,
+    // and [rectOfItem]'s extent is the extent the geometry rule lays the
+    // child out at, so this is [_paintedRectOf] for a mounted child and
+    // the rect that child would paint at otherwise.
+    return rect.shift(_paintShiftOfId(_controller.idOfKey(key)));
   }
 
   /// On a zero-track axis this returns (0, 0), which is not a cell: there

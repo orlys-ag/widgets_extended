@@ -22,6 +22,14 @@ between the lift and the commit.
 edge stopped painting and hit-testing the moment its structural rect left
 the viewport, while `itemAt` still reported it there. The item paint and
 hit-test walks now gate on the painted rect, the one `itemAt` probes.
+- Fix: on a reversed board axis (`AxisDirection.up` or `left`) item slides
+ran the wrong way: the animation coordinator stores content-space deltas
+and the render object added them raw to the already-reversed paint offset,
+so a FLIP started off-screen and travelled away from its target. The render
+object now converts per-item deltas at one site. `BoardRenderPort` gains
+`paintedRectOfItem` and `contentDeltaFromPaint`, and the drag layer reads
+painted rects and converts its hand-off and drop-settle deltas through them
+instead of composing the two spaces by hand.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and

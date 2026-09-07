@@ -368,17 +368,16 @@ class BoardDragController<TKey> extends ChangeNotifier {
     Offset? paintedBefore;
     Offset? paintedExtentBefore;
     if (report && session.kind != BoardDragKind.move) {
-      final rect = session.port.rectOfItem(session.key);
+      // Painted truth through the port, which composes the animation
+      // offset in PAINT space; composing it here by hand would add a
+      // content-space delta to a paint-space corner.
+      final rect = session.port.paintedRectOfItem(session.key);
       if (rect != null) {
-        paintedBefore =
-            rect.topLeft +
-            boardController.anim.offsetOfItem(
-              boardController.idOfKey(session.key),
-            );
+        paintedBefore = rect.topLeft;
         // The PAINTED extent, which the resize preview has been holding:
-        // `rectOfItem` already carries it, the geometry rule composing
-        // the preview into the extent it reports. The glide continues
-        // from here, and the report's own FLIP is suppressed for it.
+        // the rect already carries it, the geometry rule composing the
+        // preview into the extent it reports. The glide continues from
+        // here, and the report's own FLIP is suppressed for it.
         paintedExtentBefore = Offset(rect.width, rect.height);
       }
     }
@@ -436,14 +435,11 @@ class BoardDragController<TKey> extends ChangeNotifier {
       if (key == session.key) {
         continue;
       }
-      final rect = session.port.rectOfItem(key);
+      final rect = session.port.paintedRectOfItem(key);
       if (rect == null) {
         continue;
       }
-      final corner =
-          rect.topLeft +
-          boardController.anim.offsetOfItem(boardController.idOfKey(key));
-      painted[key] = corner & rect.size;
+      painted[key] = rect;
     }
     return painted;
   }
@@ -471,14 +467,15 @@ class BoardDragController<TKey> extends ChangeNotifier {
       if (!boardController.contains(key)) {
         return;
       }
-      final rect = session.port.rectOfItem(key);
+      final rect = session.port.paintedRectOfItem(key);
       if (rect == null) {
         return;
       }
-      final id = boardController.idOfKey(key);
-      final delta =
-          painted.topLeft -
-          (rect.topLeft + boardController.anim.offsetOfItem(id));
+      // A paint-space difference between two painted corners, converted
+      // to the content-space lead the coordinator stores.
+      final delta = session.port.contentDeltaFromPaint(
+        painted.topLeft - rect.topLeft,
+      );
       // The EXTENT continuation, read from painted truth on both sides
       // exactly as the resize glide's is: the size the preview held it
       // at, minus the size it rests at now. The neighbour's own relane
@@ -519,25 +516,27 @@ class BoardDragController<TKey> extends ChangeNotifier {
     if (!boardController.contains(key)) {
       return;
     }
-    final rect = session.port.rectOfItem(key);
+    // Where the item paints NOW, every installed offset composed in paint
+    // space: the correction below is the paint-space gap between that
+    // and where it should paint, converted once for the coordinator.
+    final rect = session.port.paintedRectOfItem(key);
     if (rect == null) {
       return;
     }
-    final Offset desired;
+    final Offset paintDelta;
     if (session.kind == BoardDragKind.move) {
       if (release == null) {
         return;
       }
-      desired = (release - session.grabOffset) - rect.topLeft;
+      paintDelta = (release - session.grabOffset) - rect.topLeft;
     } else {
       if (paintedBefore == null) {
         return;
       }
-      desired = paintedBefore - rect.topLeft;
+      paintDelta = paintedBefore - rect.topLeft;
     }
     final id = boardController.idOfKey(key);
-    final current = boardController.anim.offsetOfItem(id);
-    final delta = desired - current;
+    final delta = session.port.contentDeltaFromPaint(paintDelta);
     // The extent continuation: from the painted extent the preview held
     // to the one the report's mutation produced, zero when the app
     // committed exactly what was previewed and the preview had settled,

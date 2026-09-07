@@ -167,4 +167,111 @@ void main() {
     },
   );
 
+  testWidgets("F1 a reversed axis FLIP starts where the item was", (
+    tester,
+  ) async {
+    final controller = _controller(tester, rows: 30, cols: 7);
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 0, colStart: 0),
+    );
+    await tester.pumpWidget(
+      _board(
+        controller,
+        frame: const Size(280.0, 200.0),
+        reverseVertical: true,
+      ),
+    );
+
+    // Setup sanity: under reversal row 0 sits at the bottom of the 200px
+    // viewport, y = 200 - 50.
+    expect(
+      tester.getTopLeft(find.byKey(_itemKey("a"))),
+      const Offset(0.0, 150.0),
+    );
+
+    controller.moveItem("a", const BoardSpan(rowStart: 2, colStart: 0));
+    await tester.pump();
+
+    // TARGET. The install frame paints the item where it was.
+    expect(
+      tester.getTopLeft(find.byKey(_itemKey("a"))).dy,
+      moreOrLessEquals(150.0),
+    );
+
+    // Halfway through the linear slide the item is halfway to row 2's
+    // painted position, y = 50.
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(
+      tester.getTopLeft(find.byKey(_itemKey("a"))).dy,
+      moreOrLessEquals(100.0),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byKey(_itemKey("a"))),
+      const Offset(0.0, 50.0),
+    );
+  });
+
+  testWidgets("F1 a committed move on a reversed axis glides from the proxy", (
+    tester,
+  ) async {
+    final controller = _controller(tester, rows: 6, cols: 7);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 1, colStart: 1),
+    );
+    await tester.pumpWidget(
+      _board(
+        controller,
+        frame: const Size(280.0, 300.0),
+        reverseVertical: true,
+        drag: BoardDragConfig<String>(
+          onItemMoved: (key, span) {
+            controller.moveItem(key, span);
+          },
+        ),
+      ),
+    );
+
+    // Setup sanity: row 1 under reversal on a 300px viewport paints at
+    // y = 300 - 2 * 50.
+    expect(
+      tester.getTopLeft(find.byKey(_itemKey("m"))),
+      const Offset(40.0, 200.0),
+    );
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(_itemKey("m"))),
+    );
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    // The grab offset is (20, 25); the proxy's corner lands at (80, 85),
+    // off the lattice on both axes, so the glide is non-zero.
+    await gesture.moveTo(_global(tester, const Offset(100.0, 110.0)));
+    await tester.pump();
+
+    // Setup sanity: the session is live and the proxy is up.
+    expect(controller.isDragging("m"), isTrue);
+    expect(find.byKey(_itemKey("m")), findsNWidgets(2));
+
+    await gesture.up();
+    await tester.pump();
+
+    // The report moved the item; the drop-settle glide starts at the
+    // proxy's last corner.
+    expect(controller.isDragging("m"), isFalse);
+    expect(find.byKey(_itemKey("m")), findsOneWidget);
+    // TARGET. First frame after release: the item paints where the proxy
+    // was.
+    final first = tester.getTopLeft(find.byKey(_itemKey("m")));
+    expect(first.dx, moreOrLessEquals(80.0));
+    expect(first.dy, moreOrLessEquals(85.0));
+
+    await tester.pumpAndSettle();
+    final rest = tester.getTopLeft(find.byKey(_itemKey("m")));
+    // Setup sanity for the glide: the item did travel, so the first frame
+    // above was not simply its rest position.
+    expect(rest, isNot(first));
+  });
+
 }
