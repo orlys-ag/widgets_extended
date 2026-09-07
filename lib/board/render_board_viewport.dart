@@ -2166,34 +2166,91 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   @override
+  Iterable<int> frozenTracksOf(Axis axis) {
+    return _frozenTracksOf(
+      axis == Axis.vertical ? _controller.rows : _controller.columns,
+    );
+  }
+
+  @override
   Rect visibleCellRect(int row, int col) {
+    final rowsConfig = _controller.rows;
+    final columnsConfig = _controller.columns;
+    final rowAxis = rowsConfig.axis;
+    final columnAxis = columnsConfig.axis;
+    final rowFrozen = row >= 0 &&
+        row < rowAxis.trackCount &&
+        _isFrozenTrack(rowsConfig, row);
+    final colFrozen = col >= 0 &&
+        col < columnAxis.trackCount &&
+        _isFrozenTrack(columnsConfig, col);
     assert(
-      row >= _firstVisibleRow &&
-          row <= _lastVisibleRow &&
-          col >= _firstVisibleCol &&
-          col <= _lastVisibleCol,
+      (rowFrozen || (row >= _firstVisibleRow && row <= _lastVisibleRow)) &&
+          (colFrozen || (col >= _firstVisibleCol && col <= _lastVisibleCol)),
       "visibleCellRect($row, $col) is outside the visible bounds, rows "
       "$_firstVisibleRow..$_lastVisibleRow, cols "
-      "$_firstVisibleCol..$_lastVisibleCol.",
+      "$_firstVisibleCol..$_lastVisibleCol, and not in a frozen band.",
     );
-    final rowAxis = _controller.rows.axis;
-    final columnAxis = _controller.columns.axis;
     final width = _animatedExtentOf(Axis.horizontal, columnAxis, col);
     final height = _animatedExtentOf(Axis.vertical, rowAxis, row);
+    // A frozen track sits where its frozen children paint: the normalized
+    // viewport-pinned position of `_positionObtainedChildren`, taken
+    // through the same reversal rule `computeAbsolutePaintOffsetFor`
+    // applies to a child's layoutOffset.
     return Rect.fromLTWH(
-      _paintFromContent(
-        Axis.horizontal,
-        _animatedOffsetOf(Axis.horizontal, columnAxis, col),
-        width,
-      ),
-      _paintFromContent(
-        Axis.vertical,
-        _animatedOffsetOf(Axis.vertical, rowAxis, row),
-        height,
-      ),
+      colFrozen
+          ? _paintFromNormalized(
+              Axis.horizontal,
+              _frozenNormalizedPosition(
+                columnsConfig,
+                col,
+                viewportDimension.width,
+              ),
+              width,
+            )
+          : _paintFromContent(
+              Axis.horizontal,
+              _animatedOffsetOf(Axis.horizontal, columnAxis, col),
+              width,
+            ),
+      rowFrozen
+          ? _paintFromNormalized(
+              Axis.vertical,
+              _frozenNormalizedPosition(
+                rowsConfig,
+                row,
+                viewportDimension.height,
+              ),
+              height,
+            )
+          : _paintFromContent(
+              Axis.vertical,
+              _animatedOffsetOf(Axis.vertical, rowAxis, row),
+              height,
+            ),
       width,
       height,
     );
+  }
+
+  /// Paint-space start of a NORMALIZED viewport span (no scroll term, the
+  /// space the frozen bands live in): the normalized value unreversed, and
+  /// the viewport extent minus the span's far edge reversed, which is the
+  /// expression `computeAbsolutePaintOffsetFor` applies to a frozen
+  /// child's layoutOffset (`widgets/two_dimensional_viewport.dart:1626-1640`).
+  double _paintFromNormalized(Axis axis, double normalized, double extent) {
+    switch (axis) {
+      case Axis.vertical:
+        if (verticalAxisDirection == AxisDirection.down) {
+          return normalized;
+        }
+        return viewportDimension.height - (normalized + extent);
+      case Axis.horizontal:
+        if (horizontalAxisDirection == AxisDirection.right) {
+          return normalized;
+        }
+        return viewportDimension.width - (normalized + extent);
+    }
   }
 
   @override

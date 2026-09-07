@@ -35,6 +35,14 @@ painting outside the viewport (a drop-settle glide from a proxy released
 beyond the board, on a lattice smaller than its viewport) painted over
 whatever sat beside the board. Items now count in the clip decision, at
 paint, where their shift moves.
+- Fix: frozen tracks were absent from the board background geometry. The
+visible track range is derived from the scroll offset, so a frozen row that
+had scrolled past its own extent was never iterated by `BoardGridPainter`
+and got no line or tint, and one still inside the range was positioned at
+its scrolled offset rather than in the band. `BoardGeometryView` gains
+`frozenTracksOf`, `visibleCellRect` positions a frozen track where its
+frozen child paints, and the painter iterates the visible range plus the
+frozen tracks, widening its band to cover them.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and

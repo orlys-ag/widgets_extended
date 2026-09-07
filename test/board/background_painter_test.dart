@@ -97,6 +97,11 @@ class _FakeGeometry implements BoardGeometryView {
   double frozenInsetOf(Axis axis) {
     return 0.0;
   }
+
+  @override
+  Iterable<int> frozenTracksOf(Axis axis) {
+    return const <int>[];
+  }
 }
 
 /// Four rows of extent 51.3 shifted by 137.7, three columns of 100: the
@@ -139,6 +144,11 @@ class _FractionalGeometry implements BoardGeometryView {
   @override
   double frozenInsetOf(Axis axis) {
     return 0.0;
+  }
+
+  @override
+  Iterable<int> frozenTracksOf(Axis axis) {
+    return const <int>[];
   }
 }
 

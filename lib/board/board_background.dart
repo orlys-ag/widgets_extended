@@ -24,7 +24,11 @@ abstract interface class BoardGeometryView {
   int get lastVisibleCol;
 
   /// The paint-space rect of one cell. Non-nullable, and legal only for a
-  /// cell inside the four visible bounds above.
+  /// cell whose row is inside the visible row bounds above or is a frozen
+  /// row, and whose column is inside the visible column bounds or is a
+  /// frozen column. A frozen track is positioned where its frozen band
+  /// paints, pinned to the viewport, whether or not the scrolled window
+  /// also covers it.
   Rect visibleCellRect(int row, int col);
 
   /// The viewport's size.
@@ -33,6 +37,12 @@ abstract interface class BoardGeometryView {
   /// The extent of the LEADING frozen band on [axis], 0.0 when there is
   /// none.
   double frozenInsetOf(Axis axis);
+
+  /// The frozen tracks of [axis], leading band then trailing band,
+  /// ascending within each. A frozen track paints in its band whatever the
+  /// scroll offset, so it can lie outside the visible bounds above and is
+  /// still legal for [visibleCellRect]; it can also lie inside them.
+  Iterable<int> frozenTracksOf(Axis axis);
 }
 
 /// Paints behind every cell and item. Costs no render children: the render
@@ -77,17 +87,39 @@ class BoardGridPainter extends BoardBackgroundPainter {
     if (firstRow > lastRow || firstCol > lastCol) {
       return;
     }
-    // The visible band. expandToInclude sorts the corners, so a reversed
-    // axis, whose first cell paints after its last, needs no special arm.
-    final band = geometry
+    // The tracks to paint on each axis: the visible range, then the
+    // frozen tracks the range does not already cover. A frozen track
+    // inside the range is painted ONCE, at the position the geometry
+    // reports for it, which is its band.
+    final rows = _tracksToPaint(
+      geometry.frozenTracksOf(Axis.vertical),
+      firstRow,
+      lastRow,
+    );
+    final cols = _tracksToPaint(
+      geometry.frozenTracksOf(Axis.horizontal),
+      firstCol,
+      lastCol,
+    );
+
+    // The painted band: the visible window widened to every frozen
+    // track's rect. expandToInclude sorts the corners, so a reversed axis,
+    // whose first cell paints after its last, needs no special arm.
+    var band = geometry
         .visibleCellRect(firstRow, firstCol)
         .expandToInclude(geometry.visibleCellRect(lastRow, lastCol));
+    for (final row in rows) {
+      band = band.expandToInclude(geometry.visibleCellRect(row, firstCol));
+    }
+    for (final col in cols) {
+      band = band.expandToInclude(geometry.visibleCellRect(firstRow, col));
+    }
 
     // Tints first, so the lines stay visible on top of them.
     final tint = trackTint;
     if (tint != null) {
       final fill = Paint();
-      for (var row = firstRow; row <= lastRow; row++) {
+      for (final row in rows) {
         final color = tint(Axis.vertical, row);
         if (color != null) {
           final rect = geometry.visibleCellRect(row, firstCol);
@@ -98,7 +130,7 @@ class BoardGridPainter extends BoardBackgroundPainter {
           );
         }
       }
-      for (var col = firstCol; col <= lastCol; col++) {
+      for (final col in cols) {
         final color = tint(Axis.horizontal, col);
         if (color != null) {
           final rect = geometry.visibleCellRect(firstRow, col);
@@ -121,7 +153,7 @@ class BoardGridPainter extends BoardBackgroundPainter {
     final line = Paint()
       ..color = gridLineColor
       ..strokeWidth = gridLineWidth;
-    for (var row = firstRow; row <= lastRow; row++) {
+    for (final row in rows) {
       final y = geometry.visibleCellRect(row, firstCol).top;
       canvas.drawLine(Offset(band.left, y), Offset(band.right, y), line);
     }
@@ -130,7 +162,7 @@ class BoardGridPainter extends BoardBackgroundPainter {
       Offset(band.right, band.bottom),
       line,
     );
-    for (var col = firstCol; col <= lastCol; col++) {
+    for (final col in cols) {
       final x = geometry.visibleCellRect(firstRow, col).left;
       canvas.drawLine(Offset(x, band.top), Offset(x, band.bottom), line);
     }
@@ -139,6 +171,19 @@ class BoardGridPainter extends BoardBackgroundPainter {
       Offset(band.right, band.bottom),
       line,
     );
+  }
+
+  /// The tracks of one axis the painter iterates: `first..last` inclusive,
+  /// followed by every track of [frozen] outside that range. Deduplicated
+  /// by track index, so a frozen track the range covers appears once.
+  static List<int> _tracksToPaint(Iterable<int> frozen, int first, int last) {
+    final tracks = <int>[for (var track = first; track <= last; track++) track];
+    for (final track in frozen) {
+      if (track < first || track > last) {
+        tracks.add(track);
+      }
+    }
+    return tracks;
   }
 
   @override
