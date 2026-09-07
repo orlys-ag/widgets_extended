@@ -61,15 +61,22 @@ class ItemEnterExitAnimator {
   /// The ramp: eased 0 to 1 while entering, `from` eased down to 0 while
   /// exiting, and exactly 1 for an id with no record, which is the
   /// settled-live-item arm every consumer multiplies by unconditionally.
+  ///
+  /// CLAMPED TO `[0, 1]` HERE, at the producer: an overshooting curve
+  /// (`Curves.easeInBack` dips below 0, `Curves.easeOutBack` rises above
+  /// 1) would otherwise hand the lane-axis geometry a negative extent,
+  /// which reaches layout as a negative tight constraint. The `from` an
+  /// interrupted enter hands an exit is read through this same method,
+  /// so it is bounded too.
   double progressOf(int id) {
     final record = _records[id];
     if (record == null) {
       return 1.0;
     }
     final curve = _styleOf().specFor(record.family).curve;
-    final eased = curve.transform(record.t.clamp(0.0, 1.0));
+    final eased = curve.transform(record.t.clamp(0.0, 1.0)).clamp(0.0, 1.0);
     if (_isExitingOf(id)) {
-      return record.from * (1.0 - eased);
+      return (record.from * (1.0 - eased)).clamp(0.0, 1.0);
     }
     return eased;
   }

@@ -55,6 +55,11 @@ kept forwarding its pointer, so once another host started a session that
 stale pointer drove it and its lift committed the other item. The update
 and end handlers now apply the same ownership check the other two sites
 do, dropping ownership on a mismatch.
+- Fix: an overshooting `itemEnterExit` curve (`Curves.easeInBack`,
+`Curves.easeOutBack`) on a laned board produced a negative ramp, which the
+lane-axis geometry turned into a negative tight constraint and a layout
+assertion on every later frame. The ramp is now clamped to 0..1 at its
+producer, for the enter value and the exit product alike.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and
