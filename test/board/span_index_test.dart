@@ -220,10 +220,13 @@ void main() {
     expect(result.length, 2);
     expect(result.toSet(), <int>{tall, short});
 
-    // The padded-break reproducer: a span whose end lands an ulp ABOVE an
-    // integer boundary (endTrackOn 3.0000000000000004). An unpadded
-    // backward-walk break computes fl(start + fl(end - start)), which
-    // undershoots the boundary and drops the item before its admit test.
+    // A span whose end lands an ulp ABOVE an integer boundary (endTrackOf
+    // 3.0000000000000004). Both halves of the tolerance rule: the ulp is
+    // not occupancy, so a range starting AT the boundary does not see the
+    // item, while a range starting one track earlier does. The second
+    // half is also the padded-break reproducer: an unpadded backward-walk
+    // break computes fl(start + fl(end - start)), which can undershoot
+    // the boundary and drop the item before its admit test.
     final grazing = _register(
       store,
       index,
@@ -236,7 +239,8 @@ void main() {
         colSpanFraction: 0.7413567398950821,
       ),
     );
-    expect(index.itemsInRect(0, 1, 3, 6), contains(grazing));
+    expect(index.itemsInRect(0, 1, 3, 6), isNot(contains(grazing)));
+    expect(index.itemsInRect(0, 1, 2, 6), contains(grazing));
   });
 
   // DERIVED name. No AC; the bucket-scan bound, which no set comparison can

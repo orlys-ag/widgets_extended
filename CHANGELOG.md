@@ -75,6 +75,11 @@ callback compared the OLDER call's intent generation and discarded the
 newer target, which on a content-sized axis left the landing off by the
 tracks measured since. The generation now lives in a field the newest
 landing overwrites, as the snap slot already did.
+- Fix: a board span whose fractional parts summed an ulp past a whole
+track (`rowFraction: 0.78, rowSpan: 2, rowSpanFraction: 0.22` ends at
+3.0000000000000004) was indexed into the next track and reported by
+`itemsAt`/`itemsIn` as occupying it, so a free cell read as occupied. The
+span index now applies the same tolerance the lane resolver does.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and

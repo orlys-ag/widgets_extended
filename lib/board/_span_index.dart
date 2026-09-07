@@ -6,6 +6,8 @@
 /// module barrel.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
@@ -143,7 +145,7 @@ class SpanIndex {
   /// exactly the input a bulk call carries.
   void register(int id, {bool bulk = false}) {
     final firstTrack = _store.startTrackOf(id, _primaryAxis).floor();
-    final lastTrack = _store.endTrackOf(id, _primaryAxis).ceil() - 1;
+    final lastTrack = _lastTrackOf(id, firstTrack);
     assert(
       lastTrack >= firstTrack,
       "a span asserts a positive extent, so its bucket range is never "
@@ -181,7 +183,7 @@ class SpanIndex {
   /// [flushPendingSorts] ever lowers it.
   void deregister(int id) {
     final firstTrack = _store.startTrackOf(id, _primaryAxis).floor();
-    final lastTrack = _store.endTrackOf(id, _primaryAxis).ceil() - 1;
+    final lastTrack = _lastTrackOf(id, firstTrack);
     _ordinalDirty.add(firstTrack);
     for (var track = firstTrack; track <= lastTrack; track++) {
       final bucket = _buckets[track];
@@ -195,6 +197,20 @@ class SpanIndex {
         _pendingSortBuckets.remove(track);
       }
     }
+  }
+
+  /// The last PRIMARY-axis bucket [id]'s span touches, given its first.
+  ///
+  /// `endTrackOf` is a double sum, so a span whose parts add to a whole
+  /// track can land an ulp above it (`0.78 + 2 + 0.22` is
+  /// `3.0000000000000004`); an unpadded `ceil() - 1` would bucket that
+  /// item into a track it does not occupy, and [_query] would then admit
+  /// it for a range starting there. Padded by the tolerance, and floored
+  /// at [firstTrack] so a span thinner than the tolerance still owns its
+  /// own bucket.
+  int _lastTrackOf(int id, int firstTrack) {
+    final end = _store.endTrackOf(id, _primaryAxis);
+    return math.max(firstTrack, (end - precisionErrorTolerance).ceil() - 1);
   }
 
   /// Sorts every bucket the BULK path appended to and recomputes its
@@ -324,7 +340,10 @@ class SpanIndex {
         }
         // No primary-axis re-test: membership in a visited bucket already
         // implies intersection with the query's integer primary range.
-        if (start < rangeEnd && _endOf(id) > rangeStart) {
+        // Padded on both ends: an endpoint an ulp past a range bound is
+        // ON the bound, and a half-open range does not intersect there.
+        if (start < rangeEnd - precisionErrorTolerance &&
+            _endOf(id) > rangeStart + precisionErrorTolerance) {
           if (!includeExiting && _store.isExiting(id)) {
             continue;
           }

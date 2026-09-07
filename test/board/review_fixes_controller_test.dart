@@ -162,4 +162,39 @@ void main() {
       expect(tester.getRect(find.byKey(_cellKey(50, 0))).top - frame.top, 0.0);
     });
   });
+
+  group("F6", () {
+    // `0.78 + 2 + 0.22` sums to an ulp above 3.0 in double arithmetic, and
+    // the index buckets the item into track 3 from that exact endpoint.
+    testWidgets("a span ending an ulp past a track does not occupy it", (
+      tester,
+    ) async {
+      final controller = _uniformController(tester);
+      const span = BoardSpan(
+        rowStart: 0,
+        rowFraction: 0.78,
+        rowSpan: 2,
+        rowSpanFraction: 0.22,
+        colStart: 0,
+      );
+      controller.addItem(const _Item("g"), span);
+
+      // Setup sanity, both falsifiable: the stored span is the one given,
+      // and its end computed the way the store computes it really lands
+      // above 3.0 rather than exactly on it. A pair that summed to 3.0
+      // exactly would make the target assertion vacuous.
+      expect(controller.spanOf("g"), span);
+      final end =
+          span.rowStart +
+          span.rowFraction +
+          span.rowSpan +
+          span.rowSpanFraction;
+      expect(end, greaterThan(3.0));
+      expect(end, lessThan(3.0 + 1e-12));
+
+      // TARGET: track 3 is free, track 2 is occupied.
+      expect(controller.itemsAt(3, 0), isEmpty);
+      expect(controller.itemsAt(2, 0), <String>["g"]);
+    });
+  });
 }
