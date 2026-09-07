@@ -307,4 +307,64 @@ void main() {
       await tester.pumpAndSettle();
     });
   });
+
+  group("F10", () {
+    // The session captured makeRoom's 300ms at startDrag; a restyle to
+    // 3000ms mid-session must not slow the live gap's clock, the same
+    // way the captured curve already governs it.
+    testWidgets("a mid-session makeRoom restyle does not change a live "
+        "gap's clock", (tester) async {
+      const ms300 = BoardAnimationSpec(
+        duration: Duration(milliseconds: 300),
+        curve: Curves.linear,
+      );
+      const ms3000 = BoardAnimationSpec(
+        duration: Duration(milliseconds: 3000),
+        curve: Curves.linear,
+      );
+      final controller = _controller(
+        tester,
+        const BoardAnimationStyle(itemSlide: _ms200, makeRoom: ms300),
+      );
+      _addTargetRowFixture(controller);
+      await tester.pumpWidget(_board(controller));
+      await tester.pumpAndSettle();
+      final viewport = _viewport(tester);
+      final restingTopB = _probe(tester, "b").top;
+      final drag = _drag(
+        tester,
+        controller,
+        onItemMoved: (key, span) {
+          controller.moveItem(key, span);
+        },
+      );
+      await _liftTo(tester, drag, viewport, "d", const Offset(20.0, 10.0));
+      // Setup sanity: the gap is live and at clock 0.
+      expect(controller.anim.hasMakeRoomMotion, isTrue);
+      expect(_probe(tester, "b").top, closeTo(restingTopB, 0.01));
+
+      controller.animationStyle = const BoardAnimationStyle(
+        itemSlide: _ms200,
+        makeRoom: ms3000,
+      );
+      // Setup sanity: the live style really changed.
+      expect(
+        controller.animationStyle.effectiveMakeRoom.duration,
+        const Duration(milliseconds: 3000),
+      );
+      // A re-target on the same prospective span re-sends the captured
+      // pair, which the engine's idempotence keeps clock-neutral.
+      drag.updateDrag(_global(tester, const Offset(20.0, 10.0)));
+      await tester.pump(const Duration(milliseconds: 150));
+      // TARGET: half open on the captured 300ms clock, not one twentieth
+      // open on the restyled one.
+      expect(_probe(tester, "b").top, closeTo(restingTopB + 10.0, 0.5));
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(_probe(tester, "b").top, closeTo(restingTopB + 20.0, 0.01));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(controller.anim.hasMakeRoomMotion, isFalse);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle();
+    });
+  });
 }

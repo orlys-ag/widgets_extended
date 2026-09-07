@@ -229,6 +229,12 @@ class MakeRoomEngine {
 
   Curve _curve = Curves.linear;
 
+  /// The CAPTURED clock the offsets, extents and slots run on, resolved
+  /// beside [_curve] at the two declaring sites from the caller's
+  /// argument or the live spec. The live spec's ZERO still dominates at
+  /// the tick and the snap, as the kill switch does at the install.
+  Duration _duration = Duration.zero;
+
   bool get hasActive {
     return _held.isNotEmpty;
   }
@@ -338,7 +344,9 @@ class MakeRoomEngine {
       _handOff = null;
       return;
     }
-    final duration = _styleOf().effectiveMakeRoom.duration;
+    final duration = _styleOf().effectiveMakeRoom.duration == Duration.zero
+        ? Duration.zero
+        : _duration;
     _handOff = (
       remaining: duration * (1.0 - minT),
       curve: _CurveTail(_curve, minT),
@@ -464,6 +472,7 @@ class MakeRoomEngine {
     final resolved = duration ?? spec.duration;
     final snap = spec.duration == Duration.zero || resolved == Duration.zero;
     _curve = curve ?? spec.curve;
+    _duration = resolved;
     // The dry run needs lane geometry; without it nothing is laned and
     // no gap exists to open, but the EXTENT preview below still does.
     final dry = laneAxis == null
@@ -761,6 +770,7 @@ class MakeRoomEngine {
       return;
     }
     _curve = curve ?? spec.curve;
+    _duration = resolved;
     _held.forEach((id, entry) {
       final current = _valueOf(entry);
       entry
@@ -831,8 +841,12 @@ class MakeRoomEngine {
   void _tick(Duration elapsed) {
     final dt = elapsed - _lastElapsed;
     _lastElapsed = elapsed;
+    // The captured clock, under the live family's zero: a restyle to
+    // zero mid-gap drives every clock past 1 on this tick.
     final spec = _styleOf().effectiveMakeRoom;
-    final durationUs = spec.duration.inMicroseconds;
+    final durationUs = spec.duration == Duration.zero
+        ? 0
+        : _duration.inMicroseconds;
     final delta = durationUs == 0
         ? double.infinity
         : dt.inMicroseconds / durationUs;

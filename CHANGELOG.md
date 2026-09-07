@@ -64,6 +64,11 @@ producer, for the enter value and the exit product alike.
 such as `Curves.easeOutBack` past its midpoint) handed the commit a curve
 tail that reported 1 at every clock, so the displaced neighbour stepped to
 rest instead of easing back. A negative span now renormalises the tail.
+- Fix: the make-room engine honoured a drag session's captured curve but
+read the live style for its clock, so a `makeRoom` restyle mid-session
+changed a live gap's duration while the captured curve still governed. The
+captured duration is now stored beside the curve and drives the tick and
+the hand-off; the live family's zero still dominates both.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and
