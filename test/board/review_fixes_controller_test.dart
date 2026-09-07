@@ -197,4 +197,18 @@ void main() {
       expect(controller.itemsAt(2, 0), <String>["g"]);
     });
   });
+
+  group("F7", () {
+    test("a non-positive snap fraction is rejected", () {
+      // Setup sanity: a positive quantum is accepted, so the throws below
+      // are the assert's and not a constructor that always throws.
+      expect(BoardSnap.fraction(0.25).fraction, 0.25);
+      expect(() {
+        return BoardSnap.fraction(0.0);
+      }, throwsAssertionError);
+      expect(() {
+        return BoardSnap.fraction(-0.25);
+      }, throwsAssertionError);
+    });
+  });
 }

@@ -26,9 +26,15 @@ class BoardSnap {
   const BoardSnap.track() : mode = BoardSnapMode.track, fraction = null;
 
   /// Snaps to multiples of [fraction] of a track. `0.25` snaps to
-  /// quarter tracks.
+  /// quarter tracks. The quantum must be positive: [quantize] divides by
+  /// it, and a zero would make every quantized value NaN. There is no
+  /// upper bound; a quantum above one track is a legal coarse snap.
   const BoardSnap.fraction(double this.fraction)
-    : mode = BoardSnapMode.fraction;
+    : assert(
+        fraction > 0.0,
+        "BoardSnap.fraction: the quantum must be positive.",
+      ),
+      mode = BoardSnapMode.fraction;
 
   /// No quantization at all.
   const BoardSnap.free() : mode = BoardSnapMode.free, fraction = null;
