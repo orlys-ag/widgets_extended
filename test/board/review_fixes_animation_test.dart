@@ -240,4 +240,71 @@ void main() {
       expect(controller.contains("x"), isFalse);
     });
   });
+
+  group("F9", () {
+    // A commit while the make-room curve stands ABOVE 1. The published
+    // tail must renormalise the overshoot back down to 1, so the
+    // neighbour eases back from where it painted; a collapsed tail
+    // reports 1 at every clock above 0 and the neighbour steps to rest
+    // on its first tick. `Curve.transform` returns 0 at clock 0 without
+    // consulting the tail, so the FIRST frame after the commit paints
+    // the held position on either tree; the first tick after it is the
+    // discriminating one.
+    testWidgets("a hand-off interrupted mid-overshoot eases back rather "
+        "than stepping", (tester) async {
+      const overshoot = BoardAnimationSpec(
+        duration: Duration(milliseconds: 200),
+        curve: Curves.easeOutBack,
+      );
+      final controller = _controller(
+        tester,
+        const BoardAnimationStyle(
+          trackResize: _ms400,
+          itemSlide: _ms200,
+          makeRoom: overshoot,
+        ),
+      );
+      _addTargetRowFixture(controller);
+      await tester.pumpWidget(_board(controller));
+      await tester.pumpAndSettle();
+      final viewport = _viewport(tester);
+      final restingTopB = _probe(tester, "b").top;
+      final drag = _drag(
+        tester,
+        controller,
+        onItemMoved: (key, span) {
+          controller.moveItem(key, span);
+        },
+      );
+      await _liftTo(tester, drag, viewport, "d", const Offset(20.0, 10.0));
+      await tester.pump(const Duration(milliseconds: 100));
+      final atHalf = Curves.easeOutBack.transform(0.5);
+      final atThreeQuarters = Curves.easeOutBack.transform(0.75);
+      // Setup sanity: the commit lands PAST the overshoot, and the gap
+      // is painted at the overshot value.
+      expect(atHalf, greaterThan(1.0));
+      expect(atThreeQuarters, greaterThan(1.0));
+      expect(
+        _probe(tester, "b").top,
+        closeTo(restingTopB + 20.0 * atHalf, 0.5),
+      );
+      drag.endDrag(cancel: false);
+      await tester.pump();
+      expect(controller.laneOf("b"), 2);
+      expect(
+        _probe(tester, "b").top,
+        closeTo(restingTopB + 20.0 * atHalf, 0.5),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      // TARGET: the uninterrupted ramp's value at 150ms, still past
+      // rest, not rest itself.
+      expect(
+        _probe(tester, "b").top,
+        closeTo(restingTopB + 20.0 * atThreeQuarters, 0.5),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(_probe(tester, "b").top, closeTo(restingTopB + 20.0, 0.01));
+      await tester.pumpAndSettle();
+    });
+  });
 }

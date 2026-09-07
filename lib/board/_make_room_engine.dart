@@ -44,7 +44,12 @@ typedef MakeRoomHandOff = ({Duration remaining, Curve curve});
 /// `[from, 1]` segment, renormalised, so a motion interrupted at [_from]
 /// and re-run on this curve over its remaining time traces exactly what
 /// the uninterrupted curve would have, with no velocity kink at the
-/// join. A curve already at 1 by [_from] has no tail and reports 1.
+/// join. A curve sitting exactly at 1 by [_from] has no tail and reports
+/// 1. A curve ABOVE 1 at [_from] (an overshoot, `Curves.easeOutBack`
+/// past its midpoint) has a NEGATIVE span, and the division renormalises
+/// that segment from above 1 back down to 1, which is the tail the
+/// uninterrupted curve would have traced; treating it as "no tail" would
+/// report 1 at every clock and step the continuation to rest.
 class _CurveTail extends Curve {
   const _CurveTail(this._inner, this._from);
 
@@ -55,7 +60,7 @@ class _CurveTail extends Curve {
   double transformInternal(double t) {
     final at = _inner.transform(_from);
     final span = 1.0 - at;
-    if (span <= 1e-9) {
+    if (span.abs() <= 1e-9) {
       return 1.0;
     }
     return (_inner.transform(_from + (1.0 - _from) * t) - at) / span;

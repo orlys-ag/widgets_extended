@@ -60,6 +60,10 @@ do, dropping ownership on a mismatch.
 lane-axis geometry turned into a negative tight constraint and a layout
 assertion on every later frame. The ramp is now clamped to 0..1 at its
 producer, for the enter value and the exit product alike.
+- Fix: a make-room gap snapped while its curve was above 1 (an overshoot
+such as `Curves.easeOutBack` past its midpoint) handed the commit a curve
+tail that reported 1 at every clock, so the displaced neighbour stepped to
+rest instead of easing back. A negative span now renormalises the tail.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and
