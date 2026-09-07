@@ -177,8 +177,16 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
     // The drag controller holds boardController and config as FINAL
     // fields, so a change to either, or to the config's null-ness,
     // rebuilds it rather than re-pointing anything.
+    //
+    // A REPLACED drag controller must also replace the delegate: every
+    // mounted `_BoardItemHost` captured the old controller in its widget
+    // at build, and a delegate rebuild is the one route that rebuilds
+    // those children (see the note above [_createDelegate]). Without it
+    // a host presses on against a disposed controller.
+    var rehost = false;
     if (!identical(widget.controller, oldWidget.controller) ||
         !identical(widget.drag, oldWidget.drag)) {
+      rehost = true;
       _teardownDragController();
       if (widget.drag != null) {
         _dragController = BoardDragController<TKey>(
@@ -197,7 +205,8 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
         widget.controller.selection.addListener(_handleSelectionChanged);
       }
     }
-    if (!identical(widget.cellBuilder, oldWidget.cellBuilder) ||
+    if (rehost ||
+        !identical(widget.cellBuilder, oldWidget.cellBuilder) ||
         !identical(widget.itemBuilder, oldWidget.itemBuilder) ||
         widget.addRepaintBoundaries != oldWidget.addRepaintBoundaries) {
       final previous = _delegate;

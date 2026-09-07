@@ -43,6 +43,13 @@ its scrolled offset rather than in the band. `BoardGeometryView` gains
 `frozenTracksOf`, `visibleCellRect` positions a frozen track where its
 frozen child paints, and the painter iterates the visible range plus the
 frozen tracks, widening its band to cover them.
+- Fix: rebuilding a `Board` with a new `BoardDragConfig` instance (or a
+new controller) while its builders kept their identity replaced the drag
+controller but not the delegate, so every mounted item host kept the
+DISPOSED controller: the next long-press threw "used after being
+disposed", left `isDragging` stuck true and reported nothing. A replaced
+drag controller now replaces the delegate, which is the one route that
+rebuilds every mounted host.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and
