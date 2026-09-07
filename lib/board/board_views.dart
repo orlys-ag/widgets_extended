@@ -130,6 +130,14 @@ class BoardItemView<TKey, TItem> {
   final int laneSpan;
 
   /// Whether a drag session currently holds this item.
+  ///
+  /// True in the DRAG PROXY's build. FALSE in the lattice build even
+  /// while a session runs: that item comes from the viewport's delegate,
+  /// and a session edge fires no structural notification, so nothing
+  /// rebuilds it between the lift and the commit. An app giving the item
+  /// left behind a treatment of its own watches
+  /// `BoardDragController.movedItem`, which is what the board's own
+  /// `BoardDragConfig.draggedItemOpacity` rides.
   final bool isDragging;
 
   /// The controller the three mutations below run against.

@@ -194,8 +194,20 @@ range selection, frozen tracks, and a paintable background.
   forwarding listener, the drag-proxy overlay (gated on the SESSION's
   kind through `draggedKind`, never on the target's, so the moved visual
   keeps following the pointer across a `canDropAt`-refused cell, where
-  the target is null by design), `_BoardItemHost` (publishes
-  the drag scope, owns the armed recognizer, default handles: a delayed
+  the target is null by design), the config's OPACITY PAIR
+  (`dragProxyOpacity` on the proxy and `draggedItemOpacity` on the item
+  left behind, both applied through `_BoardOpacity`, which pushes a
+  layer only while it actually FADES: `RenderOpacity` composites and is
+  a repaint boundary at every alpha above zero, and this wrapper sits in
+  the tree unconditionally, because one inserted at the lift and removed
+  at the drop would re-inflate the item's subtree twice a session and
+  drop its `State` both times), `_BoardItemHost` (publishes
+  the drag scope, owns the armed recognizer, wraps its child in that
+  fade over the drag controller's `movedItem`, comparing
+  `widget.itemKey` and NOT the session's captured key, because the
+  question here is what THIS element paints, and passing the child
+  through, so a session edge rebuilds the wrapper and nothing under it,
+  default handles: a delayed
   move wrap plus opaque resize strips on the span axis under `resizeEdges`
   and on the primary axis under `primaryResizeEdges`, each handle naming
   its axis (a null axis on a handle or on `startDrag` is the span axis,
@@ -225,7 +237,15 @@ range selection, frozen tracks, and a paintable background.
   (policy chain ending in pin + `markDragging`; single teardown; end order
   resolve-validate, tear down, report, then the drop-settle glide
   installed LAST so it overrides the handler's own slide and the item
-  travels from the proxy). `_resolve` re-points the scroll subscriptions
+  travels from the proxy). Two NARROW listenables sit beside the class's
+  own `ChangeNotifier`, which fires per pointer move: `pointerPosition`,
+  written per move, and `movedItem`, written at the two session EDGES
+  only and null for a resize, which is what a per-item listener can
+  afford to watch. `BoardItemView.isDragging` is not that channel and
+  cannot be: the lattice item comes from the viewport's delegate, and a
+  session edge fires no structural notification, so nothing rebuilds it
+  between the lift and the commit, which leaves the flag true only in
+  the PROXY's build. `_resolve` re-points the scroll subscriptions
   (bind at start, re-point per sample AND at the autoscroller's tick head,
   unbind in teardown) and nulls the target on a `canDropAt` refusal so no
   gap previews a refused drop. The animation channel is the third route

@@ -86,6 +86,9 @@ class BoardDragController<TKey> extends ChangeNotifier {
     null,
   );
 
+  /// Written at the two session EDGES only; see [movedItem].
+  final ValueNotifier<TKey?> _movedItem = ValueNotifier<TKey?>(null);
+
   _DragSession<TKey>? _session;
   BoardDropTarget? _currentTarget;
 
@@ -104,6 +107,22 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// write per move event; null between sessions.
   ValueListenable<Offset?> get pointerPosition {
     return _pointerPosition;
+  }
+
+  /// The key a live MOVE session holds; null between sessions, and null
+  /// for a resize, which paints no proxy.
+  ///
+  /// Narrow on purpose, and the reason it exists beside this class's own
+  /// `ChangeNotifier`: that one fires per pointer move, so an item-level
+  /// listener on it would rebuild every mounted item every frame of a
+  /// drag, while this one is written twice per session. It is what the
+  /// item host watches for the left-behind dim, and what an app watches
+  /// to give that item a treatment of its own. `BoardItemView.isDragging`
+  /// cannot serve either: the lattice item is built by the viewport's
+  /// delegate, and a session edge fires no structural notification, so
+  /// nothing rebuilds it between the lift and the commit.
+  ValueListenable<TKey?> get movedItem {
+    return _movedItem;
   }
 
   /// What the drag currently resolves to: a whole prospective SPAN whose
@@ -290,6 +309,10 @@ class BoardDragController<TKey> extends ChangeNotifier {
       ),
     );
     _session = session;
+    // One of this session's two writes to the narrow channel; the
+    // teardown's null is the other. A resize writes the null it already
+    // holds, which notifies nobody.
+    _movedItem.value = kind == BoardDragKind.move ? key : null;
     _bindScrollSubscriptions(session);
     // The animation channel is the third route into the resolution core,
     // beside pointer events and scroll notifications: a track resizing
@@ -574,6 +597,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _currentTarget = null;
     _lastResolvedSpan = null;
     _pointerPosition.value = null;
+    _movedItem.value = null;
     notifyListeners();
   }
 
@@ -867,6 +891,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       _teardown(session);
     }
     _pointerPosition.dispose();
+    _movedItem.dispose();
     super.dispose();
   }
 }

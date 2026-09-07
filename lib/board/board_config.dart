@@ -128,11 +128,20 @@ class BoardDragConfig<TKey> {
     this.primaryResizeEdges = BoardResizeEdges.none,
     this.buildDefaultDragHandles = true,
     this.dragProxyBuilder,
+    this.dragProxyOpacity = 1.0,
+    this.draggedItemOpacity = 0.5,
     this.semanticsActionsBuilder,
     this.hapticsOnDrag = false,
     this.autoScrollEdgeZone = 48.0,
     this.autoScrollMaxVelocity = 1200.0,
-  });
+  }) : assert(
+         dragProxyOpacity >= 0.0 && dragProxyOpacity <= 1.0,
+         "dragProxyOpacity is an opacity: 0.0 through 1.0.",
+       ),
+       assert(
+         draggedItemOpacity >= 0.0 && draggedItemOpacity <= 1.0,
+         "draggedItemOpacity is an opacity: 0.0 through 1.0.",
+       );
 
   /// The COMMIT report for a move. The board reports; the app mutates.
   final void Function(TKey key, BoardSpan span) onItemMoved;
@@ -167,6 +176,19 @@ class BoardDragConfig<TKey> {
   final BoardResizeEdges primaryResizeEdges;
   final bool buildDefaultDragHandles;
   final Widget Function(BuildContext, TKey, Widget)? dragProxyBuilder;
+
+  /// The moved visual's opacity while a move session is live. The
+  /// default, 1.0, makes the proxy the opaque half of the pair and
+  /// leaves the fading to [draggedItemOpacity].
+  final double dragProxyOpacity;
+
+  /// The opacity of the item LEFT BEHIND in the lattice while a MOVE
+  /// session holds it. 1.0 leaves it untouched.
+  ///
+  /// A RESIZE session never dims, whatever this holds: it paints no
+  /// proxy, so a faded item would leave nothing at full strength.
+  final double draggedItemOpacity;
+
   final BoardSemanticsActionsBuilder<TKey>? semanticsActionsBuilder;
   final bool hapticsOnDrag;
   final double autoScrollEdgeZone;

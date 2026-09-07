@@ -1,6 +1,23 @@
 ## 0.0.36
 
 - Board 2D-scrollable.
+- Added `BoardDragConfig.dragProxyOpacity` and
+`BoardDragConfig.draggedItemOpacity`, the opacity of the drag proxy and of
+the item left behind in the lattice while a MOVE session holds it. They
+default to 1.0 and 0.5, which changes how a move looks: the proxy was
+hardcoded at 0.85 and is now opaque, with the fade moved to the item that
+stays put. A resize session fades nothing whatever `draggedItemOpacity`
+holds, because it paints no proxy and a faded item would leave nothing at
+full strength.
+- Added `BoardDragController.movedItem`, a `ValueListenable<TKey?>` holding
+the key a live move session holds and null otherwise. It is written at the
+two session edges only, unlike the controller's own `ChangeNotifier`, which
+fires per pointer move, so an item-level listener can afford it. An app
+giving the item left behind a treatment of its own watches this rather than
+`BoardItemView.isDragging`, which is false in the lattice build and
+documented as such: that item comes from the viewport's delegate, and a
+session edge fires no structural notification, so nothing rebuilds it
+between the lift and the commit.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin, with no clip. In a tree short enough to fit its viewport the
 sliver declares no visual overflow, so the viewport pushes no clip either and

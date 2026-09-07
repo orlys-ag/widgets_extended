@@ -384,8 +384,8 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
           child: SizedBox(
             width: rect?.width,
             height: rect?.height,
-            child: Opacity(
-              opacity: 0.85,
+            child: _BoardOpacity(
+              opacity: drag.config.dragProxyOpacity,
               child: _buildProxyContent(key),
             ),
           ),
@@ -601,7 +601,32 @@ class _BoardItemHostState<TKey> extends State<_BoardItemHost<TKey>> {
     // again in each: a policy is app code on a per-item build path, and
     // two reads of a stateful predicate can disagree within one build.
     final canDrag = _canDrag;
-    Widget child = widget.child;
+    // The left-behind dim. Driven by the drag controller's narrow
+    // session-edge channel and NOT by `BoardItemView.isDragging`: the
+    // lattice item is built by the viewport's delegate, and a session
+    // edge fires no structural notification, so the flag that build
+    // captured is stale for the whole session.
+    //
+    // The item passes through as `child`, so a session edge rebuilds
+    // this wrapper and nothing under it: `updateChild` returns the
+    // existing element without updating it when the new widget equals
+    // the old (`widgets/framework.dart:4014`), and an identical instance
+    // does.
+    //
+    // Compares `widget.itemKey` rather than the session's captured
+    // `_ownedKey`, which is the opposite of what the two ownership
+    // checks below do: this decides what THIS element paints, and a rank
+    // shift re-keys the element in place, so the dim follows the widget.
+    Widget child = ValueListenableBuilder<TKey?>(
+      valueListenable: widget.dragController.movedItem,
+      child: widget.child,
+      builder: (context, moved, child) {
+        return _BoardOpacity(
+          opacity: moved == widget.itemKey ? config.draggedItemOpacity : 1.0,
+          child: child!,
+        );
+      },
+    );
     if (config.buildDefaultDragHandles) {
       // The MOVE handle wraps the whole item, delayed so touch scrolling
       // that starts on an item still works; resize handles are edge
@@ -1071,5 +1096,106 @@ class _BoardViewport<TKey, TItem> extends TwoDimensionalViewport {
       ..delegate = delegate
       ..mainAxis = mainAxis
       ..clipBehavior = clipBehavior;
+  }
+}
+
+/// An opacity wrapper that costs nothing at 1.0.
+///
+/// `Opacity` cannot serve. `RenderOpacity.alwaysNeedsCompositing` is
+/// `child != null && _alpha > 0` and its `isRepaintBoundary` is that same
+/// getter (`rendering/proxy_box.dart:884-887`), so a wrapper left in the
+/// tree at full strength still composites a layer and installs a repaint
+/// boundary, per item, on top of the one the delegate already adds. This
+/// one pushes a layer only while it actually fades.
+///
+/// Costing nothing at rest is what lets the item host keep the wrapper in
+/// the tree unconditionally, and an unconditional wrapper is the point: a
+/// widget inserted above the item at the lift and removed at the drop
+/// would re-inflate the item's subtree twice per session and drop its
+/// `State` both times.
+class _BoardOpacity extends SingleChildRenderObjectWidget {
+  const _BoardOpacity({required this.opacity, required Widget super.child});
+
+  final double opacity;
+
+  @override
+  _RenderBoardOpacity createRenderObject(BuildContext context) {
+    return _RenderBoardOpacity(opacity);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderBoardOpacity renderObject,
+  ) {
+    renderObject.opacity = opacity;
+  }
+}
+
+class _RenderBoardOpacity extends RenderProxyBox {
+  _RenderBoardOpacity(double opacity)
+    : assert(opacity >= 0.0 && opacity <= 1.0),
+      _opacity = opacity,
+      _alpha = Color.getAlphaFromOpacity(opacity);
+
+  double _opacity;
+  int _alpha;
+
+  final LayerHandle<OpacityLayer> _layerHandle = LayerHandle<OpacityLayer>();
+
+  set opacity(double value) {
+    assert(value >= 0.0 && value <= 1.0);
+    if (_opacity == value) {
+      return;
+    }
+    // The compositing bit moves with the alpha, so it is read BEFORE the
+    // write and compared after, which is the order `RenderOpacity`'s own
+    // setter uses (`rendering/proxy_box.dart:901-916`).
+    final wasCompositing = alwaysNeedsCompositing;
+    _opacity = value;
+    _alpha = Color.getAlphaFromOpacity(value);
+    if (wasCompositing != alwaysNeedsCompositing) {
+      markNeedsCompositingBitsUpdate();
+    }
+    markNeedsPaint();
+  }
+
+  /// True exactly when [paint] pushes the layer: at 255 it paints the
+  /// child straight through, and at 0 it paints nothing at all.
+  @override
+  bool get alwaysNeedsCompositing {
+    return child != null && _alpha > 0 && _alpha < 255;
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    // At 0 this paints nothing and still hit-tests and still reports
+    // semantics, which is `RenderProxyBox`'s behaviour and not
+    // `RenderOpacity`'s: an item configured invisible for the length of
+    // its own drag is pinned and excluded from `itemAt` anyway.
+    if (child == null || _alpha == 0) {
+      _layerHandle.layer = null;
+      return;
+    }
+    if (_alpha == 255) {
+      _layerHandle.layer = null;
+      super.paint(context, offset);
+      return;
+    }
+    // `pushOpacity` carries the offset on the LAYER and calls the painter
+    // at zero (`rendering/object.dart:836-848`), which is what
+    // `RenderProxyBox.paint` expects to be handed.
+    _layerHandle.layer = context.pushOpacity(
+      offset,
+      _alpha,
+      super.paint,
+      oldLayer: _layerHandle.layer,
+    );
+  }
+
+  @override
+  void dispose() {
+    _layerHandle.layer = null;
+    super.dispose();
   }
 }
