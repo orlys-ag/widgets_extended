@@ -1,105 +1,43 @@
 ## 0.0.36
 
-- A payload write (`updateItem`) now rebuilds only the item's builder and
-the builders of the cells its span covers, and a selection change rebuilds
-only the cells whose `isSelected` flipped and the items whose span's
-intersection with the selection changed; both rebuilt every mounted cell
-and item before. A cell builder reading a non-covering item's payload, or
-an item builder reading the selection outside that intersection rule, no
-longer sees those writes: the view's own members are the tracked reads,
-which the two builder typedefs' doc comments state. A cell that built null
-is still asked again on every layout.
-- Board 2D-scrollable.
-- Added `BoardDragConfig.dragProxyOpacity` and
-`BoardDragConfig.draggedItemOpacity`, the opacity of the drag proxy and of
-the item left behind in the lattice while a MOVE session holds it. They
-default to 1.0 and 0.5, which changes how a move looks: the proxy was
-hardcoded at 0.85 and is now opaque, with the fade moved to the item that
-stays put. A resize session fades nothing whatever `draggedItemOpacity`
-holds, because it paints no proxy and a faded item would leave nothing at
-full strength.
-- Added `BoardDragController.movedItem`, a `ValueListenable<TKey?>` holding
-the key a live move session holds and null otherwise. It is written at the
-two session edges only, unlike the controller's own `ChangeNotifier`, which
-fires per pointer move, so an item-level listener can afford it. An app
-giving the item left behind a treatment of its own watches this rather than
-`BoardItemView.isDragging`, which is false in the lattice build and
-documented as such: that item comes from the viewport's delegate, and a
-session edge fires no structural notification, so nothing rebuilds it
-between the lift and the commit.
-- Fix: a board item whose paint-only slide carried it across the viewport
-edge stopped painting and hit-testing the moment its structural rect left
-the viewport, while `itemAt` still reported it there. The item paint and
-hit-test walks now gate on the painted rect, the one `itemAt` probes.
-- Fix: on a reversed board axis (`AxisDirection.up` or `left`) item slides
-ran the wrong way: the animation coordinator stores content-space deltas
-and the render object added them raw to the already-reversed paint offset,
-so a FLIP started off-screen and travelled away from its target. The render
-object now converts per-item deltas at one site. `BoardRenderPort` gains
-`paintedRectOfItem` and `contentDeltaFromPaint`, and the drag layer reads
-painted rects and converts its hand-off and drop-settle deltas through them
-instead of composing the two spaces by hand.
-- Fix: the board viewport decided its clip from cells alone, so an item
-painting outside the viewport (a drop-settle glide from a proxy released
-beyond the board, on a lattice smaller than its viewport) painted over
-whatever sat beside the board. Items now count in the clip decision, at
-paint, where their shift moves.
-- Fix: frozen tracks were absent from the board background geometry. The
-visible track range is derived from the scroll offset, so a frozen row that
-had scrolled past its own extent was never iterated by `BoardGridPainter`
-and got no line or tint, and one still inside the range was positioned at
-its scrolled offset rather than in the band. `BoardGeometryView` gains
-`frozenTracksOf`, `visibleCellRect` positions a frozen track where its
-frozen child paints, and the painter iterates the visible range plus the
-frozen tracks, widening its band to cover them.
-- Fix: rebuilding a `Board` with a new `BoardDragConfig` instance (or a
-new controller) while its builders kept their identity replaced the drag
-controller but not the delegate, so every mounted item host kept the
-DISPOSED controller: the next long-press threw "used after being
-disposed", left `isDragging` stuck true and reported nothing. A replaced
-drag controller now replaces the delegate, which is the one route that
-rebuilds every mounted host.
-- Fix: a board item host whose drag session a span mutator had cancelled
-kept forwarding its pointer, so once another host started a session that
-stale pointer drove it and its lift committed the other item. The update
-and end handlers now apply the same ownership check the other two sites
-do, dropping ownership on a mismatch.
-- Fix: an overshooting `itemEnterExit` curve (`Curves.easeInBack`,
-`Curves.easeOutBack`) on a laned board produced a negative ramp, which the
-lane-axis geometry turned into a negative tight constraint and a layout
-assertion on every later frame. The ramp is now clamped to 0..1 at its
-producer, for the enter value and the exit product alike.
-- Fix: a make-room gap snapped while its curve was above 1 (an overshoot
-such as `Curves.easeOutBack` past its midpoint) handed the commit a curve
-tail that reported 1 at every clock, so the displaced neighbour stepped to
-rest instead of easing back. A negative span now renormalises the tail.
-- Fix: the make-room engine honoured a drag session's captured curve but
-read the live style for its clock, so a `makeRoom` restyle mid-session
-changed a live gap's duration while the captured curve still governed. The
-captured duration is now stored beside the curve and drives the tick and
-the hand-off; the live family's zero still dominates both.
-- Fix: a second board scroll landing in the frame an earlier landing had
-already scheduled its settle snap for lost its snap: the post-frame
-callback compared the OLDER call's intent generation and discarded the
-newer target, which on a content-sized axis left the landing off by the
-tracks measured since. The generation now lives in a field the newest
-landing overwrites, as the snap slot already did.
-- Fix: a board span whose fractional parts summed an ulp past a whole
-track (`rowFraction: 0.78, rowSpan: 2, rowSpanFraction: 0.22` ends at
-3.0000000000000004) was indexed into the next track and reported by
-`itemsAt`/`itemsIn` as occupying it, so a free cell read as occupied. The
-span index now applies the same tolerance the lane resolver does.
-- Fix: `BoardSnap.fraction(0.0)` was accepted and made every quantized
-value NaN, which threw on the first drop resolve or selection tap. The
-constructor now asserts a positive quantum.
+- Added `board`: a two-axis scrolling lattice. `Board` is the widget and
+`BoardController` owns the model (`addItem`, `moveItem`, `resizeItem`,
+`removeItem`, `setItems`); a `BoardCellBuilder` fills every `(row, col)` cell
+and a `BoardItemBuilder` builds items, which span track rectangles and may
+cover many cells. `BoardAxisConfig` describes each axis with one of four
+kinds: `UniformAxis`, `ExplicitAxis`, `DerivedAxis`, and `LazyContentAxis`,
+which measures its tracks from cell content. An axis given a `laneExtent`
+becomes the lane axis, where overlapping items stack into lanes instead of
+covering each other. Axes can freeze leading and trailing tracks
+(`frozenStart`, `frozenEnd`), and `animateScrollToCell` and `jumpToCell`
+scroll both axes at once.
+- Added board drag-and-drop through `BoardDragConfig`. The board resolves the
+drop and reports it (`onItemMoved`, `onItemResized`); the app mutates.
+`BoardSnap` quantizes the target to whole tracks or to a fraction, `canDropAt`
+vetoes it, `BoardDropFit` slides a refused move onto nearby free space, and
+the items a drop would displace open a make-room gap that previews it.
+Dragging near an edge autoscrolls. `BoardDragHandle` and
+`BoardDelayedDragHandle` are the built-in handles, `resizeEdges` and
+`primaryResizeEdges` choose which edges resize, and `dragProxyOpacity` and
+`draggedItemOpacity` (1.0 and 0.5) fade the drag proxy and the item left
+behind. `BoardDragController.movedItem` is a `ValueListenable` holding the key
+a live move session holds, written at the two session edges only.
+- Added board selection through `BoardSelectionConfig`: `BoardSelectionMode.cell`
+selects on a tap and `.range` on a drag. The controller holds the current
+`BoardSelection`.
+- Added board animation timing in one `BoardAnimationStyle` over five families
+(`trackResize`, `itemEnterExit`, `itemSlide`, `makeRoom`, `dropSettle`), as
+`TreeAnimationStyle` already does for the tree. A family's zero duration is a
+kill switch.
+- Added `BoardGridPainter` and `BoardBackgroundPainter`, which paint behind the
+lattice from its live track geometry (`BoardGeometryView`), frozen bands
+included.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
-paint origin, with no clip. In a tree short enough to fit its viewport the
-sliver declares no visual overflow, so the viewport pushes no clip either and
-the header was drawn over whatever sat above the scroll view; with a sliver
-above the tree it was drawn over that sliver even when the viewport did clip.
-The header is now clipped to the sliver's paint region at the top as it already
-was at the bottom. The 0.0.35 no-clip fast path is unchanged for settled
-headers; the clip appears only while a header slides up out of the band.
+paint origin with no clip, so it was drawn over whatever sat above the scroll
+view: a tree short enough to fit its viewport declares no visual overflow, so
+the viewport pushes no clip either. The header is now clipped to the sliver's
+paint region at the top as it already was at the bottom, and the 0.0.35
+no-clip fast path still applies to settled headers.
 
 ## 0.0.35
 
