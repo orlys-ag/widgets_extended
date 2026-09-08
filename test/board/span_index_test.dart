@@ -57,7 +57,6 @@ void main() {
       expect(index.debugProbeCount, lessThanOrEqualTo(12));
       expect(index.itemsInRect(0, 1, 500, 501), isEmpty);
     },
-    skip: "lands with the sorted removal, plan step 4",
   );
 
   // Performance plan T2b.

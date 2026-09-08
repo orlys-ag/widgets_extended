@@ -202,12 +202,16 @@ class SpanIndex {
       if (bucket == null) {
         continue;
       }
-      for (var i = 0; i < bucket.length; i++) {
-        debugProbeCount++;
-        if (bucket[i] == id) {
-          bucket.removeAt(i);
-          break;
-        }
+      final int at;
+      if (_pendingSortBuckets.contains(track)) {
+        // Appended by the bulk path and not yet sorted: no order to
+        // search, so this is the one arm that walks.
+        at = _linearIndex(bucket, id);
+      } else {
+        at = _removalIndex(bucket, id);
+      }
+      if (at >= 0) {
+        bucket.removeAt(at);
       }
       if (bucket.isEmpty) {
         _buckets.remove(track);
@@ -480,6 +484,51 @@ class SpanIndex {
       return endA > endB ? -1 : 1;
     }
     return a.compareTo(b);
+  }
+
+  /// The index of [id] in a SORTED bucket, or -1: the lower bound under
+  /// [_compare], the mirror of [_insertionIndex]'s upper bound, followed
+  /// by a walk over the equal-key run until the id. That run has length
+  /// one, since [_compare] ends on the id and no two distinct ids compare
+  /// equal, so the walk exists only so a missing id degrades to -1 rather
+  /// than removing a neighbour. Each probe is counted.
+  ///
+  /// Reads the keys the store holds NOW, which are the keys the item was
+  /// inserted under because every span mutator de-registers before
+  /// writing (see [deregister]).
+  int _removalIndex(List<int> bucket, int id) {
+    var low = 0;
+    var high = bucket.length;
+    while (low < high) {
+      final mid = (low + high) >> 1;
+      debugProbeCount++;
+      if (_compare(bucket[mid], id) < 0) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    for (var i = low; i < bucket.length; i++) {
+      debugProbeCount++;
+      if (bucket[i] == id) {
+        return i;
+      }
+      if (_compare(bucket[i], id) > 0) {
+        break;
+      }
+    }
+    return -1;
+  }
+
+  /// The index of [id] in an UNSORTED bucket, or -1, counting each probe.
+  int _linearIndex(List<int> bucket, int id) {
+    for (var i = 0; i < bucket.length; i++) {
+      debugProbeCount++;
+      if (bucket[i] == id) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   /// Upper bound for [id] under [_compare], counting each probe.
