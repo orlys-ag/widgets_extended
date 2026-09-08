@@ -506,6 +506,22 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   @override
   void layoutChildSequence() {
+    // The shift memo is valid only inside ONE layout, between the
+    // invalidation points [_invalidateShiftMemo] names; outside layout
+    // the port's queries read live, so a tick between frames is never
+    // masked.
+    _shiftMemoActive = true;
+    _invalidateShiftMemo();
+    try {
+      _layoutChildSequenceBody();
+    } finally {
+      _shiftMemoActive = false;
+      _shiftMemoRows.clear();
+      _shiftMemoCols.clear();
+    }
+  }
+
+  void _layoutChildSequenceBody() {
     _obtainedThisLayout.clear();
     // Cleared at ENTRY, not in the sweep: the item OBTAIN writes it and
     // the sweep, the paint walks and applyPaintTransform read it.
@@ -687,11 +703,58 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (!_controller.anim.hasActiveTrackResize) {
       return settled;
     }
-    final floor = axisEnum == Axis.vertical
-        ? _shiftFloorRow
-        : _shiftFloorCol;
-    return settled +
-        _controller.animatedOffsetShiftBetween(axisEnum, floor, track);
+    return settled + _shiftTo(axisEnum, track);
+  }
+
+  /// Per-axis memo of the animated-minus-settled SHIFT at a track's lead
+  /// over the current layout, keyed by track. Valid only between the
+  /// invalidation points [_invalidateShiftMemo] is called at; consulted
+  /// only while [_shiftMemoActive]. Stores the shift and not the offset,
+  /// so the settled half is always read live.
+  final Map<int, double> _shiftMemoRows = <int, double>{};
+  final Map<int, double> _shiftMemoCols = <int, double>{};
+  bool _shiftMemoActive = false;
+
+  /// The animator generation the memo was last invalidated at; the
+  /// assert in [_shiftTo] covers the animator half of the memo's
+  /// invariant, the enumerated invalidation points the settled half.
+  int _shiftMemoGeneration = 0;
+
+  /// The shift `animatedOffsetShiftBetween` would return for [track] on
+  /// [axis] from this layout's floor: memoized inside a layout, live
+  /// outside one. One animator walk per distinct (axis, track) per
+  /// invalidation window instead of one per positioned cell.
+  double _shiftTo(Axis axis, int track) {
+    final floor = axis == Axis.vertical ? _shiftFloorRow : _shiftFloorCol;
+    if (!_shiftMemoActive) {
+      return _controller.animatedOffsetShiftBetween(axis, floor, track);
+    }
+    assert(
+      _shiftMemoGeneration == _controller.debugTrackResizeGeneration,
+      "the shift memo was served across a resize animator mutation; the "
+      "mutating site is missing from _invalidateShiftMemo's callers",
+    );
+    final memo = axis == Axis.vertical ? _shiftMemoRows : _shiftMemoCols;
+    return memo[track] ??= _controller.animatedOffsetShiftBetween(
+      axis,
+      floor,
+      track,
+    );
+  }
+
+  /// Clears the memo. Called at layoutChildSequence entry, at the head of
+  /// each obtain round, immediately after the floor writes, and
+  /// immediately after `_sizeContentTracks` returns, which together cover
+  /// every write the memo's inputs can take inside a layout: a grep for
+  /// recordMeasurement, animateTrackResize and finalizeTrackResize over
+  /// this file returns only lines inside `_sizeContentTracks`.
+  void _invalidateShiftMemo() {
+    _shiftMemoRows.clear();
+    _shiftMemoCols.clear();
+    assert(() {
+      _shiftMemoGeneration = _controller.debugTrackResizeGeneration;
+      return true;
+    }());
   }
 
   double _animatedExtentOf(Axis axisEnum, BoardAxis axis, int track) {
@@ -781,6 +844,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // obtainable set; the obtain-once set makes re-walks cheap.
     while (true) {
       final obtainedBefore = _obtainedThisLayout.length;
+      _invalidateShiftMemo();
       final firstRow = _animatedTrackAt(
         Axis.vertical,
         rowAxis,
@@ -795,6 +859,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       // last write wins, which is the settling pass's.
       _shiftFloorRow = firstRow;
       _shiftFloorCol = firstCol;
+      // The shift is anchored at the floor, so a floor write re-keys
+      // every memo entry.
+      _invalidateShiftMemo();
       // The scrolled window, then the three frozen extensions: frozen
       // rows under the scrolled columns, frozen columns beside the
       // scrolled rows, and the frozen-by-frozen corner. A frozen track is
@@ -868,6 +935,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       );
       if (anchorAxis != null) {
         _sizeContentTracks(anchorAxis);
+        // Every install, finalize and settled write sits inside it.
+        _invalidateShiftMemo();
       }
       if (_obtainedThisLayout.length == obtainedBefore) {
         break;
@@ -1311,17 +1380,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       math.min(endTrack, boardAxis.trackCount.toDouble()),
     );
     if (_controller.anim.hasActiveTrackResize) {
-      final floor = axis == Axis.vertical ? _shiftFloorRow : _shiftFloorCol;
-      lead += _controller.animatedOffsetShiftBetween(
-        axis,
-        floor,
-        startTrack.floor(),
-      );
-      trail += _controller.animatedOffsetShiftBetween(
-        axis,
-        floor,
-        endTrack.floor(),
-      );
+      lead += _shiftTo(axis, startTrack.floor());
+      trail += _shiftTo(axis, endTrack.floor());
     }
     var extent = math.max(0.0, trail - lead + extentDelta);
     if (_controller.laneAxis == axis) {

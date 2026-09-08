@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/board/_board_animation_coordinator.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
@@ -120,6 +121,73 @@ BoardSpan _chip(int row, int colStart, int colSpan) {
 }
 
 void main() {
+  // Performance plan T4 (plans/2026-09-07-board-performance-plan.md).
+  // Asserts: a layout under in-flight resizes on every visible row reads
+  // the resize animator's shift walk once per distinct track per
+  // invalidation window, not twice per positioned cell.
+  // Falsification: the per-cell reads at the positioning sweep report at
+  // least two per cell, 800 for the 400 visible cells.
+  testWidgets(
+    "a layout under in-flight resizes reads the animator once per track",
+    (tester) async {
+      final controller = BoardController<String, _Item>(
+        vsync: tester,
+        rows: BoardAxisConfig(axis: LazyContentAxis(20, 20.0)),
+        columns: BoardAxisConfig(axis: UniformAxis(20, 14.0)),
+        keyOf: (item) {
+          return item.key;
+        },
+        animationStyle: BoardAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+      var cellHeight = 20.0;
+      // A fresh closure per call: pumping the tree again replaces the
+      // delegate, which rebuilds and re-measures every cell without an
+      // item, and a content-sized axis without a lane extent admits none.
+      Widget board() {
+        return MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 280.0,
+                height: 400.0,
+                child: Board<String, _Item>(
+                  controller: controller,
+                  cellBuilder: (context, cell) {
+                    return SizedBox(width: 14.0, height: cellHeight);
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      await tester.pumpWidget(board());
+      final viewport = _viewport(tester);
+      // Setup sanity: the whole 20 by 20 lattice is visible.
+      expect(viewport.rectOfCell(19, 19), isNotNull);
+      controller.animationStyle = _resizeOnly;
+      // Every row re-measures taller on the rebuild, so every visible row
+      // installs a resize on the same frame.
+      cellHeight = 30.0;
+      await tester.pumpWidget(board());
+      final coordinator = controller.anim as BoardAnimationCoordinator<String>;
+      expect(controller.anim.hasActiveTrackResize, isTrue);
+      coordinator.trackResize.debugShiftCallCount = 0;
+      final layoutsBefore = viewport.debugPerformLayoutCount;
+
+      await tester.pump(const Duration(milliseconds: 16));
+
+      expect(viewport.debugPerformLayoutCount, layoutsBefore + 1);
+      expect(viewport.debugLastCorrectionPassCount, 1);
+      expect(coordinator.trackResize.debugShiftCallCount, lessThan(200));
+      // Let the resizes finish so no ticker outlives the test.
+      await tester.pump(const Duration(milliseconds: 400));
+    },
+  );
+
   // AC14 reflow without slides.
   // Asserts: debugSlideInstallCount is unchanged across the resize while
   // every following item's painted rect moves. The style keeps itemSlide

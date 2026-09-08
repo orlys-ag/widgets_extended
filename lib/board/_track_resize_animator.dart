@@ -65,6 +65,15 @@ class TrackResizeAnimator {
   /// distinguishes a per-track read from a per-cell one.
   int debugShiftCallCount = 0;
 
+  /// Debug-only: bumped by every door that mutates a state, install,
+  /// finalize (both forms) and tick, so a reader that memoizes
+  /// [offsetShiftBetween] can assert it never served across one.
+  int get debugGeneration {
+    return _generation;
+  }
+
+  int _generation = 0;
+
   final Map<int, _TrackResizeState> _vertical = <int, _TrackResizeState>{};
   final Map<int, _TrackResizeState> _horizontal = <int, _TrackResizeState>{};
 
@@ -93,6 +102,7 @@ class TrackResizeAnimator {
     Duration? duration,
     Curve? curve,
   }) {
+    _generation++;
     final spec = _styleOf().specFor(family);
     if (spec.duration == Duration.zero ||
         (duration ?? spec.duration) == Duration.zero) {
@@ -146,6 +156,7 @@ class TrackResizeAnimator {
   /// invalidates only the swapped lattice, and extents animating against
   /// the OTHER one are still evidence.
   void finalizeAll({Axis? axis}) {
+    _generation++;
     if (axis == null || axis == Axis.vertical) {
       _vertical.clear();
     }
@@ -162,6 +173,7 @@ class TrackResizeAnimator {
   /// from inside layout like the install beside it; the only reachable
   /// side effect is the ticker stop.
   void finalizeTrack(Axis axis, int track) {
+    _generation++;
     _statesOf(axis).remove(track);
     _stopIfIdle();
   }
@@ -180,6 +192,7 @@ class TrackResizeAnimator {
   }
 
   void _tick(Duration elapsed) {
+    _generation++;
     final dt = elapsed - _lastElapsed;
     _lastElapsed = elapsed;
     final style = _styleOf();

@@ -1307,6 +1307,14 @@ class BoardController<TKey, TItem> {
     return _anim.trackResize.offsetShiftBetween(axis, fromTrack, track);
   }
 
+  /// Debug-only: the resize animator's mutation generation, forwarded for
+  /// the render object's shift-memo assert for the reason
+  /// [debugLaneBucketResolveCount] gives: only the animator knows it
+  /// mutated.
+  int get debugTrackResizeGeneration {
+    return _anim.trackResize.debugGeneration;
+  }
+
   /// Scrolls both axes so cell `(row, col)` lands aligned, below the
   /// frozen bands when [avoidFrozenTracks] is true. Completes true only
   /// when BOTH axes' legs landed; false when either leg was superseded
