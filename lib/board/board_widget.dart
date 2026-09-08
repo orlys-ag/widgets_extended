@@ -135,6 +135,17 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
   final _SelectionRelay _selectionRelay = _SelectionRelay();
   final _ItemDataRelay<TKey> _dataRelay = _ItemDataRelay<TKey>();
 
+  /// The proxy's item host, ONE instance per move session. The pointer
+  /// `ValueListenableBuilder` in [_buildDragProxy] receives it through
+  /// its `child` slot and `updateChild` hands an identical instance back
+  /// unchanged (`widgets/framework.dart:4014`), so the app's builder runs
+  /// once at the lift and once per payload write to the dragged key,
+  /// which the host's data relay delivers, never per pointer move.
+  /// Rewritten when the dragged key changes and nulled at the session's
+  /// end, so a session's content does not outlive it.
+  Widget? _proxyHost;
+  TKey? _proxyKey;
+
   @override
   void initState() {
     super.initState();
@@ -179,6 +190,14 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
   /// The proxy shows and hides with the session; a plain setState is
   /// enough because the proxy is built in [build].
   void _handleDragChanged() {
+    if (_dragController?.draggedKey == null) {
+      // Cleared HERE and not only in build: an end notify and a start
+      // notify on the same key inside one build window coalesce into one
+      // build, in which the key compare in [_buildDragProxy] alone would
+      // keep the ended session's host and the view it captured.
+      _proxyHost = null;
+      _proxyKey = null;
+    }
     if (mounted) {
       setState(() {});
     }
@@ -406,9 +425,15 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
     if (key == null || drag.draggedKind != BoardDragKind.move) {
       return const SizedBox.shrink();
     }
+    if (_proxyHost == null || _proxyKey != key) {
+      // The one builder call per session; see [_proxyHost].
+      _proxyKey = key;
+      _proxyHost = _buildProxyContent(key);
+    }
     return ValueListenableBuilder<Offset?>(
       valueListenable: drag.pointerPosition,
-      builder: (context, pointer, _) {
+      child: _proxyHost,
+      builder: (context, pointer, proxyHost) {
         final topLeft = drag.proxyTopLeft;
         if (pointer == null || topLeft == null) {
           return const SizedBox.shrink();
@@ -420,7 +445,7 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
             height: rect?.height,
             child: _BoardOpacity(
               opacity: drag.config.dragProxyOpacity,
-              child: _buildProxyContent(key),
+              child: proxyHost!,
             ),
           ),
         );
