@@ -23,6 +23,72 @@ import 'package:widgets_extended/board/_overlap_lanes.dart';
 import 'package:widgets_extended/board/_span_index.dart';
 
 void main() {
+  // Performance plan T1 (plans/2026-09-07-board-performance-plan.md).
+  // Asserts: once the rank list is built, one ordinalOf read costs one
+  // probe whatever the id's rank.
+  // Falsification: a linear rank search reports the rank plus one.
+  test("ordinalOf on a bucket of 1000 items costs one probe", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final ids = _registerRow(store, index, 1000);
+    // Setup sanity: the id at column 999 ranks last, so a linear search
+    // would walk the whole list. This read also builds the rank list.
+    expect(index.ordinalOf(ids[999]), 999);
+    index.debugProbeCount = 0;
+    index.ordinalOf(ids[999]);
+    expect(index.debugProbeCount, 1);
+  });
+
+  // Performance plan T2.
+  // Asserts: removing an id from a sorted bucket of 1000 costs at most
+  // log2(1000) probes plus the one-element run walk plus slack.
+  // Falsification: a linear removal reports about 500.
+  test(
+    "deregister from a sorted bucket of 1000 items stays inside the probe "
+    "bound",
+    () {
+      final store = BoardStore<String, String>();
+      final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+      final ids = _registerRow(store, index, 1000);
+      // Setup sanity: the bucket is sorted and holds the id.
+      expect(index.itemsInRect(0, 1, 500, 501), <int>[ids[500]]);
+      index.debugProbeCount = 0;
+      index.deregister(ids[500]);
+      expect(index.debugProbeCount, lessThanOrEqualTo(12));
+      expect(index.itemsInRect(0, 1, 500, 501), isEmpty);
+    },
+    skip: "lands with the sorted removal, plan step 4",
+  );
+
+  // Performance plan T2b.
+  // Asserts: a de-registration that lands between a bulk append and its
+  // flush still removes the id.
+  // Falsification: a removal that binary-searches the still-unsorted
+  // bucket misses, and the id survives the flush.
+  test("deregister during a bulk append removes the id", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final ids = <int>[];
+    // Descending columns, so the appended order is the REVERSE of the
+    // sorted order and a sorted search over it cannot land on the id.
+    for (var i = 49; i >= 0; i--) {
+      ids.add(
+        _register(
+          store,
+          index,
+          "b$i",
+          BoardSpan(rowStart: 0, colStart: i, colSpan: 1),
+          bulk: true,
+        ),
+      );
+    }
+    index.deregister(ids[7]);
+    index.flushPendingSorts();
+    final found = index.itemsInRect(0, 1, 0, 50);
+    expect(found, isNot(contains(ids[7])));
+    expect(found.length, 49);
+  });
+
   // DERIVED name. No AC.
   // Asserts: an oracle fuzz against a linear scan over randomized add,
   // move, resize and remove scripts.
@@ -544,6 +610,29 @@ class _OneBucketFixture {
     store: store,
     primaryAxis: Axis.vertical,
   );
+}
+
+/// [count] single-cell items on row 0, one per column, appended in bulk
+/// and flushed, so the row-0 bucket is sorted by column.
+List<int> _registerRow(
+  BoardStore<String, String> store,
+  SpanIndex index,
+  int count,
+) {
+  final ids = <int>[];
+  for (var i = 0; i < count; i++) {
+    ids.add(
+      _register(
+        store,
+        index,
+        "r$i",
+        BoardSpan(rowStart: 0, colStart: i, colSpan: 1),
+        bulk: true,
+      ),
+    );
+  }
+  index.flushPendingSorts();
+  return ids;
 }
 
 int _register(

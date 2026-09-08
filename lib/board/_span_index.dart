@@ -69,6 +69,7 @@ class SpanIndex {
     }
     _laneAxis = value;
     _ordinalRanks.clear();
+    _ordinalById.clear();
     _ordinalDirty.clear();
   }
 
@@ -80,6 +81,13 @@ class SpanIndex {
   /// vicinity is not (a lane is reused within a cluster by
   /// non-overlapping items, and non-laned items all carry lane 0).
   final Map<int, List<int>> _ordinalRanks = <int, List<int>>{};
+
+  /// Id to its ordinal, the inverse of [_ordinalRanks]. Written only by
+  /// [_ranksFor]'s rebuild, in the same loop that fills the rank list,
+  /// removed by [deregister] beside its dirty mark so the map never holds
+  /// an id that is not registered, and cleared wherever [_ordinalRanks]
+  /// is.
+  final Map<int, int> _ordinalById = <int, int>{};
 
   /// Primary start tracks whose rank list is stale. Registration and
   /// de-registration mark the item's own start track; ranks rebuild
@@ -116,6 +124,7 @@ class SpanIndex {
     }
     _primaryAxis = value;
     _ordinalRanks.clear();
+    _ordinalById.clear();
     _ordinalDirty.clear();
     clear();
   }
@@ -187,6 +196,7 @@ class SpanIndex {
     final firstTrack = _store.startTrackOf(id, _primaryAxis).floor();
     final lastTrack = _lastTrackOf(id, firstTrack);
     _ordinalDirty.add(firstTrack);
+    _ordinalById.remove(id);
     for (var track = firstTrack; track <= lastTrack; track++) {
       final bucket = _buckets[track];
       if (bucket == null) {
@@ -298,6 +308,7 @@ class SpanIndex {
     _pendingSortBuckets.clear();
     _seen.clear();
     _ordinalRanks.clear();
+    _ordinalById.clear();
     _ordinalDirty.clear();
   }
 
@@ -376,21 +387,19 @@ class SpanIndex {
   /// own. The item vicinity's xIndex component.
   int ordinalOf(int id) {
     final track = _store.startTrackOf(id, _primaryAxis).floor();
-    final ranks = _ranksFor(track);
-    var at = -1;
-    for (var i = 0; i < ranks.length; i++) {
-      debugProbeCount++;
-      if (ranks[i] == id) {
-        at = i;
-        break;
-      }
-    }
+    // The rebuild call is what makes a dirty track rebuild FIRST: either
+    // the track is dirty and the rebuild overwrites the id's entry before
+    // the read, or it is clean and nothing registered on it since the
+    // entry was written. One map read, counted as one probe.
+    _ranksFor(track);
+    debugProbeCount++;
+    final at = _ordinalById[id];
     assert(
-      at >= 0,
+      at != null,
       "ordinalOf($id) on a track whose rank list does not hold it; the "
       "item was mutated without deregister-register",
     );
-    return at;
+    return at ?? -1;
   }
 
   /// The id at [ordinal] on primary start track [track], or noId when the
@@ -441,6 +450,9 @@ class SpanIndex {
         }
         return a.compareTo(b);
       });
+    }
+    for (var i = 0; i < ranks.length; i++) {
+      _ordinalById[ranks[i]] = i;
     }
     _ordinalRanks[track] = ranks;
     _ordinalDirty.remove(track);
