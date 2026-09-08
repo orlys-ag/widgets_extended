@@ -60,6 +60,11 @@ class TrackResizeAnimator {
   late final Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
 
+  /// Debug-only: calls to [offsetShiftBetween] since the last reset. Each
+  /// call walks every in-flight state on its axis, so the count is what
+  /// distinguishes a per-track read from a per-cell one.
+  int debugShiftCallCount = 0;
+
   final Map<int, _TrackResizeState> _vertical = <int, _TrackResizeState>{};
   final Map<int, _TrackResizeState> _horizontal = <int, _TrackResizeState>{};
 
@@ -121,6 +126,7 @@ class TrackResizeAnimator {
   /// window's first track: the accumulation starts THERE, anchored at its
   /// settled offset, so a resize before the window is invisible.
   double offsetShiftBetween(Axis axis, int fromTrack, int track) {
+    debugShiftCallCount++;
     var shift = 0.0;
     _statesOf(axis).forEach((stateTrack, state) {
       if (stateTrack >= fromTrack && stateTrack < track) {

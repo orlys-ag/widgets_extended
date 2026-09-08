@@ -94,7 +94,9 @@ class SpanIndex {
 
   /// Debug-only: bucket entries any operation on this index has touched
   /// since the last reset. Counts each binary-search probe, each step of
-  /// the backward walk, and each element a sorted insert shifts. It is the
+  /// the backward walk, each element a sorted insert shifts, each
+  /// comparison [ordinalOf]'s rank search makes, and each comparison
+  /// [deregister]'s bucket search makes. It is the
   /// only thing that distinguishes the sorted bucket from a full linear
   /// scan, which return identical sets. A field on an unexported class, so
   /// it adds nothing to the public surface.
@@ -190,7 +192,13 @@ class SpanIndex {
       if (bucket == null) {
         continue;
       }
-      bucket.remove(id);
+      for (var i = 0; i < bucket.length; i++) {
+        debugProbeCount++;
+        if (bucket[i] == id) {
+          bucket.removeAt(i);
+          break;
+        }
+      }
       if (bucket.isEmpty) {
         _buckets.remove(track);
         _maxSpanAxisExtent.remove(track);
@@ -369,7 +377,14 @@ class SpanIndex {
   int ordinalOf(int id) {
     final track = _store.startTrackOf(id, _primaryAxis).floor();
     final ranks = _ranksFor(track);
-    final at = ranks.indexOf(id);
+    var at = -1;
+    for (var i = 0; i < ranks.length; i++) {
+      debugProbeCount++;
+      if (ranks[i] == id) {
+        at = i;
+        break;
+      }
+    }
     assert(
       at >= 0,
       "ordinalOf($id) on a track whose rank list does not hold it; the "

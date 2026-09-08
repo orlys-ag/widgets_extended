@@ -72,6 +72,11 @@ class OverlapLaneResolver {
   /// second is O(all items log) per frame.
   int debugBucketResolveCount = 0;
 
+  /// Debug-only: calls to [laneBucketMembers] since the last reset. The
+  /// resolver is the only object that knows a bucket was read, so the
+  /// counter lives here and the controller forwards it.
+  int debugBucketMemberReadCount = 0;
+
   /// The axis items are laned ON, or null when neither config carries a
   /// lane extent. Governs LANE GEOMETRY and this partition, and nothing
   /// else; it is NOT the span index's bucket key.
@@ -470,6 +475,7 @@ class OverlapLaneResolver {
   /// for an absent bucket. For the sizing sweep's scaled cluster term and
   /// the resize install site's contributor walk; callers must not mutate.
   List<int> laneBucketMembers(int track) {
+    debugBucketMemberReadCount++;
     return _laneBuckets[track] ?? const <int>[];
   }
 

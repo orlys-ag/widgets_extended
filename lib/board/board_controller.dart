@@ -305,6 +305,16 @@ class BoardController<TKey, TItem> {
     return _lanes.debugBucketResolveCount;
   }
 
+  /// Debug-only: lane-axis bucket member reads, forwarded from the
+  /// resolver for the same reason as [debugLaneBucketResolveCount].
+  int get debugLaneBucketMemberReadCount {
+    return _lanes.debugBucketMemberReadCount;
+  }
+
+  set debugLaneBucketMemberReadCount(int value) {
+    _lanes.debugBucketMemberReadCount = value;
+  }
+
   // ---------------------------------------------------------------------
   // Caller-facing reads, TKey-keyed.
   //
