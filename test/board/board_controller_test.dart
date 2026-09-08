@@ -43,6 +43,7 @@ BoardController<String, _Item> _controller(
   WidgetTester tester, {
   BoardAxisConfig? rows,
   BoardAxisConfig? columns,
+  BoardAnimationStyle style = BoardAnimationStyle.disabled,
 }) {
   final controller = BoardController<String, _Item>(
     vsync: tester,
@@ -51,7 +52,7 @@ BoardController<String, _Item> _controller(
     keyOf: (item) {
       return item.key;
     },
-    animationStyle: BoardAnimationStyle.disabled,
+    animationStyle: style,
   );
   addTearDown(controller.dispose);
   return controller;
@@ -116,6 +117,49 @@ List<void> _logAnimation(BoardController<String, _Item> controller) {
 }
 
 void main() {
+  // Performance plan T3 (plans/2026-09-07-board-performance-plan.md).
+  // Asserts: a setItems re-sync whose placements all share one lane-axis
+  // track walks that bucket once. The SLIDE family is live: the capture
+  // runs only under a non-zero itemSlide, and under the helper's default
+  // both halves read 0. The two extent families stay at zero so the
+  // first sync starts no enter ticker for the test to leak.
+  // Falsification: one walk per collected track entry, two entries per
+  // placement, reports 400.
+  testWidgets(
+    "a setItems re-sync reads each disturbed lane bucket once per distinct "
+    "track",
+    (tester) async {
+      final controller = _controller(
+        tester,
+        rows: _lanedRows(),
+        style: const BoardAnimationStyle(
+          trackResize: BoardAnimationSpec(
+            duration: Duration.zero,
+            curve: Curves.linear,
+          ),
+          itemEnterExit: BoardAnimationSpec(
+            duration: Duration.zero,
+            curve: Curves.linear,
+          ),
+          itemSlide: BoardAnimationSpec(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.linear,
+          ),
+        ),
+      );
+      final placements = <BoardPlacement<_Item>>[
+        for (var i = 0; i < 200; i++)
+          BoardPlacement<_Item>(_Item("k$i"), _chip(0, i % 7, 1)),
+      ];
+      controller.setItems(placements);
+      // Setup sanity: the first sync read the bucket at all.
+      expect(controller.debugLaneBucketMemberReadCount, greaterThan(0));
+      controller.debugLaneBucketMemberReadCount = 0;
+      controller.setItems(placements);
+      expect(controller.debugLaneBucketMemberReadCount, 1);
+    },
+  );
+
   // DERIVED name. No AC; board_controller_test.dart is listed under the
   // tests not tied to one criterion.
   // Asserts: runBatch defers the structural and item-data channels; the

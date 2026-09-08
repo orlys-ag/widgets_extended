@@ -754,7 +754,12 @@ class BoardController<TKey, TItem> {
         // on, the track an exiting item leaves, and the track a ghost
         // retired by a re-added key leaves.
         final laneAxis = _lanes.laneAxis;
-        final tracks = <int?>[];
+        // A SET, not a list: the loop below adds one or two entries per
+        // placement and every placement in one laned row names the same
+        // track, and `_captureLaneBuckets` walks a bucket once per entry.
+        // Its own `containsKey` guard already made the result
+        // duplicate-independent, so this is a cost change only.
+        final tracks = <int?>{};
         for (final key in exiting) {
           tracks.add(_laneStartTrackOf(_store.idOf(key)));
         }
