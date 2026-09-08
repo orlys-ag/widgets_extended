@@ -59,6 +59,56 @@ void main() {
     },
   );
 
+  // Performance plan T2c.
+  // Asserts: coversCell lists a cell exactly when itemsInRect does, at
+  // the two padded edges: an endpoint sum an ulp past a whole track does
+  // not reach that track, and a sub-track item lying wholly inside a
+  // cell does reach it.
+  // Falsification: a predicate computed from the raw endpoints puts
+  // track 3 in range through `ceil() - 1`.
+  test("coversCell agrees with itemsInRect at both padded edges", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final tall = _register(
+      store,
+      index,
+      "tall",
+      const BoardSpan(
+        rowStart: 0,
+        rowFraction: 0.78,
+        rowSpan: 2,
+        rowSpanFraction: 0.22,
+        colStart: 1,
+      ),
+    );
+    final dot = _register(
+      store,
+      index,
+      "dot",
+      const BoardSpan(
+        rowStart: 5,
+        rowFraction: 0.25,
+        rowSpan: 0,
+        rowSpanFraction: 0.5,
+        colStart: 1,
+        colFraction: 0.25,
+        colSpan: 0,
+        colSpanFraction: 0.5,
+      ),
+    );
+    // Setup sanity: the endpoint sum lands past track 3 and the index
+    // does not list the item there; the dot is listed inside its cell.
+    expect(store.endTrackOf(tall, Axis.vertical), greaterThan(3.0));
+    expect(index.itemsInRect(3, 4, 0, 2), isEmpty);
+    expect(index.itemsInRect(2, 3, 1, 2), <int>[tall]);
+    expect(index.itemsInRect(5, 6, 1, 2), <int>[dot]);
+
+    expect(index.coversCell(tall, 2, 1), isTrue);
+    expect(index.coversCell(tall, 3, 1), isFalse);
+    expect(index.coversCell(tall, 2, 0), isFalse);
+    expect(index.coversCell(dot, 5, 1), isTrue);
+  });
+
   // Performance plan T2b.
   // Asserts: a de-registration that lands between a bulk append and its
   // flush still removes the id.

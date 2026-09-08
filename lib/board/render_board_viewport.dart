@@ -369,14 +369,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     _controller.detachRenderPort(this);
   }
 
-  /// A selection change alters what every cell in the old and new
-  /// rectangles builds, and the builders are reachable only through a
-  /// delegate rebuild. This listener lives here and not on `Board`'s
-  /// `State` because `markNeedsLayout(withDelegateRebuild: true)` is a
-  /// render-object call; a `setState` up there reaches nothing, for the
-  /// reason documented at the widget's listener comment.
+  /// A selection change. A MOUNTED cell or item rebuilds through its host
+  /// in the widget layer, which the `Board` state's relay reaches, and
+  /// nothing in layout reads the selection, so a mounted child needs no
+  /// delegate rebuild. The plain relayout is for a cell whose builder
+  /// returned NULL: it holds no child, so no host and no relay reach it,
+  /// and `buildOrObtainChildFor` rebuilds a vicinity holding no child on
+  /// every layout that obtains it
+  /// (`widgets/two_dimensional_viewport.dart:1490`), which is the cost
+  /// such a cell already pays per scroll.
   void _handleSelectionChanged() {
-    markNeedsLayout(withDelegateRebuild: true);
+    markNeedsLayout();
   }
 
   /// A structural change relays out, and rebuilds every obtained child
@@ -392,11 +395,15 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     );
   }
 
-  /// A payload-only write. R-7: there is no targeted-rebuild hook, so this
-  /// rebuilds every obtained child. Accepted for v1; the cost is bounded
-  /// by the mounted set, which is viewport-bounded.
+  /// A payload-only write. The item's host and the hosts of the cells its
+  /// span covers rebuild through the `Board` state's relay. The plain
+  /// relayout does two things: the sizing pass lays every obtained cell
+  /// out under measuring constraints on every layout, so a payload that
+  /// changed a cell's or item's intrinsic size still re-measures, and a
+  /// cell whose builder returned null is asked again, as under
+  /// [_handleSelectionChanged].
   void _handleItemDataChange(TKey key) {
-    markNeedsLayout(withDelegateRebuild: true);
+    markNeedsLayout();
   }
 
   /// An animation tick.

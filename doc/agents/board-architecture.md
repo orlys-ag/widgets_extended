@@ -27,8 +27,10 @@ range selection, frozen tracks, and a paintable background.
   with an uncoalesced settle carve-out (`notifyNow` clears the pending
   flag; the microtask checks it). The render object's structural handler
   maps non-empty or null `affectedKeys` to
-  `markNeedsLayout(withDelegateRebuild: true)`, which is also why a
-  data-only update rebuilds every mounted child (accepted for v1).
+  `markNeedsLayout(withDelegateRebuild: true)`; a data-only update and a
+  selection change take a plain relayout there and rebuild only the
+  hosts whose own answer changed, through the `Board` state's two relays
+  (see `Board` below).
 - **Two coordinate spaces.** Content space (distance from the lattice
   origin, per axis) and viewport-paint space (content minus the scroll
   offset, axis-direction aware). `_contentFromPaint` and
@@ -193,7 +195,21 @@ range selection, frozen tracks, and a paintable background.
   id's extent delta where an animated trailing edge reaches further than
   its lead, because items are obtained by their STRUCTURAL span.
 - **`Board`** (`board_widget.dart`): owns the delegate (cached, rebuilt
-  only when a builder identity changes, disposed when replaced), the drag
+  only when a builder identity changes, disposed when replaced), the
+  per-cell and per-item HOSTS (`_BoardCellHost`, `_BoardItemBuildHost`),
+  which show the delegate's builder output as `initial` and re-run the
+  builder only when a relay says THEIR answer changed: two relays the
+  state owns fan out the selection notifier and the item-data channel,
+  deferring a notify made in the build or layout phase to one post-frame
+  callback so a write from a builder during a host's self-rebuild cannot
+  mark a sibling, hosts read the never-notifying `_BoardScope` with
+  `getInheritedWidgetOfExactType`, the cell host's cover test is the
+  span index's own `coversCell` (the padded bucket range and admit test,
+  called rather than restated), the item host's selection test is the
+  selection's intersection with the item's cell range, and the render
+  keeps a plain relayout on both channels, for re-measurement and for a
+  cell that built null, which holds no host and is re-asked by every
+  layout; the drag
   controller's lifetime (`didUpdateWidget` cancels before disposing and
   only rebuilds when controller or config identity changed), the selection
   forwarding listener, the drag-proxy overlay (gated on the SESSION's

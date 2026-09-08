@@ -435,6 +435,13 @@ class BoardController<TKey, TItem> {
   // normative site for the same fact.
   // ---------------------------------------------------------------------
 
+  /// Whether [id]'s span covers cell `(row, col)` by the span index's own
+  /// two rules, so a per-cell listener rebuilds exactly when [itemsAt]
+  /// would list the item. Internal-use, like [keyOfId].
+  bool idCoversCell(int id, int row, int col) {
+    return _spanIndex.coversCell(id, row, col);
+  }
+
   /// The id for [key], or -1 when it is not registered. Unlike the
   /// TKey-keyed reads this does NOT exclude an exiting item, which the
   /// render layer must keep until its exit settles.

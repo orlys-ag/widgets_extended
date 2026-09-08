@@ -19,6 +19,15 @@ import 'board_controller.dart';
 /// `buildOrObtainChildFor` returns null when no child landed
 /// (`widgets/two_dimensional_viewport.dart:1498`), so an empty cell costs
 /// no element, no render object and no paint.
+///
+/// WHEN THE BOARD CALLS THIS AGAIN. A structural change that reaches the
+/// cell rebuilds it through the viewport's delegate. A payload write
+/// rebuilds the cell only when the written item COVERS it, by the same
+/// rule [BoardCellView.items] lists it. A selection change rebuilds the
+/// cell only when its own [BoardCellView.isSelected] flipped. A read the
+/// builder makes outside the view's members, a non-covering item's
+/// payload or the selection's shape, is not tracked. A cell that built
+/// null holds no element, so it is asked again on every layout instead.
 typedef BoardCellBuilder<TKey, TItem> =
     Widget? Function(BuildContext context, BoardCellView<TKey, TItem> cell);
 
@@ -32,6 +41,13 @@ typedef BoardCellBuilder<TKey, TItem> =
 /// (`widgets/two_dimensional_viewport.dart:357`), so a re-ranked item
 /// loses its `State` unless the widget returned here carries a
 /// `GlobalKey`. A pure lane change re-lanes it in place and keeps it.
+///
+/// WHEN THE BOARD CALLS THIS AGAIN. A structural change that reaches the
+/// item rebuilds it through the viewport's delegate. A payload write to
+/// the item's own key rebuilds it. A selection change rebuilds it only
+/// when the selection's intersection with the item's cell range changed;
+/// the view carries no selection member, and a read of the selection
+/// through the controller outside that rule is not tracked.
 typedef BoardItemBuilder<TKey, TItem> =
     Widget Function(BuildContext context, BoardItemView<TKey, TItem> item);
 
@@ -134,7 +150,9 @@ class BoardItemView<TKey, TItem> {
   /// True in the DRAG PROXY's build. FALSE in the lattice build even
   /// while a session runs: that item comes from the viewport's delegate,
   /// and a session edge fires no structural notification, so nothing
-  /// rebuilds it between the lift and the commit. An app giving the item
+  /// rebuilds it at the lift or the commit; a payload write to the item
+  /// mid-session rebuilds it through its host with the flag true. An app
+  /// giving the item
   /// left behind a treatment of its own watches
   /// `BoardDragController.movedItem`, which is what the board's own
   /// `BoardDragConfig.draggedItemOpacity` rides.

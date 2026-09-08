@@ -1,5 +1,14 @@
 ## 0.0.36
 
+- A payload write (`updateItem`) now rebuilds only the item's builder and
+the builders of the cells its span covers, and a selection change rebuilds
+only the cells whose `isSelected` flipped and the items whose span's
+intersection with the selection changed; both rebuilt every mounted cell
+and item before. A cell builder reading a non-covering item's payload, or
+an item builder reading the selection outside that intersection rule, no
+longer sees those writes: the view's own members are the tracked reads,
+which the two builder typedefs' doc comments state. A cell that built null
+is still asked again on every layout.
 - Board 2D-scrollable.
 - Added `BoardDragConfig.dragProxyOpacity` and
 `BoardDragConfig.draggedItemOpacity`, the opacity of the drag proxy and of

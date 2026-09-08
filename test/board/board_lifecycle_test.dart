@@ -22,9 +22,13 @@ import 'package:widgets_extended/board/board_widget.dart';
 import 'package:widgets_extended/board/render_board_viewport.dart';
 
 class _Item {
-  const _Item(this.key);
+  const _Item(this.key, [this.label = ""]);
 
   final String key;
+
+  /// A payload the item builder can render, so a test can tell which
+  /// payload a mounted item shows.
+  final String label;
 }
 
 const BoardAnimationSpec _ms300 = BoardAnimationSpec(
@@ -75,7 +79,7 @@ Widget _board(
   BoardDragConfig<String>? drag,
   BoardSelectionConfig? selection,
   Widget Function(BuildContext, BoardItemView<String, _Item>)? itemBuilder,
-  Widget Function(BuildContext, BoardCellView<String, _Item>)? cellBuilder,
+  Widget? Function(BuildContext, BoardCellView<String, _Item>)? cellBuilder,
   Key? boardKey,
 }) {
   return MaterialApp(
@@ -127,15 +131,41 @@ int _childCount(WidgetTester tester) {
   return count;
 }
 
+/// Hoisted builders whose identity is stable across pumps, so a rebuild
+/// with the same controller replaces no delegate and a swap's rebuilds
+/// are the swap's alone (performance plan T9, T10).
+final Map<String, int> _cellBuilds = <String, int>{};
+final Map<String, bool> _cellSelected = <String, bool>{};
+final Map<String, int> _itemBuilds = <String, int>{};
+
+Widget _countingCell(BuildContext context, BoardCellView<String, _Item> cell) {
+  final id = "${cell.row},${cell.col}";
+  _cellBuilds[id] = (_cellBuilds[id] ?? 0) + 1;
+  _cellSelected[id] = cell.isSelected;
+  return const SizedBox(width: 100.0, height: 100.0);
+}
+
+Widget _labelItem(BuildContext context, BoardItemView<String, _Item> item) {
+  _itemBuilds[item.key] = (_itemBuilds[item.key] ?? 0) + 1;
+  return Text(item.item.label, key: _itemKey(item.key));
+}
+
+BoardSelection _cell(int row, int col) {
+  return BoardSelection(anchor: (row: row, col: col), focus: (row: row, col: col));
+}
+
 void main() {
   // The regression fence for the selection route: a selection change must
-  // reach the cell BUILDERS, which only a delegate rebuild can do.
+  // reach the cell BUILDERS whose answer flipped, through the per-cell
+  // host the `Board` state's relay reaches, and no other. Performance
+  // plan T5.
   // Falsification: an implementation whose selection listener calls
   // `setState` on the widget's `State` (and only that) rebuilds nothing,
   // because a parent-driven rebuild bypasses the viewport element's
   // `performRebuild` and the delegate setter early-returns on identity;
   // build counts then stay at 1 and the second assertion reads a stale
-  // `isSelected`.
+  // `isSelected`. A delegate rebuild rebuilds every cell, and the third
+  // assertion reads 2 for the cell whose answer did not flip.
   testWidgets("a selection change rebuilds the cells that report it", (
     tester,
   ) async {
@@ -177,7 +207,314 @@ void main() {
     // The change reached the builder: a second build, reporting selected.
     expect(buildCounts["1,1"], 2);
     expect(lastSelected["1,1"], isTrue);
+    // And only that builder: the cell whose answer did not flip is
+    // untouched.
+    expect(buildCounts["0,0"], 1);
   });
+
+  // Performance plan T6.
+  // Asserts: a payload write rebuilds the item's builder and the builders
+  // of the cells its span covers, and no other mounted child.
+  // Falsification: the delegate-rebuild route reads 2 for every count.
+  testWidgets(
+    "a payload write rebuilds the item and its covering cells and nothing "
+    "else",
+    (tester) async {
+      final controller = _controller(tester);
+      controller.addItem(
+        const _Item("m"),
+        const BoardSpan(rowStart: 1, colStart: 1, colSpan: 2),
+      );
+      controller.addItem(
+        const _Item("n"),
+        const BoardSpan(rowStart: 0, colStart: 1),
+      );
+      final cellBuilds = <String, int>{};
+      final itemBuilds = <String, int>{};
+      await tester.pumpWidget(
+        _board(
+          controller,
+          cellBuilder: (context, cell) {
+            final id = "${cell.row},${cell.col}";
+            cellBuilds[id] = (cellBuilds[id] ?? 0) + 1;
+            return const SizedBox(width: 100.0, height: 100.0);
+          },
+          itemBuilder: (context, item) {
+            itemBuilds[item.key] = (itemBuilds[item.key] ?? 0) + 1;
+            return const SizedBox();
+          },
+        ),
+      );
+      // Setup sanity: everything built exactly once.
+      expect(cellBuilds["1,1"], 1);
+      expect(cellBuilds["1,2"], 1);
+      expect(cellBuilds["0,0"], 1);
+      expect(itemBuilds["m"], 1);
+      expect(itemBuilds["n"], 1);
+
+      controller.updateItem("m", const _Item("m", "changed"));
+      await tester.pump();
+
+      expect(itemBuilds["m"], 2);
+      expect(cellBuilds["1,1"], 2);
+      expect(cellBuilds["1,2"], 2);
+      expect(cellBuilds["0,0"], 1);
+      expect(itemBuilds["n"], 1);
+    },
+  );
+
+  // Performance plan T6b.
+  // Asserts: the cell host's cover test is the span index's own padded
+  // test, so a sub-track item rebuilds the cell it lies inside and an
+  // endpoint sum an ulp past a whole track does not reach that track.
+  // Falsification: a host copying the unpadded endpoints reads 2 for
+  // cell (3,1).
+  testWidgets(
+    "a payload write rebuilds the cell a sub-track item lies inside and "
+    "not the cell an ulp past its end",
+    (tester) async {
+      final controller = _controller(
+        tester,
+        rows: BoardAxisConfig(axis: UniformAxis(6, 50.0)),
+      );
+      controller.addItem(
+        const _Item("tall"),
+        const BoardSpan(
+          rowStart: 0,
+          rowFraction: 0.78,
+          rowSpan: 2,
+          rowSpanFraction: 0.22,
+          colStart: 1,
+        ),
+      );
+      controller.addItem(
+        const _Item("dot"),
+        const BoardSpan(
+          rowStart: 5,
+          rowFraction: 0.25,
+          rowSpan: 0,
+          rowSpanFraction: 0.5,
+          colStart: 1,
+          colFraction: 0.25,
+          colSpan: 0,
+          colSpanFraction: 0.5,
+        ),
+      );
+      final cellBuilds = <String, int>{};
+      await tester.pumpWidget(
+        _board(
+          controller,
+          cellBuilder: (context, cell) {
+            final id = "${cell.row},${cell.col}";
+            cellBuilds[id] = (cellBuilds[id] ?? 0) + 1;
+            return const SizedBox(width: 100.0, height: 50.0);
+          },
+        ),
+      );
+      // Setup sanity: the index's own answers at the two edges.
+      expect(controller.itemsAt(2, 1), <String>["tall"]);
+      expect(controller.itemsAt(3, 1), isEmpty);
+      expect(controller.itemsAt(5, 1), <String>["dot"]);
+      expect(cellBuilds["3,1"], 1);
+
+      controller.updateItem("tall", const _Item("tall", "x"));
+      controller.updateItem("dot", const _Item("dot", "x"));
+      await tester.pump();
+
+      expect(cellBuilds["2,1"], 2);
+      expect(cellBuilds["5,1"], 2);
+      expect(cellBuilds["3,1"], 1);
+    },
+  );
+
+  // Performance plan T9.
+  // Asserts: after a controller swap a selection change on the NEW
+  // controller reaches the cell through the relay the state re-pointed.
+  // Falsification: hosts subscribed to the controller they were built
+  // with never hear the new one; the count stays at 2.
+  testWidgets(
+    "a selection change on a swapped controller rebuilds through the new "
+    "one",
+    (tester) async {
+      _cellBuilds.clear();
+      _cellSelected.clear();
+      final a = _controller(tester);
+      final b = _controller(tester);
+      await tester.pumpWidget(
+        _board(a, cellBuilder: _countingCell, itemBuilder: _labelItem),
+      );
+      expect(_cellBuilds["1,1"], 1);
+
+      await tester.pumpWidget(
+        _board(b, cellBuilder: _countingCell, itemBuilder: _labelItem),
+      );
+      // The swap's delegate replacement rebuilds every cell once.
+      expect(_cellBuilds["1,1"], 2);
+
+      b.setSelection(_cell(1, 1));
+      await tester.pump();
+      expect(_cellBuilds["1,1"], 3);
+      expect(_cellSelected["1,1"], isTrue);
+    },
+  );
+
+  // Performance plan T10.
+  // Asserts: a controller swap shows the new controller's payload in a
+  // mounted item, even after the item host rebuilt itself once and shows
+  // its own output rather than the delegate's.
+  // Falsification: a host whose didUpdateWidget keeps its self-rebuilt
+  // output instead of adopting the new `initial` still shows from-A.
+  testWidgets(
+    "a controller swap rebuilds mounted children against the new "
+    "controller",
+    (tester) async {
+      _itemBuilds.clear();
+      final a = _controller(tester)
+        ..addItem(
+          const _Item("m", "from-A"),
+          const BoardSpan(rowStart: 1, colStart: 1),
+        );
+      final b = _controller(tester)
+        ..addItem(
+          const _Item("m", "from-B"),
+          const BoardSpan(rowStart: 1, colStart: 1),
+        );
+      await tester.pumpWidget(
+        _board(a, cellBuilder: _countingCell, itemBuilder: _labelItem),
+      );
+      expect(find.text("from-A"), findsOneWidget);
+      a.setSelection(_cell(1, 1));
+      await tester.pump();
+      // Setup sanity: the item host self-rebuilt once and now shows its
+      // own output.
+      expect(_itemBuilds["m"], 2);
+
+      await tester.pumpWidget(
+        _board(b, cellBuilder: _countingCell, itemBuilder: _labelItem),
+      );
+      await tester.pump();
+
+      expect(find.text("from-B"), findsOneWidget);
+      expect(find.text("from-A"), findsNothing);
+    },
+  );
+
+  // Performance plan T11.
+  // Asserts: a write issued from a builder while a host rebuilds ITSELF
+  // throws nothing and reaches its target one frame later.
+  // Falsification: relays notifying synchronously in the build phase
+  // mark a sibling host and throw "setState() or markNeedsBuild() called
+  // during build".
+  testWidgets(
+    "a write from inside a builder during a host's own rebuild reaches "
+    "its target",
+    (tester) async {
+      final controller = _controller(tester)
+        ..addItem(
+          const _Item("m", "before"),
+          const BoardSpan(rowStart: 0, colStart: 0),
+        );
+      var writes = 0;
+      await tester.pumpWidget(
+        _board(
+          controller,
+          cellBuilder: (context, cell) {
+            if (cell.row == 2 && cell.col == 2 && cell.isSelected) {
+              if (writes == 0) {
+                writes++;
+                controller.updateItem("m", const _Item("m", "after"));
+              }
+            }
+            return const SizedBox(width: 100.0, height: 100.0);
+          },
+          itemBuilder: (context, item) {
+            return Text(item.item.label);
+          },
+        ),
+      );
+      expect(find.text("before"), findsOneWidget);
+
+      controller.setSelection(_cell(2, 2));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      // Setup sanity: the builder's write ran exactly once.
+      expect(writes, 1);
+      await tester.pump();
+      expect(find.text("after"), findsOneWidget);
+    },
+  );
+
+  // Performance plan T12.
+  // Asserts: a cell whose builder returned null, and so holds no host,
+  // still appears when the selection reaches it, through the render's
+  // plain relayout re-asking every null vicinity.
+  // Falsification: a render with no selection subscription runs no
+  // layout, and the probe stays absent.
+  testWidgets("a cell that built null appears when the selection reaches it", (
+    tester,
+  ) async {
+    final controller = _controller(tester);
+    const probe = ValueKey<String>("probe");
+    await tester.pumpWidget(
+      _board(
+        controller,
+        cellBuilder: (context, cell) {
+          if (!cell.isSelected) {
+            return null;
+          }
+          return const SizedBox(key: probe, width: 100.0, height: 100.0);
+        },
+      ),
+    );
+    // Setup sanity: the cell built null.
+    expect(find.byKey(probe), findsNothing);
+
+    controller.setSelection(_cell(1, 1));
+    await tester.pump();
+
+    expect(find.byKey(probe), findsOneWidget);
+  });
+
+  // Performance plan T12b.
+  // Asserts: the same for a payload write to an item covering the cell.
+  // Falsification: a data handler that dropped the relayout leaves the
+  // probe absent.
+  testWidgets(
+    "a cell that built null appears when a covering item's payload says "
+    "so",
+    (tester) async {
+      final controller = _controller(tester)
+        ..addItem(
+          const _Item("m", "off"),
+          const BoardSpan(rowStart: 1, colStart: 1),
+        );
+      const probe = ValueKey<String>("probe");
+      await tester.pumpWidget(
+        _board(
+          controller,
+          cellBuilder: (context, cell) {
+            for (final key in cell.items) {
+              if (controller.itemOf(key)!.label == "on") {
+                return const SizedBox(
+                  key: probe,
+                  width: 100.0,
+                  height: 100.0,
+                );
+              }
+            }
+            return null;
+          },
+        ),
+      );
+      expect(find.byKey(probe), findsNothing);
+
+      controller.updateItem("m", const _Item("m", "on"));
+      await tester.pump();
+
+      expect(find.byKey(probe), findsOneWidget);
+    },
+  );
 
   // AC22 controller swap and dispose.
   // Asserts: after the swap a LazyContentAxis reports isProvisional true

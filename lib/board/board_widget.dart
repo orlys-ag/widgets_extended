@@ -9,7 +9,10 @@
 /// be one class; composition satisfies both.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import 'package:flutter/gestures.dart';
@@ -126,6 +129,12 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
 
   BoardDragController<TKey>? _dragController;
 
+  /// The two relays every mounted host listens to, stable for this
+  /// state's life; the controller subscriptions feeding them move on a
+  /// swap. See [_BoardScope].
+  final _SelectionRelay _selectionRelay = _SelectionRelay();
+  final _ItemDataRelay<TKey> _dataRelay = _ItemDataRelay<TKey>();
+
   @override
   void initState() {
     super.initState();
@@ -137,16 +146,34 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
         config: widget.drag!,
       )..addListener(_handleDragChanged);
     }
-    if (widget.selection != null) {
-      widget.controller.selection.addListener(_handleSelectionChanged);
-    }
+    _subscribe(widget.controller);
   }
 
-  /// Forwards every selection CHANGE to the config's onChanged; the
-  /// ValueNotifier's equality suppression is what makes this once per
-  /// change rather than once per write.
+  /// This state's two controller subscriptions, one per channel the hosts
+  /// ride: the selection notifier and the item-data channel. Moved on a
+  /// controller swap and removed in [dispose], so the controller's
+  /// dispose assertion sees them gone.
+  void _subscribe(BoardController<TKey, TItem> controller) {
+    controller.selection.addListener(_handleSelectionChanged);
+    controller.addItemDataListener(_handleItemData);
+  }
+
+  void _unsubscribe(BoardController<TKey, TItem> controller) {
+    controller.selection.removeListener(_handleSelectionChanged);
+    controller.removeItemDataListener(_handleItemData);
+  }
+
+  /// Forwards every selection CHANGE to the config's onChanged, when a
+  /// config is present, and to the relay always; the ValueNotifier's
+  /// equality suppression is what makes this once per change rather than
+  /// once per write.
   void _handleSelectionChanged() {
     widget.selection?.onChanged(widget.controller.selection.value);
+    _selectionRelay.fire();
+  }
+
+  void _handleItemData(TKey key) {
+    _dataRelay.fire(key);
   }
 
   /// The proxy shows and hides with the session; a plain setState is
@@ -196,14 +223,9 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
         )..addListener(_handleDragChanged);
       }
     }
-    if (!identical(widget.controller, oldWidget.controller) ||
-        (widget.selection == null) != (oldWidget.selection == null)) {
-      oldWidget.controller.selection.removeListener(
-        _handleSelectionChanged,
-      );
-      if (widget.selection != null) {
-        widget.controller.selection.addListener(_handleSelectionChanged);
-      }
+    if (!identical(widget.controller, oldWidget.controller)) {
+      _unsubscribe(oldWidget.controller);
+      _subscribe(widget.controller);
     }
     if (rehost ||
         !identical(widget.cellBuilder, oldWidget.cellBuilder) ||
@@ -222,21 +244,26 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
   @override
   void dispose() {
     _teardownDragController();
-    if (widget.selection != null) {
-      widget.controller.selection.removeListener(_handleSelectionChanged);
-    }
+    _unsubscribe(widget.controller);
     _delegate.dispose();
+    // Children unmount before their parent's state disposes, so every
+    // host has already dropped its relay listeners.
+    _selectionRelay.dispose();
+    _dataRelay.dispose();
     super.dispose();
   }
 
-  // The selection listener lives on the render object, beside the three
-  // controller channels: a selection change must reach the cell BUILDERS,
-  // and the one non-private route to them is
-  // `markNeedsLayout(withDelegateRebuild: true)`, which only the render
-  // object can call. A `setState` here reaches nothing: a parent-driven
-  // rebuild goes through `RenderObjectElement.update`, which calls the
-  // PRIVATE `_performRebuild` (`widgets/framework.dart:6813`) and so
-  // bypasses `_TwoDimensionalViewportElement.performRebuild`
+  // Rebuild routes. A STRUCTURAL change rebuilds through the delegate,
+  // which the render object requests. A selection change or a payload
+  // write rebuilds only the hosts whose own answer changed, through the
+  // two relays above, which is why this state and not the render object
+  // subscribes to those channels; the render object keeps a plain
+  // relayout on both, for re-measurement and for cells that built null
+  // (see `RenderBoardViewport._handleSelectionChanged`). A `setState`
+  // here reaches no child: a parent-driven rebuild goes through
+  // `RenderObjectElement.update`, which calls the PRIVATE
+  // `_performRebuild` (`widgets/framework.dart:6813`) and so bypasses
+  // `_TwoDimensionalViewportElement.performRebuild`
   // (`widgets/two_dimensional_viewport.dart:277`), and the `delegate`
   // setter early-returns on identity
   // (`widgets/two_dimensional_viewport.dart:670`).
@@ -291,54 +318,42 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
       if (item == null) {
         return null;
       }
-      final built = itemBuilder(
-        context,
-        BoardItemView<TKey, TItem>(
-          key: key,
-          item: item as TItem,
-          span: controller.spanOfId(id),
-          lane: controller.laneOfId(id),
-          laneCount: controller.laneCountOfId(id),
-          laneSpan: controller.laneSpanOfId(id),
-          isDragging: controller.isDraggingId(id),
-          controller: controller,
-        ),
-      );
-      final drag = _dragController;
-      if (drag == null) {
-        return built;
-      }
-      return _BoardItemHost<TKey>(
+      // The builder runs ONCE here and the host adopts its output as
+      // `initial`; the drag-host wrap happens in the host's build, from
+      // the scope's drag controller.
+      return _BoardItemBuildHost<TKey, TItem>(
+        id: id,
         itemKey: key,
-        dragController: drag,
-        spanAxisVertical: controller.primaryAxis == Axis.horizontal,
-        child: built,
+        isProxy: false,
+        initial: _itemContent<TKey, TItem>(
+          context,
+          itemBuilder,
+          controller,
+          id,
+          key,
+          item as TItem,
+          isProxy: false,
+        ),
       );
     }
     if (vicinity.yIndex >= rowsConfig.axis.trackCount) {
       return null;
     }
-    return widget.cellBuilder(
+    // The builder runs ONCE here to decide null-ness, so an empty cell
+    // still costs no element; a non-null result is adopted by the host as
+    // `initial`.
+    final built = widget.cellBuilder(
       context,
-      BoardCellView<TKey, TItem>(
-        row: vicinity.yIndex,
-        col: vicinity.xIndex,
-        isFrozen:
-            _isFrozenTrack(rowsConfig, vicinity.yIndex) ||
-            _isFrozenTrack(columnsConfig, vicinity.xIndex),
-        controller: controller,
-      ),
+      _cellView<TKey, TItem>(controller, vicinity.yIndex, vicinity.xIndex),
     );
-  }
-
-  /// Whether [track] is inside one of [config]'s frozen bands. This
-  /// reads the CONFIG; the render object derives its frozen geometry from
-  /// the same numbers.
-  bool _isFrozenTrack(BoardAxisConfig config, int track) {
-    if (track < config.frozenStart) {
-      return true;
+    if (built == null) {
+      return null;
     }
-    return track >= config.axis.trackCount - config.frozenEnd;
+    return _BoardCellHost<TKey, TItem>(
+      row: vicinity.yIndex,
+      col: vicinity.xIndex,
+      initial: built,
+    );
   }
 
   @override
@@ -356,15 +371,25 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
       primary: widget.primary,
     );
     final drag = _dragController;
-    if (drag == null) {
-      return board;
-    }
-    return Stack(
-      clipBehavior: Clip.none,
-      children: <Widget>[
-        board,
-        _buildDragProxy(drag),
-      ],
+    // The scope wraps EVERYTHING this build returns, the Stack included,
+    // because the proxy host is the Stack's second child and must find
+    // it too.
+    return _BoardScope<TKey, TItem>(
+      controller: widget.controller,
+      cellBuilder: widget.cellBuilder,
+      itemBuilder: widget.itemBuilder,
+      dragController: drag,
+      selectionRelay: _selectionRelay,
+      dataRelay: _dataRelay,
+      child: drag == null
+          ? board
+          : Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                board,
+                _buildDragProxy(drag),
+              ],
+            ),
     );
   }
 
@@ -415,22 +440,477 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
   Widget _buildProxyContent(TKey key) {
     final controller = widget.controller;
     final itemBuilder = widget.itemBuilder;
-    final item = controller.itemOf(key);
-    if (itemBuilder == null || item == null) {
+    final id = controller.idOfKey(key);
+    if (itemBuilder == null || id < 0) {
       return const SizedBox.shrink();
     }
-    return itemBuilder(
-      context,
-      BoardItemView<TKey, TItem>(
-        key: key,
-        item: item,
-        span: controller.spanOf(key)!,
-        lane: controller.laneOf(key),
-        laneCount: controller.laneCountOf(key),
-        laneSpan: controller.laneSpanOf(key),
-        isDragging: true,
-        controller: controller,
+    final item = controller.itemOfId(id);
+    if (item == null) {
+      return const SizedBox.shrink();
+    }
+    return _BoardItemBuildHost<TKey, TItem>(
+      id: id,
+      itemKey: key,
+      isProxy: true,
+      initial: _itemContent<TKey, TItem>(
+        context,
+        itemBuilder,
+        controller,
+        id,
+        key,
+        item as TItem,
+        isProxy: true,
       ),
+    );
+  }
+}
+
+/// Whether [track] is inside one of [config]'s frozen bands. This reads
+/// the CONFIG; the render object derives its frozen geometry from the
+/// same numbers.
+bool _isFrozenTrack(BoardAxisConfig config, int track) {
+  if (track < config.frozenStart) {
+    return true;
+  }
+  return track >= config.axis.trackCount - config.frozenEnd;
+}
+
+/// The view a cell builder is handed, computed from the controller's
+/// CURRENT configs on every call so a swap-driven rebuild reads the new
+/// ones.
+BoardCellView<TKey, TItem> _cellView<TKey, TItem>(
+  BoardController<TKey, TItem> controller,
+  int row,
+  int col,
+) {
+  return BoardCellView<TKey, TItem>(
+    row: row,
+    col: col,
+    isFrozen:
+        _isFrozenTrack(controller.rows, row) ||
+        _isFrozenTrack(controller.columns, col),
+    controller: controller,
+  );
+}
+
+/// One item's builder output, for the lattice or, under [isProxy], the
+/// drag proxy. The ONE site that constructs a `BoardItemView`; the
+/// delegate and the item host both call it. Id-space reads throughout:
+/// an EXITING item still builds and paints, and the key-space reads
+/// exclude it while it does.
+Widget _itemContent<TKey, TItem>(
+  BuildContext context,
+  BoardItemBuilder<TKey, TItem> builder,
+  BoardController<TKey, TItem> controller,
+  int id,
+  TKey key,
+  TItem item, {
+  required bool isProxy,
+}) {
+  return builder(
+    context,
+    BoardItemView<TKey, TItem>(
+      key: key,
+      item: item,
+      span: controller.spanOfId(id),
+      lane: controller.laneOfId(id),
+      laneCount: controller.laneCountOfId(id),
+      laneSpan: controller.laneSpanOfId(id),
+      isDragging: isProxy || controller.isDraggingId(id),
+      controller: controller,
+    ),
+  );
+}
+
+/// Whether a notify issued NOW would land inside the build or layout
+/// phase. A host answers a relay with `setState`, and the framework
+/// permits a mark during a build only on a descendant of the element
+/// currently building (`widgets/framework.dart:5350`), so a write issued
+/// from a builder during a host's SELF-rebuild would mark a sibling and
+/// throw; the two relays defer such a notify to one post-frame callback.
+/// Same discriminator as the animation coordinator's coalesced dispatch.
+bool _inBuildOrLayoutPhase() {
+  return SchedulerBinding.instance.schedulerPhase ==
+      SchedulerPhase.persistentCallbacks;
+}
+
+/// Fan-out of the controller's selection notifier. Carries no value: a
+/// host reads `controller.selection.value` at notify time.
+class _SelectionRelay extends ChangeNotifier {
+  bool _pending = false;
+  bool _disposed = false;
+
+  void fire() {
+    if (_inBuildOrLayoutPhase()) {
+      if (_pending) {
+        return;
+      }
+      _pending = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _pending = false;
+        if (!_disposed) {
+          notifyListeners();
+        }
+      });
+      return;
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+}
+
+/// Fan-out of the controller's item-data channel, carrying the key. A
+/// host resolves the id and the geometry through the controller at
+/// notify time, so a write that raced a removal resolves to no id and is
+/// dropped rather than read against a recycled one.
+class _ItemDataRelay<TKey> extends ChangeNotifier {
+  /// The key of the write being delivered; meaningful inside a listener.
+  TKey? lastKey;
+
+  final Set<TKey> _pending = <TKey>{};
+  bool _disposed = false;
+
+  void fire(TKey key) {
+    if (_inBuildOrLayoutPhase()) {
+      final schedule = _pending.isEmpty;
+      _pending.add(key);
+      if (schedule) {
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          final keys = List<TKey>.of(_pending);
+          _pending.clear();
+          if (_disposed) {
+            return;
+          }
+          for (final pendingKey in keys) {
+            lastKey = pendingKey;
+            notifyListeners();
+          }
+        });
+      }
+      return;
+    }
+    lastKey = key;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+}
+
+/// What every host reads: the current controller and builders, the drag
+/// controller, and the two relays. It NEVER notifies: every value here
+/// changes only when `_BoardState.didUpdateWidget` replaces the delegate
+/// (a builder change, a controller swap or a drag-controller
+/// replacement), and a delegate rebuild already hands every host a new
+/// `initial` and rebuilds it, so a notification would invoke each
+/// builder twice. Hosts read it with `getInheritedWidgetOfExactType`,
+/// which registers no dependency.
+class _BoardScope<TKey, TItem> extends InheritedWidget {
+  const _BoardScope({
+    required this.controller,
+    required this.cellBuilder,
+    required this.itemBuilder,
+    required this.dragController,
+    required this.selectionRelay,
+    required this.dataRelay,
+    required super.child,
+  });
+
+  final BoardController<TKey, TItem> controller;
+  final BoardCellBuilder<TKey, TItem> cellBuilder;
+  final BoardItemBuilder<TKey, TItem>? itemBuilder;
+  final BoardDragController<TKey>? dragController;
+  final _SelectionRelay selectionRelay;
+  final _ItemDataRelay<TKey> dataRelay;
+
+  static _BoardScope<TKey, TItem> of<TKey, TItem>(BuildContext context) {
+    final scope = context
+        .getInheritedWidgetOfExactType<_BoardScope<TKey, TItem>>();
+    assert(scope != null, "a board host was built outside its Board");
+    return scope!;
+  }
+
+  @override
+  bool updateShouldNotify(_BoardScope<TKey, TItem> oldWidget) {
+    return false;
+  }
+}
+
+/// Hosts one CELL's builder output. Shows [initial], the delegate's own
+/// builder call, until a relay makes THIS cell's answer change, after
+/// which it calls the builder itself; a new [initial] from a delegate
+/// rebuild is adopted in [State.didUpdateWidget]. The builder runs only
+/// when a relay handler asked for it, never on a parent-driven rebuild.
+class _BoardCellHost<TKey, TItem> extends StatefulWidget {
+  const _BoardCellHost({
+    required this.row,
+    required this.col,
+    required this.initial,
+  });
+
+  final int row;
+  final int col;
+  final Widget initial;
+
+  @override
+  State<_BoardCellHost<TKey, TItem>> createState() {
+    return _BoardCellHostState<TKey, TItem>();
+  }
+}
+
+class _BoardCellHostState<TKey, TItem>
+    extends State<_BoardCellHost<TKey, TItem>> {
+  _BoardScope<TKey, TItem>? _scope;
+  Widget? _built;
+  bool _builderRequested = false;
+  bool _wasSelected = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_scope == null) {
+      final scope = _BoardScope.of<TKey, TItem>(context);
+      _scope = scope;
+      scope.selectionRelay.addListener(_handleSelection);
+      scope.dataRelay.addListener(_handleData);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _BoardCellHost<TKey, TItem> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.initial, oldWidget.initial)) {
+      _built = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    final scope = _scope;
+    if (scope != null) {
+      scope.selectionRelay.removeListener(_handleSelection);
+      scope.dataRelay.removeListener(_handleData);
+    }
+    super.dispose();
+  }
+
+  void _requestBuilder() {
+    _builderRequested = true;
+    setState(() {});
+  }
+
+  void _handleSelection() {
+    final scope = _scope!;
+    if (scope.controller.isSelected(widget.row, widget.col) != _wasSelected) {
+      _requestBuilder();
+    }
+  }
+
+  void _handleData() {
+    final scope = _scope!;
+    final key = scope.dataRelay.lastKey as TKey;
+    final id = scope.controller.idOfKey(key);
+    if (id < 0) {
+      return;
+    }
+    if (scope.controller.idCoversCell(id, widget.row, widget.col)) {
+      _requestBuilder();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = _BoardScope.of<TKey, TItem>(context);
+    _scope = scope;
+    _wasSelected = scope.controller.isSelected(widget.row, widget.col);
+    if (_builderRequested) {
+      _builderRequested = false;
+      _built =
+          scope.cellBuilder(
+            context,
+            _cellView<TKey, TItem>(scope.controller, widget.row, widget.col),
+          ) ??
+          const SizedBox.shrink();
+    }
+    return _built ?? widget.initial;
+  }
+}
+
+/// Hosts one ITEM's builder output, in the lattice or, under [isProxy],
+/// in the drag proxy, with the same `initial` protocol as
+/// [_BoardCellHost]. A lattice host wraps the content in [_BoardItemHost]
+/// when the scope carries a drag controller; that host is un-keyed and
+/// its `State` survives a rebuild of this wrapper, which the drag layer's
+/// key capture relies on.
+class _BoardItemBuildHost<TKey, TItem> extends StatefulWidget {
+  const _BoardItemBuildHost({
+    required this.id,
+    required this.itemKey,
+    required this.isProxy,
+    required this.initial,
+  });
+
+  final int id;
+  final TKey itemKey;
+  final bool isProxy;
+  final Widget initial;
+
+  @override
+  State<_BoardItemBuildHost<TKey, TItem>> createState() {
+    return _BoardItemBuildHostState<TKey, TItem>();
+  }
+}
+
+class _BoardItemBuildHostState<TKey, TItem>
+    extends State<_BoardItemBuildHost<TKey, TItem>> {
+  _BoardScope<TKey, TItem>? _scope;
+  Widget? _built;
+  bool _builderRequested = false;
+
+  /// The selection's intersection with the item's CELL range, the integer
+  /// rectangle `[floor(start), ceil(end))` per axis, or null when they do
+  /// not meet. A selection change rebuilds the item exactly when this
+  /// changes.
+  ({int rowStart, int rowEnd, int colStart, int colEnd})? _selected;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_scope == null) {
+      final scope = _BoardScope.of<TKey, TItem>(context);
+      _scope = scope;
+      scope.selectionRelay.addListener(_handleSelection);
+      scope.dataRelay.addListener(_handleData);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _BoardItemBuildHost<TKey, TItem> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.initial, oldWidget.initial)) {
+      _built = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    final scope = _scope;
+    if (scope != null) {
+      scope.selectionRelay.removeListener(_handleSelection);
+      scope.dataRelay.removeListener(_handleData);
+    }
+    super.dispose();
+  }
+
+  ({int rowStart, int rowEnd, int colStart, int colEnd})? _intersection(
+    _BoardScope<TKey, TItem> scope,
+  ) {
+    final controller = scope.controller;
+    final selection = controller.selection.value;
+    if (selection.isEmpty || controller.keyOfId(widget.id) != widget.itemKey) {
+      return null;
+    }
+    final span = controller.spanOfId(widget.id);
+    final rowStart = math.max(
+      span.startTrackOn(Axis.vertical).floor(),
+      selection.rowStart,
+    );
+    final rowEnd = math.min(
+      span.endTrackOn(Axis.vertical).ceil(),
+      selection.rowEnd,
+    );
+    final colStart = math.max(
+      span.startTrackOn(Axis.horizontal).floor(),
+      selection.colStart,
+    );
+    final colEnd = math.min(
+      span.endTrackOn(Axis.horizontal).ceil(),
+      selection.colEnd,
+    );
+    if (rowStart >= rowEnd || colStart >= colEnd) {
+      return null;
+    }
+    return (
+      rowStart: rowStart,
+      rowEnd: rowEnd,
+      colStart: colStart,
+      colEnd: colEnd,
+    );
+  }
+
+  void _requestBuilder() {
+    _builderRequested = true;
+    setState(() {});
+  }
+
+  void _handleSelection() {
+    if (_intersection(_scope!) != _selected) {
+      _requestBuilder();
+    }
+  }
+
+  void _handleData() {
+    final scope = _scope!;
+    // The second test drops a write that raced an id recycle.
+    if (scope.dataRelay.lastKey == widget.itemKey &&
+        scope.controller.keyOfId(widget.id) == widget.itemKey) {
+      _requestBuilder();
+    }
+  }
+
+  Widget _rebuild(BuildContext context, _BoardScope<TKey, TItem> scope) {
+    final controller = scope.controller;
+    final builder = scope.itemBuilder;
+    if (builder == null || controller.keyOfId(widget.id) != widget.itemKey) {
+      // The id was released between the write and the build; a
+      // structural rebuild is already scheduled.
+      return const SizedBox.shrink();
+    }
+    final item = controller.itemOfId(widget.id);
+    if (item == null) {
+      return const SizedBox.shrink();
+    }
+    return _itemContent<TKey, TItem>(
+      context,
+      builder,
+      controller,
+      widget.id,
+      widget.itemKey,
+      item as TItem,
+      isProxy: widget.isProxy,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = _BoardScope.of<TKey, TItem>(context);
+    _scope = scope;
+    _selected = _intersection(scope);
+    if (_builderRequested) {
+      _builderRequested = false;
+      _built = _rebuild(context, scope);
+    }
+    final content = _built ?? widget.initial;
+    if (widget.isProxy) {
+      return content;
+    }
+    final drag = scope.dragController;
+    if (drag == null) {
+      return content;
+    }
+    return _BoardItemHost<TKey>(
+      itemKey: widget.itemKey,
+      dragController: drag,
+      spanAxisVertical: scope.controller.primaryAxis == Axis.horizontal,
+      child: content,
     );
   }
 }

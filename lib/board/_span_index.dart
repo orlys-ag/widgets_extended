@@ -365,8 +365,7 @@ class SpanIndex {
         // implies intersection with the query's integer primary range.
         // Padded on both ends: an endpoint an ulp past a range bound is
         // ON the bound, and a half-open range does not intersect there.
-        if (start < rangeEnd - precisionErrorTolerance &&
-            _endOf(id) > rangeStart + precisionErrorTolerance) {
+        if (_admits(start, _endOf(id), rangeStart, rangeEnd)) {
           if (!includeExiting && _store.isExiting(id)) {
             continue;
           }
@@ -385,6 +384,34 @@ class SpanIndex {
 
   double _endOf(int id) {
     return _store.endTrackOf(id, spanAxis);
+  }
+
+  /// The admit test on the span axis: whether `[start, end)` intersects
+  /// the half-open `[rangeStart, rangeEnd)`, padded on both ends because
+  /// an endpoint an ulp past a range bound is ON the bound. The ONE site
+  /// of the rule; [_query] and [coversCell] both call it.
+  bool _admits(double start, double end, double rangeStart, double rangeEnd) {
+    return start < rangeEnd - precisionErrorTolerance &&
+        end > rangeStart + precisionErrorTolerance;
+  }
+
+  /// Whether [id]'s span covers cell `(row, col)` by the SAME two rules
+  /// [itemsInRect] lists it by: the cell's primary track lies inside the
+  /// padded bucket range [register] files the id under, and the cell's
+  /// unit range on the span axis passes the padded admit test [_query]
+  /// applies. Both rules are CALLED, not restated, so a change to either
+  /// reaches this predicate for free. Reads no exiting bit; the caller
+  /// decides that.
+  bool coversCell(int id, int row, int col) {
+    final primaryIsRow = _primaryAxis == Axis.vertical;
+    final primaryTrack = primaryIsRow ? row : col;
+    final firstTrack = _store.startTrackOf(id, _primaryAxis).floor();
+    if (primaryTrack < firstTrack ||
+        primaryTrack > _lastTrackOf(id, firstTrack)) {
+      return false;
+    }
+    final spanTrack = (primaryIsRow ? col : row).toDouble();
+    return _admits(_startOf(id), _endOf(id), spanTrack, spanTrack + 1.0);
   }
 
   /// The item's rank among the items whose primary START track equals its
