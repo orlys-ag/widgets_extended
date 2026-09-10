@@ -51,3 +51,4 @@ examples
 # Per-developer Claude Code overrides. The shared config is
 # .claude/settings.json, which IS tracked.
 .claude/settings.local.json
+.claude
