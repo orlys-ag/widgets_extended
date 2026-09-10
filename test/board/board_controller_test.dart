@@ -117,36 +117,45 @@ List<void> _logAnimation(BoardController<String, _Item> controller) {
 }
 
 void main() {
-  // Performance plan T3 (plans/2026-09-07-board-performance-plan.md).
-  // Asserts: a setItems re-sync whose placements all share one lane-axis
-  // track walks that bucket once. The SLIDE family is live: the capture
-  // runs only under a non-zero itemSlide, and under the helper's default
-  // both halves read 0. The two extent families stay at zero so the
-  // first sync starts no enter ticker for the test to leak.
+  /// The 200-chip single-bucket fixture both lane-read cases sync.
+  ///
+  /// The SLIDE family is live: the capture runs only under a non-zero
+  /// itemSlide, and under the helper's default both halves read 0. The
+  /// two extent families stay at zero so the first sync starts no enter
+  /// ticker for the test to leak.
+  BoardController<String, _Item> lanedSyncController(WidgetTester tester) {
+    return _controller(
+      tester,
+      rows: _lanedRows(),
+      style: const BoardAnimationStyle(
+        trackResize: BoardAnimationSpec(
+          duration: Duration.zero,
+          curve: Curves.linear,
+        ),
+        itemEnterExit: BoardAnimationSpec(
+          duration: Duration.zero,
+          curve: Curves.linear,
+        ),
+        itemSlide: BoardAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+      ),
+    );
+  }
+
+  // Performance plan T3 (plans/2026-09-07-board-performance-plan.md),
+  // whose second sync performance plan 2's C3 made a no-op; it now syncs
+  // a CHANGED list, which is the input that still has a bucket to walk.
+  // Asserts: a setItems whose placements all share one lane-axis track
+  // walks that bucket once however many placements it carries.
   // Falsification: one walk per collected track entry, two entries per
   // placement, reports 400.
   testWidgets(
     "a setItems re-sync reads each disturbed lane bucket once per distinct "
     "track",
     (tester) async {
-      final controller = _controller(
-        tester,
-        rows: _lanedRows(),
-        style: const BoardAnimationStyle(
-          trackResize: BoardAnimationSpec(
-            duration: Duration.zero,
-            curve: Curves.linear,
-          ),
-          itemEnterExit: BoardAnimationSpec(
-            duration: Duration.zero,
-            curve: Curves.linear,
-          ),
-          itemSlide: BoardAnimationSpec(
-            duration: Duration(milliseconds: 300),
-            curve: Curves.linear,
-          ),
-        ),
-      );
+      final controller = lanedSyncController(tester);
       final placements = <BoardPlacement<_Item>>[
         for (var i = 0; i < 200; i++)
           BoardPlacement<_Item>(_Item("k$i"), _chip(0, i % 7, 1)),
@@ -155,10 +164,49 @@ void main() {
       // Setup sanity: the first sync read the bucket at all.
       expect(controller.debugLaneBucketMemberReadCount, greaterThan(0));
       controller.debugLaneBucketMemberReadCount = 0;
-      controller.setItems(placements);
+      // One chip moves WITHIN the lane-axis track, so the sync disturbs
+      // exactly one bucket while 199 placements are unchanged.
+      final moved = <BoardPlacement<_Item>>[
+        BoardPlacement<_Item>(const _Item("k0"), _chip(0, 3, 1)),
+        for (var i = 1; i < 200; i++)
+          BoardPlacement<_Item>(_Item("k$i"), _chip(0, i % 7, 1)),
+      ];
+      controller.setItems(moved);
       expect(controller.debugLaneBucketMemberReadCount, 1);
+      // The moved chip installs real slides, and this file pumps no
+      // widget, so no frame ever drives them. Restyling `itemSlide` to
+      // zero PURGES them and stops the engine's ticker, which is the
+      // documented door for the transition and leaves the end-of-test
+      // ticker check nothing to find.
+      controller.animationStyle = BoardAnimationStyle.disabled;
+      expect(controller.anim.hasActiveOffsets, isFalse);
     },
   );
+
+  // Performance plan 2 T7 (plans/2026-09-09-board-performance-2-plan.md).
+  // Asserts: a setItems whose placements EQUAL the live set walks no lane
+  // bucket at all. An unchanged span cannot move a neighbour's lane, so
+  // there is nothing whose geometry needs capturing.
+  // Falsification: naming a track for every placement, changed or not,
+  // walks the bucket once and reads all 200 members' geometry twice.
+  testWidgets("a setItems equal to the live set reads no lane bucket", (
+    tester,
+  ) async {
+    final controller = lanedSyncController(tester);
+    final placements = <BoardPlacement<_Item>>[
+      for (var i = 0; i < 200; i++)
+        BoardPlacement<_Item>(_Item("k$i"), _chip(0, i % 7, 1)),
+    ];
+    controller.setItems(placements);
+    // Setup sanity: the first sync read the bucket, so a zero below is
+    // this call declining to and not the counter being inert.
+    expect(controller.debugLaneBucketMemberReadCount, greaterThan(0));
+    controller.debugLaneBucketMemberReadCount = 0;
+
+    controller.setItems(placements);
+
+    expect(controller.debugLaneBucketMemberReadCount, 0);
+  });
 
   // DERIVED name. No AC; board_controller_test.dart is listed under the
   // tests not tied to one criterion.

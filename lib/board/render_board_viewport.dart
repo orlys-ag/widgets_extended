@@ -137,6 +137,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       _subscribe();
     }
     _resetMeasurements();
+    // The reset above rewrote the new controller's settled extents, and
+    // its animator's shift prefix may have captured the old ones: an
+    // axis INSTANCE can be shared between two controllers, which is the
+    // construction the swap case in `board_lifecycle_test.dart` builds.
+    value.invalidateAnimatedShifts();
     markNeedsLayout();
   }
 
@@ -254,6 +259,31 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   bool _priorTickHadOffsets = false;
   bool _priorTickHadExtent = false;
 
+  /// Whether `layoutChildSequence` is running, written by it alone. Read
+  /// by the cell surface's poke, which dirties layout outside one and
+  /// sets its flag alone inside one.
+  bool _inLayout = false;
+
+  /// Cell vicinities the LAST layout obtained whose builder returned
+  /// null, written once per layout by the positioning sweep.
+  ///
+  /// The gate on the selection and item-data handlers. A cell that built
+  /// null holds no element and therefore no host, so neither relay can
+  /// reach its builder and the only way it is ever asked again is a
+  /// layout that obtains it; `buildOrObtainChildFor` rebuilds a vicinity
+  /// holding no child on every layout that obtains it
+  /// (`widgets/two_dimensional_viewport.dart:1490`). Above zero the two
+  /// handlers relayout as they always did; at zero they do not, because
+  /// every mounted child that can change reaches its builder through its
+  /// own host.
+  ///
+  /// ITEM vicinities that built null are deliberately not counted: the
+  /// item arm of the delegate's builder returns null for a null
+  /// `itemBuilder`, a missing ordinal, a released id and a null payload,
+  /// and none of the four reads the selection or a payload's contents,
+  /// so no dispatch on either channel can change its answer.
+  int _nullCellCount = 0;
+
   bool _subscribed = false;
 
   /// Paint plane 1: cells in unfrozen tracks. Cleared and rebuilt exactly
@@ -277,6 +307,16 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// and for [applyPaintTransform]'s mirror of it. Rebuilt in the same
   /// sweep as the paint lists.
   final Map<ChildVicinity, int> _vicinityToItemId = <ChildVicinity, int>{};
+
+  /// The painted rect of each entry of [_itemPaintOrder], parallel to it,
+  /// filled ONCE at the head of every [paint] and read by the clip
+  /// decision and the item paint pass.
+  ///
+  /// A field rather than a local so a paint allocates nothing, and
+  /// scoped to one `paint` call rather than to a layout: an item's
+  /// painted rect moves on paint-only ticks, so hit-testing and [itemAt]
+  /// evaluate live and never read this.
+  final List<Rect> _itemPaintRects = <Rect>[];
 
   /// Whether the last sweep positioned any child extending outside the
   /// viewport box, which is what gates the paint clip. The base class
@@ -372,14 +412,26 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// A selection change. A MOUNTED cell or item rebuilds through its host
   /// in the widget layer, which the `Board` state's relay reaches, and
   /// nothing in layout reads the selection, so a mounted child needs no
-  /// delegate rebuild. The plain relayout is for a cell whose builder
-  /// returned NULL: it holds no child, so no host and no relay reach it,
-  /// and `buildOrObtainChildFor` rebuilds a vicinity holding no child on
+  /// delegate rebuild.
+  ///
+  /// The relayout is for a cell whose builder returned NULL: it holds no
+  /// child, so no host and no relay reach it, and
+  /// `buildOrObtainChildFor` rebuilds a vicinity holding no child on
   /// every layout that obtains it
   /// (`widgets/two_dimensional_viewport.dart:1490`), which is the cost
-  /// such a cell already pays per scroll.
+  /// such a cell already pays per scroll. It is GATED on there being
+  /// one: a board with none has nothing here that a layout would
+  /// discover, and in range selection this handler fires once per cell
+  /// the pointer crosses.
+  ///
+  /// Re-measurement is NOT a reason to relayout here. A cell whose
+  /// height depends on the selection rebuilds through its host, and that
+  /// rebuild pokes its measurement surface, which schedules the layout
+  /// itself; see [_requestRemeasure].
   void _handleSelectionChanged() {
-    markNeedsLayout();
+    if (_nullCellCount > 0) {
+      markNeedsLayout();
+    }
   }
 
   /// A structural change relays out, and rebuilds every obtained child
@@ -396,14 +448,18 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   /// A payload-only write. The item's host and the hosts of the cells its
-  /// span covers rebuild through the `Board` state's relay. The plain
-  /// relayout does two things: the sizing pass lays every obtained cell
-  /// out under measuring constraints on every layout, so a payload that
-  /// changed a cell's or item's intrinsic size still re-measures, and a
-  /// cell whose builder returned null is asked again, as under
-  /// [_handleSelectionChanged].
+  /// span covers rebuild through the `Board` state's relay.
+  ///
+  /// The relayout is for a cell that built NULL and so has no host, and
+  /// is gated on there being one, for the reason
+  /// [_handleSelectionChanged] gives. Re-measurement is not a reason
+  /// either: a payload that changes a cell's intrinsic size does so
+  /// through that cell's builder, whose host's rebuild pokes the
+  /// measurement surface.
   void _handleItemDataChange(TKey key) {
-    markNeedsLayout();
+    if (_nullCellCount > 0) {
+      markNeedsLayout();
+    }
   }
 
   /// An animation tick.
@@ -483,6 +539,55 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     _priorTickHadExtent = anim.hasMakeRoomExtent;
   }
 
+  /// Every child of this viewport carries a [_BoardChildParentData], so
+  /// the measurement cache has somewhere to live.
+  ///
+  /// The base's own override installs a plain
+  /// `TwoDimensionalViewportParentData`
+  /// (`widgets/two_dimensional_viewport.dart:870`) and its `parentDataOf`
+  /// is documented to accept a subclass of it
+  /// (`widgets/two_dimensional_viewport.dart:880`), which is what makes
+  /// widening it here legal rather than a side channel.
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _BoardChildParentData) {
+      child.parentData = _BoardChildParentData();
+    }
+  }
+
+  /// The viewport half of a cell surface's poke: mark the cell for
+  /// re-measurement, and schedule the layout that will do it.
+  ///
+  /// [top] is the child this viewport holds, which the surface found by
+  /// walking its own ancestry. TWO ARMS, and the discriminator is
+  /// whether a layout is running:
+  ///
+  /// - Outside one, the flag alone would sit unread until something else
+  ///   laid this object out, which after the channel handlers stopped
+  ///   relaying out may be never. So it also dirties layout.
+  /// - Inside one, the poke came from a delegate rebuild running in
+  ///   `buildOrObtainChildFor`, and the measure step reads the flag
+  ///   later in the same pass, so the flag alone is enough. Dirtying
+  ///   from inside a layout would be a re-entrant mark of a node already
+  ///   being laid out.
+  ///
+  /// A board with no content axis returns at once: nothing there is
+  /// measured, so a rebuild has nothing to re-measure and a fixed board
+  /// pays nothing at all for this mechanism.
+  void _requestRemeasure(RenderBox top) {
+    if (_contentAxis == null) {
+      return;
+    }
+    final data = top.parentData;
+    if (data is! _BoardChildParentData) {
+      return;
+    }
+    data.remeasure = true;
+    if (!_inLayout) {
+      markNeedsLayout();
+    }
+  }
+
   /// The measurement half of a controller swap's reset: extents measured
   /// against one item set are not evidence about another, so a swap drops
   /// every measurement on the axes it is about to lay out.
@@ -513,18 +618,14 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   @override
   void layoutChildSequence() {
-    // The shift memo is valid only inside ONE layout, between the
-    // invalidation points [_invalidateShiftMemo] names; outside layout
-    // the port's queries read live, so a tick between frames is never
-    // masked.
-    _shiftMemoActive = true;
-    _invalidateShiftMemo();
+    // The one writer of the in-layout flag. Its reader is the cell
+    // surface's poke, which takes the flag-only arm inside a layout
+    // because the measure step has not yet read the flag it sets.
+    _inLayout = true;
     try {
       _layoutChildSequenceBody();
     } finally {
-      _shiftMemoActive = false;
-      _shiftMemoRows.clear();
-      _shiftMemoCols.clear();
+      _inLayout = false;
     }
   }
 
@@ -689,14 +790,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// overwriting any older id at the vicinity, which is what makes id
   /// recycling a non-event; releases happened at the top of
   /// [_obtainRetained].
+  /// Walks the ITEM map rather than the whole obtain set: only an item
+  /// vicinity can carry an exiting id, and the obtain wrote exactly the
+  /// item vicinities into that map, so the two enumerate the same
+  /// entries while this one skips every cell and hashes nothing.
   void _sweepRetention() {
     final anim = _controller.anim;
-    for (final vicinity in _obtainedThisLayout) {
-      final id = _vicinityToItemId[vicinity];
-      if (id != null && anim.isExitingItem(id)) {
+    _vicinityToItemId.forEach((vicinity, id) {
+      if (anim.isExitingItem(id)) {
         _retainedExits[vicinity] = id;
       }
-    }
+    });
   }
 
   /// The ANIMATED geometry reads: settled unless a trackResize is in
@@ -713,55 +817,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     return settled + _shiftTo(axisEnum, track);
   }
 
-  /// Per-axis memo of the animated-minus-settled SHIFT at a track's lead
-  /// over the current layout, keyed by track. Valid only between the
-  /// invalidation points [_invalidateShiftMemo] is called at; consulted
-  /// only while [_shiftMemoActive]. Stores the shift and not the offset,
-  /// so the settled half is always read live.
-  final Map<int, double> _shiftMemoRows = <int, double>{};
-  final Map<int, double> _shiftMemoCols = <int, double>{};
-  bool _shiftMemoActive = false;
-
-  /// The animator generation the memo was last invalidated at; the
-  /// assert in [_shiftTo] covers the animator half of the memo's
-  /// invariant, the enumerated invalidation points the settled half.
-  int _shiftMemoGeneration = 0;
-
-  /// The shift `animatedOffsetShiftBetween` would return for [track] on
-  /// [axis] from this layout's floor: memoized inside a layout, live
-  /// outside one. One animator walk per distinct (axis, track) per
-  /// invalidation window instead of one per positioned cell.
+  /// The shift `animatedOffsetShiftBetween` returns for [track] on [axis]
+  /// from this layout's floor.
+  ///
+  /// A plain forward. The animator answers from a prefix over its
+  /// in-flight tracks, so this costs two binary searches whether it is
+  /// called from inside a layout or from a port query between frames;
+  /// the per-layout memo that used to sit here was one cache too many
+  /// once the source itself stopped walking.
   double _shiftTo(Axis axis, int track) {
     final floor = axis == Axis.vertical ? _shiftFloorRow : _shiftFloorCol;
-    if (!_shiftMemoActive) {
-      return _controller.animatedOffsetShiftBetween(axis, floor, track);
-    }
-    assert(
-      _shiftMemoGeneration == _controller.debugTrackResizeGeneration,
-      "the shift memo was served across a resize animator mutation; the "
-      "mutating site is missing from _invalidateShiftMemo's callers",
-    );
-    final memo = axis == Axis.vertical ? _shiftMemoRows : _shiftMemoCols;
-    return memo[track] ??= _controller.animatedOffsetShiftBetween(
-      axis,
-      floor,
-      track,
-    );
-  }
-
-  /// Clears the memo. Called at layoutChildSequence entry, at the head of
-  /// each obtain round, immediately after the floor writes, and
-  /// immediately after `_sizeContentTracks` returns, which together cover
-  /// every write the memo's inputs can take inside a layout: a grep for
-  /// recordMeasurement, animateTrackResize and finalizeTrackResize over
-  /// this file returns only lines inside `_sizeContentTracks`.
-  void _invalidateShiftMemo() {
-    _shiftMemoRows.clear();
-    _shiftMemoCols.clear();
-    assert(() {
-      _shiftMemoGeneration = _controller.debugTrackResizeGeneration;
-      return true;
-    }());
+    return _controller.animatedOffsetShiftBetween(axis, floor, track);
   }
 
   double _animatedExtentOf(Axis axisEnum, BoardAxis axis, int track) {
@@ -851,7 +917,6 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // obtainable set; the obtain-once set makes re-walks cheap.
     while (true) {
       final obtainedBefore = _obtainedThisLayout.length;
-      _invalidateShiftMemo();
       final firstRow = _animatedTrackAt(
         Axis.vertical,
         rowAxis,
@@ -866,9 +931,6 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       // last write wins, which is the settling pass's.
       _shiftFloorRow = firstRow;
       _shiftFloorCol = firstCol;
-      // The shift is anchored at the floor, so a floor write re-keys
-      // every memo entry.
-      _invalidateShiftMemo();
       // The scrolled window, then the three frozen extensions: frozen
       // rows under the scrolled columns, frozen columns beside the
       // scrolled rows, and the frozen-by-frozen corner. A frozen track is
@@ -942,8 +1004,13 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       );
       if (anchorAxis != null) {
         _sizeContentTracks(anchorAxis);
-        // Every install, finalize and settled write sits inside it.
-        _invalidateShiftMemo();
+        // THE SETTLED-WRITE INVALIDATION. Every `recordMeasurement` in
+        // this file sits inside the step above, and the animator's shift
+        // prefix captures settled extents, so this is the one site that
+        // has to tell it. The installs and finalizes beside them need no
+        // telling: those move the animator's own state and it bumps its
+        // generation for itself.
+        _controller.invalidateAnimatedShifts();
       }
       if (_obtainedThisLayout.length == obtainedBefore) {
         break;
@@ -1217,20 +1284,55 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (child == null) {
       return;
     }
-    child.layout(
-      _measuringConstraints(rowsConfig, columnsConfig, row, col),
-      parentUsesSize: true,
-    );
     if (contentAxis == null) {
+      // Nothing on this board is measured, so the placement layout the
+      // sweep runs is the only layout this cell needs. Measuring here
+      // too would lay every cell out twice per layout to feed a track
+      // sizing step that never runs.
       return;
+    }
+    // THE MEASUREMENT CACHE. A cell is measured on the layout that first
+    // obtains it, on the layout after its host rebuilt, and on a layout
+    // whose measuring constraints differ from the ones the cached value
+    // was taken under; on every other layout the cached extent is used
+    // and the child is not laid out at all.
+    //
+    // What that buys: the placement layout in the sweep passes tight
+    // constraints under `stretch`, and a measuring layout passes loose
+    // ones on the content axis, so measuring every layout made the two
+    // alternate and the framework's equal-constraints early return
+    // (`rendering/object.dart:2848`) never fired. A scroll now runs no
+    // cell layout at all.
+    //
+    // What it costs is stated at `board_views.dart`: a cell that changes
+    // size without rebuilding is not re-measured until it does. A cell
+    // laid out tight is its own relayout boundary
+    // (`rendering/object.dart:2847`), so its dirtiness never reached
+    // this render object anyway; what changes is that a later layout no
+    // longer picks the new size up incidentally.
+    final data = child.parentData! as _BoardChildParentData;
+    final measuring = _measuringConstraints(
+      rowsConfig,
+      columnsConfig,
+      row,
+      col,
+    );
+    if (data.remeasure ||
+        data.measured == null ||
+        data.measuredUnder != measuring) {
+      child.layout(measuring, parentUsesSize: true);
+      data
+        ..measured = contentAxis == Axis.vertical
+            ? child.size.height
+            : child.size.width
+        ..measuredUnder = measuring
+        ..remeasure = false;
     }
     // The CELL contribution to the track's intrinsic extent: the maximum
     // over the cells of that track. The item-cluster term lands with the
     // item plane.
     final track = contentAxis == Axis.vertical ? row : col;
-    final measured = contentAxis == Axis.vertical
-        ? child.size.height
-        : child.size.width;
+    final measured = data.measured!;
     final current = _contentTrackExtents[track];
     if (current == null || measured > current) {
       _contentTrackExtents[track] = measured;
@@ -1479,9 +1581,19 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final corner = <RenderBox>[];
     final itemEntries =
         <({bool laned, int lane, int id, RenderBox child})>[];
+    // The one write site of the null-cell count; see the field.
+    final cellColumns = columnAxis.trackCount;
+    _nullCellCount = 0;
     for (final vicinity in _obtainedThisLayout) {
       final child = getChildFor(vicinity);
       if (child == null) {
+        // A vicinity that built nothing. A CELL one is what the two
+        // channel handlers gate on: it holds no host, so no relay can
+        // reach its builder and only a layout can ask it again. An ITEM
+        // one is not counted, per the field's doc.
+        if (vicinity.xIndex < cellColumns) {
+          _nullCellCount += 1;
+        }
         continue;
       }
       final itemId = _vicinityToItemId[vicinity];
@@ -1519,8 +1631,22 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         "placeable, because updateChildPaintData asserts on a null "
         "layoutOffset.",
       );
+      // The two animated extents, read ONCE and used three times each:
+      // the placement constraints, the alignment surplus, and nothing
+      // else in this arm.
+      final trackWidth = _animatedExtentOf(
+        Axis.horizontal,
+        columnAxis,
+        col,
+      );
+      final trackHeight = _animatedExtentOf(Axis.vertical, rowAxis, row);
       child.layout(
-        _placementConstraints(rowsConfig, columnsConfig, row, col),
+        _placementConstraints(
+          rowsConfig,
+          columnsConfig,
+          trackWidth,
+          trackHeight,
+        ),
         parentUsesSize: true,
       );
       final rowFrozen = _isFrozenTrack(rowsConfig, row);
@@ -1531,12 +1657,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       // on ITS axis only; a header row still scrolls with its columns.
       final shiftY = _alignmentShift(
         rowsConfig.alignment,
-        _animatedExtentOf(Axis.vertical, rowAxis, row) - child.size.height,
+        trackHeight - child.size.height,
       );
       final shiftX = _alignmentShift(
         columnsConfig.alignment,
-        _animatedExtentOf(Axis.horizontal, columnAxis, col) -
-            child.size.width,
+        trackWidth - child.size.width,
       );
       final normalizedY = rowFrozen
           ? _frozenNormalizedPosition(rowsConfig, row, extent.height) + shiftY
@@ -1633,18 +1758,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// resolved. `stretch` is tight at the track extent, so there is no
   /// surplus to place; the other three are loose and get the surplus
   /// through [_alignmentShift].
+  ///
+  /// The two ANIMATED EXTENTS are passed in rather than read here: its
+  /// one caller, the cell arm of the positioning sweep, needs the same
+  /// two numbers for the alignment shift below it, and on a content
+  /// -sized axis each read is two Fenwick prefix sums.
   BoxConstraints _placementConstraints(
     BoardAxisConfig rowsConfig,
     BoardAxisConfig columnsConfig,
-    int row,
-    int col,
+    double width,
+    double height,
   ) {
-    final width = _animatedExtentOf(
-      Axis.horizontal,
-      columnsConfig.axis,
-      col,
-    );
-    final height = _animatedExtentOf(Axis.vertical, rowsConfig.axis, row);
     return BoxConstraints(
       minWidth: columnsConfig.alignment == TrackAlignment.stretch ? width : 0.0,
       maxWidth: width,
@@ -1905,12 +2029,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   /// Whether any item child's PAINTED rect is not wholly inside the
-  /// viewport: the item half of the clip decision in [paint]. One rect
-  /// test per mounted item per paint.
+  /// viewport: the item half of the clip decision in [paint]. Reads the
+  /// scratch [paint] filled, so it evaluates no rect of its own.
   bool _anyItemPaintsOutsideViewport() {
     final extent = viewportDimension;
-    for (final child in _itemPaintOrder) {
-      final rect = _paintedRectOf(child);
+    for (final rect in _itemPaintRects) {
       if (rect.left < 0.0 ||
           rect.top < 0.0 ||
           rect.right > extent.width ||
@@ -1936,14 +2059,32 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       _paintBackground(context, offset);
       return;
     }
+    // THE PAINTED-RECT SCRATCH, filled once for this call. An item's
+    // painted rect is its paint offset composed with the coordinator's
+    // animation offset, which costs a vicinity lookup and two engine
+    // reads with a curve evaluation each; the overflow test, the
+    // visibility gate and the paint offset all want it, so it is
+    // computed here rather than three times per item.
+    //
+    // Valid for THIS call only. Hit-testing and `itemAt` deliberately
+    // read live: a tick between a paint and a pointer event moves the
+    // shift, and a stale rect would find an item where it no longer
+    // paints.
+    _itemPaintRects.clear();
+    for (final child in _itemPaintOrder) {
+      _itemPaintRects.add(_paintedRectOf(child));
+    }
     // The layout flag counts cells only: the positioning sweep's item arm
     // `continue`s before the overflow test. Items are decided HERE, at
     // paint, because their shift moves on paint-only ticks with no
     // layout: a drop-settle glide from a proxy released outside the
     // viewport starts outside it, and a lattice smaller than its
     // viewport has no overflowing cell to raise the flag for it.
-    final overflow = _hasVisualOverflow || _anyItemPaintsOutsideViewport();
-    if (overflow && clipBehavior != Clip.none) {
+    //
+    // `clipBehavior` is read FIRST, so a board that does not clip runs
+    // no overflow test at all.
+    if (clipBehavior != Clip.none &&
+        (_hasVisualOverflow || _anyItemPaintsOutsideViewport())) {
       _clipRectLayer.layer = context.pushClipRect(
         needsCompositing,
         offset,
@@ -1966,11 +2107,15 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         context.paintChild(child, offset + childParentData.paintOffset!);
       }
     }
-    for (final child in _itemPaintOrder) {
+    final viewport = Offset.zero & viewportDimension;
+    for (var i = 0; i < _itemPaintOrder.length; i++) {
+      final child = _itemPaintOrder[i];
       // The PAINTED rect gates, not the base's `isVisible`: see
-      // [_paintsItem].
-      if (_paintsItem(child)) {
-        context.paintChild(child, offset + _paintedRectOf(child).topLeft);
+      // [_paintsItem]. Read from the scratch, so this loop and the
+      // overflow test above share one evaluation per item.
+      final rect = _itemPaintRects[i];
+      if (rect.overlaps(viewport)) {
+        context.paintChild(child, offset + rect.topLeft);
       }
     }
     for (final child in _frozenPaintOrder) {
@@ -2557,5 +2702,80 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         }
         return viewportDimension.width - (local + extent);
     }
+  }
+}
+
+/// The viewport's parent data: the base's, widened by the per-cell
+/// MEASUREMENT CACHE the measure step reads and writes.
+///
+/// Three fields and one rule between them (the measure step is the only
+/// writer of the first two, and the surface's poke the only writer of
+/// the third). They sit here rather than in a map keyed by vicinity
+/// because a child's parent data moves with the child: a vicinity that
+/// is re-keyed by an ordinal shift carries its measurement along, and a
+/// child that unmounts takes its entry with it, so nothing has to be
+/// swept.
+class _BoardChildParentData extends TwoDimensionalViewportParentData {
+  /// The child's extent along the content-sized axis under
+  /// [measuredUnder], or null when it has never been measured. A null is
+  /// what makes a newly obtained vicinity measure on its first layout.
+  double? measured;
+
+  /// The measuring constraints [measured] was taken under. Compared by
+  /// VALUE, which is what re-measures a cell whose fixed-axis track
+  /// changed extent, or whose alignment stopped tightening it, without
+  /// either needing a flag of its own.
+  BoxConstraints? measuredUnder;
+
+  /// Set by the cell surface's poke and cleared by the measurement that
+  /// answers it. The cell's host rebuilt, so its builder may have
+  /// returned content of a different size.
+  bool remeasure = false;
+}
+
+/// A cell's measurement TRIGGER: a proxy the cell host wraps its content
+/// in, whose widget calls [requestRemeasure] on every host rebuild.
+///
+/// It exists because a rebuild is not otherwise observable from here. A
+/// cell is laid out tight by the positioning sweep, which makes it a
+/// relayout boundary (`rendering/object.dart:2847`) whose dirtiness
+/// stops at itself (`rendering/object.dart:2667`); a proxy that
+/// overrode `markNeedsLayout` would never see one. What does happen on
+/// every host rebuild is `RenderObjectElement.update`'s call to
+/// `updateRenderObject` (`widgets/framework.dart:6837`), because the
+/// host hands down a fresh widget instance, and that is the signal this
+/// class turns into a re-measurement.
+///
+/// Public only because it is named by a widget in another library of
+/// this module; the barrel exports `RenderBoardViewport` alone, so it is
+/// unreachable from app code.
+class RenderBoardCellSurface extends RenderProxyBox {
+  /// Marks this cell for re-measurement on the enclosing board's next
+  /// layout, and schedules that layout unless one is already running.
+  ///
+  /// Walks up to the [RenderBoardViewport], keeping the last node before
+  /// it: that node is the child the viewport holds and owns the parent
+  /// data the cache lives in. The walk is one or two hops, the delegate's
+  /// `RepaintBoundary` (`widgets/scroll_delegate.dart:1122`) being the
+  /// only thing that can sit between, and it is a walk rather than a
+  /// stored reference because a `GlobalKey` move can re-parent a cell
+  /// between boards.
+  ///
+  /// A detached surface, or one with no board above it, returns having
+  /// done nothing: neither can be showing a measured cell.
+  void requestRemeasure() {
+    if (!attached) {
+      return;
+    }
+    RenderObject top = this;
+    RenderObject? node = parent;
+    while (node != null && node is! RenderBoardViewport) {
+      top = node;
+      node = node.parent;
+    }
+    if (node is! RenderBoardViewport || top is! RenderBox) {
+      return;
+    }
+    node._requestRemeasure(top);
   }
 }

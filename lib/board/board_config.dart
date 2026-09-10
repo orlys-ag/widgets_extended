@@ -313,9 +313,11 @@ class BoardSelection {
 
   /// VALUE equality over both corners. Required, not decorative: the
   /// controller holds the selection in a `ValueNotifier`, which suppresses
-  /// a dispatch exactly when `new == old`, and the render object's
-  /// listener answers every dispatch with a full delegate rebuild. Without
-  /// this, an equal-but-distinct write costs that rebuild for nothing.
+  /// a dispatch exactly when `new == old`, and every dispatch that does
+  /// get through asks each mounted host whether its own answer changed
+  /// and relays the board out when a cell that built null is on screen.
+  /// Without this, an equal-but-distinct write costs all of that for
+  /// nothing.
   @override
   bool operator ==(Object other) {
     return other is BoardSelection &&

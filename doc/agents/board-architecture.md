@@ -28,9 +28,9 @@ range selection, frozen tracks, and a paintable background.
   flag; the microtask checks it). The render object's structural handler
   maps non-empty or null `affectedKeys` to
   `markNeedsLayout(withDelegateRebuild: true)`; a data-only update and a
-  selection change take a plain relayout there and rebuild only the
-  hosts whose own answer changed, through the `Board` state's two relays
-  (see `Board` below).
+  selection change rebuild only the hosts whose own answer changed,
+  through the `Board` state's two relays, and relayout there only when
+  the last layout obtained a cell that built NULL (see `Board` below).
 - **Two coordinate spaces.** Content space (distance from the lattice
   origin, per axis) and viewport-paint space (content minus the scroll
   offset, axis-direction aware). `_contentFromPaint` and
@@ -101,7 +101,11 @@ range selection, frozen tracks, and a paintable background.
   one site that clears bit 0 and frees the id (exactly-one-bit assert,
   delivered/deferred arms); `retireExitNow` is the one synchronous retire
   door. Sub-sources: `TrackResizeAnimator` (refuse-on-zero, re-target,
-  `animatedExtentOf`/offset shifts, and a per-track `finalizeTrack`, the
+  `animatedExtentOf`, offset shifts answered from a per-axis PREFIX over
+  the in-flight tracks, rebuilt lazily per generation or restyle and
+  dropped by `invalidateShiftCache` when layout writes a settled extent,
+  so a read costs two binary searches inside a layout and outside one
+  alike, and a per-track `finalizeTrack`, the
   make-room latch's hand-in door: the sizing step lands a track's
   in-flight resize the moment that track's extent becomes term-driven,
   because while a make-room latch entry stands the animator must hold no
@@ -161,15 +165,23 @@ range selection, frozen tracks, and a paintable background.
   walk widened by the composed animation offset bound; a correction loop
   whose ceiling counts consecutive STAGNANT passes (a pass that measured a
   new track resets it) and honors `applyContentDimensions`' false return
-  as another round; obtain-to-retain retention plus the drag pin's
+  as another round; a per-cell MEASUREMENT CACHE in the viewport's own
+  parent data, so a cell is laid out under measuring constraints only
+  when it is newly obtained, when its host's rebuild poked it, or when
+  those constraints changed, which is what stops a scroll laying every
+  mounted cell out twice; obtain-to-retain retention plus the drag pin's
   per-layout vicinity derivation; three paint planes (cells, items,
-  frozen) with hit-testing in exact reverse and `applyPaintTransform`
-  mirroring the per-item shift; `itemAt` probes painted rects (paint
-  offset composed with the held shift) and excludes exiting and dragged
-  items; `resolveDropCell` rounds the fractional animated track-space
+  frozen), whose item painted rects are computed ONCE per paint into a
+  scratch the clip decision and the paint pass share while hit-testing
+  and `itemAt` read live, with hit-testing in exact reverse and
+  `applyPaintTransform` mirroring the per-item shift; `itemAt` probes
+  painted rects (paint offset composed with the held shift) and excludes
+  exiting and dragged items; `resolveDropCell` rounds the fractional animated track-space
   coordinate to the NEAREST cell, agreeing with `BoardSnap.track`'s
   quantize; the `controller` setter re-subscribes, resets content-axis
-  measurements, and leaves the retention map alone. The tick router has
+  measurements, drops the new controller's shift prefix with them (an
+  axis instance can be shared between two controllers), and leaves the
+  retention map alone. The tick router has
   five arms: it composes the coordinator's layout-driving union with
   make-room motion ON A CONTENT-SIZED LANE AXIS and lays out on a
   make-room generation change there, and composes a RELANE slide the same
@@ -206,10 +218,14 @@ range selection, frozen tracks, and a paintable background.
   `getInheritedWidgetOfExactType`, the cell host's cover test is the
   span index's own `coversCell` (the padded bucket range and admit test,
   called rather than restated), the item host's selection test is the
-  selection's intersection with the item's cell range, and the render
-  keeps a plain relayout on both channels, for re-measurement and for a
-  cell that built null, which holds no host and is re-asked by every
-  layout; the drag
+  selection's intersection with the item's cell range, and the CELL host
+  wraps its output in a fresh `_BoardCellSurface` per build, whose
+  `updateRenderObject` pokes the render's per-cell measurement cache,
+  because a cell laid out tight is its own relayout boundary and its
+  rebuild is otherwise invisible below the element layer; the render
+  relays out on those two channels only when the last layout obtained a
+  cell that built NULL, which holds no host and can be re-asked by
+  nothing else, re-measurement having moved to the poke; the drag
   controller's lifetime (`didUpdateWidget` cancels before disposing and
   only rebuilds when controller or config identity changed), the selection
   forwarding listener, the drag-proxy overlay (gated on the SESSION's

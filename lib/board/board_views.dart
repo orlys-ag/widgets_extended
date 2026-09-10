@@ -28,6 +28,17 @@ import 'board_controller.dart';
 /// builder makes outside the view's members, a non-covering item's
 /// payload or the selection's shape, is not tracked. A cell that built
 /// null holds no element, so it is asked again on every layout instead.
+///
+/// WHEN THE BOARD MEASURES THE RESULT. On a board with a content-sized
+/// axis, a cell's own extent feeds its track's, and the board measures a
+/// cell when this builder is called for it and not otherwise. A widget
+/// this returns that changes size WITHOUT being rebuilt, an animating
+/// box, an image that resolves late, a font that loads, therefore does
+/// not move its track until the next call. Rebuild the cell to apply
+/// such a change: write the payload of an item covering it, or drive the
+/// size from something this builder reads. On a board with no
+/// content-sized axis nothing is measured and the question does not
+/// arise.
 typedef BoardCellBuilder<TKey, TItem> =
     Widget? Function(BuildContext context, BoardCellView<TKey, TItem> cell);
 

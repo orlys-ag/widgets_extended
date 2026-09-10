@@ -11,6 +11,11 @@ becomes the lane axis, where overlapping items stack into lanes instead of
 covering each other. Axes can freeze leading and trailing tracks
 (`frozenStart`, `frozenEnd`), and `animateScrollToCell` and `jumpToCell`
 scroll both axes at once.
+- A board cell is re-measured when its host rebuilds: a structural change, a
+payload write to an item covering it, or a selection change that reaches it.
+A size change a cell makes without rebuilding, an animating box or an image
+that resolves late, is applied at its next rebuild. This applies only where
+an axis is `LazyContentAxis`, which is the only kind measured from content.
 - Added board drag-and-drop through `BoardDragConfig`. The board resolves the
 drop and reports it (`onItemMoved`, `onItemResized`); the app mutates.
 `BoardSnap` quantizes the target to whole tracks or to a fraction, `canDropAt`

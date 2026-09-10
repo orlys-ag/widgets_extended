@@ -772,18 +772,38 @@ class BoardController<TKey, TItem> {
         }
         for (final entry in desired.entries) {
           final id = _liveIdOf(entry.key);
-          if (laneAxis != null) {
-            tracks.add(entry.value.span.startTrackOn(laneAxis).floor());
-          }
           if (id == BoardStore.noId) {
+            // An ENTERING key disturbs the bucket it arrives in, and the
+            // one a ghost of the same key is leaving.
+            if (laneAxis != null) {
+              tracks.add(entry.value.span.startTrackOn(laneAxis).floor());
+            }
             final ghost = _store.idOf(entry.key);
             if (ghost != BoardStore.noId && _store.isExiting(ghost)) {
               tracks.add(_laneStartTrackOf(ghost));
             }
             continue;
           }
+          // AN UNCHANGED SPAN DISTURBS NOTHING, so it names no track and
+          // nothing walks its bucket. Lanes are a function of the spans
+          // in a bucket, and the only write this call makes to such a
+          // key is its payload, which the resolver never reads; a
+          // neighbour that IS disturbed is reached through the track of
+          // whichever key disturbed it. Without this the commonest
+          // `setItems` there is, a re-sync of an unchanged list, walked
+          // every laned bucket and read every member's geometry twice.
+          if (_spanEquals(id, entry.value.span)) {
+            continue;
+          }
+          // The two buckets a changed span disturbs: the one it leaves
+          // and the one it arrives in. Named BEFORE the geometry guard
+          // below, because an item whose own geometry cannot be read
+          // still moves its neighbours, whose geometry can.
           tracks.add(_laneStartTrackOf(id));
-          if (_spanEquals(id, entry.value.span) || !_canReadItemGeometry(id)) {
+          if (laneAxis != null) {
+            tracks.add(entry.value.span.startTrackOn(laneAxis).floor());
+          }
+          if (!_canReadItemGeometry(id)) {
             continue;
           }
           reSpanned.add(id);
@@ -1314,12 +1334,17 @@ class BoardController<TKey, TItem> {
     return _anim.trackResize.offsetShiftBetween(axis, fromTrack, track);
   }
 
-  /// Debug-only: the resize animator's mutation generation, forwarded for
-  /// the render object's shift-memo assert for the reason
-  /// [debugLaneBucketResolveCount] gives: only the animator knows it
-  /// mutated.
-  int get debugTrackResizeGeneration {
-    return _anim.trackResize.debugGeneration;
+  /// Internal-use channel for the render object; not part of the
+  /// supported surface. Drops the resize animator's shift prefix, which
+  /// captures SETTLED extents and so cannot survive a write to one.
+  ///
+  /// Every other invalidation the prefix needs rides a state mutation or
+  /// a restyle, which the animator sees for itself; a settled write is
+  /// the one event that reaches the axis and not the animator, and
+  /// layout's `recordMeasurement` is its only site. Forwards and decides
+  /// nothing.
+  void invalidateAnimatedShifts() {
+    _anim.trackResize.invalidateShiftCache();
   }
 
   /// Scrolls both axes so cell `(row, col)` lands aligned, below the

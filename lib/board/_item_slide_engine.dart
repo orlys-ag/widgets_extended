@@ -65,17 +65,27 @@ class ItemSlideEngine {
     required TickerProvider vsync,
     required BoardAnimationStyle Function() styleOf,
     required void Function() notifyNow,
+    required void Function() notifyCoalesced,
   }) : _styleOf = styleOf,
-       _notifyNow = notifyNow {
+       _notifyNow = notifyNow,
+       _notifyCoalesced = notifyCoalesced {
     _ticker = vsync.createTicker(_tick);
   }
 
   final BoardAnimationStyle Function() _styleOf;
 
-  /// The UNCOALESCED dispatch: this engine's settle notify carries a
+  /// The UNCOALESCED dispatch, for the SETTLE only: that notify carries a
   /// synchronous ordering contract (deltas observed at 0 while the record
   /// still exists), which a deferred dispatch would land after.
   final void Function() _notifyNow;
+
+  /// The ordinary per-tick dispatch, coalesced with every other source
+  /// ticking in the same frame. A tick that completed no record carries
+  /// no ordering contract: it moved some deltas, and one dispatch per
+  /// frame is what the listeners want. The microtask it defers to runs
+  /// before the frame's build and layout phase, so a listener that marks
+  /// layout dirty still lays out in the same frame.
+  final void Function() _notifyCoalesced;
 
   late final Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
@@ -254,18 +264,23 @@ class ItemSlideEngine {
         anyCompleted = true;
       }
     });
+    if (!anyCompleted) {
+      // An ordinary tick: nothing settled, so nothing depends on when
+      // within the frame this lands. Coalesced with every other source.
+      _notifyCoalesced();
+      return;
+    }
     // The settle protocol: listeners first observe the completed records
     // with their deltas at 0 while the engine still reports active, then
     // the records are cleared, then one more dispatch shows the
-    // active-to-idle transition.
+    // active-to-idle transition. BOTH are synchronous, because both are
+    // about what is observable at a particular instant.
     _notifyNow();
-    if (anyCompleted) {
-      _records.removeWhere((id, record) {
-        return record.t >= 1.0;
-      });
-      _stopIfIdle();
-      _notifyNow();
-    }
+    _records.removeWhere((id, record) {
+      return record.t >= 1.0;
+    });
+    _stopIfIdle();
+    _notifyNow();
   }
 
   void dispose() {

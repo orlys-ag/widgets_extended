@@ -1022,4 +1022,131 @@ void main() {
       expect(find.byKey(const ValueKey<String>("probe0_0")), findsOneWidget);
     },
   );
+
+  // Performance plan 2 T6, first arm
+  // (plans/2026-09-09-board-performance-2-plan.md).
+  // Asserts: on a FIXED board holding no null-built cell, neither a
+  // selection change nor a payload write runs a viewport layout at all.
+  // Nothing on such a board is measured, so the hosts that rebuild have
+  // nothing to tell the render object, and no cell is waiting to be
+  // asked again.
+  // Falsification: the unconditional relayout both handlers carried
+  // reports one layout for each of the two writes.
+  testWidgets(
+    "a selection change and a payload write run no viewport layout on a "
+    "fixed board with no null cell",
+    (tester) async {
+      final controller = _controller(tester)
+        ..addItem(const _Item("a"), const BoardSpan(rowStart: 1, colStart: 1));
+      await tester.pumpWidget(_board(controller));
+      final viewport = _viewport(tester);
+      // Setup sanity: every cell built something, so the gate's subject
+      // is genuinely absent rather than merely unobserved.
+      expect(_childCount(tester), greaterThan(9));
+      final layouts = viewport.debugPerformLayoutCount;
+
+      controller.setSelection(_cell(1, 1));
+      await tester.pump();
+      expect(viewport.debugPerformLayoutCount, layouts);
+
+      controller.updateItem("a", const _Item("a", "after"));
+      await tester.pump();
+      expect(viewport.debugPerformLayoutCount, layouts);
+    },
+  );
+
+  // Performance plan 2 T6, second arm.
+  // Asserts: on a CONTENT-SIZED board the same selection change runs one
+  // viewport layout, and that layout measures only the cell whose host
+  // rebuilt. The route is the host's poke, not the handler: the handler
+  // is gated off here for the same reason as the first arm.
+  // Falsification: measuring every obtained cell on every layout reports
+  // one measuring layout per mounted cell rather than one for the cell
+  // that flipped.
+  testWidgets(
+    "a selection change on a content-sized board measures only the cells "
+    "it flipped",
+    (tester) async {
+      var layouts = 0;
+      final controller = _controller(
+        tester,
+        rows: BoardAxisConfig(axis: LazyContentAxis(3, 100.0)),
+      );
+      await tester.pumpWidget(
+        _board(
+          controller,
+          cellBuilder: (context, cell) {
+            return _LayoutCountingBox(
+              onLayout: () {
+                layouts += 1;
+              },
+              height: cell.isSelected ? 120.0 : 100.0,
+            );
+          },
+        ),
+      );
+      final viewport = _viewport(tester);
+      // Setup sanity: the rows took their extent from the cells, so the
+      // measuring path is live on this board.
+      expect(controller.rows.axis.extentOf(0), 100.0);
+      final before = viewport.debugPerformLayoutCount;
+      layouts = 0;
+
+      controller.setSelection(_cell(0, 0));
+      await tester.pump();
+
+      // One layout, scheduled by the flipped cell's own poke.
+      expect(viewport.debugPerformLayoutCount, before + 1);
+      // And in it, the flipped cell measured and was placed; its two
+      // row-mates were re-placed at the row's new extent. Nothing else
+      // was laid out at all.
+      expect(layouts, lessThanOrEqualTo(4));
+      expect(controller.rows.axis.extentOf(0), 120.0);
+    },
+  );
+}
+
+/// A cell that reports every layout of its own render object.
+class _LayoutCountingBox extends LeafRenderObjectWidget {
+  const _LayoutCountingBox({required this.onLayout, required this.height});
+
+  final VoidCallback onLayout;
+  final double height;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _RenderLayoutCountingBox(onLayout, height);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant _RenderLayoutCountingBox renderObject,
+  ) {
+    renderObject
+      ..onLayout = onLayout
+      ..height = height;
+  }
+}
+
+class _RenderLayoutCountingBox extends RenderBox {
+  _RenderLayoutCountingBox(this.onLayout, this._height);
+
+  VoidCallback onLayout;
+
+  double _height;
+
+  set height(double value) {
+    if (value == _height) {
+      return;
+    }
+    _height = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    onLayout();
+    size = constraints.constrain(Size(100.0, _height));
+  }
 }

@@ -146,6 +146,7 @@ class MakeRoomEngine {
     required TickerProvider vsync,
     required BoardAnimationStyle Function() styleOf,
     required void Function() notifyNow,
+    required void Function() notifyCoalesced,
     required Axis? Function() laneAxisOf,
     required Map<int, ({int lane, int laneCount, int laneSpan})> Function(
       int draggedId,
@@ -163,6 +164,7 @@ class MakeRoomEngine {
     required int Function(int id) laneCountOfId,
   }) : _styleOf = styleOf,
        _notifyNow = notifyNow,
+       _notifyCoalesced = notifyCoalesced,
        _laneAxisOf = laneAxisOf,
        _dryRunOf = dryRunOf,
        _laneOriginOfId = laneOriginOfId,
@@ -177,8 +179,13 @@ class MakeRoomEngine {
   /// The UNCOALESCED dispatch. Load-bearing on both snap arms: a snapped
   /// install starts no ticker, so without this notify nothing repaints
   /// and a gap past the admitted bound opens over children that were
-  /// never built.
+  /// never built. The tick uses it for the SETTLE only.
   final void Function() _notifyNow;
+
+  /// The ordinary per-tick dispatch, coalesced with every other source
+  /// ticking in the same frame; see the slide engine's field of the same
+  /// name. A tick that closed no entry carries no ordering contract.
+  final void Function() _notifyCoalesced;
 
   final Axis? Function() _laneAxisOf;
   final Map<int, ({int lane, int laneCount, int laneSpan})> Function(
@@ -881,30 +888,35 @@ class MakeRoomEngine {
         }
       }
     });
+    if (!anyClosed) {
+      // An ordinary tick: nothing closed, so nothing depends on when
+      // within the frame this lands. Coalesced with every other source.
+      _notifyCoalesced();
+      _stopIfIdle();
+      return;
+    }
     // Same settle protocol as the slide engine: deltas observed at their
     // settled values before a closing entry is removed, then the
-    // idle transition.
+    // idle transition. Both synchronous.
     _notifyNow();
-    if (anyClosed) {
-      _held.removeWhere((id, entry) {
-        return entry.t >= 1.0 && entry.target == 0.0;
+    _held.removeWhere((id, entry) {
+      return entry.t >= 1.0 && entry.target == 0.0;
+    });
+    _heldExtent.removeWhere((id, entry) {
+      return entry.t >= 1.0 && entry.target == Offset.zero;
+    });
+    _slots.removeWhere((track, slots) {
+      slots.removeWhere((slot) {
+        return slot.t >= 1.0 && slot.target == 0.0;
       });
-      _heldExtent.removeWhere((id, entry) {
-        return entry.t >= 1.0 && entry.target == Offset.zero;
-      });
-      _slots.removeWhere((track, slots) {
-        slots.removeWhere((slot) {
-          return slot.t >= 1.0 && slot.target == 0.0;
-        });
-        // An emptied bucket goes, which is what keeps `_slots.isEmpty`
-        // meaning "no slot exists".
-        return slots.isEmpty;
-      });
-      if (_slots.isEmpty) {
-        _liftedId = null;
-      }
-      _notifyNow();
+      // An emptied bucket goes, which is what keeps `_slots.isEmpty`
+      // meaning "no slot exists".
+      return slots.isEmpty;
+    });
+    if (_slots.isEmpty) {
+      _liftedId = null;
     }
+    _notifyNow();
     _stopIfIdle();
   }
 

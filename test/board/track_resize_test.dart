@@ -8,11 +8,14 @@
 /// Landed at Landing Order step 9 with the animation sources.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_animation_coordinator.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_span.dart';
+import 'package:widgets_extended/board/_track_resize_animator.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
 import 'package:widgets_extended/board/board_controller.dart';
 import 'package:widgets_extended/board/board_widget.dart';
@@ -120,15 +123,36 @@ BoardSpan _chip(int row, int colStart, int colSpan) {
   return BoardSpan(rowStart: row, colStart: colStart, colSpan: colSpan);
 }
 
+/// The probe budget for [reads] shift reads against an axis holding
+/// [states] in-flight resizes: two lower-bound searches per read, each
+/// costing at most `log2(states) + 2` comparisons.
+///
+/// Performance plan 2 T9 (plans/2026-09-09-board-performance-2-plan.md).
+///
+/// [reads] counts reads on the axis that HOLDS the states, not every
+/// shift read a frame makes. At most one axis is content-sized, so only
+/// one axis is ever resized by layout, and a read on the other returns
+/// before probing anything under both the prefix and the walk it
+/// replaced. Averaging over both axes halves whatever either costs and
+/// stops the budget separating them, which is exactly what an earlier
+/// version of this helper did.
+double _probeBudget({required int reads, required int states}) {
+  return reads * 2 * ((math.log(states) / math.ln2) + 2);
+}
+
 void main() {
-  // Performance plan T4 (plans/2026-09-07-board-performance-plan.md).
-  // Asserts: a layout under in-flight resizes on every visible row reads
-  // the resize animator's shift walk once per distinct track per
-  // invalidation window, not twice per positioned cell.
-  // Falsification: the per-cell reads at the positioning sweep report at
-  // least two per cell, 800 for the 400 visible cells.
+  // Performance plan 2 T9 (plans/2026-09-09-board-performance-2-plan.md),
+  // replacing performance plan 1's T4 assertion on this same case.
+  // Asserts: a layout under in-flight resizes on every visible row pays
+  // O(log S) probes per shift read. The CALL count is no longer the
+  // measure: the render's per-layout memo is gone, so a layout makes one
+  // call per positioned cell per axis and each is a pair of binary
+  // searches over the animator's prefix.
+  // Falsification: the walk this replaced visits all 20 states per call,
+  // which is 20 probes against a budget of 12.6.
   testWidgets(
-    "a layout under in-flight resizes reads the animator once per track",
+    "a layout under in-flight resizes probes the animator O(log S) times "
+    "per read",
     (tester) async {
       final controller = BoardController<String, _Item>(
         vsync: tester,
@@ -175,15 +199,157 @@ void main() {
       await tester.pumpWidget(board());
       final coordinator = controller.anim as BoardAnimationCoordinator<String>;
       expect(controller.anim.hasActiveTrackResize, isTrue);
-      coordinator.trackResize.debugShiftCallCount = 0;
+      coordinator.trackResize
+        ..debugShiftCallCount = 0
+        ..debugShiftProbeCount = 0;
       final layoutsBefore = viewport.debugPerformLayoutCount;
 
       await tester.pump(const Duration(milliseconds: 16));
 
       expect(viewport.debugPerformLayoutCount, layoutsBefore + 1);
       expect(viewport.debugLastCorrectionPassCount, 1);
-      expect(coordinator.trackResize.debugShiftCallCount, lessThan(200));
+      // Setup sanity: the layout reads the shift at SCALE, hundreds of
+      // times for 400 positioned cells. It is that scale which makes the
+      // per-read cost measured below the thing that matters; a layout
+      // reading once would satisfy any budget.
+      expect(coordinator.trackResize.debugShiftCallCount, greaterThan(100));
+
+      // The per-read cost, measured over a KNOWN number of reads on the
+      // axis that holds the states. The vertical axis is the content
+      // -sized one, so it is the only axis layout resizes.
+      coordinator.trackResize
+        ..debugShiftCallCount = 0
+        ..debugShiftProbeCount = 0;
+      for (var track = 0; track < 20; track++) {
+        coordinator.trackResize.offsetShiftBetween(Axis.vertical, 0, track);
+      }
+      expect(coordinator.trackResize.debugShiftCallCount, 20);
+      expect(
+        coordinator.trackResize.debugShiftProbeCount,
+        lessThanOrEqualTo(_probeBudget(reads: 20, states: 20)),
+      );
       // Let the resizes finish so no ticker outlives the test.
+      await tester.pump(const Duration(milliseconds: 400));
+    },
+  );
+
+  // Performance plan 2 C5, the shift prefix's debug guard.
+  // Asserts: the guard FIRES when a settled extent moves under a built
+  // prefix with no invalidation. The prefix is a function of the settled
+  // extents it captured, and the animator cannot see a write to the axis,
+  // so every site that makes one must call `invalidateShiftCache`; this
+  // is the tripwire that says so, tested directly because no render path
+  // in this suite reaches the state it guards (the render's own two
+  // invalidation sites, and the generation bump every install and tick
+  // makes, together keep the prefix fresh on every path a test drives).
+  // Falsification: an animator with no guard answers from the stale
+  // prefix and throws nothing.
+  testWidgets("the shift prefix asserts when a settled extent moves under "
+      "it", (tester) async {
+    var settled = 20.0;
+    final animator = TrackResizeAnimator(
+      vsync: tester,
+      styleOf: () {
+        return _resizeOnly;
+      },
+      settledExtentOf: (axis, track) {
+        return settled;
+      },
+      onTick: () {},
+    );
+    addTearDown(animator.dispose);
+    animator.animateTrackResize(Axis.vertical, 1, 20.0, 30.0);
+    // Builds the prefix, capturing settled 20.
+    expect(animator.offsetShiftBetween(Axis.vertical, 0, 2), isNotNull);
+    // Setup sanity: a second read with nothing changed is served from
+    // that prefix and does not throw, so the throw below is the write's
+    // doing and not the guard firing on every serve.
+    expect(animator.offsetShiftBetween(Axis.vertical, 0, 2), isNotNull);
+
+    // The write the animator cannot see.
+    settled = 25.0;
+
+    expect(
+      () {
+        return animator.offsetShiftBetween(Axis.vertical, 0, 2);
+      },
+      throwsA(isA<FlutterError>()),
+    );
+    // And an invalidation is what makes it serve again.
+    animator.invalidateShiftCache();
+    expect(animator.offsetShiftBetween(Axis.vertical, 0, 2), isNotNull);
+    animator.finalizeAll();
+  });
+
+  // Performance plan 2 T10.
+  // Asserts: a PORT read during a resize costs the same probes per read
+  // as a layout read. The render's memo was live only inside a layout,
+  // so this is the half of the cost the memo never covered: the grid
+  // painter makes one such read per visible track per paint.
+  // Falsification: the walk this replaced visits all 20 states on every
+  // one of these reads, 20 probes against a budget of 12.6.
+  testWidgets(
+    "a port read during a resize costs the same probes as a layout read",
+    (tester) async {
+      final controller = BoardController<String, _Item>(
+        vsync: tester,
+        rows: BoardAxisConfig(axis: LazyContentAxis(20, 20.0)),
+        columns: BoardAxisConfig(axis: UniformAxis(20, 14.0)),
+        keyOf: (item) {
+          return item.key;
+        },
+        animationStyle: BoardAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+      var cellHeight = 20.0;
+      Widget board() {
+        return MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 280.0,
+                height: 400.0,
+                child: Board<String, _Item>(
+                  controller: controller,
+                  cellBuilder: (context, cell) {
+                    return SizedBox(width: 14.0, height: cellHeight);
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      await tester.pumpWidget(board());
+      final viewport = _viewport(tester);
+      expect(viewport.rectOfCell(19, 19), isNotNull);
+      controller.animationStyle = _resizeOnly;
+      cellHeight = 30.0;
+      await tester.pumpWidget(board());
+      final coordinator = controller.anim as BoardAnimationCoordinator<String>;
+      // Setup sanity: the reads below happen WHILE 20 states are in
+      // flight, which is what makes the walk they replace expensive.
+      expect(controller.anim.hasActiveTrackResize, isTrue);
+      coordinator.trackResize
+        ..debugShiftCallCount = 0
+        ..debugShiftProbeCount = 0;
+
+      // The grid painter's shape: one cell rect per visible row, read
+      // between frames rather than inside a layout.
+      for (var row = 0; row < 20; row++) {
+        expect(viewport.rectOfCell(row, 0), isNotNull);
+      }
+
+      // Setup sanity: two axes per rect, so 20 rects made 40 reads, of
+      // which the 20 vertical ones meet a non-empty axis and are what
+      // the budget is written against.
+      expect(coordinator.trackResize.debugShiftCallCount, 40);
+      expect(
+        coordinator.trackResize.debugShiftProbeCount,
+        lessThanOrEqualTo(_probeBudget(reads: 20, states: 20)),
+      );
       await tester.pump(const Duration(milliseconds: 400));
     },
   );
