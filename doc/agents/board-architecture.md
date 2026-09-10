@@ -167,9 +167,15 @@ range selection, frozen tracks, and a paintable background.
   new track resets it) and honors `applyContentDimensions`' false return
   as another round; a per-cell MEASUREMENT CACHE in the viewport's own
   parent data, so a cell is laid out under measuring constraints only
-  when it is newly obtained, when its host's rebuild poked it, or when
-  those constraints changed, which is what stops a scroll laying every
-  mounted cell out twice; obtain-to-retain retention plus the drag pin's
+  when it is newly obtained, when its host's rebuild poked it, when the
+  controller's `invalidateCellMeasurements` dropped every mounted cell's
+  entry, or when those constraints changed, which is what stops a scroll
+  laying every mounted cell out twice; the opt-in
+  `debugCheckCellMeasurements` re-measures every cell that USES its cache
+  and reports, once per layout and repeating while the staleness stands,
+  every one whose extent moved, reading the cache and never writing it,
+  and reporting rather than throwing because a throw from inside the pass
+  loop strands the children the base's child manager has claimed; obtain-to-retain retention plus the drag pin's
   per-layout vicinity derivation; three paint planes (cells, items,
   frozen), whose item painted rects are computed ONCE per paint into a
   scratch the clip decision and the paint pass share while hit-testing
@@ -225,7 +231,8 @@ range selection, frozen tracks, and a paintable background.
   rebuild is otherwise invisible below the element layer; the render
   relays out on those two channels only when the last layout obtained a
   cell that built NULL, which holds no host and can be re-asked by
-  nothing else, re-measurement having moved to the poke; the drag
+  nothing else, re-measurement having moved to the poke and the
+  controller's door; the drag
   controller's lifetime (`didUpdateWidget` cancels before disposing and
   only rebuilds when controller or config identity changed), the selection
   forwarding listener, the drag-proxy overlay (gated on the SESSION's

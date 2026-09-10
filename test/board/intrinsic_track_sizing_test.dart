@@ -562,4 +562,225 @@ void main() {
     // 30 a column is 7 lines.
     expect(controller.rows.axis.extentOf(0), 84.0);
   });
+
+  // ------------------------------------------------------------------
+  // Cell measurement invalidation plan
+  // (plans/2026-09-09-cell-measurement-invalidation-plan.md).
+  // ------------------------------------------------------------------
+
+  tearDown(() {
+    RenderBoardViewport.debugCheckCellMeasurements = false;
+  });
+
+  /// The STALENESS FIXTURE: a content-sized row axis, builders hoisted to
+  /// a stable identity so no delegate rebuild can heal anything, and cell
+  /// content that reads its height from an inherited widget the test
+  /// owns. Pumping a new value rebuilds the content and not the host.
+  Future<BoardController<String, _Item>> pumpStaleness(
+    WidgetTester tester, {
+    required double height,
+    BoardController<String, _Item>? controller,
+  }) async {
+    final c =
+        controller ??
+        BoardController<String, _Item>(
+          vsync: tester,
+          rows: BoardAxisConfig(
+            axis: LazyContentAxis(40, 40.0),
+            laneExtent: 12.0,
+          ),
+          columns: BoardAxisConfig(axis: UniformAxis(4, 60.0)),
+          keyOf: (item) {
+            return item.key;
+          },
+          animationStyle: BoardAnimationStyle.disabled,
+        );
+    if (controller == null) {
+      addTearDown(c.dispose);
+      c.addItem(const _Item("a"), const BoardSpan(rowStart: 1, colStart: 1));
+    }
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 240.0,
+              height: 200.0,
+              child: _HeightScope(
+                height: height,
+                child: Board<String, _Item>(
+                  controller: c,
+                  cellBuilder: _inheritedCell,
+                  itemBuilder: _emptyItem,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    return c;
+  }
+
+  // T1 (D1).
+  // Asserts: after the inherited height changes, the track is UNCHANGED
+  // (the documented contract, and the setup sanity for what follows);
+  // after invalidateCellMeasurements the next layout takes the new
+  // extent, at one measuring and one placement layout per mounted cell.
+  // Falsification: red before D1 (does not compile); red after D1 with
+  // the visitChildren walk replaced by a no-op (the track stays 40).
+  testWidgets("invalidateCellMeasurements re-measures a cell its host "
+      "never rebuilt", (tester) async {
+    final controller = await pumpStaleness(tester, height: 40.0);
+    final viewport = _viewport(tester);
+    expect(controller.rows.axis.extentOf(0), 40.0);
+    var mounted = 0;
+    viewport.visitChildren((child) {
+      mounted += 1;
+    });
+    // 48 cells and one item.
+    expect(mounted, 49);
+
+    await pumpStaleness(tester, height: 70.0, controller: controller);
+    (viewport.verticalOffset as ScrollPosition).jumpTo(1.0);
+    await tester.pump();
+    // Setup sanity: the content rebuilt and the host did not, so the
+    // track kept its extent.
+    expect(controller.rows.axis.extentOf(0), 40.0);
+
+    cellLayouts = 0;
+    final layoutsBefore = viewport.debugPerformLayoutCount;
+    controller.invalidateCellMeasurements();
+    await tester.pump();
+
+    expect(controller.rows.axis.extentOf(0), 70.0);
+    expect(viewport.debugPerformLayoutCount, layoutsBefore + 1);
+    // One measuring layout and one placement layout per mounted cell.
+    expect(cellLayouts, 2 * 48);
+  });
+
+  // T3 (D1).
+  // Asserts: a call from inside a cell builder asserts, and the message
+  // names the door.
+  // Falsification: an implementation with no _inLayout guard throws
+  // NOTHING: the framework permits the mutation inside a layout callback
+  // and markNeedsLayout returns early, so the pump completes clean and
+  // takeException() is null.
+  testWidgets("invalidateCellMeasurements from inside a cell builder "
+      "asserts", (tester) async {
+    var called = false;
+    await pumpFixture(
+      tester,
+      contentSized: true,
+      cellFor: (cell) {
+        if (!called) {
+          called = true;
+          cell.controller.invalidateCellMeasurements();
+        }
+        return const _CountingCell(40.0);
+      },
+    );
+    // Setup sanity: the builder ran and made the call.
+    expect(called, isTrue);
+    final exception = tester.takeException();
+    expect(exception, isA<AssertionError>());
+    expect(
+      (exception as AssertionError).message.toString(),
+      contains("invalidateCellMeasurements"),
+    );
+  });
+
+  // T4 (D2).
+  // Asserts: with the flag on, the first layout after the staleness
+  // throws a FlutterError naming the cached and the fresh extent.
+  // Falsification: red with the flag off, which is T5.
+  testWidgets("the measurement check names a stale cell", (tester) async {
+    final controller = await pumpStaleness(tester, height: 40.0);
+    final viewport = _viewport(tester);
+    expect(controller.rows.axis.extentOf(0), 40.0);
+
+    RenderBoardViewport.debugCheckCellMeasurements = true;
+    final layoutsBeforeStaleness = viewport.debugPerformLayoutCount;
+    await pumpStaleness(tester, height: 70.0, controller: controller);
+    // Setup sanity: the staleness pump laid the viewport out NOT AT ALL,
+    // so the error below is the scroll's layout's and not a second one.
+    expect(viewport.debugPerformLayoutCount, layoutsBeforeStaleness);
+    final layoutsBefore = viewport.debugPerformLayoutCount;
+    (viewport.verticalOffset as ScrollPosition).jumpTo(1.0);
+    await tester.pump();
+
+    // Setup sanity: the scroll DID lay the viewport out.
+    expect(viewport.debugPerformLayoutCount, layoutsBefore + 1);
+    final exception = tester.takeException();
+    expect(exception, isA<FlutterError>());
+    final message = (exception as FlutterError).toString();
+    expect(message, contains("70.0"));
+    expect(message, contains("40.0"));
+    expect(message, contains("invalidateCellMeasurements"));
+    // I2: the check read and did not write; the track is still stale.
+    expect(controller.rows.axis.extentOf(0), 40.0);
+  });
+
+  // T5 (D2).
+  // Asserts: with the flag at its default, the same layout throws
+  // nothing, lays no cell out, and leaves the track stale.
+  // Falsification: red against a check that runs unconditionally.
+  testWidgets("the measurement check is off by default", (tester) async {
+    final controller = await pumpStaleness(tester, height: 40.0);
+    final viewport = _viewport(tester);
+    expect(controller.rows.axis.extentOf(0), 40.0);
+    expect(RenderBoardViewport.debugCheckCellMeasurements, isFalse);
+
+    await pumpStaleness(tester, height: 70.0, controller: controller);
+    cellLayouts = 0;
+    final layoutsBefore = viewport.debugPerformLayoutCount;
+    (viewport.verticalOffset as ScrollPosition).jumpTo(1.0);
+    await tester.pump();
+
+    expect(viewport.debugPerformLayoutCount, layoutsBefore + 1);
+    expect(tester.takeException(), isNull);
+    expect(cellLayouts, 0);
+    expect(controller.rows.axis.extentOf(0), 40.0);
+  });
+}
+
+/// Hoisted builders: identity-stable across pumps, so the Board's
+/// delegate is never rebuilt and no host is poked by the fixture itself.
+Widget? _inheritedCell(BuildContext context, BoardCellView<String, _Item> cell) {
+  return const _InheritedHeightCell();
+}
+
+Widget _emptyItem(BuildContext context, BoardItemView<String, _Item> item) {
+  return const SizedBox();
+}
+
+/// The inherited value the cell CONTENT reads, in its own build.
+class _HeightScope extends InheritedWidget {
+  const _HeightScope({required this.height, required super.child});
+
+  final double height;
+
+  static double of(BuildContext context) {
+    return context
+        .dependOnInheritedWidgetOfExactType<_HeightScope>()!
+        .height;
+  }
+
+  @override
+  bool updateShouldNotify(_HeightScope oldWidget) {
+    return oldWidget.height != height;
+  }
+}
+
+/// Cell content whose size comes from the inherited value: a rebuild of
+/// THIS widget, not of the cell host, is what a new value produces.
+class _InheritedHeightCell extends StatelessWidget {
+  const _InheritedHeightCell();
+
+  @override
+  Widget build(BuildContext context) {
+    return _CountingCell(_HeightScope.of(context));
+  }
 }

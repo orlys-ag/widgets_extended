@@ -261,8 +261,26 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   /// Whether `layoutChildSequence` is running, written by it alone. Read
   /// by the cell surface's poke, which dirties layout outside one and
-  /// sets its flag alone inside one.
+  /// sets its flag alone inside one, and by [invalidateCellMeasurements],
+  /// which asserts on it.
   bool _inLayout = false;
+
+  /// Opt-in staleness check for the cell measurement cache, off by
+  /// default. When true, every layout re-measures every cell whose cached
+  /// extent it would otherwise use and throws a [FlutterError] naming a
+  /// cell whose extent moved. It reads and never writes the cache, so a
+  /// debug build with it on shows the same geometry as a release build.
+  /// A cell whose content animates its own size trips it on every frame
+  /// of that animation by design, which is why it is a diagnostic to turn
+  /// on when tracks look wrong and not a guard to leave on.
+  /// While a staleness persists the report repeats on every layout,
+  /// because the check heals nothing.
+  static bool debugCheckCellMeasurements = false;
+
+  /// The stale cells [debugCheckCellMeasurements] found this layout, one
+  /// entry per cell, reported ONCE at the end of the pass loop and
+  /// cleared there. Debug-only; null in release.
+  List<String>? _debugStaleCells;
 
   /// Cell vicinities the LAST layout obtained whose builder returned
   /// null, written once per layout by the positioning sweep.
@@ -588,6 +606,41 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     }
   }
 
+  /// The whole-board arm of the cell measurement cache's invalidation:
+  /// sets every mounted child's `remeasure` flag and dirties layout. The
+  /// port member `BoardController.invalidateCellMeasurements` forwards
+  /// to.
+  ///
+  /// `visitChildren` walks the sibling chain and then the keep-alive
+  /// bucket (`widgets/two_dimensional_viewport.dart:940`); this board
+  /// writes no `keepAlive`, so the walk is the set the last layout
+  /// reified. An item child gets the flag too, inertly: the flag's one
+  /// reader is the cell measure step, which an item never reaches.
+  ///
+  /// Asserts outside a layout. Inside one the call would be SILENT
+  /// rather than loud: a layout callback is a context the framework's
+  /// mutation guard permits (`rendering/object.dart:2342`), and
+  /// `markNeedsLayout` returns early while `_needsLayout` is true
+  /// (`rendering/object.dart:2662`), which it is for the whole of
+  /// `performLayout`, so the request would be dropped.
+  @override
+  void invalidateCellMeasurements() {
+    assert(
+      !_inLayout,
+      "invalidateCellMeasurements was called during the board's layout, "
+      "which drops the request silently. Call it from an event handler, "
+      "a post-frame callback, or the build phase, not from a cell or "
+      "item builder or from the first build of a cell's content.",
+    );
+    visitChildren((child) {
+      final data = child.parentData;
+      if (data is _BoardChildParentData) {
+        data.remeasure = true;
+      }
+    });
+    markNeedsLayout();
+  }
+
   /// The measurement half of a controller swap's reset: extents measured
   /// against one item set are not evidence about another, so a swap drops
   /// every measurement on the axes it is about to lay out.
@@ -675,6 +728,51 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       }
     }
     debugLastCorrectionPassCount = passes;
+    assert(() {
+      final stale = _debugStaleCells;
+      if (stale == null || stale.isEmpty) {
+        return true;
+      }
+      _debugStaleCells = null;
+      // REPORTED, not thrown, and ONCE per layout. A throw from inside
+      // the pass loop aborts this layout before the base's child manager
+      // closes its pass, which strands the children the pass already
+      // claimed (`widgets/two_dimensional_viewport.dart:380` moves a
+      // reused child out of the element's map and only
+      // `widgets/two_dimensional_viewport.dart:389` moves it back), so
+      // the next unmount trips the framework's dependents assert. A
+      // report reaches the same handler a throw would and leaves the
+      // pass to finish; one per layout, because a stale app value
+      // usually leaves every mounted cell stale at once.
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          library: "widgets_extended board",
+          context: ErrorDescription(
+            "while checking the cell measurement cache",
+          ),
+          exception: FlutterError.fromParts(<DiagnosticsNode>[
+            ErrorSummary(
+              "${stale.length} cell(s) measure differently from their "
+              "cached measurement on the content axis.",
+            ),
+            ErrorDescription(
+              "A cell is measured when its host rebuilds and not "
+              "otherwise; a widget the cell builder returned changed size "
+              "without the host rebuilding, so its track kept the extent "
+              "it had. Stale cells: ${stale.join("; ")}.",
+            ),
+            ErrorHint(
+              "Call BoardController.invalidateCellMeasurements() after "
+              "changing what the cell's content consumes, or rebuild the "
+              "cell by writing the payload of an item covering it. "
+              "RenderBoardViewport.debugCheckCellMeasurements is on, "
+              "which is what reported this.",
+            ),
+          ]),
+        ),
+      );
+      return true;
+    }());
 
     if (!settled) {
       // Release behaviour at the ceiling: lay out at the last attempted
@@ -1327,6 +1425,27 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
             : child.size.width
         ..measuredUnder = measuring
         ..remeasure = false;
+    } else {
+      // THE OPT-IN STALENESS CHECK, in the arm that uses the cache and
+      // only there. It reads and never writes: a check that healed the
+      // cache would make a stale board correct in debug and wrong in
+      // release.
+      assert(() {
+        if (!debugCheckCellMeasurements) {
+          return true;
+        }
+        child.layout(measuring, parentUsesSize: true);
+        final fresh = contentAxis == Axis.vertical
+            ? child.size.height
+            : child.size.width;
+        if ((fresh - data.measured!).abs() > precisionErrorTolerance) {
+          (_debugStaleCells ??= <String>[]).add(
+            "row $row, column $col: cached ${data.measured}, measures "
+            "$fresh",
+          );
+        }
+        return true;
+      }());
     }
     // The CELL contribution to the track's intrinsic extent: the maximum
     // over the cells of that track. The item-cluster term lands with the

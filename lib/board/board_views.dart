@@ -31,12 +31,16 @@ import 'board_controller.dart';
 ///
 /// WHEN THE BOARD MEASURES THE RESULT. On a board with a content-sized
 /// axis, a cell's own extent feeds its track's, and the board measures a
-/// cell when this builder is called for it and not otherwise. A widget
-/// this returns that changes size WITHOUT being rebuilt, an animating
-/// box, an image that resolves late, a font that loads, therefore does
-/// not move its track until the next call. Rebuild the cell to apply
-/// such a change: write the payload of an item covering it, or drive the
-/// size from something this builder reads. On a board with no
+/// cell when this builder is called for it and not otherwise. The
+/// condition is the cell's HOST rebuilding. A widget this returns that
+/// changes size without one, an animating box, an image that resolves
+/// late, a font that loads, does not move its track; and neither does
+/// one that rebuilds on its OWN, reading an inherited value in its
+/// build, because that rebuild stops below the host. Rebuild the cell to
+/// apply such a change: write the payload of an item covering it, or
+/// drive the size from something this builder reads. When what changed
+/// is app-wide and the board cannot observe it, a theme or a text scale,
+/// call [BoardController.invalidateCellMeasurements]. On a board with no
 /// content-sized axis nothing is measured and the question does not
 /// arise.
 typedef BoardCellBuilder<TKey, TItem> =

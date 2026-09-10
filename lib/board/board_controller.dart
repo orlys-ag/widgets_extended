@@ -1396,6 +1396,28 @@ class BoardController<TKey, TItem> {
     return _orchestrator.frozenInsetOf(axis);
   }
 
+  /// Drops every mounted cell's cached measurement and schedules one
+  /// layout that re-measures each.
+  ///
+  /// A cell is measured when its host rebuilds and not otherwise, so a
+  /// widget the cell builder returns that changes size in its OWN
+  /// rebuild, one that reads a theme, a text scale or an inherited value
+  /// of the app's, keeps its track at the extent it had. Call this after
+  /// changing such a value. It costs one viewport layout plus one
+  /// measuring layout per mounted cell, which is what every layout cost
+  /// before the measurement cache; nothing enforces that it is called
+  /// rarely.
+  ///
+  /// A no-op with no board mounted on this controller. On a board with
+  /// no content-sized axis it schedules one layout that measures no
+  /// cell. Asserts when called during the board's layout, which includes
+  /// a cell or item builder and the first build of a cell's content: a
+  /// call there would be dropped silently by the framework.
+  void invalidateCellMeasurements() {
+    _assertNotDisposed();
+    _renderPort?.invalidateCellMeasurements();
+  }
+
   /// Registers [port] as the render object driving this controller.
   ///
   /// Called from `RenderBoardViewport.attach`, and idempotent, because a

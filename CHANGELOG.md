@@ -13,9 +13,20 @@ covering each other. Axes can freeze leading and trailing tracks
 scroll both axes at once.
 - A board cell is re-measured when its host rebuilds: a structural change, a
 payload write to an item covering it, or a selection change that reaches it.
-A size change a cell makes without rebuilding, an animating box or an image
-that resolves late, is applied at its next rebuild. This applies only where
-an axis is `LazyContentAxis`, which is the only kind measured from content.
+A size change the cell's content makes without its HOST rebuilding, an
+animating box, an image that resolves late, or a widget that rebuilds on its
+own after reading an inherited value, is applied at the host's next rebuild.
+This applies only where an axis is `LazyContentAxis`, which is the only kind
+measured from content.
+- Added `BoardController.invalidateCellMeasurements`, which drops every
+mounted cell's cached measurement and schedules one layout that re-measures
+each. Call it after changing something the cell builders' widgets consume and
+the board cannot observe, a theme or a text scale. It costs one measuring
+layout per mounted cell, so it is for the event and not for every frame.
+- Added `RenderBoardViewport.debugCheckCellMeasurements`, off by default. With
+it on, a layout re-measures every cell whose cached extent it would otherwise
+use and reports, once per layout, any whose extent moved; the report repeats
+while the staleness stands, because the check heals nothing.
 - Added board drag-and-drop through `BoardDragConfig`. The board resolves the
 drop and reports it (`onItemMoved`, `onItemResized`); the app mutates.
 `BoardSnap` quantizes the target to whole tracks or to a fraction, `canDropAt`
