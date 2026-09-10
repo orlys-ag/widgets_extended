@@ -48,7 +48,9 @@ examples
 !/doc/agents/
 !/doc/synced_sliver_tree_tutorial.md
 
-# Per-developer Claude Code overrides. The shared config is
-# .claude/settings.json, which IS tracked.
-.claude/settings.local.json
+# Claude Code state is local and none of it is versioned: per-developer
+# settings, agent memory, rules, workflows, skills, hooks and the agent
+# worktrees under .claude/worktrees. A clone gets none of it. Unlike
+# /plans and /doc above, there are no negations here, so nothing under
+# this directory can be added without -f.
 .claude
