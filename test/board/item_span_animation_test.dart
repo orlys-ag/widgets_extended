@@ -318,7 +318,12 @@ void main() {
   testWidgets("an engine record decays both deltas on one clock and "
       "reports an extent while one stands", (tester) async {
     final vsync = _TestVSync();
+    // The engine has TWO dispatch doors: the SETTLE is synchronous,
+    // because its ordering is observable, and an ordinary tick is
+    // coalesced with every other source ticking in the same frame.
+    // Counted apart, so the assertion below is about the settle.
     var notifies = 0;
+    var coalesced = 0;
     final engine = ItemSlideEngine(
       vsync: vsync,
       styleOf: () {
@@ -326,6 +331,9 @@ void main() {
       },
       notifyNow: () {
         notifies += 1;
+      },
+      notifyCoalesced: () {
+        coalesced += 1;
       },
     );
     addTearDown(engine.dispose);
@@ -363,6 +371,8 @@ void main() {
     expect(engine.extentDeltaOf(1), Offset.zero);
     expect(engine.hasExtentActive, isFalse);
     expect(notifies, greaterThan(0));
+    // And the ticks before it went through the other door.
+    expect(coalesced, greaterThan(0));
 
     // A LEAD-ONLY install leaves the extent flag false.
     engine.animateSlideFrom(
@@ -408,6 +418,7 @@ void main() {
         return BoardAnimationStyle.disabled;
       },
       notifyNow: () {},
+      notifyCoalesced: () {},
     );
     addTearDown(off.dispose);
     expect(

@@ -187,10 +187,27 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
     _dataRelay.fire(key);
   }
 
+  /// The dragged key the last [build] read, so a notification that did
+  /// not move a session edge can be told from one that did.
+  ///
+  /// Compared rather than the session itself: the two things this build
+  /// shows are the proxy's presence and its content, and both are a
+  /// function of the key alone.
+  TKey? _builtDraggedKey;
+
   /// The proxy shows and hides with the session; a plain setState is
   /// enough because the proxy is built in [build].
+  ///
+  /// GATED ON THE SESSION EDGE. The drag controller's own notifier fires
+  /// per pointer move, and under a free snap every move re-resolves to a
+  /// new span, so an unconditional rebuild here rebuilt this whole
+  /// subtree at pointer rate for the length of a drag. Nothing in this
+  /// build reads the target: the proxy follows the pointer through its
+  /// own `ValueListenableBuilder` and reads its size inside that
+  /// builder's callback.
   void _handleDragChanged() {
-    if (_dragController?.draggedKey == null) {
+    final key = _dragController?.draggedKey;
+    if (key == null) {
       // Cleared HERE and not only in build: an end notify and a start
       // notify on the same key inside one build window coalesce into one
       // build, in which the key compare in [_buildDragProxy] alone would
@@ -198,6 +215,14 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
       _proxyHost = null;
       _proxyKey = null;
     }
+    if (key == _builtDraggedKey) {
+      return;
+    }
+    // The build this schedules is what updates [_builtDraggedKey], so
+    // the coalescing case still builds once: the end differs from the
+    // built key and schedules, the start compares equal to the
+    // not-yet-updated built key and returns, and the scheduled build
+    // sees the live session.
     if (mounted) {
       setState(() {});
     }
@@ -390,6 +415,9 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
       primary: widget.primary,
     );
     final drag = _dragController;
+    // The one write site: what this build showed is what the next
+    // notification compares against.
+    _builtDraggedKey = drag?.draggedKey;
     // The scope wraps EVERYTHING this build returns, the Stack included,
     // because the proxy host is the Stack's second child and must find
     // it too.
@@ -765,7 +793,42 @@ class _BoardCellHostState<TKey, TItem>
           ) ??
           const SizedBox.shrink();
     }
-    return _built ?? widget.initial;
+    // The surface is CONSTRUCTED HERE, fresh on every build of this
+    // host, which is the whole of its mechanism: a new instance makes
+    // the framework call `updateRenderObject`, and that call is what
+    // tells the board this cell's content may have changed size. See
+    // [_BoardCellSurface].
+    return _BoardCellSurface(child: _built ?? widget.initial);
+  }
+}
+
+/// Wraps one cell's content so the board learns when it was rebuilt.
+///
+/// A `StatelessWidget` would not do: the signal is not the widget being
+/// built, it is the RENDER OBJECT being updated, which is the one event
+/// that reaches the render tree on every host rebuild and on no other
+/// occasion. `updateRenderObject` runs whenever the new widget is not
+/// identical to the old (`widgets/framework.dart:6837`), and this host
+/// builds a new instance every time, so the two coincide exactly.
+///
+/// It carries no fields on purpose. A field would tempt a `==` that
+/// suppressed the update, which is the one thing this must never do.
+class _BoardCellSurface extends SingleChildRenderObjectWidget {
+  const _BoardCellSurface({required Widget super.child});
+
+  @override
+  RenderBoardCellSurface createRenderObject(BuildContext context) {
+    // A first build needs no poke: the vicinity is newly obtained, so
+    // its cache is null and the measure step measures it anyway.
+    return RenderBoardCellSurface();
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    RenderBoardCellSurface renderObject,
+  ) {
+    renderObject.requestRemeasure();
   }
 }
 

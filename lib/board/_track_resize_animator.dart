@@ -9,10 +9,99 @@
 library;
 
 import 'package:flutter/animation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'board_animation_style.dart';
+
+/// One axis's SHIFT PREFIX: the in-flight tracks in ascending order and a
+/// running sum of each one's animated-minus-settled extent difference, so
+/// the sum over any track range is one subtraction of two entries.
+///
+/// `sums` has one more entry than `tracks`, `sums[0]` being 0.0, which is
+/// what makes the empty prefix and the whole-range query fall out of the
+/// same expression. `settled` keeps what each entry was built from, for
+/// the debug guard that catches a settled write with no invalidation.
+class _ShiftPrefix {
+  Int32List tracks = Int32List(0);
+  Float64List sums = Float64List(1);
+  Float64List settled = Float64List(0);
+
+  /// Whether the cache holds a build. False after [invalidate] and before
+  /// the first one.
+  bool valid = false;
+
+  /// The animator generation and the style INSTANCE the build read. A
+  /// restyle re-curves a state without a generation bump, so the second
+  /// is not redundant.
+  int generation = -1;
+  BoardAnimationStyle? style;
+
+  int get length {
+    return tracks.length;
+  }
+
+  void invalidate() {
+    valid = false;
+    style = null;
+  }
+
+  /// Rebuilds from [states]: the keys sorted ascending, then one pass
+  /// accumulating the differences. O(S log S) for S states, once per
+  /// generation rather than once per read.
+  void rebuild(
+    Map<int, Object?> states, {
+    required int generation,
+    required BoardAnimationStyle style,
+    required double Function(int track) animatedExtentOf,
+    required double Function(int track) settledExtentOf,
+  }) {
+    final count = states.length;
+    if (tracks.length != count) {
+      tracks = Int32List(count);
+      sums = Float64List(count + 1);
+      settled = Float64List(count);
+    }
+    var at = 0;
+    for (final track in states.keys) {
+      tracks[at++] = track;
+    }
+    // `sort` on a typed list is the same introsort a `List<int>` gets and
+    // allocates nothing beyond it.
+    tracks.sort();
+    var running = 0.0;
+    sums[0] = 0.0;
+    for (var i = 0; i < count; i++) {
+      final track = tracks[i];
+      final settledExtent = settledExtentOf(track);
+      settled[i] = settledExtent;
+      running += animatedExtentOf(track) - settledExtent;
+      sums[i + 1] = running;
+    }
+    this.generation = generation;
+    this.style = style;
+    valid = true;
+  }
+
+  /// The number of cached tracks strictly below [track], which is the
+  /// index into [sums] of the sum over everything before it. Counts each
+  /// comparison on [owner]'s probe counter.
+  int lowerBound(int track, TrackResizeAnimator owner) {
+    var low = 0;
+    var high = tracks.length;
+    while (low < high) {
+      final mid = (low + high) >> 1;
+      owner.debugShiftProbeCount++;
+      if (tracks[mid] < track) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }
+}
 
 class _TrackResizeState {
   _TrackResizeState({
@@ -60,25 +149,38 @@ class TrackResizeAnimator {
   late final Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
 
-  /// Debug-only: calls to [offsetShiftBetween] since the last reset. Each
-  /// call walks every in-flight state on its axis, so the count is what
-  /// distinguishes a per-track read from a per-cell one.
+  /// Debug-only: calls to [offsetShiftBetween] since the last reset.
+  /// After the prefix cache each call costs two binary searches rather
+  /// than a walk, so this counts CALLS and [debugShiftProbeCount] counts
+  /// the work; a case that wants the cost reads the second.
   int debugShiftCallCount = 0;
 
-  /// Debug-only: bumped by every door that mutates a state, install,
-  /// finalize (both forms) and tick, so a reader that memoizes
-  /// [offsetShiftBetween] can assert it never served across one.
-  int get debugGeneration {
-    return _generation;
-  }
+  /// Debug-only: comparisons the two lower-bound searches of
+  /// [offsetShiftBetween] have made since the last reset. It is the only
+  /// thing that separates the prefix from the walk it replaced, which
+  /// return the same number; same justification as `_span_index.dart`'s
+  /// `debugProbeCount`. The debug guard's settled re-reads are NOT
+  /// counted here: they do not exist in a release build.
+  int debugShiftProbeCount = 0;
 
+  /// Bumped by every door that mutates a state: install, both finalize
+  /// forms, and the tick. The prefix cache rebuilds when it differs from
+  /// the generation the cache was built at.
   int _generation = 0;
 
   final Map<int, _TrackResizeState> _vertical = <int, _TrackResizeState>{};
   final Map<int, _TrackResizeState> _horizontal = <int, _TrackResizeState>{};
 
+  /// The prefix cache, one per axis. Built lazily by [_prefixOf].
+  final _ShiftPrefix _verticalPrefix = _ShiftPrefix();
+  final _ShiftPrefix _horizontalPrefix = _ShiftPrefix();
+
   Map<int, _TrackResizeState> _statesOf(Axis axis) {
     return axis == Axis.vertical ? _vertical : _horizontal;
+  }
+
+  _ShiftPrefix _prefixSlotOf(Axis axis) {
+    return axis == Axis.vertical ? _verticalPrefix : _horizontalPrefix;
   }
 
   bool get hasActive {
@@ -135,16 +237,91 @@ class TrackResizeAnimator {
   /// painted offset sits from its settled one. [fromTrack] is the
   /// window's first track: the accumulation starts THERE, anchored at its
   /// settled offset, so a resize before the window is invisible.
+  ///
+  /// Answered from a PREFIX over the axis's in-flight tracks, so the cost
+  /// is two lower-bound searches rather than a walk of every state. The
+  /// prefix is rebuilt by the first query after any state mutation, so a
+  /// frame's many reads share one build; see [_prefixOf].
   double offsetShiftBetween(Axis axis, int fromTrack, int track) {
     debugShiftCallCount++;
-    var shift = 0.0;
-    _statesOf(axis).forEach((stateTrack, state) {
-      if (stateTrack >= fromTrack && stateTrack < track) {
-        shift += animatedExtentOf(axis, stateTrack) -
-            _settledExtentOf(axis, stateTrack);
+    // The EMPTY RANGE, which the walk this replaced answered 0.0 for and
+    // a subtraction of two bounds would answer a negation for. Reachable:
+    // a retained exit or the drag pin can sit before the window's floor
+    // and the item geometry rule reads the shift at its start track.
+    if (track <= fromTrack) {
+      return 0.0;
+    }
+    final prefix = _prefixOf(axis);
+    if (prefix.length == 0) {
+      return 0.0;
+    }
+    return prefix.sums[prefix.lowerBound(track, this)] -
+        prefix.sums[prefix.lowerBound(fromTrack, this)];
+  }
+
+  /// Drops both axes' prefix caches.
+  ///
+  /// The door for a SETTLED write: the prefix captures settled extents,
+  /// and layout's `recordMeasurement` moves one without touching a state,
+  /// so the render calls this through the controller wherever it records.
+  /// Every other invalidation rides [_generation] or the style identity.
+  void invalidateShiftCache() {
+    _verticalPrefix.invalidate();
+    _horizontalPrefix.invalidate();
+  }
+
+  /// The axis's prefix, rebuilt when the generation moved, when the style
+  /// INSTANCE changed (a restyle re-curves a state with no bump), or when
+  /// [invalidateShiftCache] dropped it.
+  ///
+  /// Debug builds re-read every captured settled extent on every serve
+  /// and assert it is unchanged, which is the assert form of the rule
+  /// that a settled write invalidates.
+  _ShiftPrefix _prefixOf(Axis axis) {
+    final prefix = _prefixSlotOf(axis);
+    final style = _styleOf();
+    if (!prefix.valid ||
+        prefix.generation != _generation ||
+        !identical(prefix.style, style)) {
+      prefix.rebuild(
+        _statesOf(axis),
+        generation: _generation,
+        style: style,
+        animatedExtentOf: (track) {
+          return animatedExtentOf(axis, track);
+        },
+        settledExtentOf: (track) {
+          return _settledExtentOf(axis, track);
+        },
+      );
+      return prefix;
+    }
+    assert(() {
+      for (var i = 0; i < prefix.length; i++) {
+        final track = prefix.tracks[i];
+        final settled = _settledExtentOf(axis, track);
+        if ((settled - prefix.settled[i]).abs() > precisionErrorTolerance) {
+          throw FlutterError.fromParts(<DiagnosticsNode>[
+            ErrorSummary(
+              "TrackResizeAnimator served a stale shift prefix on "
+              "$axis track $track.",
+            ),
+            ErrorDescription(
+              "The prefix captured a settled extent of "
+              "${prefix.settled[i]} and the axis now reports $settled. "
+              "The prefix is a function of the settled extents it was "
+              "built from, so a site that writes one must invalidate it.",
+            ),
+            ErrorHint(
+              "Call BoardController.invalidateAnimatedShifts() from "
+              "whichever site recorded the measurement.",
+            ),
+          ]);
+        }
       }
-    });
-    return shift;
+      return true;
+    }());
+    return prefix;
   }
 
   /// Drops every in-flight state, landing each track at its target, which

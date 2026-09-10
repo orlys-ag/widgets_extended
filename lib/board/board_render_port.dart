@@ -122,4 +122,10 @@ abstract interface class BoardRenderPort<TKey> {
   /// viewport edge. 0.0 when the board carries no frozen tracks on that
   /// axis.
   double frozenInsetOf(Axis axis);
+
+  /// Drops every mounted cell's cached measurement and schedules one
+  /// layout that re-measures each. The whole-board arm of the cell
+  /// measurement cache; the per-cell arm is the cell host's poke. See
+  /// `BoardController.invalidateCellMeasurements`.
+  void invalidateCellMeasurements();
 }

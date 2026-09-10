@@ -185,11 +185,13 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
       vsync: vsync,
       styleOf: styleOf,
       notifyNow: notifyNow,
+      notifyCoalesced: notifyCoalesced,
     );
     makeRoom = MakeRoomEngine(
       vsync: vsync,
       styleOf: styleOf,
       notifyNow: notifyNow,
+      notifyCoalesced: notifyCoalesced,
       laneAxisOf: laneAxisOf,
       dryRunOf: dryRunOf,
       laneOriginOfId: laneOriginOfId,

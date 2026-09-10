@@ -2708,4 +2708,162 @@ void main() {
       await tester.pump();
     },
   );
+
+  // Performance plan 2 T8 (plans/2026-09-09-board-performance-2-plan.md).
+  // Asserts: pointer moves inside one session do not rebuild `Board`,
+  // and the two session EDGES do.
+  //
+  // The probe is the scrollable's widget instance:
+  // `TwoDimensionalScrollView.build` constructs a new
+  // `TwoDimensionalScrollable` on every build
+  // (`widgets/two_dimensional_scroll_view.dart:197`), so an unchanged
+  // instance is a build that did not happen. A FREE snap is the input
+  // that makes this bite: it quantizes nothing, so every move resolves a
+  // new span and notifies.
+  // Falsification: the unconditional setState on every drag
+  // notification replaces the instance on the first move.
+  testWidgets(
+    "pointer moves inside a free-snap session keep the scrollable widget "
+    "instance",
+    (tester) async {
+      final controller = _plainController(tester);
+      controller.addItem(
+        const _Item("m"),
+        const BoardSpan(rowStart: 2, colStart: 1),
+      );
+      await tester.pumpWidget(
+        _board(
+          controller,
+          drag: BoardDragConfig<String>(
+            snap: const BoardSnap.free(),
+            onItemMoved: (key, span) {},
+          ),
+        ),
+      );
+      TwoDimensionalScrollable scrollable() {
+        return tester.widget<TwoDimensionalScrollable>(
+          find.byType(TwoDimensionalScrollable),
+        );
+      }
+
+      final beforeLift = scrollable();
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(_itemKey("m"))),
+      );
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      // Setup sanity: the session started, and starting it DID rebuild,
+      // which is what makes the unchanged instance below meaningful.
+      expect(controller.isDragging("m"), isTrue);
+      final afterLift = scrollable();
+      expect(identical(afterLift, beforeLift), isFalse);
+
+      // Three moves, each resolving a different span under a free snap.
+      final drag = tester.state<State<Board<String, _Item>>>(
+        find.byType(Board<String, _Item>),
+      );
+      expect(drag.mounted, isTrue);
+      for (final dx in <double>[6.0, 13.0, 21.0]) {
+        await gesture.moveTo(
+          _global(tester, Offset(150.0 + dx, 125.0 + dx)),
+        );
+        await tester.pump();
+      }
+      expect(identical(scrollable(), afterLift), isTrue);
+
+      // The other edge rebuilds.
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(identical(scrollable(), afterLift), isFalse);
+    },
+  );
+
+  // Performance plan 2 T12.
+  // Asserts: a frame in which the slide engine and the make-room engine
+  // BOTH tick dispatches the animation channel once, not once per
+  // engine. Their per-tick notify used to be the uncoalesced one, which
+  // the settle protocol needs and an ordinary tick does not, so every
+  // listener ran twice a frame and the render object re-ran its router
+  // scans twice.
+  // Falsification: the uncoalesced per-tick dispatch reports 2.
+  testWidgets(
+    "a frame in which a slide and the make-room gap both tick dispatches "
+    "once",
+    (tester) async {
+      final controller = _lanedController(tester);
+      controller
+        ..addItem(
+          const _Item("m"),
+          const BoardSpan(rowStart: 1, colStart: 0, colSpan: 2),
+        )
+        ..addItem(
+          const _Item("n"),
+          const BoardSpan(rowStart: 1, colStart: 2, colSpan: 2),
+        )
+        ..addItem(
+          const _Item("far"),
+          const BoardSpan(rowStart: 4, colStart: 0, colSpan: 2),
+        );
+      await tester.pumpWidget(
+        _board(
+          controller,
+          drag: BoardDragConfig<String>(onItemMoved: (key, span) {}),
+        ),
+      );
+      // Both families live, so both engines can hold a record at once.
+      controller.animationStyle = const BoardAnimationStyle(
+        itemSlide: BoardAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+        makeRoom: BoardAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+        trackResize: BoardAnimationSpec(
+          duration: Duration.zero,
+          curve: Curves.linear,
+        ),
+        itemEnterExit: BoardAnimationSpec(
+          duration: Duration.zero,
+          curve: Curves.linear,
+        ),
+      );
+
+      // A gap, opened by a live session hovering over the other chip.
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(_itemKey("m"))),
+      );
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      expect(controller.isDragging("m"), isTrue);
+      await gesture.moveTo(_global(tester, const Offset(110.0, 95.0)));
+      await tester.pump();
+
+      // And a slide, installed on an item the session does not hold.
+      controller.moveItem(
+        "far",
+        const BoardSpan(rowStart: 5, colStart: 0, colSpan: 2),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+
+      // Setup sanity: BOTH engines really are mid-flight, so the frame
+      // measured below is one in which both tick.
+      expect(controller.anim.hasActiveOffsets, isTrue);
+      expect(controller.anim.hasMakeRoomMotion, isTrue);
+
+      var dispatches = 0;
+      void counter() {
+        dispatches += 1;
+      }
+
+      controller.addAnimationListener(counter);
+      await tester.pump(const Duration(milliseconds: 16));
+      controller.removeAnimationListener(counter);
+
+      expect(dispatches, 1);
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+    },
+  );
 }

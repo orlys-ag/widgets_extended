@@ -502,4 +502,30 @@ void main() {
       expect(controller.isDragging("deep"), isFalse);
     },
   );
+
+  // Cell measurement invalidation plan, T2 (D1).
+  // Asserts: the door is a no-op before any board is mounted and again
+  // after the board is pumped away, with the controller LIVE both times.
+  // Falsification: red against an implementation that dereferences the
+  // null port.
+  testWidgets(
+    "invalidateCellMeasurements is a no-op with no board mounted",
+    (tester) async {
+      final controller = _controller(
+        tester,
+        rows: LazyContentAxis(6, 50.0),
+        columns: UniformAxis(7, 40.0),
+      );
+      controller.invalidateCellMeasurements();
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(_board(controller));
+      expect(controller.rows.axis.extentOf(0), 50.0);
+      await tester.pumpWidget(const SizedBox());
+      expect(tester.allRenderObjects.whereType<RenderBoardViewport<String>>(),
+          isEmpty);
+      controller.invalidateCellMeasurements();
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

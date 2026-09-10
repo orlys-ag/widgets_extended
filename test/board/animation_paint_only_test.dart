@@ -318,4 +318,85 @@ void main() {
       await tester.pumpAndSettle();
     },
   );
+
+  // Performance plan 2 T11 (plans/2026-09-09-board-performance-2-plan.md).
+  // Asserts: one paint-only frame evaluates each sliding item's curve a
+  // BOUNDED number of times, and the bound is what a paint that computes
+  // each painted rect once costs.
+  //
+  // The frame's reads, per sliding item: two in the tick router's
+  // composed offset bound, which folds the lead and the trailing edge
+  // per active id, and one in the paint, which composes the item's shift
+  // into its painted rect exactly once.
+  //
+  // Falsification: a paint that re-derives the painted rect for the
+  // overflow test, the visibility gate and the paint offset reads three
+  // times there instead of one, and the frame costs five per item.
+  testWidgets("a paint-only tick evaluates each item's slide once", (
+    tester,
+  ) async {
+    _CountingCurve.transforms = 0;
+    const counting = _CountingCurve();
+    final controller = BoardController<String, _Item>(
+      vsync: tester,
+      rows: BoardAxisConfig(axis: UniformAxis(6, 50.0)),
+      columns: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
+      keyOf: (item) {
+        return item.key;
+      },
+      animationStyle: const BoardAnimationStyle(
+        trackResize: _zero,
+        itemEnterExit: _zero,
+        itemSlide: BoardAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: counting,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
+    const items = 3;
+    for (var i = 0; i < items; i++) {
+      controller.addItem(_Item("m$i"), _chip(i, 0, 2));
+    }
+    await tester.pumpWidget(_board(controller));
+    for (var i = 0; i < items; i++) {
+      controller.moveItem("m$i", _chip(i + 3, 0, 2));
+    }
+    // The install frame lays out; the frame measured below is the
+    // paint-only tick after it.
+    await tester.pump();
+    final viewport = _viewport(tester);
+    final layouts = viewport.debugPerformLayoutCount;
+
+    _CountingCurve.transforms = 0;
+    await tester.pump(const Duration(milliseconds: 60));
+
+    // Setup sanity: a PAINT-ONLY frame, and all three items really are
+    // mid-slide, so the count below is over three live records.
+    expect(viewport.debugPerformLayoutCount, layouts);
+    for (var i = 0; i < items; i++) {
+      expect(
+        controller.anim.offsetOfItem(controller.idOfKey("m$i")),
+        isNot(Offset.zero),
+      );
+    }
+    // Those sanity reads cost one transform per item themselves, so the
+    // budget carries them.
+    expect(_CountingCurve.transforms, lessThanOrEqualTo(3 * items + items));
+
+    await tester.pumpAndSettle();
+  });
+}
+
+/// A linear curve that counts every evaluation.
+class _CountingCurve extends Curve {
+  const _CountingCurve();
+
+  static int transforms = 0;
+
+  @override
+  double transformInternal(double t) {
+    transforms += 1;
+    return t;
+  }
 }
