@@ -1,0 +1,145 @@
+{
+  "codePaths": [
+    "lib",
+    "test"
+  ],
+  "conventionDocs": [
+    "AGENTS.md",
+    "doc/agents/testing-patterns.md"
+  ],
+  "methodFiles": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "doc/agents/feature-workflow-contracts.md",
+    "doc/agents/method-profile.json",
+    "plans/AUDIT-METHOD.md",
+    "plans/check_citations.py",
+    ".claude/rules/plans.md",
+    ".claude/workflows/feature-implementation.js",
+    ".claude/workflows/feature-implementation.harness.mjs",
+    ".claude/agents/plan-architect.md",
+    ".claude/agents/plan-critic.md",
+    ".claude/agents/plan-checklist.md",
+    ".claude/agents/plan-implementer.md",
+    ".claude/agents/acceptance-reviewer.md",
+    ".claude/skills/feature-start/SKILL.md",
+    ".claude/skills/feature-status/SKILL.md"
+  ],
+  "gates": [
+    {
+      "name": "analyze",
+      "command": "flutter analyze",
+      "pass": "no issue beyond the count before the change",
+      "when": "always"
+    },
+    {
+      "name": "test",
+      "command": "flutter test",
+      "pass": "0 failed",
+      "when": "always"
+    },
+    {
+      "name": "examples",
+      "command": "cd examples && flutter test",
+      "pass": "no failure beyond those before the change",
+      "when": "examples/ exists"
+    },
+    {
+      "name": "workflow-harness",
+      "command": "node .claude/workflows/feature-implementation.harness.mjs",
+      "pass": "0 failed",
+      "when": "a methodFiles entry changed"
+    },
+    {
+      "name": "citations-self-test",
+      "command": "python plans/check_citations.py --self-test",
+      "pass": "0 failed",
+      "when": "plans/check_citations.py changed"
+    }
+  ],
+  "modules": {
+    "board": {
+      "paths": [
+        "^lib/board/"
+      ],
+      "archDoc": "doc/agents/board-architecture.md",
+      "vocabulary": "Module vocabulary: dense item ids in BoardStore with idOfKey/keyOfId (there are no nids and no onCapacityGrew; per-id arrays grow in lockstep in the store), TWO coordinate spaces (content and viewport-paint, plus track space for spans), the animation sources under BoardAnimationCoordinator (TrackResizeAnimator, ItemEnterExitAnimator, ItemSlideEngine, MakeRoomEngine), obtain-to-retain retention, OverlapLaneResolver lanes, the BoardDragController drag layer with BoardDropResolver, and BoardAnimationStyle families with a per-family zero kill switch. Where a lens focus names a sliver_tree construct (exit ghost, sticky pin, pending-deletion node, defunct scrollable), read it as the board analogue: an exiting item held by retention, a frozen track, an item mid-exit, an unlaid or detached port."
+    },
+    "sliver_tree": {
+      "paths": [
+        "^lib/sliver_tree/",
+        "^lib/sectioned_sliver_list/"
+      ],
+      "archDoc": "doc/agents/sliver-tree-architecture.md",
+      "vocabulary": "Module vocabulary: nids and the *Nid hot-path variants, three coordinate spaces (sliver scroll, sliver paint, viewport scroll), five animation sources under AnimationCoordinator, exit and edge ghosts, sticky pins, pending-deletion nodes, TreeAnimationStyle families with a per-family zero kill switch."
+    }
+  },
+  "lenses": {
+    "correctness": {
+      "reads": [
+        "archDoc"
+      ],
+      "addendum": "In this codebase re-entrancy includes anything that can abort and re-run a layout, plus frame ordering and settle transitions. Teardown includes dispose, ticker cancellation and recognizer disposal. Degradation includes a zero-duration animation family (a kill switch that dominates explicit per-call durations), a defunct scrollable, a pending-deletion node, hot reload, and a mutation issued mid-animation, mid-drag or inside a batch."
+    },
+    "performance": {
+      "reads": [
+        "archDoc",
+        "doc/agents/testing-patterns.md"
+      ],
+      "addendum": "Hot paths that hash keys instead of using the *Nid method variants (sliver_tree) or the id-keyed reads (board). Per-frame allocation. Debug counters pin performance contracts here, so a plan names the counter and its expected value."
+    },
+    "design": {
+      "reads": [
+        "archDoc",
+        "conventionDocs",
+        "doc/agents/feature-workflow-contracts.md"
+      ],
+      "addendum": "This package exports through explicit show clauses, so a symbol introduced without declaring its export is unnameable by app code. House conventions from AGENTS.md: double quotes except on imports, braces on every block, block bodies, no non-plain-text symbols anywhere. Every geometric value is tagged with its coordinate space. Debug counters and @visibleForTesting members are test seams."
+    },
+    "interaction": {
+      "reads": [
+        "archDoc"
+      ],
+      "addendum": "Here the crossings are every animation source, paint pass, mutator, widget layer and entry point. A plan silent on what happens when its change coincides with a bulk animation, a reorder preview, an exit ghost or a sticky pin has not covered it."
+    },
+    "timing": {
+      "reads": [
+        "archDoc"
+      ],
+      "addendum": "Here: a settle transition whose notify order is described but not asserted, a scroll correction whose re-entrancy is reasoned about but not exercised, a tick whose paint-only or layout-triggering status is claimed but not pinned by a debug counter. Running a frame is the test."
+    },
+    "consistency": {
+      "reads": [],
+      "addendum": ""
+    }
+  },
+  "defectClasses": [
+    "stale-summary",
+    "unenumerated-consumer",
+    "unverified-claim",
+    "plan-history"
+  ],
+  "ranking": [
+    "hot-path-performance",
+    "user-visible-behaviour",
+    "architecture-fit",
+    "extensibility",
+    "developer-experience",
+    "blast-radius"
+  ],
+  "hotPaths": [
+    "per frame",
+    "per layout",
+    "per pointer move"
+  ],
+  "citations": {
+    "sdkRoot": "C:/flutter_sdk/flutter/packages/flutter/lib/src",
+    "extensions": [
+      "dart",
+      "md",
+      "js",
+      "mjs",
+      "py"
+    ]
+  }
+}

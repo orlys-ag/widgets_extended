@@ -13,6 +13,12 @@ agent, and add Claude-specific notes under the heading below.
   directory is read, not at session start. Never put a rule that must always
   apply into one; they suit reference material that is only needed while
   working in that directory.
-- `.claude/rules/*.md` loads at launch and supports path scoping, which makes
-  it the right home for a rule that applies to some paths but must not be
-  missed.
+- A `.claude/rules/*.md` file without `paths:` frontmatter loads at launch.
+  One with `paths:` loads only when Claude reads a matching file, like a
+  directory-scoped `CLAUDE.md`, but its globs can span directories (the board
+  rule covers `lib/board/**` and `test/board/**`). The documented trigger is a
+  read, so a rule that must apply before any file is opened belongs in
+  `AGENTS.md`.
+- `.claude/` is versioned except its agent worktrees, so these rules, the
+  agents, skills, workflows and hooks reach every clone. Other agent tools read
+  `AGENTS.md` and its guidance map instead.

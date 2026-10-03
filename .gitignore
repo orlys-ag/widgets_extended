@@ -48,9 +48,9 @@ examples
 !/doc/agents/
 !/doc/synced_sliver_tree_tutorial.md
 
-# Claude Code state is local and none of it is versioned: per-developer
-# settings, agent memory, rules, workflows, skills, hooks and the agent
-# worktrees under .claude/worktrees. A clone gets none of it. Unlike
-# /plans and /doc above, there are no negations here, so nothing under
-# this directory can be added without -f.
-.claude
+# Claude Code's shared configuration is versioned: agents, skills, rules,
+# workflows, hooks, settings and agent memory. The agent worktrees are full
+# checkouts of this repository, and settings.local.json holds one developer's
+# own grants, so both stay local.
+/.claude/worktrees/
+/.claude/settings.local.json

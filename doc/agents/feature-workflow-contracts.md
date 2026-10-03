@@ -19,12 +19,17 @@ House convention (`AGENTS.md`, "Plans and audits") is
 |---|---|
 | Plan | `plans/<date>-<slug>-plan.md` |
 | Checklist | `plans/<date>-<slug>-checklist.md` |
+| Superseded checklist | `plans/<date>-<slug>-checklist.superseded-<n>.md`, the first free `n` (section 4) |
 | Citation ledger | `plans/<date>-<slug>-plan.md.citations.tsv` |
+| Audit file | `plans/<date>-<slug>-audit.md` (section 3) |
+| Revision snapshot | `plans/<date>-<slug>-plan.md.r<N>`, the first free `N` |
+| Acceptance document | `plans/<date>-<slug>-acceptance.md` (section 10) |
 | Trial branch | `<slug>-trial`, or the first free `-2`, `-3` suffix (section 9) |
 
 `<date>` is `YYYY-MM-DD`. `<slug>` is kebab-case. `plans/` is gitignored except
 `AUDIT-METHOD.md` and `check_citations.py`, so these artifacts stay local by
-design; the trial branch is what leaves the machine.
+design; the trial branch is what leaves the machine. The project profile the
+workflow reads is `doc/agents/method-profile.json`.
 
 ## 2. PLAN-STATUS state machine
 
@@ -37,13 +42,18 @@ The first non-empty line of every plan MUST be:
 | Value | Meaning |
 |---|---|
 | `draft` | Initial state, or post-revision pre-approval. Critics may critique; checklist generation refuses. |
-| `ready-to-implement` | Every lens returned zero blocking findings in the standard round AND in the fresh-angle round. Checklist generation proceeds. |
+| `ready-to-implement` | A standard round returned no failing finding AND the fresh angle then came back clean on its first pass (`plans/AUDIT-METHOD.md` sections 6 and 12). Checklist generation proceeds. |
 
 | From | To | Trigger | Performed by |
 |---|---|---|---|
 | (none) | `draft` | Initial draft mode | `plan-architect` |
 | `draft` | `draft` | Revision mode | `plan-architect` |
 | `draft` | `ready-to-implement` | Approval-stamp mode | `plan-architect` |
+| `ready-to-implement` | `draft` | Revision mode on an approved plan (a reopen, from `priorFindings`) | `plan-architect` |
+
+A plan whose ledger is retired has landed and is not reopened: `feature-start`
+refuses `priorFindings` on it, and a later change is a successor plan that
+cites it.
 
 No other agent changes PLAN-STATUS, and no other values are valid.
 
@@ -72,33 +82,43 @@ links to these slugs and a mismatch breaks navigation silently.
 
 | # | Heading | Slug | Carries |
 |---|---|---|---|
-| 1 | `Overview` | `overview` | 2 to 3 sentences, the key decisions with one-line rationale, and every file created or modified |
+| 1 | `Overview` | `overview` | 2 to 3 sentences, a pointer to the key decisions, and every file created or modified |
 | 2 | `Goals & Non-Goals` | `goals-non-goals` | Non-goals prevent scope creep |
-| 3 | `Public Surface` | `public-surface` | Per `AUDIT-METHOD.md` 3.5: name, signature, where it lives, and whether it is exported. This package exports through explicit `show` clauses, so an undeclared symbol is unnameable by app code |
-| 4 | `Components & State` | `components-state` | New per-nid arrays (sliver_tree) or per-id store arrays (board), controller fields, parent-data fields: exact name, type, growth path (`onCapacityGrew` in sliver_tree; the store's lockstep growth in board), and who writes each |
-| 5 | `Coordinate Spaces` | `coordinate-spaces` | Every geometric value the plan introduces, tagged with its space: in sliver_tree one of the three (sliver scroll, sliver paint, viewport scroll), in board content, viewport-paint, or track space. A plan that does not tag them is incomplete, not merely terse |
-| 6 | `Invariants & Pair Rules` | `invariants-pair-rules` | Every invariant preserved, and every PAIR whose halves must read the same value (prune criterion and paint skip; paint gate and `applyPaintTransform`) |
-| 7 | `Landing Order` | `landing-order` | Per `AUDIT-METHOD.md` 3.6: numbered, dependency-ordered. Each step names the test that goes green when it lands, or is marked NOT INDEPENDENTLY VERIFIABLE with the reason. Pure restructuring lands first, in its own commit |
-| 8 | `Testing Plan` | `testing-plan` | Exact test names, what each asserts, and the seam each attaches at. A new seam names the existing seam it rejected and why |
-| 9 | `Risks & Pitfalls` | `risks-pitfalls` | Demonstrated risks only. An undemonstrated one is labelled unverified, per `AGENTS.md` |
-| 10 | `Open Questions` | `open-questions` | Genuinely undecided only. Empty is desirable |
+| 3 | `Decisions` | `decisions` | One subsection per architecture, performance or algorithm choice, anchored `d<N>`: the decision and its ranking table, per `plans/AUDIT-METHOD.md` section 11 |
+| 4 | `Public Surface` | `public-surface` | Per `AUDIT-METHOD.md` 3.5: name, signature, where it lives, and whether it is exported. This package exports through explicit `show` clauses, so an undeclared symbol is unnameable by app code |
+| 5 | `Components & State` | `components-state` | New per-nid arrays (sliver_tree) or per-id store arrays (board), controller fields, parent-data fields: exact name, type, growth path (`onCapacityGrew` in sliver_tree; the store's lockstep growth in board), and who writes each |
+| 6 | `Coordinate Spaces` | `coordinate-spaces` | Every geometric value the plan introduces, tagged with its space: in sliver_tree one of the three (sliver scroll, sliver paint, viewport scroll), in board content, viewport-paint, or track space. A plan that does not tag them is incomplete, not merely terse |
+| 7 | `Invariants & Pair Rules` | `invariants-pair-rules` | Every invariant preserved, and every PAIR whose halves must read the same value (prune criterion and paint skip; paint gate and `applyPaintTransform`) |
+| 8 | `Landing Order` | `landing-order` | Per `AUDIT-METHOD.md` 3.6: numbered, dependency-ordered. Each step names the test that goes green when it lands, or is marked NOT INDEPENDENTLY VERIFIABLE with the reason. Pure restructuring lands first, in its own commit |
+| 9 | `Testing Plan` | `testing-plan` | Exact test names, what each asserts, and the seam each attaches at. A new seam names the existing seam it rejected and why |
+| 10 | `Risks & Pitfalls` | `risks-pitfalls` | Demonstrated risks only. An undemonstrated one is labelled unverified, per `AGENTS.md` |
+| 11 | `Open Questions` | `open-questions` | Genuinely undecided only. Empty is desirable |
 
 Optional, appended later:
 
 | Heading | Slug |
 |---|---|
-| `Audit log` | `audit-log` |
-| `Round N Revision` | `round-2-revision` |
-| `Trial Log` | `trial-log` |
 | `Approval` | `approval` |
 
-The first of those is not an ordinary section: `plans/check_citations.py`
-treats that exact heading text as the end of the live document and verifies no
-citation at or below it, so a plan that adds it puts its round records under it
-and keeps every live rule above it. The match is an unanchored substring split,
-so writing that heading text into a sentence above the section truncates
-verification silently and still exits 0. Refer to the section in words when
-prose has to mention it.
+The plan holds what implementation needs, written as the final design and
+never as its history (`plans/AUDIT-METHOD.md` rule 3.7). The record of how it
+got there lives in the plan's audit file, `plans/<date>-<slug>-audit.md`, which carries no
+ledger and is never the checklist's source. Each writer creates the file when
+it is absent.
+
+Audit file records, appended in order:
+
+| Heading | Slug | Written by |
+|---|---|---|
+| `Round N` | `round-n` | `plan-architect`: a revision or the approval step, one record per round it received, one line per finding giving its id, lens, kind, severity and outcome (`plans/AUDIT-METHOD.md` section 12) |
+| `Trial Log` | `trial-log` | `plan-implementer` in trial mode: the section trialed, the branch, the commit, and each gate's outcome |
+| `Run` | `run` | `feature-start`: the commit the first launch started from (`baseRef`), and the `unrecordedFindings` of a result |
+
+Plans written before the audit file carry their records in the plan, under an
+audit-log heading. `plans/check_citations.py` treats that exact heading text as
+the end of a plan's live document, an unanchored substring split, so writing
+the heading text into a sentence above the section truncates verification
+silently. Refer to it in words.
 
 Note that `&` is non-alphanumeric, so `Goals & Non-Goals` collapses to
 `goals-non-goals`, not `goals--non-goals` and not `goals-and-non-goals`.
@@ -125,6 +145,10 @@ The first two non-empty lines of every checklist MUST be:
 The CHECKLIST-FOR comment is the authoritative pairing. If it does not match the
 resolved plan path, the pair is malformed and the implementer aborts.
 
+A regenerated checklist, after a reopen, first renames the existing one to the
+first free `plans/<date>-<slug>-checklist.superseded-<n>.md`, which keeps the
+record of what the last checklist ticked.
+
 ## 5. Checklist body structure
 
 ```markdown
@@ -149,17 +173,20 @@ Plan: [2026-08-29-example-plan.md](2026-08-29-example-plan.md)
 
 ## Phase 4 - Verification
 <a id="phase-4-verification"></a>
-- [ ] **Analyzer clean** - [S Risks & Pitfalls](2026-08-29-example-plan.md#risks-pitfalls)
+- [ ] **Mutation: d2's rule** - [S d2](2026-08-29-example-plan.md#d2)
+  - Files: `lib/sliver_tree/_animation_coordinator.dart`
+  - Acceptance: break the rule at its site; `flutter test test/sliver_tree/band_cache_test.dart`
+    fails; restore; the file's `sha256sum` before and after match
+- [ ] **Gate: analyze** - [S Risks & Pitfalls](2026-08-29-example-plan.md#risks-pitfalls)
   - Files: (n/a)
-  - Acceptance: `flutter analyze` reports no new issues in `lib/`
-- [ ] **Full suite green** - [S Testing Plan](2026-08-29-example-plan.md#testing-plan)
+  - Acceptance: `flutter analyze` reports no issue beyond the count before the change
+- [ ] **Gate: test** - [S Testing Plan](2026-08-29-example-plan.md#testing-plan)
   - Files: (n/a)
-  - Acceptance: `flutter test`
-- [ ] **Citations re-anchored** - [S Testing Plan](2026-08-29-example-plan.md#testing-plan)
+  - Acceptance: `flutter test`, 0 failed
+- [ ] **Ledger retired** - [S Testing Plan](2026-08-29-example-plan.md#testing-plan)
   - Files: (n/a)
-  - Acceptance: `python plans/check_citations.py plans/2026-08-29-example-plan.md --repoint`
-    leaves no drifted citations; whatever it cannot place is a finding, and `--update`
-    is never used to force it green
+  - Acceptance: `plans/2026-08-29-example-plan.md.citations.tsv` is renamed to
+    `.citations.tsv.retired`, and the plan says which tree its citations are against
 
 ## Discovered
 <a id="discovered"></a>
@@ -171,9 +198,17 @@ Every Phase 1 to 4 item MUST have a bolded title, a plan link of the form
 cannot meet all four does not go in a Phase; it goes in `## Discovered` with
 `Blocking: yes`.
 
-Phase 4 always ends with the three verification items above. They are the gates
-`AUDIT-METHOD.md` section 10 names, and the checklist agent adds them whether or
-not the plan mentions them.
+Phase 4 is built in this order, whether or not the plan mentions it
+(`plans/AUDIT-METHOD.md` section 16): one mutation item per decision whose
+Components & State entry names a file under the profile's `codePaths`; one
+`Gate:` item per profile gate that applies, so the suite runs after the last
+restore; then the ledger item. With this project's profile that is at least
+three items, which the workflow checks.
+
+Each implementation finding the audit carried (`plans/AUDIT-METHOD.md` section
+12) becomes an item in the phase its code lands in, with a test shown to fail
+first, a mutation, or a code check as its acceptance; one that no longer applies
+to the approved plan goes to `## Discovered` with `Blocking: no` and the reason.
 
 ## 6. Discovered item format
 
@@ -211,13 +246,16 @@ plan for that slug already exists.
 
 A trial is `AUDIT-METHOD.md` section 10 applied by an agent rather than by hand.
 It runs after the fresh-angle round comes back clean and before the approval
-stamp, on a branch named `<slug>-trial` cut from the current HEAD.
+stamp, on a branch named `<slug>-trial` cut from the current HEAD. Confirming a
+run in `feature-start` authorizes the trial commit; nothing else in the run
+commits.
 
 A trial is KEPT. Passing or failing, the diff is committed on that branch, and
-the plan records the outcome in `## Trial Log`. Nothing is reverted to restore a
-clean tree. The gates are the three from section 10 of the audit method: the
-repro fails before and passes after, `flutter analyze` reports no new issues in
-`lib/`, and `flutter test` is green.
+the audit file records the outcome in its `Trial Log` record (section 3).
+Nothing is reverted to restore a clean tree. A trial passes when its repro fails
+before and passes after, and every profile gate that applies passes; it reports
+every profile gate by name in the `gates` field of its result, and a gate it
+does not report is a gate nobody ran.
 
 A failed trial is a blocking finding routed back to the planner, because a plan
 whose text reads correctly and whose code does not is the failure mode trials
@@ -230,92 +268,103 @@ later phase reads the name from the trial's `branch` field. A phase that
 hardcodes `<slug>-trial` points the implementer at a branch that may not exist.
 
 **The trial requires a clean tree and branches from it.** `git switch` carries
-uncommitted work onto the new branch, so a dirty `lib/` or `test/` lands inside
-the trial commit and the diff stops being "exactly the plan section applied",
-which is the only property that makes a trial evidence. The implementer checks
-`git status --porcelain lib test` before branching and reports a dirty tree as a
-blocking finding rather than stashing someone else's work. It stages by path,
-because `git commit -a` would leave a new untracked repro test out of the commit
-that must carry it.
+uncommitted work onto the new branch, so a dirty code path lands inside the
+trial commit and the diff stops being "exactly the plan section applied", which
+is the only property that makes a trial evidence. The implementer runs
+`git status --porcelain` over the profile's `codePaths` before branching and
+reports a dirty tree as a blocking finding rather than stashing someone else's
+work. It stages by path, because `git commit -a` would leave a new untracked
+repro test out of the commit that must carry it.
 
-**A trial drifts the plan's citations, and the approval stamp does not demand
-zero.** The trial runs `--repoint`, which re-anchors what it can find and leaves
-the rest reporting. What it leaves is evidence that the trial's change deleted or
-duplicated cited code, so the approval step records it instead of clearing it.
-Requiring `check_citations.py` to exit 0 at approval would push the architect
-toward `--update`, which re-anchors every citation to whatever moved into place
-and then reports clean.
+**A trial leaves the plan's citations alone, and the approval stamp does not
+demand a clean check.** The trial changes code on its branch, so the check run
+at approval reads the trial's code: MOVED citations there are nothing, and a GONE
+one is evidence that the trial changed code the plan cites, which the approval
+step records rather than clears.
 
-**Appending `## Trial Log` is one of two plan writes `plan-implementer`
-performs**, the other being the citation re-anchor above.
-Its system prompt otherwise forbids modifying the plan, and this exception is
-stated in both places: here, and in that agent's trial-mode section. Scoped to
-appending that section, never to PLAN-STATUS, and never to another line.
+**`plan-implementer` never writes the plan.** Its one write outside code, tests
+and the checklist is the trial's `Trial Log` record in the audit file.
 
 ## 10. Adaptations from the source implementation
 
 Recorded so the differences are not mistaken for drift.
 
-- **The lens set is the audit angle list.** The source used six Unity-specific
-  lenses. Ours are five, and they are `AUDIT-METHOD.md` section 2's ten angles
-  merged onto five agents. This is deliberate: a second taxonomy for "what to
-  examine" would be a second normative site, which section 3.1 forbids.
+- **The lens set is the audit method's.** The source used six Unity-specific
+  lenses. Ours are `AUDIT-METHOD.md` section 13's: three standard lenses that
+  judge at decision level, two fresh angles, and the consistency lens, with the
+  project's addendum and reading list for each in the profile. A second
+  taxonomy for "what to examine" would be a second normative site, which
+  section 3.1 forbids.
 - **The stopping rule is the audit method's, not the source's.** The source
   approved a plan on one clean round. `AUDIT-METHOD.md` section 6 rejects that
   shape outright, because consecutive clean passes measure the lens rather than
-  the artifact. Ours requires a clean standard sweep AND a clean fresh angle,
-  which is section 6's "a freshly opened angle came back empty on its first
+  the artifact. Ours requires a clean standard round AND a clean fresh angle,
+  which is section 6's "a freshly opened angle came back clean on its first
   pass" mechanized. ONE fresh lens runs per round, because that clause is
   singular, and it is drawn from a POOL and spent after one use. FIRST is the
-  load-bearing word: a lens that blocked, saw a revision, and then cleared has
-  come back empty on its SECOND pass, which is the shape section 6 rejects. The
-  pool is `AUDIT-METHOD.md` section 8's two named unsettleable classes,
-  `interaction` then `timing`, in its order. A third entry would be invented
-  rather than derived, so an exhausted pool returns `fresh-angles-exhausted`
-  and leaves the plan in draft for a human to open a new angle or to accept it
-  under section 6's yield rule.
-- **A revision re-runs the lenses that reported blocking and the lenses that
-  did not report**, plus a `consistency` lens. Re-running a lens that CLEARED a
-  section the revision did not touch is spend without coverage. A lens that
-  never reported is different: it swept nothing, so dropping it retires an
-  angle, and the clean-round coverage guard cannot catch that because the round
-  was not clean. The consistency lens is what makes the skip safe rather than a
-  shortcut: it owns the revision's own damage, which
-  `AUDIT-METHOD.md` names as the second most common defect class, and it reports
-  a revision that edited a section outside the findings it was addressing,
-  since that would invalidate a clean report from a lens not running.
-- **Critics read only what their lens needs.** Five parallel critics each
-  loading the 20KB architecture document is the largest avoidable cost in a
-  run, so each lens declares its own reading list and the rest grep instead.
-  Every agent runs on the same model (section 11), so the reading lists are the
-  only thing holding critic context down.
-
-- **The run is module-scoped.** `args.module` (`sliver_tree` or `board`),
-  derived from `modules_touched` when omitted and required when those paths
-  name both modules or neither, selects the architecture document every lens
-  `reads` entry and every architect, trial and implementer prompt names, and
-  adds one module-vocabulary line to each prompt. Before this, every lens read
-  the sliver_tree document for a board plan, which is the wrong contract for
-  the `contracts` lens and dead context for the rest.
+  load-bearing word: a lens that failed a round, saw a revision, and then
+  cleared has come back clean on its SECOND pass, which is the shape section 6
+  rejects. The pool is `AUDIT-METHOD.md` section 8's two named unsettleable
+  classes, `interaction` then `timing`, in its order. A third entry would be
+  invented rather than derived, so an exhausted pool returns
+  `fresh-angles-exhausted` and leaves the plan in draft for a human to open a
+  new angle or to accept it under section 6's yield rule.
+- **A revision re-runs the lenses that raised a failing finding**, plus the
+  `consistency` lens. Re-running a lens that CLEARED a section the revision did
+  not touch is spend without coverage. The consistency lens is what makes the
+  skip safe rather than a shortcut: it owns the revision's own damage, which
+  `AUDIT-METHOD.md` names as the second most common defect class, and it diffs
+  the revision's snapshot against the findings and obligations the revision
+  was given (`AUDIT-METHOD.md` section 14). A lens that does not report is
+  dispatched once more, and one that still cannot review ends the run.
+- **Critics read only what their lens needs.** Parallel critics each loading
+  the 20KB architecture document is the largest avoidable cost in a run, so
+  each lens's reading list comes from the profile, and a consumer is verified
+  by reading the code that uses it rather than a whole document.
+- **The run is module-scoped.** `args.module`, derived through the profile's
+  module path patterns from `modules_touched` when omitted and required when
+  those paths name more than one module or none, selects the architecture
+  document every lens reading list and every architect, trial and implementer
+  prompt names, and adds one module-vocabulary line to each prompt. Before
+  this, every lens read the sliver_tree document for a board plan, which is the
+  wrong contract for the design lens and dead context for the rest.
+- **The project's facts live in the profile.** `feature-start` reads
+  `doc/agents/method-profile.json` and passes it as `args.profile`, because the
+  workflow scope has no file access; the script validates it and takes the
+  modules, the lens addenda and reading lists, the gates, the code paths, the
+  defect classes and the ranking criteria from it.
 - **A trial phase exists.** The source had none. See section 9.
+- **A blind acceptance review closes the run.** The source's Gate 4 is the
+  `acceptance-reviewer` agent: it gets the request and the acceptance criteria
+  verbatim, the commit the run started from and the files the implementer
+  reports it changed, reads nothing else under `plans/`, and writes the
+  acceptance document. Gaps go to the owner.
 - **Citations are ledgered, not eyeballed.** Critics verify `path:line`
-  citations, and Phase 4 requires `check_citations.py` to exit 0. Implementation
-  moves the lines the plan cites, so that gate is a re-anchor, not a no-op:
-  `--repoint` fixes the moved line numbers and leaves the rest reporting, which
-  is the signal. `--update` would pass the gate while destroying it.
+  citations against the code, the check fails only on a citation whose recorded
+  text is gone from its file, and Phase 4 retires the ledger of the plan that
+  just landed instead of re-anchoring it.
 - **`feature-resume` was not ported.** The source routes `Discovered` items back
   to the planner through a generated temporary workflow. Re-run
   `feature-implementation` with the `Discovered` items passed as
   `args.priorFindings` instead; the workflow accepts them and enters at the
-  revision phase.
+  revision phase, which reopens an approved plan (section 2).
+- **The cost.** A clean run is 10 agents: the draft, three critics, one fresh
+  angle, the trial, the approval stamp, the checklist, the implementer and the
+  acceptance reviewer. A revision round adds 2 to 6: the architect, the
+  consistency lens, the standard lenses that failed, and a fresh angle when
+  they all clear. At the default budget of 4 rounds the critique phase spawns
+  at most 20 agents, plus 5 to close, and each lens dispatched a second time
+  adds 1. This is the one site of these numbers; `AGENTS.md` and
+  `feature-start` refer here, and the workflow harness checks the clean-run
+  count against the script.
 
 ## 11. Model assignment
 
 Set in each agent's frontmatter, so a run is reproducible when the session model
-changes. All four agents declare `claude-opus-5[1m]`; reasoning effort is set
-per agent with the `effort` frontmatter key.
+changes. The table below is each agent's model and effort; the workflow harness
+checks it against the frontmatter.
 
-**The workflow defers to the frontmatter and must keep doing so.** All seven
+**The workflow defers to the frontmatter and must keep doing so.** All eight
 `agent()` call sites pass only `agentType`, `label`, `phase` and `schema`, never
 `opts.model` or `opts.effort`. Duplicating those into the script would make
 retuning one agent an edit to the orchestrator, and would leave the frontmatter
@@ -334,32 +383,32 @@ lane span expansion feature): every agent transcript under
 `subagents/` records `message.model` as `claude-opus-5` and the effort the
 agent's frontmatter sets (`xhigh` for the architect, critics and
 implementer, `medium` for the checklist agent), in a session whose own model
-was `claude-fable-5-1`. The frontmatter wins there too. The paragraph below
-is kept as the reasoning that predicted it. The authoring reference calls `agentType`
-"resolved from the same registry as the Agent tool", which is the link; its
-`opts.model` bullet separately says an agent omitting it "inherits the main-loop
-model", written without an `agentType` caveat. Settle it by observation on the
-first real run, not by argument: every subagent transcript records
-`message.model` and a top-level `effort`, so reading
-`~/.claude/projects/<project>/<session>/subagents/*.jsonl` afterwards says which
-model and effort each of the eleven agents actually used. If frontmatter turns
-out to lose there, the fix is to raise it as a harness bug, not to hardcode the
-values here.
+was `claude-fable-5-1`. The frontmatter wins there too. Whether the model IDs
+in the table below resolve in frontmatter is unverified until the first run
+under them: every subagent transcript records `message.model` and a top-level
+`effort`, so reading `~/.claude/projects/<project>/<session>/subagents/*.jsonl`
+afterwards says which model and effort each agent actually used. If
+frontmatter turns out to lose, the fix is to raise it as a harness bug, not to
+hardcode the values in the script.
 
-| Agent | Model | Effort | Why that effort |
+| Agent | Model | Effort | Why that model and effort |
 |---|---|---|---|
-| `plan-architect` | `claude-opus-5[1m]` | `xhigh` | Writes the design and every citation in it |
-| `plan-critic` | `claude-opus-5[1m]` | `xhigh` | Adversarial review. A missed defect costs a revision round plus whatever it does downstream |
-| `plan-implementer` | `claude-opus-5[1m]` | `xhigh` | Writes code and diagnoses failing gates |
-| `plan-checklist` | `claude-opus-5[1m]` | `medium` | Mechanical transform of an already-approved plan into phased items. It decides nothing |
+| `plan-architect` | `claude-opus-5-5[1m]` | `xhigh` | Writes the design and every citation in it |
+| `plan-critic` | `claude-opus-5-5[1m]` | `xhigh` | Adversarial review. A missed defect costs a revision round plus whatever it does downstream |
+| `plan-implementer` | `claude-opus-5-5[1m]` | `xhigh` | Writes code and diagnoses failing gates |
+| `acceptance-reviewer` | `claude-opus-5-5[1m]` | `xhigh` | Judges the result against the request with no plan to lean on |
+| `plan-checklist` | `claude-sonnet-5-5` | `medium` | Mechanical transform of an already-approved plan into phased items. It decides nothing |
 
-The `plan-checklist` exception follows Anthropic's own precedent: in the
-`claude-security` plugin, six agents that research, generate or verify are set
-to `effort: xhigh`, while `scan-inventory`, described as a "repository
+The `plan-checklist` exception is the owner's decision, and three things bound
+its risk: the agent decides nothing, the script rejects a malformed checklist,
+and the implementer runs every acceptance signal before it ticks an item. Its
+`medium` effort follows Anthropic's own precedent: in the `claude-security`
+plugin, six agents that research, generate or verify are set to
+`effort: xhigh`, while `scan-inventory`, described as a "repository
 cartographer" that partitions a tree and accounts for directories, is set to
 `medium`. Our checklist agent is the same shape: it partitions an approved plan.
-Raise it to `xhigh` if checklists start arriving with weak acceptance signals,
-since that is the failure this would cause.
+Raise its model or effort if checklists start arriving with weak acceptance
+signals, since that is the failure this would cause.
 
 Setting `effort` explicitly also removes a dependency on inheritance. Without
 the key an agent falls back to the session or `modelSettings` value, and whether
@@ -369,12 +418,34 @@ written.
 The two skills carry no `model` key: they run in the main loop, so they use
 whatever the session is on.
 
-A uniform tier was the owner's decision, taken after model tiering was proposed
-and implemented. The trade it makes is explicit: a critic that misses a real
-defect costs a revision round plus whatever the defect does downstream, which is
-worth more than the difference in tier. The consequence to plan for is that
-every one of the 11 agents in a clean run is a frontier call, and the five
-parallel critics are simultaneous ones, so the per-lens reading lists in the
-workflow are now the ONLY mechanism holding critic context down. Do not widen
-a lens's `reads` array without a reason: at this tier it is paid five times in
-the same round.
+Every agent that decides or reviews runs the frontier model, the owner's
+decision: a critic that misses a real defect costs a revision round plus
+whatever the defect does downstream, which is worth more than the difference in
+tier. The consequence to plan for is that every critic in a round is a frontier
+call, and the parallel critics are simultaneous ones, so the per-lens reading
+lists in the profile are the ONLY mechanism holding critic context down. Do not
+widen a lens's `reads` without a reason: it is paid once per critic in the same
+round.
+
+## 12. Agent memory
+
+Only `plan-architect` and `plan-implementer` keep persistent memory
+(`memory: project` in their frontmatter, under `.claude/agent-memory/<agent>/`).
+The critics, the checklist agent and the acceptance reviewer keep none: a
+critic's value is a fresh look each round, the reviewer's is independence from
+everything before it, and the checklist agent performs a mechanical transform.
+
+Memory holds only lessons that will help on a different feature: how to do the
+job (method, tools, test technique), or a recurring trap in one module's code.
+
+- Each index line in `MEMORY.md` starts with its scope: `[general]`, or
+  `[<module>]` with a module key from the profile. An agent reads the
+  `[general]` lines and those of the module its prompt names.
+- Nothing about one feature, plan, round or commit is recorded: that belongs
+  in the feature's audit file.
+- Memory refers to code by symbol and file name, never by `file:line`, because
+  nothing re-checks a line number in memory.
+- An index has at most 30 lines.
+
+The workflow harness checks these rules on every run, and checks that no
+agent without memory has a memory directory.
