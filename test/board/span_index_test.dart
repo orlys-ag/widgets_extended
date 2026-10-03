@@ -22,6 +22,10 @@ import 'package:widgets_extended/board/_board_store.dart';
 import 'package:widgets_extended/board/_overlap_lanes.dart';
 import 'package:widgets_extended/board/_span_index.dart';
 
+/// The primary track count of the cases whose subject is not the lattice:
+/// past every row they register, so none is cut by it.
+const int _lattice = 1 << 20;
+
 void main() {
   // Performance plan T1 (plans/2026-09-07-board-performance-plan.md).
   // Asserts: once the rank list is built, one ordinalOf read costs one
@@ -29,7 +33,11 @@ void main() {
   // Falsification: a linear rank search reports the rank plus one.
   test("ordinalOf on a bucket of 1000 items costs one probe", () {
     final store = BoardStore<String, String>();
-    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: _lattice,
+    );
     final ids = _registerRow(store, index, 1000);
     // Setup sanity: the id at column 999 ranks last, so a linear search
     // would walk the whole list. This read also builds the rank list.
@@ -48,7 +56,11 @@ void main() {
     "bound",
     () {
       final store = BoardStore<String, String>();
-      final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+      final index = SpanIndex(
+        store: store,
+        primaryAxis: Axis.vertical,
+        trackCount: _lattice,
+      );
       final ids = _registerRow(store, index, 1000);
       // Setup sanity: the bucket is sorted and holds the id.
       expect(index.itemsInRect(0, 1, 500, 501), <int>[ids[500]]);
@@ -68,7 +80,11 @@ void main() {
   // track 3 in range through `ceil() - 1`.
   test("coversCell agrees with itemsInRect at both padded edges", () {
     final store = BoardStore<String, String>();
-    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: _lattice,
+    );
     final tall = _register(
       store,
       index,
@@ -116,7 +132,11 @@ void main() {
   // bucket misses, and the id survives the flush.
   test("deregister during a bulk append removes the id", () {
     final store = BoardStore<String, String>();
-    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: _lattice,
+    );
     final ids = <int>[];
     // Descending columns, so the appended order is the REVERSE of the
     // sorted order and a sorted search over it cannot land on the id.
@@ -147,7 +167,11 @@ void main() {
     () {
       final random = math.Random(20260830);
       final store = BoardStore<String, String>();
-      final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+      final index = SpanIndex(
+        store: store,
+        primaryAxis: Axis.vertical,
+        trackCount: _lattice,
+      );
       final live = <String>[];
       var nextKey = 0;
       // Setup sanity counters. Each is asserted non-zero at the end,
@@ -305,7 +329,11 @@ void main() {
   test("an item spanning three primary tracks appears exactly once in a "
       "range query", () {
     final store = BoardStore<String, String>();
-    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: _lattice,
+    );
 
     final tall = _register(
       store,
@@ -419,7 +447,11 @@ void main() {
   test("setItems leaves the bucket sorted with a correct maxSpanAxisExtent", () {
     const n = 200;
     final store = BoardStore<String, String>();
-    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: _lattice,
+    );
 
     // Appended in DESCENDING start order, so an implementation that never
     // sorts leaves the bucket in exactly the order a binary search cannot
@@ -444,6 +476,7 @@ void main() {
     final sortedIndex = SpanIndex(
       store: sortedStore,
       primaryAxis: Axis.vertical,
+      trackCount: _lattice,
     );
     sortedIndex.debugProbeCount = 0;
     for (var i = n - 1; i >= 0; i--) {
@@ -492,7 +525,11 @@ void main() {
   test("the pending-sort set survives a laneCountOf read inside the batch", () {
     const n = 200;
     final store = BoardStore<String, String>();
-    final index = SpanIndex(store: store, primaryAxis: Axis.vertical);
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: _lattice,
+    );
     // Columns carry the lane extent, so the lane axis is the columns and
     // the resolver has buckets of its own to dirty.
     final resolver = OverlapLaneResolver(
@@ -536,6 +573,7 @@ void main() {
     final throwingIndex = SpanIndex(
       store: throwingStore,
       primaryAxis: Axis.vertical,
+      trackCount: _lattice,
     );
     var threw = false;
     try {
@@ -629,6 +667,307 @@ void main() {
     expect(probesAfterBulk, lessThanOrEqualTo(bound));
     expect(probesAfterBulk, lessThan(probesAfterRemove));
   });
+
+  test("a span far longer than the lattice is filed under the lattice's "
+      "buckets only", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: 10,
+    );
+    final long = _register(
+      store,
+      index,
+      "long",
+      const BoardSpan(rowStart: 5, rowSpan: 1000, colStart: 0),
+    );
+    expect(index.bucketCount, 5);
+    expect(index.itemsInRect(9, 10, 0, 1), <int>[long]);
+    index.deregister(long);
+    expect(index.bucketCount, 0);
+  });
+
+  test("a query past the lattice finds what lies there, and a lattice query "
+      "does not", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: 10,
+    );
+    final long = _register(
+      store,
+      index,
+      "long",
+      const BoardSpan(rowStart: 5, rowSpan: 1000, colStart: 0),
+    );
+    final far = _register(
+      store,
+      index,
+      "far",
+      const BoardSpan(rowStart: 50, colStart: 1),
+    );
+    // `far` holds one bucket, its first track's, which is what gives it a
+    // rank.
+    expect(index.bucketCount, 6);
+    expect(index.ordinalOf(far), 0);
+    expect(index.itemsInRect(500, 501, 0, 1), <int>[long]);
+    expect(index.itemsInRect(40, 60, 0, 7), unorderedEquals(<int>[long, far]));
+    expect(index.itemsInRect(0, 10, 0, 7), <int>[long]);
+    // An inverted range past the lattice.
+    expect(index.itemsInRect(600, 500, 0, 7), isEmpty);
+    store.setFlag(far, BoardStore.exitingBit, true);
+    expect(index.itemsInRect(50, 51, 1, 2), isEmpty);
+    final including = index.itemsInRectIncludingExiting(50, 51, 1, 2, <int>[]);
+    expect(including, <int>[far]);
+  });
+
+  test("reconfigure re-files exactly the items a track-count change moves", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: 10,
+    );
+    final long = _register(
+      store,
+      index,
+      "long",
+      const BoardSpan(rowStart: 5, rowSpan: 1000, colStart: 0),
+    );
+    final far = _register(
+      store,
+      index,
+      "far",
+      const BoardSpan(rowStart: 50, colStart: 1),
+    );
+    final mid = _register(
+      store,
+      index,
+      "mid",
+      const BoardSpan(rowStart: 30, rowSpan: 10, colStart: 2),
+    );
+    // Setup sanity: `long`'s 5 to 9, and `mid`'s and `far`'s first tracks.
+    expect(index.bucketCount, 7);
+
+    index.reconfigure(primaryAxis: Axis.vertical, trackCount: 100);
+    expect(index.bucketCount, 95);
+    expect(index.itemsInRect(99, 100, 0, 1), <int>[long]);
+    index.debugProbeCount = 0;
+    expect(index.itemsInRect(100, 101, 0, 7), <int>[long]);
+    // The overflow scan reads its one member.
+    expect(index.debugProbeCount, 1);
+
+    index.reconfigure(primaryAxis: Axis.vertical, trackCount: 20);
+    // `long`'s 5 to 19, `mid`'s 30 and `far`'s 50.
+    expect(index.bucketCount, 17);
+    expect(index.itemsInRect(35, 36, 2, 3), <int>[mid]);
+    expect(index.itemsInRect(50, 51, 1, 2), <int>[far]);
+
+    index.deregister(long);
+    store.release("long");
+    index.deregister(mid);
+    store.release("mid");
+    index.reconfigure(primaryAxis: Axis.vertical, trackCount: 100);
+    expect(index.itemsInRect(0, 100, 0, 7), <int>[far]);
+
+    // A bucket below both counts is not touched: its monotone-high
+    // aggregate survives a reconfigure with the stored values and a count
+    // change.
+    final otherStore = BoardStore<String, String>();
+    final other = SpanIndex(
+      store: otherStore,
+      primaryAxis: Axis.vertical,
+      trackCount: 10,
+    );
+    final wide = _register(
+      otherStore,
+      other,
+      "wide",
+      const BoardSpan(rowStart: 0, colStart: 0, colSpan: 3),
+    );
+    _register(
+      otherStore,
+      other,
+      "narrow",
+      const BoardSpan(rowStart: 0, colStart: 4),
+    );
+    other.deregister(wide);
+    otherStore.release("wide");
+    expect(other.maxSpanAxisExtentOf(0), closeTo(3.0, 1e-9));
+    other.reconfigure(primaryAxis: Axis.vertical, trackCount: 10);
+    expect(other.maxSpanAxisExtentOf(0), closeTo(3.0, 1e-9));
+    other.reconfigure(primaryAxis: Axis.vertical, trackCount: 100);
+    expect(other.maxSpanAxisExtentOf(0), closeTo(3.0, 1e-9));
+  });
+
+  test("a track-count growth reads the overflow set and touches no bucket an "
+      "item keeps", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: 100,
+    );
+    for (var i = 0; i < 2000; i++) {
+      _register(
+        store,
+        index,
+        "r$i",
+        BoardSpan(rowStart: 150, colStart: i),
+        bulk: true,
+      );
+    }
+    index.flushPendingSorts();
+    final wide = _register(
+      store,
+      index,
+      "wide",
+      const BoardSpan(rowStart: 150, colStart: 0, colSpan: 9),
+    );
+    index.deregister(wide);
+    store.release("wide");
+    // Setup sanity: the aggregate is the released item's, monotone-high.
+    expect(index.maxSpanAxisExtentOf(150), closeTo(9.0, 1e-9));
+    final buckets = index.bucketCount;
+    index.debugProbeCount = 0;
+    index.reconfigure(primaryAxis: Axis.vertical, trackCount: 101);
+    expect(index.debugProbeCount, 2000);
+    expect(index.maxSpanAxisExtentOf(150), closeTo(9.0, 1e-9));
+    expect(index.bucketCount, buckets);
+  });
+
+  test("a track-count shrink passes once over each bucket it cuts", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: 2,
+    );
+    final ids = <int>[];
+    for (var i = 0; i < 1000; i++) {
+      ids.add(
+        _register(
+          store,
+          index,
+          "r$i",
+          BoardSpan(rowStart: 0, rowSpan: 2, colStart: i % 51),
+          bulk: true,
+        ),
+      );
+    }
+    index.flushPendingSorts();
+    index.debugProbeCount = 0;
+    index.reconfigure(primaryAxis: Axis.vertical, trackCount: 1);
+    expect(index.debugProbeCount, 1000);
+    expect(index.bucketCount, 1);
+    expect(index.itemsInRect(1, 2, 0, 60), unorderedEquals(ids));
+  });
+
+  test("a shrink over the bucket map removes the buckets it empties", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: 1000,
+    );
+    final item = _register(
+      store,
+      index,
+      "item",
+      const BoardSpan(rowStart: 500, rowSpan: 10, colStart: 0),
+    );
+    index.debugProbeCount = 0;
+    expect(() {
+      index.reconfigure(primaryAxis: Axis.vertical, trackCount: 505);
+    }, returnsNormally);
+    expect(index.bucketCount, 5);
+    expect(index.debugProbeCount, 5);
+    expect(index.itemsInRect(505, 510, 0, 1), <int>[item]);
+  });
+
+  test("a primary-axis change files at the new count", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: 10,
+    );
+    final item = _register(
+      store,
+      index,
+      "item",
+      const BoardSpan(rowStart: 0, rowSpan: 20, colStart: 20, colSpan: 10),
+    );
+    // Setup sanity: filed under rows 0 to 9, and past the vertical count.
+    expect(index.bucketCount, 10);
+    index.reconfigure(primaryAxis: Axis.horizontal, trackCount: 100);
+    expect(index.bucketCount, 10);
+    expect(index.itemsInRect(0, 1, 25, 26), <int>[item]);
+    index.debugProbeCount = 0;
+    expect(index.itemsInRect(0, 30, 100, 101), isEmpty);
+    expect(index.debugProbeCount, 0);
+  });
+
+  test("hasIntraTrackItemOn reads one bucket and follows the start rule", () {
+    final store = BoardStore<String, String>();
+    final index = SpanIndex(
+      store: store,
+      primaryAxis: Axis.vertical,
+      trackCount: _lattice,
+    );
+    for (var i = 0; i < 1000; i++) {
+      _register(
+        store,
+        index,
+        "r$i",
+        BoardSpan(rowStart: 10, colStart: i),
+        bulk: true,
+      );
+    }
+    index.flushPendingSorts();
+    _register(
+      store,
+      index,
+      "half",
+      const BoardSpan(
+        rowStart: 5,
+        rowSpan: 0,
+        rowSpanFraction: 0.5,
+        colStart: 0,
+      ),
+    );
+    _register(
+      store,
+      index,
+      "two",
+      const BoardSpan(rowStart: 7, rowSpan: 2, colStart: 0),
+    );
+    // One rounding step below row 1, ending inside it.
+    _register(
+      store,
+      index,
+      "chip",
+      const BoardSpan(
+        rowStart: 0,
+        colStart: 1,
+        rowFraction: 0.9999999999999999,
+        rowSpan: 0,
+        rowSpanFraction: 0.5,
+      ),
+    );
+
+    index.debugProbeCount = 0;
+    expect(index.hasIntraTrackItemOn(5), isTrue);
+    expect(index.debugProbeCount, 1);
+    index.debugProbeCount = 0;
+    expect(index.hasIntraTrackItemOn(6), isFalse);
+    expect(index.debugProbeCount, 0);
+    expect(index.hasIntraTrackItemOn(7), isFalse);
+    expect(index.hasIntraTrackItemOn(8), isFalse);
+    expect(index.hasIntraTrackItemOn(1), isTrue);
+  });
 }
 
 /// One primary-axis bucket holding [itemCount] unit-wide items at columns
@@ -658,6 +997,7 @@ class _OneBucketFixture {
   late final SpanIndex index = SpanIndex(
     store: store,
     primaryAxis: Axis.vertical,
+    trackCount: _lattice,
   );
 }
 

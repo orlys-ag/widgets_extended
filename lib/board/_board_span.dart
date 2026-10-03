@@ -9,6 +9,38 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
+/// The track a track-space coordinate LEADS INTO: its floor, with a
+/// coordinate within [precisionErrorTolerance] BELOW an integer taken as
+/// that integer. The one rule for turning an item's START into a track
+/// index, the start-side mirror of [trackEndIndexOf].
+///
+/// A start one ulp below an integer, which the sum of two exact multiples
+/// of a quantum can come to in doubles, is ON that track's leading edge,
+/// and flooring it raw puts the item in the track before, where it covers
+/// nothing. Every site that indexes a start reads this, never `floor()`,
+/// and never a span's integer component: that component is the raw floor.
+int trackIndexOf(double trackSpace) {
+  return (trackSpace + precisionErrorTolerance).floor();
+}
+
+/// One past the last track a half-open interval ending at the
+/// track-space [end] reaches: its ceiling, with an end within
+/// [precisionErrorTolerance] ABOVE an integer taken as that integer, so
+/// an end one ulp past a track's leading edge does not reach into it.
+int trackEndIndexOf(double end) {
+  return (end - precisionErrorTolerance).ceil();
+}
+
+/// [trackSpace], or the integer it lies within [precisionErrorTolerance]
+/// of. For a value the board PRODUCES from arithmetic on a quantum, so a
+/// placement meant to start on a track edge starts exactly there.
+double snapToTrackEdge(double trackSpace) {
+  final nearest = trackSpace.roundToDouble();
+  return (trackSpace - nearest).abs() <= precisionErrorTolerance
+      ? nearest
+      : trackSpace;
+}
+
 /// A rectangle in TRACK space: an integer start plus a leading fraction on
 /// each axis, and an integer span plus a trailing fraction on each axis.
 ///
@@ -20,6 +52,12 @@ import 'package:flutter/painting.dart';
 /// nothing else. `startOn(axis) + spanOn(axis)` still compiles and is
 /// silently wrong the moment either fraction on that axis is non-zero; no
 /// signature change can catch that, so the rule is textual.
+///
+/// The board reads both ends within `precisionErrorTolerance`: a start
+/// that far below a whole track, which arithmetic on a fraction can come
+/// to in doubles, starts ON that track, and an end that far past one
+/// does not reach into it. A span built as `rowStart: 0, rowFraction:
+/// 0.9999999999999999` is on track 1 everywhere the board asks.
 @immutable
 class BoardSpan {
   /// Creates a span. The two asserts that pair [rowSpan] with
@@ -45,9 +83,8 @@ class BoardSpan {
        assert(colSpan + colSpanFraction > 0.0),
        // The extent must SURVIVE at the span's own magnitude: a fraction
        // like 1e-17 passes the sum-at-zero assert above and then vanishes
-       // inside startTrackOn/endTrackOn at a non-zero start, which makes
-       // the bucket range empty and fires the index's assert instead of
-       // this one.
+       // inside startTrackOn/endTrackOn at a non-zero start, leaving a
+       // span whose end is its start.
        assert(
          rowStart + rowFraction + rowSpan + rowSpanFraction >
              rowStart + rowFraction,

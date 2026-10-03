@@ -6,8 +6,8 @@
 /// The coordinator owns the four animation sources and is the single
 /// writer of the store's entering and exiting bits; the members that
 /// reach it are `anim`, `previewMakeRoomGap`, `releaseMakeRoomPreview`,
-/// `animateDropSettle`, `animateMakeRoomHandOff`, `animateTrackResize`
-/// and `finalizeTrackResize`. The orchestrator answers
+/// `animateDropSettle`, `animateMakeRoomHandOff` and `animateTrackResize`.
+/// The orchestrator answers
 /// `animateScrollToCell`, `jumpToCell` and `frozenInsetOf`. The drag
 /// state that lives HERE is `markDragging`'s bit and the
 /// mutation-cancel hook whose lifetime is the bit's.
@@ -28,7 +28,52 @@ import 'board_animation_style.dart';
 import 'board_config.dart';
 import 'board_render_port.dart';
 
+part '_board_controller_internals.dart';
+
+/// Which frozen band, if any, an item is pinned in on one axis; see
+/// `BoardControllerInternals.pinOfId`. Internal-use; the barrel does not
+/// export it.
+enum BoardPin {
+  /// In no band: the item scrolls on this axis.
+  none,
+
+  /// Wholly inside the leading band, pinned to the viewport's leading
+  /// edge.
+  leading,
+
+  /// Wholly inside the trailing band, pinned to the viewport's trailing
+  /// edge.
+  trailing,
+}
+
+/// A settled rectangle captured BEFORE a write, for the FLIP install
+/// after it. It rides with its KEY because an id is not identity across
+/// a bulk call: ids are recycled off a LIFO free list, so an id one of
+/// the call's own retires released can come back allocated to another
+/// key, and only the key catches that. Not to the SAME key: `setItems`
+/// retires only keys its placements omit and allocates only keys they
+/// name that have no id, `addItem` retires nothing, and a key whose exit
+/// is running comes back on its own id (`BoardController._resurrect`).
+/// `lead` and `extent` are content space; `pinTerm` is, per axis, what
+/// the normalized lead is the content lead minus at capture time (see
+/// `BoardController._pinTermOf`); `laneTrack` is the lane-axis start
+/// track, or null when there is no lane axis, and an install whose track
+/// is unchanged is a RELANE, an intra-track shift the track-sizing term
+/// may read.
+typedef _CapturedRect<TKey> = ({
+  TKey key,
+  Offset lead,
+  Offset extent,
+  Offset pinTerm,
+  int? laneTrack,
+});
+
 /// Owns one board's items and answers every question about them.
+///
+/// The members here are the supported surface. The ones the render
+/// object, the widget and the drag controller drive the board through,
+/// id-keyed reads and animation channels among them, are declared in
+/// [BoardControllerInternals], which the package barrel does not export.
 ///
 /// Two type parameters and no more: [TKey] identifies an item and [TItem]
 /// is the caller's payload. There is no per-cell payload type, because a
@@ -38,9 +83,10 @@ import 'board_render_port.dart';
 ///
 /// - [addStructuralListener] takes a nullable key set. `null` means the
 ///   scope is unknown and the listener should do a full refresh; an EMPTY
-///   set means a structural change occurred but no built child's builder
-///   output changed, so only relayout and child collection are needed; a
-///   NON-EMPTY set means exactly these keys may differ. The inputs are a
+///   set means a structural change occurred but no item's rendered inputs
+///   changed, so an item shown by key needs no rebuild (a removal is one:
+///   the removed key is gone rather than changed); a NON-EMPTY set means
+///   exactly these keys may differ. The inputs are a
 ///   built child's RENDERED inputs, which for a board are its payload, its
 ///   span, its lane and its lane count, not only the span: a lane change
 ///   with an unchanged span is a change and is the one an implementer
@@ -83,6 +129,7 @@ class BoardController<TKey, TItem> {
     _spanIndex = SpanIndex(
       store: _store,
       primaryAxis: _derivePrimaryAxis(rows, columns),
+      trackCount: _primaryConfigOf(rows, columns).axis.trackCount,
     );
     _lanes = OverlapLaneResolver(
       store: _store,
@@ -111,6 +158,7 @@ class BoardController<TKey, TItem> {
       prospectiveExtentOf: _prospectiveExtentDelta,
       laneOfId: laneOfId,
       laneCountOfId: laneCountOfId,
+      captureSettleRelanes: _captureSettleRelanes,
     );
     _orchestrator = BoardScrollOrchestrator<TKey>(
       portOf: () {
@@ -179,7 +227,10 @@ class BoardController<TKey, TItem> {
   bool _disposed = false;
 
   /// The row axis config. Assigning a new one re-derives the primary and
-  /// lane axes and fires a full-refresh structural notification.
+  /// lane axes and fires a full-refresh structural notification. A change
+  /// to the primary axis's track count re-files the items that reach past
+  /// the smaller lattice, and a change of primary axis re-files every
+  /// item.
   BoardAxisConfig get rows {
     _assertNotDisposed();
     return _rows;
@@ -191,8 +242,9 @@ class BoardController<TKey, TItem> {
     if (identical(value, _rows)) {
       return;
     }
+    final old = _rows;
     _rows = value;
-    _resetSwappedAxis(value);
+    _resetSwappedAxis(old, value);
     _reconfigureAxes(Axis.vertical);
   }
 
@@ -208,8 +260,9 @@ class BoardController<TKey, TItem> {
     if (identical(value, _columns)) {
       return;
     }
+    final old = _columns;
     _columns = value;
-    _resetSwappedAxis(value);
+    _resetSwappedAxis(old, value);
     _reconfigureAxes(Axis.horizontal);
   }
 
@@ -223,46 +276,34 @@ class BoardController<TKey, TItem> {
   set animationStyle(BoardAnimationStyle value) {
     _assertNotDisposed();
     assert(value.debugValidate());
-    final old = _animationStyle;
     _animationStyle = value;
-    // The two ROOT-family transitions this setter owns. itemSlide to
-    // zero PURGES: dropping a record lands the item at its structural
-    // rectangle, its lead being paint-only and its extent read live by
-    // the geometry rule. trackResize to zero
-    // FINALIZES instead: the family is layout-driving and an abandoned
-    // state would strand a partial extent, so each state lands at the
-    // target the axis already stores. The other three families need no
-    // arm: dropSettle rides the purged engine, itemEnterExit is driven
-    // past 1 by the tick-time zero guard and retired through its normal
-    // handler, and makeRoom's held gap is not motion.
-    if (old.itemSlide.duration != Duration.zero &&
-        value.itemSlide.duration == Duration.zero) {
-      final hadRecords = _anim.slide.hasActive;
-      _anim.slide.purgeActive();
-      _anim.notifyNow();
-      if (hadRecords) {
-        // Before a record's FIRST tick no router mirror has latched, so
-        // the notify alone routes neither a layout nor a paint: an
-        // extent record would leave the child laid out at the animated
-        // size and a lead-only one would leave it painted displaced. An
-        // empty structural dirties layout without naming a key. The
-        // trackResize arm below does the same for the same reason, its
-        // installs being made in layout.
-        _notifyStructural(<TKey>{});
-      }
+    // DISABLING A FAMILY STOPS ITS MOTION, here and synchronously, and no
+    // other family's: every slide record and every track state whose
+    // family the NEW style resolves to zero goes, through `specFor`, so a
+    // family left inheriting stops with its root and one set explicitly
+    // runs on. A slide record purged lands its item at its structural
+    // rectangle; a track state dropped lands the track at the settled
+    // extent the axis stores, which is why a layout-driving family can be
+    // stopped without stranding a partial extent. Two families need no
+    // arm here: itemEnterExit is driven past 1 by its tick-time zero
+    // guard and retired through its handler, which owns the release, and
+    // the make-room engine's held gap is a target, not motion.
+    bool off(BoardAnimationFamily family) {
+      return value.specFor(family).duration == Duration.zero;
     }
-    if (old.trackResize.duration != Duration.zero &&
-        value.trackResize.duration == Duration.zero) {
-      final hadStates = _anim.trackResize.hasActive;
-      _anim.trackResize.finalizeAll();
+
+    final purged = _anim.slide.purgeWhere(off);
+    final finalized = _anim.trackResize.finalizeWhere(off);
+    if (purged || finalized) {
       _anim.notifyNow();
-      if (hadStates) {
-        // Before the resize's FIRST tick no mirror has latched, so the
-        // notify alone cannot route a relayout and the cells stay
-        // painted at the captured origins; an empty structural dirties
-        // layout without naming a key.
-        _notifyStructural(<TKey>{});
-      }
+      // Before a record's FIRST tick no router mirror has latched, so the
+      // notify alone routes neither a layout nor a paint: an extent
+      // record would leave the child laid out at the animated size, a
+      // lead-only one would leave it painted displaced, and a track
+      // state would leave the cells at the extents the install frame
+      // gave them. An empty structural dirties layout without naming a
+      // key.
+      _notifyStructural(<TKey>{});
     }
   }
 
@@ -290,29 +331,6 @@ class BoardController<TKey, TItem> {
   Axis get primaryAxis {
     _assertNotDisposed();
     return _spanIndex.primaryAxis;
-  }
-
-  /// Debug-only: lane-axis buckets the lane flush has actually resolved,
-  /// whichever arm called it.
-  ///
-  /// A FORWARDER, not a second counter. The only code that knows a bucket
-  /// was processed is the resolver's own per-bucket loop, so the storage
-  /// and the increment are there; this controller sees one flush call, not
-  /// the number of buckets it processed, and a call-counting field here
-  /// would pass the very implementation the counter exists to reject, one
-  /// that re-resolves every bucket on every layout.
-  int get debugLaneBucketResolveCount {
-    return _lanes.debugBucketResolveCount;
-  }
-
-  /// Debug-only: lane-axis bucket member reads, forwarded from the
-  /// resolver for the same reason as [debugLaneBucketResolveCount].
-  int get debugLaneBucketMemberReadCount {
-    return _lanes.debugBucketMemberReadCount;
-  }
-
-  set debugLaneBucketMemberReadCount(int value) {
-    _lanes.debugBucketMemberReadCount = value;
   }
 
   // ---------------------------------------------------------------------
@@ -365,38 +383,40 @@ class BoardController<TKey, TItem> {
     return _store.dataOf(id);
   }
 
-  /// [key]'s lane within its lane-axis track, or 0 when it is not in the
-  /// live set or is not laned. Flushes dirty lane buckets first, so the
+  /// [key]'s lane within its lane-axis track: 0 when it is not laned, and
+  /// null when it is not in the live set. Flushes dirty lane buckets first, so the
   /// value is observable on the frame of the mutation that changed it and
   /// without a layout.
-  int laneOf(TKey key) {
+  int? laneOf(TKey key) {
     _ensureLanesResolved();
     final id = _liveIdOf(key);
     if (id == BoardStore.noId) {
-      return 0;
+      return null;
     }
     return _store.laneOf(id);
   }
 
-  /// The number of lanes [key]'s cluster resolved to, or 1 when it is not
-  /// in the live set or is not laned. Flushes first; see [laneOf].
-  int laneCountOf(TKey key) {
+  /// The number of lanes [key]'s cluster resolved to: 1 when it is not
+  /// laned, and null when it is not in the live set. Flushes first; see
+  /// [laneOf].
+  int? laneCountOf(TKey key) {
     _ensureLanesResolved();
     final id = _liveIdOf(key);
     if (id == BoardStore.noId) {
-      return 1;
+      return null;
     }
     return _store.laneCountOf(id);
   }
 
   /// The number of consecutive lanes [key] occupies, counting upward
-  /// from [laneOf], or 1 when it is not in the live set or is not laned.
+  /// from [laneOf]: 1 when it is not laned, and null when it is not in the
+  /// live set.
   /// Flushes first; see [laneOf].
-  int laneSpanOf(TKey key) {
+  int? laneSpanOf(TKey key) {
     _ensureLanesResolved();
     final id = _liveIdOf(key);
     if (id == BoardStore.noId) {
-      return 1;
+      return null;
     }
     return _store.laneSpanOf(id);
   }
@@ -407,6 +427,21 @@ class BoardController<TKey, TItem> {
     return _liveIdOf(key) != BoardStore.noId;
   }
 
+  /// The number of items in the live set. An item animating out is not
+  /// counted, as [contains] does not report it. O(1).
+  int get itemCount {
+    _assertNotDisposed();
+    return _store.liveCount;
+  }
+
+  /// The keys of the live set, in no particular order: a new list on each
+  /// call, so the caller may mutate the board while walking it. An item
+  /// animating out is not listed. O(items).
+  List<TKey> get keys {
+    _assertNotDisposed();
+    return _store.liveKeys();
+  }
+
   /// Whether [key] is the item a drag session currently holds.
   bool isDragging(TKey key) {
     final id = _liveIdOf(key);
@@ -414,247 +449,6 @@ class BoardController<TKey, TItem> {
       return false;
     }
     return _store.isDragging(id);
-  }
-
-  // ---------------------------------------------------------------------
-  // Render-facing reads, id-keyed.
-  //
-  // The board's analogue of the tree's `*Nid` variants. They exist because
-  // the render object, the views and the drag controller are separate
-  // libraries from the store, so no consumer can reach a dense array
-  // directly. They are public members of an exported class, which the
-  // barrel cannot hide, and are internal-use-only. None of them hashes a
-  // key or allocates.
-  //
-  // They are id-keyed and scalar-returning on purpose: layout touches
-  // every obtained item every frame, so a span-returning accessor would
-  // allocate one value object per item per frame.
-  //
-  // There is deliberately no `isExitingId`: the exiting bit's one read API
-  // is the animation reader's, and a second one here would be a second
-  // normative site for the same fact.
-  // ---------------------------------------------------------------------
-
-  /// Whether [id]'s span covers cell `(row, col)` by the span index's own
-  /// two rules, so a per-cell listener rebuilds exactly when [itemsAt]
-  /// would list the item. Internal-use, like [keyOfId].
-  bool idCoversCell(int id, int row, int col) {
-    return _spanIndex.coversCell(id, row, col);
-  }
-
-  /// The id for [key], or -1 when it is not registered. Unlike the
-  /// TKey-keyed reads this does NOT exclude an exiting item, which the
-  /// render layer must keep until its exit settles.
-  int idOfKey(TKey key) {
-    return _store.idOf(key);
-  }
-
-  /// The key for [id], or null for a released id.
-  TKey? keyOfId(int id) {
-    return _store.keyOf(id);
-  }
-
-  /// Leading row track of [id]. Track space.
-  int rowStartOfId(int id) {
-    return _store.rowStartOf(id);
-  }
-
-  /// Integer row span of [id]. Track space.
-  int rowSpanOfId(int id) {
-    return _store.rowSpanOf(id);
-  }
-
-  /// Leading column track of [id]. Track space.
-  int colStartOfId(int id) {
-    return _store.colStartOf(id);
-  }
-
-  /// Integer column span of [id]. Track space.
-  int colSpanOfId(int id) {
-    return _store.colSpanOf(id);
-  }
-
-  /// Leading row fraction of [id]. Track space.
-  double rowFractionOfId(int id) {
-    return _store.rowFractionOf(id);
-  }
-
-  /// Leading column fraction of [id]. Track space.
-  double colFractionOfId(int id) {
-    return _store.colFractionOf(id);
-  }
-
-  /// Trailing row span fraction of [id]. Track space.
-  double rowSpanFractionOfId(int id) {
-    return _store.rowSpanFractionOf(id);
-  }
-
-  /// Trailing column span fraction of [id]. Track space.
-  double colSpanFractionOfId(int id) {
-    return _store.colSpanFractionOf(id);
-  }
-
-  /// [id]'s lane. Flushes dirty lane buckets first, exactly as [laneOf]
-  /// does.
-  int laneOfId(int id) {
-    _ensureLanesResolved();
-    return _store.laneOf(id);
-  }
-
-  /// [id]'s lane count. Flushes first; see [laneOfId].
-  int laneCountOfId(int id) {
-    _ensureLanesResolved();
-    return _store.laneCountOf(id);
-  }
-
-  /// [id]'s lane span. Flushes first; see [laneOfId].
-  int laneSpanOfId(int id) {
-    _ensureLanesResolved();
-    return _store.laneSpanOf(id);
-  }
-
-  /// Whether [id] is the item a drag session currently holds.
-  bool isDraggingId(int id) {
-    return _store.isDragging(id);
-  }
-
-  /// [id]'s exact track-space endpoints on the row axis, half-open. The
-  /// four endpoint reads below are what the geometry rule's fractional
-  /// arm consumes; scalar-returning for the same per-frame reason as the
-  /// rest of this block.
-  double rowStartTrackOfId(int id) {
-    return _store.startTrackOf(id, Axis.vertical);
-  }
-
-  double rowEndTrackOfId(int id) {
-    return _store.endTrackOf(id, Axis.vertical);
-  }
-
-  double colStartTrackOfId(int id) {
-    return _store.startTrackOf(id, Axis.horizontal);
-  }
-
-  double colEndTrackOfId(int id) {
-    return _store.endTrackOf(id, Axis.horizontal);
-  }
-
-  /// [id]'s vicinity ordinal: its rank among the items sharing its
-  /// primary START track. The item vicinity's xIndex component.
-  int vicinityOrdinalOfId(int id) {
-    return _spanIndex.ordinalOf(id);
-  }
-
-  /// [id]'s primary START track: the item vicinity's yIndex component.
-  int primaryStartOfId(int id) {
-    return _store.startTrackOf(id, _spanIndex.primaryAxis).floor();
-  }
-
-  /// The id at [ordinal] on primary start track [track], or
-  /// [BoardStore.noId]. The widget's builder resolves an item vicinity
-  /// back to its item through this; internal-use in the same sense the
-  /// rest of this block is.
-  int itemIdAtOrdinal(int track, int ordinal) {
-    return _spanIndex.idAtOrdinal(track, ordinal);
-  }
-
-  /// Whether [id] satisfies the laning criterion. Reads the resolver's
-  /// single predicate, which is also phase agreement: no second
-  /// implementation of the criterion exists to disagree with it.
-  bool isLanedId(int id) {
-    return _lanes.isLaned(id);
-  }
-
-  /// The largest resolved lane count among the laned items of lane-axis
-  /// bucket [track], or 0 when the bucket is absent or empty. The
-  /// item-cluster term of intrinsic track sizing reads this.
-  int maxLaneCountInBucket(int track) {
-    _ensureLanesResolved();
-    return _lanes.maxLaneCountInBucket(track);
-  }
-
-  /// A read-only view of one lane-axis bucket's members, or an empty
-  /// list for an absent bucket. Internal-use for the sizing sweep's
-  /// scaled cluster term and the resize install site's contributor walk.
-  List<int> laneBucketMembersOn(int track) {
-    return _lanes.laneBucketMembers(track);
-  }
-
-  /// The payload for [id], or null for a released slot. Id-space so the
-  /// builder can resolve an EXITING item, which the key-space reads
-  /// exclude while its exit still paints.
-  TItem? itemOfId(int id) {
-    if (id < 0 || id >= _store.capacity) {
-      return null;
-    }
-    return _store.dataOf(id);
-  }
-
-  /// The span for [id], rebuilt from the stored components. Same
-  /// id-space reasoning as [itemOfId].
-  BoardSpan spanOfId(int id) {
-    return BoardSpan(
-      rowStart: _store.rowStartOf(id),
-      colStart: _store.colStartOf(id),
-      rowSpan: _store.rowSpanOf(id),
-      colSpan: _store.colSpanOf(id),
-      rowFraction: _store.rowFractionOf(id),
-      colFraction: _store.colFractionOf(id),
-      rowSpanFraction: _store.rowSpanFractionOf(id),
-      colSpanFraction: _store.colSpanFractionOf(id),
-    );
-  }
-
-  /// Debug-only: whether any item's interval on the PRIMARY axis lies
-  /// inside the single integer track [track]. The render object's
-  /// content-axis sizing assert reads it; nothing on a release path
-  /// does.
-  bool debugHasIntraTrackItemOn(int track) {
-    var found = false;
-    assert(() {
-      for (final id in _store.ids) {
-        final start = _store.startTrackOf(id, _spanIndex.primaryAxis);
-        final end = _store.endTrackOf(id, _spanIndex.primaryAxis);
-        if (start >= track &&
-            end <= track + 1 + precisionErrorTolerance &&
-            start < track + 1) {
-          found = true;
-          break;
-        }
-      }
-      return true;
-    }());
-    return found;
-  }
-
-  /// ARM 1 of the lane flush: the head of `layoutChildSequence` calls
-  /// this so lane resolution precedes track sizing, which is the
-  /// resolve-then-size order a stale laneCount would silently violate by
-  /// one frame. Internal-use.
-  void flushLanesForLayout() {
-    _ensureLanesResolved();
-  }
-
-  /// The layout obtain set: item ids intersecting the half-open track
-  /// rect, INCLUDING ids whose exiting bit is set.
-  ///
-  /// APPENDS into [into], which the render object owns and reuses, and
-  /// returns it, so the per-layout path allocates nothing. [itemsIn] is
-  /// the exiting-EXCLUDING, freshly-materialized form.
-  List<int> itemIdsInRectIncludingExiting(
-    int rowStart,
-    int rowEnd,
-    int colStart,
-    int colEnd,
-    List<int> into,
-  ) {
-    _assertNotDisposed();
-    return _spanIndex.itemsInRectIncludingExiting(
-      rowStart,
-      rowEnd,
-      colStart,
-      colEnd,
-      into,
-    );
   }
 
   // ---------------------------------------------------------------------
@@ -707,10 +501,14 @@ class BoardController<TKey, TItem> {
   /// differs, through the same path [moveItem] and [resizeItem] use. A key only in [placements] enters and a key only in
   /// the live set exits, through the same paths [addItem] and [removeItem]
   /// take: this is not a separate door into the enter and exit machinery.
+  /// An entering key whose exit is still running therefore comes back as
+  /// the same item, its exit reversed, as [addItem] describes.
   ///
-  /// A duplicate key inside one call is caller error and throws. The check
-  /// runs over the whole argument BEFORE any mutation, so a throw leaves
-  /// the board untouched and there is nothing to notify.
+  /// A duplicate key inside one call is caller error and throws, and so
+  /// is a span [addItem] would refuse. Both checks run over the whole
+  /// argument BEFORE any mutation, so a throw leaves the board untouched
+  /// and there is nothing to notify. A span outside the lattice is kept,
+  /// as [addItem] describes.
   ///
   /// Uses the BULK registration path: N sorted inserts into one bucket
   /// would be quadratic in shifts on exactly the input a bulk call
@@ -721,9 +519,19 @@ class BoardController<TKey, TItem> {
     _assertNotDisposed();
     final desired = <TKey, BoardPlacement<TItem>>{};
     for (final placement in placements) {
+      // Every placement is checked before anything is written, so a bad
+      // one refuses the whole call, as a duplicate key does.
+      _checkSpan(placement.span, "setItems");
       final key = _keyOf(placement.item);
       if (desired.containsKey(key)) {
-        _throwDuplicateKey("setItems", key);
+        final message =
+            "BoardController.setItems: key $key appears more than once in "
+            "the placements. Each placement names one item, by its key; "
+            "give each item a key of its own.";
+        assert(() {
+          throw StateError(message);
+        }());
+        throw StateError(message);
       }
       desired[key] = placement;
     }
@@ -745,21 +553,13 @@ class BoardController<TKey, TItem> {
       // lanes resolve lazily, so a per-placement capture would read a
       // rectangle an earlier placement had already moved.
       final captured =
-          <int,
-            ({
-              TKey key,
-              Offset lead,
-              Offset extent,
-              bool frozen,
-              int? laneTrack,
-            })>{};
+          <int, _CapturedRect<TKey>>{};
       final reSpanned = <int>{};
-      final allocated = <int>{};
       if (_installsSlide(null)) {
         // Every bucket this call disturbs: the tracks a changed span
-        // leaves and arrives in, the track an entering placement lands
-        // on, the track an exiting item leaves, and the track a ghost
-        // retired by a re-added key leaves.
+        // leaves and arrives in, a resurrected key's included, the track
+        // an entering placement lands on, and the track an exiting item
+        // leaves.
         final laneAxis = _lanes.laneAxis;
         // A SET, not a list: the loop below adds one or two entries per
         // placement and every placement in one laned row names the same
@@ -771,18 +571,22 @@ class BoardController<TKey, TItem> {
           tracks.add(_laneStartTrackOf(_store.idOf(key)));
         }
         for (final entry in desired.entries) {
-          final id = _liveIdOf(entry.key);
+          var id = _liveIdOf(entry.key);
           if (id == BoardStore.noId) {
-            // An ENTERING key disturbs the bucket it arrives in, and the
-            // one a ghost of the same key is leaving.
-            if (laneAxis != null) {
-              tracks.add(entry.value.span.startTrackOn(laneAxis).floor());
-            }
             final ghost = _store.idOf(entry.key);
-            if (ghost != BoardStore.noId && _store.isExiting(ghost)) {
-              tracks.add(_laneStartTrackOf(ghost));
+            if (ghost == BoardStore.noId || !_store.isExiting(ghost)) {
+              // An ENTERING key disturbs the bucket it arrives in.
+              if (laneAxis != null) {
+                tracks.add(
+                  trackIndexOf(entry.value.span.startTrackOn(laneAxis)),
+                );
+              }
+              continue;
             }
-            continue;
+            // A key whose exit is running COMES BACK as the same id
+            // ([_resurrect]), so it is captured below exactly as a live
+            // item whose span may change.
+            id = ghost;
           }
           // AN UNCHANGED SPAN DISTURBS NOTHING, so it names no track and
           // nothing walks its bucket. Lanes are a function of the spans
@@ -801,33 +605,33 @@ class BoardController<TKey, TItem> {
           // still moves its neighbours, whose geometry can.
           tracks.add(_laneStartTrackOf(id));
           if (laneAxis != null) {
-            tracks.add(entry.value.span.startTrackOn(laneAxis).floor());
+            tracks.add(trackIndexOf(entry.value.span.startTrackOn(laneAxis)));
           }
           if (!_canReadItemGeometry(id)) {
             continue;
           }
           reSpanned.add(id);
-          captured[id] = (
-            key: entry.key,
-            lead: _itemLeadOfId(id),
-            extent: _itemExtentOfId(id),
-            frozen: _isFrozenPrimaryStart(id),
-            laneTrack: _laneStartTrackOf(id),
-          );
+          captured[id] = _captureRect(id, entry.key);
         }
         captured.addAll(_captureLaneBuckets(tracks, skip: reSpanned));
       }
       for (final key in exiting) {
-        _exitOrRetire(key, _store.idOf(key), notify: false);
+        _exitOrRetire(_store.idOf(key));
       }
       for (final entry in desired.entries) {
         final key = entry.key;
         final placement = entry.value;
         final existing = _liveIdOf(key);
+        final ghost = existing == BoardStore.noId ? _store.idOf(key) : existing;
+        if (existing == BoardStore.noId &&
+            ghost != BoardStore.noId &&
+            _store.isExiting(ghost)) {
+          _resurrect(ghost, placement.item, placement.span, bulk: true);
+          affected.add(key);
+          continue;
+        }
         if (existing == BoardStore.noId) {
-          _retireGhostOf(key);
           final id = _store.allocate(key);
-          allocated.add(id);
           if (_store.lastAllocationWasRecycled) {
             _anim.clearForId(id);
           }
@@ -855,26 +659,22 @@ class BoardController<TKey, TItem> {
       // One lane resolve serves every install: no site inside the loop
       // above reads a lane.
       captured.forEach((id, rect) {
-        if (reSpanned.contains(id) &&
-            !allocated.contains(id) &&
-            _store.keyOf(id) == rect.key) {
+        if (reSpanned.contains(id) && _store.keyOf(id) == rect.key) {
           _installReSpan(id, rect);
         }
       });
       _installRelanes(
-        Map<int, ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})>
-            .fromEntries(
+        Map<int, _CapturedRect<TKey>>.fromEntries(
           captured.entries.where((entry) {
             return !reSpanned.contains(entry.key);
           }),
         ),
-        allocated: allocated,
       );
       // A clean no-op diff notifies nothing: nothing retired, nothing
       // entered, nothing changed, and the lane accumulator drains empty.
       // An EMPTY delivered set is reserved for real structural changes
-      // whose builder output is unchanged; a re-sync of identical data is
-      // not one.
+      // that leave every item's rendered inputs unchanged; a re-sync of
+      // identical data is not one.
       if (affected.isEmpty && exiting.isEmpty) {
         if (_batchDepth > 0) {
           // Inside a batch the exit drain decides; an empty contribution
@@ -898,27 +698,44 @@ class BoardController<TKey, TItem> {
   }
 
   /// Adds one item at [span]. A key already in the live set is caller
-  /// error and throws.
+  /// error and throws a `StateError`; a span that breaks one of
+  /// [BoardSpan]'s rules (a NaN or out-of-range fraction, a negative start
+  /// or no extent), or that has an integer start or span above 2147483647,
+  /// the largest the board stores, throws an `ArgumentError`, in release
+  /// builds too, before anything is written.
+  ///
+  /// A span that lies outside the lattice is KEPT, not refused: the axes
+  /// can change under the items, so an item starting past the last track
+  /// is simply not laid out until the lattice covers it, and one that
+  /// runs past it is laid out up to the lattice's end.
+  ///
+  /// A key whose exit is still running is not in the live set, and adding
+  /// it brings that SAME item back: its exit reverses from where it has
+  /// reached and it grows back at the pace of a full enter, its payload
+  /// becomes [item], and a different [span] is reached by a slide from
+  /// where it paints, as [moveItem] would. Under a zero itemEnterExit it
+  /// is whole at once.
   void addItem(TItem item, BoardSpan span) {
     _assertNotDisposed();
+    _checkSpan(span, "addItem");
     final key = _keyOf(item);
     if (_liveIdOf(key) != BoardStore.noId) {
       _throwDuplicateKey("addItem", key);
     }
-    // Captured BEFORE the retire and the register, both of which
-    // re-lane a bucket: the arriving item's, and the one a ghost of this
-    // same key is leaving.
-    final laneAxis = _lanes.laneAxis;
     final ghost = _store.idOf(key);
+    if (ghost != BoardStore.noId && _store.isExiting(ghost)) {
+      _resurrect(ghost, item, span);
+      _notifyStructural(<TKey>{key});
+      return;
+    }
+    // Captured BEFORE the register, which re-lanes the bucket the item
+    // arrives in.
+    final laneAxis = _lanes.laneAxis;
     final neighbours = _installsSlide(null)
         ? _captureLaneBuckets(<int?>[
-            laneAxis == null ? null : span.startTrackOn(laneAxis).floor(),
-            ghost == BoardStore.noId || !_store.isExiting(ghost)
-                ? null
-                : _laneStartTrackOf(ghost),
+            laneAxis == null ? null : trackIndexOf(span.startTrackOn(laneAxis)),
           ])
         : null;
-    _retireGhostOf(key);
     final id = _store.allocate(key);
     if (_store.lastAllocationWasRecycled) {
       // A recycled id must not carry the previous occupant's animation
@@ -935,10 +752,9 @@ class BoardController<TKey, TItem> {
       _anim.animateEnter(id);
     }
     if (neighbours != null) {
-      // The id this call ALLOCATED is excluded: it may be the ghost's,
-      // recycled straight back, and the entering item must not FLIP from
-      // the dead one's rectangle.
-      _installRelanes(neighbours, allocated: <int>{id});
+      // The new id is in no captured bucket: nothing this call did
+      // between the capture and the allocation released an id.
+      _installRelanes(neighbours);
     }
     _notifyStructural(<TKey>{key});
   }
@@ -953,19 +769,26 @@ class BoardController<TKey, TItem> {
     // A SYNCHRONOUS retire re-lanes the survivors at once and they
     // animate; an ANIMATED exit keeps the id registered until its
     // settle, so no survivor's rectangle changes here and the install
-    // below finds nothing to do. The settle's own re-lane has no
-    // mutation site to capture at and steps; a follow-up.
+    // below finds nothing to do. The settle's own re-lane is captured
+    // there, through [_captureSettleRelanes].
+    //
+    // `setItems`' order: capture SKIPPING the removed id, which is no
+    // neighbour of itself; remove WITHOUT notifying; install; notify
+    // once. No listener runs between the capture and the install, so one
+    // that re-adds a key cannot hand the install a recycled id to slide
+    // from a dead rectangle.
     final neighbours = _installsSlide(null)
-        ? _captureLaneBuckets(<int?>[_laneStartTrackOf(id)])
+        ? _captureLaneBuckets(<int?>[_laneStartTrackOf(id)], skip: <int>{id})
         : null;
-    _exitOrRetire(key, id, notify: true);
+    _exitOrRetire(id);
     if (neighbours != null) {
       _installRelanes(neighbours);
     }
+    _notifyStructural(<TKey>{});
   }
 
   /// The shared removal route for [removeItem] and [setItems]'s exits.
-  void _exitOrRetire(TKey key, int id, {required bool notify}) {
+  void _exitOrRetire(int id) {
     _cancelDragIfDragged(id);
     if (_store.isEntering(id)) {
       // Capture the ramp BEFORE the record is dropped: read afterwards
@@ -977,38 +800,39 @@ class BoardController<TKey, TItem> {
       _anim.finalizeEnterExit(id);
       if (r <= precisionErrorTolerance) {
         // The enter never ticked: retire synchronously, install nothing.
-        _retireItem(key, id, notify: notify);
+        _anim.retireExitNow(id);
         return;
       }
       _anim.animateExit(id, from: r);
-      if (notify) {
-        _notifyStructural(<TKey>{});
-      }
       return;
     }
     if (_animationStyle.effectiveItemEnterExit.duration == Duration.zero) {
-      _retireItem(key, id, notify: notify);
+      _anim.retireExitNow(id);
       return;
     }
     _anim.animateExit(id, from: 1.0);
-    if (notify) {
-      _notifyStructural(<TKey>{});
+  }
+
+  /// The re-add door: a key whose exit is running comes back as the SAME
+  /// item, the way the tree cancels a pending deletion
+  /// (`TreeController._cancelDeletion`). The exit is reversed from the
+  /// ramp value it reached ([BoardAnimationCoordinator.reverseExit]), the
+  /// payload replaced, and a changed span written through [_reSpan],
+  /// which slides the item from the rectangle it paints; nothing is
+  /// allocated, so its element and `State` stay. The exiting item kept
+  /// its span-index entry and its lane record whole, so it needs no
+  /// registration. [bulk] is [setItems]', which captured the item with
+  /// its other re-spans. The caller notifies.
+  void _resurrect(int id, TItem item, BoardSpan span, {bool bulk = false}) {
+    _anim.reverseExit(id);
+    _store.setData(id, item);
+    if (!_spanEquals(id, span)) {
+      _reSpan(id, span, bulk: bulk);
     }
   }
 
-  /// The re-add door: a key whose previous incarnation is still exiting
-  /// retires it NOW, not gated on the family, so the fresh enter gets a
-  /// fresh id. The retire defers its delivery; the caller's own
-  /// notification drains the fallout.
-  void _retireGhostOf(TKey key) {
-    final ghost = _store.idOf(key);
-    if (ghost != BoardStore.noId && _store.isExiting(ghost)) {
-      _batchAffected.remove(key);
-      _anim.retireExitNow(ghost, deliver: false);
-    }
-  }
-
-  /// Overwrites [key]'s payload and nothing else.
+  /// Overwrites [key]'s payload and nothing else. A payload whose key is
+  /// not [key] throws a `StateError`, in release builds too.
   ///
   /// The ONLY mutator that fires the item-data channel, and the only one
   /// that writes the payload without writing a span. It fires
@@ -1018,27 +842,41 @@ class BoardController<TKey, TItem> {
   void updateItem(TKey key, TItem item) {
     _assertNotDisposed();
     final id = _liveIdOrThrow(key, "updateItem");
-    assert(
-      _keyOf(item) == key,
-      "BoardController.updateItem: keyOf(item) is ${_keyOf(item)}, not "
-      "$key. Rewriting one key's slot with another key's payload would "
-      "leave the key-to-id map naming the wrong item.",
-    );
+    final itemKey = _keyOf(item);
+    if (itemKey != key) {
+      // A StateError in BOTH build modes, as the house's other key errors
+      // are: an assert alone let a release build write one key's payload
+      // into another key's slot.
+      final message =
+          "BoardController.updateItem: keyOf(item) is $itemKey, not $key. "
+          "Rewriting one key's slot with another key's payload would leave "
+          "the key-to-id map naming the wrong item.";
+      assert(() {
+        throw StateError(message);
+      }());
+      throw StateError(message);
+    }
     _store.setData(id, item);
     _notifyItemData(key);
   }
 
-  /// Moves [key] to [span].
+  /// Moves [key] to [span]. A span [addItem] would refuse throws an
+  /// `ArgumentError` and leaves the item, and a drag of it, as they were;
+  /// a span outside the lattice is kept, as [addItem] describes.
   ///
-  /// [duration] and [curve] resolve a null against the `itemSlide`
-  /// family, at the slide install, which lands with the animation
-  /// sources; this step writes the span and notifies.
+  /// [duration] and [curve] time the slide from the rectangle the item
+  /// paints now to [span]'s, and a null resolves against the itemSlide
+  /// family. A zero [duration], or a zero itemSlide family, moves the
+  /// item without a slide of its own: the change lands this frame, and a
+  /// slide already in flight for the item keeps running from its new
+  /// rectangle, on its own clock.
   void moveItem(TKey key, BoardSpan span, {Duration? duration, Curve? curve}) {
     _assertNotDisposed();
     _writeSpan(key, span, "moveItem", duration: duration, curve: curve);
   }
 
-  /// Resizes [key] to [span]. See [moveItem] for [duration] and [curve].
+  /// Resizes [key] to [span]. See [moveItem] for [duration] and [curve],
+  /// and for the `ArgumentError` a span [addItem] would refuse throws.
   ///
   /// The two mutators write the same eight arrays through the same
   /// ordering and differ only in the slide they install, which is why they
@@ -1065,9 +903,11 @@ class BoardController<TKey, TItem> {
   ///   notification to `null` even if every other in-batch call carried a
   ///   set.
   /// - ITEM DATA: deferred, deduplicated by key, and fired after the
-  ///   structural one. A key that was both structurally and data-mutated
-  ///   gets both, because the structural-subsumes-data rule is about ONE
-  ///   mutation and a batch is many.
+  ///   structural one, and only for a key still on the board, live or
+  ///   animating out, when its turn comes. A key that was both
+  ///   structurally and data-mutated gets both, because the
+  ///   structural-subsumes-data rule is about ONE mutation and a batch is
+  ///   many.
   /// - ANIMATION: NOT deferred. Ticks fire on their own vsync schedule and
   ///   a batch body is synchronous, so nothing about batching reaches
   ///   them; deferring them would also defer the uncoalesced settle
@@ -1105,25 +945,6 @@ class BoardController<TKey, TItem> {
   // identity test below are the stored port's only readers.
   // ---------------------------------------------------------------------
 
-  /// Internal-use channel for [BoardDragController]; not part of the
-  /// supported surface. The single writer of the `dragging` flag in both
-  /// directions, and the single site that registers and clears the
-  /// mutation-cancel hook that rides it: `dragging: true` stores
-  /// [onMutationCancel] (at most one is ever held, because at most one
-  /// session is live); `dragging: false` clears the bit AND the hook in
-  /// the same call, which is what stops a stale hook firing into a
-  /// torn-down session.
-  void markDragging(
-    TKey key, {
-    required bool dragging,
-    VoidCallback? onMutationCancel,
-  }) {
-    _assertNotDisposed();
-    final id = _liveIdOrThrow(key, "markDragging");
-    _store.setFlag(id, BoardStore.draggingBit, dragging);
-    _onMutationCancel = dragging ? onMutationCancel : null;
-  }
-
   /// The mutation-cancel hook a live drag session registered, invoked by
   /// the four span mutators when they touch the dragged key.
   VoidCallback? _onMutationCancel;
@@ -1132,6 +953,11 @@ class BoardController<TKey, TItem> {
   /// dragged key cancels the session BEFORE the mutation proceeds, by
   /// running the hook, which performs the ordinary cancel path and clears
   /// the bit through [markDragging].
+  ///
+  /// The hook runs no `BoardDragConfig` callback: it queues the drag's
+  /// `onDragEnd` for after the mutation. The mutators rely on that: no
+  /// drag callback can change the store between the ids a mutator reads
+  /// before calling this and the writes it makes through them after.
   void _cancelDragIfDragged(int id) {
     if (!_store.isDragging(id)) {
       return;
@@ -1142,219 +968,23 @@ class BoardController<TKey, TItem> {
     }
   }
 
-  /// Internal-use channel for the drag layer and for tests; not part of
-  /// the supported surface. The declared ROUTE to the make-room engine's
-  /// `previewGap`: [prospective] is the SPAN the drag resolves to, never
-  /// the hovered cell, and a null [duration] or [curve] resolves there
-  /// against `effectiveMakeRoom`, which keeps the kill-switch disjunction
-  /// two-termed.
-  void previewMakeRoomGap({
-    required TKey draggedKey,
-    required BoardSpan prospective,
-    bool lifted = false,
-    Duration? duration,
-    Curve? curve,
-  }) {
-    _assertNotDisposed();
-    final id = _liveIdOrThrow(draggedKey, "previewMakeRoomGap");
-    _anim.makeRoom.previewGap(
-      draggedId: id,
-      prospective: prospective,
-      lifted: lifted,
-      duration: duration,
-      curve: curve,
-    );
-  }
-
-  /// Releases every held make-room offset. See [previewMakeRoomGap].
-  void releaseMakeRoomPreview({Duration? duration, Curve? curve}) {
-    _assertNotDisposed();
-    _anim.makeRoom.releasePreview(duration: duration, curve: curve);
-  }
-
-  /// Internal-use channel for the drag layer; not part of the supported
-  /// surface. The drop-settle glide, riding the slide engine with its own
-  /// family; [duration] and [curve] are the session's captured spec,
-  /// while the family's zero kill switch reads the live style. [relane]
-  /// declares the correction an intra-track shift, which a committed
-  /// RESIZE's is (it corrects onto the de-lane hold) and a committed
-  /// move's is not (it runs from the proxy).
-  void animateDropSettle(
-    TKey key,
-    Offset delta, {
-    required Duration duration,
-    required Curve curve,
-    Offset extentDelta = Offset.zero,
-    bool relane = false,
-  }) {
-    _assertNotDisposed();
-    final id = _liveIdOrThrow(key, "animateDropSettle");
-    _anim.slide.animateSlideFrom(
-      id,
-      delta,
-      family: BoardAnimationFamily.dropSettle,
-      duration: duration,
-      curve: curve,
-      extentDelta: extentDelta,
-      relane: relane,
-    );
-  }
-
-  /// Internal-use channel for the drag layer; not part of the supported
-  /// surface. Runs [body] with BOTH halves of every neighbour relane
-  /// install suppressed, lead and extent, in every door: inside a
-  /// commit's report the preview has already moved those neighbours and
-  /// sized them to their prospective slices, and the make-room hand-off
-  /// owns their landing, so a second lead or a second extent would fight
-  /// it. The written item's own FLIP is not suppressed; the drop-settle
-  /// glide's continuation cancels it from painted truth.
-  ///
-  /// Restores the PRIOR value rather than false, so a nested call and a
-  /// throwing body both leave the flag as they found it. A mutation an
-  /// app makes inside its report beyond the reported span, re-laning or
-  /// resizing a neighbour the preview never held, steps that neighbour;
-  /// accepted.
-  T withoutRelaneSlides<T>(T Function() body) {
-    _assertNotDisposed();
-    final saved = _relaneSlidesSuppressed;
-    _relaneSlidesSuppressed = true;
-    try {
-      return body();
-    } finally {
-      _relaneSlidesSuppressed = saved;
-    }
-  }
-
   bool _relaneSlidesSuppressed = false;
 
-  /// Internal-use channel for the render object; not part of the
-  /// supported surface. The one route from the track-sizing step of
-  /// layout to the resize animator, which lives in a library the render
-  /// object cannot name. Forwards and decides nothing: [family],
-  /// [duration] and [curve] are the sizing step's, and the hand-off arm
-  /// is the one caller that passes them.
-  void animateTrackResize(
-    Axis axis,
-    int track,
-    double from,
-    double to, {
-    BoardAnimationFamily family = BoardAnimationFamily.trackResize,
-    Duration? duration,
-    Curve? curve,
-  }) {
-    _anim.trackResize.animateTrackResize(
-      axis,
-      track,
-      from,
-      to,
-      family: family,
-      duration: duration,
-      curve: curve,
-    );
-  }
-
-  /// Internal-use channel for the drag layer; not part of the supported
-  /// surface. The COMMIT HAND-OFF's continuation for one displaced
-  /// neighbour: a slide starting [delta] from the item's structural
-  /// position, which the drag layer computes as where the item painted
-  /// before the snap minus where it rests after the report's mutation,
-  /// riding the slide engine under the makeRoom family with the snap's
-  /// remaining [duration] and curve tail. [extentDelta] is the same
-  /// continuation for the item's EXTENT, the painted size before the snap
-  /// minus the size it rests at after the mutation, so a neighbour whose
-  /// slice the preview held finishes shrinking or widening on the same
-  /// clock. Composes onto any slide the mutation installed, so the item
-  /// never leaves its painted rectangle.
-  void animateMakeRoomHandOff(
-    TKey key,
-    Offset delta, {
-    required Duration duration,
-    required Curve curve,
-    Offset extentDelta = Offset.zero,
-  }) {
-    _assertNotDisposed();
-    final id = _liveIdOrThrow(key, "animateMakeRoomHandOff");
-    _anim.slide.animateSlideFrom(
-      id,
-      delta,
-      family: BoardAnimationFamily.makeRoom,
-      duration: duration,
-      curve: curve,
-      extentDelta: extentDelta,
-      // Intra-track by the snap's own premise: the mutation reassigned
-      // the displaced neighbours' structure by exactly the amounts the
-      // preview held them at, so this correction moves each within its
-      // own lane-axis track and the track's term may read it.
-      relane: true,
-    );
-  }
-
-  /// Internal-use channel for the drag layer; not part of the supported
-  /// surface. The keys holding a make-room offset OR extent this instant,
-  /// for the commit's painted-truth capture before the snap.
-  List<TKey> get makeRoomHeldKeys {
-    _assertNotDisposed();
-    final keys = <TKey>[];
-    for (final id in _anim.makeRoom.activeIds) {
-      final key = keyOfId(id);
-      if (key != null) {
-        keys.add(key);
-      }
-    }
-    return keys;
-  }
-
-  /// Internal-use channel for the render object; not part of the
-  /// supported surface. The track-sizing step's make-room latch EDGE
-  /// hands the track's in-flight resize in here, because from that pass
-  /// on the extent is TERM-DRIVEN and a state in flight would make paint
-  /// read the animator instead of the recorded term. Forwards and decides
-  /// nothing.
-  void finalizeTrackResize(Axis axis, int track) {
-    _anim.trackResize.finalizeTrack(axis, track);
-  }
-
-  /// Debug-only: the id whose prospective make-room occupancy the slots
-  /// carry, or null. Non-null exactly while a slot exists, which is the
-  /// only observable separating a leaked lifecycle key from a clean one.
-  int? get debugMakeRoomLiftedId {
-    return _anim.makeRoom.liftedId;
-  }
-
-  /// Debug-only: successful slide installs, for the reflow contract.
-  int get debugSlideInstallCount {
-    return _anim.slide.debugInstallCount;
-  }
-
-  /// Internal-use channel for the render object; not part of the
-  /// supported surface. The OFFSET half of the animated axis read: how
-  /// far [track] paints from its settled offset given resizes in flight
-  /// between the window's first track and it.
-  double animatedOffsetShiftBetween(Axis axis, int fromTrack, int track) {
-    return _anim.trackResize.offsetShiftBetween(axis, fromTrack, track);
-  }
-
-  /// Internal-use channel for the render object; not part of the
-  /// supported surface. Drops the resize animator's shift prefix, which
-  /// captures SETTLED extents and so cannot survive a write to one.
+  /// Scrolls both axes so cell `(row, col)` lands aligned inside the
+  /// region between the frozen bands when [avoidFrozenTracks] is true,
+  /// or inside the viewport otherwise. The alignments follow
+  /// `Scrollable.ensureVisible`: 0.0 puts the cell's leading edge on the
+  /// region's leading edge, 1.0 its trailing edge on the region's
+  /// trailing edge, and 0.5 centres it, per axis.
   ///
-  /// Every other invalidation the prefix needs rides a state mutation or
-  /// a restyle, which the animator sees for itself; a settled write is
-  /// the one event that reaches the axis and not the animator, and
-  /// layout's `recordMeasurement` is its only site. Forwards and decides
-  /// nothing.
-  void invalidateAnimatedShifts() {
-    _anim.trackResize.invalidateShiftCache();
-  }
-
-  /// Scrolls both axes so cell `(row, col)` lands aligned, below the
-  /// frozen bands when [avoidFrozenTracks] is true. Completes true only
-  /// when BOTH axes' legs landed; false when either leg was superseded
-  /// by a later call on that axis, when no render object is attached
-  /// (a registered port that has not laid out yet costs one frame's
-  /// wait first), or when the port went away mid-scroll. The landing is
-  /// re-derived by a post-frame settle snap, because a driven scroll
-  /// overwrites in-layout corrections with absolute values.
+  /// Completes true only when BOTH axes' legs landed; false when either
+  /// leg was taken over, by a later [animateScrollToCell], [jumpToCell]
+  /// or [revealCell] that moves its axis, or by the user scrolling, when
+  /// no render object is attached (a registered port that has not laid
+  /// out yet costs one frame's wait first), or when the port went away
+  /// mid-scroll. The landing is re-derived by a post-frame settle snap,
+  /// because a driven scroll overwrites in-layout corrections with
+  /// absolute values.
   Future<bool> animateScrollToCell(
     int row,
     int col, {
@@ -1376,8 +1006,23 @@ class BoardController<TKey, TItem> {
     );
   }
 
-  /// Jumps both axes to cell `(row, col)`. No port is a no-op; a port
-  /// that has not laid out gets one deferred post-frame jump.
+  /// Scrolls the LEAST that shows cell `(row, col)` between the frozen
+  /// bands: an axis where the cell already shows, or where its track is
+  /// frozen, does not move, and a cell larger than the region shows its
+  /// leading edge. Instant. A board not yet laid out, and a cell outside
+  /// the lattice, are no-ops. An [animateScrollToCell] in flight on an
+  /// axis this moves completes false. The board's keyboard navigation
+  /// reveals each cell it moves to through this.
+  void revealCell(int row, int col) {
+    _assertNotDisposed();
+    _orchestrator.revealCell(row, col);
+  }
+
+  /// Jumps both axes to cell `(row, col)`, its leading edges on the
+  /// leading edges of the region between the frozen bands when
+  /// [avoidFrozenTracks] is true. No port is a no-op; a port that has
+  /// not laid out gets one deferred post-frame jump. An
+  /// [animateScrollToCell] in flight completes false.
   void jumpToCell(int row, int col, {bool avoidFrozenTracks = true}) {
     _assertNotDisposed();
     _orchestrator.jumpToCell(
@@ -1418,33 +1063,6 @@ class BoardController<TKey, TItem> {
     _renderPort?.invalidateCellMeasurements();
   }
 
-  /// Registers [port] as the render object driving this controller.
-  ///
-  /// Called from `RenderBoardViewport.attach`, and idempotent, because a
-  /// `GlobalKey` move detaches and reattaches. A second registration by a
-  /// DIFFERENT render object replaces the first, which is the order a
-  /// `GlobalKey` move produces: the new render object attaches before the
-  /// old one detaches.
-  void attachRenderPort(BoardRenderPort<TKey> port) {
-    _assertNotDisposed();
-    _renderPort = port;
-  }
-
-  /// Clears the registration [attachRenderPort] made, and ONLY when the
-  /// registered port IS [port].
-  ///
-  /// The identity test is what keeps a `GlobalKey` move from clearing a
-  /// live binding: the new render object has already registered by the
-  /// time the old one detaches.
-  void detachRenderPort(BoardRenderPort<TKey> port) {
-    if (identical(_renderPort, port)) {
-      // In-flight scroll legs complete false rather than waiting on a
-      // ScrollPosition that is no longer in a tree.
-      _orchestrator.cancelInFlight();
-      _renderPort = null;
-    }
-  }
-
   // ---------------------------------------------------------------------
   // Channels.
   // ---------------------------------------------------------------------
@@ -1473,6 +1091,10 @@ class BoardController<TKey, TItem> {
   }
 
   /// Subscribes to animation ticks.
+  ///
+  /// A listener that throws is reported through `FlutterError.reportError`
+  /// and does not stop the listeners after it; the throw does not reach
+  /// the tick, mutation or drag that dispatched the notification.
   void addAnimationListener(VoidCallback l) {
     _assertNotDisposed();
     _animationListeners.add(l);
@@ -1529,13 +1151,6 @@ class BoardController<TKey, TItem> {
   // ---------------------------------------------------------------------
   // Internals.
   // ---------------------------------------------------------------------
-
-  /// The narrow read interface the render layer binds to. Read off the
-  /// controller and never injected separately, so there is exactly one
-  /// binding to swap on a controller swap.
-  BoardAnimationReader<TKey> get anim {
-    return _anim;
-  }
 
   /// Resolves every dirty lane bucket and clears the dirty set.
   ///
@@ -1607,18 +1222,12 @@ class BoardController<TKey, TItem> {
     Curve? curve,
   }) {
     final id = _liveIdOrThrow(key, method);
+    // Before `_reSpan`, whose first step cancels a drag of this item: a
+    // refused span leaves the board as it was, drag included.
+    _checkSpan(span, method);
     _reSpan(id, span, duration: duration, curve: curve);
     _notifyStructural(<TKey>{key});
   }
-
-  /// A captured rectangle rides with its KEY because an id is not
-  /// identity across a bulk call: ids are recycled off a LIFO free list,
-  /// so a released id can come back allocated to another key, or to the
-  /// SAME key when a re-added key's ghost is retired first, and only the
-  /// key catches that. Its `laneTrack` is the lane-axis start track, or
-  /// null when there is no lane axis; an install whose track is
-  /// unchanged is a RELANE, an intra-track shift the track-sizing term
-  /// may read.
 
   /// The three ordered steps of a span change that ANIMATES: capture the
   /// settled rectangle, write, install the rect FLIP from the captured
@@ -1646,20 +1255,14 @@ class BoardController<TKey, TItem> {
       _applySpan(id, span);
       return;
     }
-    final captured = (
-      key: _store.keyOf(id) as TKey,
-      lead: _itemLeadOfId(id),
-      extent: _itemExtentOfId(id),
-      frozen: _isFrozenPrimaryStart(id),
-      laneTrack: _laneStartTrackOf(id),
-    );
+    final captured = _captureRect(id, _store.keyOf(id) as TKey);
     // The two buckets the write disturbs: the one the item LEAVES and
     // the one it ARRIVES in, the second read off the argument because
     // the capture precedes the write.
     final laneAxis = _lanes.laneAxis;
     final neighbours = _captureLaneBuckets(<int?>[
       captured.laneTrack,
-      laneAxis == null ? null : span.startTrackOn(laneAxis).floor(),
+      laneAxis == null ? null : trackIndexOf(span.startTrackOn(laneAxis)),
     ], skip: <int>{id});
     _applySpan(id, span);
     _installReSpan(id, captured, duration: duration, curve: curve);
@@ -1674,17 +1277,20 @@ class BoardController<TKey, TItem> {
   ///
   /// The members are COPIED out of the resolver's live list, which the
   /// write mutates in place.
-  Map<int, ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})>
-  _captureLaneBuckets(Iterable<int?> tracks, {Set<int> skip = const <int>{}}) {
-    final captured =
-        <int,
-          ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})>{};
+  Map<int, _CapturedRect<TKey>> _captureLaneBuckets(Iterable<int?> tracks, {Set<int> skip = const <int>{}}) {
+    final captured = <int, _CapturedRect<TKey>>{};
     final axis = _lanes.laneAxis;
     if (axis == null) {
       return captured;
     }
     final config = axis == Axis.vertical ? _rows : _columns;
     final trackCount = config.axis.trackCount;
+    // RESOLVED FIRST. The walk below reads each member's geometry, and
+    // the first read of a dirty bucket resolves it, sorting the very list
+    // being walked, so a member was skipped; inside `runBatch` a bucket
+    // stays dirty across mutations. Resolving here leaves nothing for a
+    // read to do.
+    _ensureLanesResolved();
     for (final track in tracks) {
       if (track == null || track < 0 || track >= trackCount) {
         continue;
@@ -1699,37 +1305,50 @@ class BoardController<TKey, TItem> {
         if (key == null) {
           continue;
         }
-        captured[id] = (
-          key: key,
-          lead: _itemLeadOfId(id),
-          extent: _itemExtentOfId(id),
-          frozen: _isFrozenPrimaryStart(id),
-          laneTrack: _laneStartTrackOf(id),
-        );
+        captured[id] = _captureRect(id, key);
       }
     }
     return captured;
   }
 
+  /// The coordinator's exit SETTLE capture: called with an exiting [id]
+  /// before the settle takes it out of the lane index, it captures the
+  /// rectangles of the members of the id's lane bucket and returns the
+  /// install to run once the lanes re-resolve, or null when nothing can
+  /// animate. The capture and the install are the ones [removeItem]
+  /// makes around a synchronous retire; an animated exit re-lanes its
+  /// survivors only here, when it settles, which is not a mutation door.
+  VoidCallback? _captureSettleRelanes(int id) {
+    if (!_installsSlide(null)) {
+      return null;
+    }
+    final neighbours = _captureLaneBuckets(
+      <int?>[_laneStartTrackOf(id)],
+      skip: <int>{id},
+    );
+    if (neighbours.isEmpty) {
+      return null;
+    }
+    return () {
+      _installRelanes(neighbours);
+    };
+  }
+
   /// Installs one RELANE FLIP per captured neighbour whose rectangle the
   /// write changed.
   ///
-  /// Three tests decide whether a captured entry still names the item it
-  /// was captured from: the id must still map to its captured KEY, must
-  /// not have been ALLOCATED by this call (an id recycles off a LIFO
-  /// free list, so a released one comes back to another key, or to the
-  /// same key when a re-added key's ghost was retired first), and must
+  /// Two tests decide whether a captured entry still names the item it
+  /// was captured from: the id must still map to its captured KEY (an id
+  /// recycles off a LIFO free list, so one the call's own retires
+  /// released comes back to another key; see [_CapturedRect]), and must
   /// not be the item a drag session holds.
   void _installRelanes(
-    Map<int, ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})>
-    captured, {
-    Set<int> allocated = const <int>{},
+    Map<int, _CapturedRect<TKey>> captured, {
     Duration? duration,
     Curve? curve,
   }) {
     captured.forEach((id, rect) {
-      if (allocated.contains(id) ||
-          _store.keyOf(id) != rect.key ||
+      if (_store.keyOf(id) != rect.key ||
           _store.isDragging(id) ||
           !_canReadItemGeometry(id)) {
         return;
@@ -1749,8 +1368,7 @@ class BoardController<TKey, TItem> {
   /// the write dirtied.
   void _installReSpan(
     int id,
-    ({TKey key, Offset lead, Offset extent, bool frozen, int? laneTrack})
-    captured, {
+    _CapturedRect<TKey> captured, {
     Duration? duration,
     Curve? curve,
     bool neighbour = false,
@@ -1758,18 +1376,20 @@ class BoardController<TKey, TItem> {
     if (!_canReadItemGeometry(id)) {
       return;
     }
-    // A span whose primary start track is frozen at either endpoint does
-    // not share the scroll subtraction, so the content-space difference
-    // is not the painted one for a POSITION: drop the lead. A LENGTH is
-    // the same number in both spaces, so the extent installs regardless
-    // of the frozen band. BOTH halves of a neighbour's install are
-    // suppressed inside a drag commit's report: the preview already moved
-    // it and sized it, and the hand-off owns its landing.
-    final crossesFrozen = captured.frozen || _isFrozenPrimaryStart(id);
+    // The lead is the difference of the two NORMALIZED leads, each its
+    // content lead minus its pin term, which is the painted difference
+    // the render needs: the content difference itself whenever the pin
+    // did not change, and the right one when the item entered or left a
+    // band between the capture and now. A LENGTH is the same number in
+    // every space, so the extent needs no term. BOTH halves of a
+    // neighbour's install are suppressed inside a drag commit's report:
+    // the preview already moved it and sized it, and the hand-off owns
+    // its landing.
     final suppressed = neighbour && _relaneSlidesSuppressed;
-    final delta = crossesFrozen || suppressed
+    final delta = suppressed
         ? Offset.zero
-        : captured.lead - _itemLeadOfId(id);
+        : (captured.lead - captured.pinTerm) -
+              (_itemLeadOfId(id) - _pinTermOf(id));
     final extentDelta = suppressed
         ? Offset.zero
         : _extentDelta(captured.extent, _itemExtentOfId(id));
@@ -1811,7 +1431,7 @@ class BoardController<TKey, TItem> {
       return true;
     }
     final config = axis == Axis.vertical ? _rows : _columns;
-    final track = _store.startTrackOf(id, axis).floor();
+    final track = _store.startIndexOf(id, axis);
     return track >= 0 && track < config.axis.trackCount;
   }
 
@@ -1821,7 +1441,7 @@ class BoardController<TKey, TItem> {
     if (axis == null) {
       return null;
     }
-    return _store.startTrackOf(id, axis).floor();
+    return _store.startIndexOf(id, axis);
   }
 
   /// The extent difference with pure floating-point RESIDUE zeroed, per
@@ -1866,7 +1486,7 @@ class BoardController<TKey, TItem> {
     final config = axis == Axis.vertical ? _rows : _columns;
     final boardAxis = config.axis;
     if (_lanes.laneAxis == axis && _lanes.isLaned(id)) {
-      final track = _store.startTrackOf(id, axis).floor();
+      final track = _store.startIndexOf(id, axis);
       return boardAxis.offsetOf(track) +
           _laneOriginOfId(id, laneOfId(id), laneCountOfId(id));
     }
@@ -1902,7 +1522,7 @@ class BoardController<TKey, TItem> {
       if (boardAxis.acceptsMeasurements) {
         return config.laneExtent! * span;
       }
-      final track = _store.startTrackOf(id, axis).floor();
+      final track = _store.startIndexOf(id, axis);
       return (boardAxis.extentOf(track) - config.lanePadding).clamp(
             0.0,
             double.infinity,
@@ -1968,7 +1588,7 @@ class BoardController<TKey, TItem> {
       if (boardAxis.acceptsMeasurements) {
         return config.laneExtent! * forLaneSpan;
       }
-      final track = _store.startTrackOf(id, axis).floor();
+      final track = _store.startIndexOf(id, axis);
       if (track < 0 || track >= boardAxis.trackCount) {
         return 0.0;
       }
@@ -2016,21 +1636,60 @@ class BoardController<TKey, TItem> {
     if (config.axis.acceptsMeasurements) {
       return padding + lane * config.laneExtent!;
     }
-    final track = _store.startTrackOf(id, axis).floor();
+    final track = _store.startIndexOf(id, axis);
     final slice =
         (config.axis.extentOf(track) - padding).clamp(0.0, double.infinity) /
         laneCount;
     return padding + lane * slice;
   }
 
-  bool _isFrozenPrimaryStart(int id) {
-    final primary = primaryAxis;
-    final config = primary == Axis.vertical ? _rows : _columns;
-    final track = _store.startTrackOf(id, primary).floor();
-    if (track < config.frozenStart) {
-      return true;
+  /// The settled rectangle of [id], captured for an install after a
+  /// write; see [_CapturedRect].
+  _CapturedRect<TKey> _captureRect(int id, TKey key) {
+    return (
+      key: key,
+      lead: _itemLeadOfId(id),
+      extent: _itemExtentOfId(id),
+      pinTerm: _pinTermOf(id),
+      laneTrack: _laneStartTrackOf(id),
+    );
+  }
+
+  /// Per axis, what [id]'s NORMALIZED lead, the one layout positions it
+  /// at before reversal, is its content lead minus: the scroll offset
+  /// where it scrolls, nothing in a leading frozen band, whose normalized
+  /// position is its content offset, and `totalExtent - viewportExtent`
+  /// in a trailing one, which is pinned to the viewport's trailing edge.
+  /// Read through the port; with none attached nothing paints, and every
+  /// term is 0.
+  Offset _pinTermOf(int id) {
+    return Offset(
+      _pinTermOn(Axis.horizontal, id),
+      _pinTermOn(Axis.vertical, id),
+    );
+  }
+
+  double _pinTermOn(Axis axis, int id) {
+    final port = _renderPort;
+    if (port == null || !port.isLaidOut) {
+      return 0.0;
     }
-    return track >= config.axis.trackCount - config.frozenEnd;
+    final vertical = axis == Axis.vertical;
+    switch (pinOfId(id, axis)) {
+      case BoardPin.leading:
+        return 0.0;
+      case BoardPin.trailing:
+        final config = vertical ? _rows : _columns;
+        final viewport = vertical
+            ? port.viewportDimension.height
+            : port.viewportDimension.width;
+        return config.axis.totalExtent - viewport;
+      case BoardPin.none:
+        final position = vertical
+            ? port.verticalPosition
+            : port.horizontalPosition;
+        return position?.pixels ?? 0.0;
+    }
   }
 
   /// The dry-run lane resolution the make-room gap derives its offsets
@@ -2075,34 +1734,6 @@ class BoardController<TKey, TItem> {
     );
   }
 
-  /// Retires one live id SYNCHRONOUSLY, through the coordinator's retire
-  /// door, which sets the exiting bit and finalizes in one statement.
-  ///
-  /// Two arms. Delivered, outside a batch: the handler flushes, drains
-  /// minus the retired key, releases last so the surviving neighbours
-  /// still resolve, and fires. Deferred, inside a batch or under a
-  /// suppressed notification: the release runs first and the caller's
-  /// own drain drops the retired id through its null-key filter.
-  void _retireItem(TKey key, int id, {required bool notify}) {
-    // The retired key must not survive in a set an earlier in-batch
-    // mutation, or an earlier step of this same call, put it in. The
-    // de-registrations, the bit pair, the release and the delivery all
-    // live in the coordinator's retire path, which is the single site
-    // that can end an id.
-    _batchAffected.remove(key);
-    if (!notify || _batchDepth > 0) {
-      if (notify) {
-        _batchStructural = true;
-      }
-      // The drain runs at the caller's notification point, which is after
-      // this release, so the retiring id's own lane change resolves to a
-      // null key and is skipped there rather than named.
-      _anim.retireExitNow(id, deliver: false);
-      return;
-    }
-    _anim.retireExitNow(id);
-  }
-
   /// Delivers or defers one mutation's structural notification.
   void _notifyStructural(Set<TKey> affected) {
     if (_batchDepth > 0) {
@@ -2140,6 +1771,16 @@ class BoardController<TKey, TItem> {
     _fireItemData(key);
   }
 
+  /// Whether [key] holds no id: it was retired, or never added. A key
+  /// whose exit is still running holds its id.
+  bool _isUnregistered(TKey key) {
+    return _store.idOf(key) == BoardStore.noId;
+  }
+
+  /// Delivers what a batch deferred, dropping the keys retired since they
+  /// were collected: the structural set is checked once, before its
+  /// dispatch, and each data key just before its own, which therefore
+  /// also drops a key a listener this flush has already run retired.
   void _flushBatchNotifications() {
     final structural = _batchStructural;
     final unknown = _batchStructuralUnknown;
@@ -2148,7 +1789,9 @@ class BoardController<TKey, TItem> {
       _ensureLanesResolved();
       final drained = _drainLaneChangedKeys();
       if (!unknown) {
-        affected = _batchAffected..addAll(drained);
+        affected = _batchAffected
+          ..addAll(drained)
+          ..removeWhere(_isUnregistered);
       }
     }
     final dataKeys = _batchDataKeys.toList(growable: false);
@@ -2162,6 +1805,11 @@ class BoardController<TKey, TItem> {
       _fireStructural(affected);
     }
     for (final key in dataKeys) {
+      // A structural listener above, or a data listener before this key,
+      // may have retired it.
+      if (_isUnregistered(key)) {
+        continue;
+      }
       _fireItemData(key);
     }
   }
@@ -2190,32 +1838,44 @@ class BoardController<TKey, TItem> {
     }
   }
 
-  /// Re-derives both axis identities after an axis config was replaced.
-  ///
-  /// A new config changes the track count the measurements and the lane
-  /// buckets were built against, so state keyed on either is invalidated
-  /// rather than migrated. Each index re-keys itself and drops every
-  /// bucket when its own axis moved, and the items are re-registered into
-  /// the new partition.
   /// A rewrapped, already-measured LazyContentAxis instance arrives
   /// carrying extents measured against the old configuration's lanes and
   /// items; the swap drops them. A fresh instance makes this a no-op.
-  void _resetSwappedAxis(BoardAxisConfig config) {
+  ///
+  /// Kept when [config] wraps the SAME instance as [old] with the same
+  /// lane geometry, the one part of a config the sizing step folds into a
+  /// recorded extent (its cluster term): a re-assigned equal config then
+  /// leaves the scroll where it was, which a reset cannot, the render's
+  /// correction anchoring only on a measured track. Frozen counts and the
+  /// alignment reach no recorded extent: a content-sized axis measures
+  /// its cells unbounded whatever its alignment, and the fixed axis's
+  /// alignment reaches the measuring constraints, whose change the
+  /// render's per-cell cache re-measures under.
+  void _resetSwappedAxis(BoardAxisConfig old, BoardAxisConfig config) {
     final axis = config.axis;
-    if (axis is LazyContentAxis) {
-      axis.resetMeasurements();
+    if (axis is! LazyContentAxis) {
+      return;
     }
+    if (identical(axis, old.axis) &&
+        config.laneExtent == old.laneExtent &&
+        config.lanePadding == old.lanePadding) {
+      return;
+    }
+    axis.resetMeasurements();
   }
 
+  /// Re-derives both axis identities after an axis config was replaced.
+  ///
+  /// The span index re-files through its `reconfigure`: every item when
+  /// the primary axis changed, only the items between the two lattices
+  /// when the primary axis's track count changed, and nothing otherwise.
+  /// The lane partition, keyed on the lane axis, is rebuilt when that axis
+  /// moved, the items re-registered into it.
   void _reconfigureAxes(Axis swapped) {
-    final primary = _derivePrimaryAxis(_rows, _columns);
-    if (primary != _spanIndex.primaryAxis) {
-      _spanIndex.primaryAxis = primary;
-      for (final id in _store.ids) {
-        _spanIndex.register(id, bulk: true);
-      }
-      _spanIndex.flushPendingSorts();
-    }
+    _spanIndex.reconfigure(
+      primaryAxis: _derivePrimaryAxis(_rows, _columns),
+      trackCount: _primaryConfigOf(_rows, _columns).axis.trackCount,
+    );
     // Extents animated against one lattice are not evidence about
     // another: land the swapped axis's in-flight resizes at their
     // targets. The other axis's lattice did not change, so its states
@@ -2253,6 +1913,14 @@ class BoardController<TKey, TItem> {
       return Axis.horizontal;
     }
     return Axis.vertical;
+  }
+
+  /// The config of the PRIMARY axis [_derivePrimaryAxis] picks.
+  static BoardAxisConfig _primaryConfigOf(
+    BoardAxisConfig rows,
+    BoardAxisConfig columns,
+  ) {
+    return _derivePrimaryAxis(rows, columns) == Axis.vertical ? rows : columns;
   }
 
   /// The LANE axis: whichever config carries a non-null `laneExtent`, or
@@ -2295,6 +1963,69 @@ class BoardController<TKey, TItem> {
       return BoardStore.noId;
     }
     return id;
+  }
+
+  /// Refuses [span] with an `ArgumentError`, in BOTH build modes, when it
+  /// breaks one of [BoardSpan]'s constructor rules. Those rules are the
+  /// constructor's asserts, stripped in a release build, where a NaN or a
+  /// negative extent otherwise reached the index after the key was
+  /// registered and stranded it. The list restates the asserts
+  /// (`_board_span.dart`), which a const constructor cannot delegate to a
+  /// function, with a finite test in front of each fraction.
+  ///
+  /// It also refuses an integer start or span above
+  /// [BoardStore.maxTrackComponent], the largest the store holds, which is
+  /// the store's limit rather than one of [BoardSpan]'s rules.
+  void _checkSpan(BoardSpan span, String method) {
+    for (final axis in Axis.values) {
+      final name = axis == Axis.vertical ? "row" : "column";
+      final start = span.startOn(axis);
+      final fraction = axis == Axis.vertical
+          ? span.rowFraction
+          : span.colFraction;
+      final extent = span.spanOn(axis);
+      final extentFraction = axis == Axis.vertical
+          ? span.rowSpanFraction
+          : span.colSpanFraction;
+      String? defect;
+      if (start < 0) {
+        // assert(rowStart >= 0 && colStart >= 0)
+        defect = "a negative $name start";
+      } else if (start > BoardStore.maxTrackComponent) {
+        defect =
+            "a $name start above ${BoardStore.maxTrackComponent}, the largest "
+            "the board stores";
+      } else if (!fraction.isFinite || fraction < 0.0 || fraction >= 1.0) {
+        // assert(rowFraction >= 0.0 && rowFraction < 1.0), and its twin
+        defect = "a $name fraction $fraction outside [0, 1)";
+      } else if (extent < 0) {
+        // assert(rowSpan >= 0 && colSpan >= 0)
+        defect = "a negative $name span";
+      } else if (extent > BoardStore.maxTrackComponent) {
+        defect =
+            "a $name span above ${BoardStore.maxTrackComponent}, the largest "
+            "the board stores";
+      } else if (!extentFraction.isFinite ||
+          extentFraction < 0.0 ||
+          extentFraction >= 1.0) {
+        // assert(rowSpanFraction >= 0.0 && rowSpanFraction < 1.0), twin
+        defect = "a $name span fraction $extentFraction outside [0, 1)";
+      } else if (!(extent + extentFraction > 0.0)) {
+        // assert(rowSpan + rowSpanFraction > 0.0), and its twin
+        defect = "no $name extent";
+      } else if (!(start + fraction + extent + extentFraction >
+          start + fraction)) {
+        // The assert that the extent survives at the span's magnitude.
+        defect = "a $name extent lost at the span's own magnitude";
+      }
+      if (defect != null) {
+        throw ArgumentError.value(
+          span,
+          "span",
+          "BoardController.$method: $defect",
+        );
+      }
+    }
   }
 
   int _liveIdOrThrow(TKey key, String method) {

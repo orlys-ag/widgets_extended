@@ -134,7 +134,8 @@ void main() {
 
   // AC11 the zero rule, part (2).
   // Asserts: DISABLING stops in-flight slide motion at the transition.
-  // Falsification: a style setter without purgeActive fails this case.
+  // Falsification: a style setter that does not purge the zeroed
+  // family's slide records fails this case.
   testWidgets(
     "restyling itemSlide to zero stops an in-flight slide at the "
     "transition",

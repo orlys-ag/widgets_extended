@@ -161,14 +161,16 @@ void main() {
   // The GESTURE'S ITEM is the one the pointer went down on, not the one
   // its element happens to host when the gesture is accepted.
   //
-  // The host is deliberately un-keyed, so a rank shift re-keys its
-  // widget in place and its `State`, which owns the armed recognizer,
-  // survives (`board_widget.dart`, the `_ownedKey` note). A recognizer
-  // therefore outlives the identity it was armed for: anything that
-  // changes which item occupies a vicinity between the pointer going
-  // down and the gesture being accepted used to hand the session a
-  // different item, and the app's report then mutated an item the user
-  // never touched.
+  // When these cases were written the host was un-keyed, so a rank shift
+  // re-keyed its widget in place and its `State`, which owns the armed
+  // recognizer, survived: a recognizer outlived the identity it was
+  // armed for, and a change of which item occupied a vicinity between
+  // the pointer going down and the gesture being accepted handed the
+  // session a different item. The key captured at pointer down fixed
+  // that. Since item 7C of the 2026-09-23 audit fixes each lattice child
+  // is keyed by its item, so the element moves WITH its item and the
+  // rank shift below no longer changes what it hosts; the cases stay as
+  // the contract that the pressed item is the dragged one.
   //
   // The window is `kLongPressTimeout` for the default move wrap and the
   // touch slop for an immediate strip, and the trigger is any add,
@@ -204,8 +206,8 @@ void main() {
         tester.getCenter(find.byKey(_itemKey("b"))),
       );
       // Mid-delay, an item that sorts EARLIER on the same row arrives,
-      // which shifts b's ordinal and re-keys the element whose `State`
-      // holds the armed recognizer.
+      // which shifts b's ordinal, the vicinity of the element whose
+      // `State` holds the armed recognizer.
       await tester.pump(const Duration(milliseconds: 100));
       controller.addItem(
         const _Item("a"),
@@ -279,7 +281,7 @@ void main() {
       await tester.pump();
       // Setup sanity: the shift really happened, and it lands before the
       // arena resolves this strip's recognizer, which is what puts the
-      // re-key inside the window.
+      // vicinity change inside the window.
       expect(controller.vicinityOrdinalOfId(controller.idOfKey("b")), 1);
 
       await gesture.moveBy(const Offset(60.0, 0.0));
@@ -1618,14 +1620,19 @@ void main() {
     },
   );
 
-  // DERIVED name. Replacement leg ONE: the sibling case above replaces
-  // the recognizer before any session exists; this one replaces it with a
-  // session LIVE (the long press elapsed), which is the state that wedges
-  // if the replacement only disposes.
-  // Asserts: after the replacement and both lifts, the session is gone
-  // (isDragging false) and nothing was reported.
+  // DERIVED name, rewritten by item 7F of the 2026-09-23 board audit
+  // fixes. The sibling case above replaces the recognizer before any
+  // session exists. This one presses a second handle with a session LIVE
+  // (the long press elapsed), which used to CANCEL that session, since
+  // disposing its recognizer would have left it wedged. The second press
+  // is now ignored (finding A11: a second finger must not end the drag
+  // the first is making), so no recognizer is disposed and nothing can
+  // wedge: the first finger's release ends the session as usual.
+  // Asserts: the session survives the second press; after both lifts it
+  // is gone, and its one release was reported.
   testWidgets(
-    "replacing the recognizer mid-session cancels the session it owned",
+    "a second press on a handle mid-session leaves the session to its "
+    "pointer",
     (tester) async {
       final controller = _plainController(tester);
       controller.addItem(
@@ -1656,24 +1663,31 @@ void main() {
         Offset(rect.right - 4.0, rect.center.dy),
       );
       await tester.pump();
+      // TARGET: the second press did not end the drag.
+      expect(controller.isDragging("m"), isTrue);
       await moveGesture.up();
       await resizeGesture.up();
       await tester.pumpAndSettle();
 
-      expect(moved, 0);
+      // No wedge: the first finger's release ended the session ...
       expect(controller.isDragging("m"), isFalse);
+      // ... and its drop was the one report.
+      expect(moved, 1);
     },
   );
 
-  // DERIVED name. The deactivate backstop's DISCRIMINATING case: the
-  // host state that owns the session leaves the tree while the Board
-  // survives. The un-keyed host means an ordinal shift re-keys the
-  // owner's widget in place, so the ownership record must be the key the
-  // session STARTED with, not the widget's current one.
-  // Asserts: after the owner unmounts, the session is cancelled rather
-  // than wedged.
+  // DERIVED name, rewritten by item 7C of the 2026-09-23 board audit
+  // fixes. The case used to reach the deactivate backstop: an un-keyed
+  // host was re-keyed in place by a rank insert, so the session owner's
+  // element hosted ANOTHER item, and scrolling that item out unmounted
+  // the owner while the dragged item stayed pinned. Each item's child is
+  // now keyed by the item, so the owner's element follows the dragged
+  // item to its new vicinity, stays mounted through the pin, and the
+  // session with it.
+  // Asserts: a rank insert and a scroll leave the session live and the
+  // owner able to commit it.
   testWidgets(
-    "the session owner's host unmounting mid-drag cancels the session",
+    "a rank insert mid-drag keeps the session with its owner",
     (tester) async {
       final controller = BoardController<String, _Item>(
         vsync: tester,
@@ -1710,24 +1724,26 @@ void main() {
       await tester.pump(kLongPressTimeout + const Duration(milliseconds: 20));
       expect(controller.isDragging("m"), isTrue);
 
-      // The rank insert re-keys the owner's vicinity: its element now
-      // hosts the new item while the session stays on the dragged one.
+      // The rank insert moves the dragged item's vicinity: q sorts
+      // before it on row 0.
       controller.addItem(
         const _Item("q"),
         const BoardSpan(rowStart: 0, colStart: 0),
       );
       await tester.pump();
-      // Scrolling the new item's span out unmounts the owner's element;
-      // the dragged item itself stays mounted through the pin.
+      expect(controller.vicinityOrdinalOfId(controller.idOfKey("m")), 1);
+      // Scrolling row 0 out leaves the dragged item mounted through the
+      // pin, and its owner with it.
       vertical.jumpTo(600.0);
       await tester.pump();
       await tester.pump();
 
-      expect(controller.isDragging("m"), isFalse);
-      expect(moved, 0);
+      expect(controller.isDragging("m"), isTrue);
       expect(tester.takeException(), isNull);
       await gesture.up();
       await tester.pumpAndSettle();
+      // The owner committed the drop.
+      expect(moved, 1);
     },
   );
 

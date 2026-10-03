@@ -8,6 +8,7 @@
 /// Landed at Landing Order step 11 with the interaction layer.
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
@@ -73,7 +74,12 @@ void main() {
     // Row track-space 1.8 (y = 90): the half-track quantization rounds
     // to 2.0 and the anchor lands in row 2; containment alone would keep
     // row 1. Column 0.4 (x = 16) quantizes to 0.5, cell 0.
-    final gesture = await tester.startGesture(const Offset(16.0, 90.0));
+    // A mouse, which starts a range at once; touch needs a long press
+    // (item 7I of the 2026-09-23 audit fixes).
+    final gesture = await tester.startGesture(
+      const Offset(16.0, 90.0),
+      kind: PointerDeviceKind.mouse,
+    );
     await tester.pump();
     // Drag to row-space 3.1 (y = 155): quantizes to 3.0, focus row 3.
     await gesture.moveTo(const Offset(16.0, 155.0));

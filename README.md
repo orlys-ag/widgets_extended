@@ -8,6 +8,9 @@ reorders slide, reparenting glides across depths. No controller to manage,
 no imperative mutation calls, no manual keys bookkeeping. Drag-and-drop
 reorder is one parameter.
 
+The package also ships **`Board`**, a two-axis lattice for calendars,
+timelines and grids; see [Board](#board).
+
 ## Install
 
 `flutter pub add widgets_extended`.
@@ -257,6 +260,112 @@ Per-family specs are available (`TreeAnimationStyle(expandCollapse: ...,
 reorderSlide: ...)`), unset drag families inherit from `reorderSlide`, and
 `TreeAnimationStyle.disabled` snaps everything, which is also the
 synchronous-test configuration.
+
+## Board
+
+`Board` is the package's second widget: a two-axis scrolling lattice of
+cells with items laid over it, for week views, month calendars, timelines
+and spreadsheets. Items span whole or fractional tracks, overlapping items
+stack into lanes along the axis you give a `laneExtent`, and they animate
+in, out and across. A `BoardController` owns the items; the widget shows
+them:
+
+```dart
+class Task {
+  const Task(this.id, this.title);
+  final String id;
+  final String title;
+}
+
+class Planner extends StatefulWidget {
+  const Planner({super.key});
+
+  @override
+  State<Planner> createState() => _PlannerState();
+}
+
+class _PlannerState extends State<Planner> with TickerProviderStateMixin {
+  late final controller = BoardController<String, Task>(
+    vsync: this,
+    rows: BoardAxisConfig(axis: UniformAxis(24, 48)), // hours
+    columns: BoardAxisConfig(axis: UniformAxis(7, 120), laneExtent: 40), // days
+    keyOf: (task) => task.id,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    controller.addItem(
+      const Task("standup", "Standup"),
+      const BoardSpan(rowStart: 9, colStart: 1),
+    );
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Board<String, Task>(
+      controller: controller,
+      cellBuilder: (context, cell) => const DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.fromBorderSide(BorderSide(color: Colors.black12)),
+        ),
+      ),
+      itemBuilder: (context, view) => Card(child: Text(view.item.title)),
+      drag: BoardDragConfig<String>(
+        onItemMoved: (key, span) => controller.moveItem(key, span),
+        onItemResized: (key, span) => controller.resizeItem(key, span),
+        primaryResizeEdges: BoardResizeEdges.both,
+      ),
+      selection: BoardSelectionConfig(onChanged: (selection) {}),
+    );
+  }
+}
+```
+
+**Dragging.** An item lifts on a long press and follows the finger, and on
+the lane axis its neighbours make room. `primaryResizeEdges` gives an item
+resize handles at the ends of its span along the primary axis (the rows,
+unless the columns are content-sized) and `resizeEdges` along the other.
+The board
+REPORTS a drop through `onItemMoved` and `onItemResized` and changes
+nothing itself: apply it, as above, or ignore it to refuse. `canDropAt:
+(key, span) => ...` refuses a placement before the drop, so it shows no
+gap, and `dropFit` slides a refused move onto nearby free space. `snap:
+BoardSnap.fraction(0.25)` lands on quarter tracks. For an immediate grip,
+set `buildDefaultDragHandles: false` and put a `BoardDragHandle` inside the
+item.
+
+**Selection and keys.** `BoardSelectionConfig` selects a range by dragging
+across cells, the default, or one cell per tap (`mode:
+BoardSelectionMode.cell`). On touch a range starts with a long press, so a
+plain drag scrolls. The selection lives on the controller
+(`controller.selection`, `setSelection`). A focused board moves it with the
+arrow keys, extends it with Shift, jumps with Home, End and Page Up/Down,
+and Escape cancels a drag.
+
+**Axes.** `UniformAxis`, `ExplicitAxis` and `DerivedAxis` give tracks fixed
+extents; `LazyContentAxis` measures them from their cells. `frozenStart`
+and `frozenEnd` pin header and footer tracks, and items inside a frozen
+band stay with it. The board reads no `Directionality`: a right-to-left board
+passes `horizontalDetails: ScrollableDetails.horizontal(reverse: true)`.
+
+**The model.** `addItem`, `moveItem`, `resizeItem`, `removeItem` and
+`updateItem` change one item; `setItems` replaces them all, diffing by key.
+`itemCount`, `keys`, `itemsAt` and `itemsIn` read them back.
+`animateScrollToCell`, `jumpToCell` and `revealCell` scroll to a cell, and
+`BoardAnimationStyle` times every animation (`BoardAnimationStyle.disabled`
+snaps them). An item builder's `view.presence` is the item's enter/exit ramp
+as an `Animation<double>`, so `FadeTransition(opacity: view.presence, ...)`
+fades an item in and out as the board grows and shrinks it.
+
+`examples/lib/week_view_example.dart` and
+`examples/lib/month_calendar_example.dart` are complete boards.
 
 ## Also in the box
 

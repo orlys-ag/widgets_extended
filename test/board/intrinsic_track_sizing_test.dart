@@ -248,8 +248,10 @@ void main() {
         return controller;
       }
 
-      // The clean arms run FIRST: an intentional layout throw poisons the
-      // element tree for every later pump in the same body.
+      // The clean arms run FIRST. The check used to THROW from inside
+      // layout, which poisoned the element tree for every later pump in
+      // the same body; since item 7H of the 2026-09-23 audit fixes it
+      // reports instead, and the order is kept as it was.
       // Arm 1: the SAME shape with laneExtent set pumps clean.
       final laned = controllerWith(laneExtent: 18.0);
       laned.addItem(
@@ -291,7 +293,7 @@ void main() {
       expect(tester.takeException(), isNull);
 
       // Arm 3, LAST: null laneExtent AND a contributing single-track
-      // item: the pump throws.
+      // item: the pump reports the error.
       final broken = controllerWith();
       broken.addItem(
         const _Item("chip"),

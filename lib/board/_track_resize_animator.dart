@@ -1,9 +1,16 @@
 /// Internal: the trackResize animation source.
 ///
-/// One state per resizing track, per axis. The axis already holds the
-/// TARGET extent when a state is installed (the install site records the
-/// measurement first), so this source only answers what a track's PAINTED
-/// extent is mid-flight; dropping a state lands the settled geometry.
+/// One state per resizing track, per axis. A state holds a RESIDUAL, not
+/// a from and a to: the painted extent at install minus the settled
+/// extent the axis stored then. The painted extent is the axis's CURRENT
+/// settled extent plus that residual decayed by the eased clock, so this
+/// source answers only how far a track's paint still is from its settled
+/// geometry, and dropping a state lands that geometry.
+///
+/// Storing the residual rather than the target is what lets a settled
+/// write compose with a state in flight: the write shows at once and the
+/// residual keeps decaying on its own clock. A stored target would hide
+/// every later write until the state ended, and then step to it.
 ///
 /// Not exported from the module barrel.
 library;
@@ -105,15 +112,15 @@ class _ShiftPrefix {
 
 class _TrackResizeState {
   _TrackResizeState({
-    required this.from,
-    required this.to,
+    required this.residual,
     required this.family,
     required this.explicitDuration,
     required this.explicitCurve,
   });
 
-  final double from;
-  final double to;
+  /// The painted extent at install minus the settled extent at install.
+  /// Decays to zero on the eased clock.
+  final double residual;
 
   /// The family whose spec times and shapes this state: trackResize for
   /// a settled-structure resize, makeRoom for a residue the track-sizing
@@ -187,32 +194,47 @@ class TrackResizeAnimator {
     return _vertical.isNotEmpty || _horizontal.isNotEmpty;
   }
 
-  /// Installs or RE-TARGETS a resize. Refuses under a zero [family] or a
-  /// zero [duration]: the axis already holds the target, so a refusal
-  /// lands the new geometry on the same frame. A re-target overwrites
-  /// rather than stacking; the caller captures [from] from the currently
-  /// painted extent, which is what makes the overwrite compose. [family]
-  /// defaults to trackResize; the track-sizing hand-off arm passes
-  /// makeRoom with the snap's remaining [duration] and curve tail, so a
-  /// residue runs on the clock the gap was on.
+  /// Installs or RE-TARGETS a resize from the painted extent [from] to
+  /// the settled extent the axis ALREADY stores: the caller records the
+  /// target first and captures [from] before recording it. A re-target
+  /// overwrites rather than stacking, and [from] being what paints is
+  /// what makes the overwrite compose. [family] defaults to trackResize;
+  /// the track-sizing hand-off arm passes makeRoom with the snap's
+  /// remaining [duration] and curve tail, so a residue runs on the clock
+  /// the gap was on.
+  ///
+  /// Two outcomes install nothing, in this order:
+  ///
+  /// - A residual within `precisionErrorTolerance` is NO MOTION: the
+  ///   track already paints its settled extent, so any state it holds is
+  ///   DROPPED, which is continuous by that same fact. A state kept there
+  ///   would add its residual on top of an extent that already arrived.
+  /// - A zero [family] or a zero [duration] REFUSES: the call creates no
+  ///   motion, so the new geometry lands this frame, and it destroys none,
+  ///   so a state already in flight for the track keeps decaying its
+  ///   residual from the new settled extent.
   void animateTrackResize(
     Axis axis,
     int track,
-    double from,
-    double to, {
+    double from, {
     BoardAnimationFamily family = BoardAnimationFamily.trackResize,
     Duration? duration,
     Curve? curve,
   }) {
     _generation++;
+    final residual = from - _settledExtentOf(axis, track);
+    if (residual.abs() <= precisionErrorTolerance) {
+      _statesOf(axis).remove(track);
+      _stopIfIdle();
+      return;
+    }
     final spec = _styleOf().specFor(family);
     if (spec.duration == Duration.zero ||
         (duration ?? spec.duration) == Duration.zero) {
       return;
     }
     _statesOf(axis)[track] = _TrackResizeState(
-      from: from,
-      to: to,
+      residual: residual,
       family: family,
       explicitDuration: duration,
       explicitCurve: curve,
@@ -220,16 +242,26 @@ class TrackResizeAnimator {
     _ensureTicking();
   }
 
-  /// The painted extent: the settled one unless a state is in flight.
+  /// The painted extent: the settled one plus the residual of a state in
+  /// flight, decayed by its eased clock.
+  ///
+  /// FLOORED AT ZERO HERE, at the producer, as the enter/exit ramp is
+  /// clamped at its own: an overshooting curve (`Curves.easeOutBack`)
+  /// carries a shrinking track past its target, and past zero when the
+  /// target is small, which would reach layout as a negative constraint.
+  /// A floor and not a clamp of the eased value, so a growing track keeps
+  /// the curve's overshoot, which is valid geometry.
   double animatedExtentOf(Axis axis, int track) {
+    final settled = _settledExtentOf(axis, track);
     final state = _statesOf(axis)[track];
     if (state == null) {
-      return _settledExtentOf(axis, track);
+      return settled;
     }
     final curve =
         state.explicitCurve ?? _styleOf().specFor(state.family).curve;
     final eased = curve.transform(state.t.clamp(0.0, 1.0));
-    return state.from + (state.to - state.from) * eased;
+    final painted = settled + state.residual * (1.0 - eased);
+    return painted < 0.0 ? 0.0 : painted;
   }
 
   /// Sum over the in-flight states on [axis] in `[fromTrack, track)` of
@@ -324,11 +356,10 @@ class TrackResizeAnimator {
     return prefix;
   }
 
-  /// Drops every in-flight state, landing each track at its target, which
-  /// the axis already stores. The anti-stranding arm of the restyle
-  /// transition and of a controller swap; a PURGE would be identical
-  /// here, but the name states the intent: nothing is abandoned
-  /// mid-lattice.
+  /// Drops every in-flight state, landing each track at the settled
+  /// extent the axis stores. The anti-stranding arm of an axis swap; a
+  /// PURGE would be identical here, but the name states the intent:
+  /// nothing is abandoned mid-lattice.
   /// [axis] narrows the snap to one axis's states: an axis swap
   /// invalidates only the swapped lattice, and extents animating against
   /// the OTHER one are still evidence.
@@ -343,16 +374,30 @@ class TrackResizeAnimator {
     _stopIfIdle();
   }
 
-  /// [finalizeAll]'s body narrowed to ONE track: the door the track
-  /// sizing step's make-room latch EDGE hands an in-flight resize in
-  /// through. A track holding no state is a no-op, so no caller needs a
-  /// residue test. It dispatches NOTHING, which is what makes it callable
-  /// from inside layout like the install beside it; the only reachable
-  /// side effect is the ticker stop.
-  void finalizeTrack(Axis axis, int track) {
-    _generation++;
-    _statesOf(axis).remove(track);
-    _stopIfIdle();
+  /// Drops, landing at its settled extent, every state whose family [off]
+  /// answers true for, and returns whether any went. The restyle
+  /// transition: the controller passes the families the NEW style
+  /// resolves to zero, so a family restyled to zero stops its own motion
+  /// and no other's. It dispatches nothing; the caller notifies.
+  bool finalizeWhere(bool Function(BoardAnimationFamily family) off) {
+    var removed = false;
+    for (final states in <Map<int, _TrackResizeState>>[
+      _vertical,
+      _horizontal,
+    ]) {
+      states.removeWhere((track, state) {
+        if (off(state.family)) {
+          removed = true;
+          return true;
+        }
+        return false;
+      });
+    }
+    if (removed) {
+      _generation++;
+      _stopIfIdle();
+    }
+    return removed;
   }
 
   void _ensureTicking() {
@@ -379,9 +424,10 @@ class TrackResizeAnimator {
     ]) {
       states.forEach((track, state) {
         final spec = style.specFor(state.family);
-        // The family's zero dominates the state's explicit duration: a
-        // restyle to zero between two ticks drives every state past 1
-        // here rather than dividing by zero.
+        // The family's zero dominates the state's explicit duration. The
+        // restyle to zero stops a family's states in the setter, so this
+        // is the guard against a division by zero rather than the
+        // mechanism: a zero family drives a state past 1 here.
         final effective = spec.duration == Duration.zero
             ? Duration.zero
             : (state.explicitDuration ?? spec.duration);

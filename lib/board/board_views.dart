@@ -43,19 +43,25 @@ import 'board_controller.dart';
 /// call [BoardController.invalidateCellMeasurements]. On a board with no
 /// content-sized axis nothing is measured and the question does not
 /// arise.
+///
+/// A content-sized track is as tall as the tallest cell measured in it,
+/// including cells since scrolled out along the other axis, so scrolling
+/// sideways never changes a row's height; measuring such a cell again,
+/// or finding it building nothing, replaces its measurement.
+/// [BoardController.invalidateCellMeasurements] forgets them all.
 typedef BoardCellBuilder<TKey, TItem> =
     Widget? Function(BuildContext context, BoardCellView<TKey, TItem> cell);
 
 /// Builds the widget for one ITEM.
 ///
-/// AN ORDINAL SHIFT IS A VICINITY CHANGE, and the item's `State` does
-/// not survive one: an item vicinity's `xIndex` is the item's rank among
-/// the items starting on its primary track, so an insertion or removal
-/// that re-ranks the item re-keys its vicinity, and the framework
-/// retrieves an old element by KEY first and only then by vicinity
-/// (`widgets/two_dimensional_viewport.dart:357`), so a re-ranked item
-/// loses its `State` unless the widget returned here carries a
-/// `GlobalKey`. A pure lane change re-lanes it in place and keeps it.
+/// THE ITEM KEEPS ITS `State`. An item's vicinity moves when an insertion
+/// or removal re-ranks it among the items starting on its primary track,
+/// when it moves to another primary track, and when the column count
+/// changes; the board keys each item's child by the item's key, and the
+/// framework retrieves an old element by KEY before it tries the vicinity
+/// (`widgets/two_dimensional_viewport.dart:357-369`), so the element, and
+/// every `State` under the widget returned here, follows the item. An id
+/// the board recycles for another item gets a fresh element.
 ///
 /// WHEN THE BOARD CALLS THIS AGAIN. A structural change that reaches the
 /// item rebuilds it through the viewport's delegate. A payload write to
@@ -119,10 +125,10 @@ class BoardCellView<TKey, TItem> {
 /// resolved geometry, plus the controller and the three mutations an item
 /// needs.
 ///
-/// Every value here is CAPTURED at construction rather than resolved on
-/// read, because the site that constructs it is layout, which has just
-/// read all six from the controller and would otherwise pay for them
-/// again per build.
+/// Every value here but [presence] is CAPTURED at construction rather than
+/// resolved on read, because the site that constructs it is layout, which
+/// has just read them from the controller and would otherwise pay for
+/// them again per build. [presence] is an [Animation], read live.
 @immutable
 class BoardItemView<TKey, TItem> {
   /// Creates a view of the item [key] holds on [controller].
@@ -134,6 +140,7 @@ class BoardItemView<TKey, TItem> {
     required this.laneCount,
     required this.laneSpan,
     required this.isDragging,
+    required this.presence,
     required this.controller,
   });
 
@@ -166,12 +173,30 @@ class BoardItemView<TKey, TItem> {
   /// while a session runs: that item comes from the viewport's delegate,
   /// and a session edge fires no structural notification, so nothing
   /// rebuilds it at the lift or the commit; a payload write to the item
-  /// mid-session rebuilds it through its host with the flag true. An app
-  /// giving the item
-  /// left behind a treatment of its own watches
-  /// `BoardDragController.movedItem`, which is what the board's own
-  /// `BoardDragConfig.draggedItemOpacity` rides.
+  /// mid-session rebuilds it through its host with the flag true. The
+  /// board's own treatment of the item left behind is
+  /// `BoardDragConfig.draggedItemOpacity`; an app giving it one of its
+  /// own tracks the session through `BoardDragConfig.onDragStart` and
+  /// `BoardDragConfig.onDragEnd`.
   final bool isDragging;
+
+  /// The item's enter/exit ramp: the value the board scales the item's
+  /// extent by as it arrives and leaves, on the `itemEnterExit` family's
+  /// clock and curve. It rises from 0 to 1 while the item enters
+  /// ([AnimationStatus.forward]), falls to 0 while it leaves
+  /// ([AnimationStatus.reverse]), and is 1 at rest
+  /// ([AnimationStatus.completed]); once the item has left the board it
+  /// is 0 and [AnimationStatus.dismissed]. A key re-added while it leaves
+  /// turns back to [AnimationStatus.forward] from where it had reached.
+  /// Under a zero `itemEnterExit` family it is 1 for the item's whole
+  /// time on the board.
+  ///
+  /// A transition built on it runs WITH the board's own growth, which it
+  /// does not replace: `FadeTransition(opacity: view.presence, ...)` fades
+  /// the item in and out as it grows and shrinks. Every build of one item
+  /// hands the same object, so the transition keeps its listener across a
+  /// rebuild.
+  final Animation<double> presence;
 
   /// The controller the three mutations below run against.
   final BoardController<TKey, TItem> controller;

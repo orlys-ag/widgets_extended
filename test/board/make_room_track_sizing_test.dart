@@ -43,11 +43,6 @@ const BoardAnimationSpec _ms400 = BoardAnimationSpec(
   curve: Curves.linear,
 );
 
-const BoardAnimationSpec _ms600 = BoardAnimationSpec(
-  duration: Duration(milliseconds: 600),
-  curve: Curves.linear,
-);
-
 const BoardAnimationSpec _zero = BoardAnimationSpec(
   duration: Duration.zero,
   curve: Curves.linear,
@@ -338,12 +333,18 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  // T-free. C1's idempotence rule on the one snap mode that defeats
-  // `_resolve`'s early-out: under a free snap the resolved span carries a
-  // lane-axis fraction read off the recorded axis, which the latch
-  // re-records every tick, so `previewMakeRoomGap` is re-entered on every
-  // frame of the resize. An install that restarted every clock there
-  // would never let the gap settle.
+  // T-free. C1's idempotence rule on the snap mode that defeats
+  // `_resolve`'s early-out: under a free snap every pointer move resolves
+  // a span with a new span-axis fraction, so `previewMakeRoomGap` is
+  // re-entered on every frame of a moving pointer with targets that do
+  // not change. An install that restarted every clock there would never
+  // let the gap settle.
+  //
+  // The case once drove the re-entry from a STATIONARY pointer, through
+  // the lane-axis fraction a laned item's corner took off the resizing
+  // row. That fraction was the defect item 4 of the 2026-09-23 audit
+  // fixes removed (a laned item moves by whole tracks on its lane axis),
+  // so the re-entry now comes from the pointer; the target is unchanged.
   testWidgets("a free-snap hover settles instead of restarting the gap "
       "every frame", (tester) async {
     final controller = _controller(
@@ -373,20 +374,29 @@ void main() {
       ),
       isTrue,
     );
-    // A point in a row BELOW the source row, so the source row's shrink
-    // moves that row's offset and with it the anchor's fraction.
-    final pointer = Offset(lift.dx, viewport.rectOfCell(3, 0)!.center.dy);
+    // A point in a row ABOVE the source row: the source bucket re-lanes
+    // and a make-room gap opens, and the row under the pointer does not
+    // move while the source row shrinks, so the target's TRACK holds and
+    // only the span-axis fraction below changes.
+    final pointer = Offset(lift.dx, viewport.rectOfCell(1, 0)!.center.dy);
     drag.updateDrag(_global(tester, pointer));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
-    // Setup sanity: the source bucket really re-laned, a term really
-    // moves, and the resolve really is re-entering on every frame.
+    // Setup sanity: the source bucket really re-laned and a term really
+    // moves.
     expect(controller.anim.offsetOfItem(cId).dy, isNot(0.0));
-    final fractionA = drag.currentTarget!.span.rowFraction;
-    await tester.pump(const Duration(milliseconds: 16));
-    final fractionB = drag.currentTarget!.span.rowFraction;
-    expect(fractionA, isNot(fractionB));
-    await tester.pump(const Duration(milliseconds: 200));
+    // Half a pixel along the span axis per frame for longer than the
+    // gap's 200ms: a new span every frame, the same targets.
+    final fractions = <double>{};
+    for (var i = 1; i <= 14; i++) {
+      drag.updateDrag(_global(tester, pointer + Offset(i * 0.5, 0.0)));
+      fractions.add(drag.currentTarget!.span.colFraction);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    // Setup sanity: the resolve really re-entered with a new span each
+    // time, on the one track.
+    expect(fractions, hasLength(14));
+    expect(drag.currentTarget!.span.rowStart, 1);
     // TARGET: one make-room duration plus a frame after the lift the gap
     // has settled and nothing else is in flight.
     expect(controller.anim.hasMakeRoomMotion, isFalse);
@@ -703,60 +713,12 @@ void main() {
     expect(controller.anim.hasActiveTrackResize, isFalse);
   });
 
-  // T-handin. C2 arm 2's TRACK-RESIZE HAND-IN. A track whose extent is
-  // about to become TERM-DRIVEN cannot leave a trackResize state in
-  // flight: paint would read the animator's captured from/to pair, so
-  // every recorded term would be invisible until the state is dropped and
-  // would then pop. The in-flight state is CONSTRUCTED through the
-  // existing internal-use channel rather than raced for.
-  testWidgets("a gap opening on a resizing row hands that resize in "
-      "rather than painting behind it", (tester) async {
-    final controller = _controller(
-      tester,
-      const BoardAnimationStyle(trackResize: _ms600, itemSlide: _ms300),
-    );
-    controller.addItem(
-      const _Item("a"),
-      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
-    );
-    controller.addItem(
-      const _Item("b"),
-      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
-    );
-    controller.addItem(
-      const _Item("d"),
-      const BoardSpan(rowStart: 2, colStart: 2, colSpan: 4),
-    );
-    await tester.pumpWidget(_board(controller));
-    await tester.pumpAndSettle();
-    final viewport = _viewport(tester);
-    expect(viewport.rectOfCell(0, 0)!.height, 40.0);
-    controller.animateTrackResize(Axis.vertical, 0, 76.0, 40.0);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    // Setup sanity: row 0 genuinely paints from the ANIMATOR, not from
-    // the stored 40, and the state does not touch the axis.
-    expect(controller.anim.hasActiveTrackResize, isTrue);
-    expect(viewport.rectOfCell(0, 0)!.height, closeTo(70.0, 0.5));
-    controller.previewMakeRoomGap(
-      draggedKey: "d",
-      prospective: const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
-      lifted: true,
-    );
-    await tester.pump();
-    // TARGET: the latch EDGE handed the state in, so the row paints the
-    // recorded term from this frame on.
-    expect(controller.anim.hasActiveTrackResize, isFalse);
-    expect(viewport.rectOfCell(0, 0)!.height, inInclusiveRange(40.0, 41.5));
-    await tester.pump(const Duration(milliseconds: 150));
-    expect(viewport.rectOfCell(0, 0)!.height, closeTo(49.0, 0.5));
-    expect(controller.anim.hasActiveTrackResize, isFalse);
-    await tester.pump(const Duration(milliseconds: 150));
-    expect(viewport.rectOfCell(0, 0)!.height, closeTo(58.0, 0.5));
-    expect(controller.anim.hasActiveTrackResize, isFalse);
-    controller.releaseMakeRoomPreview();
-    await tester.pumpAndSettle();
-  });
+  // T-handin, the make-room latch's TRACK-RESIZE HAND-IN, is gone with
+  // the hand-in itself: a trackResize state holds a residual over the
+  // settled extent, so a gap opening on a resizing row shows its term at
+  // once. Its successor is board_animation_reconcile_test.dart's "a gap
+  // opening on a resizing row continues that resize under the term".
+
   // T0. Controller-only: the slot half of a lifted install. The source
   // track holds NO slot, which is the no-vacating-slot guard at the
   // engine level (a source neighbour's held OFFSET is a different

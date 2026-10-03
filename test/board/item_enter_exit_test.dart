@@ -346,7 +346,11 @@ void main() {
   // Falsification: an implementation that allocates a second id without
   // retiring the first passes the first two assertions and fails the
   // last, because the old id's settle deletes the live key's mapping.
-  testWidgets("re-adding a key mid-exit retires the old incarnation first", (
+  // Since item 7D of the 2026-09-23 audit fixes the re-add brings the
+  // exiting item back on its own id rather than retiring it
+  // (board_lifecycle_fixes_test.dart pins the reversal); this case keeps
+  // the one-incarnation contract.
+  testWidgets("re-adding a key mid-exit leaves one incarnation of it", (
     tester,
   ) async {
     final controller = _lanedController(tester);
@@ -484,14 +488,13 @@ void main() {
 
   // DERIVED name. No AC; settle-tick re-entrancy: the first settle's
   // delivered notification reaches an app listener that re-adds the
-  // OTHER key settling on the same tick. The re-add retires the old
-  // incarnation and, under LIFO recycling, hands the SAME id to the
-  // fresh enter, so the animator's loop still holds that id in its
-  // collected settle list.
+  // OTHER key settling on the same tick. The re-add reverses that key's
+  // exit on the SAME id, replacing its record with an enter's, so the
+  // animator's loop still holds that id in its collected settle list.
   // Falsification: a settle loop that does not re-check the record
-  // reaches the handler against the recycled id and finalizes the fresh
-  // incarnation's ENTER on the spot, so isEnteringItem reads false on
-  // the very tick the enter was installed.
+  // reaches the handler against the reversed id and finalizes its ENTER
+  // on the spot, so isEnteringItem reads false on the very tick the
+  // enter was installed.
   testWidgets(
     "a structural listener re-adding a key during a double settle does "
     "not reach the handler twice",
@@ -534,8 +537,8 @@ void main() {
       expect(tester.takeException(), isNull);
       // Setup sanity: the listener really ran.
       expect(reAdded, isTrue);
-      // The fresh incarnation's enter survives the tick that recycled
-      // its id.
+      // The reversed item's enter survives the tick that collected its
+      // id to settle.
       expect(
         controller.anim.isEnteringItem(controller.idOfKey("b")),
         isTrue,

@@ -35,6 +35,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import '_board_axis.dart';
+import '_board_span.dart';
 import 'board_animation_style.dart';
 import 'board_background.dart';
 import 'board_controller.dart';
@@ -78,8 +79,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// bounded by the track count, and a far jump onto a heavily
   /// mis-estimated band legitimately needs more than any small constant
   /// of them, because every correction and clamp relocates the window.
-  /// The cap is the assert that fires when the argument is wrong: an
-  /// extent oscillating between passes of one layout.
+  /// Reaching the cap reports that the argument failed: an extent
+  /// oscillating between passes of one layout.
   static const int _maxCorrectionPasses = 5;
 
   /// Whether the current placement pass recorded a FIRST measurement.
@@ -202,6 +203,42 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// local so a pass allocates nothing.
   final Map<int, double> _contentTrackExtents = <int, double>{};
 
+  /// The cross index of the cell each [_contentTrackExtents] entry came
+  /// from, parallel to it and cleared with it.
+  final Map<int, int> _contentTrackArgMax = <int, int>{};
+
+  /// Per CONTENT track, the tallest CELL measurement taken since this
+  /// record was last dropped, and the cross index of the cell it came
+  /// from.
+  ///
+  /// A pass obtains only the cross axis's window, so without it a tall
+  /// cell scrolled out sideways would shrink its track, and everything
+  /// past the track would move while the user scrolls the other way. The
+  /// sizing step takes the larger of a track's window maximum and this,
+  /// and a pass that measures the recorded cell again, or finds it
+  /// building nothing, REPLACES the record with its window's, so a cell
+  /// that shrinks in view lowers its track. One entry per track, not per
+  /// cell: where the recorded cell shrinks in view while a cell taller
+  /// than the window's sits out of view, the track falls back to the
+  /// window until that cell returns, the price of memory that does not
+  /// grow with every cell ever visited.
+  ///
+  /// Valid for the cell content and the measuring constraints it was
+  /// taken under: dropped by [invalidateCellMeasurements], by
+  /// [_resetMeasurements], and when [_cellRecordKey] changes.
+  final Map<int, ({double extent, int cross})> _cellRecord =
+      <int, ({double extent, int cross})>{};
+
+  /// The tracks whose recorded cell the running pass measured again or
+  /// found building nothing. Cleared at the head of every pass.
+  final Set<int> _recordRemeasured = <int>{};
+
+  /// The axis instances and alignments [_cellRecord] was measured under:
+  /// a measurement depends on its cell's content and on the measuring
+  /// constraints, which are a function of these (see
+  /// [_measuringConstraints]).
+  Object? _cellRecordKey;
+
   /// The item a drag session holds, or null when no session is live. At
   /// most one, because at most one session is live.
   ///
@@ -267,8 +304,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   /// Opt-in staleness check for the cell measurement cache, off by
   /// default. When true, every layout re-measures every cell whose cached
-  /// extent it would otherwise use and throws a [FlutterError] naming a
-  /// cell whose extent moved. It reads and never writes the cache, so a
+  /// extent it would otherwise use and reports, through
+  /// [FlutterError.reportError], one [FlutterError] naming every cell
+  /// whose extent moved. It reads and never writes the cache, so a
   /// debug build with it on shows the same geometry as a release build.
   /// A cell whose content animates its own size trips it on every frame
   /// of that animation by design, which is why it is a diagnostic to turn
@@ -281,6 +319,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// entry per cell, reported ONCE at the end of the pass loop and
   /// cleared there. Debug-only; null in release.
   List<String>? _debugStaleCells;
+
+  /// The content tracks holding an intra-track item cluster with no lane
+  /// axis this layout, reported ONCE at the end of the pass loop and
+  /// cleared there, for the reason the stale-cell report gives.
+  /// Debug-only; null in release.
+  Set<int>? _debugClusterTracks;
 
   /// Cell vicinities the LAST layout obtained whose builder returned
   /// null, written once per layout by the positioning sweep.
@@ -304,22 +348,34 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   bool _subscribed = false;
 
-  /// Paint plane 1: cells in unfrozen tracks. Cleared and rebuilt exactly
+  /// The bottom plane: cells in unfrozen tracks. Cleared and rebuilt exactly
   /// once per `layoutChildSequence`, in the final positioning sweep, never
   /// per pass: appended per pass, a vicinity obtained by two passes paints
   /// twice; cleared per pass, a pass-1-only child drops out of paint AND
   /// its hit-test mirror.
   final List<RenderBox> _cellPaintOrder = <RenderBox>[];
 
-  /// Paint plane 2: items. Laned items by lane then id; non-laned items
-  /// last, so they paint above the laned stack in their track.
+  /// Items, in three planes one after another: the SCROLLED items, then
+  /// the BAND items (pinned on one axis) from [_bandItemStart], then the
+  /// CORNER items (pinned on both) from [_cornerItemStart]. Inside a plane,
+  /// laned items by lane then id and non-laned items last, so they paint
+  /// above the laned stack in their track.
   final List<RenderBox> _itemPaintOrder = <RenderBox>[];
+  int _bandItemStart = 0;
+  int _cornerItemStart = 0;
 
-  /// Paint plane 3: cells in frozen tracks, with cells frozen on BOTH axes
-  /// (the corner) last. The corner must outpaint the two bands because a
-  /// band cell scrolled along its unfrozen axis can slide into the corner
-  /// rectangle.
+  /// Cells in frozen tracks: the BAND cells (frozen on one axis), then
+  /// the CORNER cells (frozen on both) from [_cornerCellStart]. The
+  /// corner must outpaint the two bands because a band cell scrolled
+  /// along its unfrozen axis can slide into the corner rectangle.
+  ///
+  /// The six planes, bottom to top: scrolled cells, scrolled items, band
+  /// cells, band items, corner cells, corner items. A band item overlaps
+  /// only its own band's cells, which it must cover, and corner cells,
+  /// which must cover it, so the order is total; hit-testing and
+  /// [itemAt] walk its exact reverse.
   final List<RenderBox> _frozenPaintOrder = <RenderBox>[];
+  int _cornerCellStart = 0;
 
   /// Item child back to its store id, for the paint-time animation shift
   /// and for [applyPaintTransform]'s mirror of it. Rebuilt in the same
@@ -350,29 +406,33 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   int _firstVisibleCol = 0;
   int _lastVisibleCol = -1;
 
-  /// First row track intersecting the visible rect. The four window
-  /// bounds are overwritten once per `layoutChildSequence`, from the
-  /// settling pass's window, and describe the VISIBLE rect rather than the
-  /// wider obtain window. An empty axis reports `first` 0 and `last` -1.
+  /// First SCROLLED row track showing in [scrolledRegion], the viewport
+  /// minus its frozen bands. The four window bounds are overwritten once
+  /// per `layoutChildSequence`, from the settling pass's window, and
+  /// describe what is VISIBLE rather than the wider obtain window: a
+  /// track wholly under a band is left out, and a frozen track is
+  /// reported by [frozenTracksOf] instead. An axis with nothing visible
+  /// reports `first` 0 and `last` -1.
   @override
   int get firstVisibleRow {
     return _firstVisibleRow;
   }
 
-  /// Last row track intersecting the visible rect. See [firstVisibleRow].
+  /// Last SCROLLED row track showing in [scrolledRegion]. See
+  /// [firstVisibleRow].
   @override
   int get lastVisibleRow {
     return _lastVisibleRow;
   }
 
-  /// First column track intersecting the visible rect. See
+  /// First SCROLLED column track showing in [scrolledRegion]. See
   /// [firstVisibleRow].
   @override
   int get firstVisibleCol {
     return _firstVisibleCol;
   }
 
-  /// Last column track intersecting the visible rect. See
+  /// Last SCROLLED column track showing in [scrolledRegion]. See
   /// [firstVisibleRow].
   @override
   int get lastVisibleCol {
@@ -453,16 +513,50 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   /// A structural change relays out, and rebuilds every obtained child
-  /// unless the key set says no built child's builder output changed.
+  /// unless no built child's builder output changed.
   ///
-  /// An EMPTY set means exactly that, so it takes the cheaper route; null
-  /// and a non-empty set both take the delegate rebuild, which is the only
-  /// route to a child's builder the viewport's private element leaves open
-  /// (R-7).
+  /// Null and a non-empty set both take the delegate rebuild, which is the
+  /// only route to a child's builder the viewport's private element leaves
+  /// open (R-7). An EMPTY set says no ITEM's rendered inputs changed, and
+  /// takes the cheaper route unless [_builtVicinityChangedOwner]: the key
+  /// set speaks of items, and the vicinity a child is built at is this
+  /// object's scheme, not the controller's.
   void _handleStructuralChange(Set<TKey>? affectedKeys) {
     markNeedsLayout(
-      withDelegateRebuild: affectedKeys == null || affectedKeys.isNotEmpty,
+      withDelegateRebuild:
+          affectedKeys == null ||
+          affectedKeys.isNotEmpty ||
+          _builtVicinityChangedOwner(),
     );
+  }
+
+  /// Whether an item vicinity the last layout built now resolves, through
+  /// the lookup the delegate's builder uses, to a DIFFERENT item.
+  ///
+  /// A removal shifts every later item on its primary start track down
+  /// one ordinal, and notifies an empty set, since no remaining item's
+  /// inputs changed. Without a delegate rebuild the base REUSES the child
+  /// already at a vicinity (`widgets/two_dimensional_viewport.dart:1489`),
+  /// so the item shifting into the removed one's vicinity would be shown
+  /// by the removed one's element, and its own element, obtained by
+  /// nobody, unmounted. A vicinity that now resolves to NO item is not a
+  /// remap: nothing obtains it again. [_vicinityToItemId] is the record,
+  /// written by every item obtain, the retained exits' and the drag
+  /// pin's included, and the lookups are total, so a record made for a
+  /// swapped-out controller answers without throwing (a swap through
+  /// `Board` replaces the delegate, which rebuilds regardless).
+  bool _builtVicinityChangedOwner() {
+    final columnCount = _controller.columns.axis.trackCount;
+    for (final entry in _vicinityToItemId.entries) {
+      final owner = _controller.itemIdAtOrdinal(
+        entry.key.yIndex,
+        entry.key.xIndex - columnCount,
+      );
+      if (owner >= 0 && owner != entry.value) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// A payload-only write. The item's host and the hosts of the cells its
@@ -531,8 +625,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         contentAxis != null && _controller.laneAxis == contentAxis;
     final hasLayoutDriving =
         anim.hasLayoutDrivingAnimations ||
-        (laneAxisIsContent &&
-            (anim.hasMakeRoomMotion || anim.hasRelaneActive));
+        (laneAxisIsContent && (anim.hasMakeRoomMotion || anim.hasRelaneActive));
     final hasOffsets = anim.hasActiveOffsets;
     if (hasLayoutDriving || _priorTickHadLayoutDriving) {
       markNeedsLayout();
@@ -638,6 +731,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         data.remeasure = true;
       }
     });
+    // A cell out of view has no child to flag, and the app says content
+    // changed: its recorded measurement goes too.
+    _cellRecord.clear();
     markNeedsLayout();
   }
 
@@ -649,6 +745,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// the lane assignments belong to the controller, and a freshly
   /// assigned controller carries its own.
   void _resetMeasurements() {
+    _cellRecord.clear();
     final rowAxis = _controller.rows.axis;
     if (rowAxis is LazyContentAxis) {
       rowAxis.resetMeasurements();
@@ -675,21 +772,121 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // surface's poke, which takes the flag-only arm inside a layout
     // because the measure step has not yet read the flag it sets.
     _inLayout = true;
+    _paintListsCurrent = false;
     try {
       _layoutChildSequenceBody();
+      _paintListsCurrent = true;
     } finally {
       _inLayout = false;
     }
   }
 
+  /// Whether the paint lists hold exactly the children of the last
+  /// layout. False from the start of a `layoutChildSequence` until its
+  /// body returns: a layout that THROWS leaves the lists from the sweep
+  /// before it while the base, which rebuilds its sibling chain only
+  /// after this method returns, leaves that chain empty. The semantics
+  /// walk defers to the base's while this is false.
+  bool _paintListsCurrent = false;
+
+  /// The controller and the two axis configs the last layout ran with,
+  /// which [_anchorSwappedAxes] compares the next layout's against.
+  BoardController<TKey, Object?>? _laidOutController;
+  BoardAxisConfig? _laidOutRows;
+  BoardAxisConfig? _laidOutColumns;
+
+  /// A NEW AXIS under the same controller, a zoom for instance, keeps the
+  /// scrolled region's leading edge on the same place in the lattice: the
+  /// track-space coordinate there under the old config is put there under
+  /// the new one, by a `correctBy` the pass loop's `applyContentDimensions`
+  /// then settles, as it settles the content axis's corrections. Not on a
+  /// controller swap, a new model rather than a zoom, and not for a config
+  /// that keeps its axis instance.
+  void _anchorSwappedAxes() {
+    final rows = _controller.rows;
+    final columns = _controller.columns;
+    if (identical(_laidOutController, _controller)) {
+      final oldRows = _laidOutRows;
+      if (oldRows != null && !identical(oldRows.axis, rows.axis)) {
+        _anchorSwappedAxis(
+          verticalOffset,
+          oldRows,
+          rows,
+          viewportDimension.height,
+        );
+      }
+      final oldColumns = _laidOutColumns;
+      if (oldColumns != null && !identical(oldColumns.axis, columns.axis)) {
+        _anchorSwappedAxis(
+          horizontalOffset,
+          oldColumns,
+          columns,
+          viewportDimension.width,
+        );
+      }
+    }
+    _laidOutController = _controller;
+    _laidOutRows = rows;
+    _laidOutColumns = columns;
+  }
+
+  /// Content space throughout, the offset plus the leading band, which is
+  /// direction agnostic: the band sits at the content's leading edge
+  /// whichever way the axis paints. The target is clamped into the new
+  /// axis's scroll range, the one [_applyContentDimensions] applies, so a
+  /// lattice that shrank past the anchor ends scrolled to its end.
+  void _anchorSwappedAxis(
+    ViewportOffset offset,
+    BoardAxisConfig old,
+    BoardAxisConfig next,
+    double viewportExtent,
+  ) {
+    final oldAxis = old.axis;
+    final newAxis = next.axis;
+    if (!offset.hasPixels ||
+        oldAxis.trackCount == 0 ||
+        newAxis.trackCount == 0) {
+      return;
+    }
+    final oldBand = old.leadingBandExtent;
+    final newBand = next.leadingBandExtent;
+    final content = offset.pixels + oldBand;
+    final track = oldAxis.trackAt(content);
+    final extent = oldAxis.extentOf(track);
+    final into = extent > 0.0
+        ? ((content - oldAxis.offsetOf(track)) / extent).clamp(0.0, 1.0)
+        : 0.0;
+    final anchor = (track + into).clamp(0.0, newAxis.trackCount.toDouble());
+    final target = (newAxis.offsetOfFraction(anchor) - newBand).clamp(
+      0.0,
+      math.max(0.0, newAxis.totalExtent - viewportExtent),
+    );
+    final correction = target - offset.pixels;
+    if (correction.abs() >= precisionErrorTolerance) {
+      offset.correctBy(correction);
+    }
+  }
+
   void _layoutChildSequenceBody() {
+    _anchorSwappedAxes();
     _obtainedThisLayout.clear();
+    _builtNothing.clear();
     // Cleared at ENTRY, not in the sweep: the item OBTAIN writes it and
     // the sweep, the paint walks and applyPaintTransform read it.
     _vicinityToItemId.clear();
     // ARM 1 of the lane flush: resolution precedes track sizing, so the
     // cluster term below never reads a stale laneCount.
     _controller.flushLanesForLayout();
+    final recordKey = (
+      _controller.rows.axis,
+      _controller.columns.axis,
+      _controller.rows.alignment,
+      _controller.columns.alignment,
+    );
+    if (recordKey != _cellRecordKey) {
+      _cellRecord.clear();
+      _cellRecordKey = recordKey;
+    }
 
     // The WINDOW RULE's two terms, read ONCE per `layoutChildSequence`.
     // Both are per-axis content-space magnitudes.
@@ -734,16 +931,16 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         return true;
       }
       _debugStaleCells = null;
-      // REPORTED, not thrown, and ONCE per layout. A throw from inside
-      // the pass loop aborts this layout before the base's child manager
-      // closes its pass, which strands the children the pass already
-      // claimed (`widgets/two_dimensional_viewport.dart:380` moves a
-      // reused child out of the element's map and only
-      // `widgets/two_dimensional_viewport.dart:389` moves it back), so
-      // the next unmount trips the framework's dependents assert. A
-      // report reaches the same handler a throw would and leaves the
-      // pass to finish; one per layout, because a stale app value
-      // usually leaves every mounted cell stale at once.
+      // REPORTED, not thrown, and ONCE per layout. The base runs
+      // `layoutChildSequence`, which calls this method, between its child
+      // manager's `_startLayout` and `_endLayout`: `_buildChild` and
+      // `_reuseChild` file every child the pass claims in the element's
+      // pending maps, and only `_endLayout` swaps them in. A throw from
+      // inside `layoutChildSequence` skips `_endLayout`, which leaves those
+      // children unreachable from the element tree and the next layout's
+      // `_startLayout` failing its assert. A report reaches the same handler
+      // a throw would and leaves the pass to finish; one per layout, because
+      // a stale app value usually leaves every mounted cell stale at once.
       FlutterError.reportError(
         FlutterErrorDetails(
           library: "widgets_extended board",
@@ -773,31 +970,75 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       );
       return true;
     }());
+    assert(() {
+      final tracks = _debugClusterTracks;
+      if (tracks == null || tracks.isEmpty) {
+        return true;
+      }
+      _debugClusterTracks = null;
+      // Reported, not thrown, for the stale-cell report's reason; once
+      // per layout and again on every layout while the data stands.
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          library: "widgets_extended board",
+          context: ErrorDescription("while sizing the content-sized axis"),
+          exception: FlutterError(
+            "A content-sized axis holds an intra-track item cluster on "
+            "track(s) ${(tracks.toList()..sort()).join(", ")} and no axis "
+            "carries a laneExtent: the cluster can neither grow its track "
+            "nor stack along the other axis. Give one axis's config a "
+            "laneExtent, or keep items off the content axis.",
+          ),
+        ),
+      );
+      return true;
+    }());
 
     if (!settled) {
-      // Release behaviour at the ceiling: lay out at the last attempted
-      // offset. Both offsets still need dimensions, or the frame paints
-      // against a position that has none.
+      // At the ceiling, lay out at the last attempted offset. Both offsets
+      // still need dimensions, or the frame paints against a position that
+      // has none.
       _applyContentDimensions();
+      // Reported, not thrown, for the stale-cell report's reason, so the
+      // retention and positioning below still run. Once per layout that
+      // reaches the ceiling.
       assert(() {
-        throw FlutterError.fromParts(<DiagnosticsNode>[
-          ErrorSummary(
-            "RenderBoardViewport ran $_maxCorrectionPasses consecutive "
-            "STAGNANT placement passes without settling.",
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            library: "widgets_extended board",
+            context: ErrorDescription("while running the placement passes"),
+            exception: FlutterError.fromParts(<DiagnosticsNode>[
+              ErrorSummary(
+                "RenderBoardViewport ran $_maxCorrectionPasses consecutive "
+                "STAGNANT placement passes without settling.",
+              ),
+              ErrorDescription(
+                "A stagnant pass measures no previously unmeasured track "
+                "and still does not settle. Reaching the ceiling means a "
+                "track's resolved extent is moving between passes of ONE "
+                "layout, or applyContentDimensions kept clamping the "
+                "position with nothing left to measure.",
+              ),
+              ErrorHint(
+                "A cap that is reached is a convergence defect, not a slow "
+                "path. debugLastCorrectionPassCount reports the count and "
+                "debugCorrectionCount the corrections applied.",
+              ),
+            ]),
+            stack: StackTrace.current,
+            informationCollector: () {
+              final creator = debugCreator;
+              return <DiagnosticsNode>[
+                if (creator != null) DiagnosticsDebugCreator(creator),
+                describeForError(
+                  "The following RenderObject was being laid out when the "
+                  "ceiling was reached",
+                ),
+              ];
+            },
           ),
-          ErrorDescription(
-            "A stagnant pass measures no previously unmeasured track and "
-            "still does not settle. Reaching the ceiling means a track's "
-            "resolved extent is moving between passes of ONE layout, or "
-            "applyContentDimensions kept clamping the position with "
-            "nothing left to measure.",
-          ),
-          ErrorHint(
-            "A cap that is reached is a convergence defect, not a slow "
-            "path. debugLastCorrectionPassCount reports the count and "
-            "debugCorrectionCount the corrections applied.",
-          ),
-        ]);
+        );
+        return true;
       }());
     }
 
@@ -879,9 +1120,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// Whether [id]'s span starts past either axis's current track count,
   /// which only an axis swap can produce mid-flight.
   bool _outOfLattice(int id) {
-    return _controller.rowStartOfId(id) >=
+    return _controller.startIndexOfId(id, Axis.vertical) >=
             _controller.rows.axis.trackCount ||
-        _controller.colStartOfId(id) >= _controller.columns.axis.trackCount;
+        _controller.startIndexOfId(id, Axis.horizontal) >=
+            _controller.columns.axis.trackCount;
   }
 
   /// The retention bookkeeping: every obtained EXITING item is recorded,
@@ -952,7 +1194,6 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     return lo;
   }
 
-
   /// One placement pass: obtain the window's cells, lay them out, size the
   /// content-sized axis's tracks from what they measured, and return the
   /// scroll correction that holds the anchor still.
@@ -987,23 +1228,35 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // geometry, which is what keeps an in-flight track resize from
     // fighting a correction.
     final contentAxis = _contentAxis;
-    final anchorAxis = contentAxis == null
+    final anchorConfig = contentAxis == null
         ? null
-        : (contentAxis == Axis.vertical ? rowAxis : columnAxis);
+        : (contentAxis == Axis.vertical ? rowsConfig : columnsConfig);
+    final anchorAxis = anchorConfig?.axis;
     var anchorTrack = -1;
     var anchorBefore = 0.0;
     if (anchorAxis != null) {
+      // Searched in the UNFROZEN region: a track under a band is not what
+      // the user sees, and holding it still holds nothing visible.
+      final region = _unfrozenNormalized(contentAxis!);
+      final pixels = contentAxis == Axis.vertical ? scrollY : scrollX;
       anchorTrack = _firstMeasuredTrackIn(
         anchorAxis,
-        contentAxis == Axis.vertical ? topVisible : leftVisible,
-        contentAxis == Axis.vertical ? bottomVisible : rightVisible,
+        pixels + region.lo,
+        pixels + region.hi,
       );
       if (anchorTrack >= 0) {
-        anchorBefore = anchorAxis.offsetOf(anchorTrack);
+        // Held relative to the LEADING BAND's end: a band that grows
+        // pushes the scrolled content down with it rather than scrolling
+        // it underneath, so the offset held is the anchor's minus the
+        // band's.
+        anchorBefore =
+            anchorAxis.offsetOf(anchorTrack) - anchorConfig!.leadingBandExtent;
       }
     }
 
     _contentTrackExtents.clear();
+    _contentTrackArgMax.clear();
+    _recordRemeasured.clear();
     // OBTAIN-AND-SIZE TO A FIXED POINT. Sizing shrinks estimate-sized
     // tracks, which recomputes the window's track range from the new
     // offsets and can reveal tracks the previous round never walked; on a
@@ -1053,7 +1306,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           );
         }
       }
-      for (final row in _frozenTracksOf(rowsConfig)) {
+      for (final row in rowsConfig.frozenTracks) {
         for (var col = firstCol; col < columnAxis.trackCount; col++) {
           if (columnAxis.offsetOf(col) >= rightObtain) {
             break;
@@ -1067,7 +1320,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           );
         }
       }
-      for (final col in _frozenTracksOf(columnsConfig)) {
+      for (final col in columnsConfig.frozenTracks) {
         for (var row = firstRow; row < rowAxis.trackCount; row++) {
           if (rowAxis.offsetOf(row) >= bottomObtain) {
             break;
@@ -1081,8 +1334,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           );
         }
       }
-      for (final row in _frozenTracksOf(rowsConfig)) {
-        for (final col in _frozenTracksOf(columnsConfig)) {
+      for (final row in rowsConfig.frozenTracks) {
+        for (final col in columnsConfig.frozenTracks) {
           _obtainAndMeasureCell(
             rowsConfig,
             columnsConfig,
@@ -1114,37 +1367,33 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         break;
       }
     }
-    _recordVisibleWindow(
-      rowAxis,
-      columnAxis,
-      topVisible: topVisible,
-      bottomVisible: bottomVisible,
-      leftVisible: leftVisible,
-      rightVisible: rightVisible,
-    );
+    _recordVisibleWindow();
 
     if (anchorAxis == null || anchorTrack < 0) {
       return 0.0;
     }
-    return anchorAxis.offsetOf(anchorTrack) - anchorBefore;
+    return anchorAxis.offsetOf(anchorTrack) -
+        anchorConfig!.leadingBandExtent -
+        anchorBefore;
   }
 
   /// The TRACK SIZING step: writes this pass's resolved extents into the
   /// content-sized axis.
   ///
-  /// Five arms per track. A first measurement replaces the estimate and
+  /// Four arms per track. A first measurement replaces the estimate and
   /// clears every latch set. A RAMPING contributor, or one holding a
   /// make-room delta or a RELANE lead, records per pass and maintains
-  /// both latch sets symmetrically, each against its own condition, and
-  /// at the make-room latch EDGE it hands the
-  /// track's in-flight trackResize in: while a make-room latch entry
-  /// stands the animator holds no state for that track, or every recorded
-  /// term would be invisible until the state was dropped. The latch's
-  /// hand-off then either RECORDS the residue or, when the SNAP
-  /// generation moved and the engine published the discarded motion's
-  /// clock, installs a makeRoom-family resize for a residue past
-  /// tolerance on that clock. A changed settled extent records the
-  /// target and installs the resize that animates toward it.
+  /// both latch sets symmetrically, each against its own condition. The
+  /// latch's end either RECORDS the residue or, when the SNAP generation
+  /// moved and the engine published the discarded motion's clock,
+  /// continues the track from where it paints on that clock. A changed
+  /// settled extent records the target and installs the resize that
+  /// animates toward it.
+  ///
+  /// A trackResize state in flight needs no hand-in on any arm: it holds
+  /// a RESIDUAL over the settled extent rather than a target, so every
+  /// record here shows at once and the residual keeps decaying under it
+  /// (see `_track_resize_animator.dart`).
   void _sizeContentTracks(BoardAxis axis) {
     final contentAxis = _contentAxis!;
     final config = contentAxis == Axis.vertical
@@ -1161,6 +1410,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     for (final entry in _contentTrackExtents.entries) {
       final track = entry.key;
       var to = entry.value;
+      // The CELL term, folded with the record of cells out of the window:
+      // the window's maximum replaces the record when it is at least as
+      // tall, or when this pass measured the recorded cell again.
+      final record = _cellRecord[track];
+      if (record == null ||
+          to >= record.extent ||
+          _recordRemeasured.contains(track)) {
+        _cellRecord[track] = (extent: to, cross: _contentTrackArgMax[track]!);
+      } else {
+        to = record.extent;
+      }
       var contributorRamping = false;
       var makeRoomContributes = false;
       if (laneAxisIsContent) {
@@ -1235,16 +1495,13 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           }
         }
       }
+      // COLLECTED here and REPORTED after the pass loop, never thrown
+      // from inside it: see [_debugStaleCells]'s report for what a throw
+      // here strands.
       assert(() {
         if (_controller.laneAxis == null &&
             _controller.debugHasIntraTrackItemOn(track)) {
-          throw FlutterError(
-            "A content-sized axis holds an intra-track item cluster on "
-            "track $track and no axis carries a laneExtent: the cluster "
-            "can neither grow this track nor stack along the other axis. "
-            "Give one axis's config a laneExtent, or keep items off the "
-            "content axis.",
-          );
+          (_debugClusterTracks ??= <int>{}).add(track);
         }
         return true;
       }());
@@ -1266,22 +1523,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         // The ramp or the gap IS this track's animation: `to` already
         // carries it and changes every tick, so record and latch. An
         // install here would re-target a resize once per tick and leave
-        // layout dirty for a resize duration after the settle.
-        //
-        // THE TRACK-RESIZE HAND-IN, at the latch EDGE and nowhere else.
-        // From this pass on the extent is TERM-DRIVEN, recorded once per
-        // pass, while a trackResize in flight makes paint read the
-        // animator's captured from and to for both this track's extent
-        // and the following tracks' offsets. Nothing re-targets that
-        // state while the latch holds, since this arm's `continue` puts
-        // the one install site out of reach, so the recorded term would
-        // be invisible for the rest of the state's duration and would
-        // then pop when the animator dropped it. Finalizing lands the
-        // extent the axis already stores. Unconditional at the edge: a
-        // track holding no state is a no-op.
-        if (makeRoomContributes && !makeRoomLatch.contains(track)) {
-          _controller.finalizeTrackResize(contentAxis, track);
-        }
+        // layout dirty for a resize duration after the settle. A resize
+        // already in flight for the track stays: its residual is over
+        // the settled extent this records, so the term shows at once and
+        // the residual finishes under it on its own clock.
         axis.recordMeasurement(track, to);
         // SYMMETRIC, not add-only: a track can lose one kind of
         // contribution while another keeps it on this arm, and an entry
@@ -1318,24 +1563,23 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         // window. The install rides the makeRoom family, whose kill
         // switch is the one that governs the motion being continued.
         //
-        // `painted` is read BEFORE the record: the animator holds no
-        // state for a latched track, so it answers the settled extent,
-        // which the record is about to replace. `stored` is the
-        // floor-corrected value, for the reason the ordinary arm below
-        // gives.
-        final stored = to < axis.minTrackExtent ? axis.minTrackExtent : to;
+        // `painted` is read BEFORE the record, which moves the settled
+        // extent it is measured from. The install decides the rest: a
+        // residue within tolerance is no motion and drops any state the
+        // track still holds, since the track already paints its new
+        // extent, and a zero family refuses. No natural settle installs:
+        // a state still in flight there keeps its residual over the new
+        // record.
         final painted = anim.animatedExtentOf(contentAxis, track);
         final handOff = anim.makeRoomSnapGeneration != _laidOutSnapGeneration
             ? anim.makeRoomHandOff
             : null;
         axis.recordMeasurement(track, to);
-        if (handOff != null &&
-            (stored - painted).abs() > precisionErrorTolerance) {
+        if (handOff != null) {
           _controller.animateTrackResize(
             contentAxis,
             track,
             painted,
-            stored,
             family: BoardAnimationFamily.makeRoom,
             duration: handOff.remaining,
             curve: handOff.curve,
@@ -1353,16 +1597,18 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       final stored = to < axis.minTrackExtent ? axis.minTrackExtent : to;
       if ((stored - axis.extentOf(track)).abs() > precisionErrorTolerance) {
         // Capture `from` FIRST: it is the currently PAINTED extent, so a
-        // re-target mid-resize composes from where the track is;
-        // captured after the write it would read the target and animate
-        // nothing. The record then makes the axis the settled truth, and
-        // the install (which the forwarder routes to the animator, and
-        // which a zero family refuses, landing the geometry this frame)
-        // must not touch layout, notification or the animation channel
-        // from inside layout; its first dispatch is its first tick.
+        // re-target mid-resize composes from where the track is; captured
+        // after the write it would read the new settled extent, under
+        // any residual still in flight, which is not what painted. The
+        // record then makes the axis the settled truth, and the install
+        // (which the forwarder routes to the animator, and which a zero
+        // family refuses, landing the change this frame while a state of
+        // another family keeps decaying over it) must not touch layout,
+        // notification or the animation channel from inside layout; its
+        // first dispatch is its first tick.
         final from = anim.animatedExtentOf(contentAxis, track);
         axis.recordMeasurement(track, to);
-        _controller.animateTrackResize(contentAxis, track, from, stored);
+        _controller.animateTrackResize(contentAxis, track, from);
       }
     }
   }
@@ -1380,6 +1626,15 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   ) {
     final child = _obtainOnce(ChildVicinity(xIndex: col, yIndex: row));
     if (child == null) {
+      // A recorded cell that now builds nothing no longer holds its
+      // track.
+      if (contentAxis != null) {
+        final track = contentAxis == Axis.vertical ? row : col;
+        final cross = contentAxis == Axis.vertical ? col : row;
+        if (_cellRecord[track]?.cross == cross) {
+          _recordRemeasured.add(track);
+        }
+      }
       return;
     }
     if (contentAxis == null) {
@@ -1448,13 +1703,19 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       }());
     }
     // The CELL contribution to the track's intrinsic extent: the maximum
-    // over the cells of that track. The item-cluster term lands with the
+    // over the cells of that track this pass obtained, which the sizing
+    // step folds with [_cellRecord]. The item-cluster term lands with the
     // item plane.
     final track = contentAxis == Axis.vertical ? row : col;
+    final cross = contentAxis == Axis.vertical ? col : row;
     final measured = data.measured!;
     final current = _contentTrackExtents[track];
     if (current == null || measured > current) {
       _contentTrackExtents[track] = measured;
+      _contentTrackArgMax[track] = cross;
+    }
+    if (_cellRecord[track]?.cross == cross) {
+      _recordRemeasured.add(track);
     }
   }
 
@@ -1502,15 +1763,50 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           precisionErrorTolerance,
     );
     _itemIdScratch.clear();
-    final ids = _controller.itemIdsInRectIncludingExiting(
+    _controller.itemIdsInRectIncludingExiting(
       rowStart,
       rowEnd + 1,
       colStart,
       colEnd + 1,
       _itemIdScratch,
     );
+    // The BANDS, as frozen cells are obtained: a pinned item paints in
+    // its band whatever the scroll offset, so it must be obtained even
+    // when its tracks lie far outside the scrolled window. Frozen rows
+    // against the window's columns, frozen columns against its rows, and
+    // the corners; a board with no band runs none of these, and an id two
+    // queries both return is obtained once below.
+    final rowBands = _bandRangesOf(_controller.rows);
+    final colBands = _bandRangesOf(_controller.columns);
+    for (final rows in rowBands) {
+      _controller.itemIdsInRectIncludingExiting(
+        rows.start,
+        rows.end,
+        colStart,
+        colEnd + 1,
+        _itemIdScratch,
+      );
+      for (final cols in colBands) {
+        _controller.itemIdsInRectIncludingExiting(
+          rows.start,
+          rows.end,
+          cols.start,
+          cols.end,
+          _itemIdScratch,
+        );
+      }
+    }
+    for (final cols in colBands) {
+      _controller.itemIdsInRectIncludingExiting(
+        rowStart,
+        rowEnd + 1,
+        cols.start,
+        cols.end,
+        _itemIdScratch,
+      );
+    }
     final columnCount = columnAxis.trackCount;
-    for (final id in ids) {
+    for (final id in _itemIdScratch) {
       final vicinity = ChildVicinity(
         xIndex: columnCount + _controller.vicinityOrdinalOfId(id),
         yIndex: _controller.primaryStartOfId(id),
@@ -1538,28 +1834,37 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// paint another. The delta is SIGNED, a growth carrying a negative
   /// one, so the floor is on the SUM and never on the delta alone. The
   /// LEAD takes no such term: a slide's lead is the paint shift.
-  ({double lead, double extent}) _itemSpanGeometry(int id, Axis axis) {
-    final config = axis == Axis.vertical ? _controller.rows : _controller.columns;
+  ({double lead, double extent}) _itemSpanGeometry(
+    int id,
+    Axis axis,
+    BoardPin pin,
+  ) {
+    final config = axis == Axis.vertical
+        ? _controller.rows
+        : _controller.columns;
+    // A PINNED axis reads settled track offsets, exactly as its band's
+    // frozen cells do (`_frozenNormalizedPosition`): a track resize in
+    // flight shifts the scrolled lattice, not the band.
+    final pinned = pin != BoardPin.none;
     final boardAxis = config.axis;
     final extentDelta = axis == Axis.vertical
         ? _controller.anim.extentDeltaOf(id).dy
         : _controller.anim.extentDeltaOf(id).dx;
-    final laned =
-        _controller.laneAxis == axis && _controller.isLanedId(id);
+    final laned = _controller.laneAxis == axis && _controller.isLanedId(id);
     if (laned) {
       // Clamped exactly as the fractional arm below clamps: an axis swap
       // can strand a live span past the lattice, and these reads must
       // stay total for every consumer, rectOfItem included.
       final track = math.min(
-        axis == Axis.vertical
-            ? _controller.rowStartOfId(id)
-            : _controller.colStartOfId(id),
+        _controller.startIndexOfId(id, axis),
         boardAxis.trackCount,
       );
       final lane = _controller.laneOfId(id);
       final laneCount = _controller.laneCountOfId(id);
       final laneSpan = _controller.laneSpanOfId(id);
-      final trackLead = _animatedOffsetOf(axis, boardAxis, track);
+      final trackLead = pinned
+          ? boardAxis.offsetOf(track)
+          : _animatedOffsetOf(axis, boardAxis, track);
       final laneExtent = config.laneExtent;
       final padding = config.lanePadding;
       if (boardAxis.acceptsMeasurements) {
@@ -1607,42 +1912,35 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     var trail = boardAxis.offsetOfFraction(
       math.min(endTrack, boardAxis.trackCount.toDouble()),
     );
-    if (_controller.anim.hasActiveTrackResize) {
-      lead += _shiftTo(axis, startTrack.floor());
-      trail += _shiftTo(axis, endTrack.floor());
+    if (!pinned && _controller.anim.hasActiveTrackResize) {
+      lead += _shiftTo(axis, trackIndexOf(startTrack));
+      trail += _shiftTo(axis, trackIndexOf(endTrack));
     }
     var extent = math.max(0.0, trail - lead + extentDelta);
-    if (_controller.laneAxis == axis) {
+    if (axis == (_controller.laneAxis ?? _controller.primaryAxis)) {
       // The third form of the scaled lane-axis extent: a non-laned item
       // on the lane axis ramps over its own full extent. The span axis
       // is never scaled; a chip entering a week row grows in height, not
-      // in day count.
+      // in day count. With NO lane axis the PRIMARY axis takes its place,
+      // or an item entering or leaving such a board would show nothing
+      // for the whole ramp and then pop: on a gantt, rows primary and
+      // time across, a bar grows in thickness and not in duration.
       extent *= _controller.anim.enterExitProgressOf(id);
     }
     return (lead: lead, extent: extent);
   }
 
-  /// The frozen tracks of one axis, leading band then trailing band, each
-  /// clamped so the two never overlap on a small axis. Iteration order is
-  /// ascending within each band.
-  Iterable<int> _frozenTracksOf(BoardAxisConfig config) sync* {
+  /// The half-open track ranges of [config]'s frozen bands, leading then
+  /// trailing, as [BoardAxisConfigBands] bounds them; empty for an axis
+  /// with no band.
+  List<({int start, int end})> _bandRangesOf(BoardAxisConfig config) {
     final count = config.axis.trackCount;
-    final lead = math.min(config.frozenStart, count);
-    final trailFrom = math.max(lead, count - config.frozenEnd);
-    for (var track = 0; track < lead; track++) {
-      yield track;
-    }
-    for (var track = trailFrom; track < count; track++) {
-      yield track;
-    }
-  }
-
-  /// Whether [track] lies in [config]'s leading or trailing frozen band.
-  bool _isFrozenTrack(BoardAxisConfig config, int track) {
-    final count = config.axis.trackCount;
-    final lead = math.min(config.frozenStart, count);
-    final trailFrom = math.max(lead, count - config.frozenEnd);
-    return track < lead || track >= trailFrom;
+    final lead = config.leadingBandEnd;
+    final trailFrom = config.trailingBandStart;
+    return <({int start, int end})>[
+      if (lead > 0) (start: 0, end: lead),
+      if (trailFrom < count) (start: trailFrom, end: count),
+    ];
   }
 
   /// A frozen track's NORMALIZED position, pinned to the viewport: a
@@ -1657,21 +1955,74 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     double viewportExtent,
   ) {
     final axis = config.axis;
-    final count = axis.trackCount;
-    final lead = math.min(config.frozenStart, count);
-    if (track < lead) {
+    if (track < config.leadingBandEnd) {
       return axis.offsetOf(track);
     }
     return viewportExtent - (axis.totalExtent - axis.offsetOf(track));
   }
 
+  /// An item's NORMALIZED lead on [axis] from its content-space [lead]:
+  /// the lead minus the scroll offset where it scrolls, and where its
+  /// [pin] holds it, the position its band's cells take
+  /// ([_frozenNormalizedPosition]): its content offset in the leading
+  /// band, and the viewport extent minus what follows it in the trailing
+  /// one.
+  double _normalizedItemLead(Axis axis, BoardPin pin, double lead) {
+    final vertical = axis == Axis.vertical;
+    switch (pin) {
+      case BoardPin.none:
+        return lead -
+            (vertical ? verticalOffset.pixels : horizontalOffset.pixels);
+      case BoardPin.leading:
+        return lead;
+      case BoardPin.trailing:
+        final config = vertical ? _controller.rows : _controller.columns;
+        final viewport = vertical
+            ? viewportDimension.height
+            : viewportDimension.width;
+        return viewport - (config.axis.totalExtent - lead);
+    }
+  }
+
   /// Obtains a child at most once per `layoutChildSequence`, reading it
-  /// back through `getChildFor` on any later request in the same call.
+  /// back through [_liveChildFor] on any later request in the same call.
   RenderBox? _obtainOnce(ChildVicinity vicinity) {
     if (_obtainedThisLayout.add(vicinity)) {
-      return buildOrObtainChildFor(vicinity);
+      final child = buildOrObtainChildFor(vicinity);
+      return _builtNothing.contains(vicinity) ? null : child;
+    }
+    return _liveChildFor(vicinity);
+  }
+
+  /// The child at [vicinity] for the layout that is running, or null when
+  /// there is none or when its builder answered null this layout.
+  ///
+  /// The second arm is the stale child: on a delegate rebuild the element
+  /// returns early for a null widget
+  /// (`widgets/two_dimensional_viewport.dart:339-342`), so the base hands
+  /// back the child ALREADY at the vicinity (`:1489-1505`), which the
+  /// child manager drops only after this layout's sequence returns. The
+  /// base skips it when it links its children (`:1424`); this object's
+  /// paint lists, measurements and null-cell count are built inside the
+  /// sequence and must skip it too.
+  RenderBox? _liveChildFor(ChildVicinity vicinity) {
+    if (_builtNothing.contains(vicinity)) {
+      return null;
     }
     return getChildFor(vicinity);
+  }
+
+  /// The vicinities whose builder answered null in the layout that is
+  /// running, which [noteBuiltNothing] writes and [_liveChildFor] reads.
+  /// Cleared at the head of every `layoutChildSequence`.
+  final Set<ChildVicinity> _builtNothing = <ChildVicinity>{};
+
+  /// Internal-use channel for the board's delegate builder; not part of
+  /// the supported surface. Records that the builder answered null for
+  /// [vicinity], so a child left there from an earlier layout is not read
+  /// back as this layout's; see [_liveChildFor].
+  void noteBuiltNothing(ChildVicinity vicinity) {
+    _builtNothing.add(vicinity);
   }
 
   /// The final positioning sweep. Every obtained vicinity gets a
@@ -1699,12 +2050,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     _hasVisualOverflow = false;
     final corner = <RenderBox>[];
     final itemEntries =
-        <({bool laned, int lane, int id, RenderBox child})>[];
+        <({int plane, bool laned, int lane, int id, RenderBox child})>[];
     // The one write site of the null-cell count; see the field.
     final cellColumns = columnAxis.trackCount;
     _nullCellCount = 0;
     for (final vicinity in _obtainedThisLayout) {
-      final child = getChildFor(vicinity);
+      final child = _liveChildFor(vicinity);
       if (child == null) {
         // A vicinity that built nothing. A CELL one is what the two
         // channel handlers gate on: it holds no host, so no relay can
@@ -1718,10 +2069,13 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       final itemId = _vicinityToItemId[vicinity];
       if (itemId != null) {
         // An ITEM child: exact rect on both axes from the two-arm
-        // geometry rule; never frozen-pinned, so the band covers items
-        // scrolled beneath it.
-        final vertical = _itemSpanGeometry(itemId, Axis.vertical);
-        final horizontal = _itemSpanGeometry(itemId, Axis.horizontal);
+        // geometry rule, positioned with its band on an axis where it is
+        // PINNED and with the scroll offset elsewhere, so the band covers
+        // an item that merely scrolls beneath it.
+        final pinV = _controller.pinOfId(itemId, Axis.vertical);
+        final pinH = _controller.pinOfId(itemId, Axis.horizontal);
+        final vertical = _itemSpanGeometry(itemId, Axis.vertical, pinV);
+        final horizontal = _itemSpanGeometry(itemId, Axis.horizontal, pinH);
         child.layout(
           BoxConstraints.tightFor(
             width: horizontal.extent,
@@ -1729,11 +2083,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           ),
           parentUsesSize: true,
         );
-        parentDataOf(child).layoutOffset = Offset(
-          horizontal.lead - scrollX,
-          vertical.lead - scrollY,
-        );
+        final data = parentDataOf(child) as _BoardChildParentData;
+        data
+          ..layoutOffset = Offset(
+            _normalizedItemLead(Axis.horizontal, pinH, horizontal.lead),
+            _normalizedItemLead(Axis.vertical, pinV, vertical.lead),
+          )
+          ..pinnedVertical = pinV != BoardPin.none
+          ..pinnedHorizontal = pinH != BoardPin.none;
         itemEntries.add((
+          plane:
+              (pinV == BoardPin.none ? 0 : 1) + (pinH == BoardPin.none ? 0 : 1),
           laned: _controller.isLanedId(itemId),
           lane: _controller.laneOfId(itemId),
           id: itemId,
@@ -1753,11 +2113,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       // The two animated extents, read ONCE and used three times each:
       // the placement constraints, the alignment surplus, and nothing
       // else in this arm.
-      final trackWidth = _animatedExtentOf(
-        Axis.horizontal,
-        columnAxis,
-        col,
-      );
+      final trackWidth = _animatedExtentOf(Axis.horizontal, columnAxis, col);
       final trackHeight = _animatedExtentOf(Axis.vertical, rowAxis, row);
       child.layout(
         _placementConstraints(
@@ -1768,8 +2124,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         ),
         parentUsesSize: true,
       );
-      final rowFrozen = _isFrozenTrack(rowsConfig, row);
-      final colFrozen = _isFrozenTrack(columnsConfig, col);
+      final rowFrozen = rowsConfig.isFrozenTrack(row);
+      final colFrozen = columnsConfig.isFrozenTrack(col);
       // Content space: the track's leading edge plus the alignment's share
       // of whatever surplus the cell left in the track. A frozen track
       // replaces the content-minus-scroll term with a viewport-pinned one
@@ -1786,14 +2142,16 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           ? _frozenNormalizedPosition(rowsConfig, row, extent.height) + shiftY
           : _animatedOffsetOf(Axis.vertical, rowAxis, row) + shiftY - scrollY;
       final normalizedX = colFrozen
-          ? _frozenNormalizedPosition(columnsConfig, col, extent.width) +
-                shiftX
+          ? _frozenNormalizedPosition(columnsConfig, col, extent.width) + shiftX
           : _animatedOffsetOf(Axis.horizontal, columnAxis, col) +
                 shiftX -
                 scrollX;
       // NORMALIZED space, not viewport paint space:
       // computeAbsolutePaintOffsetFor applies reversal from here.
-      parentDataOf(child).layoutOffset = Offset(normalizedX, normalizedY);
+      (parentDataOf(child) as _BoardChildParentData)
+        ..layoutOffset = Offset(normalizedX, normalizedY)
+        ..pinnedVertical = rowFrozen
+        ..pinnedHorizontal = colFrozen;
       if (normalizedX < 0.0 ||
           normalizedY < 0.0 ||
           normalizedX + child.size.width > extent.width ||
@@ -1809,13 +2167,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       }
     }
     // Corner cells outpaint the two bands; see the field's doc.
+    _cornerCellStart = _frozenPaintOrder.length;
     _frozenPaintOrder.addAll(corner);
-    // Plane 2's order: laned items by lane then id, and non-laned items
-    // LAST, so an item painting across its whole lane-axis extent sits
-    // above the laned stack and, through the reverse hit-test walk, takes
-    // the pointer over it. A plain (lane, id) order buries it: exclusion
-    // from laning stores lane 0.
+    // The item planes in order, and inside each: laned items by lane then
+    // id, and non-laned items LAST, so an item painting across its whole
+    // lane-axis extent sits above the laned stack and, through the reverse
+    // hit-test walk, takes the pointer over it. A plain (lane, id) order
+    // buries it: exclusion from laning stores lane 0.
     itemEntries.sort((a, b) {
+      if (a.plane != b.plane) {
+        return a.plane.compareTo(b.plane);
+      }
       if (a.laned != b.laned) {
         return a.laned ? -1 : 1;
       }
@@ -1825,6 +2187,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       }
       return a.id.compareTo(b.id);
     });
+    _bandItemStart = itemEntries.length;
+    _cornerItemStart = itemEntries.length;
+    for (var i = itemEntries.length - 1; i >= 0; i--) {
+      final plane = itemEntries[i].plane;
+      if (plane >= 1) {
+        _bandItemStart = i;
+      }
+      if (plane == 2) {
+        _cornerItemStart = i;
+      }
+    }
     for (final entry in itemEntries) {
       _itemPaintOrder.add(entry.child);
     }
@@ -1935,7 +2308,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       // holds nothing the user sees still while every unfrozen row
       // shifts. Frozen tracks are always obtained and measured, so on a
       // content-sized axis with a frozen band one would otherwise win.
-      if (_isFrozenTrack(config, track)) {
+      if (config.isFrozenTrack(track)) {
         continue;
       }
       if (axis.isMeasured(track)) {
@@ -1945,44 +2318,49 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     return -1;
   }
 
-  void _recordVisibleWindow(
-    BoardAxis rowAxis,
-    BoardAxis columnAxis, {
-    required double topVisible,
-    required double bottomVisible,
-    required double leftVisible,
-    required double rightVisible,
-  }) {
-    if (rowAxis.trackCount == 0) {
-      _firstVisibleRow = 0;
-      _lastVisibleRow = -1;
-    } else {
-      _firstVisibleRow = _animatedTrackAt(
-        Axis.vertical,
-        rowAxis,
-        math.max(0.0, topVisible),
-      );
-      _lastVisibleRow = _animatedTrackAt(
-        Axis.vertical,
-        rowAxis,
-        math.max(0.0, bottomVisible - precisionErrorTolerance),
-      );
+  /// Records the four visible bounds: the SCROLLED tracks that show in
+  /// the unfrozen region, [scrolledRegion]. A track wholly under a frozen
+  /// band shows nowhere, and a frozen track is reported by
+  /// `frozenTracksOf` instead, so no track is in both.
+  void _recordVisibleWindow() {
+    final rows = _visibleScrolledTracks(Axis.vertical);
+    final cols = _visibleScrolledTracks(Axis.horizontal);
+    _firstVisibleRow = rows.first;
+    _lastVisibleRow = rows.last;
+    _firstVisibleCol = cols.first;
+    _lastVisibleCol = cols.last;
+  }
+
+  /// The scrolled tracks of [axis] that intersect its unfrozen interval,
+  /// through the animated geometry they paint with; `(0, -1)` when none
+  /// does.
+  ({int first, int last}) _visibleScrolledTracks(Axis axis) {
+    final vertical = axis == Axis.vertical;
+    final config = vertical ? _controller.rows : _controller.columns;
+    final boardAxis = config.axis;
+    final lead = config.leadingBandEnd;
+    final trailFrom = config.trailingBandStart;
+    final region = _unfrozenNormalized(axis);
+    if (trailFrom <= lead || region.hi <= region.lo) {
+      return (first: 0, last: -1);
     }
-    if (columnAxis.trackCount == 0) {
-      _firstVisibleCol = 0;
-      _lastVisibleCol = -1;
-    } else {
-      _firstVisibleCol = _animatedTrackAt(
-        Axis.horizontal,
-        columnAxis,
-        math.max(0.0, leftVisible),
-      );
-      _lastVisibleCol = _animatedTrackAt(
-        Axis.horizontal,
-        columnAxis,
-        math.max(0.0, rightVisible - precisionErrorTolerance),
-      );
+    final pixels = vertical ? verticalOffset.pixels : horizontalOffset.pixels;
+    final first = math.max(
+      lead,
+      _animatedTrackAt(axis, boardAxis, math.max(0.0, pixels + region.lo)),
+    );
+    final last = math.min(
+      trailFrom - 1,
+      _animatedTrackAt(
+        axis,
+        boardAxis,
+        math.max(0.0, pixels + region.hi - precisionErrorTolerance),
+      ),
+    );
+    if (last < first) {
+      return (first: 0, last: -1);
     }
+    return (first: first, last: last);
   }
 
   /// Gives BOTH offsets content dimensions, on every layout including an
@@ -2068,7 +2446,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   // -----------------------------------------------------------------
-  // Paint and hit-test. Three planes: cells, items, frozen; hit-testing
+  // Paint and hit-test. Six planes (see [_frozenPaintOrder]); hit-testing
   // walks the exact reverse, and applyPaintTransform mirrors the same
   // per-item shift paint applies.
   // -----------------------------------------------------------------
@@ -2116,6 +2494,18 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       verticalAxisDirection == AxisDirection.up
           ? -paintDelta.dy
           : paintDelta.dy,
+    );
+  }
+
+  @override
+  Offset leadingCornerOf(Rect paintRect) {
+    return Offset(
+      horizontalAxisDirection == AxisDirection.left
+          ? paintRect.right
+          : paintRect.left,
+      verticalAxisDirection == AxisDirection.up
+          ? paintRect.bottom
+          : paintRect.top,
     );
   }
 
@@ -2220,14 +2610,39 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   void _paintPlanes(PaintingContext context, Offset offset) {
     _paintBackground(context, offset);
-    for (final child in _cellPaintOrder) {
+    _paintCells(context, offset, _cellPaintOrder, 0, _cellPaintOrder.length);
+    _paintItems(context, offset, 0, _bandItemStart);
+    _paintCells(context, offset, _frozenPaintOrder, 0, _cornerCellStart);
+    _paintItems(context, offset, _bandItemStart, _cornerItemStart);
+    _paintCells(
+      context,
+      offset,
+      _frozenPaintOrder,
+      _cornerCellStart,
+      _frozenPaintOrder.length,
+    );
+    _paintItems(context, offset, _cornerItemStart, _itemPaintOrder.length);
+  }
+
+  void _paintCells(
+    PaintingContext context,
+    Offset offset,
+    List<RenderBox> cells,
+    int from,
+    int to,
+  ) {
+    for (var i = from; i < to; i++) {
+      final child = cells[i];
       final childParentData = parentDataOf(child);
       if (childParentData.isVisible) {
         context.paintChild(child, offset + childParentData.paintOffset!);
       }
     }
+  }
+
+  void _paintItems(PaintingContext context, Offset offset, int from, int to) {
     final viewport = Offset.zero & viewportDimension;
-    for (var i = 0; i < _itemPaintOrder.length; i++) {
+    for (var i = from; i < to; i++) {
       final child = _itemPaintOrder[i];
       // The PAINTED rect gates, not the base's `isVisible`: see
       // [_paintsItem]. Read from the scratch, so this loop and the
@@ -2237,21 +2652,171 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         context.paintChild(child, offset + rect.topLeft);
       }
     }
-    for (final child in _frozenPaintOrder) {
-      final childParentData = parentDataOf(child);
-      if (childParentData.isVisible) {
-        context.paintChild(child, offset + childParentData.paintOffset!);
-      }
+  }
+
+  /// The SEMANTICS walk, in PAINT order: the six planes of
+  /// [_frozenPaintOrder]'s doc, bottom to top, as [_paintPlanes] draws
+  /// them.
+  ///
+  /// The base walks the sibling chain, which is sorted by vicinity
+  /// (`widgets/two_dimensional_viewport.dart:949-960`), and a semantics
+  /// node's hit-test order is its child list reversed
+  /// (`semantics/semantics.dart:4064-4071`). On the chain a frozen header
+  /// came BEFORE the content cell scrolled under it, and an item before a
+  /// later row's cell it covers, so explore-by-touch found the covered
+  /// node. Reading order is not this list's: with a text direction in
+  /// scope the framework sorts the children geometrically
+  /// (`semantics/semantics.dart:4234-4240`).
+  ///
+  /// The SET is the base's: the chain holds the children obtained this
+  /// layout, and the final sweep files every non-null one in exactly one
+  /// list. Nothing here writes keep-alive, so there is no bucket to
+  /// leave out. After a layout that threw, the lists are the previous
+  /// sweep's and the chain is empty, so the base's walk runs instead
+  /// ([_paintListsCurrent]).
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) {
+    if (!_paintListsCurrent) {
+      super.visitChildrenForSemantics(visitor);
+      return;
     }
+    assert(() {
+      var chain = 0;
+      visitChildren((child) {
+        chain += 1;
+      });
+      final listed =
+          _cellPaintOrder.length +
+          _itemPaintOrder.length +
+          _frozenPaintOrder.length;
+      if (chain != listed) {
+        throw FlutterError(
+          "RenderBoardViewport's semantics walk lists $listed children "
+          "and the viewport holds $chain. The paint lists are rebuilt by "
+          "the final positioning sweep of every layout and must hold "
+          "every child that layout kept.",
+        );
+      }
+      return true;
+    }());
+    _cellPaintOrder.forEach(visitor);
+    for (var i = 0; i < _bandItemStart; i++) {
+      visitor(_itemPaintOrder[i]);
+    }
+    for (var i = 0; i < _cornerCellStart; i++) {
+      visitor(_frozenPaintOrder[i]);
+    }
+    for (var i = _bandItemStart; i < _cornerItemStart; i++) {
+      visitor(_itemPaintOrder[i]);
+    }
+    for (var i = _cornerCellStart; i < _frozenPaintOrder.length; i++) {
+      visitor(_frozenPaintOrder[i]);
+    }
+    for (var i = _cornerItemStart; i < _itemPaintOrder.length; i++) {
+      visitor(_itemPaintOrder[i]);
+    }
+  }
+
+  /// Where [child] can be SEEN, for the semantics pass, which flags a
+  /// node hidden when its rect misses this (`rendering/object.dart:6719-6729`).
+  ///
+  /// Null under [Clip.none]: a render object that clips with a `Clip`
+  /// must describe no clip when it does not clip
+  /// (`rendering/object.dart:3747-3750`). Otherwise the viewport on each
+  /// axis [child] is PINNED on, and the scrolled region between the
+  /// frozen bands on each axis it scrolls on, because the bands paint
+  /// over whatever scrolls under them. That is `RenderViewport`'s rule for
+  /// the content under a pinned header (`rendering/viewport.dart:886-933`)
+  /// on both axes: a cell outside the viewport, a content cell under a
+  /// header band, and a header cell slid under the corner are hidden; a
+  /// corner cell is not.
+  @override
+  Rect? describeApproximatePaintClip(RenderObject child) {
+    if (clipBehavior == Clip.none) {
+      return null;
+    }
+    final viewport = Offset.zero & viewportDimension;
+    final data = child.parentData;
+    if (data is! _BoardChildParentData) {
+      return viewport;
+    }
+    final region = scrolledRegion;
+    return Rect.fromLTRB(
+      data.pinnedHorizontal ? viewport.left : region.left,
+      data.pinnedVertical ? viewport.top : region.top,
+      data.pinnedHorizontal ? viewport.right : region.right,
+      data.pinnedVertical ? viewport.bottom : region.bottom,
+    );
+  }
+
+  /// Which children's semantics nodes are KEPT: the viewport grown by the
+  /// cache region on both axes, the region layout builds. A node inside it
+  /// and outside [describeApproximatePaintClip] is kept flagged hidden,
+  /// which a screen reader's implicit scrolling moves onto; without this
+  /// the semantics clip falls back to the paint clip
+  /// (`rendering/object.dart:6700-6701`), which empties such a node's
+  /// rect, and a node with an empty rect is dropped from its parent's
+  /// children (`rendering/object.dart:6246`,
+  /// `semantics/semantics.dart:2907`).
+  /// `RenderViewport` grows its own along its one axis
+  /// (`rendering/viewport.dart:938-960`).
+  @override
+  Rect? describeSemanticsClip(RenderObject? child) {
+    final cache = _resolveCacheTerms();
+    final size = viewportDimension;
+    return Rect.fromLTRB(
+      -cache.dx,
+      -cache.dy,
+      size.width + cache.dx,
+      size.height + cache.dy,
+    );
   }
 
   @override
   bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
     // Exact reverse of the paint walk, so the child drawn on top is the
-    // child that takes the pointer: frozen (corner first), then items,
-    // then cells.
-    for (var i = _frozenPaintOrder.length - 1; i >= 0; i--) {
-      final child = _frozenPaintOrder[i];
+    // child that takes the pointer; see [_frozenPaintOrder] for the six
+    // planes.
+    return _hitTestItems(
+          result,
+          position,
+          _cornerItemStart,
+          _itemPaintOrder.length,
+        ) ||
+        _hitTestCells(
+          result,
+          position,
+          _frozenPaintOrder,
+          _cornerCellStart,
+          _frozenPaintOrder.length,
+        ) ||
+        _hitTestItems(result, position, _bandItemStart, _cornerItemStart) ||
+        _hitTestCells(
+          result,
+          position,
+          _frozenPaintOrder,
+          0,
+          _cornerCellStart,
+        ) ||
+        _hitTestItems(result, position, 0, _bandItemStart) ||
+        _hitTestCells(
+          result,
+          position,
+          _cellPaintOrder,
+          0,
+          _cellPaintOrder.length,
+        );
+  }
+
+  bool _hitTestCells(
+    BoxHitTestResult result,
+    Offset position,
+    List<RenderBox> cells,
+    int from,
+    int to,
+  ) {
+    for (var i = to - 1; i >= from; i--) {
+      final child = cells[i];
       final childParentData = parentDataOf(child);
       if (childParentData.isVisible &&
           _hitTestChild(
@@ -2263,8 +2828,24 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         return true;
       }
     }
-    for (var i = _itemPaintOrder.length - 1; i >= 0; i--) {
+    return false;
+  }
+
+  bool _hitTestItems(
+    BoxHitTestResult result,
+    Offset position,
+    int from,
+    int to,
+  ) {
+    for (var i = to - 1; i >= from; i--) {
       final child = _itemPaintOrder[i];
+      // An EXITING item takes no pointer, as `itemAt` finds none: the
+      // model no longer holds it, and the pointer reaches what lies
+      // under it.
+      final id = _vicinityToItemId[parentDataOf(child).vicinity];
+      if (id != null && _controller.anim.isExitingItem(id)) {
+        continue;
+      }
       // The same predicate and the same rect the paint walk reads, so an
       // item is found exactly where it is drawn.
       if (_paintsItem(child) &&
@@ -2273,19 +2854,6 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
             result,
             position,
             _paintedRectOf(child).topLeft,
-          )) {
-        return true;
-      }
-    }
-    for (var i = _cellPaintOrder.length - 1; i >= 0; i--) {
-      final child = _cellPaintOrder[i];
-      final childParentData = parentDataOf(child);
-      if (childParentData.isVisible &&
-          _hitTestChild(
-            child,
-            result,
-            position,
-            childParentData.paintOffset!,
           )) {
         return true;
       }
@@ -2320,6 +2888,62 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final paintOffset =
         childParentData.paintOffset! + _paintShiftOf(childParentData.vicinity);
     transform.translateByDouble(paintOffset.dx, paintOffset.dy, 0.0, 1.0);
+  }
+
+  /// Reveals against the viewport the user can see into, which is the
+  /// viewport minus its frozen bands, and never scrolls on an axis where
+  /// the child is PINNED, since a frozen cell or a pinned item is on
+  /// screen at every offset there.
+  ///
+  /// Built on the base's own answer for alignment 0, the offset that puts
+  /// the rect's leading edge at the viewport's leading edge
+  /// (`widgets/two_dimensional_viewport.dart:1024-1097`): the leading
+  /// band's extent is subtracted from it, and [alignment] spreads the rect
+  /// across the unfrozen extent rather than the whole one.
+  @override
+  RevealedOffset getOffsetToReveal(
+    RenderObject target,
+    double alignment, {
+    Rect? rect,
+    Axis? axis,
+  }) {
+    final resolvedAxis = axis ?? mainAxis;
+    final vertical = resolvedAxis == Axis.vertical;
+    var child = target;
+    while (child.parent != this) {
+      child = child.parent!;
+    }
+    final data = child.parentData! as _BoardChildParentData;
+    final pixels = vertical ? verticalOffset.pixels : horizontalOffset.pixels;
+    final current = MatrixUtils.transformRect(
+      target.getTransformTo(this),
+      rect ?? target.paintBounds,
+    );
+    if (vertical ? data.pinnedVertical : data.pinnedHorizontal) {
+      return RevealedOffset(offset: pixels, rect: current);
+    }
+    final base = super.getOffsetToReveal(
+      target,
+      0.0,
+      rect: rect,
+      axis: resolvedAxis,
+    );
+    final region = _unfrozenNormalized(resolvedAxis);
+    final extent = vertical ? current.height : current.width;
+    final spare = math.max(0.0, region.hi - region.lo - extent);
+    final offset = base.offset - region.lo - spare * alignment;
+    // `current` is where the rect paints at `pixels`; at `offset` the
+    // content has moved by the difference toward the axis's leading side.
+    final moved = pixels - offset;
+    final revealed = switch (vertical
+        ? verticalAxisDirection
+        : horizontalAxisDirection) {
+      AxisDirection.up => current.translate(0.0, -moved),
+      AxisDirection.down => current.translate(0.0, moved),
+      AxisDirection.left => current.translate(-moved, 0.0),
+      AxisDirection.right => current.translate(moved, 0.0),
+    };
+    return RevealedOffset(offset: offset, rect: revealed);
   }
 
   @override
@@ -2368,22 +2992,14 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (!hasSize) {
       return null;
     }
-    final rowAxis = _controller.rows.axis;
-    final columnAxis = _controller.columns.axis;
-    if (rowAxis.trackCount == 0 || columnAxis.trackCount == 0) {
-      return null;
-    }
-    final contentY = _contentFromPaint(Axis.vertical, local.dy);
-    final contentX = _contentFromPaint(Axis.horizontal, local.dx);
-    if (contentY < 0.0 || contentY >= rowAxis.totalExtent) {
-      return null;
-    }
-    if (contentX < 0.0 || contentX >= columnAxis.totalExtent) {
+    final row = _trackCoordinateAt(Axis.vertical, local.dy, clamp: false);
+    final col = _trackCoordinateAt(Axis.horizontal, local.dx, clamp: false);
+    if (row == null || col == null) {
       return null;
     }
     return (
-      row: _animatedTrackAt(Axis.vertical, rowAxis, contentY),
-      col: _animatedTrackAt(Axis.horizontal, columnAxis, contentX),
+      row: row.floor().clamp(0, _controller.rows.axis.trackCount - 1),
+      col: col.floor().clamp(0, _controller.columns.axis.trackCount - 1),
     );
   }
 
@@ -2392,76 +3008,140 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (!hasSize) {
       return null;
     }
-    final rowsConfig = _controller.rows;
-    final columnsConfig = _controller.columns;
-    if (rowsConfig.axis.trackCount == 0 ||
-        columnsConfig.axis.trackCount == 0) {
+    // A cell of a band: the point is in a band on at least one axis, and
+    // the other axis resolves through the same mapping, so a pointer in
+    // the header band lands on the header cell of the column under it.
+    if (!_inFrozenBand(Axis.vertical, local.dy) &&
+        !_inFrozenBand(Axis.horizontal, local.dx)) {
       return null;
     }
-    final extent = viewportDimension;
-    final normalizedY = _normalizedFromPaint(Axis.vertical, local.dy);
-    final normalizedX = _normalizedFromPaint(Axis.horizontal, local.dx);
-    final frozenRow = _frozenTrackAtNormalized(
-      rowsConfig,
-      normalizedY,
-      extent.height,
-    );
-    final frozenCol = _frozenTrackAtNormalized(
-      columnsConfig,
-      normalizedX,
-      extent.width,
-    );
-    if (frozenRow == null && frozenCol == null) {
-      return null;
-    }
-    // The unfrozen coordinate resolves through the scrolled lattice, so a
-    // pointer in the header band lands on the header cell of the column
-    // currently under it.
-    final int row;
-    if (frozenRow != null) {
-      row = frozenRow;
-    } else {
-      final contentY = _contentFromPaint(Axis.vertical, local.dy);
-      if (contentY < 0.0 || contentY >= rowsConfig.axis.totalExtent) {
-        return null;
-      }
-      row = rowsConfig.axis.trackAt(contentY);
-    }
-    final int col;
-    if (frozenCol != null) {
-      col = frozenCol;
-    } else {
-      final contentX = _contentFromPaint(Axis.horizontal, local.dx);
-      if (contentX < 0.0 || contentX >= columnsConfig.axis.totalExtent) {
-        return null;
-      }
-      col = columnsConfig.axis.trackAt(contentX);
-    }
-    return (row: row, col: col);
+    return cellAt(local);
   }
 
-  /// The frozen track under a NORMALIZED viewport coordinate, or null when
-  /// the coordinate is outside both of [config]'s bands.
-  int? _frozenTrackAtNormalized(
-    BoardAxisConfig config,
-    double normalized,
-    double viewportExtent,
-  ) {
-    final axis = config.axis;
-    final count = axis.trackCount;
-    final lead = math.min(config.frozenStart, count);
-    if (lead > 0 && normalized >= 0.0 && normalized < axis.offsetOf(lead)) {
-      return axis.trackAt(normalized);
+  /// Whether the paint-space coordinate [paint] on [axis] lies inside one
+  /// of that axis's frozen bands as they paint.
+  bool _inFrozenBand(Axis axis, double paint) {
+    final region = _unfrozenNormalized(axis);
+    final normalized = _normalizedFromPaint(axis, paint);
+    final viewport = axis == Axis.vertical
+        ? viewportDimension.height
+        : viewportDimension.width;
+    return (normalized >= 0.0 && normalized < region.lo) ||
+        (normalized >= region.hi && normalized < viewport);
+  }
+
+  /// THE POINT MAPPING: the fractional track coordinate (the track plus
+  /// the fraction into it) that PAINTS under the paint-space coordinate
+  /// [paint] on [axis]. Every point query on the port reads it, so a
+  /// selection, a drop and a probe agree with each other and with paint.
+  ///
+  /// Three regions along the axis, in NORMALIZED space ([scrolledRegion]
+  /// in paint space): the leading band's tracks inside `[0, lo)`, where
+  /// frozen cells paint at their content offsets; the trailing band's
+  /// inside `[hi, viewport)`, pinned to the trailing edge; and between
+  /// them the SCROLLED tracks, the normalized coordinate plus the scroll
+  /// offset read through the ANIMATED geometry, exactly as those cells are
+  /// laid out mid track resize. A band reads settled offsets, as its cells
+  /// do.
+  ///
+  /// [clamp] true answers for every coordinate: a point past a band's
+  /// viewport edge takes that band's outer end, and the scrolled region is
+  /// clamped into the unfrozen tracks, which with no band is
+  /// `[0, trackCount]`. False answers null wherever no track paints: past
+  /// the viewport beside a band, past either end of the lattice, and in
+  /// the gap a short lattice leaves above a trailing band.
+  double? _trackCoordinateAt(Axis axis, double paint, {required bool clamp}) {
+    final vertical = axis == Axis.vertical;
+    final config = vertical ? _controller.rows : _controller.columns;
+    final boardAxis = config.axis;
+    final count = boardAxis.trackCount;
+    if (count == 0) {
+      return null;
     }
-    final trailFrom = math.max(lead, count - config.frozenEnd);
-    if (trailFrom < count) {
-      final trailInset = axis.totalExtent - axis.offsetOf(trailFrom);
-      if (normalized >= viewportExtent - trailInset &&
-          normalized < viewportExtent) {
-        return axis.trackAt(axis.totalExtent - (viewportExtent - normalized));
+    final lead = config.leadingBandEnd;
+    final trailFrom = config.trailingBandStart;
+    final viewport = vertical
+        ? viewportDimension.height
+        : viewportDimension.width;
+    final region = _unfrozenNormalized(axis);
+    final normalized = _normalizedFromPaint(axis, paint);
+    if (lead > 0 && normalized < region.lo) {
+      if (normalized < 0.0 && !clamp) {
+        return null;
       }
+      return _settledCoordinateOf(boardAxis, math.max(0.0, normalized));
     }
-    return null;
+    if (trailFrom < count && normalized >= region.hi) {
+      if (normalized >= viewport && !clamp) {
+        return null;
+      }
+      final content =
+          boardAxis.totalExtent - (viewport - math.min(normalized, viewport));
+      return _settledCoordinateOf(boardAxis, content);
+    }
+    final pixels = vertical ? verticalOffset.pixels : horizontalOffset.pixels;
+    final content = normalized + pixels;
+    final track = _animatedTrackAt(axis, boardAxis, math.max(0.0, content));
+    final trackLead = _animatedOffsetOf(axis, boardAxis, track);
+    final trackExtent = _animatedExtentOf(axis, boardAxis, track);
+    final coordinate = trackExtent <= 0.0
+        ? track.toDouble()
+        : track + (content - trackLead) / trackExtent;
+    if (!clamp) {
+      if (coordinate < lead || coordinate >= trailFrom) {
+        return null;
+      }
+      return coordinate;
+    }
+    return coordinate.clamp(lead.toDouble(), trailFrom.toDouble());
+  }
+
+  /// The settled track coordinate of the content-space [content], clamped
+  /// into `[0, trackCount]`.
+  double _settledCoordinateOf(BoardAxis axis, double content) {
+    if (content <= 0.0) {
+      return 0.0;
+    }
+    if (content >= axis.totalExtent) {
+      return axis.trackCount.toDouble();
+    }
+    final track = axis.trackAt(content);
+    return track + (content - axis.offsetOf(track)) / axis.extentOf(track);
+  }
+
+  /// The NORMALIZED interval `[lo, hi]` the scrolled tracks show through
+  /// on [axis]: the viewport minus its two frozen bands, each band's
+  /// extent settled as its cells are placed. Empty (`lo == hi`) when the
+  /// bands fill the viewport.
+  ({double lo, double hi}) _unfrozenNormalized(Axis axis) {
+    final vertical = axis == Axis.vertical;
+    final config = vertical ? _controller.rows : _controller.columns;
+    final viewport = vertical
+        ? viewportDimension.height
+        : viewportDimension.width;
+    final leading = config.leadingBandExtent;
+    final trailing = config.trailingBandExtent;
+    final lo = math.min(leading, viewport);
+    final hi = math.max(lo, viewport - trailing);
+    return (lo: lo, hi: hi);
+  }
+
+  @override
+  Rect get scrolledRegion {
+    if (!hasSize) {
+      return Rect.zero;
+    }
+    final v = _unfrozenNormalized(Axis.vertical);
+    final h = _unfrozenNormalized(Axis.horizontal);
+    final size = viewportDimension;
+    final upward = verticalAxisDirection == AxisDirection.up;
+    final leftward = horizontalAxisDirection == AxisDirection.left;
+    return Rect.fromLTRB(
+      leftward ? size.width - h.hi : h.lo,
+      upward ? size.height - v.hi : v.lo,
+      leftward ? size.width - h.lo : h.hi,
+      upward ? size.height - v.lo : v.hi,
+    );
   }
 
   /// A paint-space POINT's normalized viewport coordinate: reversal
@@ -2498,9 +3178,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   @override
   Iterable<int> frozenTracksOf(Axis axis) {
-    return _frozenTracksOf(
-      axis == Axis.vertical ? _controller.rows : _controller.columns,
-    );
+    final config = axis == Axis.vertical
+        ? _controller.rows
+        : _controller.columns;
+    return config.frozenTracks;
   }
 
   @override
@@ -2509,12 +3190,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final columnsConfig = _controller.columns;
     final rowAxis = rowsConfig.axis;
     final columnAxis = columnsConfig.axis;
-    final rowFrozen = row >= 0 &&
-        row < rowAxis.trackCount &&
-        _isFrozenTrack(rowsConfig, row);
-    final colFrozen = col >= 0 &&
+    final rowFrozen =
+        row >= 0 && row < rowAxis.trackCount && rowsConfig.isFrozenTrack(row);
+    final colFrozen =
+        col >= 0 &&
         col < columnAxis.trackCount &&
-        _isFrozenTrack(columnsConfig, col);
+        columnsConfig.isFrozenTrack(col);
     assert(
       (rowFrozen || (row >= _firstVisibleRow && row <= _lastVisibleRow)) &&
           (colFrozen || (col >= _firstVisibleCol && col <= _lastVisibleCol)),
@@ -2522,12 +3203,27 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       "$_firstVisibleRow..$_lastVisibleRow, cols "
       "$_firstVisibleCol..$_lastVisibleCol, and not in a frozen band.",
     );
+    return _cellRect(row, col, rowFrozen: rowFrozen, colFrozen: colFrozen);
+  }
+
+  /// Where cell `(row, col)` paints, both indices in range: a frozen
+  /// track where its frozen children paint (the normalized viewport-pinned
+  /// position of `_positionObtainedChildren`, through the reversal rule
+  /// `computeAbsolutePaintOffsetFor` applies to a layoutOffset), and a
+  /// scrolled one at its animated offset. The one computation behind
+  /// [visibleCellRect] and [rectOfCell].
+  Rect _cellRect(
+    int row,
+    int col, {
+    required bool rowFrozen,
+    required bool colFrozen,
+  }) {
+    final rowsConfig = _controller.rows;
+    final columnsConfig = _controller.columns;
+    final rowAxis = rowsConfig.axis;
+    final columnAxis = columnsConfig.axis;
     final width = _animatedExtentOf(Axis.horizontal, columnAxis, col);
     final height = _animatedExtentOf(Axis.vertical, rowAxis, row);
-    // A frozen track sits where its frozen children paint: the normalized
-    // viewport-pinned position of `_positionObtainedChildren`, taken
-    // through the same reversal rule `computeAbsolutePaintOffsetFor`
-    // applies to a child's layoutOffset.
     return Rect.fromLTWH(
       colFrozen
           ? _paintFromNormalized(
@@ -2589,29 +3285,19 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (!hasSize) {
       return null;
     }
-    final rowAxis = _controller.rows.axis;
-    final columnAxis = _controller.columns.axis;
-    if (row < 0 || row >= rowAxis.trackCount) {
+    final rowsConfig = _controller.rows;
+    final columnsConfig = _controller.columns;
+    if (row < 0 || row >= rowsConfig.axis.trackCount) {
       return null;
     }
-    if (col < 0 || col >= columnAxis.trackCount) {
+    if (col < 0 || col >= columnsConfig.axis.trackCount) {
       return null;
     }
-    final width = _animatedExtentOf(Axis.horizontal, columnAxis, col);
-    final height = _animatedExtentOf(Axis.vertical, rowAxis, row);
-    return Rect.fromLTWH(
-      _paintFromContent(
-        Axis.horizontal,
-        _animatedOffsetOf(Axis.horizontal, columnAxis, col),
-        width,
-      ),
-      _paintFromContent(
-        Axis.vertical,
-        _animatedOffsetOf(Axis.vertical, rowAxis, row),
-        height,
-      ),
-      width,
-      height,
+    return _cellRect(
+      row,
+      col,
+      rowFrozen: rowsConfig.isFrozenTrack(row),
+      colFrozen: columnsConfig.isFrozenTrack(col),
     );
   }
 
@@ -2620,30 +3306,62 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (!hasSize) {
       return null;
     }
-    // The topmost item under the pointer: plane 2 in exact reverse, the
-    // same order hit-testing walks. Excludes items animating out and the
-    // dragged item: neither can be a tap target or a drop target.
-    for (var i = _itemPaintOrder.length - 1; i >= 0; i--) {
-      final child = _itemPaintOrder[i];
-      final childParentData = parentDataOf(child);
-      if (childParentData.paintOffset == null) {
-        continue;
-      }
-      // The painted rect, the same one hit-testing reads: a probe must
-      // agree with what paints, held gaps included.
-      if (_paintedRectOf(child).contains(local)) {
-        final id = _vicinityToItemId[childParentData.vicinity];
-        if (id == null) {
+    // The topmost item under the pointer, down the planes in the order
+    // hit-testing walks them. A frozen cell painted over the point ends
+    // the walk: the band hides every item beneath it. Items animating out
+    // and the dragged item are passed over: neither can be a tap target
+    // or a drop target.
+    TKey? itemIn(int from, int to) {
+      for (var i = to - 1; i >= from; i--) {
+        final child = _itemPaintOrder[i];
+        final childParentData = parentDataOf(child);
+        if (childParentData.paintOffset == null) {
           continue;
         }
-        if (_controller.anim.isExitingItem(id) ||
-            _controller.isDraggingId(id)) {
-          continue;
+        // The painted rect, the same one hit-testing reads: a probe must
+        // agree with what paints, held gaps included.
+        if (_paintedRectOf(child).contains(local)) {
+          final id = _vicinityToItemId[childParentData.vicinity];
+          if (id == null) {
+            continue;
+          }
+          if (_controller.anim.isExitingItem(id) ||
+              _controller.isDraggingId(id)) {
+            continue;
+          }
+          return _controller.keyOfId(id);
         }
-        return _controller.keyOfId(id);
       }
+      return null;
     }
-    return null;
+
+    bool coveredByFrozen(int from, int to) {
+      for (var i = to - 1; i >= from; i--) {
+        final child = _frozenPaintOrder[i];
+        final childParentData = parentDataOf(child);
+        if (childParentData.isVisible &&
+            (childParentData.paintOffset! & child.size).contains(local)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    final corner = itemIn(_cornerItemStart, _itemPaintOrder.length);
+    if (corner != null) {
+      return corner;
+    }
+    if (coveredByFrozen(_cornerCellStart, _frozenPaintOrder.length)) {
+      return null;
+    }
+    final band = itemIn(_bandItemStart, _cornerItemStart);
+    if (band != null) {
+      return band;
+    }
+    if (coveredByFrozen(0, _cornerCellStart)) {
+      return null;
+    }
+    return itemIn(0, _bandItemStart);
   }
 
   @override
@@ -2655,11 +3373,21 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (id < 0) {
       return null;
     }
-    final vertical = _itemSpanGeometry(id, Axis.vertical);
-    final horizontal = _itemSpanGeometry(id, Axis.horizontal);
+    final pinV = _controller.pinOfId(id, Axis.vertical);
+    final pinH = _controller.pinOfId(id, Axis.horizontal);
+    final vertical = _itemSpanGeometry(id, Axis.vertical, pinV);
+    final horizontal = _itemSpanGeometry(id, Axis.horizontal, pinH);
     return Rect.fromLTWH(
-      _paintFromContent(Axis.horizontal, horizontal.lead, horizontal.extent),
-      _paintFromContent(Axis.vertical, vertical.lead, vertical.extent),
+      _paintFromNormalized(
+        Axis.horizontal,
+        _normalizedItemLead(Axis.horizontal, pinH, horizontal.lead),
+        horizontal.extent,
+      ),
+      _paintFromNormalized(
+        Axis.vertical,
+        _normalizedItemLead(Axis.vertical, pinV, vertical.lead),
+        vertical.extent,
+      ),
       horizontal.extent,
       vertical.extent,
     );
@@ -2685,42 +3413,23 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// board anyway. Callers that can see an empty board gate on trackCount.
   @override
   ({int row, int col}) resolveDropCell(Offset local) {
-    final rowAxis = _controller.rows.axis;
-    final columnAxis = _controller.columns.axis;
     if (!hasSize) {
       return (row: 0, col: 0);
     }
     // NEAREST, not containment: the fractional track-space coordinate is
     // rounded by the same rule BoardSnap.track's quantize applies, so
     // the cell route and the trackSpaceAt route agree on where an anchor
-    // between two boundaries lands. Read through the animated geometry,
-    // agreeing with what paints.
+    // between two boundaries lands. Both read the one point mapping.
+    final row = _trackCoordinateAt(Axis.vertical, local.dy, clamp: true);
+    final col = _trackCoordinateAt(Axis.horizontal, local.dx, clamp: true);
     return (
-      row: _nearestTrack(
-        Axis.vertical,
-        rowAxis,
-        _contentFromPaint(Axis.vertical, local.dy),
-      ),
-      col: _nearestTrack(
-        Axis.horizontal,
-        columnAxis,
-        _contentFromPaint(Axis.horizontal, local.dx),
-      ),
+      row: row == null
+          ? 0
+          : row.round().clamp(0, _controller.rows.axis.trackCount - 1),
+      col: col == null
+          ? 0
+          : col.round().clamp(0, _controller.columns.axis.trackCount - 1),
     );
-  }
-
-  int _nearestTrack(Axis axisDirection, BoardAxis axis, double content) {
-    final count = axis.trackCount;
-    if (count == 0 || content <= 0.0) {
-      return 0;
-    }
-    final track = _animatedTrackAt(axisDirection, axis, content);
-    final lead = _animatedOffsetOf(axisDirection, axis, track);
-    final extent = _animatedExtentOf(axisDirection, axis, track);
-    final fraction = extent <= 0.0
-        ? track.toDouble()
-        : track + (content - lead) / extent;
-    return fraction.round().clamp(0, count - 1);
   }
 
   @override
@@ -2728,21 +3437,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (!hasSize) {
       return null;
     }
-    final rowAxis = _controller.rows.axis;
-    final columnAxis = _controller.columns.axis;
-    if (rowAxis.trackCount == 0 || columnAxis.trackCount == 0) {
+    final row = _trackCoordinateAt(Axis.vertical, local.dy, clamp: true);
+    final col = _trackCoordinateAt(Axis.horizontal, local.dx, clamp: true);
+    if (row == null || col == null) {
       return null;
     }
-    return (
-      row: _trackFractionOf(
-        rowAxis,
-        _contentFromPaint(Axis.vertical, local.dy),
-      ),
-      col: _trackFractionOf(
-        columnAxis,
-        _contentFromPaint(Axis.horizontal, local.dx),
-      ),
-    );
+    return (row: row, col: col);
   }
 
   @override
@@ -2763,49 +3463,16 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// cannot tell the two apart.
   @override
   double frozenInsetOf(Axis axis) {
-    final config = axis == Axis.vertical ? _controller.rows : _controller.columns;
-    final lead = math.min(config.frozenStart, config.axis.trackCount);
-    if (lead == 0) {
-      return 0.0;
-    }
-    return config.axis.offsetOf(lead);
-  }
-
-  /// Track space of a content-space coordinate: the integer track plus the
-  /// fraction into it, clamped into `[0, trackCount]`.
-  double _trackFractionOf(BoardAxis axis, double content) {
-    if (content <= 0.0) {
-      return 0.0;
-    }
-    if (content >= axis.totalExtent) {
-      return axis.trackCount.toDouble();
-    }
-    final track = axis.trackAt(content);
-    return track + (content - axis.offsetOf(track)) / axis.extentOf(track);
-  }
-
-  /// Content-space coordinate of a viewport-paint-space one.
-  ///
-  /// The reversed arm is the inverse of `computeAbsolutePaintOffsetFor`
-  /// (`widgets/two_dimensional_viewport.dart:1626`) for a point.
-  double _contentFromPaint(Axis axis, double paint) {
-    switch (axis) {
-      case Axis.vertical:
-        if (verticalAxisDirection == AxisDirection.down) {
-          return paint + verticalOffset.pixels;
-        }
-        return verticalOffset.pixels + viewportDimension.height - paint;
-      case Axis.horizontal:
-        if (horizontalAxisDirection == AxisDirection.right) {
-          return paint + horizontalOffset.pixels;
-        }
-        return horizontalOffset.pixels + viewportDimension.width - paint;
-    }
+    final config = axis == Axis.vertical
+        ? _controller.rows
+        : _controller.columns;
+    return config.leadingBandExtent;
   }
 
   /// Viewport-paint-space LEADING edge of a content-space interval. Under
   /// reversal the leading edge is the far side of the interval, which is
-  /// why this takes the extent and [_contentFromPaint] does not.
+  /// why this takes the extent and [_normalizedFromPaint], which maps a
+  /// point, does not.
   double _paintFromContent(Axis axis, double contentStart, double extent) {
     switch (axis) {
       case Axis.vertical:
@@ -2850,6 +3517,13 @@ class _BoardChildParentData extends TwoDimensionalViewportParentData {
   /// answers it. The cell's host rebuilt, so its builder may have
   /// returned content of a different size.
   bool remeasure = false;
+
+  /// Whether the child is pinned to the viewport on each axis: a cell in
+  /// a frozen track, or an item wholly inside a frozen band. Written by
+  /// the positioning sweep, read by `getOffsetToReveal`, for which a
+  /// pinned axis needs no scroll.
+  bool pinnedVertical = false;
+  bool pinnedHorizontal = false;
 }
 
 /// A cell's measurement TRIGGER: a proxy the cell host wraps its content

@@ -102,6 +102,11 @@ class _FakeGeometry implements BoardGeometryView {
   Iterable<int> frozenTracksOf(Axis axis) {
     return const <int>[];
   }
+
+  @override
+  Rect get scrolledRegion {
+    return Offset.zero & viewportDimension;
+  }
 }
 
 /// Four rows of extent 51.3 shifted by 137.7, three columns of 100: the
@@ -149,6 +154,11 @@ class _FractionalGeometry implements BoardGeometryView {
   @override
   Iterable<int> frozenTracksOf(Axis axis) {
     return const <int>[];
+  }
+
+  @override
+  Rect get scrolledRegion {
+    return Offset.zero & viewportDimension;
   }
 }
 

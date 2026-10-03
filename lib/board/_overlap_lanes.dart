@@ -13,6 +13,7 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
+import '_board_span.dart';
 import '_board_store.dart';
 
 /// Assigns each laned item a lane within its lane-axis track, and every
@@ -148,9 +149,8 @@ class OverlapLaneResolver {
     if (axis == null) {
       return false;
     }
-    final start = _store.startTrackOf(id, axis);
     final end = _store.endTrackOf(id, axis);
-    return end <= start.floorToDouble() + 1 + precisionErrorTolerance;
+    return end <= _store.startIndexOf(id, axis) + 1 + precisionErrorTolerance;
   }
 
   /// Adds [id]'s single lane-bucket entry and dirties that bucket, when
@@ -159,7 +159,7 @@ class OverlapLaneResolver {
     if (!isLaned(id)) {
       return;
     }
-    final track = _store.startTrackOf(id, _laneAxis!).floor();
+    final track = _store.startIndexOf(id, _laneAxis!);
     final bucket = _laneBuckets.putIfAbsent(track, () {
       return <int>[];
     });
@@ -181,7 +181,7 @@ class OverlapLaneResolver {
     if (!isLaned(id)) {
       return;
     }
-    final track = _store.startTrackOf(id, _laneAxis!).floor();
+    final track = _store.startIndexOf(id, _laneAxis!);
     final bucket = _laneBuckets[track];
     final removed = bucket != null && bucket.remove(id);
     assert(
@@ -302,10 +302,10 @@ class OverlapLaneResolver {
             "interval covers more than one track",
           );
         }
-        if (_store.startTrackOf(id, laneAxis).floor() != track) {
+        if (_store.startIndexOf(id, laneAxis) != track) {
           throw StateError(
             "lane-axis bucket $track holds id $id, which now sits in "
-            "track ${_store.startTrackOf(id, laneAxis).floor()}",
+            "track ${_store.startIndexOf(id, laneAxis)}",
           );
         }
       }
@@ -501,12 +501,12 @@ class OverlapLaneResolver {
       return result;
     }
     final sweep = sweepAxis!;
-    final prospectivelyLaned = prospectiveLaneEnd <=
-        prospectiveLaneStart.floorToDouble() + 1 + precisionErrorTolerance;
-    final prospectiveTrack = prospectiveLaneStart.floor();
+    final prospectiveTrack = trackIndexOf(prospectiveLaneStart);
+    final prospectivelyLaned =
+        prospectiveLaneEnd <= prospectiveTrack + 1 + precisionErrorTolerance;
     final tracks = <int>{};
     if (isLaned(draggedId)) {
-      tracks.add(_store.startTrackOf(draggedId, axis).floor());
+      tracks.add(_store.startIndexOf(draggedId, axis));
     }
     if (prospectivelyLaned) {
       tracks.add(prospectiveTrack);

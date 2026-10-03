@@ -9,6 +9,9 @@
 /// `animationStyle` once per session.
 library;
 
+import 'dart:async';
+import 'dart:collection';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +35,7 @@ class _DragSession<TKey> {
     required this.grabOffset,
     required this.grabCellRow,
     required this.grabCellCol,
+    required this.liftTrack,
     required this.makeRoomDuration,
     required this.makeRoomCurve,
     required this.dropSettleDuration,
@@ -44,8 +48,10 @@ class _DragSession<TKey> {
   final BoardRenderPort<TKey> port;
 
   /// Pointer minus the item's painted top-left at lift: what places the
-  /// PROXY, and, on the continuous snaps, what makes the resolved anchor
-  /// the item's would-be corner rather than the finger.
+  /// PROXY, whose content-LEADING corner (`BoardRenderPort.leadingCornerOf`)
+  /// is a move's resolved anchor, so a move resolves from where the item
+  /// would start rather than from the finger. Paint space, and a top-left
+  /// because that is what positions a widget; the anchor converts.
   final Offset grabOffset;
 
   /// The lift pointer's cell minus the item's start cell, per axis: the
@@ -53,6 +59,10 @@ class _DragSession<TKey> {
   /// under the pointer while within-cell grab detail is discarded.
   final int grabCellRow;
   final int grabCellCol;
+
+  /// The lift pointer's track coordinate, which a RESIZE's displacement
+  /// is measured from; `startDrag` refuses a resize without one.
+  final ({double row, double col})? liftTrack;
 
   /// The session's captured values; the kill switch re-reads the live
   /// style at every install and dominates them.
@@ -63,22 +73,136 @@ class _DragSession<TKey> {
 
   final BoardAutoScroller autoScroller;
 
+  /// The target last queued for `onDragTargetChanged`.
+  BoardDropTarget? reportedTarget;
+
   ScrollPosition? verticalSubscription;
   ScrollPosition? horizontalSubscription;
 }
 
+/// Whether [config] lets [key] start a drag: true with no predicate,
+/// false for a refusal or a throw, which is reported through
+/// [FlutterError.reportError]. A question that fails has a safe answer,
+/// and a session in flight must never see an exception from one.
+///
+/// Every `canDrag` question the board asks goes through here. Not shown
+/// by the module barrel.
+@pragma("vm:notify-debugger-on-exception")
+bool askCanDrag<TKey>(BoardDragConfig<TKey> config, TKey key) {
+  final canDrag = config.canDrag;
+  if (canDrag == null) {
+    return true;
+  }
+  try {
+    return canDrag(key);
+  } catch (exception, stack) {
+    _reportPolicyThrow("canDrag", exception, stack);
+    return false;
+  }
+}
+
+/// Whether [config] lets [key] land on [span]: true with no predicate,
+/// false for a refusal, and null for a throw, which is reported through
+/// [FlutterError.reportError]. Every caller treats null as a refusal;
+/// the drag's resolution also skips the nudge for it.
+///
+/// Every `canDropAt` question the board asks goes through here. Not shown
+/// by the module barrel.
+@pragma("vm:notify-debugger-on-exception")
+bool? askCanDropAt<TKey>(
+  BoardDragConfig<TKey> config,
+  TKey key,
+  BoardSpan span,
+) {
+  final canDropAt = config.canDropAt;
+  if (canDropAt == null) {
+    return true;
+  }
+  try {
+    return canDropAt(key, span);
+  } catch (exception, stack) {
+    _reportPolicyThrow("canDropAt", exception, stack);
+    return null;
+  }
+}
+
+void _reportPolicyThrow(String predicate, Object exception, StackTrace stack) {
+  FlutterError.reportError(
+    FlutterErrorDetails(
+      exception: exception,
+      stack: stack,
+      library: "widgets_extended board",
+      context: ErrorDescription("while asking $predicate"),
+    ),
+  );
+}
+
 /// Drag-and-drop and drag-resize over a board.
+///
+/// Not exported from the module barrel: `Board` builds its own from
+/// `Board.drag` and hands it to nothing an app holds. An app reaches a
+/// session through `BoardDragConfig`'s `onDragStart`,
+/// `onDragTargetChanged` and `onDragEnd`.
 class BoardDragController<TKey> extends ChangeNotifier {
   BoardDragController({
     required this.boardController,
     required TickerProvider vsync,
-    required this.config,
-  }) : _vsync = vsync;
+    required BoardDragConfig<TKey> config,
+  }) : _vsync = vsync,
+       _config = config;
 
   /// Key-only: the drag layer never reads a payload.
   final BoardController<TKey, Object?> boardController;
 
-  final BoardDragConfig<TKey> config;
+  /// The policy every session is gated and resolved by.
+  ///
+  /// ASSIGNED IN PLACE: `Board` hands each new config instance to the
+  /// controller it already has, so a config built inline in a parent's
+  /// build costs no session and no rebuilt lattice. Assigning the
+  /// identical instance does nothing. A different one takes effect at
+  /// once for every later read, and a LIVE session is re-validated
+  /// against it by the part of [startDrag]'s gate that describes a
+  /// session rather than a lift: [BoardDragConfig.enabled], and for a
+  /// resize a non-null [BoardDragConfig.onItemResized] and an axis policy
+  /// that still admits the session's edge. A session that fails is
+  /// cancelled exactly as `endDrag(cancel: true)` cancels one.
+  /// [BoardDragConfig.canDrag] is not asked again: it decides whether a
+  /// drag may START. A session that passes adopts the new autoscroll
+  /// zone and velocity at once and re-resolves its target after the
+  /// frame, so a new snap or `canDropAt` answers for the pointer where
+  /// it already is.
+  BoardDragConfig<TKey> get config {
+    return _config;
+  }
+
+  set config(BoardDragConfig<TKey> value) {
+    if (identical(value, _config)) {
+      return;
+    }
+    _config = value;
+    final session = _session;
+    if (session == null) {
+      return;
+    }
+    if (!_sessionAdmitted(session.kind)) {
+      endDrag(cancel: true);
+      return;
+    }
+    session.autoScroller
+      ..edgeZone = value.autoScrollEdgeZone
+      ..maxVelocity = value.autoScrollMaxVelocity;
+    final pointer = _pointerPosition.value;
+    if (pointer != null) {
+      session.autoScroller.evaluate(pointer);
+    }
+    // The resolver's early-out compares against the last span it
+    // returned; cleared, the post-frame resolve re-runs the gate and the
+    // scan even when the pointer's placement has not moved.
+    _lastResolvedSpan = null;
+    _scheduleResolve();
+  }
+
+  BoardDragConfig<TKey> _config;
 
   final TickerProvider _vsync;
 
@@ -102,6 +226,13 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// Whether a post-frame re-resolve is already scheduled for this
   /// frame, so a frame with several animation dispatches resolves once.
   bool _resolvePending = false;
+
+  /// The lifecycle notifications not yet delivered, oldest first.
+  final ListQueue<VoidCallback> _pendingNotifications =
+      ListQueue<VoidCallback>();
+
+  /// Whether a microtask that drains [_pendingNotifications] is pending.
+  bool _drainScheduled = false;
 
   /// The pointer's viewport-paint position while a session is live, one
   /// write per move event; null between sessions.
@@ -195,6 +326,42 @@ class BoardDragController<TKey> extends ChangeNotifier {
         : Axis.horizontal;
   }
 
+  /// Whether the current config admits a session of [kind]: the part of
+  /// [startDrag]'s gate that describes the SESSION rather than the lift,
+  /// and the one test [config]'s setter re-runs on a live session. A move
+  /// needs only [BoardDragConfig.enabled]; a resize also needs a report
+  /// and an axis policy admitting its edge.
+  bool _sessionAdmitted(BoardDragKind kind) {
+    if (!config.enabled) {
+      return false;
+    }
+    final Axis axis;
+    final BoardResizeEdges edge;
+    switch (kind) {
+      case BoardDragKind.move:
+        return true;
+      case BoardDragKind.resizeRowStart:
+        axis = Axis.vertical;
+        edge = BoardResizeEdges.leading;
+      case BoardDragKind.resizeRowEnd:
+        axis = Axis.vertical;
+        edge = BoardResizeEdges.trailing;
+      case BoardDragKind.resizeColStart:
+        axis = Axis.horizontal;
+        edge = BoardResizeEdges.leading;
+      case BoardDragKind.resizeColEnd:
+        axis = Axis.horizontal;
+        edge = BoardResizeEdges.trailing;
+    }
+    if (config.onItemResized == null) {
+      return false;
+    }
+    final policy = axis == _spanAxis
+        ? config.resizeEdges
+        : config.primaryResizeEdges;
+    return _edgeAccepted(policy, edge);
+  }
+
   static bool _edgeAccepted(BoardResizeEdges policy, BoardResizeEdges edge) {
     switch (policy) {
       case BoardResizeEdges.none:
@@ -211,11 +378,17 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// Starts a session. Returns false for a POLICY refusal: disabled
   /// config, unknown or refused key, a board that has not laid out, a
   /// resize this config could not report (a null `onItemResized` would
-  /// move pixels and then vanish), or a resize edge its axis's policy
+  /// move pixels and then vanish), a resize edge its axis's policy
   /// does not accept: `resizeEdges` on the span axis, which a null
-  /// [axis] names, and `primaryResizeEdges` on the primary axis. Throws
+  /// [axis] names, and `primaryResizeEdges` on the primary axis, or a
+  /// resize on a lattice with no tracks, which gives it no lift sample to
+  /// measure its displacement from. Throws
   /// [ArgumentError] only for cross-controller misuse: a [renderPort]
   /// not driven by [boardController].
+  ///
+  /// Returns true for a session that app code ended inside this call,
+  /// through a predicate or an animation listener: its start and its end
+  /// are both queued, in that order.
   bool startDrag({
     required TKey key,
     required BoardRenderPort<TKey> renderPort,
@@ -230,31 +403,25 @@ class BoardDragController<TKey> extends ChangeNotifier {
         "one board.",
       );
     }
-    if (_session != null || !config.enabled || !renderPort.isLaidOut) {
+    if (_session != null || !renderPort.isLaidOut) {
       return false;
     }
     if (!boardController.contains(key)) {
-      return false;
-    }
-    if (config.canDrag != null && !config.canDrag!(key)) {
       return false;
     }
     final kind = _kindFor(edge, axis);
     if (kind == null) {
       return false;
     }
-    if (kind != BoardDragKind.move) {
-      if (config.onItemResized == null) {
-        return false;
-      }
-      // Each axis carries its own policy, so a config that opens the
-      // span axis leaves the primary one closed and the reverse.
-      final policy = (axis ?? _spanAxis) == _spanAxis
-          ? config.resizeEdges
-          : config.primaryResizeEdges;
-      if (!_edgeAccepted(policy, edge)) {
-        return false;
-      }
+    // The session half of the gate, shared with the config setter's
+    // re-validation: `enabled`, and for a resize a report plus an axis
+    // policy admitting the edge (each axis carries its own, so a config
+    // that opens the span axis leaves the primary one closed).
+    if (!_sessionAdmitted(kind)) {
+      return false;
+    }
+    if (!askCanDrag(config, key)) {
+      return false;
     }
     final local = renderPort.globalToPaintLocal(pointerGlobal);
     final rect = renderPort.rectOfItem(key);
@@ -266,11 +433,16 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final style = boardController.animationStyle;
     final makeRoom = style.effectiveMakeRoom;
     final dropSettle = boardController.animationStyle.effectiveDropSettle;
-    // The last policy check has passed: take the pin and the bit.
     final span = boardController.spanOf(key)!;
     // The lift pointer's fractional cell, sampled once: the track snap's
-    // grab offset is in WHOLE cells.
+    // grab offset is in WHOLE cells, and a resize's displacement is
+    // measured from it. Null only for a lattice with no tracks, where a
+    // resize has nothing to measure against and is refused.
     final liftCell = renderPort.trackSpaceAt(local);
+    if (liftCell == null && kind != BoardDragKind.move) {
+      return false;
+    }
+    // The last policy check has passed: take the pin and the bit.
     renderPort.pinItem(key);
     boardController.markDragging(
       key,
@@ -286,10 +458,12 @@ class BoardDragController<TKey> extends ChangeNotifier {
           : Offset.zero,
       grabCellRow: liftCell == null
           ? 0
-          : liftCell.row.floor() - span.rowStart,
+          : liftCell.row.floor() - trackIndexOf(span.startTrackOn(Axis.vertical)),
       grabCellCol: liftCell == null
           ? 0
-          : liftCell.col.floor() - span.colStart,
+          : liftCell.col.floor() -
+                trackIndexOf(span.startTrackOn(Axis.horizontal)),
+      liftTrack: liftCell,
       makeRoomDuration: makeRoom.duration,
       makeRoomCurve: makeRoom.curve,
       dropSettleDuration: dropSettle.duration,
@@ -317,19 +491,123 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // The animation channel is the third route into the resolution core,
     // beside pointer events and scroll notifications: a track resizing
     // above a stationary pointer moves the cell under it, and nothing
-    // else re-resolves for that.
+    // else re-resolves for that. The structural channel is the fourth: a
+    // board change under a parked pointer changes what the drop gate
+    // answers for the same placement.
     boardController.addAnimationListener(_handleAnimationTick);
+    boardController.addStructuralListener(_handleStructuralChange);
     if (config.hapticsOnDrag) {
       HapticFeedback.mediumImpact();
     }
     _pointerPosition.value = local;
+    // Queued BEFORE the first resolve, so an end that the resolve's
+    // synchronous work causes is queued after it, and the resolve queues
+    // the first target after it too.
+    _notifyStart(key, kind);
     _resolve(session, local);
+    // App code the resolve reached synchronously, a predicate or an
+    // animation listener, may have ended the session through the
+    // mutation-cancel hook; its autoscroller is then disposed, and its
+    // end is already queued.
+    if (!identical(_session, session)) {
+      return true;
+    }
     // Evaluated at start too, not only per move: a finger that lifts an
     // item already inside an edge zone autoscrolls with no move event
     // ever arriving.
     session.autoScroller.evaluate(local);
     notifyListeners();
     return true;
+  }
+
+  /// Queues [_currentTarget] for `onDragTargetChanged` when it differs
+  /// from the last one queued, and only for the live session.
+  void _reportTarget(_DragSession<TKey> session) {
+    if (!identical(_session, session)) {
+      return;
+    }
+    final target = _currentTarget;
+    if (target == session.reportedTarget) {
+      return;
+    }
+    session.reportedTarget = target;
+    final onDragTargetChanged = config.onDragTargetChanged;
+    if (onDragTargetChanged != null) {
+      final key = session.key;
+      _notifyApp(() {
+        onDragTargetChanged(key, target);
+      });
+    }
+  }
+
+  void _notifyStart(TKey key, BoardDragKind kind) {
+    final onDragStart = config.onDragStart;
+    if (onDragStart == null) {
+      return;
+    }
+    _notifyApp(() {
+      onDragStart(key, kind);
+    });
+  }
+
+  void _notifyEnd(TKey key, {required bool committed}) {
+    final onDragEnd = config.onDragEnd;
+    if (onDragEnd == null) {
+      return;
+    }
+    _notifyApp(() {
+      onDragEnd(key, committed);
+    });
+  }
+
+  /// Queues a lifecycle notification. Each caller captures its callback
+  /// and arguments here, never at delivery, so a notification reports
+  /// through the config current when it was queued, and a delivery after
+  /// [dispose] reads nothing this controller disposed.
+  ///
+  /// Delivered in a microtask, which runs after the board call that
+  /// queued it has returned and never inside a mutation, a build, a
+  /// layout or the frame's finalize; or earlier, by the drain at the top
+  /// of a pointer release in [endDrag].
+  void _notifyApp(VoidCallback notification) {
+    _pendingNotifications.add(notification);
+    if (_drainScheduled) {
+      return;
+    }
+    _drainScheduled = true;
+    scheduleMicrotask(() {
+      // Cleared AFTER the loop: an entry queued while it runs is delivered
+      // by it, so it schedules no second microtask. In a `finally`, so a
+      // throw that escapes the loop, which only `FlutterError.onError`
+      // itself could raise, cannot leave the flag set and the queue stuck.
+      try {
+        _drainNotifications();
+      } finally {
+        _drainScheduled = false;
+      }
+    });
+  }
+
+  /// Delivers every queued notification, oldest first, including one a
+  /// delivery queues. A throw is reported and the drain goes on, so one
+  /// failing callback cannot strand the ones behind it.
+  @pragma("vm:notify-debugger-on-exception")
+  void _drainNotifications() {
+    while (_pendingNotifications.isNotEmpty) {
+      final notification = _pendingNotifications.removeFirst();
+      try {
+        notification();
+      } catch (exception, stack) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: exception,
+            stack: stack,
+            library: "widgets_extended board",
+            context: ErrorDescription("while delivering a drag notification"),
+          ),
+        );
+      }
+    }
   }
 
   /// One pointer move. Also the autoscroll evaluation site: started and
@@ -342,44 +620,56 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final local = session.port.globalToPaintLocal(pointerGlobal);
     _pointerPosition.value = local;
     _resolve(session, local);
+    // As in [startDrag]: a session the resolve's app code ended has a
+    // disposed autoscroller.
+    if (!identical(_session, session)) {
+      return;
+    }
     session.autoScroller.evaluate(local);
   }
 
   /// Ends the session, in the order the mutation-cancel rule forces:
   /// resolve and validate FIRST (nothing reported), TEAR DOWN second
-  /// (the same statements every other exit runs), REPORT last, so the
+  /// (the same statements every other exit runs), REPORT third, so the
   /// dragging bit is already clear when an `onItemMoved` handler
-  /// mutates the dragged key.
+  /// mutates the dragged key, and queue `onDragEnd` last, in a `finally`,
+  /// so a report that throws still ends the drag for the app.
+  ///
+  /// A release ([cancel] false) first delivers every lifecycle
+  /// notification still queued, so the app hears a target change that
+  /// shared the release's task before the drop it precedes. A handler
+  /// delivered there that ends the session leaves nothing to release.
   void endDrag({required bool cancel}) {
+    if (!cancel) {
+      _drainNotifications();
+    }
     final session = _session;
     if (session == null) {
       return;
     }
     final target = _currentTarget;
     var report = !cancel && target != null;
-    if (report &&
-        config.canDropAt != null &&
-        !config.canDropAt!(session.key, target.span)) {
+    if (report && askCanDropAt(config, session.key, target.span) != true) {
       report = false;
     }
-    // The RESIZED item's painted corner, captured before the snap
-    // clears its de-lane hold: the commit's own FLIP slide starts from
-    // its old lane origin, and the glide below corrects onto this.
-    Offset? paintedBefore;
-    Offset? paintedExtentBefore;
-    if (report && session.kind != BoardDragKind.move) {
-      // Painted truth through the port, which composes the animation
-      // offset in PAINT space; composing it here by hand would add a
-      // content-space delta to a paint-space corner.
-      final rect = session.port.paintedRectOfItem(session.key);
-      if (rect != null) {
-        paintedBefore = rect.topLeft;
-        // The PAINTED extent, which the resize preview has been holding:
-        // the rect already carries it, the geometry rule composing the
-        // preview into the extent it reports. The glide continues from
-        // here, and the report's own FLIP is suppressed for it.
-        paintedExtentBefore = Offset(rect.width, rect.height);
+    // The drop-settle glide's FROM rect, captured before the snap and the
+    // teardown, in PAINT space. A MOVE's content was at the PROXY, so it
+    // is the proxy's rect at release, commit and cancel alike. A
+    // committed RESIZE has no proxy: it is the item's painted rect, which
+    // the port composes from the animation offset and the extent the
+    // resize preview holds, so the glide starts where the preview left
+    // it; the report's own FLIP starts from the old lane origin and the
+    // glide corrects onto this. A cancelled resize glides from nothing:
+    // teardown's animated release closes its preview.
+    Rect? glideFrom;
+    if (session.kind == BoardDragKind.move) {
+      final pointer = _pointerPosition.value;
+      final size = proxySize;
+      if (pointer != null && size != null) {
+        glideFrom = (pointer - session.grabOffset) & size;
       }
+    } else if (report) {
+      glideFrom = session.port.paintedRectOfItem(session.key);
     }
     Map<TKey, Rect>? paintedByKey;
     if (report) {
@@ -399,29 +689,42 @@ class BoardDragController<TKey> extends ChangeNotifier {
       // animated close in teardown.
       boardController.releaseMakeRoomPreview(duration: Duration.zero);
     }
-    // Captured before teardown nulls the pointer: the glide's FROM is
-    // the proxy's release position.
-    final release = _pointerPosition.value;
+    // The snap dispatches the animation channel synchronously, and an app
+    // listener there may have ended the session through the
+    // mutation-cancel hook, which tore it down and queued its uncommitted
+    // end: nothing is left to tear down or report.
+    if (!identical(_session, session)) {
+      return;
+    }
     _teardown(session);
-    if (report && target != null) {
-      // The report's mutation re-lanes exactly the neighbours the
-      // preview displaced and re-sized, whose landing the hand-off below
-      // owns, so their relane slides, LEAD and EXTENT, are suppressed
-      // for its duration, in whatever door the app mutates through. The
-      // widget's built-in semantics move action reports outside any
-      // session and is deliberately not wrapped: nothing is held there.
-      boardController.withoutRelaneSlides(() {
-        if (target.kind == BoardDragKind.move) {
-          config.onItemMoved(session.key, target.span);
-        } else {
-          config.onItemResized!(session.key, target.span);
-        }
-      });
+    try {
+      if (report && target != null) {
+        // The report's mutation re-lanes exactly the neighbours the
+        // preview displaced and re-sized, whose landing the hand-off
+        // below owns, so their relane slides, LEAD and EXTENT, are
+        // suppressed for its duration, in whatever door the app mutates
+        // through. The widget's built-in semantics move action reports
+        // outside any session and is deliberately not wrapped: nothing is
+        // held there.
+        boardController.withoutRelaneSlides(() {
+          if (target.kind == BoardDragKind.move) {
+            config.onItemMoved(session.key, target.span);
+          } else {
+            config.onItemResized!(session.key, target.span);
+          }
+        });
+      }
+      if (paintedByKey != null) {
+        _installMakeRoomHandOff(session, paintedByKey);
+      }
+      _installDropSettle(session, glideFrom);
+    } finally {
+      // After the report, so an app hears the drop, then the end; and
+      // queued even when the report threw, which still propagates.
+      // `committed` is whether the drop was reported, which a throwing
+      // report was.
+      _notifyEnd(session.key, committed: report && target != null);
     }
-    if (paintedByKey != null) {
-      _installMakeRoomHandOff(session, paintedByKey);
-    }
-    _installDropSettle(session, release, paintedBefore, paintedExtentBefore);
   }
 
   /// The hand-off's capture: the painted RECT of every item the make-room
@@ -471,96 +774,59 @@ class BoardDragController<TKey> extends ChangeNotifier {
       if (rect == null) {
         return;
       }
-      // A paint-space difference between two painted corners, converted
-      // to the content-space lead the coordinator stores.
-      final delta = session.port.contentDeltaFromPaint(
-        painted.topLeft - rect.topLeft,
-      );
-      // The EXTENT continuation, read from painted truth on both sides
-      // exactly as the resize glide's is: the size the preview held it
-      // at, minus the size it rests at now. The neighbour's own relane
-      // extent was suppressed in the report, so this composes onto no
-      // record and starts where the preview left the item.
-      final extentDelta = Offset(
-        painted.width - rect.width,
-        painted.height - rect.height,
-      );
-      if (delta == Offset.zero && extentDelta == Offset.zero) {
+      // The correction from painted truth on both sides, exactly as the
+      // glide's: the rect the preview held it at, minus the one it rests
+      // at now. The neighbour's own relane extent was suppressed in the
+      // report, so this composes onto no record and starts where the
+      // preview left the item.
+      final (:lead, :extent) = _correctionBetween(session.port, painted, rect);
+      if (lead == Offset.zero && extent == Offset.zero) {
         return;
       }
       boardController.animateMakeRoomHandOff(
         key,
-        delta,
+        lead,
         duration: handOff.remaining,
         curve: handOff.curve,
-        extentDelta: extentDelta,
+        extentDelta: extent,
       );
     });
   }
 
   /// The drop-settle glide, installed LAST so it overrides whatever
-  /// slide the report's own mutator installed. A MOVE's content was at
-  /// the PROXY, so its glide runs from the proxy's release position to
-  /// wherever the item now rests, commit and cancel alike. A committed
-  /// RESIZE has no proxy; its glide runs from the painted corner the
-  /// de-lane hold had it at, so the item never leaves the position the
-  /// preview showed. The mutation-cancel path installs nothing: there
-  /// the mutation's own animation is the feedback.
-  void _installDropSettle(
-    _DragSession<TKey> session,
-    Offset? release,
-    Offset? paintedBefore, [
-    Offset? paintedExtentBefore,
-  ]) {
+  /// slide the report's own mutator installed, from [from] to wherever
+  /// the item now rests. A MOVE's [from] is the proxy's rect at release,
+  /// commit and cancel alike; a committed RESIZE's is the rect the
+  /// preview had it at, so the item never leaves what the preview showed.
+  /// Null installs nothing, which is also the mutation-cancel path's
+  /// case: there the mutation's own animation is the feedback.
+  void _installDropSettle(_DragSession<TKey> session, Rect? from) {
     final key = session.key;
-    if (!boardController.contains(key)) {
+    if (from == null || !boardController.contains(key)) {
       return;
     }
     // Where the item paints NOW, every installed offset composed in paint
-    // space: the correction below is the paint-space gap between that
-    // and where it should paint, converted once for the coordinator.
+    // space.
     final rect = session.port.paintedRectOfItem(key);
     if (rect == null) {
       return;
     }
-    final Offset paintDelta;
-    if (session.kind == BoardDragKind.move) {
-      if (release == null) {
-        return;
-      }
-      paintDelta = (release - session.grabOffset) - rect.topLeft;
-    } else {
-      if (paintedBefore == null) {
-        return;
-      }
-      paintDelta = paintedBefore - rect.topLeft;
-    }
     final id = boardController.idOfKey(key);
-    final delta = session.port.contentDeltaFromPaint(paintDelta);
-    // The extent continuation: from the painted extent the preview held
-    // to the one the report's mutation produced, zero when the app
-    // committed exactly what was previewed and the preview had settled,
-    // which is the quiet half of a continuous commit.
-    final extentDelta = paintedExtentBefore == null
-        ? Offset.zero
-        : Offset(
-            paintedExtentBefore.dx - rect.width,
-            paintedExtentBefore.dy - rect.height,
-          );
+    final (:lead, :extent) = _correctionBetween(session.port, from, rect);
     // A ZERO correction still composes when the item holds an extent
     // record: the compose is what carries that extent onto the
     // drop-settle clock, and a committed resize of an UNLANED item has a
     // zero correction by construction, there having been no de-lane hold
     // to correct off.
-    if (delta == Offset.zero &&
-        extentDelta == Offset.zero &&
+    if (lead == Offset.zero &&
+        extent == Offset.zero &&
         boardController.anim.extentDeltaOf(id) == Offset.zero) {
       return;
     }
     boardController.animateDropSettle(
       key,
-      delta,
-      extentDelta: extentDelta,
+      lead,
+      extentDelta: extent,
       duration: session.dropSettleDuration,
       curve: session.dropSettleCurve,
       // A RESIZE's correction is the de-lane hold's intra-track lead, so
@@ -570,21 +836,54 @@ class BoardDragController<TKey> extends ChangeNotifier {
     );
   }
 
+  /// The content-space correction that paints an item resting at [to]
+  /// at [from] instead, both PAINT-space rects: the LEAD is the
+  /// difference of their content-leading corners, converted by the one
+  /// delta conversion, and the EXTENT the difference of their sizes,
+  /// which is the same number in both spaces.
+  ///
+  /// Corners, not top-lefts: on a reversed axis a painted top-left is the
+  /// content TRAILING corner, and a difference of trailing corners is the
+  /// lead difference PLUS the extent difference, which the extent term
+  /// then installs a second time.
+  static ({Offset lead, Offset extent}) _correctionBetween(
+    BoardRenderPort<Object?> port,
+    Rect from,
+    Rect to,
+  ) {
+    return (
+      lead: port.contentDeltaFromPaint(
+        port.leadingCornerOf(from) - port.leadingCornerOf(to),
+      ),
+      extent: Offset(from.width - to.width, from.height - to.height),
+    );
+  }
+
   /// The mutation-cancel hook: a span mutator touching the dragged key
   /// runs the ordinary cancel path BEFORE the mutation proceeds. No
-  /// report.
+  /// report, and no [BoardDragConfig] callback: the uncommitted end is
+  /// QUEUED, so the mutator's ids stay valid across the hook and the app
+  /// hears the end once the mutation has finished.
   void _handleMutationCancel() {
     final session = _session;
     if (session == null) {
       return;
     }
     _teardown(session);
+    _notifyEnd(session.key, committed: false);
   }
 
   /// The single teardown site: every exit runs these same statements.
   void _teardown(_DragSession<TKey> session) {
     _session = null;
-    boardController.releaseMakeRoomPreview();
+    // The gap closes on the clock the session opened it on: the pair
+    // `startDrag` captured, which every preview passed, so a restyle
+    // during the session reaches neither the gap nor its close. The live
+    // family's zero still snaps it, the engine reading that itself.
+    boardController.releaseMakeRoomPreview(
+      duration: session.makeRoomDuration,
+      curve: session.makeRoomCurve,
+    );
     session.port.unpinItem(session.key);
     if (boardController.contains(session.key)) {
       // Drops the bit AND the mutation-cancel hook in one call.
@@ -593,6 +892,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     session.autoScroller.dispose();
     _unbindScrollSubscriptions(session);
     boardController.removeAnimationListener(_handleAnimationTick);
+    boardController.removeStructuralListener(_handleStructuralChange);
     _currentTarget = null;
     _lastResolvedSpan = null;
     _pointerPosition.value = null;
@@ -605,8 +905,14 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// position was swapped under the session.
   void _resolve(_DragSession<TKey> session, Offset local) {
     _repointScrollSubscriptions(session);
+    // A move resolves from the proxy's content-LEADING corner, the point
+    // its span starts at, which is the proxy's painted top-left only
+    // where both axes run forward. A resize resolves from the pointer's
+    // displacement since the lift, in track space.
     final anchor = session.kind == BoardDragKind.move
-        ? local - session.grabOffset
+        ? session.port.leadingCornerOf(
+            (local - session.grabOffset) & (proxySize ?? Size.zero),
+          )
         : local;
     final resolved = BoardDropResolver.resolve(
       port: session.port,
@@ -620,6 +926,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       rowCount: boardController.rows.axis.trackCount,
       colCount: boardController.columns.axis.trackCount,
       pointerAnchoredAxis: _pointerAnchoredAxis(session),
+      liftTrack: session.liftTrack,
     );
     if (resolved == null || resolved.span == _lastResolvedSpan) {
       return;
@@ -638,14 +945,20 @@ class BoardDragController<TKey> extends ChangeNotifier {
     //
     // A refusal is also where the NUDGE gets its one chance; a null
     // answer from it leaves the arm exactly as it was.
-    final canDropAt = config.canDropAt;
-    if (canDropAt != null && !canDropAt(session.key, target.span)) {
-      final fitted = _fitRefusal(session, target);
+    final answer = askCanDropAt(config, session.key, target.span);
+    if (answer != true) {
+      // A throw, answered null, is a refusal with no nudge: the nudge is
+      // for overlaps, and a throw says nothing about one.
+      final fitted = answer == false ? _fitRefusal(session, target) : null;
       if (fitted == null) {
         if (_currentTarget != null) {
           _currentTarget = null;
-          boardController.releaseMakeRoomPreview();
+          boardController.releaseMakeRoomPreview(
+            duration: session.makeRoomDuration,
+            curve: session.makeRoomCurve,
+          );
           notifyListeners();
+          _reportTarget(session);
         }
         return;
       }
@@ -660,6 +973,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       curve: session.makeRoomCurve,
     );
     notifyListeners();
+    _reportTarget(session);
   }
 
   /// The axis a whole-track move takes from the POINTER rather than
@@ -696,10 +1010,17 @@ class BoardDragController<TKey> extends ChangeNotifier {
         session.kind != BoardDragKind.move) {
       return null;
     }
+    // A laned item steps by WHOLE tracks on its lane axis, the axis the
+    // resolver anchors to the pointer, exactly as the resolver moves it.
+    final wholeTrackAxis = _pointerAnchoredAxis(session);
     // THE STEP COUNTS COME FIRST. A policy that admits no step can
     // produce no candidate, so it must not pay a span-index query or the
     // gate to discover that.
-    final steps = BoardDropFitter.stepsOf(policy: policy, snap: config.snap);
+    final steps = BoardDropFitter.stepsOf(
+      policy: policy,
+      snap: config.snap,
+      wholeTrackAxis: wholeTrackAxis,
+    );
     if (steps.rows == 0 && steps.cols == 0) {
       return null;
     }
@@ -741,8 +1062,9 @@ class BoardDragController<TKey> extends ChangeNotifier {
       colAxis: colAxis,
       obstacles: obstacles,
       accepts: (candidate) {
-        return canDropAt(session.key, candidate);
+        return askCanDropAt(config, session.key, candidate) == true;
       },
+      wholeTrackAxis: wholeTrackAxis,
     );
     if (fitted == null) {
       return null;
@@ -856,14 +1178,44 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// also keeps `previewMakeRoomGap` out of the make-room engine's own
   /// tick dispatch.
   void _handleAnimationTick() {
+    _scheduleResolve();
+  }
+
+  /// A structural change: items arrived, left or moved, so the drop gate
+  /// may answer differently for the placement the pointer rests on,
+  /// which the early-out in [_resolve] would never put to it again.
+  /// Clears that record and schedules the one post-frame resolve, the
+  /// config setter's route, reading the board as the change lays it out:
+  /// a freed placement is accepted and previewed, an occupied one
+  /// withdrawn before the release rather than refused at it. The
+  /// session's own writes notify no structural listener, so this cannot
+  /// feed itself; the report runs after teardown has unbound it.
+  void _handleStructuralChange(Set<TKey>? affectedKeys) {
+    _lastResolvedSpan = null;
+    _scheduleResolve();
+  }
+
+  /// Schedules ONE post-frame re-resolve from the last pointer position,
+  /// however many dispatches ask for it this frame. The animation route,
+  /// the structural route and the config setter share it.
+  ///
+  /// A post-frame callback does not schedule a frame of its own. The
+  /// animation route always calls from inside one; the setter can call
+  /// from outside any, and then asks for the frame, which is the only
+  /// case where a frame would not otherwise come.
+  void _scheduleResolve() {
     if (_resolvePending) {
       return;
     }
     _resolvePending = true;
-    SchedulerBinding.instance.addPostFrameCallback((_) {
+    final scheduler = SchedulerBinding.instance;
+    scheduler.addPostFrameCallback((_) {
       _resolvePending = false;
       _resolveFromLastPointer();
     }, debugLabel: "BoardDragController.resolve");
+    if (scheduler.schedulerPhase == SchedulerPhase.idle) {
+      scheduler.scheduleFrame();
+    }
   }
 
   /// The shared body of the scroll and animation routes. `_session` is
@@ -882,7 +1234,8 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _resolve(session, local);
   }
 
-  /// Tears the session down with no commit, then the notifier.
+  /// Tears the session down with no commit, then the notifier. Queues no
+  /// lifecycle notification; one already queued is still delivered.
   @override
   void dispose() {
     final session = _session;
@@ -912,8 +1265,11 @@ class BoardAutoScroller {
   final VoidCallback? onTick;
 
   final BoardRenderPort<Object?> _port;
-  final double edgeZone;
-  final double maxVelocity;
+
+  /// Mutable because the drag controller's config is: a new config
+  /// updates a live session's zone and velocity in place.
+  double edgeZone;
+  double maxVelocity;
 
   late final Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
@@ -934,16 +1290,28 @@ class BoardAutoScroller {
 
   /// Starts or stops the ticker from the FINGER's viewport position:
   /// inside either axis's edge zone drives that axis toward the edge.
+  ///
+  /// The zones are measured from the SCROLLED REGION's edges, not the
+  /// viewport's: a frozen band is where scrolled content disappears, so
+  /// the zone sits just inside the band, and a finger over the band
+  /// itself is choosing one of its frozen tracks and scrolls nothing on
+  /// that axis. Past the viewport's own edge the finger drives at full
+  /// speed, band or not.
   void evaluate(Offset local) {
     final vertical = _port.verticalPosition;
     final horizontal = _port.horizontalPosition;
+    final region = _port.scrolledRegion;
+    final size = _port.viewportDimension;
     _verticalVelocity = vertical == null
         ? 0.0
-        : _axisVelocity(local.dy, vertical.viewportDimension);
+        : _axisVelocity(local.dy, region.top, region.bottom, size.height);
     _horizontalVelocity = horizontal == null
         ? 0.0
-        : _axisVelocity(local.dx, horizontal.viewportDimension);
-    final active = _verticalVelocity != 0.0 || _horizontalVelocity != 0.0;
+        : _axisVelocity(local.dx, region.left, region.right, size.width);
+    // A zone whose scroll is already at its end in the direction it
+    // drives starts nothing: the tick would clamp every step to where the
+    // position is.
+    final active = _canAdvance();
     if (active && !_ticker.isActive) {
       _lastElapsed = Duration.zero;
       _ticker.start();
@@ -954,16 +1322,25 @@ class BoardAutoScroller {
     }
   }
 
-  double _axisVelocity(double position, double viewport) {
-    if (position < edgeZone) {
-      return -velocityAt(edgeZone - position, edgeZone, maxVelocity);
+  /// The paint-space velocity for a finger at [position] on an axis
+  /// whose scrolled region is `[start, end]` inside a viewport of
+  /// [viewport]: negative toward the start, positive toward the end.
+  double _axisVelocity(
+    double position,
+    double start,
+    double end,
+    double viewport,
+  ) {
+    // Over a band: choosing a frozen track, not scrolling.
+    if ((position >= 0.0 && position < start) ||
+        (position > end && position <= viewport)) {
+      return 0.0;
     }
-    if (position > viewport - edgeZone) {
-      return velocityAt(
-        position - (viewport - edgeZone),
-        edgeZone,
-        maxVelocity,
-      );
+    if (position < start + edgeZone) {
+      return -velocityAt(start + edgeZone - position, edgeZone, maxVelocity);
+    }
+    if (position > end - edgeZone) {
+      return velocityAt(position - (end - edgeZone), edgeZone, maxVelocity);
     }
     return 0.0;
   }
@@ -972,6 +1349,14 @@ class BoardAutoScroller {
     onTick?.call();
     final dt = (elapsed - _lastElapsed).inMicroseconds / 1e6;
     _lastElapsed = elapsed;
+    // The velocities are PAINT-space: negative drives toward the painted
+    // top or left edge. The scroll offset is content-space, so the step
+    // passes through the one delta conversion, which negates it on a
+    // reversed axis, where the content beyond the painted top edge lies at
+    // GREATER offsets.
+    final step = _port.contentDeltaFromPaint(
+      Offset(_horizontalVelocity * dt, _verticalVelocity * dt),
+    );
     // A null position mid-drag is a defunct scrollable: stop that axis
     // and keep the session; cancellation is the backstop's job.
     final vertical = _port.verticalPosition;
@@ -980,7 +1365,7 @@ class BoardAutoScroller {
         _verticalVelocity = 0.0;
       } else {
         vertical.jumpTo(
-          (vertical.pixels + _verticalVelocity * dt).clamp(
+          (vertical.pixels + step.dy).clamp(
             vertical.minScrollExtent,
             vertical.maxScrollExtent,
           ),
@@ -993,16 +1378,42 @@ class BoardAutoScroller {
         _horizontalVelocity = 0.0;
       } else {
         horizontal.jumpTo(
-          (horizontal.pixels + _horizontalVelocity * dt).clamp(
+          (horizontal.pixels + step.dx).clamp(
             horizontal.minScrollExtent,
             horizontal.maxScrollExtent,
           ),
         );
       }
     }
-    if (_verticalVelocity == 0.0 && _horizontalVelocity == 0.0) {
+    // Stopped once no axis can move, a zero velocity or a position at its
+    // end alike, rather than ticking a clamped step every frame. The
+    // velocities stay: [evaluate], at start and on every pointer move,
+    // is the restart door, as the pointer update is for Flutter's own
+    // edge autoscroller (`widgets/scrollable_helpers.dart:282-303`).
+    if (!_canAdvance()) {
       _ticker.stop();
     }
+  }
+
+  /// Whether a tick would move anything: some axis with a velocity whose
+  /// position has room in the CONTENT direction that velocity drives,
+  /// read through the one delta conversion so a reversed axis is judged
+  /// by where its content lies.
+  bool _canAdvance() {
+    final step = _port.contentDeltaFromPaint(
+      Offset(_horizontalVelocity, _verticalVelocity),
+    );
+    return _hasRoom(_port.verticalPosition, step.dy) ||
+        _hasRoom(_port.horizontalPosition, step.dx);
+  }
+
+  static bool _hasRoom(ScrollPosition? position, double step) {
+    if (position == null || step == 0.0) {
+      return false;
+    }
+    return step > 0.0
+        ? position.pixels < position.maxScrollExtent
+        : position.pixels > position.minScrollExtent;
   }
 
   void dispose() {

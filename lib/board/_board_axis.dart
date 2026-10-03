@@ -45,7 +45,9 @@ const double _emptyAxisMinTrackExtent = 1.0;
 /// [acceptsMeasurements] true, and only it can report [isProvisional]
 /// true.
 abstract interface class BoardAxis {
-  /// Number of tracks, indexed `[0, trackCount)`.
+  /// Number of tracks, indexed `[0, trackCount)`. Constant for the
+  /// instance's life: a lattice of another size is a new axis, assigned
+  /// through the config.
   int get trackCount;
 
   /// Extent of [track], in content space.
@@ -117,7 +119,8 @@ abstract interface class BoardAxis {
 }
 
 /// Every track the same extent. Two scalars of storage, O(1) offsets and
-/// O(1) [trackAt], and no prefix is ever built, so a swap costs nothing.
+/// O(1) [trackAt], and no prefix is ever built, so a swap costs this axis
+/// nothing.
 class UniformAxis implements BoardAxis {
   /// Creates an axis of [trackCount] tracks, each [extent] long.
   UniformAxis(this.trackCount, this.extent)
@@ -161,6 +164,13 @@ class UniformAxis implements BoardAxis {
   int trackAt(double offset) {
     if (trackCount == 0) {
       return 0;
+    }
+    // The documented clamp for an offset the division cannot take: it
+    // throws for a non-finite double. The answers are the ones the prefix
+    // search gives the other three axes, NaN and negative infinity to the
+    // first track and positive infinity to the last.
+    if (!offset.isFinite) {
+      return offset == double.infinity ? trackCount - 1 : 0;
     }
     // The division is an APPROXIMATION of the inverse of [offsetOf], not
     // the inverse: `offset ~/ extent` and `track * extent` are different
@@ -320,6 +330,7 @@ class DerivedAxis implements BoardAxis {
   /// [extentOf], which is invoked exactly [trackCount] times here.
   DerivedAxis(this.trackCount, double Function(int track) extentOf)
     : assert(trackCount >= 0),
+      _extents = Float64List(trackCount),
       _prefix = Float64List(trackCount + 1),
       _minTrackExtent = _emptyAxisMinTrackExtent {
     var running = 0.0;
@@ -331,6 +342,7 @@ class DerivedAxis implements BoardAxis {
         "DerivedAxis extent at track $i must be strictly positive so "
         "minTrackExtent is",
       );
+      _extents[i] = extent;
       running += extent;
       _prefix[i + 1] = running;
       if (extent < smallest) {
@@ -347,13 +359,18 @@ class DerivedAxis implements BoardAxis {
   @override
   final int trackCount;
 
+  /// The callback's extents, kept as given, as `ExplicitAxis` keeps its
+  /// own. A difference of two prefix sums rounds: it reported values
+  /// below the one given, and below [minTrackExtent], which this axis
+  /// promises never to report under.
+  final Float64List _extents;
   final Float64List _prefix;
   double _minTrackExtent;
 
   @override
   double extentOf(int track) {
     assert(track >= 0 && track < trackCount);
-    return _prefix[track + 1] - _prefix[track];
+    return _extents[track];
   }
 
   @override
@@ -646,9 +663,17 @@ class BoardAxisConfig {
   final BoardAxis axis;
 
   /// Number of leading tracks pinned to the viewport's leading edge.
+  ///
+  /// The band's cells stay put while the lattice scrolls, and so does an
+  /// ITEM whose span lies wholly inside the band on this axis (a laned
+  /// item on the lane axis by its one track): a header row can carry
+  /// items, and a drag or a selection over the band lands in it. An item
+  /// that crosses the band's edge scrolls, and the band covers what
+  /// scrolls beneath it.
   final int frozenStart;
 
-  /// Number of trailing tracks pinned to the viewport's trailing edge.
+  /// Number of trailing tracks pinned to the viewport's trailing edge,
+  /// with the same rules for items as [frozenStart].
   final int frozenEnd;
 
   /// What a cell does with surplus track extent on this axis.
@@ -662,4 +687,88 @@ class BoardAxisConfig {
   /// along this axis. This is the space a month calendar day number
   /// occupies above its chips.
   final double lanePadding;
+}
+
+/// The frozen bands of a [BoardAxisConfig] as track bounds and extents:
+/// the one site that clamps [BoardAxisConfig.frozenStart] and
+/// [BoardAxisConfig.frozenEnd] against the axis. Internal, and not shown
+/// by the barrel.
+///
+/// Where the two counts overlap on a short axis, the shared tracks belong
+/// to the leading band, so the bands never overlap. Every read derives
+/// from the axis as it is at the call, so a measurement recorded between
+/// two reads shows in the second. The extents are SETTLED: no track
+/// resize in flight is applied.
+extension BoardAxisConfigBands on BoardAxisConfig {
+  /// The exclusive end of the leading band: [frozenStart] clamped into
+  /// `[0, trackCount]`, so 0 with no leading band.
+  int get leadingBandEnd {
+    return _leadingBandEndOf(axis.trackCount);
+  }
+
+  /// The first track of the trailing band, `trackCount` with no trailing
+  /// band. Never below [leadingBandEnd].
+  int get trailingBandStart {
+    final count = axis.trackCount;
+    return _trailingBandStartOf(count, _leadingBandEndOf(count));
+  }
+
+  /// Whether [track] lies in either band. Defined for
+  /// `0 <= track < trackCount`.
+  bool isFrozenTrack(int track) {
+    final count = axis.trackCount;
+    final lead = _leadingBandEndOf(count);
+    return track < lead || track >= _trailingBandStartOf(count, lead);
+  }
+
+  /// The settled extent of the leading band, 0.0 with none.
+  double get leadingBandExtent {
+    final lead = leadingBandEnd;
+    if (lead <= 0) {
+      return 0.0;
+    }
+    return axis.offsetOfFraction(lead.toDouble());
+  }
+
+  /// The settled extent of the trailing band, 0.0 with none.
+  double get trailingBandExtent {
+    final start = trailingBandStart;
+    // Not an equality: the non-negative checks on the counts are asserts,
+    // so in a release build a negative `frozenEnd` puts the start past the
+    // axis, where `offsetOfFraction` would read out of range.
+    if (start >= axis.trackCount) {
+      return 0.0;
+    }
+    return axis.totalExtent - axis.offsetOfFraction(start.toDouble());
+  }
+
+  /// The frozen tracks: the leading band ascending, then the trailing band
+  /// ascending.
+  Iterable<int> get frozenTracks sync* {
+    final count = axis.trackCount;
+    final lead = _leadingBandEndOf(count);
+    for (var track = 0; track < lead; track++) {
+      yield track;
+    }
+    for (
+      var track = _trailingBandStartOf(count, lead);
+      track < count;
+      track++
+    ) {
+      yield track;
+    }
+  }
+
+  int _leadingBandEndOf(int count) {
+    final start = frozenStart;
+    if (start <= 0) {
+      return 0;
+    }
+    return start < count ? start : count;
+  }
+
+  int _trailingBandStartOf(int count, int lead) {
+    final start = count - frozenEnd;
+    return start > lead ? start : lead;
+  }
 }

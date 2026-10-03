@@ -48,6 +48,264 @@ kill switch.
 - Added `BoardGridPainter` and `BoardBackgroundPainter`, which paint behind the
 lattice from its live track geometry (`BoardGeometryView`), frozen bands
 included.
+- Fix: a new `BoardDragConfig` instance, which an inline config in a parent's
+`build` is on every rebuild of that parent, cancelled a live drag and rebuilt
+every cell and item. `Board` now assigns it to the drag controller it has
+(`BoardDragController.config` gained a setter): a live session carries on under
+the new policy, and is cancelled only when `enabled` turns false or a resize
+session can no longer be reported or admitted. No cell or item builder runs.
+- Fix: toggling `BoardDragConfig.enabled`, the resize policy or
+`buildDefaultDragHandles`, or `BoardSelectionConfig.enabled`, its mode or its
+presence, re-created every item's or every cell's widgets; the selection
+toggles re-created the viewport itself, and toggling `Board.drag` presence
+re-created the whole scroll view and reset its scroll offset. All of these now
+keep every `State`, except that drag PRESENCE still re-creates each item's
+widgets. `BoardDragHandle` stays in the tree while inactive, deferring the
+pointer to its child.
+- The default drag handles are one zone per item: a press in an admitted edge's
+band resizes that edge, anywhere else starts a move after a long press. A band
+is 12 px deep as the strips were, but never more than a third of the item, so
+an item shorter than 24 px with both edges admitted can be moved again.
+- Fix: after the drag controller was torn down mid-session, the next session on
+the same key showed the earlier session's content in the drag proxy.
+- Fix: on a board axis whose direction is `AxisDirection.up` or
+`AxisDirection.left`, a move landed one item-length from where it was dropped,
+the default trailing resize handle sat on the item's leading edge, autoscroll
+ran away from the finger, the "Move up/down/left/right" semantics actions moved
+the item the other way on screen, and a committed resize, or a neighbour the
+make-room gap handed off at a commit, stepped by its size change. The drag layer
+now reads an item's position from its content-leading corner, which a reversed
+axis paints at the item's far edge; `BoardRenderPort.leadingCornerOf` is that
+conversion. `BoardResizeEdges` now documents that `leading` and `trailing` are
+content edges.
+- Board items now pin with frozen bands: an item whose span lies wholly inside
+a frozen band on an axis stays with that band as the board scrolls, so a
+frozen header row can carry items. An item that crosses a band's edge scrolls
+and is covered by the band, as before. A move into or out of a band slides
+from where the item painted.
+- Fix: a tap on a frozen cell selected, and a drop over a frozen band landed
+on, the scrolled cell hidden under the band. `trackSpaceAt`, `cellAt`,
+`frozenCellAt` and `resolveDropCell` now map a point through the lattice as it
+paints, frozen bands and in-flight track resizes included (`trackSpaceAt` read
+the settled geometry before), `rectOfCell` reports a frozen cell where it
+paints, and `itemAt` no longer returns an item a frozen cell covers. A
+cell-mode tap on empty space past the lattice now selects nothing.
+- Fix: `showOnScreen` on a cell hidden under a frozen band left it there; the
+board now reveals into the viewport minus its bands, and never scrolls to show
+a frozen cell or a pinned item.
+- Fix: a frozen header on a content-sized axis that grew slid the first
+scrolled row under itself; it now pushes the content down.
+- `firstVisibleRow`, `lastVisibleRow`, `firstVisibleCol` and `lastVisibleCol`
+now report only the scrolled tracks that show between the frozen bands, and
+`BoardGeometryView.scrolledRegion` is that region's rect; frozen tracks come
+from `frozenTracksOf` alone. `BoardGridPainter` clips a scrolled track to the
+region, so no line or tint of a track hidden under a band shows through it.
+- Drag autoscroll zones are measured from the frozen bands' inner edges, and a
+pointer over a band no longer autoscrolls on that axis.
+- Fix: under a fraction or free snap, moving a laned item wrote a fractional
+start on the lane axis (a lane-1 event dropped in place landed at noon of its
+day), and a `BoardDropFit` nudge could do the same. A laned item now moves by
+whole tracks on its lane axis under every snap, landing on the track under the
+finger.
+- Fix: an item whose start came to one rounding step below a whole track, as
+arithmetic on a fraction can in doubles, was treated as starting in the track
+before: `itemsAt` listed it there and two overlapping chips stopped taking
+separate lanes. The board now reads such a start as on the track, and
+`BoardSnap.quantize` returns an exact whole track where a multiple of its
+fraction lands on one.
+- Fix: a `trackResize` curve that overshoots (`Curves.easeOutBack`) on a
+shrinking content-sized track drove its painted extent below zero and threw a
+negative-constraint error. The painted extent is now floored at zero; a
+growing track keeps the overshoot.
+- Fix: a content-sized track that changed while a track resize was in flight
+hid the change until the resize ended and then stepped to it. An item entering
+or leaving mid-resize, a measurement a zero `trackResize` family refuses to
+animate, and a make-room gap opening on a resizing row now show at once, and
+the resize in flight finishes under them. The gap no longer steps the row
+when it opens.
+- Fix: restyling `itemSlide` to zero stopped a `dropSettle` glide even when
+`dropSettle` was set explicitly, and restyling `trackResize` to zero stopped a
+drag's make-room continuation. A restyle now stops at once the motion of every
+family it turns off, including one left inheriting, and of no other.
+- An item move or resize with `duration: Duration.zero`, or under a zero
+`itemSlide` family, lands at once and leaves a slide already in flight for the
+item running, as the documentation now says.
+- Fix: when an animated removal finished, the items that re-laned into its
+lane stepped there; they now slide on the `itemSlide` clock.
+- Fix: a drag's make-room gap jumped when its clock changed under it: a
+cancel after the app restyled `makeRoom` mid-drag re-read the gap on the new
+curve, and closed it on the new duration rather than on the one the drag
+started with. The gap now closes on the drag's own clock, and a gap whose
+clock does change continues from where it painted.
+- Fix: under an overshooting `makeRoom` curve, a drop could carry a displaced
+neighbour several pixels past where it lands and back. The continuation of a
+drop now approaches each item's rest from where it painted and never passes
+it.
+- Fix: a screen reader's explore-by-touch found the node painted underneath:
+the content cell scrolled under a frozen header rather than the header, and a
+cell an item covers rather than the item. The board's semantics children are
+now in paint order.
+- Fix: cells the board builds but does not show, in the cache region outside
+the viewport or scrolled under a frozen band, were announced as visible. They
+are now kept in the semantics tree flagged hidden, as a list's offscreen rows
+are.
+- The built-in "Move up/down/left/right" semantics actions now take their
+labels from `WidgetsLocalizations`, so they follow the app's locale.
+`BoardDragConfig.semanticsActionsBuilder` documents how to add resize
+actions, which the board does not build in.
+- Added keyboard support to `Board`. With a selection config active, the board
+is a Tab stop, a cell tap focuses it, and the arrow keys move the selection by
+screen direction; Shift extends a range, Home and End go to the row's ends
+(with Control or Meta, the board's), and Page Up and Page Down move by the rows
+in view. Each move scrolls only as far as the new cell needs. Escape cancels a
+live drag. `Board.focusNode` and `Board.autofocus` are new.
+- Added `BoardController.revealCell`, which scrolls the least that shows a
+cell between the frozen bands, and not at all when it already shows.
+- `addItem`, `moveItem`, `resizeItem` and `setItems` now throw an
+`ArgumentError` in release builds too for a span that breaks one of
+`BoardSpan`'s rules (a NaN or out-of-range fraction, a negative start, no
+extent), and for a start or span above 2147483647, the largest the board
+stores, before anything is written. Before, a release build registered the
+key and then failed, leaving it on the board in no index, and a start or
+span above 2147483647 was stored wrapped.
+- `updateItem` with a payload whose key is not the key given throws a
+`StateError` in release builds too, where it used to write the wrong payload.
+- Fix: inside `runBatch`, an item-data notification was delivered for a key no
+longer on the board, removed outright by the batch or by a listener during its
+notifications; a key still animating out keeps it.
+- Fix: in debug builds, the report of an intra-track item cluster on a
+content-sized axis missed an item starting within a rounding step below a
+track, and checked each measured track by walking every item on the board. It
+now places such a start on that track, as the rest of the board does, and
+reads only that track's items.
+- Perf: an item spanning far more tracks than the lattice cost time and memory
+per track it spanned; it now costs at most one per lattice track it covers, and
+one for an item starting past the lattice.
+- Fix: `UniformAxis.trackAt` threw for an infinite or NaN offset; it now clamps
+as the other axes do. `DerivedAxis.extentOf` returns the extent the callback
+gave, where it could round below it and below `minTrackExtent`.
+- Fix: a structural listener that removed and re-added an item while
+`removeItem` notified could make the re-added item slide in from where the
+removed one had been. `removeItem` now installs its neighbours' slides before
+it notifies.
+- Fix: inside `runBatch`, a mutation after a `setItems` could miss a neighbour
+it re-laned, which then stepped to its new lane instead of sliding.
+- Fix: on a board with no lane axis, an item entering or leaving showed
+nothing for the whole `itemEnterExit` animation and then popped. It now grows
+and shrinks along the primary axis, as an item on a laned board does along the
+lane axis.
+- Fix: an item animating out still took taps. The pointer now reaches what lies
+under it, as `itemAt` already did.
+- `BoardSelectionConfig.onChanged` now documents that it is called for every
+change of the selection, a programmatic `setSelection` included.
+- Fix: an item lost its widget `State` when another item was added or removed
+before it on the same row, when it moved to another row, and when the column
+count changed. Each item's child is now keyed by the item, so its `State` follows
+it; an item no longer needs a `GlobalKey` in its content for that.
+- Fix: adding a key back while its exit was still running made the exiting item
+vanish and a new one grow from nothing. `addItem` and `setItems` now reverse the
+exit: the same item grows back from where it had shrunk to, at the pace of a full
+enter, and slides to a new span if it was given one.
+- Fix: removing an item that came before another on the same row, or letting its
+exit finish, left the removed item's widget showing in the other item's place and
+unmounted the other item's widget, cancelling a drag of it. The board now rebuilds
+whenever a removal moves an item into a place built for another.
+- Fix: a resize moved the dragged edge to the pointer, so pressing a resize handle
+a few pixels inside the edge and releasing resized the item under a free or fine
+snap. The edge now moves by how far the pointer moves.
+- Fix: a second finger on an item being dragged cancelled the drag. It is now
+ignored.
+- Fix: dragging into an edge zone with the board already scrolled to its end kept
+requesting a frame every vsync. Autoscroll now stops at the end and resumes when
+the pointer moves.
+- Fix: a drop target that `canDropAt` refused stayed refused while the pointer
+rested on it, even after the board changed to allow it, and one it accepted stayed
+accepted after the board changed to refuse it. A board change during a drag now
+asks `canDropAt` again.
+- Fix: `animateScrollToCell`'s `rowAlignment` and `colAlignment` now follow
+`Scrollable.ensureVisible`: 1.0 puts the cell's trailing edge on the viewport's
+trailing edge (it used to put the cell's leading edge there, leaving the cell off
+screen) and 0.5 centres the cell. 0.0, the default, is unchanged. With
+`avoidFrozenTracks` the alignment is inside the region between the frozen bands.
+- Fix: `animateScrollToCell` completed true when a later `jumpToCell` or
+`revealCell`, or the user scrolling, took the position before it arrived. It now
+completes false then, as its documentation says.
+- Fix: when `frozenStart` and `frozenEnd` together exceed an axis's track count,
+`animateScrollToCell` with `avoidFrozenTracks` counted the tracks the two bands
+share in its trailing inset, so with a non-zero alignment it scrolled to a
+different offset. The shared tracks now count only in the leading band, as the
+board paints them.
+- Fix: assigning `BoardController.rows` or `columns` a new config that wraps the
+same content-sized axis with the same lane settings discarded every measurement,
+and a scrolled board jumped to other rows. The measurements are now kept unless
+the axis or its lane geometry changed.
+- Fix: a content-sized row took the height of its tallest cell in view, so it
+shrank when that cell scrolled out sideways and everything below it moved. It now
+keeps the height of the tallest cell measured in it until that cell is measured
+again or `invalidateCellMeasurements` is called.
+- Fix: in debug builds, an item lying within one track of a content-sized axis
+with no lane axis threw from inside layout, and every later layout failed even
+after the item was removed. The error is now reported once per layout and the
+board recovers when the item goes.
+- Fix: a cell or item whose builder started returning null failed the next paint
+with a framework assertion. The board now drops it cleanly.
+- Fix: with range selection on (the default mode), a touch drag over the cells
+selected a range instead of scrolling the board. Touch now starts a range after a
+long press; a mouse, stylus or trackpad still starts one as soon as it moves.
+- `BoardController.laneOf`, `laneCountOf` and `laneSpanOf` return null for a key
+that is not on the board, as `spanOf` and `itemOf` do; they used to return the
+values of an unlaned item, 0, 1 and 1, which a real lane 0 could not be told
+from.
+- Added `BoardController.itemCount` (constant time) and `BoardController.keys`,
+which count and list the items on the board, not counting those animating out.
+- Fix: a key repeated inside one `setItems` call was refused with the message for
+a key already on the board, which advised `updateItem`; it now says the key
+appears more than once in the placements.
+- `addItem`, `moveItem` and `setItems` now document that a span outside the grid
+is kept, and shown once the grid covers it.
+- `BoardController`'s internal members, the id-keyed reads, the drag and animation
+channels, the render object's registration and the debug counters, moved to the
+`BoardControllerInternals` extension, which the package does not export, so they
+no longer appear beside the supported API. `BoardAnimationReader` is no longer
+exported.
+- The README has a `Board` section with a quick start, and every public board
+config field and enum value is documented.
+- `Board` passes `scrollCacheExtent`, `dragStartBehavior`,
+`keyboardDismissBehavior` and `hitTestBehavior` through to its scroll view.
+- `BoardDragConfig.dragStartDelay` sets the default handle's long press, and
+`BoardDelayedDragHandle.delay` a delayed handle's; `resizeHandleExtent` sets how
+deep the default resize strips reach.
+- `BoardDragConfig.onDragStart`, `onDragTargetChanged` and `onDragEnd` report a
+drag's lifecycle: its start and kind, each change of its drop target (for a live
+label), and its end, committed or not. They are delivered after the board call
+that caused them has returned, in a microtask or at the start of a pointer
+release, and never inside a controller mutation, a build or the frame's
+finalize, so a handler may mutate the board and call `setState`.
+- A mouse over an item's resize strip shows a resize cursor, and a drag shows its
+cursor, grabbing for a move and the resize cursor for a resize, until it ends.
+- A range selection dragged to the edge of the board scrolls it and extends the
+range as the cells arrive; `BoardSelectionConfig.autoScrollEdgeZone` and
+`autoScrollMaxVelocity` tune it as the drag config's do.
+- Assigning `BoardController.rows` or `columns` a new axis, to zoom for instance,
+keeps the row or column at the leading edge of the scrolled area where it was,
+instead of keeping the pixel offset and showing other rows.
+- `BoardItemView.presence` hands an item builder the item's enter/exit ramp as
+an `Animation<double>`: `forward` while it enters, `reverse` while it leaves,
+`completed` at rest and `dismissed` once it has gone, so a `FadeTransition` or
+any other transition can run with the board's own growth. Every build of one
+item hands the same object. `BoardItemView`'s constructor takes it as a new
+required argument.
+- `Board.restorationId` restores the board's two scroll offsets after an app
+restart, as a `ListView`'s `restorationId` does. `TwoDimensionalScrollView`
+does not forward one to its scrollable, so the board's scroll view now builds
+the scrollable itself.
+- `BoardDragController` is no longer exported. `Board` builds its own and no
+app could reach it; `BoardDragConfig`'s `onDragStart`, `onDragTargetChanged`
+and `onDragEnd` are how an app follows a drag. `BoardDragKind` and
+`BoardDropTarget`, which those callbacks carry, stay exported.
+- `BoardController.animateTrackResize`, an internal-use channel, no longer
+takes a target extent: it reads the one the axis stores. The internal-use
+`BoardController.finalizeTrackResize` is removed.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin with no clip, so it was drawn over whatever sat above the scroll
 view: a tree short enough to fit its viewport declares no visual overflow, so

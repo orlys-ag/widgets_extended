@@ -10,7 +10,6 @@
 /// is internal regardless of its name.
 library;
 
-export '_board_animation_coordinator.dart' show BoardAnimationReader;
 export '_board_axis.dart'
     show
         BoardAxis,
@@ -37,8 +36,7 @@ export 'board_config.dart'
         BoardSnap,
         BoardSnapMode;
 export 'board_controller.dart' show BoardController;
-export 'board_drag_controller.dart'
-    show BoardDragController, BoardDragKind, BoardDropTarget;
+export 'board_drag_controller.dart' show BoardDragKind, BoardDropTarget;
 export 'board_drag_handle.dart'
     show BoardDelayedDragHandle, BoardDragHandle, BoardItemDragScope;
 export 'board_render_port.dart' show BoardRenderPort;

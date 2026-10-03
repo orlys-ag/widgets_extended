@@ -80,27 +80,14 @@ class BoardScrollOrchestrator<TKey> {
     return port.frozenInsetOf(axis);
   }
 
-  /// The TRAILING band's extent, derived from the configs and the axis
-  /// directly: the port's inset read is leading-only by contract.
-  double _trailingInsetOf(Axis axis) {
-    final config = axis == Axis.vertical ? _rowsOf() : _columnsOf();
-    if (config.frozenEnd <= 0) {
-      return 0.0;
-    }
-    final boardAxis = config.axis;
-    // Clamped like every other frozen-band consumer: an over-large
-    // frozenEnd freezes everything rather than leaving the axis's
-    // domain.
-    final start = boardAxis.trackCount - config.frozenEnd;
-    if (start <= 0) {
-      return boardAxis.totalExtent;
-    }
-    return boardAxis.totalExtent - boardAxis.offsetOf(start);
-  }
-
-  /// The scroll offset that lands [track]'s leading edge at the aligned
-  /// painted position: the leading inset when [alignment] is 0, sliding
-  /// toward the trailing band's start as it approaches 1.
+  /// The scroll offset that places [track] by [alignment] inside the
+  /// region the bands leave, Flutter's convention for
+  /// `RenderAbstractViewport.getOffsetToReveal`
+  /// (`rendering/viewport.dart:1214-1219`) with the frozen bands as its
+  /// pinned extents: 0.0 puts the track's leading edge on the region's,
+  /// 1.0 its trailing edge on the region's trailing edge, 0.5 centres it.
+  /// A track larger than the region makes the span the alignment runs
+  /// over negative, and 1.0 then shows its trailing edge.
   double _targetFor(
     Axis axis,
     int track,
@@ -110,10 +97,13 @@ class BoardScrollOrchestrator<TKey> {
   ) {
     final config = axis == Axis.vertical ? _rowsOf() : _columnsOf();
     final leading = avoid ? frozenInsetOf(axis) : 0.0;
-    final trailing = avoid ? _trailingInsetOf(axis) : 0.0;
+    // The port's inset read is leading-only, so the trailing band's extent
+    // comes from the config.
+    final trailing = avoid ? config.trailingBandExtent : 0.0;
     final viewport = position.viewportDimension;
+    final extent = config.axis.extentOf(track);
     final paintedTarget =
-        leading + alignment * (viewport - leading - trailing);
+        leading + alignment * (viewport - leading - trailing - extent);
     final raw = config.axis.offsetOf(track) - paintedTarget;
     return raw.clamp(position.minScrollExtent, position.maxScrollExtent);
   }
@@ -189,10 +179,8 @@ class BoardScrollOrchestrator<TKey> {
     if (landed && !_disposed && generation == _intentGeneration) {
       // The driven activity overwrote every correction with absolute
       // values; one post-frame snap re-derives the landing against the
-      // settled geometry. Guarded by the generation: an interrupted
-      // flight can report landed through the activity-dispose path (a
-      // documented residual), and its stale snap must not take the
-      // position from whatever interrupted it.
+      // settled geometry. Guarded by the generation: a later call made
+      // between the landing and the callback owns the position.
       _pendingSnap = (
         row: row,
         col: col,
@@ -205,6 +193,35 @@ class BoardScrollOrchestrator<TKey> {
     return landed;
   }
 
+  /// Completes [axis]'s in-flight leg FALSE: a later call has taken the
+  /// axis, which is a supersession however the position then ends, even
+  /// on the very offset the leg was heading for.
+  void _supersede(Axis axis) {
+    final leg = axis == Axis.vertical ? _verticalLeg : _horizontalLeg;
+    if (leg != null && !leg.completer.isCompleted) {
+      leg.completer.complete(false);
+    }
+  }
+
+  /// Whether [position] stands at [target] clamped into its CURRENT
+  /// extents, which is where a driven scroll nothing took over ends: its
+  /// last tick writes its end value, and a target the content shrank past
+  /// during the flight ends clamped. A driven scroll's future completes
+  /// when the activity is DISPOSED as well as when it arrives
+  /// (`widgets/scroll_activity.dart:800-801`), so this is what tells an
+  /// arrival from a user's drag, or any other activity, taking the
+  /// position mid-flight.
+  static bool _arrived(ScrollPosition position, double target) {
+    if (!position.hasContentDimensions) {
+      return false;
+    }
+    final clamped = target.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    return (position.pixels - clamped).abs() <= precisionErrorTolerance;
+  }
+
   Future<bool> _driveLeg(
     Axis axis,
     ScrollPosition position,
@@ -212,10 +229,7 @@ class BoardScrollOrchestrator<TKey> {
     Duration duration,
     Curve curve,
   ) {
-    final superseded = axis == Axis.vertical ? _verticalLeg : _horizontalLeg;
-    if (superseded != null && !superseded.completer.isCompleted) {
-      superseded.completer.complete(false);
-    }
+    _supersede(axis);
     final leg = _AxisLeg();
     if (axis == Axis.vertical) {
       _verticalLeg = leg;
@@ -231,10 +245,11 @@ class BoardScrollOrchestrator<TKey> {
     }
     position.animateTo(target, duration: duration, curve: curve).whenComplete(
       () {
-        // Landed only if this leg is still the axis's current one and
-        // nothing cancelled it while the activity ran.
+        // Landed only if nothing superseded or cancelled this leg while
+        // the activity ran, and the activity ended at the target rather
+        // than being taken over short of it.
         if (!leg.completer.isCompleted) {
-          leg.completer.complete(true);
+          leg.completer.complete(_arrived(position, target));
         }
       },
     );
@@ -299,7 +314,8 @@ class BoardScrollOrchestrator<TKey> {
 
   /// Jumps both axes. A registered-but-unlaid-out port gets one deferred
   /// post-frame jump, one slot, newest wins; no port is a no-op, and so
-  /// is a target outside the lattice.
+  /// is a target outside the lattice. Supersedes an animation in flight
+  /// on either axis, which completes false.
   void jumpToCell(int row, int col, {required bool avoidFrozenTracks}) {
     final port = _portOf();
     if (port == null || _disposed) {
@@ -312,6 +328,8 @@ class BoardScrollOrchestrator<TKey> {
       return;
     }
     _intentGeneration += 1;
+    _supersede(Axis.vertical);
+    _supersede(Axis.horizontal);
     if (!port.isLaidOut) {
       _pendingJump = (row: row, col: col, avoid: avoidFrozenTracks);
       if (_jumpScheduled) {
@@ -347,20 +365,89 @@ class BoardScrollOrchestrator<TKey> {
     );
   }
 
+  /// Jumps each axis the LEAST that brings cell `(row, col)` into the
+  /// scrolled region, the viewport minus its frozen bands, and leaves an
+  /// axis alone where the cell already shows or its track is frozen, a
+  /// frozen track always showing. A cell larger than the region shows its
+  /// leading edge. No port, one not laid out, and a cell outside the
+  /// lattice are no-ops. A jump supersedes an animation in flight on the
+  /// axis it moves, as [jumpToCell] does on both, and that animation
+  /// completes false; a reveal that moves nothing supersedes nothing.
+  void revealCell(int row, int col) {
+    final port = _portOf();
+    if (port == null || _disposed || !port.isLaidOut) {
+      return;
+    }
+    if (row < 0 ||
+        row >= _rowsOf().axis.trackCount ||
+        col < 0 ||
+        col >= _columnsOf().axis.trackCount) {
+      return;
+    }
+    final vertical = port.verticalPosition;
+    final horizontal = port.horizontalPosition;
+    if (vertical == null || horizontal == null) {
+      return;
+    }
+    final rowTarget = _revealTargetFor(Axis.vertical, row, vertical);
+    final colTarget = _revealTargetFor(Axis.horizontal, col, horizontal);
+    if (rowTarget == null && colTarget == null) {
+      return;
+    }
+    _intentGeneration += 1;
+    if (rowTarget != null) {
+      _supersede(Axis.vertical);
+      vertical.jumpTo(rowTarget);
+    }
+    if (colTarget != null) {
+      _supersede(Axis.horizontal);
+      horizontal.jumpTo(colTarget);
+    }
+  }
+
+  /// The scroll offset that reveals [track] on [axis] with the least
+  /// motion, or null when it already shows or is frozen. Content space,
+  /// which is direction-agnostic: the leading band is at the content's
+  /// leading edge whichever way the axis paints.
+  double? _revealTargetFor(Axis axis, int track, ScrollPosition position) {
+    final config = axis == Axis.vertical ? _rowsOf() : _columnsOf();
+    final boardAxis = config.axis;
+    if (config.isFrozenTrack(track)) {
+      return null;
+    }
+    final leading = frozenInsetOf(axis);
+    final trailing = config.trailingBandExtent;
+    final viewport = position.viewportDimension;
+    final start = boardAxis.offsetOf(track);
+    final end = start + boardAxis.extentOf(track);
+    final shownStart = position.pixels + leading;
+    final shownEnd = position.pixels + viewport - trailing;
+    double target;
+    if (start < shownStart || end - start > shownEnd - shownStart) {
+      target = start - leading;
+    } else if (end > shownEnd) {
+      target = end - (viewport - trailing);
+    } else {
+      return null;
+    }
+    final clamped = target.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((clamped - position.pixels).abs() <= precisionErrorTolerance) {
+      return null;
+    }
+    return clamped;
+  }
+
   /// Completes every in-flight leg false and drops the pending slots.
   /// Run by `detachRenderPort` and by [dispose], so a `Future` never
   /// waits on a `ScrollPosition` that left the tree.
   void cancelInFlight() {
     _intentGeneration += 1;
-    final vertical = _verticalLeg;
-    if (vertical != null && !vertical.completer.isCompleted) {
-      vertical.completer.complete(false);
-    }
+    _supersede(Axis.vertical);
     _verticalLeg = null;
-    final horizontal = _horizontalLeg;
-    if (horizontal != null && !horizontal.completer.isCompleted) {
-      horizontal.completer.complete(false);
-    }
+    _supersede(Axis.horizontal);
     _horizontalLeg = null;
     _pendingSnap = null;
     _pendingJump = null;

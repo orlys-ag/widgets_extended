@@ -32,6 +32,12 @@ class BoardStore<TKey, TItem> {
   /// tree's `NodeIdRegistry.noNid`.
   static const int noId = -1;
 
+  /// The largest integer span component the store holds: the four integer
+  /// components live in `Int32List`s, which keep only the low 32 bits of
+  /// what is written. `BoardController`'s span gate refuses a larger one
+  /// before anything is written.
+  static const int maxTrackComponent = 0x7FFFFFFF;
+
   /// Bit 0 of the flags byte: the item is animating OUT. The single
   /// normative record of that state; nothing re-derives it from an
   /// animation's progress.
@@ -99,8 +105,9 @@ class BoardStore<TKey, TItem> {
       assert(
         (_flags[existing] & exitingBit) == 0,
         "BoardStore.allocate: key $key still maps to exiting id "
-        "$existing. A re-add while the previous incarnation is exiting "
-        "must retire it first, or the enter rides the dying id.",
+        "$existing. A key whose exit is running comes back on its own id "
+        "through the controller's resurrection and is never allocated; "
+        "allocating it here would enter it on the dying id.",
       );
       lastAllocationWasRecycled = false;
       return existing;
@@ -129,10 +136,37 @@ class BoardStore<TKey, TItem> {
     if (id == null) {
       return noId;
     }
+    // The retire path clears the exiting bit first; a caller that did not
+    // still leaves the count right.
+    if ((_flags[id] & exitingBit) != 0) {
+      _exitingCount -= 1;
+    }
     _idToKey[id] = null;
     _resetSlot(id);
     _freeIds.add(id);
     return id;
+  }
+
+  /// The number of registered keys whose id is not exiting: the live
+  /// set's size. O(1): the exiting count moves in [setFlag], the one
+  /// writer of the bit on a registered id, and in [release], which takes a
+  /// slot out whatever its bits; an allocated slot starts with none.
+  int get liveCount {
+    return _keyToId.length - _exitingCount;
+  }
+
+  int _exitingCount = 0;
+
+  /// The live set's keys, in registration order: a snapshot, so the
+  /// caller may mutate the store while it walks the list.
+  List<TKey> liveKeys() {
+    final keys = <TKey>[];
+    _keyToId.forEach((key, id) {
+      if ((_flags[id] & exitingBit) == 0) {
+        keys.add(key);
+      }
+    });
+    return keys;
   }
 
   /// Number of id slots ever allocated; every live id is below it. The
@@ -204,6 +238,13 @@ class BoardStore<TKey, TItem> {
         : _colStart[id] + _colFraction[id];
   }
 
+  /// The track [id] STARTS in on [axis], by the one start rule
+  /// ([trackIndexOf]); a start one ulp below an integer is in that
+  /// integer's track, which the raw integer component is not.
+  int startIndexOf(int id, Axis axis) {
+    return trackIndexOf(startTrackOf(id, axis));
+  }
+
   /// The EXACT track-space trailing endpoint of [id] on [axis]. The span
   /// occupies the HALF-OPEN interval
   /// `[startTrackOf(id, axis), endTrackOf(id, axis))`.
@@ -235,6 +276,14 @@ class BoardStore<TKey, TItem> {
   /// write site.
   void setSpan(int id, BoardSpan span) {
     assert(id >= 0 && id < _rowStart.length);
+    assert(
+      span.rowStart <= maxTrackComponent &&
+          span.rowSpan <= maxTrackComponent &&
+          span.colStart <= maxTrackComponent &&
+          span.colSpan <= maxTrackComponent,
+      "BoardStore.setSpan: a span component above $maxTrackComponent, which "
+      "the store cannot hold; the controller's span gate refuses it first.",
+    );
     _rowStart[id] = span.rowStart;
     _rowSpan[id] = span.rowSpan;
     _colStart[id] = span.colStart;
@@ -296,6 +345,9 @@ class BoardStore<TKey, TItem> {
   void setFlag(int id, int bit, bool value) {
     assert(id >= 0 && id < _flags.length);
     assert(bit == exitingBit || bit == enteringBit || bit == draggingBit);
+    if (bit == exitingBit && ((_flags[id] & bit) != 0) != value) {
+      _exitingCount += value ? 1 : -1;
+    }
     if (value) {
       _flags[id] |= bit;
     } else {

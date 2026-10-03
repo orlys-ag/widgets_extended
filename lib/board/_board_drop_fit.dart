@@ -57,12 +57,17 @@ class BoardDropFitter {
   /// Steps available per axis under [policy] and [snap]. Both zero means
   /// no candidate can exist, which the caller uses to skip the gather and
   /// the gate entirely.
+  ///
+  /// [wholeTrackAxis] is an axis the scan steps by WHOLE tracks whatever
+  /// the snap: the lane axis of a laned item, which occupies one track
+  /// there and moves by whole tracks, as the resolver moves it.
   static ({int rows, int cols}) stepsOf({
     required BoardDropFit policy,
     required BoardSnap snap,
+    Axis? wholeTrackAxis,
   }) {
-    final quantum = BoardDropResolver.quantumOf(snap);
-    int stepsFor(double radius) {
+    int stepsFor(double radius, Axis axis) {
+      final quantum = quantumOn(axis, snap, wholeTrackAxis);
       if (radius <= 0.0 || quantum <= 0.0) {
         return 0;
       }
@@ -71,9 +76,15 @@ class BoardDropFitter {
     }
 
     return (
-      rows: stepsFor(policy.rowRadius),
-      cols: stepsFor(policy.colRadius),
+      rows: stepsFor(policy.rowRadius, Axis.vertical),
+      cols: stepsFor(policy.colRadius, Axis.horizontal),
     );
+  }
+
+  /// The scan's step on [axis]: one track on [wholeTrackAxis], the
+  /// snap's quantum elsewhere.
+  static double quantumOn(Axis axis, BoardSnap snap, Axis? wholeTrackAxis) {
+    return axis == wholeTrackAxis ? 1.0 : BoardDropResolver.quantumOf(snap);
   }
 
   /// The share of [box] that no obstacle covers, by CONTENT-SPACE area.
@@ -183,12 +194,18 @@ class BoardDropFitter {
     required BoardAxis colAxis,
     required List<BoardSpan> obstacles,
     required bool Function(BoardSpan candidate) accepts,
+    Axis? wholeTrackAxis,
   }) {
-    final steps = stepsOf(policy: policy, snap: snap);
+    final steps = stepsOf(
+      policy: policy,
+      snap: snap,
+      wholeTrackAxis: wholeTrackAxis,
+    );
     if (steps.rows == 0 && steps.cols == 0) {
       return null;
     }
-    final quantum = BoardDropResolver.quantumOf(snap);
+    final rowQuantum = quantumOn(Axis.vertical, snap, wholeTrackAxis);
+    final colQuantum = quantumOn(Axis.horizontal, snap, wholeTrackAxis);
     final rowLow = box.startTrackOn(Axis.vertical);
     final colLow = box.startTrackOn(Axis.horizontal);
     final rowExtent = box.endTrackOn(Axis.vertical) - rowLow;
@@ -206,16 +223,26 @@ class BoardDropFitter {
         // Clamped BEFORE the split, and the distance is read off the
         // clamped value: at the lattice edge the clamp moves a candidate,
         // so the step count stops describing how far it went.
-        final row = BoardDropResolver.clampStart(
-          rowLow + dRow * quantum,
+        // Each candidate start snapped to a track edge it lies within the
+        // tolerance of: `low + d * quantum` is a sum of two exact
+        // multiples, which in doubles can come to one ulp below the
+        // integer it means.
+        var row = BoardDropResolver.clampStart(
+          snapToTrackEdge(rowLow + dRow * rowQuantum),
           rowExtent,
           rowAxis.trackCount,
         );
-        final col = BoardDropResolver.clampStart(
-          colLow + dCol * quantum,
+        var col = BoardDropResolver.clampStart(
+          snapToTrackEdge(colLow + dCol * colQuantum),
           colExtent,
           colAxis.trackCount,
         );
+        if (wholeTrackAxis == Axis.vertical) {
+          row = row.floorToDouble();
+        }
+        if (wholeTrackAxis == Axis.horizontal) {
+          col = col.floorToDouble();
+        }
         // RE-SPLIT, never an addition to the fraction field: a span
         // asserts its leading fraction below 1.0, so a quantum carrying
         // past a track boundary has to move the integer start.
