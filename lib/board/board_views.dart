@@ -49,6 +49,13 @@ import 'board_controller.dart';
 /// sideways never changes a row's height; measuring such a cell again,
 /// or finding it building nothing, replaces its measurement.
 /// [BoardController.invalidateCellMeasurements] forgets them all.
+///
+/// A cell that builds null contributes nothing to its content-sized
+/// track. When none of a track's cells builds anything,
+/// `LazyContentAxis.estimate` stands in for them, and the track grows
+/// past it only where its lane cluster needs more. A widget that takes
+/// no extent measures zero, so a track of such cells rests at
+/// `LazyContentAxis.minTrackExtent`.
 typedef BoardCellBuilder<TKey, TItem> =
     Widget? Function(BuildContext context, BoardCellView<TKey, TItem> cell);
 
