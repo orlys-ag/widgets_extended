@@ -1,121 +1,88 @@
 ---
 name: feature-status
-description: "Report the state of a feature-implementation cycle without running anything. Reads the plan, its audit file, checklist and acceptance document for a slug, or lists every in-progress feature when given no slug, and reports plan status, checklist progress, discovered blockers, revision rounds, trial outcome, acceptance and citation drift. Read-only: never writes files, never invokes the workflow, never spawns agents."
+description: "Report the state of a feature-implementation cycle without running anything. Reads the plan, its audit file, checklist, run record and acceptance document for a slug, or lists every feature when given no slug, and reports plan status, checklist progress, discovered blockers, revisions, trial outcome, acceptance and citation drift. Read-only: never writes files, never invokes the workflow, never spawns agents."
 ---
 
-You report where a feature stands. You never write, never invoke a workflow, and
-never spawn agents.
-
-**Format source of truth:** `doc/agents/feature-workflow-contracts.md`. Where
-anything below contradicts it, that document wins.
-
-Read tools plus `Bash` for the citation check. Nothing else.
-
-## Inputs
-
-`$ARGUMENTS`, one of:
-
-1. A slug, for example `sticky-band-clip`.
-2. A path to a plan or checklist.
-3. Empty: report on every feature found under `plans/`.
+You report where a feature stands. You never write a file, invoke a workflow or
+spawn an agent; you use the read tools, and `Bash` only for the citation check.
+The formats are `doc/agents/feature-workflow-contracts.md`, which wins where
+this file disagrees with it.
 
 ## Step 1: resolve the target
 
-- Empty argument: `Glob` for `plans/*-plan.md`, derive each slug, and emit the
-  short form (one line per feature). Stop there.
-- A path: derive the slug and date from the filename.
-- Otherwise treat it as a slug and `Glob` for `plans/*-<slug>-plan.md`. More
-  than one match means more than one date; report all and ask which.
+`$ARGUMENTS` is a slug, a path to a plan or checklist, or empty.
 
-If no plan is found, say so and suggest `/feature-start`. If the plan exists but
-the checklist does not, that is normal: the cycle has not reached the checklist
-phase.
+- Empty: `Glob` for `plans/*-plan.md` and give the short form, one line per
+  feature. Stop there.
+- A path: take the slug and date from the file name.
+- A slug: `Glob` for `plans/*-<slug>-plan.md`. Several matches are several
+  dates: list them and ask which.
 
-## Step 2: parse
+No plan: say so and suggest `/feature-start`. A plan without a checklist is
+normal before the checklist phase.
 
-From the plan:
+## Step 2: read
 
-- `PLAN-STATUS` from the first non-empty line: `draft` or `ready-to-implement`.
-  Any other value, or a missing comment, is a contract violation worth
-  reporting.
-- Whether `## Approval` exists.
-- The `## Open Questions` section: how many remain.
+- Plan: `PLAN-STATUS` from its first non-empty line (any value but `draft` or
+  `ready-to-implement`, or none, is a contract violation to report); whether
+  `## Approval` exists; how many open questions remain; the revision count,
+  which is the number of `<plan>.r<N>` snapshots beside it.
+- Audit file: the `## Round N` records (the findings each revision or approval
+  step received, with their outcomes); the last `## Trial Log` record; the
+  `## Run` records (the base commit and each run's status). A plan written
+  before the audit file keeps these under its own audit-log heading.
+- Run record: the `phase` the next run starts at, `roundsRun`, `freshSpent` and
+  `branch`.
+- Acceptance document: each criterion's status.
+- Checklist: whether `CHECKLIST-FOR` names the plan (if not, the pair is
+  malformed: say so and report no progress from it); `CHECKLIST-STATUS`; the
+  ticked and total items under Phase 1 to 4 only; the Discovered items, split
+  by `Blocking:`.
 
-From the audit file, `plans/<date>-<slug>-audit.md`, if present:
-
-- The `## Round N` records, which give the revision count and each round's
-  findings with their outcomes.
-- Whether a `## Trial Log` record exists, and what it records for each gate.
-- The `## Run` records: the base commit, and the status of each run.
-
-A plan written before the audit file keeps these records in the plan itself,
-under its revision and trial sections; read them there for such a plan.
-
-From the acceptance document, `plans/<date>-<slug>-acceptance.md`, if present:
-each criterion's status.
-
-From the checklist, if present:
-
-- `CHECKLIST-FOR` and whether it matches the plan path. A mismatch means the
-  pair is malformed; say so rather than reporting progress from it.
-- `CHECKLIST-STATUS`: `pending` or `complete`.
-- Counts of `- [ ]` and `- [x]` **restricted to items under `## Phase 1`
-  through `## Phase 4`**. Items under `## Discovered` are never counted toward
-  progress.
-- `## Discovered` items, split by `Blocking: yes` and `Blocking: no`.
+The trial passed when its Trial Log records the repro failing before and
+passing after, every applying gate passed, and no blocking finding
+(`plans/AUDIT-METHOD.md` section 7).
 
 ## Step 3: check citation drift
+
+Unless the run record's phase is `done`, run:
 
 ```bash
 python plans/check_citations.py <plan path>
 ```
 
-Report the tail line (`ok N, moved N, gone N, unrecorded N`). A GONE citation
-fails the citation angle before any other angle is worth sweeping, so this
-belongs in the status rather than in a follow-up; MOVED ones are not a problem.
-If no ledger exists yet, say the plan is unrecorded rather than treating it as
-clean, and if only a `.citations.tsv.retired` exists, say the plan has landed.
+Report its tail line. Any status but OK and MOVED fails the citation angle
+before any other angle is worth sweeping. A plan without a CITATIONS marker is
+unstamped, not clean.
 
 ## Step 4: report
 
-Write directly to the user. Do not create a file.
-
-### Long form, one feature
+Write to the user; create no file.
 
 ```
-sticky-band-clip  (plans/2026-08-29-sticky-band-clip-plan.md)
+<slug>  (<plan path>)
 
-  Plan        ready-to-implement, 2 revision rounds, approved
-  Trial       passed on sticky-band-clip-trial at a1b2c3d
-  Checklist   pending, 7/11 phase items ticked
-              Phase 1 3/3, Phase 2 3/4, Phase 3 1/2, Phase 4 0/2
-  Discovered  1 blocking, 2 non-blocking
-  Acceptance  not yet reviewed
-  Citations   ok 34, moved 2, gone 0, unrecorded 0
-  Open        2 open questions remain in the plan
+  Plan        <PLAN-STATUS>, <N> revisions, <approved or not>
+  Next        <the run record's phase>, on branch <branch>
+  Trial       <passed or failed> on <branch> at <sha>, or not run
+  Checklist   <CHECKLIST-STATUS>, <ticked>/<total> phase items, per phase
+  Discovered  <N> blocking, <N> non-blocking
+  Acceptance  <each criterion's status>, or not yet reviewed
+  Citations   <the check's tail line>
+  Open        <N> open questions in the plan
 
   Blocking discoveries:
-    - Preview offset composed into the prune criterion (S invariants-pair-rules)
+    - <title> (S <plan section>)
 ```
 
-### Short form, one line per feature
+Short form:
 
 ```
-sticky-band-clip     ready-to-implement   7/11   1 blocker    citations ok
-row-transition       draft                 -     -            3 gone
+<slug>   <PLAN-STATUS>   <ticked>/<total>   <N> blockers   <citation summary>
 ```
 
-## What to say about state
-
-Report what you read. Do not infer progress from the absence of evidence: a
-checklist with no ticks means no item has passed its acceptance signal, which is
-not the same as no work having happened, and you cannot tell which from the
-files. Say the former.
-
-If `CHECKLIST-STATUS` is `complete` but blocking discoveries exist, that is a
-contract violation, because the implementer may only flip to complete when no
-Discovered item is blocking. Report it as a violation rather than as success.
-
-Close with the single next action: `/feature-start` for a new cycle, re-running
-the workflow with `priorFindings` when blocking discoveries exist, or nothing
-when the cycle is genuinely finished.
+Report what the files show: no ticks means no item has passed its acceptance
+signal, not that no work happened. `CHECKLIST-STATUS: complete` with a blocking
+discovery is a contract violation, not success. Close with the next action:
+`/feature-start` for a new cycle, `/feature-start` on the slug to resume when
+the run record's phase is not `done`, or nothing when the cycle is finished.

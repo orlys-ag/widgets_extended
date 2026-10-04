@@ -95,35 +95,64 @@ function validate(schema, value, at = '$') {
 // ---- the stub run ----------------------------------------------------------
 
 const PROFILE = JSON.parse(fs.readFileSync(path.join(ROOT, 'doc/agents/method-profile.json'), 'utf8'))
+// The T1 scenarios test the script's logic, so they run on a fixture profile of
+// their own, a project no scenario depends on. The T3 checks read the
+// project's real profile, and T1s shows the script accepts it.
+const FIXTURE = {
+  codePaths: ['src', 'tests'],
+  conventionDocs: ['docs/testing.md'],
+  methodFiles: ['METHOD.md'],
+  gates: [
+    { name: 'build', command: 'make build', pass: '0 errors', when: 'always' },
+    { name: 'test', command: 'make test', pass: '0 failed', when: 'always' },
+    { name: 'docs', command: 'make docs', pass: '0 warnings', when: 'docs/ exists' },
+  ],
+  modules: { core: { paths: ['^src/core/'], guidance: ['docs/core.md', 'docs/core-io.md'], vocabulary: 'Core vocabulary.' } },
+  lenses: {
+    correctness: { reads: ['moduleGuidance'], addendum: 'Correctness addendum.' },
+    performance: { reads: ['moduleGuidance', 'docs/testing.md'], addendum: '' },
+    design: { reads: ['moduleGuidance', 'conventionDocs'], addendum: '' },
+    interaction: { reads: ['moduleGuidance'], addendum: '' },
+    timing: { reads: ['moduleGuidance'], addendum: '' },
+    consistency: { reads: [], addendum: '' },
+  },
+  defectClasses: ['stale-summary', 'unenumerated-consumer', 'unverified-claim', 'plan-history'],
+  ranking: ['user-visible-behaviour', 'architecture-fit'],
+  hotPaths: ['per request'],
+  citations: { sdkRoot: 'sdk', extensions: ['ts', 'md'] },
+  planRules: ['Every fixture value names its unit.'],
+}
 const SLUG = 'harness-run'
 const DATE = '2026-10-02'
 const PLAN = `plans/${DATE}-${SLUG}-plan.md`
 const CHECKLIST = `plans/${DATE}-${SLUG}-checklist.md`
 const AUDIT = `plans/${DATE}-${SLUG}-audit.md`
 const ACCEPTANCE = `plans/${DATE}-${SLUG}-acceptance.md`
-const CRITERIA = ['A drag over a frozen band lands on screen, verified by test/board/x_test.dart']
-const REQUEST = 'Make a drop over a frozen band land where the pointer is.'
+const CRITERIA = ['Exporting an empty list writes only the header row, verified by tests/core/widget_test.ts']
+const REQUEST = 'Make an export of an empty list write its header row.'
 
 function baseArgs(over = {}) {
   return {
     slug: SLUG,
     date: DATE,
-    module: 'board',
+    module: 'core',
     requirements: {
       summary: 'A harness feature.',
       user_visible_behavior: [],
       acceptance_criteria: CRITERIA,
-      modules_touched: ['lib/board/board_widget.dart'],
+      modules_touched: ['src/core/widget.ts'],
       constraints: [],
       non_goals: [],
       open_questions: [],
     },
-    profile: PROFILE,
+    profile: FIXTURE,
     request: REQUEST,
     baseRef: 'abc1234',
     ...over,
   }
 }
+
+const BASE_ITEM = { id: 'b1', location: 'd1', severity: 'blocking', title: 't', why: 'w', suggested_direction: 's' }
 
 let findingSerial = 0
 function finding(over = {}) {
@@ -168,14 +197,14 @@ function defaultFor(label, opts, prompt, nthRevision) {
       commit: 'def5678', notes: '', blocking_findings: [],
     }
     if (required.includes('gates')) {
-      result.gates = PROFILE.gates.map(g => ({ name: g.name, applies: true, passed: true }))
+      result.gates = FIXTURE.gates.map(g => ({ name: g.name, applies: true, passed: true }))
     } else {
       Object.assign(result, { analyzer_clean: true, suite_green: true })
     }
     return result
   }
   if (label === 'plan:approve') {
-    return 'Stamped.'
+    return opts.schema ? { stamped: true } : 'Stamped.'
   }
   if (label === 'checklist') {
     return {
@@ -186,12 +215,17 @@ function defaultFor(label, opts, prompt, nthRevision) {
     }
   }
   if (label === 'implement') {
-    return opts.schema
-      ? { changed_files: ['lib/board/board_widget.dart', 'test/board/x_test.dart', CHECKLIST], report: 'Done.' }
-      : 'Done.'
+    if (!opts.schema) {
+      return 'Done.'
+    }
+    const result = { changed_files: ['src/core/widget.ts', 'tests/core/widget_test.ts', CHECKLIST], report: 'Done.' }
+    if ((opts.schema.required ?? []).includes('complete')) {
+      Object.assign(result, { branch: `${SLUG}-trial`, commit: 'fed9876', complete: true, blocking_discoveries: [] })
+    }
+    return result
   }
   if (label === 'accept') {
-    return { criteria: CRITERIA.map(c => ({ criterion: c, status: 'met', evidence: 'test/board/x_test.dart passed' })), findings: [] }
+    return { criteria: CRITERIA.map(c => ({ criterion: c, status: 'met', evidence: 'tests/core/widget_test.ts passed' })), findings: [] }
   }
   throw new Error(`no default for label ${label}`)
 }
@@ -351,6 +385,7 @@ const T1 = [
     })
     expect(afterNull.labels.includes('plan:revise-r4'), 'the null-revision scenario did not reach a fourth revision')
     expect(!/do not patch them: [^.]*d7/.test(afterNull.prompt('plan:revise-r4')), 'R1 used the changed_decisions of a revision before the one that returned nothing')
+    expect(/do not patch them: [^.]*d1/.test(afterNull.prompt('plan:revise-r4')), 'a re-rank owed by a revision that returned nothing was dropped')
   }],
 
   ['T1d', 'the consistency prompt carries the snapshot, the received findings and the obligations', async ({ expect }) => {
@@ -455,15 +490,32 @@ const T1 = [
     expect(lost.labels.filter(l => l === 'critic:correctness:r1').length === 2, 'expected exactly two attempts')
     expect(lost.result?.status === 'critique-aborted-insufficient-coverage', `status ${lost.result?.status}`)
     expect((lost.result?.lensesMissing ?? []).join() === 'correctness', `lensesMissing ${lost.result?.lensesMissing}`)
-    expect(ids(lost.result?.unrecordedFindings ?? []) === 'kept-1', 'the round\'s findings are not in unrecordedFindings')
+    expect(ids(lost.result?.unrecordedFindings ?? []) === '' && !(lost.result?.state?.carried ?? []).length,
+      'the findings of a round that is dispatched again were kept')
 
     const blind = await run({
       respond: label => label === 'critic:design:r1' ? critic('design', [finding({ kind: 'coverage', severity: 'blocking' })]) : undefined,
     })
     expect(blind.result?.status === 'critique-aborted-insufficient-coverage', `coverage twice: status ${blind.result?.status}`)
+
+    const discarded = await run({
+      respond: label => {
+        if (label === 'critic:design:r1') {
+          return critic('design', [finding({ severity: 'major', kind: 'surface', defect_class: 'stale-summary' })])
+        }
+        if (label === 'critic:consistency:r2') {
+          return critic('consistency', [finding({ defect_class: 'stale-summary' })])
+        }
+        return label === 'fresh:interaction:r2' ? null : undefined
+      },
+    })
+    const st = discarded.result?.state ?? {}
+    expect(discarded.result?.status === 'critique-aborted-insufficient-coverage', `fresh coverage: status ${discarded.result?.status}`)
+    expect(JSON.stringify(st.classRounds) === '{"stale-summary":[1]}' && (st.pendingMechanize ?? []).length === 0,
+      `a discarded round still counts toward R3: classRounds ${JSON.stringify(st.classRounds)}, pendingMechanize ${JSON.stringify(st.pendingMechanize)}`)
   }],
 
-  ['T1h', 'every finding reaches exactly one receiver', async ({ expect }) => {
+  ['T1h', 'every finding reaches the next architect step, and an implementation finding the checklist', async ({ expect }) => {
     const r = await run({
       respond: (label) => {
         if (label === 'critic:design:r1') {
@@ -518,12 +570,17 @@ const T1 = [
     expect(!resumed.error, `a priorFindings run threw: ${resumed.error?.message}`)
     expect(/replace it with <!-- PLAN-STATUS: draft -->/.test(resumed.prompt('plan:revise-r1')), 'the priorFindings revision does not carry the reopen line')
     expect(resumed.prompt('plan:revise-r1').includes('checklist-gap'), 'the prior finding is missing from the revision prompt')
+    expect(resumed.labels.includes('critic:consistency:r1'), 'no consistency lens followed the opening revision')
   }],
 
   ['T1j', 'a blind reviewer closes the run', async ({ expect }) => {
     const dead = await run({ respond: label => label === 'implement' ? null : undefined })
     expect(dead.result?.status === 'implementation-failed', `null implementer: status ${dead.result?.status}`)
     expect(!dead.labels.includes('accept'), 'the reviewer ran after a null implementer')
+    const deadNoTrial = await run({ args: baseArgs({ trial: false }), respond: label => label === 'implement' ? null : undefined })
+    expect(deadNoTrial.result?.state?.branch === `${SLUG}-impl`, `a dead implementer with no trial leaves branch ${deadNoTrial.result?.state?.branch}`)
+    const continued = await run({ args: baseArgs({ trial: false, resume: deadNoTrial.result?.state }) })
+    expect(continued.prompt('implement').includes(`work on branch ${SLUG}-impl: git switch ${SLUG}-impl when it exists`), 'the resumed implementer is not sent to the dead one\'s branch')
 
     const r = await run()
     const p = r.prompt('accept')
@@ -531,7 +588,7 @@ const T1 = [
     expect(CRITERIA.every(c => p.includes(c)), 'a criterion is missing')
     expect(p.includes('abc1234'), 'baseRef is missing')
     expect(p.includes(ACCEPTANCE), 'the acceptance document path is missing')
-    expect(p.includes('lib/board/board_widget.dart') && p.includes('test/board/x_test.dart'), 'a changed file is missing')
+    expect(p.includes('src/core/widget.ts') && p.includes('tests/core/widget_test.ts'), 'a changed file is missing')
     expect(![PLAN, CHECKLIST, AUDIT].some(x => p.includes(x)), 'the prompt names the plan, checklist or audit file')
     expect(r.calls.find(c => c.label === 'accept')?.opts.agentType === 'acceptance-reviewer', 'wrong agent type')
 
@@ -559,12 +616,25 @@ const T1 = [
     await throwsEarly(baseArgs({ profile: undefined }), 'missing profile')
     const { gates, ...noGates } = PROFILE
     await throwsEarly(baseArgs({ profile: noGates }), 'profile without gates')
-    await throwsEarly(baseArgs({ profile: { ...PROFILE, lenses: { ...PROFILE.lenses, mechanism: { reads: [], addendum: '' } } } }), 'profile with an unknown lens')
+    await throwsEarly(baseArgs({ profile: { ...PROFILE, lenses: { ...FIXTURE.lenses, mechanism: { reads: [], addendum: '' } } } }), 'profile with an unknown lens')
     await throwsEarly(baseArgs({ request: undefined }), 'missing request')
     await throwsEarly(baseArgs({ baseRef: ' ' }), 'blank baseRef')
     const req = baseArgs().requirements
     await throwsEarly(baseArgs({ requirements: { ...req, decisions: 'd1: use X' } }), 'non-array decisions')
     await throwsEarly(baseArgs({ requirements: { ...req, decisions: ['d1: use X', ''] } }), 'an empty decision')
+
+    await throwsEarly(baseArgs({ start: 'checklist' }), 'start without resume')
+    const state = (await run({ respond: label => label === 'checklist' ? null : undefined })).result?.state
+    await throwsEarly(baseArgs({ resume: { ...state, baseRef: 'other' } }), 'a resume state from another base commit')
+    await throwsEarly(baseArgs({ resume: { ...state, version: 0 } }), 'a resume state of another version')
+    await throwsEarly(baseArgs({ resume: state, priorFindings: [BASE_ITEM] }), 'priorFindings at a phase past the revision')
+    await throwsEarly(baseArgs({ resume: { ...state, phase: 'trial', clearedFresh: null } }), 'a start past the critique with no cleared angle and no owner approval')
+    await throwsEarly(baseArgs({ resume: { ...state, clearedFresh: 'correctness' } }), 'a cleared angle that is not a fresh lens')
+    await throwsEarly(baseArgs({ resume: { ...state, pendingLenses: [] } }), 'an empty pending lens list')
+    const queued = (await run({
+      respond: label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), blocking_findings: [BASE_ITEM] } : undefined,
+    })).result?.state
+    await throwsEarly(baseArgs({ resume: queued, start: 'trial', ownerApproval: 'Owner.' }), 'a start that skips findings queued for the revision')
 
     const withDecisions = await run({ args: baseArgs({ requirements: { ...req, decisions: ['Use the span index: measured 3x faster'] } }) })
     expect(withDecisions.prompt('plan:draft').includes('Use the span index'), 'decisions missing from the draft prompt')
@@ -575,10 +645,10 @@ const T1 = [
     const r = await run()
     expect(r.prompt('critic:design:r1').includes('### Acceptance Criteria'), 'the design prompt lacks the requirements block')
     expect(!r.prompt('critic:correctness:r1').includes('### Acceptance Criteria') && !r.prompt('critic:performance:r1').includes('### Acceptance Criteria'), 'another critic received the requirements block')
-    const archDoc = PROFILE.modules.board.archDoc
+    const guidance = FIXTURE.modules.core.guidance
     for (const key of ['correctness', 'performance', 'design']) {
-      const expected = [...new Set(PROFILE.lenses[key].reads.flatMap(x => x === 'archDoc' ? [archDoc] : x === 'conventionDocs' ? PROFILE.conventionDocs : [x]))]
-      const line = (r.prompt(`critic:${key}:r1`).match(/Also read, because this lens needs them: (.*)\./) ?? [])[1]
+      const expected = [...new Set(FIXTURE.lenses[key].reads.flatMap(x => x === 'moduleGuidance' ? guidance : x === 'conventionDocs' ? FIXTURE.conventionDocs : [x]))]
+      const line = (r.prompt(`critic:${key}:r1`).match(/Also read: (.*)\./) ?? [])[1]
       expect(line === expected.join(', '), `${key} reads "${line}", expected "${expected.join(', ')}"`)
     }
   }],
@@ -597,16 +667,224 @@ const T1 = [
     expect(trial.result?.status === 'trial-failed', `trial status ${trial.result?.status}`)
   }],
 
+  ['T1o', 'a resumed run continues the rounds, the spent fresh angles and the carried findings', async ({ expect }) => {
+    const first = await run({
+      respond: label => {
+        if (label === 'critic:correctness:r1') {
+          return critic('correctness', [finding({ id: 'impl-1' })])
+        }
+        if (label === 'trial') {
+          return { ...defaultFor('trial', { schema: { required: ['gates'] } }), blocking_findings: [BASE_ITEM] }
+        }
+        return undefined
+      },
+    })
+    expect(first.result?.status === 'trial-failed', `a trial with a blocking finding and passing gates: status ${first.result?.status}`)
+    const st = first.result?.state ?? {}
+    expect(st.phase === 'revise', `next phase ${st.phase}`)
+    expect((st.freshSpent ?? []).join() === 'interaction', `freshSpent ${st.freshSpent}`)
+    expect((st.carried ?? []).some(f => f.id === 'impl-1'), 'the implementation finding is not carried')
+    expect(ids(st.revise ?? []) === 'b1', 'the trial finding is not queued for the revision')
+    expect(st.branch === null && (st.previousBranches ?? []).includes(`${SLUG}-trial`), `a failed trial's branch is ${st.branch}, retired ${st.previousBranches}`)
+
+    const second = await run({
+      args: baseArgs({ resume: JSON.parse(JSON.stringify(st)) }),
+      respond: label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), branch: `${SLUG}-trial-2` } : undefined,
+    })
+    expect(second.labels[0] === 'plan:revise-r2', `the resumed run opened with ${second.labels[0]}`)
+    const revise = second.prompt('plan:revise-r2')
+    expect(revise.includes('"b1"'), 'the trial finding did not reach the revision')
+    expect(revise.includes('### Acceptance Criteria'), 'the revision lacks the requirements')
+    expect(second.labels.includes('critic:consistency:r2'), 'no consistency lens followed the opening revision')
+    expect(second.labels.includes('fresh:timing:r2') && !second.labels.some(l => l.startsWith('fresh:interaction')), 'the spent fresh angle ran again')
+    expect(second.prompt('checklist').includes('"impl-1"'), 'a carried implementation finding did not reach the checklist')
+    expect(second.prompt('trial').includes(`git switch -c ${SLUG}-trial abc1234`), 'the trial does not branch from the base commit')
+    expect(second.prompt('implement').includes(`work on branch ${SLUG}-trial-2`), 'the implementer is not on the new trial branch')
+    expect(second.prompt('implement').includes(`plan were trialed or implemented on ${SLUG}-trial.`), 'the implementer is not told of the retired branch')
+    expect(second.result?.status === 'accepted', `status ${second.result?.status}`)
+    expect(second.result?.state?.phase === 'done', `final phase ${second.result?.state?.phase}`)
+  }],
+
+  ['T1p', 'a run starts at the phase its state or the owner names', async ({ expect }) => {
+    const st = (await run({ respond: label => label === 'checklist' ? null : undefined })).result?.state ?? {}
+    expect(st.phase === 'checklist', `a dead checklist agent leaves phase ${st.phase}`)
+    const later = await run({ args: baseArgs({ resume: st }) })
+    expect(later.labels.join(' ') === 'checklist implement accept', `labels ${later.labels.join(' ')}`)
+    const byOwner = await run({ args: baseArgs({ resume: { ...st, phase: 'trial', clearedFresh: null }, ownerApproval: 'Accepted under the yield rule.' }) })
+    expect(byOwner.labels[0] === 'trial', `the owner-approved run opened with ${byOwner.labels[0]}`)
+    expect(byOwner.prompt('plan:approve').includes('Accepted under the yield rule.'), 'the owner approval is missing from the approval prompt')
+    const coverage = (await run({ respond: label => label === 'critic:design:r1' ? null : undefined })).result?.state ?? {}
+    expect(coverage.phase === 'critique' && coverage.roundsRun === 0, `a coverage failure leaves phase ${coverage.phase}, round ${coverage.roundsRun}`)
+    const again = await run({ args: baseArgs({ resume: coverage }) })
+    expect(again.labels.slice(0, 3).join(' ') === 'critic:correctness:r1 critic:performance:r1 critic:design:r1', `the re-dispatched round is ${again.labels.slice(0, 3).join(' ')}`)
+  }],
+
+  ['T1q', 'a stopped implementation is committed and not reviewed', async ({ expect }) => {
+    const implementWith = over => label => label === 'implement' ? { ...defaultFor('implement', { schema: { required: ['complete'] } }), ...over } : undefined
+    const stopped = await run({ respond: implementWith({ complete: false, blocking_discoveries: [BASE_ITEM] }) })
+    expect(stopped.result?.status === 'implementation-stopped', `status ${stopped.result?.status}`)
+    expect(!stopped.labels.includes('accept'), 'the reviewer ran on a stopped implementation')
+    expect(stopped.result?.state?.phase === 'revise' && ids(stopped.result?.state?.revise ?? []) === 'b1', 'the blocking discovery is not queued for the revision')
+    const unfinished = await run({ respond: implementWith({ complete: false }) })
+    expect(unfinished.result?.state?.phase === 'implement', `an unfinished implementation leaves phase ${unfinished.result?.state?.phase}`)
+    expect(/Commit each item's files on that branch when its acceptance signal passes, before you tick it, and commit any remaining change before you stop for any reason/.test(stopped.prompt('implement')), 'the implementer is not told to commit each item and before every stop')
+  }],
+
+  ['T1r', 'the approval and the acceptance gates read what the agents report', async ({ expect }) => {
+    const unstamped = await run({ respond: label => label === 'plan:approve' ? { stamped: false } : undefined })
+    expect(unstamped.result?.status === 'approval-failed', `status ${unstamped.result?.status}`)
+    expect(!unstamped.labels.includes('checklist'), 'the checklist ran on an unstamped plan')
+    const two = ['First criterion.', 'Second criterion.']
+    const omitted = await run({
+      args: baseArgs({ requirements: { ...baseArgs().requirements, acceptance_criteria: two } }),
+      respond: label => label === 'accept' ? { criteria: [{ criterion: two[0], status: 'met', evidence: 'e' }], findings: [] } : undefined,
+    })
+    expect(omitted.result?.status === 'acceptance-gaps', `a criterion the reviewer left out: status ${omitted.result?.status}`)
+    const absolute = await run({
+      respond: label => label === 'implement'
+        ? { ...defaultFor('implement', { schema: { required: ['complete'] } }), changed_files: ['src/core/widget.ts', 'C:\\repo\\plans\\x-checklist.md'] } : undefined,
+    })
+    expect(!absolute.prompt('accept').includes('x-checklist.md'), 'an absolute plans path reached the reviewer')
+    expect(absolute.prompt('accept').includes(`git diff --name-only abc1234 ${SLUG}-trial`), 'the reviewer is not told to diff the branch')
+  }],
+
+  ['T1s', 'the project profile validates, plan rules reach their readers, and an unknown argument throws', async ({ expect }) => {
+    const real = await run({ args: baseArgs({ profile: PROFILE, module: Object.keys(PROFILE.modules)[0] }) })
+    expect(!real.error && real.labels[0] === 'plan:draft', `the project profile: ${real.error?.message ?? real.labels[0]}`)
+    const r = await run({
+      respond: label => label === 'critic:design:r1' ? critic('design', [finding({ severity: 'major', kind: 'surface' })]) : undefined,
+    })
+    const rule = FIXTURE.planRules[0]
+    for (const label of ['plan:draft', 'plan:revise-r2', 'critic:design:r1']) {
+      expect(r.prompt(label).includes(rule), `the plan rules are missing from ${label}`)
+    }
+    expect(!r.prompt('critic:correctness:r1').includes(rule), 'the plan rules reached a lens that does not check them')
+    expect(r.prompt('implement').includes('House conventions, read before writing code or tests: docs/testing.md.'), 'the implementer is not given the convention documents')
+    const unknown = await run({ args: { ...baseArgs(), maxround: 3 } })
+    expect(unknown.error && unknown.calls.length === 0, 'an unknown argument did not throw before the first agent')
+  }],
+
+  ['T1t', 'a revision clears the fresh angle, so a later approval needs a new one or the owner', async ({ expect }) => {
+    const first = await run({
+      respond: label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), blocking_findings: [BASE_ITEM] } : undefined,
+    })
+    expect(first.result?.state?.clearedFresh === 'interaction', `before the revision: ${first.result?.state?.clearedFresh}`)
+    const second = await run({
+      args: baseArgs({ resume: first.result?.state }),
+      respond: label => label === 'fresh:timing:r2' ? critic('timing', [finding({ severity: 'major', kind: 'surface' })]) : undefined,
+    })
+    expect(second.result?.status === 'fresh-angles-exhausted', `status ${second.result?.status}`)
+    expect(second.result?.state?.clearedFresh === null, `after the revision: ${second.result?.state?.clearedFresh}`)
+    const third = await run({ args: baseArgs({ resume: second.result?.state }) })
+    expect(third.error && third.calls.length === 0, 'a plan whose only fresh angle since its revision failed reached approval without the owner')
+  }],
+
+  ['T1u', 'a failed trial is retired; a run without a trial branches from the base commit', async ({ expect }) => {
+    const failed = await run({
+      respond: label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), repro_failed_before: false } : undefined,
+    })
+    const st = failed.result?.state ?? {}
+    expect(failed.result?.status === 'trial-failed' && st.phase === 'trial', `status ${failed.result?.status}, next ${st.phase}`)
+    expect(st.branch === null && st.trialCommit === null && st.previousBranches.includes(`${SLUG}-trial`), `branch ${st.branch}, commit ${st.trialCommit}`)
+    const noTrial = await run({ args: baseArgs({ resume: st, trial: false }) })
+    expect(noTrial.labels.join(' ') === 'plan:approve checklist implement accept', `labels ${noTrial.labels.join(' ')}`)
+    expect(noTrial.prompt('plan:approve').includes('No trial was run for this version of the plan.'), 'the approval was told a failed trial passed')
+    expect(noTrial.prompt('implement').includes(`git switch -c ${SLUG}-impl abc1234`), 'the implementer does not branch from the base commit')
+    expect(noTrial.prompt('implement').includes(`git status --porcelain -- ${FIXTURE.codePaths.join(' ')}`), 'the implementer does not check the tree first')
+  }],
+
+  ['T1w', 'a failing fresh angle sends the plan to a revision, and only a later clean angle approves it', async ({ expect }) => {
+    const r = await run({
+      respond: label => label === 'fresh:interaction:r1' ? critic('interaction', [finding({ severity: 'major', kind: 'surface' })]) : undefined,
+    })
+    expect(r.labels.indexOf('plan:revise-r2') > r.labels.indexOf('fresh:interaction:r1'), 'no revision followed the failing fresh angle')
+    expect(r.labels.includes('critic:consistency:r2') && !r.labels.includes('critic:design:r2'), 'the round after a fresh revision is not the consistency lens alone')
+    expect(r.prompt('plan:approve').includes('the fresh angle "timing" came back clean'), 'the approval does not credit the angle that cleared this version')
+  }],
+
+  ['T1x', 'every field of the run state survives a resume', async ({ expect }) => {
+    const full = {
+      version: 1, phase: 'approve', baseRef: 'abc1234', roundsRun: 3,
+      freshSpent: ['interaction', 'timing'], clearedFresh: 'timing', pendingLenses: null,
+      rankFailRounds: { d1: [1, 2] }, failRounds: { d1: [1, 2], none: [2] }, reranked: ['d1'],
+      classRounds: { 'unverified-claim': [1, 3] }, mechanizeIssued: ['unverified-claim'], pendingMechanize: ['stale-summary'],
+      pendingRerank: ['d2'], lastRevision: { round: 3, changed_decisions: ['d1'], snapshot: `${PLAN}.r2` },
+      lastReceived: [finding({ id: 'lr-1' })], lastObligations: { rerank: ['d1'], mechanize: [] },
+      received: [finding({ id: 'rc-1', round: 3 })], revise: [], carried: [finding({ id: 'ca-1', round: 1 })],
+      branch: `${SLUG}-trial-3`, trialCommit: 'feed123', previousBranches: [`${SLUG}-trial`], changedFiles: ['src/core/a.ts'],
+    }
+    const r = await run({ args: baseArgs({ resume: full }), respond: label => label === 'plan:approve' ? { stamped: false } : undefined })
+    const canon = v => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x)) ? Object.fromEntries(Object.entries(x).sort()) : x)
+    expect(r.result?.status === 'approval-failed', `status ${r.result?.status}`)
+    const back = r.result?.state ?? {}
+    const differ = Object.keys(full).filter(k => canon(back[k]) !== canon(full[k]))
+    expect(differ.length === 0 && Object.keys(back).length === Object.keys(full).length, `fields changed by a resume: ${differ.join(', ')}`)
+  }],
+
+  ['T1y', 'every agent told to switch branches is told by its file to switch back', async ({ expect }) => {
+    const r = await run()
+    for (const c of r.calls.filter(c => /git switch|checked out/.test(c.prompt))) {
+      const file = fs.readFileSync(path.join(ROOT, '.claude/agents', `${c.opts.agentType}.md`), 'utf8')
+      expect(/switch back to the branch you started on/i.test(file), `${c.opts.agentType} (${c.label}) switches branches without switching back`)
+    }
+  }],
+
+  ['T1v', 'a killed run resumes from its run record, its fresh angle spent', async ({ expect }) => {
+    const record = jsonBlocks(read(ROOT, CONTRACTS)).find(b => b && b.phase === 'draft' && 'version' in b)
+    expect(record, 'the contracts document has no initial run record')
+    const initial = { ...record, baseRef: 'abc1234' }
+    const fresh = await run({ args: baseArgs({ resume: initial }) })
+    expect(!fresh.error && fresh.labels.join(' ') === CLEAN_RUN.join(' '), `the initial record: ${fresh.error?.message ?? fresh.labels.join(' ')}`)
+
+    const killed = await run({ args: baseArgs({ resume: initial, start: 'critique', killed: true }) })
+    expect(!killed.error && killed.labels[0] === 'critic:correctness:r1', `the killed first run: ${killed.error?.message ?? killed.labels[0]}`)
+    expect(killed.labels.includes('fresh:timing:r1') && !killed.labels.some(l => l.startsWith('fresh:interaction')), 'the fresh angle the killed run could have opened ran again')
+    expect(killed.prompt('plan:approve').includes('the fresh angle "timing" came back clean'), 'the approval does not credit the first-pass angle')
+
+    const late = (await run({ respond: label => label === 'checklist' ? null : undefined })).result?.state
+    const lateRun = await run({ args: baseArgs({ resume: late, killed: true }) })
+    expect((lateRun.result?.state?.freshSpent ?? []).join() === 'interaction', `a killed run past the critique spent ${lateRun.result?.state?.freshSpent}`)
+
+    const orphan = await run({ args: baseArgs({ killed: true }) })
+    expect(orphan.error && orphan.calls.length === 0, 'killed without a run record did not throw')
+    const misphased = await run({ args: baseArgs({ resume: { ...initial, phase: 'trial' }, ownerApproval: 'Owner.' }) })
+    expect(misphased.error && misphased.calls.length === 0, 'an initial record past the draft did not throw')
+  }],
+
+  ['T1z', 'consistency fails a round; the Phase 4 floor, a blocked checklist and a refused draft route as documented', async ({ expect }) => {
+    const consistency = await run({
+      respond: label => label === 'critic:design:r1' ? critic('design', [finding({ severity: 'major', kind: 'consistency' })]) : undefined,
+    })
+    expect(consistency.labels.includes('plan:revise-r2'), 'a major consistency finding did not fail the round')
+
+    const floor = FIXTURE.gates.filter(g => g.when === 'always').length
+    const thin = await run({
+      respond: label => label === 'checklist' ? { ...defaultFor('checklist', {}), phase_counts: { phase1: 1, phase2: 1, phase3: 0, phase4: floor - 1 } } : undefined,
+    })
+    expect(thin.result?.status === 'checklist-malformed', `a Phase 4 below the floor: status ${thin.result?.status}`)
+
+    const blocked = await run({
+      respond: label => label === 'checklist'
+        ? { ...defaultFor('checklist', {}), phase_counts: { phase1: 0, phase2: 0, phase3: 0, phase4: 0 }, blocking_discoveries: [{ title: 'Gap', plan_section: 'testing-plan', why: 'No signal.' }] } : undefined,
+    })
+    expect(blocked.result?.status === 'checklist-blocked' && blocked.result?.state?.phase === 'revise' && (blocked.result?.state?.revise ?? []).length === 1,
+      `a blocking discovery with no items: status ${blocked.result?.status}, next ${blocked.result?.state?.phase}`)
+
+    const refused = await run({ respond: label => label === 'plan:draft' ? 'ABORT: plan already exists' : undefined })
+    expect(refused.result?.status === 'draft-aborted' && refused.labels.length === 1, `a refused draft: status ${refused.result?.status}`)
+  }],
+
   ['T1n', 'the trial and the checklist carry the profile gates', async ({ expect }) => {
     const r = await run()
     const trialPrompt = r.prompt('trial')
-    expect(PROFILE.gates.every(g => trialPrompt.includes(`- ${g.name}: \`${g.command}\``)), 'a gate is missing from the trial prompt')
-    expect(trialPrompt.includes(`git status --porcelain -- ${PROFILE.codePaths.join(' ')}`), 'the trial prompt does not check the profile code paths')
+    expect(FIXTURE.gates.every(g => trialPrompt.includes(`- ${g.name}: \`${g.command}\``)), 'a gate is missing from the trial prompt')
+    expect(trialPrompt.includes(`git status --porcelain -- ${FIXTURE.codePaths.join(' ')}`), 'the trial prompt does not check the profile code paths')
     const checklistPrompt = r.prompt('checklist')
-    expect(/Phase 4, in this order: one mutation item per decision/.test(checklistPrompt), 'the checklist prompt lacks the Phase 4 order')
-    expect(PROFILE.gates.every(g => checklistPrompt.includes(`- ${g.name}:`)), 'a gate is missing from the checklist prompt')
+    expect(/Phase 4, in this order: one item per decision, a mutation when its code site/.test(checklistPrompt), 'the checklist prompt lacks the Phase 4 order')
+    expect(/Trial Log" record [^\n]*with these fields of your result: section, branch, repro_failed_before, repro_passes_after, gates, commit, blocking_findings\./.test(trialPrompt), 'the trial is not told to log every field its pass decision reads')
+    expect(FIXTURE.gates.every(g => checklistPrompt.includes(`- ${g.name}:`)), 'a gate is missing from the checklist prompt')
 
-    const gates = PROFILE.gates.map(g => ({ name: g.name, applies: true, passed: true }))
+    const gates = FIXTURE.gates.map(g => ({ name: g.name, applies: true, passed: true }))
     const trialWith = gateList => label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), gates: gateList } : undefined
     const missingGate = await run({ respond: trialWith(gates.slice(1)) })
     expect(missingGate.result?.status === 'trial-failed', `a missing gate: status ${missingGate.result?.status}`)
@@ -649,27 +927,62 @@ const CORE = 'plans/AUDIT-METHOD.md'
 const CONTRACTS = 'doc/agents/feature-workflow-contracts.md'
 const START = '.claude/skills/feature-start/SKILL.md'
 const STATUS_SKILL = '.claude/skills/feature-status/SKILL.md'
+const CHECKER = 'plans/check_citations.py'
 const MEMORY_DIR = '.claude/agent-memory'
 const AGENTS_DIR = '.claude/agents'
+const RULES_DIR = '.claude/rules'
+const PROFILE_PATH = 'doc/agents/method-profile.json'
+const SCRIPT_REL = '.claude/workflows/feature-implementation.js'
+// The documents agents and the method read as standing instructions.
+const GUIDANCE_FILES = ['AGENTS.md', 'CLAUDE.md', CORE, CONTRACTS, RULES_DIR, AGENTS_DIR, '.claude/skills']
+// The project-neutral layer: the core, the contracts, the agents, the skills
+// and the workflow script.
+const NEUTRAL_FILES = [CORE, CONTRACTS, AGENTS_DIR, '.claude/skills', SCRIPT_REL]
+// The files that point into the core's or the contracts' numbered sections.
+const REFERRING_FILES = ['AGENTS.md', CORE, CONTRACTS, RULES_DIR, AGENTS_DIR, '.claude/skills', SCRIPT_REL]
+function guidanceFiles(root) {
+  return expand(root, GUIDANCE_FILES)
+}
+function expand(root, list) {
+  const out = []
+  for (const rel of list) {
+    const abs = path.join(root, rel)
+    if (!fs.existsSync(abs)) {
+      continue
+    }
+    if (!fs.statSync(abs).isDirectory()) {
+      out.push(rel)
+      continue
+    }
+    for (const f of fs.readdirSync(abs, { recursive: true }).map(String)) {
+      if (f.endsWith('.md')) {
+        out.push(`${rel}/${f.split(path.sep).join('/')}`)
+      }
+    }
+  }
+  return out
+}
 
 // The section headings every "section N" reference in the method files names.
 const CORE_HEADINGS = [
-  '## 1. The two failure modes this exists to prevent',
-  '## 2. Before the first round: enumerate the angles',
-  '## 3. Rules for the plan document itself',
-  '### 3.1 One normative site per fact',
-  '### 3.2 Summary sections are a known hazard',
-  '### 3.3 Citations must be re-anchorable, by a ledger not by inline tokens',
-  '### 3.4 Counts and universal claims must carry their command',
-  '### 3.5 Declare every public artifact the plan depends on',
-  '### 3.6 State the landing order when the work spans layers',
-  '## 4. The citation and claim pass',
-  '## 5. What a pass is, and the consistency pass',
-  '## 6. Stopping rule',
-  '## 7. Verdict labeling',
-  '## 8. Move the unsettleable out of prose',
-  '## 9. Round checklist',
-  '## 10. Trials are kept, on a branch',
+  '## 1. Angles',
+  '## 2. Writing a plan',
+  '### 2.1 One site per fact',
+  '### 2.2 Summary sections go stale first',
+  '### 2.3 Counts and universals carry their command',
+  '### 2.4 Declare every artifact the implementer creates',
+  '### 2.5 Landing order',
+  '### 2.6 Write the design, not its history',
+  '### 2.7 Decisions are ranking tables',
+  '## 3. Citations and claims',
+  '## 4. Rounds, lenses and findings',
+  '## 5. Revisions and loop control',
+  '## 6. Stopping and the verdict',
+  '## 7. Trials',
+  '## 8. Consumers are verified in code',
+  '## 9. Closing',
+  '## 10. Timed measurement',
+  '## 11. The profile',
 ]
 
 function contractTables(text) {
@@ -682,9 +995,103 @@ function contractTables(text) {
     const rest = text.slice(start)
     const end = rest.slice(1).search(/\n(Optional|##|Audit file records)/)
     const block = end < 0 ? rest : rest.slice(0, end + 1)
-    return [...block.matchAll(/^\| `([^`]+)` \| `([a-z0-9-]+)` \|/gm)].map(m => m[1])
+    return [...block.matchAll(/^\| `([^`]+)` \|/gm)].map(m => m[1])
   }
   return { required, optional: section('Optional, appended later'), audit: section('Audit file records') }
+}
+
+// Every "section N" or "rule N.N" a method document points at, with the
+// document it points into: the core or the contracts, whichever the sentence
+// names last before the reference, else first after it, else the document
+// itself when that is the core or the contracts. Other references are skipped.
+const DOC_MENTION = /AUDIT-METHOD\.md|feature-workflow-contracts\.md|\bcontracts\b/g
+function sectionReferences(text, self) {
+  const refs = []
+  const flat = text.replace(/\s+/g, ' ')
+  for (const sentence of flat.split(/(?<=[.;!?])\s|\|/)) {
+    const mentions = [...sentence.matchAll(DOC_MENTION)].map(m => ({ at: m.index, doc: m[0] === 'AUDIT-METHOD.md' ? 'core' : 'contracts' }))
+    for (const m of sentence.matchAll(/\b(?:[Ss]ections?|rule) (\d+(?:\.\d+)?)((?:(?:, | and | to )\d+(?:\.\d+)?)*)/g)) {
+      const before = mentions.filter(x => x.at < m.index).pop()
+      const after = mentions.find(x => x.at > m.index)
+      const target = before?.doc ?? after?.doc ?? self
+      if (!target) {
+        continue
+      }
+      const numbers = [m[1], ...[...m[2].matchAll(/\d+(?:\.\d+)?/g)].map(x => x[0])]
+      for (const n of numbers) {
+        refs.push({ target, n, sentence: sentence.slice(Math.max(0, m.index - 60), m.index + 30) })
+      }
+    }
+  }
+  return refs
+}
+
+// A count written in the same sentence as the `wc -l` or `grep -c` that
+// produced it, before or after the command.
+function countsBesideCommands(root) {
+  const command = '`[^`]*\\b(?:wc -l|grep -c)\\b[^`]*`'
+  const patterns = [
+    new RegExp(`\\b\\d[\\d,]*\\b[^.;]{0,160}?${command}`, 'g'),
+    new RegExp(`${command}[^.;]{0,160}?\\b\\d[\\d,]*\\b`, 'g'),
+  ]
+  const problems = []
+  for (const rel of guidanceFiles(root)) {
+    const text = read(root, rel).replace(/\s+/g, ' ')
+    for (const re of patterns) {
+      for (const m of text.matchAll(re)) {
+        problems.push(`${rel}: "${m[0].slice(0, 80)}"`)
+      }
+    }
+  }
+  return problems
+}
+
+function headingNumbers(text) {
+  return new Set([...text.matchAll(/^#{2,3} (\d+(?:\.\d+)?)\.? /gm)].map(m => m[1]))
+}
+
+// The `paths:` list of a rule file's frontmatter, or null when it has none.
+function rulePaths(text) {
+  const m = text.match(/^---\n([\s\S]*?)\n---/)
+  if (!m || !/^paths:/m.test(m[1])) {
+    return null
+  }
+  return [...m[1].matchAll(/^\s+- "([^"]+)"$/gm)].map(x => x[1])
+}
+
+const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// Every term the profile holds that a project-neutral document must not name:
+// module keys and guidance paths, code paths, convention documents, gate
+// commands, hot paths, cited extensions no method file uses, and the
+// identifiers the module vocabulary, the lens addenda and the plan rules name.
+function profileTerms(profile) {
+  const methodPaths = profile.methodFiles
+  const commandWords = profile.gates
+    .filter(g => !methodPaths.some(p => g.command.includes(p)))
+    .map(g => g.command.replace(/^cd \S+ && /, '').split(/\s+/)[0])
+  const prose = [
+    ...Object.values(profile.modules).map(m => m.vocabulary),
+    ...Object.values(profile.lenses).map(l => l.addendum),
+    ...profile.planRules,
+  ].join(' ')
+  const identifiers = [...new Set(prose.match(/@?\b[A-Za-z_]*[a-z][A-Z][A-Za-z0-9_]*\b/g) ?? [])]
+  const extensions = profile.citations.extensions.filter(e => !methodPaths.some(p => p.endsWith(`.${e}`)))
+  return [
+    ...Object.keys(profile.modules).map(k => ({ term: k, word: true })),
+    ...Object.values(profile.modules).flatMap(m => m.guidance.map(g => ({ term: g }))),
+    ...profile.codePaths.map(p => ({ term: `${p}/` })),
+    ...profile.conventionDocs.map(d => ({ term: d })),
+    ...commandWords.map(w => ({ term: w, word: true })),
+    ...profile.hotPaths.flatMap(h => [{ term: h }, { term: h.replace(/ /g, '-') }]),
+    ...extensions.map(e => ({ term: `.${e}` })),
+    ...identifiers.map(i => ({ term: i, word: true, source: 'identifier' })),
+  ]
+}
+
+// Each row of the core's lens table: the lens key and its stage column.
+function lensStages(core) {
+  return [...core.matchAll(/^\| `([a-z]+)` \| ([a-z ]+) \|/gm)].map(m => [m[1], m[2].trim()])
 }
 
 function lensTable(core) {
@@ -722,74 +1129,69 @@ const T3 = [
           at = i
         }
       }
-      const extra = lines.filter(l => /^## \d+\. /.test(l) && !CORE_HEADINGS.includes(l) && Number(l.match(/^## (\d+)/)[1]) <= 10)
+      const extra = lines.filter(l => /^#{2,3} \d+(\.\d+)*\.? /.test(l) && !CORE_HEADINGS.includes(l))
       return problems.concat(extra.map(l => `renumbered: ${l}`))
     },
-    root => fs.writeFileSync(path.join(root, CORE), read(root, CORE).replace('## 6. Stopping rule', '## 6. Stopping rules'))],
+    root => fs.writeFileSync(path.join(root, CORE), read(root, CORE).replace('## 6. Stopping and the verdict', '## 6. Stopping'))],
 
-  ['T3b', 'the core names no project fact the profile holds', [CORE],
+  ['T3b', 'the method and the workflow name no project fact the profile holds', NEUTRAL_FILES,
     (root) => {
-      const core = read(root, CORE)
-      const profile = JSON.parse(read(root, 'doc/agents/method-profile.json'))
-      const methodPaths = profile.methodFiles
-      const commandWords = profile.gates
-        .filter(g => !methodPaths.some(p => g.command.includes(p)))
-        .map(g => g.command.replace(/^cd \S+ && /, '').split(/\s+/)[0])
-      const terms = [
-        ...Object.keys(profile.modules).map(k => ({ term: k, word: true })),
-        ...Object.values(profile.modules).map(m => ({ term: m.archDoc })),
-        ...profile.codePaths.map(p => ({ term: `${p}/` })),
-        ...profile.conventionDocs.map(d => ({ term: d })),
-        ...commandWords.map(w => ({ term: w, word: true })),
-      ]
-      return terms
-        .filter(({ term, word }) => word ? new RegExp(`\\b${term}\\b`, 'i').test(core) : core.includes(term))
-        .map(({ term }) => `the core names ${term}`)
+      const terms = profileTerms(JSON.parse(read(root, PROFILE_PATH)))
+      const problems = []
+      for (const rel of expand(root, NEUTRAL_FILES)) {
+        const text = read(root, rel)
+        for (const { term, word } of terms) {
+          const named = word ? new RegExp(`(^|[^A-Za-z0-9_])${escapeRe(term)}([^A-Za-z0-9_]|$)`, 'i').test(text) : text.toLowerCase().includes(term.toLowerCase())
+          if (named) {
+            problems.push(`${rel} names ${term}`)
+          }
+        }
+      }
+      return problems
     },
-    root => fs.appendFileSync(path.join(root, CORE), '\nSee lib/board/ for an example.\n')],
+    root => {
+      const profile = JSON.parse(read(root, PROFILE_PATH))
+      const identifier = profileTerms(profile).find(t => t.source === 'identifier')
+      fs.appendFileSync(path.join(root, STATUS_SKILL), `\nSee ${profile.codePaths[0]}/ and ${identifier?.term ?? ''} for an example.\n`)
+    }],
 
   ['T3c', 'the feature-start outcomes table lists exactly the script statuses', [START],
     (root, ctx) => {
       const text = read(root, START)
       const table = text.slice(text.indexOf('## Possible outcomes'))
       const listed = [...table.matchAll(/^\| `([a-z-]+)` \|/gm)].map(m => m[1]).filter(s => s !== 'status')
-      return sameSet(listed, ctx.describe.statuses) ? [] : [`table ${listed.join(',')} vs script ${ctx.describe.statuses.join(',')}`]
+      return sameSet(listed, ctx.describe.statuses) && listed.length === ctx.describe.statuses.length
+        ? [] : [`table ${listed.join(',')} vs script ${ctx.describe.statuses.join(',')}`]
     },
     root => fs.writeFileSync(path.join(root, START), read(root, START).replace(/^\| `accepted` \|.*\n/m, ''))],
 
-  ['T3d', 'every finding and result example has exactly the schema fields', [`${AGENTS_DIR}/plan-critic.md`, `${AGENTS_DIR}/plan-implementer.md`, `${AGENTS_DIR}/plan-architect.md`, `${AGENTS_DIR}/acceptance-reviewer.md`, START],
+  ['T3d', 'the feature-start args template names exactly what the script reads', [START],
     (root, ctx) => {
       const d = ctx.describe
-      const problems = []
-      const keysOf = o => (o && typeof o === 'object' ? Object.keys(o) : [])
-      const check = (where, actual, expected) => {
-        if (!sameSet(actual, expected)) {
-          problems.push(`${where}: ${actual.join(',')} vs ${expected.join(',')}`)
-        }
+      const blocks = jsonBlocks(read(root, START))
+      const args = blocks.find(b => b && typeof b === 'object' && 'requirements' in b)
+      if (!args) {
+        return ['feature-start has no args template']
       }
-      const blocks = rel => jsonBlocks(read(root, rel))
-      const find = (rel, key) => blocks(rel).find(b => b && key in b)
-      const criticExample = find(`${AGENTS_DIR}/plan-critic.md`, 'findings')
-      check('plan-critic finding', keysOf(criticExample?.findings?.[0]), d.criticFindingFields)
-      const trialExample = find(`${AGENTS_DIR}/plan-implementer.md`, 'blocking_findings')
-      check('plan-implementer trial result', keysOf(trialExample), d.trialFields)
-      check('plan-implementer trial finding', keysOf(trialExample?.blocking_findings?.[0]), d.baseFindingFields)
-      check('plan-implementer result', keysOf(find(`${AGENTS_DIR}/plan-implementer.md`, 'changed_files')), d.implementerFields)
-      check('plan-architect revise result', keysOf(find(`${AGENTS_DIR}/plan-architect.md`, 'changed_decisions')), d.reviseFields)
-      const architect = read(root, `${AGENTS_DIR}/plan-architect.md`)
-      const list = (architect.match(/JSON array of\s+`\{([^}]*)\}`/) ?? [])[1] ?? ''
-      check('plan-architect revision input', list.split(',').map(s => s.trim()).filter(Boolean), d.criticFindingFields)
-      const acceptance = find(`${AGENTS_DIR}/acceptance-reviewer.md`, 'criteria')
-      check('acceptance-reviewer result', keysOf(acceptance), d.acceptanceFields)
-      check('acceptance-reviewer finding', keysOf(acceptance?.findings?.[0]), d.baseFindingFields)
-      const prior = find(START, 'priorFindings')
-      check('feature-start priorFindings entry', keysOf(prior?.priorFindings?.[0]), d.baseFindingFields)
+      const problems = []
+      const unknown = Object.keys(args).filter(k => !d.argNames.includes(k))
+      if (unknown.length > 0) {
+        problems.push(`the args template names ${unknown.join(', ')}, which the script does not read`)
+      }
+      const absent = d.requiredArgs.filter(k => !(k in args))
+      if (absent.length > 0) {
+        problems.push(`the args template omits ${absent.join(', ')}, which the script requires`)
+      }
+      if (!sameSet(Object.keys(args.requirements ?? {}), d.requirementFields)) {
+        problems.push(`requirements template ${Object.keys(args.requirements ?? {}).join(',')} vs script ${d.requirementFields.join(',')}`)
+      }
+      const prior = blocks.find(b => b && typeof b === 'object' && 'priorFindings' in b)
+      if (!sameSet(Object.keys(prior?.priorFindings?.[0] ?? {}), d.baseFindingFields)) {
+        problems.push(`priorFindings template ${Object.keys(prior?.priorFindings?.[0] ?? {}).join(',')} vs script ${d.baseFindingFields.join(',')}`)
+      }
       return problems
     },
-    root => {
-      const rel = `${AGENTS_DIR}/plan-critic.md`
-      fs.writeFileSync(path.join(root, rel), read(root, rel).replace('"defect_class"', '"defect_klass"'))
-    }],
+    root => fs.writeFileSync(path.join(root, START), read(root, START).replace('"open_questions"', '"open_issues"'))],
 
   ['T3e', 'agent frontmatter matches the contracts model table', [CONTRACTS, AGENTS_DIR],
     (root) => {
@@ -836,6 +1238,13 @@ const T3 = [
       if (!sameSet(coreKeys, ctx.describe.lensKeys)) {
         problems.push(`core lens table ${coreKeys} vs script ${ctx.describe.lensKeys}`)
       }
+      const stageOf = k => ctx.describe.standardLenses.includes(k) ? 'standard'
+        : ctx.describe.freshLenses.includes(k) ? 'fresh' : 'after a revision'
+      for (const [key, stage] of lensStages(read(root, CORE))) {
+        if (stage !== stageOf(key)) {
+          problems.push(`the core gives ${key} the stage ${stage}, the script ${stageOf(key)}`)
+        }
+      }
       return problems
     },
     root => fs.writeFileSync(path.join(root, CORE), read(root, CORE).replace('| `timing` |', '| `tempo` |'))],
@@ -873,57 +1282,180 @@ const T3 = [
     },
     root => fs.appendFileSync(path.join(root, STATUS_SKILL), '\nAlso read `## Bogus Section`.\n')],
 
-  ['T3i', 'agent memory holds only scoped, cross-feature lessons', [CONTRACTS, AGENTS_DIR, MEMORY_DIR, 'doc/agents/method-profile.json'],
+  ['T3i', 'no workflow agent keeps persistent memory', [CONTRACTS, AGENTS_DIR],
     (root) => {
-      const contracts = read(root, CONTRACTS)
-      const capMatch = contracts.match(/An index has at most (\d+) lines/)
-      if (!capMatch) {
-        return ['no "An index has at most N lines" rule in the contracts document']
-      }
-      const cap = Number(capMatch[1])
-      const modules = Object.keys(JSON.parse(read(root, 'doc/agents/method-profile.json')).modules)
-      const scopes = new Set(['general', ...modules])
-      const withMemory = new Set(fs.readdirSync(path.join(root, AGENTS_DIR))
-        .filter(f => f.endsWith('.md'))
-        .map(f => frontmatter(read(root, `${AGENTS_DIR}/${f}`)))
-        .filter(fm => fm.memory)
-        .map(fm => fm.name))
       const problems = []
-      const memoryRoot = path.join(root, MEMORY_DIR)
-      const dirs = fs.existsSync(memoryRoot) ? fs.readdirSync(memoryRoot) : []
-      for (const dir of dirs) {
-        if (!withMemory.has(dir)) {
-          problems.push(`${MEMORY_DIR}/${dir} exists, but agent ${dir} keeps no memory`)
+      if (!read(root, CONTRACTS).includes('No workflow agent keeps persistent memory')) {
+        problems.push('the contracts document does not state that no agent keeps memory')
+      }
+      for (const f of fs.readdirSync(path.join(root, AGENTS_DIR)).filter(f => f.endsWith('.md'))) {
+        if ('memory' in frontmatter(read(root, `${AGENTS_DIR}/${f}`))) {
+          problems.push(`${AGENTS_DIR}/${f} sets memory`)
+        }
+      }
+      if (fs.existsSync(path.join(root, MEMORY_DIR))) {
+        problems.push(`${MEMORY_DIR} exists`)
+      }
+      return problems
+    },
+    root => {
+      const rel = `${AGENTS_DIR}/plan-architect.md`
+      fs.writeFileSync(path.join(root, rel), read(root, rel).replace('\nmodel: ', '\nmemory: project\nmodel: '))
+    }],
+
+  // An import loads at launch wherever it sits, so a path-scoped rule that
+  // imports a document stops being scoped. A module's rules are the rule files
+  // whose paths fall under its path patterns, and the profile must list exactly
+  // those. A layer rule, whose paths name single files, loads for every source
+  // file it names.
+  ['T3j', 'path-scoped rules import nothing, and each module lists exactly its rules', [RULES_DIR, PROFILE_PATH],
+    (root) => {
+      const profile = JSON.parse(read(root, PROFILE_PATH))
+      const problems = []
+      const rules = fs.readdirSync(path.join(root, RULES_DIR)).filter(f => f.endsWith('.md'))
+      const owned = new Map(Object.keys(profile.modules).map(k => [k, []]))
+      for (const f of rules) {
+        const rel = `${RULES_DIR}/${f}`
+        const text = read(root, rel)
+        const paths = rulePaths(text)
+        if (paths === null) {
           continue
         }
-        const files = fs.readdirSync(path.join(memoryRoot, dir)).filter(f => f.endsWith('.md'))
-        const index = files.includes('MEMORY.md') ? read(root, `${MEMORY_DIR}/${dir}/MEMORY.md`) : ''
-        const lines = index.split('\n').filter(l => l.startsWith('- '))
-        if (lines.length > cap) {
-          problems.push(`${dir}: ${lines.length} index lines, the limit is ${cap}`)
+        if (/(^|\s)@[A-Za-z0-9_.\/~-]+/m.test(text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, ''))) {
+          problems.push(`${rel} has paths: and an @ import`)
         }
-        for (const line of lines) {
-          const tag = (line.match(/^- \[([a-z_]+)\] /) ?? [])[1]
-          if (!scopes.has(tag)) {
-            problems.push(`${dir}: index line without a valid scope tag: ${line.slice(0, 60)}`)
+        for (const [key, m] of Object.entries(profile.modules)) {
+          if (paths.some(p => m.paths.some(pattern => new RegExp(pattern).test(p)))) {
+            owned.get(key).push(rel)
           }
         }
-        for (const f of files) {
-          const text = read(root, `${MEMORY_DIR}/${dir}/${f}`)
-          if (/[A-Za-z0-9_./-]+\.(dart|md|js|mjs|py):\d+/.test(text)) {
-            problems.push(`${dir}/${f} cites a file:line`)
+        if (paths.every(p => !p.includes('*'))) {
+          const names = new Set(paths.map(p => p.split('/').pop()))
+          for (const named of new Set([...text.matchAll(/`([A-Za-z0-9_]+\.dart)`/g)].map(x => x[1]))) {
+            if (!names.has(named) && !/_test\.dart$/.test(named)) {
+              problems.push(`${rel} names ${named}, which its paths do not load it for`)
+            }
           }
-          if (/\b20\d\d-\d\d-\d\d\b/.test(text) || /[a-z0-9]-plan\.md/.test(text)) {
-            problems.push(`${dir}/${f} names a date or a plan, so it records one feature`)
-          }
+        }
+      }
+      for (const [key, m] of Object.entries(profile.modules)) {
+        if (!sameSet(owned.get(key), m.guidance)) {
+          problems.push(`modules.${key}.guidance ${m.guidance.join(',')} vs the rules under its paths ${owned.get(key).join(',')}`)
         }
       }
       return problems
     },
     root => {
-      const index = path.join(root, MEMORY_DIR, 'plan-architect', 'MEMORY.md')
-      fs.appendFileSync(index, '- Lane span expansion, 2026-09-05: see the plan.\n')
+      const rule = Object.values(JSON.parse(read(root, PROFILE_PATH)).modules)[0].guidance[0]
+      fs.appendFileSync(path.join(root, rule), '\nSee @../../AGENTS.md for the rules.\n')
     }],
+
+  ['T3k', 'the contracts resume table gives each status exactly the phases the script hands on', [CONTRACTS],
+    (root, ctx) => {
+      const text = read(root, CONTRACTS)
+      const start = text.indexOf('| Status | The next run starts at |')
+      if (start < 0) {
+        return ['no resume table in the contracts document']
+      }
+      const rows = [...text.slice(start).split('\n\n')[0].matchAll(/^\| `([a-z-]+)` \| ([^|\n]*) \|/gm)]
+      const problems = []
+      if (!sameSet(rows.map(r => r[1]), ctx.describe.statuses) || rows.length !== ctx.describe.statuses.length) {
+        problems.push(`table ${rows.map(r => r[1]).join(',')} vs script ${ctx.describe.statuses.join(',')}`)
+      }
+      for (const [, status, cell] of rows) {
+        const phases = [...cell.matchAll(/`([a-z]+)`/g)].map(m => m[1])
+        if (!sameSet(phases, ctx.describe.nextPhases[status] ?? [])) {
+          problems.push(`${status}: table ${phases.join(',')}, script ${(ctx.describe.nextPhases[status] ?? []).join(',')}`)
+        }
+      }
+      return problems
+    },
+    root => fs.writeFileSync(path.join(root, CONTRACTS), read(root, CONTRACTS).replace('| `trial-failed` | `revise` for a plan defect, otherwise `trial` |', '| `trial-failed` | `revise` |'))],
+
+  ['T3l', 'the core names exactly the citation statuses the checker fails on', [CORE, CHECKER],
+    root => {
+      const failing = read(root, CHECKER).match(/^FAILING = \(([^)]*)\)/m)
+      const sentence = read(root, CORE).replace(/\s+/g, ' ').match(/It fails on ([^:.]*)[:.]/)
+      if (!failing || !sentence) {
+        return ['no FAILING tuple in the checker, or no "It fails on" sentence in the core']
+      }
+      const statuses = [...failing[1].matchAll(/"([A-Z-]+)"/g)].map(m => m[1])
+      const named = [...sentence[1].matchAll(/\b[A-Z][A-Z-]*[A-Z]\b/g)].map(m => m[0])
+      return sameSet(named, statuses) && named.length === statuses.length ? [] : [`the core names ${named.join(',')}; the checker fails on ${statuses.join(',')}`]
+    },
+    root => fs.writeFileSync(path.join(root, CORE), read(root, CORE).replace('PAST-END and DANGLING', 'DANGLING'))],
+
+  ['T3n', 'guidance states no count before the command that produces it', GUIDANCE_FILES,
+    root => countsBesideCommands(root),
+    root => fs.appendFileSync(path.join(root, RULES_DIR, 'testing.md'), '\n- The suite holds 12 files (`ls test | wc -l`).\n')],
+
+  ['T3s', 'guidance states no count after the command that produces it', GUIDANCE_FILES,
+    root => countsBesideCommands(root),
+    root => fs.appendFileSync(path.join(root, RULES_DIR, 'testing.md'), '\n- `ls test | wc -l` prints 12 today.\n')],
+
+  ['T3p', 'every numbered section a method document points at exists', [...REFERRING_FILES, PROFILE_PATH],
+    root => {
+      const numbers = { core: headingNumbers(read(root, CORE)), contracts: headingNumbers(read(root, CONTRACTS)) }
+      const problems = []
+      for (const rel of expand(root, REFERRING_FILES)) {
+        const self = rel === CORE ? 'core' : rel === CONTRACTS ? 'contracts' : null
+        for (const { target, n, sentence } of sectionReferences(read(root, rel), self)) {
+          if (!numbers[target].has(n)) {
+            problems.push(`${rel} points at ${target} section ${n}: "${sentence}"`)
+          }
+        }
+      }
+      return problems
+    },
+    root => fs.appendFileSync(path.join(root, START), '\nSee `plans/AUDIT-METHOD.md` section 19.\n')],
+
+  ['T3q', 'the contracts list exactly the trial result fields the Trial Log records', [CONTRACTS],
+    (root, ctx) => {
+      const m = read(root, CONTRACTS).replace(/\s+/g, ' ').match(/with these fields of its result: ([^.]*)\./)
+      if (!m) {
+        return ['no "with these fields of its result:" list in the contracts document']
+      }
+      const listed = [...m[1].matchAll(/`([a-z_]+)`/g)].map(x => x[1])
+      return sameSet(listed, ctx.describe.trialLogFields) && listed.length === ctx.describe.trialLogFields.length
+        ? [] : [`the contracts list ${listed.join(',')}; the trial logs ${ctx.describe.trialLogFields.join(',')}`]
+    },
+    root => fs.writeFileSync(path.join(root, CONTRACTS), read(root, CONTRACTS).replace('`section`, `branch`, `commit`, ', '`section`, `branch`, '))],
+
+  ['T3r', 'the core restates the script\'s finding kinds and profile keys exactly', [CORE],
+    (root, ctx) => {
+      const core = read(root, CORE)
+      // The bulleted list that follows a heading, up to the first paragraph after it.
+      const bulletKeys = heading => {
+        const start = core.indexOf(heading)
+        if (start < 0) {
+          return []
+        }
+        const rest = core.slice(core.indexOf('\n- ', start))
+        const end = rest.search(/\n\n(?![-\s])/)
+        return [...(end < 0 ? rest : rest.slice(0, end)).matchAll(/^- `([A-Za-z-]+)`:/gm)].map(m => m[1])
+      }
+      const problems = []
+      const kinds = bulletKeys('Kinds:')
+      if (!sameSet(kinds, ctx.describe.kinds) || kinds.length !== ctx.describe.kinds.length) {
+        problems.push(`the core lists kinds ${kinds.join(',')}; the script ${ctx.describe.kinds.join(',')}`)
+      }
+      const keys = bulletKeys('## 11. The profile')
+      if (!sameSet(keys, ctx.describe.profileKeys) || keys.length !== ctx.describe.profileKeys.length) {
+        problems.push(`the core lists profile keys ${keys.join(',')}; the script ${ctx.describe.profileKeys.join(',')}`)
+      }
+      return problems
+    },
+    root => fs.writeFileSync(path.join(root, CORE), read(root, CORE).replace('- `hotPaths`:', '- `hotPath`:'))],
+
+  ['T3o', 'the contracts default budget matches the script', [CONTRACTS],
+    (root, ctx) => {
+      const m = read(root, CONTRACTS).replace(/\s+/g, ' ').match(/default budget of (\d+) rounds/)
+      if (!m) {
+        return ['no "default budget of N rounds" in the contracts document']
+      }
+      return Number(m[1]) === ctx.describe.defaultRounds ? [] : [`the document says ${m[1]}, the script defaults to ${ctx.describe.defaultRounds}`]
+    },
+    root => fs.writeFileSync(path.join(root, CONTRACTS), read(root, CONTRACTS).replace(/default budget of (\d+) rounds/, (_, n) => `default budget of ${Number(n) + 1} rounds`))],
 ]
 
 function copyInto(tmp, rel) {

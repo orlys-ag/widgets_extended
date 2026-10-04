@@ -15,7 +15,7 @@ Two things are deliberately not flagged:
     deliberate section banners. Flagging those would swamp the real hits.
   * Dart string LITERALS. A bullet in a UI label is display text, not
     prose style. Comments, doc comments and identifiers are still checked.
-    Only .dart gets this treatment; .md and .yaml have no literals.
+    Only .dart gets this treatment: a literal in any other file is checked.
 
 The literal scanner fails toward FLAGGING: a line it cannot parse is
 checked in full. A false negative hides a real violation, a false positive
@@ -123,7 +123,7 @@ def main():
     tool_input = payload.get("tool_input") or {}
     # `or ""`, not a default: the key can be present with a null value.
     path = tool_input.get("file_path") or ""
-    if not path.endswith((".dart", ".md", ".yaml", ".yml")):
+    if not path.endswith((".dart", ".md", ".yaml", ".yml", ".js", ".mjs", ".py", ".json")):
         return 0
 
     # Edit writes new_string; Write writes content; MultiEdit carries a list.
