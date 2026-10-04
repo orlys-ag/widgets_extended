@@ -91,7 +91,7 @@ abstract interface class BoardAxis {
   /// end.
   static const double maxTotalExtent = 1.0e12;
 
-  /// Whether any track's extent is still an estimate.
+  /// Whether any track's extent has not yet been resolved by layout.
   bool get isProvisional;
 
   /// Smallest extent this axis can ever report, strictly positive.
@@ -110,7 +110,8 @@ abstract interface class BoardAxis {
   /// measurements.
   bool get acceptsMeasurements;
 
-  /// Whether [track] already has a measured, non-estimated extent.
+  /// Whether layout has resolved [track]'s extent, which on a
+  /// [LazyContentAxis] can be [LazyContentAxis.estimate] itself.
   bool isMeasured(int track);
 
   /// Records a measured extent, floored at [minTrackExtent]. Asserts
@@ -427,6 +428,10 @@ class DerivedAxis implements BoardAxis {
 /// The content-sized axis: every track starts at [estimate] and is
 /// replaced by a measurement as layout supplies one.
 ///
+/// [estimate] is what an unmeasured track reports, and the value layout
+/// resolves a track to while none of its cells builds anything; the
+/// `BoardCellBuilder` doc states what each kind of cell gives its track.
+///
 /// Storage is one [Fenwick] of length [trackCount] holding
 /// `extentOf(i) - estimate` at every measured `i`, so [offsetOf] is
 /// `track * estimate + prefixSum(track)` and the prefix is built
@@ -435,7 +440,8 @@ class LazyContentAxis implements BoardAxis {
   /// Creates a content-sized axis. [minTrackExtent] is the floor every
   /// recorded measurement is clamped to, and this is the only
   /// implementation that has to ask the caller for it, because its extents
-  /// are not known at construction.
+  /// are not known at construction. It is also what a track of cells that
+  /// take no extent rests at; see `BoardCellBuilder`.
   LazyContentAxis(this.trackCount, this.estimate, {this.minTrackExtent = 1.0})
     : assert(trackCount >= 0),
       assert(estimate > 0.0, "LazyContentAxis estimate must be positive"),
@@ -556,8 +562,8 @@ class LazyContentAxis implements BoardAxis {
     assert(track >= 0 && track < trackCount);
     assert(extent.isFinite, "a measured extent must be finite");
     // A zero measurement is reachable from LEGAL input, not from caller
-    // error: a content-sized track with no cell content, no items and a
-    // lane padding of 0 resolves to 0. So this FLOORS instead of
+    // error: a content-sized track of cells that take no extent, with no
+    // items and a lane padding of 0, resolves to 0. So this FLOORS instead of
     // asserting, which is what keeps the correction loop's termination
     // true by construction at the cost of one comparison per measurement.
     final floored = extent < minTrackExtent ? minTrackExtent : extent;
