@@ -28,11 +28,16 @@ The contract of `Board`. The conventions every layer follows are in `board.md`.
   wraps its output in a fresh `_BoardCellSurface` per build, whose
   `updateRenderObject` pokes the render's per-cell measurement cache,
   because a cell laid out tight is its own relayout boundary and its
-  rebuild is otherwise invisible below the element layer; the render
-  relays out on those two channels only when the last layout obtained a
-  cell that built NULL, which holds no host and can be re-asked by
-  nothing else, re-measurement having moved to the poke and the
-  controller's door; the drag
+  rebuild is otherwise invisible below the element layer; the surface
+  carries `buildsNothing`, true exactly when the host shows the empty
+  box it puts in place of its OWN builder's null answer and false while
+  it shows the delegate's `initial`, which the delegate hands a host only
+  for a non-null answer, and the poke passes it on so the render takes
+  that cell as no cell rather than measuring the box (`board-render.md`);
+  the render relays out on those two channels only when the last layout
+  obtained a cell the DELEGATE built as NULL, which holds no host and can
+  be re-asked by nothing else, re-measurement having moved to the poke
+  and the controller's door; the drag
   controller's lifetime (`didUpdateWidget` cancels before disposing and
   rebuilds it only when the board controller or the config's PRESENCE
   changed; any other new config instance is ASSIGNED to the live drag

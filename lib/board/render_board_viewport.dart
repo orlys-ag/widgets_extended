@@ -201,7 +201,16 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// Resolved extents, keyed by CONTENT-axis track, for the pass that is
   /// running. Cleared at the head of every pass; a field rather than a
   /// local so a pass allocates nothing.
+  ///
+  /// Holds an entry for every content track the pass obtained a cell of;
+  /// a track whose obtained cells have all built nothing holds
+  /// [_noCellTerm].
   final Map<int, double> _contentTrackExtents = <int, double>{};
+
+  /// The running maximum's value for a content track whose obtained cells
+  /// have all built nothing: the identity of `max`, so any measured cell
+  /// replaces it, and a value no measurement can take.
+  static const double _noCellTerm = double.negativeInfinity;
 
   /// The cross index of the cell each [_contentTrackExtents] entry came
   /// from, parallel to it and cleared with it.
@@ -217,7 +226,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// sizing step takes the larger of a track's window maximum and this,
   /// and a pass that measures the recorded cell again, or finds it
   /// building nothing, REPLACES the record with its window's, so a cell
-  /// that shrinks in view lowers its track. One entry per track, not per
+  /// that shrinks in view lowers its track; when no cell of that window
+  /// built anything, it REMOVES the record instead, since there is no
+  /// cell measurement to replace it with. One entry per track, not per
   /// cell: where the recorded cell shrinks in view while a cell taller
   /// than the window's sits out of view, the track falls back to the
   /// window until that cell returns, the price of memory that does not
@@ -225,7 +236,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   ///
   /// Valid for the cell content and the measuring constraints it was
   /// taken under: dropped by [invalidateCellMeasurements], by
-  /// [_resetMeasurements], and when [_cellRecordKey] changes.
+  /// [_resetMeasurements], when [_cellRecordKey] changes, and by the
+  /// sizing step for a track whose window built nothing while its
+  /// recorded cell was among the cells obtained.
   final Map<int, ({double extent, int cross})> _cellRecord =
       <int, ({double extent, int cross})>{};
 
@@ -682,15 +695,20 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   ///   from inside a layout would be a re-entrant mark of a node already
   ///   being laid out.
   ///
-  /// A board with no content axis returns at once: nothing there is
-  /// measured, so a rebuild has nothing to re-measure and a fixed board
-  /// pays nothing at all for this mechanism.
-  void _requestRemeasure(RenderBox top) {
-    if (_contentAxis == null) {
-      return;
-    }
+  /// [buildsNothing] is whether the host's builder answered null, so the
+  /// cell shows an empty box in its place. It is written in both arms
+  /// and before the content-axis test, so the measure step finds it right
+  /// whatever the board's axes are when it next measures the cell.
+  ///
+  /// A board with no content axis records the flag and returns: nothing
+  /// there is measured, so a rebuild costs one field write and no layout.
+  void _requestRemeasure(RenderBox top, {required bool buildsNothing}) {
     final data = top.parentData;
     if (data is! _BoardChildParentData) {
+      return;
+    }
+    data.buildsNothing = buildsNothing;
+    if (_contentAxis == null) {
       return;
     }
     data.remeasure = true;
@@ -1407,6 +1425,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         ? _makeRoomWroteRows
         : _makeRoomWroteCols;
     final anim = _controller.anim;
+    // What a track none of whose cells builds anything resolves to before
+    // its lane terms. A foreign axis that accepts measurements has no
+    // estimate, so its cells-only term there is zero.
+    final standIn = axis is LazyContentAxis ? axis.estimate : 0.0;
     for (final entry in _contentTrackExtents.entries) {
       final track = entry.key;
       var to = entry.value;
@@ -1414,7 +1436,18 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       // the window's maximum replaces the record when it is at least as
       // tall, or when this pass measured the recorded cell again.
       final record = _cellRecord[track];
-      if (record == null ||
+      if (to == _noCellTerm) {
+        // No obtained cell of the track built anything. A recorded cell
+        // out of the window still holds it; one seen building nothing no
+        // longer does, and the estimate stands in for the cells until one
+        // of them builds something.
+        if (record != null && !_recordRemeasured.contains(track)) {
+          to = record.extent;
+        } else {
+          _cellRecord.remove(track);
+          to = standIn;
+        }
+      } else if (record == null ||
           to >= record.extent ||
           _recordRemeasured.contains(track)) {
         _cellRecord[track] = (extent: to, cross: _contentTrackArgMax[track]!);
@@ -1589,11 +1622,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       }
       // Compared against what the axis WOULD STORE, not against the raw
       // measurement: `recordMeasurement` floors at `minTrackExtent`, so a
-      // sub-floor track (an empty content-sized track, which is legal
-      // input) differs from its stored extent by the whole floor on every
-      // pass and would be re-recorded forever. The correction is zero
-      // either way, so this is the "one comparison per measurement"
-      // pricing and not a correctness fix.
+      // sub-floor track (a content-sized track of cells that take no
+      // extent, which is legal input) differs from its stored extent by
+      // the whole floor on every pass and would be re-recorded forever.
+      // The correction is zero either way, so this is the "one
+      // comparison per measurement" pricing and not a correctness fix.
       final stored = to < axis.minTrackExtent ? axis.minTrackExtent : to;
       if ((stored - axis.extentOf(track)).abs() > precisionErrorTolerance) {
         // Capture `from` FIRST: it is the currently PAINTED extent, so a
@@ -1625,18 +1658,6 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     Axis? contentAxis,
   ) {
     final child = _obtainOnce(ChildVicinity(xIndex: col, yIndex: row));
-    if (child == null) {
-      // A recorded cell that now builds nothing no longer holds its
-      // track.
-      if (contentAxis != null) {
-        final track = contentAxis == Axis.vertical ? row : col;
-        final cross = contentAxis == Axis.vertical ? col : row;
-        if (_cellRecord[track]?.cross == cross) {
-          _recordRemeasured.add(track);
-        }
-      }
-      return;
-    }
     if (contentAxis == null) {
       // Nothing on this board is measured, so the placement layout the
       // sweep runs is the only layout this cell needs. Measuring here
@@ -1644,63 +1665,75 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       // sizing step that never runs.
       return;
     }
-    // THE MEASUREMENT CACHE. A cell is measured on the layout that first
-    // obtains it, on the layout after its host rebuilt, and on a layout
-    // whose measuring constraints differ from the ones the cached value
-    // was taken under; on every other layout the cached extent is used
-    // and the child is not laid out at all.
-    //
-    // What that buys: the placement layout in the sweep passes tight
-    // constraints under `stretch`, and a measuring layout passes loose
-    // ones on the content axis, so measuring every layout made the two
-    // alternate and the framework's equal-constraints early return
-    // (`rendering/object.dart:2848`) never fired. A scroll now runs no
-    // cell layout at all.
-    //
-    // What it costs is stated at `board_views.dart`: a cell that changes
-    // size without rebuilding is not re-measured until it does. A cell
-    // laid out tight is its own relayout boundary
-    // (`rendering/object.dart:2847`), so its dirtiness never reached
-    // this render object anyway; what changes is that a later layout no
-    // longer picks the new size up incidentally.
-    final data = child.parentData! as _BoardChildParentData;
-    final measuring = _measuringConstraints(
-      rowsConfig,
-      columnsConfig,
-      row,
-      col,
-    );
-    if (data.remeasure ||
-        data.measured == null ||
-        data.measuredUnder != measuring) {
-      child.layout(measuring, parentUsesSize: true);
-      data
-        ..measured = contentAxis == Axis.vertical
-            ? child.size.height
-            : child.size.width
-        ..measuredUnder = measuring
-        ..remeasure = false;
+    final data = child?.parentData as _BoardChildParentData?;
+    final double measured;
+    if (data == null || data.buildsNothing) {
+      // A cell that builds nothing contributes nothing, whether the
+      // delegate dropped its element or its host shows an empty box in
+      // place of the builder's null: its track still reaches the sizing
+      // step, which gives it its record, its estimate or a lane term, and
+      // a recorded cell that now builds nothing is marked below like one
+      // measured again.
+      measured = _noCellTerm;
     } else {
-      // THE OPT-IN STALENESS CHECK, in the arm that uses the cache and
-      // only there. It reads and never writes: a check that healed the
-      // cache would make a stale board correct in debug and wrong in
-      // release.
-      assert(() {
-        if (!debugCheckCellMeasurements) {
+      // THE MEASUREMENT CACHE. A cell is measured on the layout that
+      // first obtains it, on the layout after its host rebuilt, and on a
+      // layout whose measuring constraints differ from the ones the
+      // cached value was taken under; on every other layout the cached
+      // extent is used and the child is not laid out at all.
+      //
+      // What that buys: the placement layout in the sweep passes tight
+      // constraints under `stretch`, and a measuring layout passes loose
+      // ones on the content axis, so measuring every layout made the two
+      // alternate and the framework's equal-constraints early return
+      // (`rendering/object.dart:2848`) never fired. A scroll now runs no
+      // cell layout at all.
+      //
+      // What it costs is stated at `board_views.dart`: a cell that
+      // changes size without rebuilding is not re-measured until it
+      // does. A cell laid out tight is its own relayout boundary
+      // (`rendering/object.dart:2847`), so its dirtiness never reached
+      // this render object anyway; what changes is that a later layout
+      // no longer picks the new size up incidentally.
+      final measuring = _measuringConstraints(
+        rowsConfig,
+        columnsConfig,
+        row,
+        col,
+      );
+      if (data.remeasure ||
+          data.measured == null ||
+          data.measuredUnder != measuring) {
+        child!.layout(measuring, parentUsesSize: true);
+        data
+          ..measured = contentAxis == Axis.vertical
+              ? child.size.height
+              : child.size.width
+          ..measuredUnder = measuring
+          ..remeasure = false;
+      } else {
+        // THE OPT-IN STALENESS CHECK, in the arm that uses the cache and
+        // only there. It reads and never writes: a check that healed the
+        // cache would make a stale board correct in debug and wrong in
+        // release.
+        assert(() {
+          if (!debugCheckCellMeasurements) {
+            return true;
+          }
+          child!.layout(measuring, parentUsesSize: true);
+          final fresh = contentAxis == Axis.vertical
+              ? child.size.height
+              : child.size.width;
+          if ((fresh - data.measured!).abs() > precisionErrorTolerance) {
+            (_debugStaleCells ??= <String>[]).add(
+              "row $row, column $col: cached ${data.measured}, measures "
+              "$fresh",
+            );
+          }
           return true;
-        }
-        child.layout(measuring, parentUsesSize: true);
-        final fresh = contentAxis == Axis.vertical
-            ? child.size.height
-            : child.size.width;
-        if ((fresh - data.measured!).abs() > precisionErrorTolerance) {
-          (_debugStaleCells ??= <String>[]).add(
-            "row $row, column $col: cached ${data.measured}, measures "
-            "$fresh",
-          );
-        }
-        return true;
-      }());
+        }());
+      }
+      measured = data.measured!;
     }
     // The CELL contribution to the track's intrinsic extent: the maximum
     // over the cells of that track this pass obtained, which the sizing
@@ -1708,7 +1741,6 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // item plane.
     final track = contentAxis == Axis.vertical ? row : col;
     final cross = contentAxis == Axis.vertical ? col : row;
-    final measured = data.measured!;
     final current = _contentTrackExtents[track];
     if (current == null || measured > current) {
       _contentTrackExtents[track] = measured;
@@ -3617,9 +3649,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 /// The viewport's parent data: the base's, widened by the per-cell
 /// MEASUREMENT CACHE the measure step reads and writes.
 ///
-/// Three fields and one rule between them (the measure step is the only
-/// writer of the first two, and the surface's poke the only writer of
-/// the third). They sit here rather than in a map keyed by vicinity
+/// Four fields and the rules between them: the measure step writes
+/// [measured] and [measuredUnder]; the surface's poke and
+/// [RenderBoardViewport.invalidateCellMeasurements] set [remeasure], and
+/// the measure step clears it; the poke is the only writer of
+/// [buildsNothing]. They sit here rather than in a map keyed by vicinity
 /// because a child's parent data moves with the child: a vicinity that
 /// is re-keyed by an ordinal shift carries its measurement along, and a
 /// child that unmounts takes its entry with it, so nothing has to be
@@ -3640,6 +3674,12 @@ class _BoardChildParentData extends TwoDimensionalViewportParentData {
   /// answers it. The cell's host rebuilt, so its builder may have
   /// returned content of a different size.
   bool remeasure = false;
+
+  /// Whether the cell's host shows an empty box in place of a null answer
+  /// from its builder. The measure step reads it in place of a
+  /// measurement, so such a cell contributes nothing to its content
+  /// track, as a cell the delegate dropped does.
+  bool buildsNothing = false;
 
   /// Whether the child is pinned to the viewport on each axis: a cell in
   /// a frozen track, or an item wholly inside a frozen band. Written by
@@ -3677,9 +3717,14 @@ class RenderBoardCellSurface extends RenderProxyBox {
   /// stored reference because a `GlobalKey` move can re-parent a cell
   /// between boards.
   ///
+  /// [buildsNothing] is whether the host's builder answered null, so that
+  /// the empty box the host shows in its place is taken as no cell rather
+  /// than measured. Its one caller is `_BoardCellSurface`'s
+  /// `updateRenderObject`, which passes the host's answer.
+  ///
   /// A detached surface, or one with no board above it, returns having
   /// done nothing: neither can be showing a measured cell.
-  void requestRemeasure() {
+  void requestRemeasure({required bool buildsNothing}) {
     if (!attached) {
       return;
     }
@@ -3692,6 +3737,6 @@ class RenderBoardCellSurface extends RenderProxyBox {
     if (node is! RenderBoardViewport || top is! RenderBox) {
       return;
     }
-    node._requestRemeasure(top);
+    node._requestRemeasure(top, buildsNothing: buildsNothing);
   }
 }

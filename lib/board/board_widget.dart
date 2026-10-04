@@ -980,6 +980,7 @@ class _BoardCellHostState<TKey, TItem>
     extends State<_BoardCellHost<TKey, TItem>> {
   _BoardScope<TKey, TItem>? _scope;
   Widget? _built;
+  bool _answeredNull = false;
   bool _builderRequested = false;
   bool _wasSelected = false;
 
@@ -1043,19 +1044,27 @@ class _BoardCellHostState<TKey, TItem>
     _wasSelected = scope.controller.isSelected(widget.row, widget.col);
     if (_builderRequested) {
       _builderRequested = false;
-      _built =
-          scope.cellBuilder(
-            context,
-            _cellView<TKey, TItem>(scope.controller, widget.row, widget.col),
-          ) ??
-          const SizedBox.shrink();
+      final answer = scope.cellBuilder(
+        context,
+        _cellView<TKey, TItem>(scope.controller, widget.row, widget.col),
+      );
+      _answeredNull = answer == null;
+      _built = answer ?? const SizedBox.shrink();
     }
     // The surface is CONSTRUCTED HERE, fresh on every build of this
     // host, which is the whole of its mechanism: a new instance makes
     // the framework call `updateRenderObject`, and that call is what
     // tells the board this cell's content may have changed size. See
     // [_BoardCellSurface].
-    return _BoardCellSurface(child: _built ?? widget.initial);
+    //
+    // `_built` is null while the host shows the delegate's `initial`,
+    // which is never a null answer; `didUpdateWidget` clears `_built` and
+    // leaves `_answeredNull`, so the flag is read only beside the answer
+    // it describes.
+    return _BoardCellSurface(
+      buildsNothing: _built != null && _answeredNull,
+      child: _built ?? widget.initial,
+    );
   }
 }
 
@@ -1068,10 +1077,19 @@ class _BoardCellHostState<TKey, TItem>
 /// identical to the old (`widgets/framework.dart:6837`), and this host
 /// builds a new instance every time, so the two coincide exactly.
 ///
-/// It carries no fields on purpose. A field would tempt a `==` that
-/// suppressed the update, which is the one thing this must never do.
+/// It carries one field, [buildsNothing], and defines no `==`, so every
+/// host build still updates its render object: an `==` that suppressed
+/// the update is the one thing this must never have.
 class _BoardCellSurface extends SingleChildRenderObjectWidget {
-  const _BoardCellSurface({required Widget super.child});
+  const _BoardCellSurface({
+    required this.buildsNothing,
+    required Widget super.child,
+  });
+
+  /// Whether [child] is the empty box the host shows in place of a null
+  /// answer from its builder, which the poke carries to the board so the
+  /// cell is taken as no cell rather than measured.
+  final bool buildsNothing;
 
   @override
   RenderBoardCellSurface createRenderObject(BuildContext context) {
@@ -1085,7 +1103,7 @@ class _BoardCellSurface extends SingleChildRenderObjectWidget {
     BuildContext context,
     RenderBoardCellSurface renderObject,
   ) {
-    renderObject.requestRemeasure();
+    renderObject.requestRemeasure(buildsNothing: buildsNothing);
   }
 }
 
