@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
+import 'package:widgets_extended/board/board_config.dart';
 import 'package:widgets_extended/board/board_controller.dart';
 import 'package:widgets_extended/board/board_views.dart';
 import 'package:widgets_extended/board/board_widget.dart';
@@ -47,6 +48,7 @@ BoardController<String, _Item> _controller(
   WidgetTester tester, {
   required BoardAxisConfig rows,
   required BoardAxisConfig columns,
+  BoardAnimationStyle style = BoardAnimationStyle.disabled,
 }) {
   final controller = BoardController<String, _Item>(
     vsync: tester,
@@ -55,7 +57,7 @@ BoardController<String, _Item> _controller(
     keyOf: (item) {
       return item.key;
     },
-    animationStyle: BoardAnimationStyle.disabled,
+    animationStyle: style,
   );
   addTearDown(controller.dispose);
   // Registered after the dispose, so it runs before it: the board
@@ -93,6 +95,7 @@ RenderBoardViewport<String> _viewport(WidgetTester tester) {
 BoardController<String, _Item> _rowsController(
   WidgetTester tester, {
   double? laneExtent,
+  BoardAnimationStyle style = BoardAnimationStyle.disabled,
 }) {
   return _controller(
     tester,
@@ -101,6 +104,7 @@ BoardController<String, _Item> _rowsController(
       laneExtent: laneExtent,
     ),
     columns: BoardAxisConfig(axis: UniformAxis(4, 50.0)),
+    style: style,
   );
 }
 
@@ -119,21 +123,22 @@ Widget _itemBox(BuildContext context, BoardItemView<String, _Item> item) {
   return ColoredBox(key: _itemKey(item.key), color: const Color(0xFF4CAF50));
 }
 
-/// Row 1's cells are 100 px tall while [tall] says so and build nothing
-/// otherwise; every other cell is 20 px tall.
-Widget _tallRowBoard(
+/// Row 1's cells are [height] tall, and build nothing while it is null;
+/// every other cell is 20 px tall. Each call makes a new cell builder, so
+/// pumping it replaces the delegate, which rebuilds every child.
+Widget _rowBoard(
   BoardController<String, _Item> controller, {
-  required bool tall,
+  required double? height,
 }) {
   return _frame(
     Board<String, _Item>(
       controller: controller,
       cellBuilder: (context, cell) {
         if (cell.row == 1) {
-          if (!tall) {
+          if (height == null) {
             return null;
           }
-          return SizedBox(key: _cellKey(cell.row, cell.col), height: 100.0);
+          return SizedBox(key: _cellKey(cell.row, cell.col), height: height);
         }
         return SizedBox(key: _cellKey(cell.row, cell.col), height: 20.0);
       },
@@ -297,7 +302,7 @@ void main() {
         "estimate (${invalidate ? "after" : "without"} "
         "invalidateCellMeasurements)", (tester) async {
       final controller = _rowsController(tester);
-      await tester.pumpWidget(_tallRowBoard(controller, tall: true));
+      await tester.pumpWidget(_rowBoard(controller, height: 100.0));
       final rows = controller.rows.axis;
       // Setup sanity: the tall cells hold the row.
       expect(rows.extentOf(1), 100.0);
@@ -305,8 +310,7 @@ void main() {
       if (invalidate) {
         controller.invalidateCellMeasurements();
       }
-      // A new builder replaces the delegate, which rebuilds every child.
-      await tester.pumpWidget(_tallRowBoard(controller, tall: false));
+      await tester.pumpWidget(_rowBoard(controller, height: null));
       // Setup sanity: the cells are gone.
       expect(find.byKey(_cellKey(1, 0)), findsNothing);
       // TARGET.
@@ -314,6 +318,142 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  for (final invalidate in <bool>[true, false]) {
+    testWidgets("a content row whose cells shrink to no extent rests at its "
+        "floor (${invalidate ? "after" : "without"} "
+        "invalidateCellMeasurements)", (tester) async {
+      final controller = _rowsController(tester);
+      await tester.pumpWidget(_rowBoard(controller, height: 100.0));
+      final rows = controller.rows.axis;
+      // Setup sanity: the tall cells hold the row.
+      expect(rows.extentOf(1), 100.0);
+
+      if (invalidate) {
+        controller.invalidateCellMeasurements();
+      }
+      await tester.pumpWidget(_rowBoard(controller, height: 0.0));
+      // Control: a cell that takes no extent measures zero, which the
+      // floor raises.
+      expect(rows.extentOf(1), 10.0);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets("a row returning to its estimate runs on the trackResize "
+      "family", (tester) async {
+    final controller = _rowsController(
+      tester,
+      style: const BoardAnimationStyle(
+        trackResize: BoardAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+        itemSlide: BoardAnimationSpec(
+          duration: Duration.zero,
+          curve: Curves.linear,
+        ),
+      ),
+    );
+    await tester.pumpWidget(_rowBoard(controller, height: 100.0));
+    await tester.pumpAndSettle();
+    final rows = controller.rows.axis;
+    final viewport = _viewport(tester);
+    // Setup sanity: the row rests at its tall cells' extent.
+    expect(viewport.rectOfCell(1, 0)!.height, 100.0);
+
+    await tester.pumpWidget(_rowBoard(controller, height: null));
+    // TARGET 1: the axis takes the estimate at once.
+    expect(rows.extentOf(1), 40.0);
+    await tester.pump(const Duration(milliseconds: 150));
+    // TARGET 2: the painted row is on its way there.
+    expect(viewport.rectOfCell(1, 0)!.height, inExclusiveRange(40.0, 100.0));
+    await tester.pumpAndSettle();
+    // TARGET 3: and arrives.
+    expect(viewport.rectOfCell(1, 0)!.height, 40.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a content column whose cells stop building returns to its "
+      "estimate", (tester) async {
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(axis: UniformAxis(5, 50.0)),
+      columns: BoardAxisConfig(
+        axis: LazyContentAxis(4, 40.0, minTrackExtent: 10.0),
+      ),
+    );
+    Widget board({required bool wide}) {
+      return _frame(
+        Board<String, _Item>(
+          controller: controller,
+          cellBuilder: (context, cell) {
+            if (cell.col == 1) {
+              if (!wide) {
+                return null;
+              }
+              return SizedBox(key: _cellKey(cell.row, cell.col), width: 100.0);
+            }
+            return SizedBox(key: _cellKey(cell.row, cell.col), width: 20.0);
+          },
+        ),
+        width: 400.0,
+        height: 300.0,
+      );
+    }
+
+    await tester.pumpWidget(board(wide: true));
+    final columns = controller.columns.axis;
+    // Setup sanity: the wide cells hold the column.
+    expect(columns.extentOf(1), 100.0);
+
+    await tester.pumpWidget(board(wide: false));
+    // Setup sanity: the cells are gone.
+    expect(find.byKey(_cellKey(0, 1)), findsNothing);
+    // TARGET.
+    expect(columns.extentOf(1), 40.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a row whose cells build nothing is measured once, not on "
+      "every layout", (tester) async {
+    final rows = LazyContentAxis(6, 40.0, minTrackExtent: 10.0);
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(axis: rows),
+      columns: BoardAxisConfig(axis: UniformAxis(3, 100.0)),
+    );
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          cellBuilder: (context, cell) {
+            if (cell.row == 2) {
+              return null;
+            }
+            return SizedBox(key: _cellKey(cell.row, cell.col), height: 20.0);
+          },
+        ),
+      ),
+    );
+    // TARGET: the row is resolved to the estimate.
+    expect(rows.isMeasured(2), isTrue);
+    expect(rows.extentOf(2), 40.0);
+
+    final records = rows.debugRecordCount;
+    final layouts = _viewport(tester).debugPerformLayoutCount;
+    controller.setSelection(
+      const BoardSelection(anchor: (row: 0, col: 0), focus: (row: 0, col: 0)),
+    );
+    await tester.pump();
+    await tester.pump();
+    // Setup sanity: the selection change laid the board out again, which
+    // it does while a cell that builds nothing is obtained.
+    expect(_viewport(tester).debugPerformLayoutCount, greaterThan(layouts));
+    // Control: that layout recorded nothing.
+    expect(rows.debugRecordCount, records);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets("a row whose cells a payload write turns to nothing rests at "
       "its estimate", (tester) async {
