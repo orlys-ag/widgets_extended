@@ -6,11 +6,14 @@
 and a `BoardItemBuilder` builds items, which span track rectangles and may
 cover many cells. `BoardAxisConfig` describes each axis with one of four
 kinds: `UniformAxis`, `ExplicitAxis`, `DerivedAxis`, and `LazyContentAxis`,
-which measures its tracks from cell content. An axis given a `laneExtent`
-becomes the lane axis, where overlapping items stack into lanes instead of
-covering each other. Axes can freeze leading and trailing tracks
-(`frozenStart`, `frozenEnd`), and `animateScrollToCell` and `jumpToCell`
-scroll both axes at once.
+which measures its tracks from cell content. A cell that builds null
+contributes nothing to its track: a content-sized track none of whose cells
+builds anything takes the axis's `estimate`, or more where its lane cluster
+needs it, while a track of cells that take no extent rests at
+`minTrackExtent`. An axis given a `laneExtent` becomes the lane axis, where
+overlapping items stack into lanes instead of covering each other. Axes can
+freeze leading and trailing tracks (`frozenStart`, `frozenEnd`), and
+`animateScrollToCell` and `jumpToCell` scroll both axes at once.
 - A board cell is re-measured when its host rebuilds: a structural change, a
 payload write to an item covering it, or a selection change that reaches it.
 A size change the cell's content makes without its HOST rebuilding, an
