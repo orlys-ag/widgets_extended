@@ -667,7 +667,12 @@ class BoardAxisConfig {
   /// The band's cells stay put while the lattice scrolls, and so does an
   /// ITEM whose span lies wholly inside the band on this axis (a laned
   /// item on the lane axis by its one track): a header row can carry
-  /// items, and a drag or a selection over the band lands in it. An item
+  /// items. A drag that moves an item along this axis (see
+  /// `BoardDragConfig.snap` for when it does) lands it in the band when
+  /// the drag proxy's centre is over the band and the item's span fits in
+  /// it, unless landing there would move the item against the drag; on
+  /// the lane axis a laned item lands in the band when the pointer is
+  /// over it. A selection over the band selects the band's cells. An item
   /// that crosses the band's edge scrolls, and the band covers what
   /// scrolls beneath it.
   final int frozenStart;

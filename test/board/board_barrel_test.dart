@@ -139,6 +139,9 @@ void main() {
       "BoardItemPresence",
       // The frozen-band bounds and extents of an axis config.
       "BoardAxisConfigBands",
+      // The record `BoardRenderPort.trackSampleAt` answers with, readable
+      // through its fields without the name.
+      "BoardAxisSample",
     };
     expect(shown.intersection(internals), isEmpty);
 

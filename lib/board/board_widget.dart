@@ -1914,7 +1914,11 @@ class _SelectionLayerState<TKey, TItem>
   /// FRACTIONAL snap the coordinate is quantized before the containment
   /// floor, which is what snaps the selection's edges to the grid;
   /// `track` and `free` use plain containment, because rounding a
-  /// mid-cell touch to the nearest EDGE would select the neighbour.
+  /// mid-cell touch to the nearest EDGE would select the neighbour. Each
+  /// axis resolves among the cells of the region the point is over, so a
+  /// point over a frozen band selects a cell of that band and one between
+  /// the bands a scrolled cell that shows, or any cell where none of them
+  /// shows.
   ///
   /// [onLattice] asks for a cell that PAINTS under the point, and answers
   /// null anywhere else: a tap or a range's first press on empty space
@@ -1930,29 +1934,29 @@ class _SelectionLayerState<TKey, TItem>
     if (onLattice && viewport.cellAt(local) == null) {
       return null;
     }
-    final track = viewport.trackSpaceAt(local);
-    if (track == null) {
+    final sample = viewport.trackSampleAt(local);
+    if (sample == null) {
       return null;
     }
     // A gesture only starts under a live config, but one already running
     // can outlive a rebuild that removed it; such a gesture resolves as
     // the default snap does.
     final snap = widget.config?.snap ?? const BoardSnap.track();
-    final row = snap.mode == BoardSnapMode.fraction
-        ? snap.quantize(track.row)
-        : track.row;
-    final col = snap.mode == BoardSnapMode.fraction
-        ? snap.quantize(track.col)
-        : track.col;
     final rows = widget.controller.rows.axis.trackCount;
     final cols = widget.controller.columns.axis.trackCount;
     if (rows == 0 || cols == 0) {
       return null;
     }
-    return (
-      row: row.floor().clamp(0, rows - 1),
-      col: col.floor().clamp(0, cols - 1),
-    );
+    int cellOn(BoardAxisSample axis) {
+      final path = regionPathOf(axis, extent: 1.0, quantum: 1.0);
+      final coordinate = coordinateIn(path, axis);
+      final snapped = snap.mode == BoardSnapMode.fraction
+          ? snap.quantize(coordinate)
+          : coordinate;
+      return clampToWindow(snapped.floorToDouble(), path.window).toInt();
+    }
+
+    return (row: cellOn(sample.row), col: cellOn(sample.col));
   }
 
   Drag? _beginRange(Offset global) {

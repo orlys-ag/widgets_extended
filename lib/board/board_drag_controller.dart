@@ -35,7 +35,10 @@ class _DragSession<TKey> {
     required this.grabOffset,
     required this.grabCellRow,
     required this.grabCellCol,
-    required this.liftTrack,
+    required this.liftPointer,
+    required this.liftCorner,
+    required this.liftPointerLocal,
+    required this.liftCornerLocal,
     required this.makeRoomDuration,
     required this.makeRoomCurve,
     required this.dropSettleDuration,
@@ -54,15 +57,29 @@ class _DragSession<TKey> {
   /// because that is what positions a widget; the anchor converts.
   final Offset grabOffset;
 
-  /// The lift pointer's cell minus the item's start cell, per axis: the
-  /// track snap's whole-cell grab offset, so the grabbed cell stays
-  /// under the pointer while within-cell grab detail is discarded.
+  /// The lift pointer's cell minus the item's start cell, per axis, both
+  /// read in the lattice the item paints in: the whole-cell grab offset
+  /// of the lane axis, so the grabbed cell stays under the pointer while
+  /// within-cell grab detail is discarded.
   final int grabCellRow;
   final int grabCellCol;
 
-  /// The lift pointer's track coordinate, which a RESIZE's displacement
-  /// is measured from; `startDrag` refuses a resize without one.
-  final ({double row, double col})? liftTrack;
+  /// The pointer's sample at the lift, which a resize's displacement and
+  /// a pointer-anchored axis's cell are measured from; `startDrag`
+  /// refuses a resize without one. Rewritten only by the re-derive in
+  /// `_resolve`, after an axis-config change.
+  BoardLiftSamples? liftPointer;
+
+  /// The proxy's content-leading corner's sample at the lift, which a
+  /// move's displacement is measured from, computed by `_moveAnchorOf` as
+  /// every later corner is; null for a resize. Rewritten only by the
+  /// re-derive in `_resolve`, after an axis-config change.
+  BoardLiftSamples? liftCorner;
+
+  /// The paint-space points [liftPointer] and [liftCorner] were sampled
+  /// at, which the re-derive samples again under new axis configs.
+  final Offset liftPointerLocal;
+  final Offset? liftCornerLocal;
 
   /// The session's captured values; the kill switch re-reads the live
   /// style at every install and dominates them.
@@ -199,6 +216,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // returned; cleared, the post-frame resolve re-runs the gate and the
     // scan even when the pointer's placement has not moved.
     _lastResolvedSpan = null;
+    _lastResolvedWindows = null;
     _scheduleResolve();
   }
 
@@ -220,8 +238,15 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// [_currentTarget] holds: a nudged target is a different span by
   /// construction. The early-out in [_resolve] compares against this so
   /// it compares like with like, and a pointer that has not left its
-  /// resolved placement re-runs neither the gate nor the scan.
+  /// resolved placement, under unchanged [_lastResolvedWindows], re-runs
+  /// neither the gate nor the scan.
   BoardSpan? _lastResolvedSpan;
+
+  /// The windows the resolver returned beside [_lastResolvedSpan], null
+  /// for a resize. The early-out compares them too: a scroll can move a
+  /// window by a grid step while the span stays the same, and a nudge
+  /// chosen from the old window would otherwise stand.
+  ({BoardStartWindow rows, BoardStartWindow cols})? _lastResolvedWindows;
 
   /// Whether a post-frame re-resolve is already scheduled for this
   /// frame, so a frame with several animation dispatches resolves once.
@@ -434,14 +459,43 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final makeRoom = style.effectiveMakeRoom;
     final dropSettle = boardController.animationStyle.effectiveDropSettle;
     final span = boardController.spanOf(key)!;
-    // The lift pointer's fractional cell, sampled once: the track snap's
-    // grab offset is in WHOLE cells, and a resize's displacement is
-    // measured from it. Null only for a lattice with no tracks, where a
-    // resize has nothing to measure against and is refused.
-    final liftCell = renderPort.trackSpaceAt(local);
+    // The lift pointer's sample, taken once and re-derived only after an
+    // axis-config change: the lane axis's grab offset is in WHOLE cells,
+    // and a resize's displacement is measured from it. Null only for a
+    // lattice with no tracks, where a resize has nothing to measure
+    // against and is refused.
+    final liftCell = renderPort.trackSampleAt(local);
     if (liftCell == null && kind != BoardDragKind.move) {
       return false;
     }
+    final grabOffset = kind == BoardDragKind.move
+        ? local - rect.topLeft
+        : Offset.zero;
+    // The corner through the one expression [_resolve] reads every later
+    // corner by, so the first resolve maps the bit-identical point and a
+    // lift that does not move reads a displacement of exactly zero.
+    final liftCornerLocal = kind == BoardDragKind.move
+        ? _moveAnchorOf(renderPort, local, grabOffset, rect.size)
+        : null;
+    final liftCorner = liftCornerLocal == null
+        ? null
+        : renderPort.trackSampleAt(liftCornerLocal);
+    // The grab cell is read in the lattice the item paints in at the
+    // lift, so it counts the tracks the item's own lattice puts between
+    // its start and the finger.
+    final liftPins = liftCell == null ? null : _pinsAt(key, liftCell);
+    int grabCellOn(Axis axis) {
+      if (liftCell == null || liftPins == null) {
+        return 0;
+      }
+      final vertical = axis == Axis.vertical;
+      final coordinate = itemCoordinateOf(
+        vertical ? liftPins.row : liftPins.col,
+        vertical ? liftCell.row : liftCell.col,
+      );
+      return coordinate.floor() - trackIndexOf(span.startTrackOn(axis));
+    }
+
     // The last policy check has passed: take the pin and the bit.
     renderPort.pinItem(key);
     boardController.markDragging(
@@ -453,17 +507,17 @@ class BoardDragController<TKey> extends ChangeNotifier {
       key: key,
       kind: kind,
       port: renderPort,
-      grabOffset: kind == BoardDragKind.move
-          ? local - rect.topLeft
-          : Offset.zero,
-      grabCellRow: liftCell == null
-          ? 0
-          : liftCell.row.floor() - trackIndexOf(span.startTrackOn(Axis.vertical)),
-      grabCellCol: liftCell == null
-          ? 0
-          : liftCell.col.floor() -
-                trackIndexOf(span.startTrackOn(Axis.horizontal)),
-      liftTrack: liftCell,
+      grabOffset: grabOffset,
+      grabCellRow: grabCellOn(Axis.vertical),
+      grabCellCol: grabCellOn(Axis.horizontal),
+      liftPointer: liftCell == null
+          ? null
+          : (row: liftCell.row, col: liftCell.col),
+      liftCorner: liftCorner == null
+          ? null
+          : (row: liftCorner.row, col: liftCorner.col),
+      liftPointerLocal: local,
+      liftCornerLocal: liftCornerLocal,
       makeRoomDuration: makeRoom.duration,
       makeRoomCurve: makeRoom.curve,
       dropSettleDuration: dropSettle.duration,
@@ -895,6 +949,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     boardController.removeStructuralListener(_handleStructuralChange);
     _currentTarget = null;
     _lastResolvedSpan = null;
+    _lastResolvedWindows = null;
     _pointerPosition.value = null;
     _movedItem.value = null;
     notifyListeners();
@@ -903,40 +958,97 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// The resolution core, run once per pointer event and once per scroll
   /// notification. Re-points the scroll subscriptions when either
   /// position was swapped under the session.
+  ///
+  /// Takes every sample the resolver reads, once per resolve: the
+  /// pointer's, and for a move the proxy's content-leading corner's and
+  /// its centre's. A null sample leaves the target unchanged. With the
+  /// current samples in hand it RE-DERIVES a lift sample taken under
+  /// other axis configs (a different track count or band bound on an
+  /// axis): the sample the lift point gives at the lift's scroll offsets
+  /// under the current configs, so the resolver never compares samples
+  /// of two configs. The item's pin is read here on every call, through
+  /// the pointer sample's band bounds.
   void _resolve(_DragSession<TKey> session, Offset local) {
     _repointScrollSubscriptions(session);
-    // A move resolves from the proxy's content-LEADING corner, the point
-    // its span starts at, which is the proxy's painted top-left only
-    // where both axes run forward. A resize resolves from the pointer's
-    // displacement since the lift, in track space.
-    final anchor = session.kind == BoardDragKind.move
-        ? session.port.leadingCornerOf(
-            (local - session.grabOffset) & (proxySize ?? Size.zero),
-          )
-        : local;
-    final resolved = BoardDropResolver.resolve(
-      port: session.port,
-      anchorLocal: anchor,
-      pointerLocal: local,
-      grabCellRow: session.grabCellRow,
-      grabCellCol: session.grabCellCol,
-      draggedSpan: boardController.spanOf(session.key)!,
-      kind: session.kind,
-      snap: config.snap,
-      rowCount: boardController.rows.axis.trackCount,
-      colCount: boardController.columns.axis.trackCount,
-      pointerAnchoredAxis: _pointerAnchoredAxis(session),
-      liftTrack: session.liftTrack,
-    );
-    if (resolved == null || resolved.span == _lastResolvedSpan) {
+    final port = session.port;
+    final pointer = port.trackSampleAt(local);
+    if (pointer == null) {
       return;
     }
-    // Recorded for every NON-NULL resolver answer, before the refusal
-    // branch and whatever that branch decides: a pointer parked over a
-    // refused placement resolves the same span on every move, and a
-    // field written only on the accepted path would re-run the gate and
-    // the scan for each of them.
+    final draggedSpan = boardController.spanOf(session.key)!;
+    final BoardDropTarget resolved;
+    ({BoardStartWindow rows, BoardStartWindow cols})? windows;
+    if (session.kind == BoardDragKind.move) {
+      // A move resolves from the proxy's content-LEADING corner, the
+      // point its span starts at, which is the proxy's painted top-left
+      // only where both axes run forward; the region under the proxy's
+      // centre decides which lattice it lands in.
+      final size = proxySize ?? Size.zero;
+      final corner = port.trackSampleAt(
+        _moveAnchorOf(port, local, session.grabOffset, size),
+      );
+      final centre = port.trackSampleAt(
+        ((local - session.grabOffset) & size).center,
+      );
+      if (corner == null || centre == null) {
+        return;
+      }
+      session.liftPointer = _rederived(
+        port,
+        session.liftPointer,
+        session.liftPointerLocal,
+        pointer,
+      );
+      session.liftCorner = _rederived(
+        port,
+        session.liftCorner,
+        session.liftCornerLocal,
+        corner,
+      );
+      final answer = BoardDropResolver.resolveMove(
+        corner: corner,
+        centre: centre,
+        pointer: pointer,
+        grabCellRow: session.grabCellRow,
+        grabCellCol: session.grabCellCol,
+        draggedSpan: draggedSpan,
+        snap: config.snap,
+        pointerAnchoredAxis: _pointerAnchoredAxis(session),
+        liftCorner: session.liftCorner,
+        liftPointer: session.liftPointer,
+        pinned: _pinsAt(session.key, pointer),
+      );
+      resolved = answer.target;
+      windows = (rows: answer.rows, cols: answer.cols);
+    } else {
+      // A resize resolves from the pointer's displacement since the
+      // lift, in track space.
+      session.liftPointer = _rederived(
+        port,
+        session.liftPointer,
+        session.liftPointerLocal,
+        pointer,
+      );
+      resolved = BoardDropResolver.resolveResize(
+        pointer: pointer,
+        kind: session.kind,
+        draggedSpan: draggedSpan,
+        snap: config.snap,
+        liftPointer: session.liftPointer!,
+        pinned: _pinsAt(session.key, pointer),
+      );
+    }
+    if (resolved.span == _lastResolvedSpan &&
+        windows == _lastResolvedWindows) {
+      return;
+    }
+    // Recorded for every resolver answer, before the refusal branch and
+    // whatever that branch decides: a pointer parked over a refused
+    // placement resolves the same span on every move, and a field
+    // written only on the accepted path would re-run the gate and the
+    // scan for each of them.
     _lastResolvedSpan = resolved.span;
+    _lastResolvedWindows = windows;
     var target = resolved;
     // A canDropAt refusal at RESOLUTION, not just at commit: a refused
     // target leaves currentTarget null and releases the gap, so nothing
@@ -949,7 +1061,9 @@ class BoardDragController<TKey> extends ChangeNotifier {
     if (answer != true) {
       // A throw, answered null, is a refusal with no nudge: the nudge is
       // for overlaps, and a throw says nothing about one.
-      final fitted = answer == false ? _fitRefusal(session, target) : null;
+      final fitted = answer == false
+          ? _fitRefusal(session, target, windows)
+          : null;
       if (fitted == null) {
         if (_currentTarget != null) {
           _currentTarget = null;
@@ -976,12 +1090,90 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _reportTarget(session);
   }
 
+  /// The band [key] is pinned in on each axis, as [sample]'s bounds give
+  /// the band `pinOfId` names, or null where it scrolls.
+  BoardPins _pinsAt(TKey key, BoardPointSample sample) {
+    final id = boardController.idOfKey(key);
+    ({int start, int end})? pinOn(Axis axis, BoardAxisSample axisSample) {
+      switch (boardController.pinOfId(id, axis)) {
+        case BoardPin.leading:
+          return (start: 0, end: axisSample.leadingBandEnd);
+        case BoardPin.trailing:
+          return (
+            start: axisSample.trailingBandStart,
+            end: axisSample.trackCount,
+          );
+        case BoardPin.none:
+          return null;
+      }
+    }
+
+    return (
+      row: pinOn(Axis.vertical, sample.row),
+      col: pinOn(Axis.horizontal, sample.col),
+    );
+  }
+
+  /// [lift] with each axis whose [current] sample was taken under another
+  /// track count or band bound RE-DERIVED: [liftLocal] sampled again
+  /// under the current configs at the scroll offsets the lift's samples
+  /// record, and that axis's component taken whole. The sample keeps
+  /// those offsets, so a chain of config changes loses nothing of the
+  /// lift. A null record or component stays null.
+  static BoardLiftSamples? _rederived(
+    BoardRenderPort<Object?> port,
+    BoardLiftSamples? lift,
+    Offset? liftLocal,
+    BoardPointSample current,
+  ) {
+    if (lift == null || liftLocal == null) {
+      return lift;
+    }
+    bool stale(BoardAxisSample? recorded, BoardAxisSample now) {
+      return recorded != null &&
+          (recorded.trackCount != now.trackCount ||
+              recorded.leadingBandEnd != now.leadingBandEnd ||
+              recorded.trailingBandStart != now.trailingBandStart);
+    }
+
+    final rowStale = stale(lift.row, current.row);
+    final colStale = stale(lift.col, current.col);
+    if (!rowStale && !colStale) {
+      return lift;
+    }
+    final fresh = port.trackSampleAt(
+      liftLocal,
+      verticalPixels: lift.row?.scrollPixels,
+      horizontalPixels: lift.col?.scrollPixels,
+    );
+    if (fresh == null) {
+      return lift;
+    }
+    return (
+      row: rowStale ? fresh.row : lift.row,
+      col: colStale ? fresh.col : lift.col,
+    );
+  }
+
+  /// A move's anchor: the content-leading corner of the proxy that the
+  /// pointer at [local] places, [grabOffset] above and to the left of it
+  /// with [size]. The ONE expression for it, at the lift and at every
+  /// resolve, so both map the same point for the same pointer.
+  static Offset _moveAnchorOf(
+    BoardRenderPort<Object?> port,
+    Offset local,
+    Offset grabOffset,
+    Size size,
+  ) {
+    return port.leadingCornerOf((local - grabOffset) & size);
+  }
+
   /// The axis a whole-track move takes from the POINTER rather than
   /// from the item's painted corner: the LANE axis, and only while the
   /// dragged item is laned on it, whose painted lead is a lane origin
   /// inside one track rather than its span. Null everywhere else, which
   /// is every board with no lane axis and every unlaned item on one.
-  /// The rule this feeds lives at `BoardDropResolver.resolve`.
+  /// The rule this feeds lives at `BoardDropResolver.resolveMove`.
   Axis? _pointerAnchoredAxis(_DragSession<TKey> session) {
     final laneAxis = boardController.laneAxis;
     if (laneAxis == null) {
@@ -996,23 +1188,68 @@ class BoardDragController<TKey> extends ChangeNotifier {
 
   /// The NUDGE: a refused MOVE whose box mostly misses the occupants it
   /// meets slides onto the nearest nearby placement that holds the whole
-  /// box and that the app admits. Null leaves the refusal exactly as it
-  /// was, which is what the policy's absence, a resize, a policy with no
-  /// step, a closed gate and an empty search all produce.
+  /// box and that the app admits; a box lying past the lattice's end is
+  /// first moved onto it, into [windows], and taken there when the app
+  /// admits it. Null leaves the refusal exactly as it was, which is what
+  /// the policy's absence, a resize and a throw asking about the moved box
+  /// produce, and, unless the moved box is admitted, a policy with no
+  /// step, a closed gate and an empty search.
+  ///
+  /// [windows] are the windows the resolver placed each axis in, which a
+  /// candidate is clamped into on an axis the scan steps, so a refused
+  /// span in a band is nudged within the band and a scrolled one only to
+  /// starts that show; null for a resize.
   BoardDropTarget? _fitRefusal(
     _DragSession<TKey> session,
     BoardDropTarget refused,
+    ({BoardStartWindow rows, BoardStartWindow cols})? windows,
   ) {
     final policy = config.dropFit;
     final canDropAt = config.canDropAt;
     if (policy == null ||
         canDropAt == null ||
+        windows == null ||
         session.kind != BoardDragKind.move) {
       return null;
     }
+    final rowAxis = boardController.rows.axis;
+    final colAxis = boardController.columns.axis;
+    // A box lying wholly at or past the lattice's end on an axis, as a
+    // kept span can once its tracks are removed, paints nowhere, and the
+    // scan cannot search from it: past the end an axis gives the box's
+    // start no offset to measure a candidate's distance from, and at the
+    // end the region holds none of the box's tracks on an axis the search
+    // does not widen. Such a box is moved first into its axis's window,
+    // whose starts show beside a band where any does, so it is not pinned
+    // in the band while a start shows; it is taken there when the app
+    // admits it, and refused there, it is the box the nudge searches from.
     // A laned item steps by WHOLE tracks on its lane axis, the axis the
     // resolver anchors to the pointer, exactly as the resolver moves it.
     final wholeTrackAxis = _pointerAnchoredAxis(session);
+    var box = refused.span;
+    final onto = BoardDropFitter.ontoLattice(
+      box,
+      rowCount: rowAxis.trackCount,
+      colCount: colAxis.trackCount,
+      rowWindow: windows.rows,
+      colWindow: windows.cols,
+      snap: config.snap,
+      wholeTrackAxis: wholeTrackAxis,
+    );
+    if (onto == null) {
+      return null;
+    }
+    if (onto != box) {
+      final admitted = askCanDropAt(config, session.key, onto);
+      if (admitted == true) {
+        return BoardDropTarget(span: onto, kind: refused.kind);
+      }
+      // A throw, answered null, says nothing about an overlap.
+      if (admitted == null) {
+        return null;
+      }
+      box = onto;
+    }
     // THE STEP COUNTS COME FIRST. A policy that admits no step can
     // produce no candidate, so it must not pay a span-index query or the
     // gate to discover that.
@@ -1024,9 +1261,13 @@ class BoardDragController<TKey> extends ChangeNotifier {
     if (steps.rows == 0 && steps.cols == 0) {
       return null;
     }
-    final rowAxis = boardController.rows.axis;
-    final colAxis = boardController.columns.axis;
-    final region = _searchRegion(refused.span, policy);
+    final region = _searchRegion(
+      box,
+      policy,
+      rowWindow: windows.rows,
+      colWindow: windows.cols,
+      steps: steps,
+    );
     final obstacles = _obstaclesIn(session, region);
     // BOTH gate terms, and they ask about DIFFERENT rectangles.
     //
@@ -1034,7 +1275,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // box meeting no occupant was refused for a rule of the app's own
     // that the board cannot read, and sliding it would move the item for
     // a reason nothing here understands.
-    if (!BoardDropFitter.meetsAny(refused.span, obstacles)) {
+    if (!BoardDropFitter.meetsAny(box, obstacles)) {
       return null;
     }
     // The SECOND is about the REGION, and measuring it there rather than
@@ -1055,7 +1296,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       return null;
     }
     final fitted = BoardDropFitter.nearestFit(
-      box: refused.span,
+      box: box,
       policy: policy,
       snap: config.snap,
       rowAxis: rowAxis,
@@ -1064,6 +1305,8 @@ class BoardDragController<TKey> extends ChangeNotifier {
       accepts: (candidate) {
         return askCanDropAt(config, session.key, candidate) == true;
       },
+      rowWindow: windows.rows,
+      colWindow: windows.cols,
       wholeTrackAxis: wholeTrackAxis,
     );
     if (fitted == null) {
@@ -1072,9 +1315,10 @@ class BoardDragController<TKey> extends ChangeNotifier {
     return BoardDropTarget(span: fitted, kind: refused.kind);
   }
 
-  /// The SEARCH REGION: the refused box widened by the policy's radius
-  /// on BOTH sides of each axis, snapped out to whole tracks and clamped
-  /// to the lattice.
+  /// The SEARCH REGION: on each axis, [BoardDropFitter.searchRangeOn] of
+  /// the refused box, the policy's radius and the axis's window,
+  /// [rowWindow] or [colWindow], the axis counting as stepped where
+  /// [steps] gives it at least one step.
   ///
   /// One rectangle serving three purposes, which is why it is computed
   /// once and passed around: it bounds the obstacle query, it is what
@@ -1082,21 +1326,48 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// would leave a candidate displaced toward the other tested against
   /// an incomplete set, free in the arithmetic while overlapping an item
   /// nobody fetched.
-  BoardSpan _searchRegion(BoardSpan box, BoardDropFit policy) {
-    final rowCount = boardController.rows.axis.trackCount;
-    final colCount = boardController.columns.axis.trackCount;
-    final rowStart = (box.startTrackOn(Axis.vertical) - policy.rowRadius)
-        .floor()
-        .clamp(0, rowCount);
-    final rowEnd = (box.endTrackOn(Axis.vertical) + policy.rowRadius)
-        .ceil()
-        .clamp(0, rowCount);
-    final colStart = (box.startTrackOn(Axis.horizontal) - policy.colRadius)
-        .floor()
-        .clamp(0, colCount);
-    final colEnd = (box.endTrackOn(Axis.horizontal) + policy.colRadius)
-        .ceil()
-        .clamp(0, colCount);
+  BoardSpan _searchRegion(
+    BoardSpan box,
+    BoardDropFit policy, {
+    required BoardStartWindow rowWindow,
+    required BoardStartWindow colWindow,
+    required ({int rows, int cols}) steps,
+  }) {
+    ({int start, int end}) reachOn(
+      Axis axis,
+      double radius,
+      BoardStartWindow window,
+      bool stepped,
+      int count,
+    ) {
+      return BoardDropFitter.searchRangeOn(
+        start: box.startTrackOn(axis),
+        end: box.endTrackOn(axis),
+        radius: radius,
+        window: window,
+        stepped: stepped,
+        trackCount: count,
+      );
+    }
+
+    final rows = reachOn(
+      Axis.vertical,
+      policy.rowRadius,
+      rowWindow,
+      steps.rows > 0,
+      boardController.rows.axis.trackCount,
+    );
+    final cols = reachOn(
+      Axis.horizontal,
+      policy.colRadius,
+      colWindow,
+      steps.cols > 0,
+      boardController.columns.axis.trackCount,
+    );
+    final rowStart = rows.start;
+    final rowEnd = rows.end;
+    final colStart = cols.start;
+    final colEnd = cols.end;
     return BoardSpan(
       rowStart: rowStart,
       colStart: colStart,
@@ -1192,6 +1463,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// feed itself; the report runs after teardown has unbound it.
   void _handleStructuralChange(Set<TKey>? affectedKeys) {
     _lastResolvedSpan = null;
+    _lastResolvedWindows = null;
     _scheduleResolve();
   }
 

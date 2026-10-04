@@ -118,6 +118,15 @@ typedef BoardSemanticsActionsBuilder<TKey> =
 /// spans are laned rather than rejected. Setting this and leaving the
 /// predicate null is inert, not an error.
 ///
+/// A refused item lying wholly past the lattice's end on either axis, as
+/// one can once its tracks are removed, paints nowhere, so it is first
+/// moved back onto the lattice, before either term of the gate and
+/// whatever the radii: to the last placement on that axis that holds it,
+/// or, beside a trailing frozen band, the last on the grid the search
+/// steps by that starts above that band and shows, where any does. It
+/// lands there when [BoardDragConfig.canDropAt] admits it, and the slide
+/// starts from there otherwise. That move is not a slide.
+///
 /// The gate has TWO terms and only the second is configurable. The first
 /// is that the refused box must MEET an occupant, so a refusal for a
 /// reason the board cannot see, a business rule of the app's own, never
@@ -141,23 +150,35 @@ class BoardDropFit {
   /// free of other items before the board will slide the item into it.
   ///
   /// The region is the refused box widened by [rowRadius] and
-  /// [colRadius], so this asks whether the neighbourhood being dropped
-  /// into is mostly empty. It deliberately does NOT measure the box: a
-  /// box on whole tracks against occupants on whole tracks is either
-  /// wholly free or wholly covered and never in between, so a box-share
-  /// threshold is unreachable for a single-cell item and no whole-track
-  /// board would ever be helped.
+  /// [colRadius], with, on each axis the search steps along, both ends of
+  /// that widening held within the reach of the placements a candidate
+  /// may take there: beside a frozen band, those in the box's band, or
+  /// those that show where any does. The region covers the box's tracks
+  /// that lie in the lattice and is one unbroken run of whole tracks. So,
+  /// on an axis the search steps along, tracks hidden under a band count
+  /// only where they lie within that reach or between it and the box,
+  /// while a track within the radius that no candidate happens to occupy
+  /// still counts.
+  /// This asks whether the neighbourhood being dropped into is mostly
+  /// empty. It deliberately does NOT measure the box: a box on whole
+  /// tracks against occupants on whole tracks is either wholly free or
+  /// wholly covered and never in between, so a box-share threshold is
+  /// unreachable for a single-cell item and no whole-track board would
+  /// ever be helped.
   ///
   /// 1.0 asks for a neighbourhood with nothing in it at all, which the
-  /// first term then forbids, so it disables the nudge while leaving the
+  /// first term then forbids, so it disables the nudge, though not the
+  /// move back onto the lattice the class doc describes, while leaving the
   /// policy present; 0.0 is the other endpoint, admitting every refusal
   /// that is an overlap however crowded the surroundings. Both ends are
   /// legal because the first term still holds the feature to overlaps.
   final double minFreeFraction;
 
   /// How far the search may slide the placement along the ROW axis, in
-  /// tracks. Zero pins the axis, which is what a calendar wants on its
-  /// day axis: slide within the day, never to another day.
+  /// tracks. Zero pins the axis for the slide, which is what a calendar
+  /// wants on its day axis: slide within the day, never to another day.
+  /// The move back onto the lattice the class doc describes is not bound
+  /// by it.
   final double rowRadius;
 
   /// The same along the COLUMN axis. The two are separate because the
@@ -277,8 +298,15 @@ class BoardDragConfig<TKey> {
   final BoardDropFit? dropFit;
 
   /// How a drag's target quantizes: a move's start and a resize's dragged
-  /// edge, on both axes. One exception holds under every snap: on the
-  /// lane axis a LANED item occupies one track, so it moves there by
+  /// edge, on both axes. A drag leaves an axis where it was until it has
+  /// brought the item onto a grid line there or half a step along it;
+  /// under `free`, until it moves at all; on the lane axis of a laned
+  /// item, until the finger leaves its cell. So pressing a handle, or
+  /// lifting an item and letting go, changes nothing (the unchanged span
+  /// is still reported), unless [canDropAt] refuses the item where it
+  /// is: then nothing is committed, or a [dropFit] may slide a lifted
+  /// item to free space nearby. One exception holds under every snap: on
+  /// the lane axis a LANED item occupies one track, so it moves there by
   /// whole tracks, landing on the track under the finger.
   final BoardSnap snap;
 

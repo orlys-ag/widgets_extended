@@ -213,6 +213,59 @@ whenever a removal moves an item into a place built for another.
 - Fix: a resize moved the dragged edge to the pointer, so pressing a resize handle
 a few pixels inside the edge and releasing resized the item under a free or fine
 snap. The edge now moves by how far the pointer moves.
+- Fix: a tap on a resize handle, a long press released in place, or a small
+drag changed an item that was off the snap grid (a 10:10 event lifted and
+dropped in place moved to 10:00 under a whole-hour snap), and a tap on the edge
+of an item shorter than one step made it a whole step. An item now moves along
+an axis only once the drag has brought it onto a grid line or half a step along
+that axis (under a free snap, once it moves; on a laned item's lane axis, once
+the finger leaves its cell), a drag along one axis keeps the other where it
+was, a press or lift released in place changes nothing though it is still
+reported (unless `canDropAt` refuses the item where it is, when nothing is
+committed or a `dropFit` may nudge it), and a resize never lengthens a short
+item against the drag.
+- Fix: a drop over a frozen band could land where it did not show. On a
+scrolled board a track-snapped proxy in the lower half of a one-row header landed
+on the first scrolled row, far above the viewport; an item that did not fit a
+band landed straddling the band's edge and scrolled away; and a move or resize
+beside a band could land on a row hidden under it. A move now lands in a band
+when the drag proxy's centre is over the band and the item's span fits in it,
+unless landing there would move the item against the drag, and otherwise where
+it shows between the bands when any placement there does.
+A resize's dragged edge stops
+where the item still shows, unless the resized span lies wholly inside a band,
+where it pins; a resize pressed through a band whose cells take no hits, onto
+an item the scroll has carried under it, no longer pins the item into that band
+while the pointer stays over it and content shows between the bands, so its
+edge no longer jumps against the drag.
+A selection under a fraction snap selects a cell of the band it
+is over, or a cell that shows beside one; under any snap, a range extended into
+the gap a lattice shorter than the viewport leaves above its footer ends on the
+last scrolled row, where it took the footer's row; and
+`BoardRenderPort.resolveDropCell` answers the nearest cell among those of the
+region the point is over, where it rounded into the whole lattice. A
+`BoardDropFit` nudge stays in the band the refused move was placed in, or among
+placements that show, and `minFreeFraction` no longer counts tracks hidden under
+a band beyond the candidates' reach, other than those between it and the refused
+box. Under a `BoardDropFit`, a refused item lying wholly past the lattice's end
+on either axis, as one can once its tracks are removed, is brought back onto the
+board: it lands on the last row or column that holds it, or, beside a trailing
+frozen band, the last on the snap's grid that starts above that band and shows,
+where any does, when `canDropAt` admits it there, and is nudged from there
+otherwise.
+- Some drags land differently as a result. An item whose proxy's centre is over
+a band it fits now pins in the band where its snapped span used to straddle the
+band's edge, at any scroll offset. A tall item whose proxy's top is in a short
+header but whose centre is below it lands on the row under the header instead of
+in the header. A proxy whose centre is in the gap a lattice shorter than the
+viewport leaves above its footer lands on the last scrolled row, where its top
+used to round it into the footer. On every board, with frozen bands or none,
+where the lattice's end and a whole-track snap would pull a moved item back
+against the drag, the item keeps its place: an item filling the lower half of
+the last row, dragged down half a row, used to move up to the row's upper half.
+- Added `BoardRenderPort.trackSampleAt`, which maps a point on each axis in both
+lattices the axis can paint, the frozen band's and the scrolled tracks', with the
+band geometry a drop reads; `trackSpaceAt` is its painted coordinate.
 - Fix: a second finger on an item being dragged cancelled the drag. It is now
 ignored.
 - Fix: dragging into an edge zone with the board already scrolled to its end kept

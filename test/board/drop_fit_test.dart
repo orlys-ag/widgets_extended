@@ -12,6 +12,7 @@
 /// importing its library directly.
 library;
 
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_drop_fit.dart';
@@ -105,6 +106,8 @@ void main() {
       snap: const BoardSnap.track(),
       rowAxis: UniformAxis(1, 10.0),
       colAxis: ExplicitAxis(<double>[10.0, 10.0, 10.0, 200.0, 10.0]),
+      rowWindow: (min: 0.0, max: 0.0),
+      colWindow: (min: 0.0, max: 4.0),
       obstacles: const <BoardSpan>[BoardSpan(rowStart: 0, colStart: 2)],
       accepts: _always,
     );
@@ -120,6 +123,8 @@ void main() {
         snap: const BoardSnap.track(),
         rowAxis: UniformAxis(1, 10.0),
         colAxis: UniformAxis(3, 10.0),
+        rowWindow: (min: 0.0, max: 0.0),
+        colWindow: (min: 0.0, max: 2.0),
         obstacles: const <BoardSpan>[
           BoardSpan(rowStart: 0, colStart: 0),
           BoardSpan(rowStart: 0, colStart: 2),
@@ -139,6 +144,8 @@ void main() {
       snap: const BoardSnap.track(),
       rowAxis: UniformAxis(1, 10.0),
       colAxis: UniformAxis(3, 10.0),
+      rowWindow: (min: 0.0, max: 0.0),
+      colWindow: (min: 0.0, max: 2.0),
       obstacles: const <BoardSpan>[],
       accepts: (span) {
         return span.colStart != 0;
@@ -160,6 +167,8 @@ void main() {
       snap: const BoardSnap.fraction(0.25),
       rowAxis: UniformAxis(1, 10.0),
       colAxis: UniformAxis(5, 10.0),
+      rowWindow: (min: 0.0, max: 0.0),
+      colWindow: (min: 0.0, max: 4.0),
       obstacles: const <BoardSpan>[
         BoardSpan(
           rowStart: 0,
@@ -174,5 +183,183 @@ void main() {
     expect(answer, isNotNull);
     expect(answer!.colStart, 3);
     expect(answer.colFraction, 0.0);
+  });
+
+  test("ontoLattice clamps a box past the end into its axis's window", () {
+    const rows = (min: 0.0, max: 4.5);
+    const cols = (min: 0.0, max: 6.75);
+    const inside = BoardSpan(rowStart: 2, colStart: 1);
+    const free = BoardSnap.free();
+    // A start inside the lattice but past its window, as under a band, is
+    // not this function's to move.
+    expect(
+      BoardDropFitter.ontoLattice(
+        const BoardSpan(rowStart: 3, colStart: 1),
+        rowCount: 5,
+        colCount: 7,
+        rowWindow: (min: 0.0, max: 2.0),
+        colWindow: (min: 0.0, max: 6.0),
+        snap: free,
+      ),
+      const BoardSpan(rowStart: 3, colStart: 1),
+    );
+    // Both axes past the end, each with its own fractional extent, take
+    // their windows' last starts.
+    expect(
+      BoardDropFitter.ontoLattice(
+        const BoardSpan(
+          rowStart: 6,
+          colStart: 8,
+          rowSpan: 1,
+          rowSpanFraction: 0.5,
+          colSpan: 0,
+          colSpanFraction: 0.25,
+        ),
+        rowCount: 6,
+        colCount: 7,
+        rowWindow: rows,
+        colWindow: cols,
+        snap: free,
+      ),
+      const BoardSpan(
+        rowStart: 4,
+        rowFraction: 0.5,
+        colStart: 6,
+        colFraction: 0.75,
+        rowSpan: 1,
+        rowSpanFraction: 0.5,
+        colSpan: 0,
+        colSpanFraction: 0.25,
+      ),
+    );
+    // A window that stops short of the lattice's end, as beside a band,
+    // bounds the move.
+    expect(
+      BoardDropFitter.ontoLattice(
+        const BoardSpan(rowStart: 9, colStart: 1),
+        rowCount: 5,
+        colCount: 7,
+        rowWindow: (min: 0.0, max: 2.0),
+        colWindow: (min: 0.0, max: 6.0),
+        snap: free,
+      ),
+      const BoardSpan(rowStart: 2, colStart: 1),
+    );
+    // An empty window, for an extent longer than the lattice, answers
+    // its lower bound.
+    expect(
+      BoardDropFitter.ontoLattice(
+        const BoardSpan(rowStart: 7, colStart: 2, rowSpan: 8),
+        rowCount: 6,
+        colCount: 7,
+        rowWindow: (min: 0.0, max: -2.0),
+        colWindow: (min: 0.0, max: 6.0),
+        snap: free,
+      ),
+      const BoardSpan(rowStart: 0, colStart: 2, rowSpan: 8),
+    );
+    // Each axis is tested against its own count: a column past the end
+    // on a board with more rows than columns is moved.
+    expect(
+      BoardDropFitter.ontoLattice(
+        const BoardSpan(rowStart: 2, colStart: 8),
+        rowCount: 10,
+        colCount: 7,
+        rowWindow: (min: 0.0, max: 9.0),
+        colWindow: (min: 0.0, max: 6.0),
+        snap: free,
+      ),
+      const BoardSpan(rowStart: 2, colStart: 6),
+    );
+    // A track snap floors every axis it moves.
+    expect(
+      BoardDropFitter.ontoLattice(
+        const BoardSpan(
+          rowStart: 6,
+          colStart: 8,
+          rowSpan: 1,
+          rowSpanFraction: 0.5,
+          colSpan: 0,
+          colSpanFraction: 0.25,
+        ),
+        rowCount: 6,
+        colCount: 7,
+        rowWindow: rows,
+        colWindow: cols,
+        snap: const BoardSnap.track(),
+      ),
+      const BoardSpan(
+        rowStart: 4,
+        colStart: 6,
+        rowSpan: 1,
+        rowSpanFraction: 0.5,
+        colSpan: 0,
+        colSpanFraction: 0.25,
+      ),
+    );
+    // A fraction snap does not floor.
+    expect(
+      BoardDropFitter.ontoLattice(
+        const BoardSpan(
+          rowStart: 6,
+          colStart: 8,
+          rowSpan: 1,
+          rowSpanFraction: 0.5,
+          colSpan: 0,
+          colSpanFraction: 0.25,
+        ),
+        rowCount: 6,
+        colCount: 7,
+        rowWindow: rows,
+        colWindow: cols,
+        snap: const BoardSnap.fraction(0.35),
+      ),
+      const BoardSpan(
+        rowStart: 4,
+        rowFraction: 0.5,
+        colStart: 6,
+        colFraction: 0.75,
+        rowSpan: 1,
+        rowSpanFraction: 0.5,
+        colSpan: 0,
+        colSpanFraction: 0.25,
+      ),
+    );
+    // The whole-track axis is floored.
+    expect(
+      BoardDropFitter.ontoLattice(
+        const BoardSpan(rowStart: 6, colStart: 1),
+        rowCount: 6,
+        colCount: 7,
+        rowWindow: rows,
+        colWindow: cols,
+        snap: free,
+        wholeTrackAxis: Axis.vertical,
+      ),
+      const BoardSpan(rowStart: 4, colStart: 1),
+    );
+    // An axis with no track has no placement.
+    expect(
+      BoardDropFitter.ontoLattice(
+        inside,
+        rowCount: 0,
+        colCount: 7,
+        rowWindow: rows,
+        colWindow: cols,
+        snap: free,
+      ),
+      isNull,
+    );
+    expect(
+      BoardDropFitter.ontoLattice(
+        inside,
+        rowCount: 6,
+        colCount: 0,
+        rowWindow: rows,
+        colWindow: cols,
+        snap: free,
+      ),
+      isNull,
+    );
   });
 }

@@ -2992,8 +2992,37 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (!hasSize) {
       return null;
     }
-    final row = _trackCoordinateAt(Axis.vertical, local.dy, clamp: false);
-    final col = _trackCoordinateAt(Axis.horizontal, local.dx, clamp: false);
+    final row = _trackCoordinateAt(Axis.vertical, local.dy);
+    final col = _trackCoordinateAt(Axis.horizontal, local.dx);
+    if (row == null || col == null) {
+      return null;
+    }
+    return _cellOf(row.contained, col.contained);
+  }
+
+  @override
+  ({int row, int col})? frozenCellAt(Offset local) {
+    if (!hasSize) {
+      return null;
+    }
+    final row = _trackCoordinateAt(Axis.vertical, local.dy);
+    final col = _trackCoordinateAt(Axis.horizontal, local.dx);
+    if (row == null || col == null) {
+      return null;
+    }
+    // A cell of a band: the point is in a band on at least one axis, and
+    // the other axis resolves through the same pass, so a pointer in the
+    // header band lands on the header cell of the column under it. A
+    // point past the viewport beside a band reports that band and has no
+    // contained coordinate there, so it yields no cell.
+    if (row.sample.band == null && col.sample.band == null) {
+      return null;
+    }
+    return _cellOf(row.contained, col.contained);
+  }
+
+  /// The cell of two contained coordinates, or null when either is.
+  ({int row, int col})? _cellOf(double? row, double? col) {
     if (row == null || col == null) {
       return null;
     }
@@ -3003,55 +3032,43 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     );
   }
 
-  @override
-  ({int row, int col})? frozenCellAt(Offset local) {
-    if (!hasSize) {
-      return null;
-    }
-    // A cell of a band: the point is in a band on at least one axis, and
-    // the other axis resolves through the same mapping, so a pointer in
-    // the header band lands on the header cell of the column under it.
-    if (!_inFrozenBand(Axis.vertical, local.dy) &&
-        !_inFrozenBand(Axis.horizontal, local.dx)) {
-      return null;
-    }
-    return cellAt(local);
-  }
-
-  /// Whether the paint-space coordinate [paint] on [axis] lies inside one
-  /// of that axis's frozen bands as they paint.
-  bool _inFrozenBand(Axis axis, double paint) {
-    final region = _unfrozenNormalized(axis);
-    final normalized = _normalizedFromPaint(axis, paint);
-    final viewport = axis == Axis.vertical
-        ? viewportDimension.height
-        : viewportDimension.width;
-    return (normalized >= 0.0 && normalized < region.lo) ||
-        (normalized >= region.hi && normalized < viewport);
-  }
-
-  /// THE POINT MAPPING: the fractional track coordinate (the track plus
-  /// the fraction into it) that PAINTS under the paint-space coordinate
-  /// [paint] on [axis]. Every point query on the port reads it, so a
-  /// selection, a drop and a probe agree with each other and with paint.
+  /// THE POINT MAPPING: one pass over the paint-space coordinate [paint]
+  /// on [axis] that yields the axis's whole [BoardAxisSample], and beside
+  /// it `contained`, the coordinate of the track that paints there or
+  /// null wherever none does. Every point query on the port reads it, so
+  /// a selection, a drop and a probe agree with each other and with
+  /// paint. Null when the axis has no tracks.
   ///
   /// Three regions along the axis, in NORMALIZED space ([scrolledRegion]
   /// in paint space): the leading band's tracks inside `[0, lo)`, where
   /// frozen cells paint at their content offsets; the trailing band's
   /// inside `[hi, viewport)`, pinned to the trailing edge; and between
   /// them the SCROLLED tracks, the normalized coordinate plus the scroll
-  /// offset read through the ANIMATED geometry, exactly as those cells are
-  /// laid out mid track resize. A band reads settled offsets, as its cells
-  /// do.
+  /// offset read through the ANIMATED geometry ([_scrolledCoordinateAt]),
+  /// exactly as those cells are laid out mid track resize. A band reads
+  /// settled offsets, as its cells do.
   ///
-  /// [clamp] true answers for every coordinate: a point past a band's
-  /// viewport edge takes that band's outer end, and the scrolled region is
-  /// clamped into the unfrozen tracks, which with no band is
-  /// `[0, trackCount]`. False answers null wherever no track paints: past
-  /// the viewport beside a band, past either end of the lattice, and in
-  /// the gap a short lattice leaves above a trailing band.
-  double? _trackCoordinateAt(Axis axis, double paint, {required bool clamp}) {
+  /// The band tests have no outer bound, so a point past a band's
+  /// viewport edge reports that band: `painted` takes the band's outer
+  /// end there, `paintedExtended` continues past it at the outermost
+  /// track's settled extent, and `contained` is null. In the scrolled
+  /// region `painted` is clamped into the unfrozen tracks, which with no
+  /// band is `[0, trackCount]`, and `contained` is null past either end
+  /// of the lattice and in the gap a short lattice leaves above a
+  /// trailing band. `scrolled` is the scrolled formula at the point in
+  /// every region, clamped into `[0, trackCount]` and bounded by
+  /// [boundedScrolled], and the two visible bounds are the same formula
+  /// at `lo` and at `hi`. The formula reads the scroll offset [pixels]
+  /// when given and the board's otherwise, and the sample records which
+  /// as `scrollPixels`.
+  ({BoardAxisSample sample, double? contained})? _trackCoordinateAt(
+    Axis axis,
+    double paint, {
+    double? pixels,
+  }) {
     final vertical = axis == Axis.vertical;
+    final offset =
+        pixels ?? (vertical ? verticalOffset.pixels : horizontalOffset.pixels);
     final config = vertical ? _controller.rows : _controller.columns;
     final boardAxis = config.axis;
     final count = boardAxis.trackCount;
@@ -3065,35 +3082,114 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         : viewportDimension.width;
     final region = _unfrozenNormalized(axis);
     final normalized = _normalizedFromPaint(axis, paint);
+    final ({int start, int end})? band;
+    final double painted;
+    final double paintedExtended;
+    final double scrolled;
+    final double? contained;
     if (lead > 0 && normalized < region.lo) {
-      if (normalized < 0.0 && !clamp) {
-        return null;
+      band = (start: 0, end: lead);
+      painted = _settledCoordinateOf(boardAxis, math.max(0.0, normalized));
+      if (normalized < 0.0) {
+        paintedExtended = normalized / boardAxis.extentOf(0);
+        contained = null;
+      } else {
+        paintedExtended = painted;
+        contained = painted;
       }
-      return _settledCoordinateOf(boardAxis, math.max(0.0, normalized));
-    }
-    if (trailFrom < count && normalized >= region.hi) {
-      if (normalized >= viewport && !clamp) {
-        return null;
-      }
+      scrolled = _scrolledCoordinateAt(axis, boardAxis, normalized, offset);
+    } else if (trailFrom < count && normalized >= region.hi) {
+      band = (start: trailFrom, end: count);
       final content =
           boardAxis.totalExtent - (viewport - math.min(normalized, viewport));
-      return _settledCoordinateOf(boardAxis, content);
+      painted = _settledCoordinateOf(boardAxis, content);
+      if (normalized >= viewport) {
+        paintedExtended =
+            count + (normalized - viewport) / boardAxis.extentOf(count - 1);
+        contained = null;
+      } else {
+        paintedExtended = painted;
+        contained = painted;
+      }
+      scrolled = _scrolledCoordinateAt(axis, boardAxis, normalized, offset);
+    } else {
+      band = null;
+      final coordinate = _scrolledCoordinateAt(
+        axis,
+        boardAxis,
+        normalized,
+        offset,
+      );
+      painted = coordinate.clamp(lead.toDouble(), trailFrom.toDouble());
+      paintedExtended = painted;
+      contained = coordinate < lead || coordinate >= trailFrom
+          ? null
+          : coordinate;
+      scrolled = coordinate;
     }
-    final pixels = vertical ? verticalOffset.pixels : horizontalOffset.pixels;
+    // Each bound is present only where its band exists, except that an
+    // EMPTY scrolled region (the bands fill the viewport) makes both
+    // present, and equal, whatever bands the axis has.
+    final empty = region.lo == region.hi;
+    double? visibleFrom;
+    double? visibleTo;
+    if (lead > 0 || empty) {
+      visibleFrom = _scrolledCoordinateAt(
+        axis,
+        boardAxis,
+        region.lo,
+        offset,
+      ).clamp(lead.toDouble(), trailFrom.toDouble());
+    }
+    if (empty) {
+      visibleTo = visibleFrom;
+    } else if (trailFrom < count) {
+      visibleTo = _scrolledCoordinateAt(
+        axis,
+        boardAxis,
+        region.hi,
+        offset,
+      ).clamp(lead.toDouble(), trailFrom.toDouble());
+    }
+    final unbounded = scrolled.clamp(0.0, count.toDouble());
+    return (
+      sample: (
+        painted: painted,
+        paintedExtended: paintedExtended,
+        scrolled: boundedScrolled(
+          unbounded,
+          painted: painted,
+          band: band,
+          leadingBandEnd: lead,
+        ),
+        scrollPixels: offset,
+        band: band,
+        visibleFrom: visibleFrom,
+        visibleTo: visibleTo,
+        trackCount: count,
+        leadingBandEnd: lead,
+        trailingBandStart: trailFrom,
+      ),
+      contained: contained,
+    );
+  }
+
+  /// The scrolled lattice's track coordinate at the NORMALIZED coordinate
+  /// [normalized] on [axis]: the content position under it at the scroll
+  /// offset [pixels], read through the ANIMATED geometry, unclamped.
+  double _scrolledCoordinateAt(
+    Axis axis,
+    BoardAxis boardAxis,
+    double normalized,
+    double pixels,
+  ) {
     final content = normalized + pixels;
     final track = _animatedTrackAt(axis, boardAxis, math.max(0.0, content));
     final trackLead = _animatedOffsetOf(axis, boardAxis, track);
     final trackExtent = _animatedExtentOf(axis, boardAxis, track);
-    final coordinate = trackExtent <= 0.0
+    return trackExtent <= 0.0
         ? track.toDouble()
         : track + (content - trackLead) / trackExtent;
-    if (!clamp) {
-      if (coordinate < lead || coordinate >= trailFrom) {
-        return null;
-      }
-      return coordinate;
-    }
-    return coordinate.clamp(lead.toDouble(), trailFrom.toDouble());
   }
 
   /// The settled track coordinate of the content-space [content], clamped
@@ -3416,33 +3512,60 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (!hasSize) {
       return (row: 0, col: 0);
     }
-    // NEAREST, not containment: the fractional track-space coordinate is
-    // rounded by the same rule BoardSnap.track's quantize applies, so
-    // the cell route and the trackSpaceAt route agree on where an anchor
-    // between two boundaries lands. Both read the one point mapping.
-    final row = _trackCoordinateAt(Axis.vertical, local.dy, clamp: true);
-    final col = _trackCoordinateAt(Axis.horizontal, local.dx, clamp: true);
+    final row = _trackCoordinateAt(Axis.vertical, local.dy)?.sample;
+    final col = _trackCoordinateAt(Axis.horizontal, local.dx)?.sample;
     return (
-      row: row == null
-          ? 0
-          : row.round().clamp(0, _controller.rows.axis.trackCount - 1),
-      col: col == null
-          ? 0
-          : col.round().clamp(0, _controller.columns.axis.trackCount - 1),
+      row: row == null ? 0 : _nearestCellOf(row),
+      col: col == null ? 0 : _nearestCellOf(col),
     );
+  }
+
+  /// NEAREST, not containment, and only among the cells of the REGION
+  /// [sample]'s point is over: the region's coordinate rounded by the
+  /// rule `BoardSnap.track`'s quantize applies, then clamped into that
+  /// region's cells, so a point over a band answers a cell of the band
+  /// and a point between the bands a scrolled cell that shows, or any
+  /// cell where none of them shows.
+  static int _nearestCellOf(BoardAxisSample sample) {
+    final path = regionPathOf(sample, extent: 1.0, quantum: 1.0);
+    return clampToWindow(
+      coordinateIn(path, sample).roundToDouble(),
+      path.window,
+    ).toInt();
+  }
+
+  @override
+  ({BoardAxisSample row, BoardAxisSample col})? trackSampleAt(
+    Offset local, {
+    double? verticalPixels,
+    double? horizontalPixels,
+  }) {
+    if (!hasSize) {
+      return null;
+    }
+    final row = _trackCoordinateAt(
+      Axis.vertical,
+      local.dy,
+      pixels: verticalPixels,
+    );
+    final col = _trackCoordinateAt(
+      Axis.horizontal,
+      local.dx,
+      pixels: horizontalPixels,
+    );
+    if (row == null || col == null) {
+      return null;
+    }
+    return (row: row.sample, col: col.sample);
   }
 
   @override
   ({double row, double col})? trackSpaceAt(Offset local) {
-    if (!hasSize) {
+    final sample = trackSampleAt(local);
+    if (sample == null) {
       return null;
     }
-    final row = _trackCoordinateAt(Axis.vertical, local.dy, clamp: true);
-    final col = _trackCoordinateAt(Axis.horizontal, local.dx, clamp: true);
-    if (row == null || col == null) {
-      return null;
-    }
-    return (row: row, col: col);
+    return (row: sample.row.painted, col: sample.col.painted);
   }
 
   @override

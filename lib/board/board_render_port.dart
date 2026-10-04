@@ -11,6 +11,8 @@ library;
 
 import 'package:flutter/widgets.dart';
 
+import '_board_span.dart';
+
 /// Internal contract: external code should not implement this. Public only
 /// so the production render object can implement it across library
 /// boundaries and tests can fake it. Same rationale as
@@ -104,18 +106,18 @@ abstract interface class BoardRenderPort<TKey> {
   /// it is the TRAILING corner.
   Offset leadingCornerOf(Rect paintRect);
 
-  /// Nearest cell for a pointer, clamped into the lattice: the
-  /// [trackSpaceAt] coordinate rounded per axis, by the same rule
-  /// `BoardSnap.track`'s quantize applies, so the cell route and the
-  /// [trackSpaceAt] route land an anchor on the same cell. A pure cell
-  /// query: it excludes nothing, because it names no item.
+  /// The nearest cell to a pointer among the cells of the region the
+  /// point is over, per axis: a frozen band's cells over a band, and
+  /// elsewhere the scrolled cells that show between the bands, or every
+  /// cell where none of them shows. The coordinate is rounded by the rule
+  /// `BoardSnap.track`'s quantize applies. A pure cell query: it excludes
+  /// nothing, because it names no item.
   ({int row, int col}) resolveDropCell(Offset local);
 
   /// Track-space coordinate under a viewport-paint pointer: the integer
   /// track plus the fraction into it, per axis, of the lattice as it
   /// PAINTS: a frozen band's tracks where the band paints, the scrolled
-  /// tracks between the bands through the geometry mid track resize, so
-  /// a drop or a selection over a band lands in that band.
+  /// tracks between the bands through the geometry mid track resize.
   ///
   /// CLAMPED, so a pointer past the lattice samples an edge rather than
   /// nothing: past a band's viewport edge, the band's outer end; in the
@@ -124,11 +126,31 @@ abstract interface class BoardRenderPort<TKey> {
   /// `offsetOfFraction(trackCount)` is the legal trailing endpoint.
   ///
   /// Null ONLY when there is no lattice to sample: the board is not laid
-  /// out, or an axis has `trackCount` 0. A null sample leaves the drag
-  /// session's target UNCHANGED and installs no gap.
+  /// out, or an axis has `trackCount` 0.
+  ({double row, double col})? trackSpaceAt(Offset local);
+
+  /// The paint-space point [local] mapped on each axis in BOTH lattices
+  /// that axis can paint: `painted` is the coordinate [trackSpaceAt]
+  /// answers, `scrolled` the scrolled tracks' coordinate at the point
+  /// whether or not a frozen band paints over it, bounded by the lattice
+  /// that paints there, and the remaining fields
+  /// the band geometry a drop needs, each as [BoardAxisSample] documents
+  /// it. Null exactly when [trackSpaceAt] is. A null sample leaves the
+  /// drag session's target UNCHANGED and installs no gap.
   ///
   /// This is the ONE producer of a fractional track coordinate.
-  ({double row, double col})? trackSpaceAt(Offset local);
+  ///
+  /// [verticalPixels] and [horizontalPixels] sample the point as the
+  /// board would at those scroll offsets, each null for the board's own:
+  /// a frozen band reads no offset, and the scrolled coordinate and the
+  /// two visible bounds read the one given. Internal-use for the drag
+  /// session, which samples its lift point again at the lift's offsets
+  /// when the axis configs change under it.
+  ({BoardAxisSample row, BoardAxisSample col})? trackSampleAt(
+    Offset local, {
+    double? verticalPixels,
+    double? horizontalPixels,
+  });
 
   /// Converts a GLOBAL pointer position into this port's viewport-paint
   /// space, which every spatial query above takes. Internal-use for the

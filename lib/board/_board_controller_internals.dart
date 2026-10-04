@@ -194,14 +194,15 @@ extension BoardControllerInternals<TKey, TItem>
   /// Which frozen band [id] is PINNED in on [axis]: the one its span
   /// lies wholly inside there, or [BoardPin.none]. Internal-use, and the
   /// ONE site of the rule: the render object positions a pinned item with
-  /// its band, and the FLIP install corrects a lead for a pin that
-  /// changed.
+  /// its band, the FLIP install corrects a lead for a pin that changed,
+  /// and a drag measures the item's anchor in the lattice it pins in.
   ///
   /// A LANED item on the lane axis occupies its whole lane-axis track, so
-  /// that track decides; any other item's exact interval does, within
-  /// the tolerance, so a span that meets a band's edge and one that
-  /// crosses it are told apart. A span stranded past a shrunken lattice
-  /// is in no band.
+  /// that track decides; any other item's exact interval does. This
+  /// chooses the interval, and [bandHolding], the one site of the
+  /// interval test, says which band holds it, within the tolerance, so a
+  /// span that meets a band's edge and one that crosses it are told
+  /// apart. A span stranded past a shrunken lattice is in no band.
   BoardPin pinOfId(int id, Axis axis) {
     final config = axis == Axis.vertical ? _rows : _columns;
     final count = config.axis.trackCount;
@@ -219,15 +220,20 @@ extension BoardControllerInternals<TKey, TItem>
       start = _store.startTrackOf(id, axis);
       end = _store.endTrackOf(id, axis);
     }
-    if (lead > 0 && end <= lead + precisionErrorTolerance) {
-      return BoardPin.leading;
+    final band = bandHolding(
+      start,
+      end,
+      leadingBandEnd: lead,
+      trailingBandStart: trailFrom,
+      trackCount: count,
+    );
+    if (band == null) {
+      return BoardPin.none;
     }
-    if (trailFrom < count &&
-        start >= trailFrom - precisionErrorTolerance &&
-        end <= count + precisionErrorTolerance) {
-      return BoardPin.trailing;
-    }
-    return BoardPin.none;
+    // The leading band starts below `lead` and the trailing one at or
+    // above it; comparing the start with 0 would read a trailing band
+    // that covers the whole axis as leading.
+    return band.start < lead ? BoardPin.leading : BoardPin.trailing;
   }
 
   /// Whether [id] satisfies the laning criterion. Reads the resolver's

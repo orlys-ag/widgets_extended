@@ -528,6 +528,8 @@ void main() {
         snap: const BoardSnap.fraction(quantum),
         rowAxis: UniformAxis(24, 40.0),
         colAxis: UniformAxis(7, 60.0),
+        rowWindow: (min: 0.0, max: 24 - quantum),
+        colWindow: (min: 0.0, max: 6.0),
         obstacles: <BoardSpan>[blocker],
         accepts: (candidate) {
           return true;
