@@ -28,9 +28,20 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   CELL RECORD, the tallest cell measured in a content track since the
   record was dropped and which cell it was, so a track keeps the height
   of a cell scrolled out along the other axis, replaced when a pass
-  measures that cell again or finds it building nothing, and dropped
-  with the measurements it summarizes (the invalidation door, a
-  controller swap, a change of either axis instance or alignment); a
+  measures that cell again or finds it building nothing while another
+  obtained cell of its track builds, removed when it builds nothing and
+  no obtained cell of its track builds anything, and dropped with the
+  measurements it summarizes (the invalidation door, a controller swap,
+  a change of either axis instance or alignment); a NULL CELL
+  contributes nothing to its content track, whether the delegate dropped
+  its element or its host shows an empty box for the builder's null
+  answer, which the host's surface poke writes into the parent data's
+  `buildsNothing` before the content-axis test and in both of its arms:
+  every obtained cell still feeds its track to the sizing step, a null
+  one with the identity of the maximum, and a track none of whose
+  obtained cells builds anything takes its record while the recorded
+  cell was not among them and the axis's estimate otherwise, the
+  lane-cluster and make-room slot terms applying on top as a maximum; a
   per-layout set of vicinities whose builder answered NULL, which the
   delegate's builder reports, because on a delegate rebuild the base
   hands back the child already at such a vicinity until the child
