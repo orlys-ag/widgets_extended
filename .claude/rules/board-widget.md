@@ -32,8 +32,9 @@ The contract of `Board`. The conventions every layer follows are in `board.md`.
   carries `buildsNothing`, true exactly when the host shows the empty
   box it puts in place of its OWN builder's null answer and false while
   it shows the delegate's `initial`, which the delegate hands a host only
-  for a non-null answer, and the poke passes it on so the render takes
-  that cell as no cell rather than measuring the box (`board-render.md`);
+  for a non-null answer, and the surface hands it to the render, which
+  takes that cell as no cell rather than measuring the box
+  (`board-render.md` states when the surface delivers it);
   the render relays out on those two channels only when the last layout
   obtained a cell the DELEGATE built as NULL, which holds no host and can
   be re-asked by nothing else, re-measurement having moved to the poke

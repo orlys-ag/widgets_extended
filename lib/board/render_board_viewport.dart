@@ -689,8 +689,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// - Outside one, the flag alone would sit unread until something else
   ///   laid this object out, which after the channel handlers stopped
   ///   relaying out may be never. So it also dirties layout.
-  /// - Inside one, the poke came from a delegate rebuild running in
-  ///   `buildOrObtainChildFor`, and the measure step reads the flag
+  /// - Inside one, the poke came from a cell being built in
+  ///   `buildOrObtainChildFor`, a rebuilt host or a new surface's
+  ///   attach, and the measure step reads the flag
   ///   later in the same pass, so the flag alone is enough. Dirtying
   ///   from inside a layout would be a re-entrant mark of a node already
   ///   being laid out.
@@ -1425,9 +1426,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         ? _makeRoomWroteRows
         : _makeRoomWroteCols;
     final anim = _controller.anim;
-    // What a track none of whose cells builds anything resolves to before
-    // its lane terms. A foreign axis that accepts measurements has no
-    // estimate, so its cells-only term there is zero.
+    // What stands in for the cells of a track none of whose obtained cells
+    // builds anything and which no record holds, before its lane terms. A
+    // foreign axis that accepts measurements has no estimate, so its
+    // cells-only term there is zero.
     final standIn = axis is LazyContentAxis ? axis.estimate : 0.0;
     for (final entry in _contentTrackExtents.entries) {
       final track = entry.key;
@@ -3690,7 +3692,9 @@ class _BoardChildParentData extends TwoDimensionalViewportParentData {
 }
 
 /// A cell's measurement TRIGGER: a proxy the cell host wraps its content
-/// in, whose widget calls [requestRemeasure] on every host rebuild.
+/// in, whose widget calls [requestRemeasure] on every host rebuild, and
+/// which calls it itself on an attach while no board has received its
+/// latest answer.
 ///
 /// It exists because a rebuild is not otherwise observable from here. A
 /// cell is laid out tight by the positioning sweep, which makes it a
@@ -3706,25 +3710,66 @@ class _BoardChildParentData extends TwoDimensionalViewportParentData {
 /// this module; the barrel exports `RenderBoardViewport` alone, so it is
 /// unreachable from app code.
 class RenderBoardCellSurface extends RenderProxyBox {
+  /// Creates a surface holding [buildsNothing], its host's answer, which
+  /// no board has received yet.
+  RenderBoardCellSurface({required bool buildsNothing})
+    : _buildsNothing = buildsNothing;
+
+  /// The host's latest answer.
+  bool _buildsNothing;
+
+  /// Whether no board has received [_buildsNothing]: true from creation
+  /// until this surface first delivers, and again after an answer given
+  /// while it was detached.
+  bool _undelivered = true;
+
+  /// Delivers an answer no board has received.
+  ///
+  /// A new surface can sit under a viewport child whose parent data
+  /// outlives the surface it replaced: a host build that throws has the
+  /// framework replace the host's child with an error widget, and under
+  /// the board's own `RepaintBoundary`, which `Board.addRepaintBoundaries`
+  /// adds, the host's next build creates a new surface beneath the same
+  /// viewport child, whose parent data still holds the old surface's
+  /// answer and measurement. So an attach while no board has received the
+  /// surface's latest answer delivers it and, on a board with a
+  /// content-sized axis, marks the cell for re-measurement.
+  ///
+  /// An attach after the board has the answer delivers nothing: a sliver's
+  /// keep-alive bucket detaches and re-attaches a kept-alive child without
+  /// rebuilding it, and a cell is measured when its host rebuilds, as
+  /// `BoardCellBuilder` states, not when its render object moves.
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    if (_undelivered) {
+      requestRemeasure(buildsNothing: _buildsNothing);
+    }
+  }
+
   /// Marks this cell for re-measurement on the enclosing board's next
   /// layout, and schedules that layout unless one is already running.
   ///
   /// Walks up to the [RenderBoardViewport], keeping the last node before
   /// it: that node is the child the viewport holds and owns the parent
-  /// data the cache lives in. The walk is one or two hops, the delegate's
-  /// `RepaintBoundary` (`widgets/scroll_delegate.dart:1122`) being the
+  /// data the cache lives in. The walk is one or two hops, the board's own
+  /// `RepaintBoundary`, which `Board.addRepaintBoundaries` adds, being the
   /// only thing that can sit between, and it is a walk rather than a
   /// stored reference because a `GlobalKey` move can re-parent a cell
   /// between boards.
   ///
   /// [buildsNothing] is whether the host's builder answered null, so that
   /// the empty box the host shows in its place is taken as no cell rather
-  /// than measured. Its one caller is `_BoardCellSurface`'s
-  /// `updateRenderObject`, which passes the host's answer.
+  /// than measured. `_BoardCellSurface`'s `updateRenderObject` passes the
+  /// host's answer on every host rebuild, and [attach] passes one no board
+  /// has received.
   ///
-  /// A detached surface, or one with no board above it, returns having
-  /// done nothing: neither can be showing a measured cell.
+  /// A detached surface, or one with no board above it, keeps the answer
+  /// undelivered for its next attach: neither can be showing a measured
+  /// cell.
   void requestRemeasure({required bool buildsNothing}) {
+    _buildsNothing = buildsNothing;
+    _undelivered = true;
     if (!attached) {
       return;
     }
@@ -3738,5 +3783,6 @@ class RenderBoardCellSurface extends RenderProxyBox {
       return;
     }
     node._requestRemeasure(top, buildsNothing: buildsNothing);
+    _undelivered = false;
   }
 }

@@ -185,9 +185,10 @@ Future<({int first, int scrolled})> _nullBoardCalls(
 
 /// The fixture of the relay cases: item `k` covers rows 1 and 2 across
 /// every column, two rows tall so it is no cluster of one row, and row
-/// 1's cells are 100 px tall while `k`'s label is "on" or [forceTall]
-/// answers true, and build nothing otherwise. Every other cell is 20 px
-/// tall. [calls] counts the cell builder's calls per row.
+/// 1's builder answers, the first match winning: a 50 px box while `k`'s
+/// label is "short"; a 100 px box while it is "on" or [forceTall] answers
+/// true; a throw while it is "throw"; and null otherwise. Every other
+/// cell is a 20 px box. [calls] counts the cell builder's calls per row.
 Widget _relayBoard(
   BoardController<String, _Item> controller,
   Map<int, int> calls, {
@@ -199,8 +200,14 @@ Widget _relayBoard(
       cellBuilder: (context, cell) {
         calls[cell.row] = (calls[cell.row] ?? 0) + 1;
         if (cell.row == 1) {
-          final on = controller.itemOf("k")?.label == "on";
-          if (!on && !(forceTall?.call() ?? false)) {
+          final label = controller.itemOf("k")?.label;
+          if (label == "short") {
+            return SizedBox(key: _cellKey(cell.row, cell.col), height: 50.0);
+          }
+          if (label != "on" && !(forceTall?.call() ?? false)) {
+            if (label == "throw") {
+              throw StateError("cell builder failure");
+            }
             return null;
           }
           return SizedBox(key: _cellKey(cell.row, cell.col), height: 100.0);
@@ -211,6 +218,51 @@ Widget _relayBoard(
         return const SizedBox.shrink();
       },
     ),
+  );
+}
+
+/// Keeps its child alive in a lazy list while the child is scrolled out
+/// of the list's window.
+class _KeptAlive extends StatefulWidget {
+  const _KeptAlive({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeptAlive> createState() {
+    return _KeptAliveState();
+  }
+}
+
+class _KeptAliveState extends State<_KeptAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive {
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
+/// A board in a 300 x 200 frame, scrolled sideways by [horizontal], whose
+/// cells [cellBuilder] builds.
+Widget _sidewaysBoard(
+  BoardController<String, _Item> controller,
+  ScrollController horizontal,
+  BoardCellBuilder<String, _Item> cellBuilder,
+) {
+  return _frame(
+    Board<String, _Item>(
+      controller: controller,
+      horizontalDetails: ScrollableDetails.horizontal(controller: horizontal),
+      cellBuilder: cellBuilder,
+    ),
+    width: 300.0,
+    height: 200.0,
   );
 }
 
@@ -501,12 +553,13 @@ void main() {
     final records = rows.debugRecordCount;
     final layouts = _viewport(tester).debugPerformLayoutCount;
     controller.setSelection(
-      const BoardSelection(anchor: (row: 0, col: 0), focus: (row: 0, col: 0)),
+      const BoardSelection(anchor: (row: 2, col: 0), focus: (row: 2, col: 0)),
     );
     await tester.pump();
     await tester.pump();
-    // Setup sanity: the selection change laid the board out again, which
-    // it does while a cell that builds nothing is obtained.
+    // Setup sanity: selecting the null cell, which holds no host to poke,
+    // laid the board out again, which a selection change does while the
+    // board obtains a cell the delegate built as null.
     expect(_viewport(tester).debugPerformLayoutCount, greaterThan(layouts));
     // Control: that layout recorded nothing.
     expect(rows.debugRecordCount, records);
@@ -868,6 +921,404 @@ void main() {
     await tester.pump();
     // Control: a builder answering a widget again is measured again.
     expect(rows.extentOf(1), 100.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a row with small cells beside null ones takes the small "
+      "cells' extent", (tester) async {
+    final controller = _rowsController(tester);
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          cellBuilder: (context, cell) {
+            if (cell.row == 1 && cell.col > 0) {
+              return null;
+            }
+            return SizedBox(key: _cellKey(cell.row, cell.col), height: 20.0);
+          },
+        ),
+      ),
+    );
+    // Setup sanity: row 1 holds a cell, and null cells after it.
+    expect(find.byKey(_cellKey(1, 0)), findsOneWidget);
+    expect(find.byKey(_cellKey(1, 3)), findsNothing);
+    // Control: the null cells neither raise the row to the estimate nor
+    // displace the cell's measurement.
+    expect(controller.rows.axis.extentOf(1), 20.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a row whose window built nothing records nothing for a "
+      "later window", (tester) async {
+    final horizontal = ScrollController();
+    addTearDown(horizontal.dispose);
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(
+        axis: LazyContentAxis(4, 40.0, minTrackExtent: 10.0),
+      ),
+      columns: BoardAxisConfig(axis: UniformAxis(12, 100.0)),
+    );
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          horizontalDetails: ScrollableDetails.horizontal(
+            controller: horizontal,
+          ),
+          cellBuilder: (context, cell) {
+            if (cell.row == 1) {
+              if (cell.col < 6) {
+                return null;
+              }
+              return SizedBox(key: _cellKey(cell.row, cell.col), height: 20.0);
+            }
+            return SizedBox(key: _cellKey(cell.row, cell.col), height: 30.0);
+          },
+        ),
+        width: 300.0,
+        height: 200.0,
+      ),
+    );
+    final rows = controller.rows.axis;
+    // Setup sanity: the window holds only row 1's null cells, and the row
+    // rests at the estimate.
+    expect(find.byKey(_cellKey(1, 6)), findsNothing);
+    expect(rows.extentOf(1), 40.0);
+
+    horizontal.jumpTo(900.0);
+    await tester.pump();
+    // Setup sanity: the window now holds row 1's small cells.
+    expect(find.byKey(_cellKey(1, 9)), findsOneWidget);
+    // Control: the estimate the null window resolved to holds no record,
+    // so the small cells size the row.
+    expect(rows.extentOf(1), 20.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a cell whose host recovers from a throwing build is "
+      "measured again", (tester) async {
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(
+        axis: LazyContentAxis(5, 40.0, minTrackExtent: 10.0),
+      ),
+      columns: BoardAxisConfig(axis: UniformAxis(1, 50.0)),
+    );
+    controller.addItem(
+      const _Item("k", "on"),
+      const BoardSpan(rowStart: 1, colStart: 0, rowSpan: 2),
+    );
+    await tester.pumpWidget(_relayBoard(controller, <int, int>{}));
+    final rows = controller.rows.axis;
+    // Setup sanity: the tall cell holds the row.
+    expect(rows.extentOf(1), 100.0);
+
+    controller.updateItem("k", const _Item("k", "off"));
+    await tester.pump();
+    // Setup sanity: the host's null answer reached the board.
+    expect(rows.extentOf(1), 40.0);
+
+    controller.updateItem("k", const _Item("k", "throw"));
+    await tester.pump();
+    // Setup sanity: the host's build threw, so the framework replaced
+    // what the host showed with an error widget.
+    expect(tester.takeException(), isStateError);
+    expect(find.byType(ErrorWidget), findsOneWidget);
+
+    controller.updateItem("k", const _Item("k", "on"));
+    await tester.pump();
+    // Setup sanity: the host shows its tall cell again.
+    expect(find.byKey(_cellKey(1, 0)), findsOneWidget);
+    // TARGET: the board takes the host's new answer, not the null answer
+    // it gave before the throw.
+    expect(rows.extentOf(1), 100.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a cell whose host recovers from a throwing build to a null "
+      "answer rests at its estimate", (tester) async {
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(
+        axis: LazyContentAxis(5, 40.0, minTrackExtent: 10.0),
+      ),
+      columns: BoardAxisConfig(axis: UniformAxis(1, 50.0)),
+    );
+    controller.addItem(
+      const _Item("k", "on"),
+      const BoardSpan(rowStart: 1, colStart: 0, rowSpan: 2),
+    );
+    await tester.pumpWidget(_relayBoard(controller, <int, int>{}));
+    final rows = controller.rows.axis;
+    // Setup sanity: the tall cell holds the row.
+    expect(rows.extentOf(1), 100.0);
+
+    controller.updateItem("k", const _Item("k", "throw"));
+    await tester.pump();
+    // Setup sanity: the host's build threw.
+    expect(tester.takeException(), isStateError);
+    expect(find.byType(ErrorWidget), findsOneWidget);
+
+    controller.updateItem("k", const _Item("k", "off"));
+    await tester.pump();
+    // Setup sanity: the host shows its empty box for the null answer.
+    expect(find.byType(ErrorWidget), findsNothing);
+    expect(find.byKey(_cellKey(1, 0)), findsNothing);
+    // TARGET: the empty box is taken as no cell, not measured at zero.
+    expect(rows.extentOf(1), 40.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a cell recovered from a throwing build on a fixed board is "
+      "measured once the board gains a content axis", (tester) async {
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(axis: UniformAxis(5, 40.0)),
+      columns: BoardAxisConfig(axis: UniformAxis(1, 50.0)),
+    );
+    controller.addItem(
+      const _Item("k", "on"),
+      const BoardSpan(rowStart: 1, colStart: 0, rowSpan: 2),
+    );
+    var forceTall = false;
+    await tester.pumpWidget(
+      _relayBoard(
+        controller,
+        <int, int>{},
+        forceTall: () {
+          return forceTall;
+        },
+      ),
+    );
+
+    controller.updateItem("k", const _Item("k", "off"));
+    await tester.pump();
+    // Setup sanity: the host shows its empty box for the null answer.
+    expect(find.byKey(_cellKey(1, 0)), findsNothing);
+
+    controller.updateItem("k", const _Item("k", "throw"));
+    await tester.pump();
+    // Setup sanity: the host's build threw.
+    expect(tester.takeException(), isStateError);
+    expect(find.byType(ErrorWidget), findsOneWidget);
+
+    forceTall = true;
+    controller.rows = BoardAxisConfig(
+      axis: LazyContentAxis(5, 40.0, minTrackExtent: 10.0),
+    );
+    await tester.pump();
+    // Setup sanity: the axis change rebuilt the cell through the delegate,
+    // which handed the host a tall cell.
+    expect(find.byKey(_cellKey(1, 0)), findsOneWidget);
+    // TARGET: the tall cell is measured, not taken as the null answer the
+    // host gave before the throw.
+    expect(controller.rows.axis.extentOf(1), 100.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a cell whose host recovers from a throwing build at another "
+      "size is measured afresh", (tester) async {
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(
+        axis: LazyContentAxis(5, 40.0, minTrackExtent: 10.0),
+      ),
+      columns: BoardAxisConfig(axis: UniformAxis(1, 50.0)),
+    );
+    controller.addItem(
+      const _Item("k", "on"),
+      const BoardSpan(rowStart: 1, colStart: 0, rowSpan: 2),
+    );
+    await tester.pumpWidget(_relayBoard(controller, <int, int>{}));
+    final rows = controller.rows.axis;
+    // Setup sanity: the tall cell holds the row.
+    expect(rows.extentOf(1), 100.0);
+
+    controller.updateItem("k", const _Item("k", "throw"));
+    await tester.pump();
+    // Setup sanity: the host's build threw.
+    expect(tester.takeException(), isStateError);
+    expect(find.byType(ErrorWidget), findsOneWidget);
+
+    controller.updateItem("k", const _Item("k", "short"));
+    await tester.pump();
+    // Setup sanity: the host shows a cell again.
+    expect(find.byType(ErrorWidget), findsNothing);
+    expect(find.byKey(_cellKey(1, 0)), findsOneWidget);
+    // TARGET: the new surface's content is measured, not the measurement
+    // the cell kept from before the throw.
+    expect(rows.extentOf(1), 50.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a kept-alive board brought back into view is not laid out "
+      "again", (tester) async {
+    final scroll = ScrollController();
+    addTearDown(scroll.dispose);
+    final controller = _rowsController(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(
+            controller: scroll,
+            children: <Widget>[
+              _KeptAlive(
+                child: SizedBox(
+                  height: 400.0,
+                  child: Board<String, _Item>(
+                    controller: controller,
+                    cellBuilder: (context, cell) {
+                      return SizedBox(
+                        key: _cellKey(cell.row, cell.col),
+                        height: 20.0,
+                      );
+                    },
+                  ),
+                ),
+              ),
+              for (var i = 0; i < 6; i++) const SizedBox(height: 400.0),
+            ],
+          ),
+        ),
+      ),
+    );
+    final viewport = _viewport(tester);
+    final layouts = viewport.debugPerformLayoutCount;
+
+    scroll.jumpTo(2000.0);
+    await tester.pump();
+    // Setup sanity: the board left the list's window and was kept alive.
+    expect(find.byType(Board<String, _Item>), findsNothing);
+    expect(
+      find.byType(Board<String, _Item>, skipOffstage: false),
+      findsOneWidget,
+    );
+
+    scroll.jumpTo(0.0);
+    await tester.pump();
+    // Setup sanity: the same board is back in view.
+    expect(_viewport(tester), same(viewport));
+    // TARGET: entering and leaving the keep-alive bucket, which detaches
+    // and re-attaches the board's render objects without a rebuild, laid
+    // the board out no more.
+    expect(viewport.debugPerformLayoutCount, layouts);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a row whose recorded cell stops building forgets it before "
+      "a sideways scroll", (tester) async {
+    final horizontal = ScrollController();
+    addTearDown(horizontal.dispose);
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(
+        axis: LazyContentAxis(4, 40.0, minTrackExtent: 10.0),
+      ),
+      columns: BoardAxisConfig(axis: UniformAxis(12, 100.0)),
+    );
+    Widget board({required bool tall}) {
+      return _sidewaysBoard(controller, horizontal, (context, cell) {
+        if (cell.row == 1) {
+          if (tall && cell.col == 0) {
+            return SizedBox(key: _cellKey(cell.row, cell.col), height: 100.0);
+          }
+          return null;
+        }
+        return SizedBox(key: _cellKey(cell.row, cell.col), height: 30.0);
+      });
+    }
+
+    await tester.pumpWidget(board(tall: true));
+    final rows = controller.rows.axis;
+    // Setup sanity: the tall cell holds the row.
+    expect(rows.extentOf(1), 100.0);
+
+    await tester.pumpWidget(board(tall: false));
+    // Setup sanity: the tall cell is gone, and the row rests at the
+    // estimate.
+    expect(find.byKey(_cellKey(1, 0)), findsNothing);
+    expect(rows.extentOf(1), 40.0);
+
+    horizontal.jumpTo(900.0);
+    await tester.pump();
+    // Setup sanity: column 0 is out of the window.
+    expect(find.byKey(_cellKey(0, 0)), findsNothing);
+    // TARGET: no record of the cell that stopped building holds the row.
+    expect(rows.extentOf(1), 40.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a row keeps a recorded height below its estimate while its "
+      "window builds nothing", (tester) async {
+    final horizontal = ScrollController();
+    addTearDown(horizontal.dispose);
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(
+        axis: LazyContentAxis(4, 40.0, minTrackExtent: 10.0),
+      ),
+      columns: BoardAxisConfig(axis: UniformAxis(12, 100.0)),
+    );
+    await tester.pumpWidget(
+      _sidewaysBoard(controller, horizontal, (context, cell) {
+        if (cell.row == 1) {
+          if (cell.col == 0) {
+            return SizedBox(key: _cellKey(cell.row, cell.col), height: 20.0);
+          }
+          return null;
+        }
+        return SizedBox(key: _cellKey(cell.row, cell.col), height: 30.0);
+      }),
+    );
+    final rows = controller.rows.axis;
+    // Setup sanity: the small cell holds the row below the estimate.
+    expect(rows.extentOf(1), 20.0);
+
+    horizontal.jumpTo(900.0);
+    await tester.pump();
+    // Setup sanity: the small cell's column is out of the window.
+    expect(find.byKey(_cellKey(1, 0)), findsNothing);
+    // Control: the recorded cell holds the row, not the estimate that
+    // stands in for a window of null cells.
+    expect(rows.extentOf(1), 20.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a laned row whose cells build nothing takes its cluster's "
+      "extent at first sight, without animating", (tester) async {
+    final controller = _rowsController(
+      tester,
+      laneExtent: 30.0,
+      style: const BoardAnimationStyle(
+        trackResize: BoardAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+        itemSlide: _zero,
+        itemEnterExit: _zero,
+      ),
+    );
+    _addCluster(controller, 1);
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          cellBuilder: (context, cell) {
+            return null;
+          },
+          itemBuilder: _itemBox,
+        ),
+      ),
+    );
+    final viewport = _viewport(tester);
+    // TARGET: the first layout takes the cluster's four lanes at once.
+    expect(viewport.rectOfCell(1, 0)!.height, 120.0);
+
+    await tester.pump(const Duration(milliseconds: 100));
+    // Control: no resize animates toward it.
+    expect(viewport.rectOfCell(1, 0)!.height, 120.0);
     expect(tester.takeException(), isNull);
   });
 }

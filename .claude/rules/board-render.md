@@ -14,7 +14,8 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   new track resets it) and honors `applyContentDimensions`' false return
   as another round; a per-cell MEASUREMENT CACHE in the viewport's own
   parent data, so a cell is laid out under measuring constraints only
-  when it is newly obtained, when its host's rebuild poked it, when the
+  when it is newly obtained, when its host's rebuild or its surface's
+  delivering attach poked it, when the
   controller's `invalidateCellMeasurements` dropped every mounted cell's
   entry, or when those constraints changed, which is what stops a scroll
   laying every mounted cell out twice; the opt-in
@@ -36,7 +37,12 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   contributes nothing to its content track, whether the delegate dropped
   its element or its host shows an empty box for the builder's null
   answer, which the host's surface poke writes into the parent data's
-  `buildsNothing` before the content-axis test and in both of its arms:
+  `buildsNothing` before the content-axis test and in both of its arms,
+  on every host rebuild and on an attach while no board has received the
+  surface's latest answer, because a host build that throws replaces the
+  surface while, under the board's own repaint boundary, the parent data
+  keeps the old answer, and an attach after delivery delivers nothing,
+  because a keep-alive bucket re-attaches a child without a rebuild:
   every obtained cell still feeds its track to the sizing step, a null
   one with the identity of the maximum, and a track none of whose
   obtained cells builds anything takes its record while the recorded

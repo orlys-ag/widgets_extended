@@ -1058,9 +1058,9 @@ class _BoardCellHostState<TKey, TItem>
     // [_BoardCellSurface].
     //
     // `_built` is null while the host shows the delegate's `initial`,
-    // which is never a null answer; `didUpdateWidget` clears `_built` and
-    // leaves `_answeredNull`, so the flag is read only beside the answer
-    // it describes.
+    // which is never a null answer; `didUpdateWidget` clears `_built` for
+    // a new `initial` and leaves `_answeredNull`, so the flag is read only
+    // beside the answer it describes.
     return _BoardCellSurface(
       buildsNothing: _built != null && _answeredNull,
       child: _built ?? widget.initial,
@@ -1077,9 +1077,9 @@ class _BoardCellHostState<TKey, TItem>
 /// identical to the old (`widgets/framework.dart:6837`), and this host
 /// builds a new instance every time, so the two coincide exactly.
 ///
-/// It carries one field, [buildsNothing], and defines no `==`, so every
-/// host build still updates its render object: an `==` that suppressed
-/// the update is the one thing this must never have.
+/// It carries one field, [buildsNothing]. Every host build constructs a
+/// new instance, which is what makes the framework update its render
+/// object, so the host must never reuse one or construct it as `const`.
 class _BoardCellSurface extends SingleChildRenderObjectWidget {
   const _BoardCellSurface({
     required this.buildsNothing,
@@ -1093,9 +1093,11 @@ class _BoardCellSurface extends SingleChildRenderObjectWidget {
 
   @override
   RenderBoardCellSurface createRenderObject(BuildContext context) {
-    // A first build needs no poke: the vicinity is newly obtained, so
-    // its cache is null and the measure step measures it anyway.
-    return RenderBoardCellSurface();
+    // A surface is created for a host's first build and again after a
+    // host build that threw, when the cell's parent data can still hold
+    // the old surface's answer; no board has this one yet, so the surface
+    // delivers it when it attaches.
+    return RenderBoardCellSurface(buildsNothing: buildsNothing);
   }
 
   @override

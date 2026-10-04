@@ -49,7 +49,7 @@ Normative for `lib/board/`. This rule holds the conventions every layer follows;
   element in its successor's place; a data-only update and a
   selection change rebuild only the hosts whose own answer changed,
   through the `Board` state's two relays, and relayout there only when
-  the last layout obtained a cell that built NULL (see `Board` in `board-widget.md`).
+  the last layout obtained a cell the delegate built as NULL (see `Board` in `board-widget.md`).
 - **Two coordinate spaces.** Content space (distance from the lattice
   origin, per axis) and viewport-paint space (content minus the scroll
   offset, axis-direction aware). `_paintFromContent` and, through the
