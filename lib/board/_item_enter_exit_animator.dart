@@ -18,7 +18,8 @@ class _EnterExitRecord {
 
   /// The reported ramp value at clock 0: 0 for an enter, and for an exit
   /// the value the ramp held when the exit was installed, which is 1
-  /// except for a mid-enter removal.
+  /// except for a mid-enter removal. An enter that REVERSES an exit
+  /// starts from the value that exit had reached.
   final double from;
 
   /// Resolved through `specFor` on every tick, so a restyle carries
@@ -58,9 +59,16 @@ class ItemEnterExitAnimator {
     return _records.isNotEmpty;
   }
 
-  /// The ramp: eased 0 to 1 while entering, `from` eased down to 0 while
-  /// exiting, and exactly 1 for an id with no record, which is the
-  /// settled-live-item arm every consumer multiplies by unconditionally.
+  /// The ids holding a record, a live view: the coordinator walks it once
+  /// per tick to mark those ids' presences.
+  Iterable<int> get activeIds {
+    return _records.keys;
+  }
+
+  /// The ramp: `from` eased up to 1 while entering, `from` eased down to
+  /// 0 while exiting, and exactly 1 for an id with no record, which is
+  /// the settled-live-item arm every consumer multiplies by
+  /// unconditionally.
   ///
   /// CLAMPED TO `[0, 1]` HERE, at the producer: an overshooting curve
   /// (`Curves.easeInBack` dips below 0, `Curves.easeOutBack` rises above
@@ -78,13 +86,21 @@ class ItemEnterExitAnimator {
     if (_isExitingOf(id)) {
       return (record.from * (1.0 - eased)).clamp(0.0, 1.0);
     }
-    return eased;
+    return (record.from + (1.0 - record.from) * eased).clamp(0.0, 1.0);
   }
 
-  /// Installs an enter ramp for [id]. The caller has already set the
-  /// entering bit; a fresh record starts at 0.
-  void animateEnter(int id, {required BoardAnimationFamily family}) {
-    _records[id] = _EnterExitRecord(from: 0.0, family: family);
+  /// Installs an enter ramp for [id], from [from] up to 1 over
+  /// `1 - from` times the family's resolved duration, the mirror of an
+  /// exit's scaling, so an item growing back from part way grows at the
+  /// pixels per second a full enter gives. The caller has already set the
+  /// entering bit; a fresh item starts at 0, and an exit being reversed
+  /// at the value it had reached.
+  void animateEnter(
+    int id, {
+    required BoardAnimationFamily family,
+    double from = 0.0,
+  }) {
+    _records[id] = _EnterExitRecord(from: from, family: family);
     _ensureTicking();
   }
 
@@ -125,15 +141,16 @@ class ItemEnterExitAnimator {
     List<int>? settled;
     _records.forEach((id, record) {
       final spec = style.specFor(record.family);
-      // The scaled-exit denominator: an exit's clock runs over
-      // `from * duration`. A zero product, which only a zero FAMILY can
-      // produce (installs refuse a sub-tolerance `from`), maps to an
-      // INFINITE delta rather than a division, driving the record past 1
-      // and through the normal settle on this very tick.
+      // The scaled denominators: an exit's clock runs over
+      // `from * duration`, an enter's over `(1 - from) * duration`. A zero
+      // product, which a zero FAMILY produces, and an enter reversing an
+      // exit that had not begun, maps to an INFINITE delta rather than a
+      // division, driving the record past 1 and through the normal settle
+      // on this very tick.
       final baseUs = spec.duration.inMicroseconds;
       final durationUs = _isExitingOf(id)
           ? (baseUs * record.from).round()
-          : baseUs;
+          : (baseUs * (1.0 - record.from)).round();
       record.t += durationUs == 0
           ? double.infinity
           : dt.inMicroseconds / durationUs;
@@ -145,9 +162,10 @@ class ItemEnterExitAnimator {
       for (final id in settled!) {
         // An earlier handler's delivered notification can reach an app
         // listener that retires this id (and, under LIFO recycling,
-        // re-issues it to a fresh incarnation whose record is new), so a
-        // collected id is only settled if ITS record is still the one
-        // that reached 1.
+        // re-issues it to a fresh incarnation whose record is new), or
+        // re-adds the key of this exiting id, which reverses the exit on
+        // the same id with an enter's record, so a collected id is only
+        // settled if ITS record is still the one that reached 1.
         final record = _records[id];
         if (record == null || record.t < 1.0) {
           continue;

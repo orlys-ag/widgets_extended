@@ -296,8 +296,11 @@ void main() {
         closeTo(restingTopB + 20.0 * atHalf, 0.5),
       );
       await tester.pump(const Duration(milliseconds: 50));
-      // TARGET: the uninterrupted ramp's value at 150ms, still past
-      // rest, not rest itself.
+      // TARGET: still past rest, not rest itself. The commit came before
+      // the curve's peak, and a hand-off's tail is clamped to [0, 1]
+      // (board audit fixes, item 5B), so the neighbour holds where it
+      // painted rather than rising the uninterrupted ramp's last 0.17px:
+      // the two agree within the tolerance.
       expect(
         _probe(tester, "b").top,
         closeTo(restingTopB + 20.0 * atThreeQuarters, 0.5),

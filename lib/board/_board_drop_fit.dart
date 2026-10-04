@@ -57,12 +57,17 @@ class BoardDropFitter {
   /// Steps available per axis under [policy] and [snap]. Both zero means
   /// no candidate can exist, which the caller uses to skip the gather and
   /// the gate entirely.
+  ///
+  /// [wholeTrackAxis] is an axis the scan steps by WHOLE tracks whatever
+  /// the snap: the lane axis of a laned item, which occupies one track
+  /// there and moves by whole tracks, as the resolver moves it.
   static ({int rows, int cols}) stepsOf({
     required BoardDropFit policy,
     required BoardSnap snap,
+    Axis? wholeTrackAxis,
   }) {
-    final quantum = BoardDropResolver.quantumOf(snap);
-    int stepsFor(double radius) {
+    int stepsFor(double radius, Axis axis) {
+      final quantum = BoardDropResolver.quantumOn(axis, snap, wholeTrackAxis);
       if (radius <= 0.0 || quantum <= 0.0) {
         return 0;
       }
@@ -71,8 +76,100 @@ class BoardDropFitter {
     }
 
     return (
-      rows: stepsFor(policy.rowRadius),
-      cols: stepsFor(policy.colRadius),
+      rows: stepsFor(policy.rowRadius, Axis.vertical),
+      cols: stepsFor(policy.colRadius, Axis.horizontal),
+    );
+  }
+
+  /// [box] moved onto the lattice on each axis where it starts at or past
+  /// the lattice's end, [rowCount] or [colCount]: its start is clamped
+  /// into that axis's window of starts, [rowWindow] or [colWindow], so it
+  /// takes the window's last start, or its first where the window is
+  /// empty, and is floored to a whole track under a track [snap] and on
+  /// [wholeTrackAxis], as the resolver places a start; its extent is kept.
+  /// An axis where it starts inside the lattice keeps its fields. Null
+  /// where an axis has no track.
+  static BoardSpan? ontoLattice(
+    BoardSpan box, {
+    required int rowCount,
+    required int colCount,
+    required BoardStartWindow rowWindow,
+    required BoardStartWindow colWindow,
+    required BoardSnap snap,
+    Axis? wholeTrackAxis,
+  }) {
+    if (rowCount <= 0 || colCount <= 0) {
+      return null;
+    }
+    double? onto(Axis axis, int count, BoardStartWindow window) {
+      final start = box.startTrackOn(axis);
+      if (start < count) {
+        return null;
+      }
+      final moved = clampToWindow(start, window);
+      final whole = snap.mode == BoardSnapMode.track || axis == wholeTrackAxis;
+      return whole ? moved.floorToDouble() : moved;
+    }
+
+    final row = onto(Axis.vertical, rowCount, rowWindow);
+    final col = onto(Axis.horizontal, colCount, colWindow);
+    if (row == null && col == null) {
+      return box;
+    }
+    return box.copyWith(
+      rowStart: row?.floor(),
+      rowFraction: row == null ? null : row - row.floorToDouble(),
+      colStart: col?.floor(),
+      colFraction: col == null ? null : col - col.floorToDouble(),
+    );
+  }
+
+  /// The SEARCH REGION on one axis, as a half-open range of whole tracks:
+  /// the smallest one covering the box `[start, end)`'s own tracks and the
+  /// box widened by [radius] on BOTH sides, clamped to `[0, trackCount]`.
+  ///
+  /// On an axis the scan [stepped], the widened box's two ends are
+  /// CLAMPED into the reach of [window]: the near one is
+  /// `floor(clampToWindow(start - radius))`, and the far one is
+  /// `ceil(end + radius)` clamped into `[ceil(window.min + extent),
+  /// ceil(window.max + extent)]`, upper bound first as [clampToWindow]
+  /// applies it, `extent` being `end - start`. In exact arithmetic that is
+  /// `ceil(clampToWindow(start + radius) + extent)`, and wherever neither
+  /// clamp binds both ends are the widened box's own expressions, so no
+  /// rounding of a different sum moves an end across a track edge. A
+  /// candidate there is the box moved by at most [radius], clamped into
+  /// [window] and, on the whole-track axis, floored, keeping the box's own
+  /// extent; the clamp is monotone and the floor only lowers a start, so
+  /// every candidate lies inside the clamped ends. An axis the scan does
+  /// not step keeps the box's own fields, and its range is the widened
+  /// box, [window] unread.
+  static ({int start, int end}) searchRangeOn({
+    required double start,
+    required double end,
+    required double radius,
+    required BoardStartWindow window,
+    required bool stepped,
+    required int trackCount,
+  }) {
+    final low = stepped
+        ? clampToWindow(start - radius, window).floor()
+        : (start - radius).floor();
+    var high = (end + radius).ceil();
+    if (stepped) {
+      final last = (window.max + (end - start)).ceil();
+      if (high > last) {
+        high = last;
+      }
+      final first = (window.min + (end - start)).ceil();
+      if (high < first) {
+        high = first;
+      }
+    }
+    final own = start.floor();
+    final ownEnd = end.ceil();
+    return (
+      start: (low < own ? low : own).clamp(0, trackCount),
+      end: (high > ownEnd ? high : ownEnd).clamp(0, trackCount),
     );
   }
 
@@ -166,11 +263,12 @@ class BoardDropFitter {
   /// nothing does.
   ///
   /// Candidates are [box] translated by whole quanta, clamped into the
-  /// lattice by the resolver's own endpoint rule, and tested in ascending
-  /// CONTENT-SPACE distance from the box's leading corner. The order is
-  /// TOTAL, distance then row step then column step, so two candidates at
-  /// equal distance cannot swap between two resolves and flicker the
-  /// preview.
+  /// window of each axis it steps, [rowWindow] and [colWindow], and
+  /// tested in ascending CONTENT-SPACE distance from the box's leading
+  /// corner. The order is TOTAL, distance then row step then column
+  /// step, so two candidates at equal distance cannot swap between two
+  /// resolves and flicker the preview. An axis the scan does not step
+  /// keeps the box's own fields.
   ///
   /// TWO COSTS, and only one is app code: every candidate pays a
   /// rectangle test against [obstacles], while only a FREE candidate
@@ -183,16 +281,30 @@ class BoardDropFitter {
     required BoardAxis colAxis,
     required List<BoardSpan> obstacles,
     required bool Function(BoardSpan candidate) accepts,
+    required BoardStartWindow rowWindow,
+    required BoardStartWindow colWindow,
+    Axis? wholeTrackAxis,
   }) {
-    final steps = stepsOf(policy: policy, snap: snap);
+    final steps = stepsOf(
+      policy: policy,
+      snap: snap,
+      wholeTrackAxis: wholeTrackAxis,
+    );
     if (steps.rows == 0 && steps.cols == 0) {
       return null;
     }
-    final quantum = BoardDropResolver.quantumOf(snap);
+    final rowQuantum = BoardDropResolver.quantumOn(
+      Axis.vertical,
+      snap,
+      wholeTrackAxis,
+    );
+    final colQuantum = BoardDropResolver.quantumOn(
+      Axis.horizontal,
+      snap,
+      wholeTrackAxis,
+    );
     final rowLow = box.startTrackOn(Axis.vertical);
     final colLow = box.startTrackOn(Axis.horizontal);
-    final rowExtent = box.endTrackOn(Axis.vertical) - rowLow;
-    final colExtent = box.endTrackOn(Axis.horizontal) - colLow;
     final baseRow = rowAxis.offsetOfFraction(rowLow);
     final baseCol = colAxis.offsetOfFraction(colLow);
 
@@ -204,29 +316,45 @@ class BoardDropFitter {
           continue;
         }
         // Clamped BEFORE the split, and the distance is read off the
-        // clamped value: at the lattice edge the clamp moves a candidate,
+        // clamped value: at a window edge the clamp moves a candidate,
         // so the step count stops describing how far it went.
-        final row = BoardDropResolver.clampStart(
-          rowLow + dRow * quantum,
-          rowExtent,
-          rowAxis.trackCount,
-        );
-        final col = BoardDropResolver.clampStart(
-          colLow + dCol * quantum,
-          colExtent,
-          colAxis.trackCount,
-        );
+        // Each candidate start snapped to a track edge it lies within the
+        // tolerance of: `low + d * quantum` is a sum of two exact
+        // multiples, which in doubles can come to one ulp below the
+        // integer it means.
+        // An axis the scan does not step keeps the box's own fields: no
+        // clamp, no floor and no re-split, and no distance.
+        var row = rowLow;
+        var col = colLow;
+        if (dRow != 0) {
+          row = clampToWindow(
+            snapToTrackEdge(rowLow + dRow * rowQuantum),
+            rowWindow,
+          );
+          if (wholeTrackAxis == Axis.vertical) {
+            row = row.floorToDouble();
+          }
+        }
+        if (dCol != 0) {
+          col = clampToWindow(
+            snapToTrackEdge(colLow + dCol * colQuantum),
+            colWindow,
+          );
+          if (wholeTrackAxis == Axis.horizontal) {
+            col = col.floorToDouble();
+          }
+        }
         // RE-SPLIT, never an addition to the fraction field: a span
         // asserts its leading fraction below 1.0, so a quantum carrying
         // past a track boundary has to move the integer start.
         final span = box.copyWith(
-          rowStart: row.floor(),
-          rowFraction: row - row.floorToDouble(),
-          colStart: col.floor(),
-          colFraction: col - col.floorToDouble(),
+          rowStart: dRow == 0 ? null : row.floor(),
+          rowFraction: dRow == 0 ? null : row - row.floorToDouble(),
+          colStart: dCol == 0 ? null : col.floor(),
+          colFraction: dCol == 0 ? null : col - col.floorToDouble(),
         );
-        final dy = rowAxis.offsetOfFraction(row) - baseRow;
-        final dx = colAxis.offsetOfFraction(col) - baseCol;
+        final dy = dRow == 0 ? 0.0 : rowAxis.offsetOfFraction(row) - baseRow;
+        final dx = dCol == 0 ? 0.0 : colAxis.offsetOfFraction(col) - baseCol;
         candidates.add((
           // Squared, which orders identically and avoids the root.
           distance: dx * dx + dy * dy,

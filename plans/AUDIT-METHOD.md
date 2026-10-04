@@ -1,337 +1,436 @@
 # Plan audit method
 
-How to audit a design or implementation plan in this repository, and how
-to write one that stays auditable. Derived from auditing
-`2026-08-18-sliver-tree-presentation-ghosts-plan.md` (10 rounds) and
-`2026-08-18-sliver-tree-row-transition-plan.md` (5 rounds) in one
-session. The numbers quoted below are from those two audits and are the
-reason each rule exists; treat them as evidence, not decoration.
-
-Read this before starting an audit round, and again before writing a new
-plan.
+How to write a plan that stays auditable, audit it, and close it. The method is
+project-neutral: every project fact it uses comes from the project profile,
+`doc/agents/method-profile.json` (section 11).
 
 ---
 
-## 1. The two failure modes this exists to prevent
+## 1. Angles
 
-**A. The stopping rule lies.** Both plans repeatedly closed a round with
-two consecutive clean passes, and the next round found defects on its
-FIRST pass. The escape plan did this at rounds 8, 9 and 10; the
-row-transition plan at rounds 2, 3, 4 and 5. The cause is not
-carelessness. A round exhausts one LENS, and the second clean pass
-mostly confirms the lens is exhausted, not the artifact. Findings
-cluster hard by angle: all eight of the row-transition plan's round-3
-findings were public surface, all three of round 5's were unverified
-claims.
+Before the first round, write the angle list, mark each angle unswept, and work
+down it. Start from these and add the plan's own:
 
-**B. The audit generates its own defects.** The single most common
-defect class across both audits was not subtle design error. It was a
-decision changing in one section while the summary sections kept
-asserting the old one. That happened at least six times in the
-row-transition plan alone, and in round 4 two of six findings were the
-round's own earlier fixes going wrong. Any process that edits prose is
-also producing defects, so it converges only if the fix rate beats the
-introduction rate.
+1. Mechanism: the components and their interactions.
+2. Public surface: signatures, types, exports, naming.
+3. Consumers and call sites: everything that must change (section 8).
+4. Contracts with the documents the plan depends on, or that depend on it.
+5. The test list: each test writable, failing on unfixed code, following the
+   house conventions, and each new test seam justified against an existing one.
+6. Citations and claims (section 3).
+7. House conventions: the profile's convention documents and the module
+   guidance of the code the plan touches.
+8. Failure paths: what happens when a precondition is not met.
+9. Lifecycle: creation, teardown, and every site that destroys the thing.
+10. Performance bounds: what is O(what), and whether the stated bound is the
+    one that can blow up.
 
-Everything below is aimed at one of those two.
-
----
-
-## 2. Before the first round: enumerate the angles
-
-Do not discover angles one round at a time. Write the list first, mark
-each unswept, and work down it. A usable default set:
-
-1. Internal mechanism (the components and their interactions)
-2. Public surface (signatures, types, exports, naming)
-3. Consumers and call sites (everything that must change, enumerated)
-4. Contracts with dependent or dependency documents
-5. The test list as a deliverable (is each test writable, will it fail
-   on unfixed code, does it follow house conventions, and is each new
-   test seam justified against an existing one)
-6. Citations and claims (section 4 below)
-7. House-convention compliance (`AGENTS.md` for style and the
-   verified-claims rules, `doc/agents/testing-patterns.md` for test
-   conventions and debug counters, `doc/agents/sliver-tree-architecture.md`
-   for module contracts)
-8. Degradation and failure paths (what happens when a precondition is
-   not met)
-9. Lifecycle and disposal (creation, teardown, and every site that
-   destroys the thing)
-10. Performance bounds (what is O(what), and is the bound the one that
-    can blow up)
-
-Add angles specific to the plan's subject. The list is the audit's
-coverage map, and section 6's stopping rule is defined against it.
+Section 4 assigns the angles to lenses; section 6's stopping rule is defined
+against the list.
 
 ---
 
-## 3. Rules for the plan document itself
+## 2. Writing a plan
 
-These make a plan auditable. Apply them when writing, and fix
-violations when auditing.
+Apply these when writing. A violation found when auditing is a finding.
 
-### 3.1 One normative site per fact
+### 2.1 One site per fact
 
-Exactly one location states each decision. Every other mention is a
-REFERENCE ("per 4.1"), never a restatement. A reference cannot go stale;
-a paraphrase always can.
+Exactly one place states each decision. Every other mention refers to it
+("per 4.1") instead of restating it.
 
-This is the structural cure for failure mode B. Before adding a sentence
-that restates a decision, ask whether a cross-reference would do.
+### 2.2 Summary sections go stale first
 
-### 3.2 Summary sections are a known hazard
+When a component section changes, re-read every section that paraphrases
+decisions made elsewhere: the overview, the lifecycle walkthrough, the
+contracts list, the decisions list, the costs summary and the test list.
 
-These sections attract stale text because they paraphrase decisions made
-elsewhere: the one-paragraph architecture, the lifecycle walkthrough,
-the contracts list, the decided-decisions list, the costs summary, and
-the test list. When any component section changes, re-read exactly those
-six. Treat it as a checklist item, not as something to remember.
+### 2.3 Counts and universals carry their command
 
-### 3.3 Citations must be re-anchorable, by a ledger not by inline tokens
+A count, or a claim with "every", "all", "only", "none", "the sole" or "always",
+carries the command that established it, or is rewritten as an enumeration
+(preferred when the list is short). A count of a code symbol's users comes from
+code (section 8), not from a text search.
 
-A line number alone rots silently when the file moves. Something has to
-record WHAT the citation pointed at, so a checker can find where it went.
+### 2.4 Declare every artifact the implementer creates
 
-Inline `path:line :: token` works for a document with a handful of
-citations. It does not scale: the row-transition plan has 170 citation
-instances, and tokenising them inline would have added more noise than
-the whole audit-narration cleanup removed, fighting rule 3.2 directly.
+Its name, signature, where it lives, and whether it is exported.
 
-USE A GENERATED LEDGER INSTEAD. Keep prose citations bare (`path:line`),
-and record the expected content in a sidecar that a script regenerates:
+### 2.5 Landing order
 
-    python plans/check_citations.py plans/<plan>.md --update   # record
-    python plans/check_citations.py plans/<plan>.md            # verify
+When the change spans components, files or public names, list the steps in
+dependency order and mark each grouping that correctness forces. Each step names
+the test that goes green when it lands, or is marked NOT INDEPENDENTLY
+VERIFIABLE with the reason. A pure restructuring that makes the behaviour change
+small lands first, in its own commit.
 
-The ledger is a DERIVED artifact, so it does not violate rule 3.1: it is
-regenerated, never hand-edited. `check_citations.py` reads only the live
-sections, resolves repo and SDK paths, verifies each line still holds
-its recorded content, and on a miss searches the file for that content
-and reports the new line number. It exits non-zero, so it can gate CI.
+### 2.6 Write the design, not its history
 
-Run it after any change under `lib/`.
+A plan describes the feature as it will be built: its goals, its decisions, and
+how to build and test it, as concisely as an answer to the owner. How it got
+there belongs in its audit file (section 4), which the plan names at most once.
 
-SPELL EACH PATH ONE WAY. A file cited as both `proxy_box.dart` and
-`rendering/proxy_box.dart` is one file to a reader and two to a
-checker, which is how a verification script reports phantom misses or
-silently skips a real one. Pick a form per source and hold it: repo
-files by their bare filename, SDK files as `<subdir>/<file>.dart`. This
-rule exists because the row-transition plan accumulated three files
-spelled two ways each over six rounds, and nobody noticed until a count
-of "cited files" came back 24 against a true 21.
+- Write the final state: never "previously", "round 2 changed", "an earlier
+  draft said" or "the audit found". Today's code, which the change is made
+  against, is the feature's problem and stays.
+- A revision rewrites the sentence that was wrong; it never appends a note
+  beside it.
+- A rejected option is one table row with its reason, named for what it is,
+  never for when it was tried. Its evidence may cite the audit file.
+- No defensive prose: do not answer a critic in advance unless an implementer
+  needs the constraint.
+- The deletion test: a sentence whose removal changes nothing an implementer
+  builds or a reviewer checks is removed.
 
-### 3.4 Counts and universal claims must carry their command
+### 2.7 Decisions are ranking tables
 
-Any claim containing "every", "all", "only", "none", "the sole" or
-"always" is a QUERY, not a statement. It must carry the command that
-establishes it, or be downgraded to a specific enumeration.
+Each architecture, performance or algorithm choice is a subsection of the
+plan's Decisions section, anchored `d<N>`: the decision; a problem statement
+when it answers a defect in today's behaviour; for a rule that lands in code,
+its code site and the test that pins it (section 9); and a table with the
+columns Rank, Option, Gate, Evidence and Assessment.
 
-NUMBERS ARE THE SAME PROBLEM. "Seven counters", "four call sites",
-"three sites gate on this": each is a count somebody eyeballed once, and
-plausible numbers are precisely the ones no later reader rechecks. The
-row-transition plan asserted "seven counters today" and "and four more"
-where a grep returns six, in two places, both written from a glance at a
-list. Run the command, quote the number it returns, and prefer an
-enumeration to a total where the list is short.
+- Gate: pass or fail, with the reason. An option passes when it is correct,
+  meets the goals and requirements, preserves every documented invariant, is
+  idiomatic for the language, the framework and the codebase, keeps the public
+  API compatible unless a goal says otherwise, and removes no safeguard without
+  a replacement. A failing option stays in the table, below every passing one.
+- Evidence: each claim labelled, strongest first: measured (a timed or counted
+  run, section 10), demonstrated (a recorded test, run or audit), traced (a
+  code path or normative document read), computed (arithmetic from stated
+  inputs), design-only. A rank-1 option resting on design-only evidence names
+  the check that will produce evidence.
+- Rank: passing options in the order of the profile's ranking criteria, a tie
+  on one criterion going to the next. The hot-path performance criterion
+  applies only on the profile's hot paths. A difference within measurement
+  spread, or within one complexity class when computed, is a tie. A plan whose
+  decisions are not code decisions declares its own criteria in the Decisions
+  preamble.
+- The top-ranked passing option is the decision. Rejected options stay in the
+  table, so a re-rank (section 5) can choose one.
 
-This is not pedantry. Of four universal claims checked in the
-row-transition plan's round 5, three were wrong or imprecise:
-"the sole `_dirtyKeys` consumer" (three sites touch it), "already
-per-frame coalesced" (two sources dispatch uncoalesced), and "every
-public builder in this package is a typedef" (the counterexample was the
-very widget the feature extends). All three read as checked facts. Each
-took one grep to disprove.
-
-### 3.5 Declare every public artifact the plan depends on
-
-If the plan references a thing an implementer must create, the plan
-declares it: name, signature, where it lives, and whether it is
-exported. Three separate instances of this were missed in one plan: the
-builder's signature was never declared at all, the reference widget was
-referenced seven times and never named, and a typedef was specified
-without noting that this package exports through explicit `show`
-clauses, so it would have been unnameable by app code.
-
-### 3.6 State the landing order when the work spans layers
-
-If the change touches multiple widgets, files, or public names, say what
-lands together and what can follow, and call out any grouping that is
-forced by correctness rather than convenience.
-
-Each step also names the test that goes green when it lands. A step that
-cannot name one is marked NOT INDEPENDENTLY VERIFIABLE with the reason,
-which is a real category here: a paint change and its hit-test mirror
-must land together or a row is unclickable for a commit. The point is
-not to forbid the grouping, it is to make an unexamined one visible.
-Without this rule a plan spanning controller, render object and element
-splits by layer, and nothing is testable until the last step lands.
-
-Where a plan contains a pure restructuring that makes the behaviour
-change small, it lands first and in its own commit, so the behaviour
-diff is reviewable on its own.
+The owner may supply decisions with their evidence before the plan is written;
+the architect adopts each as its starting table and may add options.
 
 ---
 
-## 4. The citation and claim pass
+## 3. Citations and claims
 
-Run this as its own angle, at least once per plan, ideally scripted.
+Write each citation in backticks, `path:line` or `path:line-line`; the checker
+reads no other form. Cite a repository file by its path from the root (a
+filename alone only when exactly one file git tracks or would track has that
+name), and an SDK file by its path under the profile's SDK root. A continuation,
+`` `:123` ``, attaches to the last file cited in that form, even when another
+file was named since in prose. A citation of a file whose extension the profile
+does not list is read by hand.
 
-1. Run `check_citations.py` (rule 3.3). It handles extraction,
-   resolution, verification and re-anchoring for the whole document.
-2. Read what it flags. A BARE continuation citation (`` `:123` ``)
-   attaches to the last file named in CITATION form, so naming a file in
-   running prose and then citing bare lines silently attributes them to
-   the wrong file. The checker catches this as an out-of-range line;
-   a reader would not catch it at all.
-3. Extract every universal quantifier and every count, and run its
-   command (rule 3.4).
-4. Verify every framework-behavior claim against the SDK source, not
-   from memory. Recall of framework internals is a hypothesis.
+`plans/check_citations.py` anchors a plan's citations to the tree they were read
+on. It commits a snapshot of the working tree, with every file the plan cites,
+under `refs/citations/` (on no branch), and writes the snapshot's id into the
+plan's CITATIONS marker, which is never edited by hand:
 
-Useful calibration from round 5: all 21 cited files were correct,
-including two below a commit that had inserted 8 lines earlier in the
-same session. Drift was not the problem. CLAIMS were. Budget accordingly:
-the citation check is cheap and worth automating, but the claim check is
-where the defects are.
+    python plans/check_citations.py plans/<plan>.md             # verify
+    python plans/check_citations.py plans/<plan>.md --stamp     # a new plan
+    python plans/check_citations.py plans/<plan>.md --rebase [--accept <path:line> ...]
+    python plans/check_citations.py --self-test
 
----
+Verify reads the plan's live sections and maps each citation through `git diff`
+from the snapshot to the files on disk. A citation passes as OK (its lines
+unchanged, at their numbers) or MOVED (unchanged, at other numbers). It fails on
+CHANGED, NEW, UNRESOLVED, PAST-END and DANGLING: a cited line edited or removed,
+or a line inserted inside a cited range; a citation the snapshot does not
+record; a name that matches no file or several; a line past the end of its
+file; a continuation after a citation whose extension the profile does not
+list.
 
-## 5. What a pass is, and the consistency pass
+Check a plan's citations when it is written or revised, at the start of each
+round on it, and before it is implemented. Each failing citation is a finding:
+re-read the code, correct the claim, and cite the line it now concerns. Then run
+`--rebase`: it renumbers MOVED citations, keeps NEW ones and stamps the current
+tree. Name with `--accept` each CHANGED citation re-read and kept at its number;
+`--rebase` writes nothing while another is CHANGED. A plan whose run is done
+keeps its marker.
 
-A pass sweeps one angle and produces findings. For each finding:
+The claim pass sweeps angle 6, at least once per plan:
 
-1. **Confirm it against source** before treating it as real. Tool output
-   and prior audit-log entries are leads, not findings.
-2. **Confirm it affects the plan.** A true observation that changes
-   nothing is not a finding.
-3. **Audit the solution**, not just the problem. State the alternatives
-   considered and why the chosen one is better for long-term
-   architecture and for performance. Prefer a solution that removes the
-   need for vigilance over one that adds a rule to remember.
-4. **Record it** in the audit log with its evidence and its rejected
-   alternatives.
+1. Run the checker and re-read each citation it flags.
+2. Run the command behind every count and universal (section 2.3).
+3. Verify every framework-behaviour claim against the SDK source; recall is a
+   hypothesis.
 
-### The consistency pass is mandatory after any edit round
-
-Before editing, write down the OLD vocabulary the change is replacing.
-After editing, grep for those terms across the live sections. Every hit
-is either a negation ("no longer X") or a defect.
-
-This step catches what re-reading does not. In round 4 it found stale
-text four separate times, faster than reading each time. Example
-vocabulary deltas from real rounds: "pushed" to "live getter",
-"animating set" to "mounted set", "just-settled" to nothing, "poke set"
-to nothing, "default builder" to a widget name.
+Steps 2 and 3 are where the defects are; budget the pass for them.
 
 ---
 
-## 6. Stopping rule
+## 4. Rounds, lenses and findings
 
-Do NOT stop on two consecutive clean passes within a round. That
-measures the lens.
+A round dispatches critics in parallel, each through one lens. A critic carries
+no memory of an earlier round.
 
-Stop when either:
+| Lens | Stage | Sweeps |
+|---|---|---|
+| `correctness` | standard | Angles 1, 8 and 9 |
+| `performance` | standard | Angle 10, and whether each measured or computed evidence cell supports its rank |
+| `design` | standard | Angles 2, 3, 4, 6 and 7 at decision level; each acceptance criterion traced to a check that can fail in the direction it claims; scope; the option set; new test seams; section 9's guidance rule |
+| `interaction` | fresh | The feature crossed with every other component, layer and entry point, a space reading samples and never covers |
+| `timing` | fresh | Behaviour under real timing (ordering, settle transitions, re-entrancy): which risks only running the code settles, and whether each is a named test rather than an argument |
+| `consistency` | after a revision | The revision against its snapshot, the findings it received and its obligations (section 5) |
 
-- **Coverage**: every angle on the section 2 list has been swept, and a
-  freshly opened angle came back empty on its FIRST pass; or
-- **Yield**: the last round produced only wording-level findings with no
-  consequence to implementation, testing, or the public surface.
+- The first round runs every standard lens, plus the consistency lens when a
+  revision precedes it.
+- After a failing standard round, the next round runs the lenses that raised a
+  failing finding, plus the consistency lens, which guards the sections the
+  others cleared. After a failing fresh angle, it runs the consistency lens
+  alone.
+- A fresh lens runs only after a clean standard round, and once per plan.
+- The design critic receives the requirements; without them it reports
+  `coverage`. The profile adds each lens's project addendum and reading list.
+- Every dispatched lens must report. A lens that returns nothing, or reports
+  `coverage`, is dispatched once more in the same round. If it still cannot
+  review, the run ends; the next run dispatches that round again with all its
+  lenses, and the first attempt's findings are discarded.
 
-Track findings per round with severity. Observed decay in the
-row-transition plan was 9, 8, 6, 3, with round 5's three being one test
-design change, one justification replacement, and one phrasing fix. That
-is roughly where a plan is done.
+### Each finding
 
-Declare a round budget in advance so the process terminates by design
-rather than by exhaustion.
+1. Confirm it against the source. Tool output, a critic's report and earlier
+   audit-file entries are leads.
+2. Confirm it changes the plan: a true observation that changes nothing is not
+   a finding.
+3. Audit the fix as well as the problem. Check a fix to a decision against its
+   table (section 2.7), and prefer a fix that removes the need for vigilance
+   over one that adds a rule to remember.
+4. Record the decision it concerns (`d<N>`, or none), its kind, its severity,
+   and its defect class (one of the profile's, or other).
+
+Kinds:
+
+- `rank`: it changes which option ranks first in a decision table, adds a valid
+  option the table lacks, or shows false a statement a ranking rests on (a
+  citation or count included).
+- `surface`: it changes the public surface, or breaks a format another
+  component reads (a required section, an anchor, the status line).
+- `consistency`: the plan disagrees with itself or with the code it describes,
+  breaks a writing rule of section 2 (usually minor when nothing contradicts),
+  or a revision did not do what section 5 required of it.
+- `scope`: a requirement is missing, ambiguous, or in conflict with another.
+- `implementation`: anything else: an edge case, a consumer, a rule no test
+  pins, an inert assertion, a mutation survivor.
+- `coverage`: the critic could not review; its lens counts as not reported.
+
+Severity: `blocking` when following the plan builds broken code, or the plan
+misstates the code or a documented invariant; `major` when it works with a
+serious problem (significant cost, an untestable rule, fragile coupling, a
+requirement not met); `minor` for a small improvement; `nit` for wording.
+
+A finding FAILS when it is blocking or major and of kind `rank`, `surface`,
+`consistency` or `scope`; severity alone never fails a round. A round is clean
+when no finding fails.
+
+Where findings go:
+
+- A failing `scope` finding ends the run; the owner settles the requirement and
+  resumes.
+- Every finding raised since the last architect step (a revision or the
+  approval) goes to the next one, which records each in the audit file with
+  its outcome: fixed, re-ranked, rejected with evidence, carried, or, for a
+  non-failing finding, left open with a reason.
+- Every `implementation` finding also goes to the checklist, as an item whose
+  acceptance is a test shown to fail first, a mutation, or the check section 8
+  names; one that no longer applies is listed with the reason.
+- A run that ends before an architect step carries those findings in its state
+  to the next run's first one, except a round's findings discarded for
+  coverage.
+
+The audit file, `plans/<date>-<slug>-audit.md` beside the plan, holds the round
+records, the trial log and the run records. A round record has one line per
+finding: its id, lens, kind, severity, outcome and the section it touched, with
+a reason only where the outcome needs one. The plan holds only what
+implementation needs, plus its Approval block. The audit file and the revision
+snapshots are history, and are never cite-checked.
 
 ---
 
-## 7. Verdict labeling
+## 5. Revisions and loop control
+
+A revision:
+
+1. Copies the plan to the first free `<plan>.r<N>`, and writes down the
+   vocabulary it is about to replace.
+2. Addresses every finding it received and every obligation below, rewriting
+   rather than appending (rule 2.6).
+3. Runs the consistency pass: diffs the plan against the snapshot and reads
+   every section that used the replaced vocabulary. Each surviving use is a
+   negation ("no longer X") or a defect; a search may locate the sections, and
+   reading them is the check. Cross-references resolve and numbering stays
+   contiguous.
+4. Checks the citations (section 3), and reports the snapshot and the
+   decisions it changed.
+
+The next consistency lens receives the snapshot, every finding the revision
+received, the decisions it changed and its obligations. An unmet obligation, or
+a changed decision that no received finding named and that does not depend on
+one that did, is a failing `consistency` finding. A revision that returns
+nothing leaves no snapshot and no changed decisions; that lens reads the
+revision's record instead.
+
+After every round, standard or fresh:
+
+- R1, re-rank. A decision with a failing `rank` finding is re-ranked when it
+  had a failing `rank` finding in an earlier round or the previous revision
+  changed it: the revision adds the findings to its table as evidence and
+  re-applies the gate and the ranking, and the snapshot keeps the option it
+  replaces. Keeping rank 1 is allowed when the record says why. Any other fix
+  may patch the chosen option in place.
+- R2, scope. A failing `scope` finding ends the run (section 4).
+- R3, mechanize. A profile defect class found in two rounds, at any severity,
+  obliges the next revision, or the checklist when no revision follows, to add
+  a check for it, preferring a code check (section 8).
+
+A run has a round budget, declared before it starts. A spent budget is reported,
+not extended silently: each failing decision, the rounds it failed in, and
+whether R1 re-ranked it.
+
+These rules and section 6 hold across runs. A run that stops returns its state:
+the round count, the fresh angles spent, the loop history and the findings in
+flight; the next run resumes from it. A run killed before it returns resumes
+from the last state an earlier run returned and repeats what it did since, and a
+fresh angle it may have opened counts as spent: a second pass cannot approve
+the plan.
+
+A revision of an approved plan first sets it back to draft. A plan whose run is
+done is not reopened: a later change is a successor plan, whose run starts from
+code that contains the earlier change, once the owner has merged it.
+
+---
+
+## 6. Stopping and the verdict
+
+Two clean passes within a round measure the lens, not the plan, and do not stop
+the audit. Stop when either:
+
+- Coverage: every angle on the list has been swept, a standard round came back
+  clean, and a fresh angle then came back clean on its FIRST pass; or
+- Yield: the last round produced only wording-level findings, with no
+  consequence for implementation, testing or the public surface.
+
+Interaction and timing risks are settled by running code, not by more rounds:
+once the plan is stable, write its tests (as skipped stubs while the code is
+blocked), and stop auditing when only these risks remain.
 
 Never write an unqualified "fit to implement". Write:
 
     VERDICT: fit as far as ANGLE goes. Unswept: ANGLE, ANGLE.
 
-The unqualified form is what made the pattern in section 1A invisible
-for seven rounds. Scoping the label costs nothing and surfaces the
-remaining risk in the one place a reader will look.
+---
+
+## 7. Trials
+
+A trial applies the plan's highest-risk section on a branch, runs the section's
+repro against unfixed and fixed code, and runs the profile gates that apply. It
+catches a section that reads correctly and builds wrong. A trial passes when its
+repro fails before and passes after, every gate that applies passes, and it
+found no plan defect.
+
+A trial is kept, never reverted:
+
+- It is committed only with the owner's authorization: in the workflow,
+  confirming the run gives it; in a hand audit, ask, and without an answer save
+  the diff as a patch where the plan names. It lives on a branch cut from the
+  base commit the plan was audited against, one commit per section, with the
+  repro promoted into the test tree in the same commit.
+- A trial that fails on a plan defect changes the plan: the failure becomes
+  evidence for a rejected option in its decision's table, or a corrective commit
+  follows it. One that fails on an implementation slip is fixed and run again.
+- Nothing is reverted without its diff saved. A later trial that needs unfixed
+  code runs its "fails before" check against the earlier commit (a worktree),
+  not by undoing work.
+- The audit file's trial log records each trial. The branch or the patch is a
+  deliverable of the audit, named in the verdict; merging it is the owner's
+  decision, and a fix found after a trial lands as its own commit.
+
+A plan whose sections have all been trialed has angle 1 swept by construction;
+later rounds open other angles.
 
 ---
 
-## 8. Move the unsettleable out of prose
+## 8. Consumers are verified in code
 
-Some classes cannot be closed by inspection at any number of rounds:
+For each interface a change touches, a plan names the strongest check that
+applies:
 
-- **Interaction completeness.** The feature crossed with every animation
-  source, paint pass, mutator, widget layer and entry point is a
-  combinatorial space that reading samples and never covers.
-- **Behavior under real timing.** Frame ordering, settle transitions,
-  and re-entrancy.
-
-Once the plan is stable, convert the test list into skipped test stubs
-in the repository. Then "does the plan cover interaction X" becomes a
-grep, and the stubs begin failing usefully the moment implementation
-starts. If a plan is blocked on a dependency and its remaining risk is
-in these classes, say so and stop auditing; more rounds are the
-expensive way to find what one test finds immediately.
-
----
-
-## 9. Round checklist
-
-- [ ] Angle chosen from the section 2 list; note which remain unswept
-- [ ] Prior audit-log conclusions treated as leads and re-checked
-- [ ] Each finding confirmed against source before being recorded
-- [ ] Each solution audited against alternatives, for architecture and
-      performance
-- [ ] Each trialed solution committed on the plan's branch with its
-      repro, never reverted (section 10)
-- [ ] Vocabulary delta recorded before editing
-- [ ] Consistency pass run after editing (grep the old vocabulary)
-- [ ] The six summary sections of 3.2 re-read if a component changed
-- [ ] Structure verified: contiguous numbering, cross-references
-      resolve, style rules held (no em-dashes, plain ASCII)
-- [ ] Audit log entry written with evidence and rejected alternatives
-- [ ] Verdict scoped per section 7
+1. Derive: the consumers read one source in code, so they cannot disagree (a
+   schema built from one item definition, a status set from one constant, a
+   list read from the profile).
+2. Check in code: the compiler or analyzer for code symbols, or a test that
+   fails when a consumer disagrees with its source, which is how structured
+   prose (tables, frontmatter, examples, headings) is checked.
+3. Read: the code that uses the interface, in full; for a change to the method
+   itself, every file in the profile's `methodFiles`.
+4. Search: a text search only locates what to read. It never verifies, because
+   a consumer that restates a rule in other words does not match.
 
 ---
 
-## 10. Trials are kept, on a branch
+## 9. Closing
 
-Section 5 says to audit a solution against source. The strongest form
-of that is a TRIAL: apply the chosen solution, run the section's repro
-against unfixed and fixed code, run the full suite. The 2026-08-21
-review-fix audit trialed 11 of 13 sections that way and found two whose
-text read correctly and failed (a sticky-offset freshness claim and a
-sectioned-list guard that broke a documented re-add path). Reading
-would not have caught either.
+The checklist's last phase opens with one item per decision. For a decision
+whose code site lies under the profile's code paths it is a mutation: break the
+rule there, observe a named test fail, restore the file, and record the test
+name and the file's SHA-256 before and after, which must match. For a decision
+that lands only in documents it is the check section 8 names for it. Showing
+that each new assertion can fail does not show that each rule is pinned; only a
+mutation of the rule does. The profile's gates that apply follow, so the suite
+runs after the last restore.
 
-What that audit got wrong was what it did with the result: every trial
-was reverted to keep `main` clean, so 13 verified diffs were thrown
-away and had to be reconstructed from the plan text. Do not do that.
+A reviewer who never reads the plan closes the run. It receives the request and
+the acceptance criteria verbatim, the commit the run started from and the branch
+holding the change; reads every file the change touched in full; runs the tests
+the criteria name; and writes the acceptance document: each criterion quoted
+and marked met, partial or unmet with its evidence, then its findings. Gaps go
+to the owner, to fix by hand or through a successor plan.
 
-- Before the first trial, branch from the audited baseline commit
-  (`git switch -c <plan-name>-fixes <sha>`). Trials happen there.
-- A trial that passes its gates (repro fails before, passes after; no
-  new analyzer issues in `lib/`; full suite green) is COMMITTED on the
-  branch, one commit per section, with the repro promoted into the
-  test tree in the same commit. The plan's section records "TRIALED"
-  with the commit sha instead of a test count.
-- A trial that fails is also kept, as a commit that is then corrected
-  by a follow-up commit, or as a recorded rejection in the plan's
-  "Considered solutions" with the failure's evidence. Either way the
-  plan's section changes in the same commit (rule 3.1).
-- Nothing is reverted to restore the baseline. If a later section's
-  trial needs unfixed code for its "fails before" gate, run that gate
-  against the previous commit (`git stash`, or a worktree at the
-  earlier sha), not by undoing landed work.
-- The branch is the deliverable of the audit alongside the plan. The
-  verdict names it. Merging is a separate decision for the owner.
+A plan changes a guidance document only to state an invariant the change adds
+or alters.
 
-One consequence for section 6's stopping rule: a trial is a pass of the
-internal-mechanism angle, so a plan whose sections have all been
-trialed and committed has that angle swept by construction, and the
-remaining rounds should open other angles rather than re-read the
-mechanism.
+---
+
+## 10. Timed measurement
+
+Deterministic counters need no noise floor. A timed comparison follows this
+protocol:
+
+- Expectations are declared before measuring, and carry no consequence.
+- A noise floor comes from A/A runs.
+- The verdict comes from a committed comparison script reading what the
+  artifacts record (order, tree, settings, inputs), built when the first
+  comparison needs it.
+- A rerun happens only when a verdict earns one.
+- A rule change applies to a fresh series only, never to data already measured.
+- Measured code is committed at exactly the hashes the verdict recorded, and a
+  follow-up fix lands as its own commit.
+
+---
+
+## 11. The profile
+
+The profile is a JSON document the launcher passes to the workflow, which
+cannot read files. Every key has a reader:
+
+- `codePaths`: the directories holding the code and its tests.
+- `conventionDocs`: the house convention documents an implementer reads.
+- `methodFiles`: the files a change to the method re-reads (section 8).
+- `gates`: each with `name`, `command`, `pass` (its pass condition) and `when`
+  (when it applies; `always` for every change).
+- `modules`: each with `paths` (regular expressions over repository paths),
+  `guidance` (its architecture rules) and `vocabulary`.
+- `lenses`: one entry per lens of section 4, each with `reads` (the files the
+  lens reads, where `moduleGuidance` and `conventionDocs` expand to those
+  lists) and `addendum` (project text appended to the lens's focus).
+- `defectClasses`: the classes R3 tracks (section 5).
+- `ranking`: the ranking criteria, in order (section 2.7).
+- `hotPaths`: where the hot-path performance criterion applies.
+- `citations`: `sdkRoot`, and the `extensions` the checker reads.
+- `planRules`: the project's own requirements for a plan, which the architect
+  writes to and the design lens checks.
+
+A project adopts the method by writing its own profile.

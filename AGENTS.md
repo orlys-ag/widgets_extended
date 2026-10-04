@@ -1,59 +1,120 @@
 # AGENTS.md
 
-Canonical agent instructions for this repository. Other agent tools read
-this file directly; Claude Code reaches it by importing it from
-`CLAUDE.md`. Edit this file for anything that should apply to every agent,
-and keep it self-contained: do not use import directives here, because not
-every tool that reads this file expands them.
+Instructions for every agent in this repository. Claude Code reads this file
+through `CLAUDE.md`; other agent tools read it directly. Keep it
+self-contained, with no import directives: not every tool expands them.
 
 ## Project Overview
 
-A Flutter package (`widgets_extended`) providing rich utility widgets. Two modules:
+A Flutter package (`widgets_extended`) providing rich utility widgets, in these modules:
 
 - **sliver_tree**: a high-performance sliver-based tree widget with animated expand/collapse, FLIP reorder slides, node diffing, drag-and-drop reordering, and sticky headers.
 - **sectioned_sliver_list**: a sectioned list (sections + items) built on top of the sliver_tree stack (`SectionedListController` wraps a `TreeController` + `TreeSyncController` with section/item-typed keys).
 - **board**: a two-axis lattice viewport built on `RenderTwoDimensionalViewport`, with spanning items, overlap lanes, animated enter/exit and slides, drag-and-drop moves and resizes, cell and range selection, and frozen tracks.
 
-The barrel file `lib/widgets_extended.dart` re-exports all three modules.
+The barrel file `lib/widgets_extended.dart` re-exports each of them.
 
 ## Commands
 
 ```bash
-# Run all tests
+flutter test                                              # all tests
+flutter test test/sliver_tree/tree_controller_test.dart   # one file
+flutter analyze
+
+# examples/: a separate package that uses the library through its barrel, as
+# an app does. Gitignored, so it exists only in a local checkout.
+cd examples
 flutter test
-
-# Run a single test file
-flutter test test/sliver_tree/tree_controller_test.dart
-
-# Analyze (lint)
 flutter analyze
 ```
 
+After a behaviour change under `lib/`, also run the examples' tests and
+analyzer when `examples/` exists: they can fail where `test/` passes.
+`flutter analyze` does not report zero issues on this tree, so compare the
+issue count before and after your change.
+
 ## Code Quality
-- Always take a research-first approach: read the code before describing it. See "Verified claims".
-- Prefer correct, complete implementations over minimal ones.
-- Use appropriate data structures and algorithms; don't brute-force what has a known better solution.
-- When fixing a bug, fix the root cause, not the symptom.
-- If something I asked for requires error handling or validation to work reliably, include it without asking.
-- Do not be biased. Disagree with the user on any claims that are wrong. Be brutally honest at all times.
+
+- Research first: read the code before describing it ("Verified claims").
+- Code and tests define current behaviour. A plan in `plans/` is proposed work
+  until the code and tests agree with it.
+- Prefer correct, complete implementations over minimal ones. Use appropriate
+  data structures and algorithms; do not brute-force what has a known better
+  solution.
+- Fix a bug at its root cause, not its symptom, and test-first: a repro test
+  that fails on the unfixed code, with every new assertion shown to fail
+  (`.claude/rules/testing.md`).
+- When a diagnosis is uncertain, test one concrete hypothesis, then reassess
+  from the evidence. Do not stack speculative fixes.
+- A performance claim needs a measurement, such as a debug counter or a timed
+  run, not only a plausible mechanism. A timed comparison follows
+  `plans/AUDIT-METHOD.md` section 10.
+- Preserve existing work. Change nothing outside the change you were asked to
+  make; the working tree may hold uncommitted work that is not yours.
+- When a requested change needs error handling or validation to work reliably,
+  include it without asking.
+- Do not be biased: disagree with the user on any claim that is wrong, and be
+  brutally honest at all times.
 
 ## Verified claims
 
-Never assert anything about code, APIs, or behavior that you have not checked in this session. This applies equally to chat replies, plans, design documents, audits, code comments, and commit messages.
+Never assert anything about code, APIs or behaviour that you have not checked in
+this session: in chat replies, plans, design documents, audits, code comments
+and commit messages alike.
 
-- **Cite what you assert.** A claim about existing code carries the `file:line` you actually read. No citation means it was not verified, which means it does not get written.
-- **Counts come from commands.** Files affected, tests affected, call sites, "N places do X", how much work something is: run the search and use its output. Never approximate a number you could have measured.
-- **Framework behavior is read, not recalled.** What a widget builds, what a recognizer fires on disposal, what a default resolves to: verify against the Flutter or Dart source before stating it. Recall of framework internals is a hypothesis, not a fact.
-- **Before changing a shared declaration, enumerate its users.** Interfaces, abstract classes, mixins, exported symbols: list every implementer and call site, including tests, before proposing or making the change.
-- **Do not invent risks.** A regression, hazard, or failure mode is either demonstrated (a failing test, a traced code path) or labelled unverified. A plausible-sounding risk stated as a finding costs more time than it saves.
-- **Tool and subagent output is a lead, not a finding.** Confirm it against the source yourself before repeating it as established.
-- **Causal clauses carry their own citation.** A "because", "so", "therefore", or any statement of what the framework does is the highest-risk claim in a write-up, not the lowest. Observing an outcome does not license explaining it: cite the line that states the mechanism, or delete the clause. Absolutes ("never", "only", "exactly", "cannot", "every") get the same treatment. Put the citation immediately after the claim it supports rather than elsewhere in the sentence, so a reader can tell which claim it backs.
-- **Do not claim a plan, an audit, or a colleague got something wrong until you have run their check.** If their statement was verified and yours is inferred, theirs stands. This is the one error that also destroys someone else's correct work, so it carries the strictest bar.
-- **Keep write-ups short enough to verify.** A status note or summary says what changed, what was checked, and how it was checked. Every additional explanatory sentence is another claim that someone has to verify, so length is a cost, not a sign of rigor.
+- Cite what you assert. A claim about existing code carries the `file:line` you
+  read; a claim without one is not verified and is not written. Source comments
+  are verified the same way but carry no citations (`.claude/rules/comments.md`).
+- Put each citation immediately after the claim it supports. A causal clause
+  ("because", "so", "therefore"), a statement of what the framework does, and
+  an absolute ("never", "only", "exactly", "cannot", "every") each carry their
+  own: observing an outcome does not license explaining it.
+- Counts come from commands. Files affected, tests affected, "N places do X",
+  how much work something is: run the command and use its output, and never
+  approximate a number you could measure. A count of a code symbol's users comes
+  from code, by the next rule, never from a text search.
+- Before changing a shared declaration (an interface, abstract class, mixin or
+  exported symbol), list every implementer and call site, tests included, and
+  verify the list in code: best, the users derive from one source and cannot
+  disagree; next, `flutter analyze` or a test fails when a user disagrees;
+  otherwise, read the code that uses it. A text search only locates what to read
+  (`plans/AUDIT-METHOD.md` section 8).
+- Read framework behaviour in the Flutter or Dart source before stating it:
+  what a widget builds, what a recognizer fires on disposal, what a default
+  resolves to. Recall of framework internals is a hypothesis.
+- A regression, hazard or failure mode is either demonstrated (a failing test,
+  a traced code path) or labelled unverified.
+- Tool and subagent output is a lead, not a finding: confirm it against the
+  source before repeating it.
+- Do not claim a plan, an audit or a colleague got something wrong until you
+  have run their check. If their statement was verified and yours is inferred,
+  theirs stands.
+- Keep write-ups short enough to verify: what changed, what was checked, and
+  how. Every extra sentence is another claim to verify.
+- Mark anything unverified in the sentence that carries it ("unverified", "I
+  have not checked this", "this needs a test"). A confident guess reads exactly
+  like a fact, which makes it worse than saying nothing.
 
-When something is unverified and still worth saying, mark it in the sentence that carries it: "unverified", "I have not checked this", "this needs a test". A stated gap is useful. A confident guess is a defect, and it is worse than saying nothing, because it reads exactly like a fact.
+Prefer running a check to reasoning toward the answer, and match the tool to
+the question. A text search tells you whether a string appears, so use it to
+find what to read; `flutter analyze` decides what a symbol resolves to and what
+a rename or deletion breaks; a named test going red decides whether a guard
+fires. When a text search could give the wrong answer, change tools rather than
+narrowing the pattern. When a change is small and fails by compile error or
+failing test, implement it rather than reason further.
 
-Prefer running the check to reasoning toward the answer. A grep, a test run, or `flutter analyze` settles a mechanical question faster and more reliably than argument does. When a change is small and its failure modes are compile errors or failing tests, implement it rather than reason further about it.
+## Response style
+
+These rules apply to every answer given to the user.
+
+- Be concise. Make each point once, and repeat a concept only when a new context
+  makes it relevant again.
+- Write in plain English. Use full sentences, in an order the reader can follow
+  from start to finish.
+- Keep the technical terms the answer needs. Do not replace a precise term with
+  a vague one to make the answer sound simpler.
+- Be precise rather than exhaustive. Answer what was asked, and leave out
+  background the reader did not ask for and does not need.
 
 ## Code Style
 
@@ -65,101 +126,39 @@ Prefer running the check to reasoning toward the answer. A grep, a test run, or 
 
 ## Guidance map
 
-Loaded on demand. Claude Code also loads the first three automatically
-via `.claude/rules/`, scoped to the paths they govern; other agent
-tools should read them when the When column applies.
+Read a row's files before the work its When column names. Claude Code also loads
+a rule file by itself when it reads, writes or edits a file the rule's `paths:`
+names, but not when a shell command touches it. A module rule lists its layer
+rules, and a layer rule's `paths:` names the files it governs.
 
 | Read | When |
 |---|---|
-| [sliver_tree architecture](doc/agents/sliver-tree-architecture.md) | Editing `lib/sliver_tree/**` or `lib/sectioned_sliver_list/**` |
-| [board architecture](doc/agents/board-architecture.md) | Editing `lib/board/**` |
-| [Testing patterns](doc/agents/testing-patterns.md) | Writing or changing tests under `test/**` |
-| [Audit method](plans/AUDIT-METHOD.md) | Writing or auditing a plan in `plans/` |
-| [Feature workflow contracts](doc/agents/feature-workflow-contracts.md) | Producing or consuming a workflow plan or checklist |
+| [sliver_tree architecture](.claude/rules/sliver-tree.md), and the `sliver-tree-*.md` layer rules naming the file | Editing `lib/sliver_tree/**`, `lib/sectioned_sliver_list/**` or their tests |
+| [board architecture](.claude/rules/board.md), and the `board-*.md` layer rules naming the file | Editing `lib/board/**` or its tests |
+| [Testing patterns](.claude/rules/testing.md) | Writing or changing tests under `test/**` |
+| [Comments](.claude/rules/comments.md) | Adding or changing a comment in Dart source under `lib/`, `test/` or `examples/` |
+| [Audit method](plans/AUDIT-METHOD.md) | Writing, auditing or revising a plan in `plans/` |
+| [Feature workflow contracts](doc/agents/feature-workflow-contracts.md) | Running or resuming the feature workflow, or producing or reading its files |
+| [Agent configuration](.claude/rules/agent-config.md) | Editing `AGENTS.md`, `CLAUDE.md`, `.claude/`, `doc/agents/`, `plans/AUDIT-METHOD.md` or `plans/check_citations.py` |
+
+Before finishing a change to the agent configuration, `plans/AUDIT-METHOD.md` or
+`plans/check_citations.py`, run every gate in `doc/agents/method-profile.json`
+whose condition applies.
 
 ## The feature workflow
 
-`feature-implementation` (`.claude/workflows/`) runs the whole cycle as agents:
-draft, five critic lenses in parallel, revise, a fresh angle, a kept trial,
-approve, checklist, implement. The five lenses are the audit angle list from
-`plans/AUDIT-METHOD.md` section 2, merged, and approval requires a clean
-standard sweep AND a clean fresh angle, because section 6 rejects a single
-clean pass as evidence. A revision re-runs the lenses that reported blocking
-and any that failed to report, plus a consistency lens that guards the ones it
-skipped.
-
-Start it with `/feature-start`, which builds the args and gates on confirmation;
-check on it with `/feature-status`. It is not the default path: a clean run is
-11 agents, and a revision adds 3 to 7 depending on how many lenses reported
-blocking. Use it for changes that span layers and carry real interaction risk,
-and write the plan by hand for anything smaller. The skill's first step is a
-table for that decision.
+`/feature-start` decides whether a change warrants the `feature-implementation`
+workflow (`.claude/workflows/`), then launches or resumes it; `/feature-status`
+reports on one. The workflow drafts a plan, critiques and revises it, opens a
+fresh angle, runs a kept trial, approves the plan, writes a checklist,
+implements it, and closes with a review by an agent that never reads the plan.
 
 ## Plans and audits
 
-Design and implementation plans live in `plans/` as `YYYY-MM-DD-<topic>-plan.md`.
-
-**Before writing OR auditing one, read `plans/AUDIT-METHOD.md` first.** It is
-the house method, derived from two multi-round audits, and it is not
-reconstructable by reasoning: it carries the angle list to sweep, the stopping
-rule (two clean passes measure the lens, not the artifact), the one-normative-site
-rule, the requirement that counts and universal claims carry the command that
-establishes them, and the trial discipline (apply the fix, run the gates, keep
-the diff). Auditing without it reliably produces a plan that reads correct and
-fails on contact.
-
-Plan citations are bare `path:line` and are verified by a generated ledger, not
-by eye. The ledger records the TEXT at each cited line, so `--update` re-records
-whatever currently sits at the line numbers the plan states. It does not follow
-a construct that moved. That makes the order matter, and it differs by what
-changed:
-
-```bash
-python plans/check_citations.py plans/<plan>.md            # verify, non-zero on a miss
-python plans/check_citations.py plans/<plan>.md --repoint  # fix lines that moved
-python plans/check_citations.py plans/<plan>.md --update   # (re)record
-```
-
-- **After any change under `lib/`**: `--repoint`. Your edit shifted every
-  citation below it, and almost all of that is a stale NUMBER against text that
-  still exists. `--repoint` rewrites those line numbers to where the recorded
-  text actually is, and moves a citation ONLY when that text is found at exactly
-  one place. It backs up the plan and the ledger first.
-- **After adding citations to a plan**: `--update`, then verify.
-
-What `--repoint` deliberately leaves behind is the point of the whole tool.
-A citation whose recorded text is now GONE, or now appears at several lines,
-keeps its old entry and keeps reporting as drifted. Those are the ones where
-the plan may actually be wrong, and they need a human.
-
-`--repoint` also rewrites LINE ENDINGS on Windows, and this is a property of
-the tool, not of any plan it touches. It reads with `read_text` and writes with
-`write_text`: the plan at `plans/check_citations.py:258`, the plan's `.bak` at
-`plans/check_citations.py:253`, the ledger's `.bak` at
-`plans/check_citations.py:254`, the rewritten ledger at
-`plans/check_citations.py:270`. `write_text` opens with the default
-`newline=None`, which translates every `\n` to `os.linesep`, so on Windows an
-LF plan comes back CRLF wholesale and the backup written first gets the same
-treatment, which means that backup is not evidence of the original bytes. The
-agent-written plans in this repository are LF; the CRLF ones are the ones the
-checker has repointed. Put the file back to LF after a repoint, and if a pass
-rewrites a plan with python, write with `newline=""` and check
-`open(p, 'rb').read().count(b'\r\n')` against a sibling document before and
-after.
-
-Never reach for `--update` to make a failing check pass. It re-records whatever
-currently sits at the line numbers the plan states, so on drifted code it
-anchors every citation to the wrong text and then reports a clean ledger,
-including the ones `--repoint` refused to touch. That is unrecoverable without
-going back through git history for the tree the ledger was recorded against.
-
-A LANDED plan is a different case: its citations describe a tree that no longer
-exists, so drift is expected forever and checking it is noise. Retire it by
-renaming the ledger to `<plan>.md.citations.tsv.retired`, and say in the plan
-which commit its citations are against. The `.retired` suffix is what stops
-both the checker and the Stop hook from globbing it.
-
-Spell each cited path one way: repo files by bare filename (`render_sliver_tree.dart:4215`),
-Flutter SDK files as `<subdir>/<file>.dart:NNN` (`rendering/viewport.dart:973`). A
-bare `` `:123` `` continuation attaches to the last file named in full, so naming a
-file in prose and then citing bare lines silently misattributes them.
+Plans live in `plans/` as `YYYY-MM-DD-<topic>-plan.md`. Before writing or
+auditing one, read `plans/AUDIT-METHOD.md`: its rules cannot be reconstructed
+by reasoning. A plan states the feature, its goals and its design as they will
+be built, never its history (`plans/AUDIT-METHOD.md` rule 2.6). Its citations
+are checked by `plans/check_citations.py` against a snapshot of the tree they
+were read on; the citation form and the procedure are `plans/AUDIT-METHOD.md`
+section 3.

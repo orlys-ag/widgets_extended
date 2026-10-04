@@ -49,10 +49,15 @@ class BoardItemDragScope extends InheritedWidget {
   }
 }
 
-/// Arms a pointer-down against the enclosing [BoardItemDragScope]. A
-/// handle outside any scope, or one whose scope refuses, renders its
-/// child unchanged, keeping the widget SHAPE stable so the subtree is
-/// not re-inflated.
+/// Arms a pointer-down against the enclosing [BoardItemDragScope].
+///
+/// A handle that is disabled, outside any scope, or whose scope refuses
+/// is INERT: it still builds the same `Listener`, with no callback and a
+/// hit-test behavior that defers to [child], so the pointer reaches
+/// whatever [child] and the widgets under it would take. The listener is
+/// never dropped, because a handle whose shape followed its state would
+/// re-create [child], and every `State` in it, each time the drag policy
+/// flipped.
 class BoardDragHandle extends StatelessWidget {
   const BoardDragHandle({
     required this.child,
@@ -73,7 +78,9 @@ class BoardDragHandle extends StatelessWidget {
   final HitTestBehavior behavior;
 
   /// Which drag this handle starts. `none` starts a move; anything else
-  /// starts a resize on that edge.
+  /// starts a resize on that edge. The edge is a CONTENT edge (see
+  /// [BoardResizeEdges]): on a reversed axis the `trailing` edge paints
+  /// at the item's top or left, so a handle for it belongs there.
   final BoardResizeEdges edge;
 
   /// The axis a resize [edge] is on, or null for the SPAN axis, the
@@ -96,7 +103,7 @@ class BoardDragHandle extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = BoardItemDragScope.maybeOf(context);
     if (!enabled || scope == null || !scope.canDrag) {
-      return child;
+      return Listener(behavior: HitTestBehavior.deferToChild, child: child);
     }
     final settings = MediaQuery.maybeGestureSettingsOf(context);
     return Listener(
@@ -124,11 +131,17 @@ class BoardDelayedDragHandle extends BoardDragHandle {
     super.edge,
     super.axis,
     super.behavior,
+    this.delay = kLongPressTimeout,
     super.key,
   });
 
+  /// How long the pointer must rest before the drag starts; a move past
+  /// the touch slop within it gives the pointer to whatever else wants it,
+  /// a scrollable for instance.
+  final Duration delay;
+
   @override
   MultiDragGestureRecognizer createRecognizer() {
-    return DelayedMultiDragGestureRecognizer();
+    return DelayedMultiDragGestureRecognizer(delay: delay);
   }
 }

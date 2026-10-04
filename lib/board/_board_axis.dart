@@ -45,7 +45,9 @@ const double _emptyAxisMinTrackExtent = 1.0;
 /// [acceptsMeasurements] true, and only it can report [isProvisional]
 /// true.
 abstract interface class BoardAxis {
-  /// Number of tracks, indexed `[0, trackCount)`.
+  /// Number of tracks, indexed `[0, trackCount)`. Constant for the
+  /// instance's life: a lattice of another size is a new axis, assigned
+  /// through the config.
   int get trackCount;
 
   /// Extent of [track], in content space.
@@ -89,7 +91,9 @@ abstract interface class BoardAxis {
   /// end.
   static const double maxTotalExtent = 1.0e12;
 
-  /// Whether any track's extent is still an estimate.
+  /// Whether any track's extent is still unsettled: never on an axis that
+  /// takes no measurements, and on a [LazyContentAxis] while any track has
+  /// no recorded measurement.
   bool get isProvisional;
 
   /// Smallest extent this axis can ever report, strictly positive.
@@ -108,7 +112,10 @@ abstract interface class BoardAxis {
   /// measurements.
   bool get acceptsMeasurements;
 
-  /// Whether [track] already has a measured, non-estimated extent.
+  /// Whether [track]'s extent is settled: always on an axis that takes no
+  /// measurements, and on a [LazyContentAxis] once a measurement is
+  /// recorded for it, which layout does even when it resolves the track
+  /// to [LazyContentAxis.estimate].
   bool isMeasured(int track);
 
   /// Records a measured extent, floored at [minTrackExtent]. Asserts
@@ -117,7 +124,8 @@ abstract interface class BoardAxis {
 }
 
 /// Every track the same extent. Two scalars of storage, O(1) offsets and
-/// O(1) [trackAt], and no prefix is ever built, so a swap costs nothing.
+/// O(1) [trackAt], and no prefix is ever built, so a swap costs this axis
+/// nothing.
 class UniformAxis implements BoardAxis {
   /// Creates an axis of [trackCount] tracks, each [extent] long.
   UniformAxis(this.trackCount, this.extent)
@@ -161,6 +169,13 @@ class UniformAxis implements BoardAxis {
   int trackAt(double offset) {
     if (trackCount == 0) {
       return 0;
+    }
+    // The documented clamp for an offset the division cannot take: it
+    // throws for a non-finite double. The answers are the ones the prefix
+    // search gives the other three axes, NaN and negative infinity to the
+    // first track and positive infinity to the last.
+    if (!offset.isFinite) {
+      return offset == double.infinity ? trackCount - 1 : 0;
     }
     // The division is an APPROXIMATION of the inverse of [offsetOf], not
     // the inverse: `offset ~/ extent` and `track * extent` are different
@@ -320,6 +335,7 @@ class DerivedAxis implements BoardAxis {
   /// [extentOf], which is invoked exactly [trackCount] times here.
   DerivedAxis(this.trackCount, double Function(int track) extentOf)
     : assert(trackCount >= 0),
+      _extents = Float64List(trackCount),
       _prefix = Float64List(trackCount + 1),
       _minTrackExtent = _emptyAxisMinTrackExtent {
     var running = 0.0;
@@ -331,6 +347,7 @@ class DerivedAxis implements BoardAxis {
         "DerivedAxis extent at track $i must be strictly positive so "
         "minTrackExtent is",
       );
+      _extents[i] = extent;
       running += extent;
       _prefix[i + 1] = running;
       if (extent < smallest) {
@@ -347,13 +364,18 @@ class DerivedAxis implements BoardAxis {
   @override
   final int trackCount;
 
+  /// The callback's extents, kept as given, as `ExplicitAxis` keeps its
+  /// own. A difference of two prefix sums rounds: it reported values
+  /// below the one given, and below [minTrackExtent], which this axis
+  /// promises never to report under.
+  final Float64List _extents;
   final Float64List _prefix;
   double _minTrackExtent;
 
   @override
   double extentOf(int track) {
     assert(track >= 0 && track < trackCount);
-    return _prefix[track + 1] - _prefix[track];
+    return _extents[track];
   }
 
   @override
@@ -410,6 +432,11 @@ class DerivedAxis implements BoardAxis {
 /// The content-sized axis: every track starts at [estimate] and is
 /// replaced by a measurement as layout supplies one.
 ///
+/// [estimate] is what an unmeasured track reports, and the value layout
+/// resolves a track to while none of its cells builds anything, unless
+/// its lanes need more; the `BoardCellBuilder` doc states what each kind
+/// of cell gives its track.
+///
 /// Storage is one [Fenwick] of length [trackCount] holding
 /// `extentOf(i) - estimate` at every measured `i`, so [offsetOf] is
 /// `track * estimate + prefixSum(track)` and the prefix is built
@@ -418,7 +445,9 @@ class LazyContentAxis implements BoardAxis {
   /// Creates a content-sized axis. [minTrackExtent] is the floor every
   /// recorded measurement is clamped to, and this is the only
   /// implementation that has to ask the caller for it, because its extents
-  /// are not known at construction.
+  /// are not known at construction. It is also what a track of cells that
+  /// take no extent rests at, unless its lanes need more; see
+  /// `BoardCellBuilder`.
   LazyContentAxis(this.trackCount, this.estimate, {this.minTrackExtent = 1.0})
     : assert(trackCount >= 0),
       assert(estimate > 0.0, "LazyContentAxis estimate must be positive"),
@@ -539,8 +568,8 @@ class LazyContentAxis implements BoardAxis {
     assert(track >= 0 && track < trackCount);
     assert(extent.isFinite, "a measured extent must be finite");
     // A zero measurement is reachable from LEGAL input, not from caller
-    // error: a content-sized track with no cell content, no items and a
-    // lane padding of 0 resolves to 0. So this FLOORS instead of
+    // error: a content-sized track of cells that take no extent, with no
+    // items and a lane padding of 0, resolves to 0. So this FLOORS instead of
     // asserting, which is what keeps the correction loop's termination
     // true by construction at the cost of one comparison per measurement.
     final floored = extent < minTrackExtent ? minTrackExtent : extent;
@@ -646,9 +675,22 @@ class BoardAxisConfig {
   final BoardAxis axis;
 
   /// Number of leading tracks pinned to the viewport's leading edge.
+  ///
+  /// The band's cells stay put while the lattice scrolls, and so does an
+  /// ITEM whose span lies wholly inside the band on this axis (a laned
+  /// item on the lane axis by its one track): a header row can carry
+  /// items. A drag that moves an item along this axis (see
+  /// `BoardDragConfig.snap` for when it does) lands it in the band when
+  /// the drag proxy's centre is over the band and the item's span fits in
+  /// it, unless landing there would move the item against the drag; on
+  /// the lane axis a laned item lands in the band when the pointer is
+  /// over it. A selection over the band selects the band's cells. An item
+  /// that crosses the band's edge scrolls, and the band covers what
+  /// scrolls beneath it.
   final int frozenStart;
 
-  /// Number of trailing tracks pinned to the viewport's trailing edge.
+  /// Number of trailing tracks pinned to the viewport's trailing edge,
+  /// with the same rules for items as [frozenStart].
   final int frozenEnd;
 
   /// What a cell does with surplus track extent on this axis.
@@ -662,4 +704,88 @@ class BoardAxisConfig {
   /// along this axis. This is the space a month calendar day number
   /// occupies above its chips.
   final double lanePadding;
+}
+
+/// The frozen bands of a [BoardAxisConfig] as track bounds and extents:
+/// the one site that clamps [BoardAxisConfig.frozenStart] and
+/// [BoardAxisConfig.frozenEnd] against the axis. Internal, and not shown
+/// by the barrel.
+///
+/// Where the two counts overlap on a short axis, the shared tracks belong
+/// to the leading band, so the bands never overlap. Every read derives
+/// from the axis as it is at the call, so a measurement recorded between
+/// two reads shows in the second. The extents are SETTLED: no track
+/// resize in flight is applied.
+extension BoardAxisConfigBands on BoardAxisConfig {
+  /// The exclusive end of the leading band: [frozenStart] clamped into
+  /// `[0, trackCount]`, so 0 with no leading band.
+  int get leadingBandEnd {
+    return _leadingBandEndOf(axis.trackCount);
+  }
+
+  /// The first track of the trailing band, `trackCount` with no trailing
+  /// band. Never below [leadingBandEnd].
+  int get trailingBandStart {
+    final count = axis.trackCount;
+    return _trailingBandStartOf(count, _leadingBandEndOf(count));
+  }
+
+  /// Whether [track] lies in either band. Defined for
+  /// `0 <= track < trackCount`.
+  bool isFrozenTrack(int track) {
+    final count = axis.trackCount;
+    final lead = _leadingBandEndOf(count);
+    return track < lead || track >= _trailingBandStartOf(count, lead);
+  }
+
+  /// The settled extent of the leading band, 0.0 with none.
+  double get leadingBandExtent {
+    final lead = leadingBandEnd;
+    if (lead <= 0) {
+      return 0.0;
+    }
+    return axis.offsetOfFraction(lead.toDouble());
+  }
+
+  /// The settled extent of the trailing band, 0.0 with none.
+  double get trailingBandExtent {
+    final start = trailingBandStart;
+    // Not an equality: the non-negative checks on the counts are asserts,
+    // so in a release build a negative `frozenEnd` puts the start past the
+    // axis, where `offsetOfFraction` would read out of range.
+    if (start >= axis.trackCount) {
+      return 0.0;
+    }
+    return axis.totalExtent - axis.offsetOfFraction(start.toDouble());
+  }
+
+  /// The frozen tracks: the leading band ascending, then the trailing band
+  /// ascending.
+  Iterable<int> get frozenTracks sync* {
+    final count = axis.trackCount;
+    final lead = _leadingBandEndOf(count);
+    for (var track = 0; track < lead; track++) {
+      yield track;
+    }
+    for (
+      var track = _trailingBandStartOf(count, lead);
+      track < count;
+      track++
+    ) {
+      yield track;
+    }
+  }
+
+  int _leadingBandEndOf(int count) {
+    final start = frozenStart;
+    if (start <= 0) {
+      return 0;
+    }
+    return start < count ? start : count;
+  }
+
+  int _trailingBandStartOf(int count, int lead) {
+    final start = count - frozenEnd;
+    return start > lead ? start : lead;
+  }
 }

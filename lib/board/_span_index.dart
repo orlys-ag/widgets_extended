@@ -11,32 +11,50 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
+import '_board_span.dart';
 import '_board_store.dart';
 
-/// A sparse map from PRIMARY-axis track to the ids whose span touches it.
+/// A sparse map from PRIMARY-axis track to the ids filed under it: each
+/// id under the tracks its span touches inside the lattice, and always
+/// under its first track, with an overflow set for the ids whose span
+/// reaches past the lattice's end.
 ///
 /// The PRIMARY axis is the CONTENT-SIZED axis when one exists and the ROW
 /// axis otherwise, so it is never null; the SPAN axis is its complement.
 /// Neither is the LANE axis in general, and the lane resolver keys its own
 /// partition on a different axis on purpose.
 class SpanIndex {
-  /// Creates an index over [store]'s items, bucketed on [primaryAxis].
+  /// Creates an index over [store]'s items, bucketed on [primaryAxis] and
+  /// filed against a lattice of [trackCount] primary tracks.
   SpanIndex({
     required BoardStore<Object?, Object?> store,
     required Axis primaryAxis,
+    required int trackCount,
   }) : _store = store,
-       _primaryAxis = primaryAxis;
+       _primaryAxis = primaryAxis,
+       _trackCount = trackCount;
 
   final BoardStore<Object?, Object?> _store;
 
   Axis _primaryAxis;
 
-  /// Item ids per PRIMARY-axis track. An item is listed in EVERY bucket
-  /// its span touches, so a query over a track range visits that many
-  /// buckets and de-duplicates through [_seen]. A sparse map rather than a
-  /// dense list because the track count is unbounded while the occupied
-  /// set is not.
+  /// The primary axis's track count the ids are filed against. Changed
+  /// only by [reconfigure], so the count [register] filed an id under is
+  /// the one [deregister] reads.
+  int _trackCount;
+
+  /// Item ids per PRIMARY-axis track. An id is listed in every bucket its
+  /// span touches below [_trackCount], and always in its first track's,
+  /// so a query over a track range visits that many buckets and
+  /// de-duplicates through [_seen]; the part of a span past the lattice is
+  /// found through [_overflow]. A sparse map rather than a dense list
+  /// because the occupied set is far smaller than the lattice.
   final Map<int, List<int>> _buckets = <int, List<int>>{};
+
+  /// The ids whose span reaches track [_trackCount] or past it. No bucket
+  /// at or past that track lists such an id beyond its first track's, so
+  /// a query whose range passes the lattice's end scans this set.
+  final Set<int> _overflow = <int>{};
 
   /// Per bucket, the maximum over its members of
   /// `endTrackOn(spanAxis) - startTrackOn(spanAxis)`. Raised in place by
@@ -103,8 +121,10 @@ class SpanIndex {
   /// Debug-only: bucket entries any operation on this index has touched
   /// since the last reset. Counts each binary-search probe, each step of
   /// the backward walk, each element a sorted insert shifts, each
-  /// comparison [ordinalOf]'s rank search makes, and each comparison
-  /// [deregister]'s bucket search makes. It is the
+  /// comparison [ordinalOf]'s rank search makes, each comparison
+  /// [deregister]'s bucket search makes, each member a query's overflow
+  /// scan reads, each id [reconfigure]'s band walk reads, and each id
+  /// [hasIntraTrackItemOn] reads. It is the
   /// only thing that distinguishes the sorted bucket from a full linear
   /// scan, which return identical sets. A field on an unexported class, so
   /// it adds nothing to the public surface.
@@ -115,18 +135,100 @@ class SpanIndex {
     return _primaryAxis;
   }
 
-  /// Re-keys the index. Every bucket is dropped, because the key changed;
-  /// the owner re-registers every item. A full invalidation, which is what
-  /// an axis swap is.
-  set primaryAxis(Axis value) {
-    if (value == _primaryAxis) {
+  /// Re-files the index for a new primary axis or track count, and does
+  /// nothing when neither changed. Both values are stored first, so every
+  /// filing below reads the new ones. A primary-axis change drops every
+  /// bucket, whose key changed, and re-files every id the store holds; a
+  /// track-count change alone re-files only what lies between the two
+  /// counts ([_grow], [_shrink]).
+  void reconfigure({required Axis primaryAxis, required int trackCount}) {
+    if (primaryAxis == _primaryAxis && trackCount == _trackCount) {
       return;
     }
-    _primaryAxis = value;
-    _ordinalRanks.clear();
-    _ordinalById.clear();
-    _ordinalDirty.clear();
-    clear();
+    final oldCount = _trackCount;
+    final axisChanged = primaryAxis != _primaryAxis;
+    _primaryAxis = primaryAxis;
+    _trackCount = trackCount;
+    if (axisChanged) {
+      clear();
+      for (final id in _store.ids) {
+        register(id, bulk: true);
+      }
+    } else if (trackCount > oldCount) {
+      _grow(oldCount, trackCount);
+    } else {
+      _shrink(oldCount, trackCount);
+    }
+    flushPendingSorts();
+  }
+
+  /// The growth arm of [reconfigure]: each overflowing id gains the
+  /// buckets its filing adds between the two counts, and leaves
+  /// [_overflow] once its span no longer reaches past the lattice. An id
+  /// starting at or past the new count gains nothing.
+  void _grow(int oldCount, int newCount) {
+    // A copy: the loop removes from the set.
+    for (final id in List<int>.of(_overflow)) {
+      debugProbeCount++;
+      final before = _filingOf(id, oldCount);
+      final after = _filingOf(id, newCount);
+      if (after.hi > before.hi) {
+        final extent = _spanAxisExtentOf(id);
+        for (var track = before.hi + 1; track <= after.hi; track++) {
+          _file(track, id, extent, bulk: true);
+        }
+      }
+      if (!after.overflows) {
+        _overflow.remove(id);
+      }
+    }
+  }
+
+  /// The shrink arm of [reconfigure]: one pass over each bucket between
+  /// the two counts, keeping an entry only while its id's filing still
+  /// reaches that track and adding each id met that now reaches past the
+  /// lattice to [_overflow]. Those buckets are visited by whichever is
+  /// smaller, the track range or the bucket map.
+  void _shrink(int oldCount, int newCount) {
+    void pass(int track) {
+      final bucket = _buckets[track];
+      if (bucket == null) {
+        return;
+      }
+      var write = 0;
+      for (var read = 0; read < bucket.length; read++) {
+        final id = bucket[read];
+        debugProbeCount++;
+        final filing = _filingOf(id, newCount);
+        if (filing.hi >= track) {
+          bucket[write] = id;
+          write++;
+        }
+        if (filing.overflows) {
+          _overflow.add(id);
+        }
+      }
+      bucket.length = write;
+      if (bucket.isEmpty) {
+        _dropBucket(track);
+      }
+    }
+
+    if (oldCount - newCount <= _buckets.length) {
+      for (var track = newCount; track < oldCount; track++) {
+        pass(track);
+      }
+      return;
+    }
+    // A copy of the in-band keys: the pass removes the buckets it empties,
+    // and a map must not change while its keys are iterated.
+    final inBand = <int>[
+      for (final track in _buckets.keys)
+        if (track >= newCount && track < oldCount) track,
+    ];
+    for (final track in inBand) {
+      pass(track);
+    }
   }
 
   /// The axis a visited bucket is filtered against: the primary axis's
@@ -146,7 +248,9 @@ class SpanIndex {
     return _maxSpanAxisExtent[track] ?? 0.0;
   }
 
-  /// Registers [id] in every PRIMARY-axis bucket its span touches.
+  /// Files [id] under the PRIMARY-axis buckets its span touches inside
+  /// the lattice, and always under its first track's, and adds it to the
+  /// overflow set when its span reaches past the lattice ([_filingOf]).
   ///
   /// With [bulk] false this is a SORTED insert per bucket, O(span times k)
   /// for buckets of k items, which is the right trade per mutation. With
@@ -155,34 +259,54 @@ class SpanIndex {
   /// inserts into one bucket would otherwise be O(N squared) shifts on
   /// exactly the input a bulk call carries.
   void register(int id, {bool bulk = false}) {
-    final firstTrack = _store.startTrackOf(id, _primaryAxis).floor();
-    final lastTrack = _lastTrackOf(id, firstTrack);
-    assert(
-      lastTrack >= firstTrack,
-      "a span asserts a positive extent, so its bucket range is never "
-      "empty",
-    );
+    final filing = _filingOf(id, _trackCount);
     final extent = _spanAxisExtentOf(id);
-    _ordinalDirty.add(firstTrack);
-    for (var track = firstTrack; track <= lastTrack; track++) {
-      final bucket = _buckets.putIfAbsent(track, () {
-        return <int>[];
-      });
-      if (bulk) {
-        bucket.add(id);
-        _pendingSortBuckets.add(track);
-      } else {
-        final at = _insertionIndex(bucket, id);
-        debugProbeCount += bucket.length - at;
-        bucket.insert(at, id);
-      }
-      if (extent > (_maxSpanAxisExtent[track] ?? 0.0)) {
-        _maxSpanAxisExtent[track] = extent;
-      }
+    _ordinalDirty.add(filing.first);
+    for (var track = filing.first; track <= filing.hi; track++) {
+      _file(track, id, extent, bulk: bulk);
+    }
+    if (filing.overflows) {
+      _overflow.add(id);
     }
   }
 
-  /// Removes [id] from every bucket its span touches.
+  /// Lists [id] in [track]'s bucket, appended and marked pending when
+  /// [bulk] and sorted into place otherwise, and raises the bucket's
+  /// aggregate to [extent].
+  void _file(int track, int id, double extent, {required bool bulk}) {
+    final bucket = _buckets.putIfAbsent(track, () {
+      return <int>[];
+    });
+    if (bulk) {
+      bucket.add(id);
+      _pendingSortBuckets.add(track);
+    } else {
+      final at = _insertionIndex(bucket, id);
+      debugProbeCount += bucket.length - at;
+      bucket.insert(at, id);
+    }
+    if (extent > (_maxSpanAxisExtent[track] ?? 0.0)) {
+      _maxSpanAxisExtent[track] = extent;
+    }
+  }
+
+  /// [id]'s filing under a lattice of [count] primary tracks: the buckets
+  /// `first` to `hi`, its span's tracks below [count] and always its first
+  /// track's, and whether its span reaches track [count] or past it. The
+  /// one computation of both, read by [register] and [deregister] at the
+  /// stored count and by [reconfigure]'s band walk at both counts.
+  ({int first, int hi, bool overflows}) _filingOf(int id, int count) {
+    final first = _store.startIndexOf(id, _primaryAxis);
+    final last = _lastTrackOf(id, first);
+    return (
+      first: first,
+      hi: math.max(first, math.min(last, count - 1)),
+      overflows: last >= count,
+    );
+  }
+
+  /// Removes [id] from every bucket it is filed under and from the
+  /// overflow set.
   ///
   /// The bucket range is computed from the store's CURRENT span, so a
   /// caller changing an item's span de-registers BEFORE writing the new
@@ -193,11 +317,11 @@ class SpanIndex {
   /// and a stale-high value is correct-but-slower, never wrong. Only
   /// [flushPendingSorts] ever lowers it.
   void deregister(int id) {
-    final firstTrack = _store.startTrackOf(id, _primaryAxis).floor();
-    final lastTrack = _lastTrackOf(id, firstTrack);
-    _ordinalDirty.add(firstTrack);
+    final filing = _filingOf(id, _trackCount);
+    _ordinalDirty.add(filing.first);
     _ordinalById.remove(id);
-    for (var track = firstTrack; track <= lastTrack; track++) {
+    _overflow.remove(id);
+    for (var track = filing.first; track <= filing.hi; track++) {
       final bucket = _buckets[track];
       if (bucket == null) {
         continue;
@@ -214,14 +338,20 @@ class SpanIndex {
         bucket.removeAt(at);
       }
       if (bucket.isEmpty) {
-        _buckets.remove(track);
-        _maxSpanAxisExtent.remove(track);
-        _pendingSortBuckets.remove(track);
+        _dropBucket(track);
       }
     }
   }
 
-  /// The last PRIMARY-axis bucket [id]'s span touches, given its first.
+  /// Removes [track]'s emptied bucket with its aggregate and pending mark.
+  void _dropBucket(int track) {
+    _buckets.remove(track);
+    _maxSpanAxisExtent.remove(track);
+    _pendingSortBuckets.remove(track);
+  }
+
+  /// The padded last PRIMARY-axis track of [id]'s span, given its first,
+  /// uncut by the lattice.
   ///
   /// `endTrackOf` is a double sum, so a span whose parts add to a whole
   /// track can land an ulp above it (`0.78 + 2 + 0.22` is
@@ -232,7 +362,7 @@ class SpanIndex {
   /// own bucket.
   int _lastTrackOf(int id, int firstTrack) {
     final end = _store.endTrackOf(id, _primaryAxis);
-    return math.max(firstTrack, (end - precisionErrorTolerance).ceil() - 1);
+    return math.max(firstTrack, trackEndIndexOf(end) - 1);
   }
 
   /// Sorts every bucket the BULK path appended to and recomputes its
@@ -308,6 +438,7 @@ class SpanIndex {
   /// Drops every bucket.
   void clear() {
     _buckets.clear();
+    _overflow.clear();
     _maxSpanAxisExtent.clear();
     _pendingSortBuckets.clear();
     _seen.clear();
@@ -331,7 +462,8 @@ class SpanIndex {
     final primaryEnd = primaryIsRow ? rowEnd : colEnd;
     final rangeStart = (primaryIsRow ? colStart : rowStart).toDouble();
     final rangeEnd = (primaryIsRow ? colEnd : rowEnd).toDouble();
-    for (var track = primaryStart; track < primaryEnd; track++) {
+    final walkEnd = math.min(primaryEnd, _trackCount);
+    for (var track = primaryStart; track < walkEnd; track++) {
       final bucket = _buckets[track];
       if (bucket == null) {
         continue;
@@ -375,6 +507,27 @@ class SpanIndex {
         }
       }
     }
+    // The part of the range past the lattice: no bucket there lists an id
+    // beyond its first track's, so the overflow set is read instead.
+    final pastStart = math.max(primaryStart, _trackCount);
+    if (pastStart < primaryEnd) {
+      for (final id in _overflow) {
+        debugProbeCount++;
+        final first = _store.startIndexOf(id, _primaryAxis);
+        if (first >= primaryEnd || _lastTrackOf(id, first) < pastStart) {
+          continue;
+        }
+        if (!_admits(_startOf(id), _endOf(id), rangeStart, rangeEnd)) {
+          continue;
+        }
+        if (!includeExiting && _store.isExiting(id)) {
+          continue;
+        }
+        if (_seen.add(id)) {
+          into.add(id);
+        }
+      }
+    }
     return into;
   }
 
@@ -397,7 +550,8 @@ class SpanIndex {
 
   /// Whether [id]'s span covers cell `(row, col)` by the SAME two rules
   /// [itemsInRect] lists it by: the cell's primary track lies inside the
-  /// padded bucket range [register] files the id under, and the cell's
+  /// id's padded primary range, uncut by the lattice as [itemsInRect]'s
+  /// overflow scan reads it, and the cell's
   /// unit range on the span axis passes the padded admit test [_query]
   /// applies. Both rules are CALLED, not restated, so a change to either
   /// reaches this predicate for free. Reads no exiting bit; the caller
@@ -405,7 +559,7 @@ class SpanIndex {
   bool coversCell(int id, int row, int col) {
     final primaryIsRow = _primaryAxis == Axis.vertical;
     final primaryTrack = primaryIsRow ? row : col;
-    final firstTrack = _store.startTrackOf(id, _primaryAxis).floor();
+    final firstTrack = _store.startIndexOf(id, _primaryAxis);
     if (primaryTrack < firstTrack ||
         primaryTrack > _lastTrackOf(id, firstTrack)) {
       return false;
@@ -414,10 +568,29 @@ class SpanIndex {
     return _admits(_startOf(id), _endOf(id), spanTrack, spanTrack + 1.0);
   }
 
+  /// Whether an id's padded primary range is the one track [track]: its
+  /// first track by the start rule is [track], and so is its padded last
+  /// track. Reads [track]'s bucket only, which lists every such id, and
+  /// stops at the first; exiting ids count.
+  bool hasIntraTrackItemOn(int track) {
+    final bucket = _buckets[track];
+    if (bucket == null) {
+      return false;
+    }
+    for (final id in bucket) {
+      debugProbeCount++;
+      final first = _store.startIndexOf(id, _primaryAxis);
+      if (first == track && _lastTrackOf(id, first) == track) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// The item's rank among the items whose primary START track equals its
   /// own. The item vicinity's xIndex component.
   int ordinalOf(int id) {
-    final track = _store.startTrackOf(id, _primaryAxis).floor();
+    final track = _store.startIndexOf(id, _primaryAxis);
     // The rebuild call is what makes a dirty track rebuild FIRST: either
     // the track is dirty and the rebuild overwrites the id's entry before
     // the read, or it is clean and nothing registered on it since the
@@ -458,7 +631,7 @@ class SpanIndex {
     ranks = <int>[];
     if (bucket != null) {
       for (final id in bucket) {
-        if (_store.startTrackOf(id, _primaryAxis).floor() == track) {
+        if (_store.startIndexOf(id, _primaryAxis) == track) {
           ranks.add(id);
         }
       }

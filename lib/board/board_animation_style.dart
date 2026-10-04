@@ -33,17 +33,21 @@
 ///
 /// A family whose RESOLVED spec has a [Duration.zero] duration is OFF, and
 /// that kill switch DOMINATES an explicit per-call duration. There is no
-/// master switch: every family gates on its own resolved zero, so a
-/// [BoardAnimationStyle.dropSettle] glide still runs when
-/// [BoardAnimationStyle.itemSlide] is zeroed, and
+/// master switch: every family gates on its own resolved zero, so an
+/// explicitly configured [BoardAnimationStyle.dropSettle] glide still runs
+/// when [BoardAnimationStyle.itemSlide] is zeroed, and
 /// [BoardAnimationStyle.disabled] is zeros on both ROOTS rather than a flag.
 ///
 /// What a resolved zero MEANS is decided at each install site, not here
 /// (refuse the install, snap to target, or complete synchronously,
 /// depending on what the family's offset represents); this file only
-/// guarantees that the resolution reads above answer per family. Restyling
-/// a family to zero at RUNTIME is a separate transition the controller's
-/// `animationStyle` setter owns.
+/// guarantees that the resolution reads above answer per family. A REFUSED
+/// install creates no motion and destroys none: its change lands at once,
+/// and motion already in flight, of any family, keeps running from the new
+/// geometry. Restyling a family to zero at RUNTIME is a separate
+/// transition the controller's `animationStyle` setter owns: it stops, at
+/// once, the motion of every family the new style resolves to zero, and
+/// of no other.
 library;
 
 import 'package:flutter/animation.dart';

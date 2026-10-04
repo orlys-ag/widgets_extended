@@ -174,11 +174,16 @@ class ItemSlideEngine {
   /// [delta] and [extentDelta] and decays to the structural one, or
   /// COMPOSES onto an active record: each new start is the record's
   /// current interpolated value plus the argument, the clock resets, and
-  /// the spec is re-read. Returns false for a REFUSED install: a zero
-  /// family, or a zero resolved duration, leaves the item at its
-  /// structural rectangle, which for a transient delta is where it
-  /// belongs. The refusal drops BOTH deltas, never one without the
-  /// other.
+  /// the spec is re-read.
+  ///
+  /// Returns false for a REFUSED install, a zero family or a zero
+  /// resolved duration. A refusal creates no motion: the change the call
+  /// describes lands this frame, both deltas of it, never one without the
+  /// other. And it destroys none: a record already standing for [id] is
+  /// left as it is, its deltas measured from whatever structural
+  /// rectangle the item now has, and it finishes on its own clock.
+  /// Stopping motion is the restyle transition's job ([purgeWhere]),
+  /// never a side effect of another install.
   ///
   /// [relane] declares that [delta] is an intra-track shift on the lane
   /// axis (see the library doc). The composed record keeps the mark only
@@ -215,14 +220,24 @@ class ItemSlideEngine {
     return true;
   }
 
-  /// Drops every record, landing every item at its structural
-  /// RECTANGLE. The restyle-to-zero transition; the caller notifies
-  /// afterwards, and re-dirties layout when a record stood, because a
-  /// purge before a record's first tick leaves the render where the
-  /// install frame left it.
-  void purgeActive() {
-    _records.clear();
+  /// Drops every record whose family [off] answers true for, landing its
+  /// item at its structural RECTANGLE, and returns whether any went. The
+  /// restyle transition: the controller passes the families the NEW style
+  /// resolves to zero, so a family restyled to zero stops its own motion
+  /// and no other's. The caller notifies afterwards, and re-dirties
+  /// layout when a record went, because a purge before a record's first
+  /// tick leaves the render where the install frame left it.
+  bool purgeWhere(bool Function(BoardAnimationFamily family) off) {
+    var removed = false;
+    _records.removeWhere((id, record) {
+      if (off(record.family)) {
+        removed = true;
+        return true;
+      }
+      return false;
+    });
     _stopIfIdle();
+    return removed;
   }
 
   void clearForId(int id) {
@@ -250,9 +265,10 @@ class ItemSlideEngine {
     var anyCompleted = false;
     _records.forEach((id, record) {
       final spec = style.specFor(record.family);
-      // The family's zero dominates the record's explicit duration: a
-      // restyle to zero between two ticks drives every record past 1
-      // here rather than dividing by zero.
+      // The family's zero dominates the record's explicit duration. The
+      // restyle to zero purges a family's records in the setter, so this
+      // is the guard against a division by zero rather than the
+      // mechanism: a zero family drives a record past 1 here.
       final effective = spec.duration == Duration.zero
           ? Duration.zero
           : (record.explicitDuration ?? spec.duration);

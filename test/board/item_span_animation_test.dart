@@ -258,6 +258,11 @@ void main() {
   // position through the exit AND through the settle frame, then slides
   // its one lane on the itemSlide clock. On unfixed code the settle
   // frame steps it a whole lane at once.
+  //
+  // The settle installs from INSIDE a frame, the enter/exit tick, and a
+  // ticker started inside a frame takes that frame's timestamp as its
+  // start (scheduler/ticker.dart:202-205): the slide runs from the settle
+  // frame, so the next frame already shows a frame of motion.
   testWidgets("a survivor of an animated exit slides its re-lane",
       (tester) async {
     final controller = _contentLane(
@@ -290,26 +295,26 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(topOfC(), closeTo(held, 0.01));
 
-    // The settle: b's exit finishes, its lane entry is deregistered and
-    // c re-lanes 2 to 1.
+    // The settle: b's exit finishes in this frame, its lane entry is
+    // deregistered and c re-lanes 2 to 1.
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.pump(const Duration(milliseconds: 16));
     expect(controller.laneOf("c"), 1);
-    // TARGET: the re-lane is an animation, not a step.
+    // TARGET: the re-lane is an animation, not a step: the settle frame
+    // paints c where it was.
     expect(controller.anim.relaneDeltaOf(cId), const Offset(0.0, 18.0));
-    expect(topOfC(), closeTo(held, 0.5));
+    expect(topOfC(), closeTo(held, 0.01));
     await tester.pump(const Duration(milliseconds: 100));
     expect(topOfC(), closeTo(held - 9.0, 0.5));
     await tester.pump(const Duration(milliseconds: 100));
     expect(topOfC(), closeTo(held - 18.0, 0.01));
     expect(controller.anim.relaneDeltaOf(cId), Offset.zero);
     await tester.pumpAndSettle();
-    // SEEDED, SKIPPED: this is the repro for N7, red on the tree that
-    // seeded it. Both TARGET assertions were shown to fail on their own:
-    // `relaneDeltaOf` reads zero where one lane is required, and the
-    // painted top steps the whole lane in the settle frame. Unskip with
-    // the fix that gives the exit settle a capture site.
-  }, skip: true);
+    // Seeded skipped as the repro for N7 and unskipped with item 5A of
+    // the board audit fixes, which gives the exit settle a capture site.
+    // Both TARGET assertions were red on the tree item 4 left:
+    // `relaneDeltaOf` read zero where one lane is required, and the
+    // painted top stepped the whole lane in the settle frame.
+  });
 
   // T0. The engine's own contract, the one case that reaches it directly
   // (no test imported `_item_slide_engine.dart` before this one).
@@ -436,7 +441,9 @@ void main() {
 
     // The records installed above are still in flight; purge stops the
     // ticker, which is what the widget-tree cases get from a settle.
-    engine.purgeActive();
+    engine.purgeWhere((family) {
+      return true;
+    });
     expect(vsync.ticker!.isActive, isFalse);
   });
 
@@ -1150,6 +1157,11 @@ void main() {
       "t",
       const BoardSpan(rowStart: 0, colStart: 3),
     );
+    await tester.pump();
+    // One more frame before the count: the two mutations are structural,
+    // so the drag re-resolves after the frame (item 7F), and its re-send
+    // of the unchanged preview bumps the make-room generation, which the
+    // router lays out once for.
     await tester.pump();
     final settled = viewport.debugPerformLayoutCount;
     await tester.pump(const Duration(milliseconds: 16));

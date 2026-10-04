@@ -427,14 +427,15 @@ void main() {
       expect(controller.primaryAxis, Axis.vertical);
 
       // The unknown-key READ answers, beside the live ones this case
-      // already asserts: reads answer their defaults and only contains
-      // discriminates.
+      // already asserts. The lane reads answered their live defaults, 0
+      // and 1, until item 7J of the 2026-09-23 audit fixes made them
+      // answer null, as spanOf and itemOf do.
       expect(controller.spanOf("ghost"), isNull);
       expect(controller.itemOf("ghost"), isNull);
       expect(controller.contains("ghost"), isFalse);
       expect(controller.isDragging("ghost"), isFalse);
-      expect(controller.laneOf("ghost"), 0);
-      expect(controller.laneCountOf("ghost"), 1);
+      expect(controller.laneOf("ghost"), isNull);
+      expect(controller.laneCountOf("ghost"), isNull);
 
       controller.addItem(const _Item("wide"), _chip(1, 1, 3));
       controller.addItem(

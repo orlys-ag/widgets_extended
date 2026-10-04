@@ -36,7 +36,6 @@ void main() {
         BoardAnimationSpec,
         BoardAnimationStyle,
         BoardAnimationFamily,
-        BoardAnimationReader,
         BoardRenderPort,
         RenderBoardViewport,
         BoardBackgroundPainter,
@@ -56,11 +55,14 @@ void main() {
         BoardSelectionMode,
         BoardResizeEdges,
         BoardSelection,
-        BoardDragController,
         BoardDropTarget,
         BoardDragKind,
       ];
-      expect(types, hasLength(36));
+      // 34 since item 7S of the 2026-09-23 audit fixes, which took
+      // BoardDragController off the barrel: no app can reach the board's
+      // instance. Item 7K took BoardAnimationReader, the type of an
+      // internal getter, off before it.
+      expect(types, hasLength(34));
       // The three typedefs are not type literals; a nullable declaration
       // per name is the compile-level reference.
       BoardCellBuilder<String, Object?>? cellBuilder;
@@ -111,7 +113,7 @@ void main() {
         shown.add(name.trim());
       }
     }
-    expect(shown, hasLength(39));
+    expect(shown, hasLength(37));
     const internals = <String>{
       "BoardStore",
       "SpanIndex",
@@ -126,6 +128,20 @@ void main() {
       "BoardDropResolver",
       "BoardDropFitter",
       "BoardAutoScroller",
+      // The controller's internal members (item 7K) and the type of the
+      // one that returns the animation reader.
+      "BoardControllerInternals",
+      "BoardAnimationReader",
+      // The board's own drag controller (item 7S) and the presence class
+      // behind `BoardItemView.presence` (item 7Q), public only as an
+      // `Animation<double>`.
+      "BoardDragController",
+      "BoardItemPresence",
+      // The frozen-band bounds and extents of an axis config.
+      "BoardAxisConfigBands",
+      // The record `BoardRenderPort.trackSampleAt` answers with, readable
+      // through its fields without the name.
+      "BoardAxisSample",
     };
     expect(shown.intersection(internals), isEmpty);
 

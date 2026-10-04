@@ -139,6 +139,120 @@ int _topmostMountedTrack(WidgetTester tester) {
   return best;
 }
 
+/// Rejections that reach the pass ceiling on the first layout of the
+/// ceiling board: with no content-sized axis every pass returns a zero
+/// correction and calls `applyContentDimensions`, so each rejection is one
+/// stagnant pass, and the call after the ceiling is accepted.
+const int _ceilingRejections = 5;
+
+/// A vertical controller whose position answers `false` from
+/// `applyContentDimensions`, the contract's "lay out again" answer, for
+/// the first [rejections] calls, and defers to the stock position after.
+class _RejectingController extends ScrollController {
+  _RejectingController({required this.rejections});
+
+  /// Rejections still to answer.
+  int rejections;
+
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) {
+    return _RejectingPosition(
+      owner: this,
+      physics: physics,
+      context: context,
+      initialPixels: initialScrollOffset,
+      keepScrollOffset: keepScrollOffset,
+      oldPosition: oldPosition,
+      debugLabel: debugLabel,
+    );
+  }
+}
+
+class _RejectingPosition extends ScrollPositionWithSingleContext {
+  _RejectingPosition({
+    required this.owner,
+    required super.physics,
+    required super.context,
+    super.initialPixels,
+    super.keepScrollOffset,
+    super.oldPosition,
+    super.debugLabel,
+  });
+
+  final _RejectingController owner;
+
+  @override
+  bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    // Records the extents as a stock position does, so a rejection only
+    // asks for another pass and never leaves the dimensions unset.
+    final accepted = super.applyContentDimensions(
+      minScrollExtent,
+      maxScrollExtent,
+    );
+    if (owner.rejections > 0) {
+      owner.rejections -= 1;
+      return false;
+    }
+    return accepted;
+  }
+}
+
+/// Pumps a 300 x 300 board of 12 rows of 200 by 3 columns of 100, both
+/// axes fixed, whose vertical position rejects [rejections] content
+/// dimension calls, and takes the ceiling report its first layout makes.
+///
+/// The first layout's window ends at 550, the viewport plus the default
+/// cache extent, so it builds rows 0 to 2 only.
+Future<_RejectingController> _pumpCeilingBoard(
+  WidgetTester tester, {
+  int rejections = _ceilingRejections,
+}) async {
+  final controller = BoardController<String, _Item>(
+    vsync: tester,
+    rows: BoardAxisConfig(axis: UniformAxis(12, 200.0)),
+    columns: BoardAxisConfig(axis: UniformAxis(3, 100.0)),
+    keyOf: (item) {
+      return item.key;
+    },
+    animationStyle: BoardAnimationStyle.disabled,
+  );
+  addTearDown(controller.dispose);
+  final vertical = _RejectingController(rejections: rejections);
+  addTearDown(vertical.dispose);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 300.0,
+            height: 300.0,
+            child: Board<String, _Item>(
+              controller: controller,
+              verticalDetails: ScrollableDetails.vertical(controller: vertical),
+              cellBuilder: (context, cell) {
+                return Text("r${cell.row}c${cell.col}");
+              },
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  expect(
+    tester.takeException()?.toString(),
+    contains("STAGNANT placement passes"),
+    reason:
+        "The first layout must reach the pass ceiling and report it, or "
+        "the assertions after this one are about a layout that settled.",
+  );
+  return vertical;
+}
+
 void main() {
   const double scrollUpBy = 300.0;
   const double startOffset = 20000.0;
@@ -298,6 +412,56 @@ void main() {
       reason:
           "A cap that is routinely hit is a convergence bug, not a "
           "slow path.",
+    );
+  });
+
+  // A layout that reaches the stagnant-pass ceiling reports and finishes:
+  // the child manager's pass closes and the cells it built stay mounted.
+  // Falsification: throwing at the ceiling leaves `r0c0` unbuilt.
+  testWidgets("a layout that reaches the pass ceiling reports it and keeps "
+      "its cells", (tester) async {
+    await _pumpCeilingBoard(tester);
+
+    expect(
+      find.text("r0c0"),
+      findsOneWidget,
+      reason:
+          "The layout that reached the ceiling must still close its child "
+          "manager's pass, or the cells it built are unreachable from the "
+          "element tree.",
+    );
+  });
+
+  // The layout after a ceiling layout starts a fresh child manager pass
+  // and builds the rows it scrolls to.
+  // Falsification: throwing at the ceiling fails this layout's
+  // `_startLayout` assert.
+  testWidgets("the layout after a ceiling layout runs clean", (tester) async {
+    final vertical = await _pumpCeilingBoard(tester);
+
+    expect(
+      find.text("r6c0"),
+      findsNothing,
+      reason:
+          "Row 6, at 1200 to 1400, must lie outside the first layout's "
+          "window, or the target below does not show that only the next "
+          "layout built it.",
+    );
+    vertical.jumpTo(1200.0);
+    await tester.pump();
+
+    expect(
+      tester.takeException(),
+      isNull,
+      reason:
+          "A layout after the ceiling must start a fresh child manager "
+          "pass; the ceiling layout must not leave its pass open.",
+    );
+    expect(
+      find.text("r6c0"),
+      findsOneWidget,
+      reason:
+          "The layout after the ceiling must build the rows it scrolled to.",
     );
   });
 }

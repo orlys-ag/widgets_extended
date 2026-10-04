@@ -209,17 +209,21 @@ void main() {
     );
   });
 
-  // F12, the in-range half: at offset 20 the visible window is rows 0..4,
-  // so row 0 is iterated, but its rect must sit where its frozen child
-  // paints (top 0), not at the scrolled position (top -20). Unfixed: the
-  // top is -20.0 and the grid line for row 0 is drawn there.
+  // F12, the in-range half: at offset 20 row 0's SCROLLED position (top
+  // -20) would still be on screen, but its rect must sit where its frozen
+  // child paints (top 0). Unfixed: the top is -20.0 and the grid line for
+  // row 0 is drawn there. Since the audit fixes' item 3 the visible range
+  // leaves a frozen row out altogether, reporting it through
+  // frozenTracksOf alone, which is what makes it drawn once.
   testWidgets(
     "F12 a frozen row inside the visible window is positioned in the band",
     (tester) async {
       final log = await _pumpFrozenBoard(tester, initialScrollOffset: 20.0);
       final capture = log.last;
-      // Setup sanity: row 0 is inside the scrolled window.
-      expect(capture.firstRow, 0);
+      // Setup sanity: the frozen row comes from frozenTracksOf, and the
+      // scrolled range starts below the band.
+      expect(capture.firstRow, 1);
+      expect(capture.frozenRows, <int>[0]);
 
       expect(capture.row0Tops, <double>[0.0, 0.0, 0.0]);
       final ys = _horizontalLineYs(capture.lines).toList();

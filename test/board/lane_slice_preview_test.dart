@@ -617,9 +617,12 @@ void main() {
       // A lead-only slide on ANOTHER item, between columns that touch
       // neither a's nor d's, so something ticks while the preview
       // stands settled. The pump that absorbs the mutation also absorbs
-      // the one admitted-bound layout its 40px lead forces; the count is
-      // read after it.
+      // the one admitted-bound layout its 40px lead forces, and the next
+      // one the layout the drag's structural re-resolve costs (item 7F:
+      // its re-send of the unchanged preview bumps the make-room
+      // generation); the count is read after both.
       controller.moveItem("e", const BoardSpan(rowStart: 4, colStart: 1));
+      await tester.pump();
       await tester.pump();
       final settled = viewport.debugPerformLayoutCount;
       await tester.pump(const Duration(milliseconds: 16));

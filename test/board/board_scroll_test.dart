@@ -261,6 +261,75 @@ void main() {
     },
   );
 
+  // Bands that overlap: `frozenStart` and `frozenEnd` of 3 on 5 rows. The
+  // leading band keeps rows 0 to 2 and the trailing band only rows 3 and
+  // 4, so the trailing inset `animateScrollToCell` aligns against is those
+  // two rows, 200, and not the 300 that `frozenEnd` alone would count. An
+  // alignment of 0.5 is what makes the inset matter: an alignment of 0.0
+  // multiplies it by zero.
+  testWidgets(
+    "overlapping frozen bands inset animateScrollToCell by the trailing "
+    "band's own tracks",
+    (tester) async {
+      final controller = BoardController<String, _Item>(
+        vsync: tester,
+        rows: BoardAxisConfig(
+          axis: UniformAxis(5, 100.0),
+          frozenStart: 3,
+          frozenEnd: 3,
+        ),
+        columns: BoardAxisConfig(axis: UniformAxis(3, 100.0)),
+        keyOf: (item) {
+          return item.key;
+        },
+        animationStyle: BoardAnimationStyle.disabled,
+      );
+      addTearDown(controller.dispose);
+      final vertical = ScrollController();
+      addTearDown(vertical.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 300.0,
+                height: 300.0,
+                child: Board<String, _Item>(
+                  controller: controller,
+                  verticalDetails: ScrollableDetails.vertical(
+                    controller: vertical,
+                  ),
+                  cellBuilder: (context, cell) {
+                    return const SizedBox.expand();
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      // Setup sanity: the leading band is the three leading rows, and the
+      // scroll range is the rows' total less the 300 px viewport.
+      expect(controller.frozenInsetOf(Axis.vertical), 300.0);
+      expect(vertical.position.maxScrollExtent, 200.0);
+
+      final landed = controller.animateScrollToCell(
+        2,
+        0,
+        rowAlignment: 0.5,
+        duration: Duration.zero,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(await landed, isTrue);
+      // The painted target is 300 + 0.5 * (300 - 300 - 200 - 100) = 150,
+      // so row 2's offset of 200 lands at 200 - 150.
+      expect(vertical.position.pixels, 50.0);
+    },
+  );
+
   // AC9's correction-versus-driven-scroll pairing.
   // Asserts: a LazyContentAxis whose estimate is deliberately wrong, so
   // tracks measured DURING the scroll keep correcting pixels while the

@@ -42,14 +42,25 @@ typedef MakeRoomHandOff = ({Duration remaining, Curve curve});
 
 /// The TAIL of a curve from [_from]: maps `[0, 1]` onto the curve's
 /// `[from, 1]` segment, renormalised, so a motion interrupted at [_from]
-/// and re-run on this curve over its remaining time traces exactly what
-/// the uninterrupted curve would have, with no velocity kink at the
-/// join. A curve sitting exactly at 1 by [_from] has no tail and reports
-/// 1. A curve ABOVE 1 at [_from] (an overshoot, `Curves.easeOutBack`
-/// past its midpoint) has a NEGATIVE span, and the division renormalises
-/// that segment from above 1 back down to 1, which is the tail the
-/// uninterrupted curve would have traced; treating it as "no tail" would
+/// and re-run on this curve over its remaining time traces what the
+/// uninterrupted curve would have, with no velocity kink at the join. A
+/// curve sitting exactly at 1 by [_from] has no tail and reports 1. A
+/// curve ABOVE 1 at [_from] (an overshoot, `Curves.easeOutBack` past its
+/// midpoint) has a NEGATIVE span, and the division renormalises that
+/// segment from above 1 back down to 1; treating it as "no tail" would
 /// report 1 at every clock and step the continuation to rest.
+///
+/// CLAMPED TO `[0, 1]`. The hand-off continues EVERY discarded motion on
+/// this one tail, the earliest clock's, and the renormalisation is exact
+/// only for a motion on that clock. For one on a later clock, under a
+/// curve that leaves `[0, 1]` in the segment, a small span (the curve
+/// near 1 at [_from]) multiplies its residual: a neighbour settling back
+/// from an overshoot was carried several times its residual past its
+/// rest. Clamped, a continuation approaches its rest from where it
+/// painted and never passes it, whatever clock it was on. Inside
+/// `[0, 1]` nothing changes; the motion on the earliest clock loses only
+/// the part of its own overshoot beyond its rest or beyond where it
+/// painted.
 class _CurveTail extends Curve {
   const _CurveTail(this._inner, this._from);
 
@@ -63,7 +74,8 @@ class _CurveTail extends Curve {
     if (span.abs() <= 1e-9) {
       return 1.0;
     }
-    return (_inner.transform(_from + (1.0 - _from) * t) - at) / span;
+    final value = (_inner.transform(_from + (1.0 - _from) * t) - at) / span;
+    return value.clamp(0.0, 1.0);
   }
 }
 
@@ -238,9 +250,51 @@ class MakeRoomEngine {
 
   /// The CAPTURED clock the offsets, extents and slots run on, resolved
   /// beside [_curve] at the two declaring sites from the caller's
-  /// argument or the live spec. The live spec's ZERO still dominates at
-  /// the tick and the snap, as the kill switch does at the install.
+  /// argument or the live spec and adopted through [_adoptClock]. The
+  /// live spec's ZERO still dominates at the tick and the snap, as the
+  /// kill switch does at the install.
   Duration _duration = Duration.zero;
+
+  /// Makes [curve] and [duration] the clock every entry runs on.
+  ///
+  /// ONE clock serves every entry, so replacing it re-reads each entry
+  /// still in motion on a curve and a duration it never ran on: its value
+  /// jumps, and its remainder runs on the new clock from the old one's
+  /// position. On a CHANGE, every offset, extent and slot still in motion
+  /// is therefore re-based first, its current value on the old clock
+  /// becoming its `from` and its clock restarting at 0, so it paints
+  /// where it did and finishes on the new one. An unchanged clock touches
+  /// nothing, which the idempotent install depends on.
+  void _adoptClock(Curve curve, Duration duration) {
+    if (curve == _curve && duration == _duration) {
+      return;
+    }
+    for (final entry in _held.values) {
+      if (!entry.snapped && entry.t < 1.0) {
+        entry
+          ..from = _valueOf(entry)
+          ..t = 0.0;
+      }
+    }
+    _heldExtent.forEach((id, entry) {
+      if (!entry.snapped && entry.t < 1.0) {
+        entry
+          ..from = extentDeltaOf(id)
+          ..t = 0.0;
+      }
+    });
+    for (final slots in _slots.values) {
+      for (final slot in slots) {
+        if (!slot.snapped && slot.t < 1.0) {
+          slot
+            ..from = _valueOfSlot(slot)
+            ..t = 0.0;
+        }
+      }
+    }
+    _curve = curve;
+    _duration = duration;
+  }
 
   bool get hasActive {
     return _held.isNotEmpty;
@@ -478,8 +532,7 @@ class MakeRoomEngine {
     final spec = _styleOf().effectiveMakeRoom;
     final resolved = duration ?? spec.duration;
     final snap = spec.duration == Duration.zero || resolved == Duration.zero;
-    _curve = curve ?? spec.curve;
-    _duration = resolved;
+    _adoptClock(curve ?? spec.curve, resolved);
     // The dry run needs lane geometry; without it nothing is laned and
     // no gap exists to open, but the EXTENT preview below still does.
     final dry = laneAxis == null
@@ -649,7 +702,7 @@ class MakeRoomEngine {
       // method already has: the TRACK from `prospective` on the lane
       // axis, the LANE from the dry run, present exactly when the run
       // laned the dragged id.
-      final prospectiveTrack = prospective.startTrackOn(laneAxis).floor();
+      final prospectiveTrack = trackIndexOf(prospective.startTrackOn(laneAxis));
       final desiredLane = dry[draggedId]?.lane;
       _slots.forEach((track, slots) {
         for (final slot in slots) {
@@ -776,8 +829,7 @@ class MakeRoomEngine {
       _notifyNow();
       return;
     }
-    _curve = curve ?? spec.curve;
-    _duration = resolved;
+    _adoptClock(curve ?? spec.curve, resolved);
     _held.forEach((id, entry) {
       final current = _valueOf(entry);
       entry

@@ -18,6 +18,7 @@
 /// on its anchor cell.
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
@@ -150,9 +151,14 @@ void main() {
         .single;
     expect(viewport.verticalPosition!.maxScrollExtent, greaterThan(0.0));
     final origin = tester.getRect(find.byType(Board<String, _Item>)).topLeft;
-    // ONE move, from the centre of cell (2, 2) one row down.
+    // ONE move, from the centre of cell (2, 2) one row down. A STYLUS:
+    // since item 7I of the 2026-09-23 audit fixes only a precise pointer
+    // starts a range at once, touch after a long press, and a stylus is
+    // one the scrollable also drags with, which keeps the arena contest
+    // this case is about.
     final gesture = await tester.startGesture(
       origin + viewport.rectOfCell(2, 2)!.center,
+      kind: PointerDeviceKind.stylus,
     );
     await gesture.moveBy(const Offset(0.0, 50.0));
     await tester.pump();

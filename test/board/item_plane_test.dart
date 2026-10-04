@@ -181,7 +181,8 @@ void main() {
       controller.addItem(const _Item("early"), _chip(1, 0, 1));
       await tester.pump();
       expect(controller.vicinityOrdinalOfId(idA), 1);
-      // All three still build: the shift re-keyed, not dropped.
+      // All three still build: the shift moved a's vicinity, and its
+      // element with it, not dropped it.
       expect(find.byKey(_itemKey("a")), findsOneWidget);
       expect(find.byKey(_itemKey("b")), findsOneWidget);
       expect(find.byKey(_itemKey("early")), findsOneWidget);

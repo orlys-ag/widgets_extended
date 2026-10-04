@@ -258,7 +258,7 @@ void main() {
       onTick: () {},
     );
     addTearDown(animator.dispose);
-    animator.animateTrackResize(Axis.vertical, 1, 20.0, 30.0);
+    animator.animateTrackResize(Axis.vertical, 1, 30.0);
     // Builds the prefix, capturing settled 20.
     expect(animator.offsetShiftBetween(Axis.vertical, 0, 2), isNotNull);
     // Setup sanity: a second read with nothing changed is served from

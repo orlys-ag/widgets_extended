@@ -632,4 +632,73 @@ void main() {
       return BoardAxisConfig(axis: UniformAxis(6, 40.0), lanePadding: -1.0);
     }, throwsAssertionError);
   });
+
+  group("BoardAxisConfigBands", () {
+    test("with no band, both bounds sit at the axis ends and no track is "
+        "frozen", () {
+      final config = BoardAxisConfig(axis: LazyContentAxis(4, 100.0));
+      expect(config.leadingBandEnd, 0);
+      expect(config.trailingBandStart, 4);
+      expect(config.frozenTracks.toList(), isEmpty);
+      for (var track = 0; track < 4; track++) {
+        expect(config.isFrozenTrack(track), isFalse);
+      }
+    });
+
+    test("with no band, both extents are zero and the trailing one reads "
+        "no prefix sum", () {
+      final axis = LazyContentAxis(4, 100.0);
+      final config = BoardAxisConfig(axis: axis);
+      expect(config.leadingBandExtent, 0.0);
+      axis.debugFenwick.debugOpCount = 0;
+      final trailing = config.trailingBandExtent;
+      final operations = axis.debugFenwick.debugOpCount;
+      expect(trailing, 0.0);
+      // This axis answers `totalExtent` and `offsetOf` from prefix sums, so
+      // only the no-band return keeps the count at zero.
+      expect(operations, 0);
+    });
+
+    test("disjoint bands bound, list and measure their own tracks", () {
+      // Distinct extents, so an extent derived from the first track's
+      // alone is told from the axis's own offset.
+      final axis = ExplicitAxis(<double>[
+        10.0,
+        20.0,
+        30.0,
+        40.0,
+        50.0,
+        60.0,
+        70.0,
+        80.0,
+        90.0,
+        100.0,
+      ]);
+      final config = BoardAxisConfig(axis: axis, frozenStart: 2, frozenEnd: 3);
+      expect(config.leadingBandEnd, 2);
+      expect(config.trailingBandStart, 7);
+      expect(config.leadingBandExtent, axis.offsetOf(2));
+      expect(config.trailingBandExtent, axis.totalExtent - axis.offsetOf(7));
+      expect(config.frozenTracks.toList(), <int>[0, 1, 7, 8, 9]);
+      expect(config.isFrozenTrack(1), isTrue);
+      expect(config.isFrozenTrack(7), isTrue);
+      expect(config.isFrozenTrack(2), isFalse);
+      expect(config.isFrozenTrack(6), isFalse);
+    });
+
+    test("overlapping bands leave the shared tracks to the leading band", () {
+      final axis = ExplicitAxis(<double>[10.0, 20.0, 30.0, 40.0, 50.0]);
+      final config = BoardAxisConfig(axis: axis, frozenStart: 3, frozenEnd: 3);
+      expect(config.trailingBandStart, 3);
+      expect(config.trailingBandExtent, axis.totalExtent - axis.offsetOf(3));
+    });
+
+    test("a band extent reads the axis's current measurements", () {
+      final axis = LazyContentAxis(4, 100.0);
+      final config = BoardAxisConfig(axis: axis, frozenStart: 1);
+      expect(config.leadingBandExtent, 100.0);
+      axis.recordMeasurement(0, 40.0);
+      expect(config.leadingBandExtent, 40.0);
+    });
+  });
 }

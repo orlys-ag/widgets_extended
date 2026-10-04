@@ -8,6 +8,7 @@
 /// Landed at Landing Order step 11 with the interaction layer.
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
@@ -69,7 +70,12 @@ void main() {
     );
 
     // Cell centers: (1,1) is (60, 75); (3,4) is (180, 175).
-    final gesture = await tester.startGesture(const Offset(60.0, 75.0));
+    // A mouse, which starts a range at once; touch needs a long press
+    // (item 7I of the 2026-09-23 audit fixes).
+    final gesture = await tester.startGesture(
+      const Offset(60.0, 75.0),
+      kind: PointerDeviceKind.mouse,
+    );
     await tester.pump();
     await gesture.moveTo(const Offset(180.0, 175.0));
     await tester.pump();

@@ -15,6 +15,8 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/animation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -60,8 +62,8 @@ abstract interface class BoardAnimationReader<TKey> {
   /// admitted; a tick exceeding either forces layout.
   ({double dx, double dy}) get composedOffsetBound;
 
-  /// Animated extent of a track during a trackResize; the settled extent
-  /// otherwise.
+  /// Animated extent of a track during a trackResize, never below zero;
+  /// the settled extent otherwise.
   double animatedExtentOf(Axis axis, int track);
 
   bool get hasActiveTrackResize;
@@ -97,7 +99,8 @@ abstract interface class BoardAnimationReader<TKey> {
 
   /// The hand-off the last make-room snap published: the clock left on
   /// the unsnapped motion it discarded and the curve tail to run it on,
-  /// or null when that snap discarded nothing unsnapped. Read by the
+  /// clamped to `[0, 1]` so no continuation passes its rest, or null
+  /// when that snap discarded nothing unsnapped. Read by the
   /// render's track-sizing hand-off arm and by the drag layer's commit,
   /// which continue the discarded motion on it.
   MakeRoomHandOff? get makeRoomHandOff;
@@ -163,11 +166,14 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     prospectiveExtentOf,
     required int Function(int id) laneOfId,
     required int Function(int id) laneCountOfId,
+    required VoidCallback? Function(int id) captureSettleRelanes,
   }) : _store = store,
        _spanIndex = spanIndex,
        _lanes = lanes,
        _fireStructural = fireStructural,
-       _listeners = listeners {
+       _listeners = listeners,
+       _captureSettleRelanes = captureSettleRelanes,
+       _styleOf = styleOf {
     trackResize = TrackResizeAnimator(
       vsync: vsync,
       styleOf: styleOf,
@@ -178,8 +184,8 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
       vsync: vsync,
       styleOf: styleOf,
       isExitingOf: isExitingItem,
-      onSettle: finalizeEnterExit,
-      onTick: notifyCoalesced,
+      onSettle: _settleOnClock,
+      onTick: _onEnterExitTick,
     );
     slide = ItemSlideEngine(
       vsync: vsync,
@@ -210,12 +216,33 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   /// the coalescing state has one owner.
   final List<VoidCallback> _listeners;
 
+  /// The controller's capture of an exiting id's lane bucket, asked by
+  /// [_settleOnClock] before the id leaves the indices. It returns the
+  /// relane install to run once the lanes re-resolve, or null.
+  final VoidCallback? Function(int id) _captureSettleRelanes;
+
+  /// The live style, for [reverseExit]'s zero test; the sub-sources read
+  /// the same callback.
+  final BoardAnimationStyle Function() _styleOf;
+
   late final TrackResizeAnimator trackResize;
   late final ItemEnterExitAnimator enterExit;
   late final ItemSlideEngine slide;
   late final MakeRoomEngine makeRoom;
 
   bool _dispatchScheduled = false;
+
+  /// The presence of each id an item builder has been handed one for,
+  /// created at the id's first build and released with the id in
+  /// [clearForId], so one incarnation keeps one presence.
+  final Map<int, BoardItemPresence> _presences = <int, BoardItemPresence>{};
+
+  /// The presences whose value or status may have moved since the last
+  /// flush; [_flushPresences] notifies the ones that did.
+  final Set<BoardItemPresence> _dirtyPresences = <BoardItemPresence>{};
+
+  bool _presenceFlushScheduled = false;
+  bool _disposed = false;
 
   // ------------------------------------------------------------ reader
 
@@ -366,11 +393,77 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
 
   // -------------------------------------------------------- installers
 
+  // ---------------------------------------------------------- presence
+
+  /// The enter/exit ramp of [id]'s incarnation as an animation, the one
+  /// `BoardItemView.presence` carries: the same object for every build of
+  /// the incarnation, so a transition built on it keeps its listener
+  /// across a rebuild.
+  BoardItemPresence presenceOf(int id) {
+    return _presences[id] ??= BoardItemPresence._(this, id);
+  }
+
+  /// Marks [id]'s presence, if one was handed out, for the next flush.
+  /// Every site that moves a ramp or a bit calls it: the three
+  /// installers, the enter settle, and [_onEnterExitTick] for every id
+  /// holding a record; [clearForId] marks the presence it releases.
+  void _markPresence(int id) {
+    final presence = _presences[id];
+    if (presence != null) {
+      _dirtyPresences.add(presence);
+      _schedulePresenceFlush();
+    }
+  }
+
+  /// One flush per microtask. After a tick it runs in the
+  /// `midFrameMicrotasks` phase, before the frame builds; after a
+  /// mutation, once the mutation's caller has returned. Either way no
+  /// listener runs inside a mutation or the animator's settle loop, and a
+  /// compound change reaches listeners as its END state: a mid-enter
+  /// removal finalizes the enter and then installs the exit, and its
+  /// presence reports `reverse`, never a `completed` in between.
+  void _schedulePresenceFlush() {
+    if (_presenceFlushScheduled) {
+      return;
+    }
+    _presenceFlushScheduled = true;
+    scheduleMicrotask(_flushPresences);
+  }
+
+  void _flushPresences() {
+    _presenceFlushScheduled = false;
+    if (_disposed || _dirtyPresences.isEmpty) {
+      return;
+    }
+    final dirty = List<BoardItemPresence>.of(_dirtyPresences);
+    _dirtyPresences.clear();
+    for (final presence in dirty) {
+      presence._notifyChanges();
+    }
+  }
+
+  /// The enter/exit animator's per-tick hook: marks the presence of
+  /// every id still holding a record, the ones that settled on this tick
+  /// having been marked by their settle, then dispatches. The walk is
+  /// the animator's records, not the presences, so a frame costs the
+  /// ramps running and nothing more.
+  void _onEnterExitTick() {
+    if (_presences.isNotEmpty) {
+      for (final id in enterExit.activeIds) {
+        _markPresence(id);
+      }
+    }
+    notifyCoalesced();
+  }
+
+  // -------------------------------------------------------- installers
+
   /// Installs an enter ramp and sets the entering bit, in one site, so
   /// the bit and the record cannot disagree.
   void animateEnter(int id) {
     _store.setFlag(id, BoardStore.enteringBit, true);
     enterExit.animateEnter(id, family: BoardAnimationFamily.itemEnterExit);
+    _markPresence(id);
   }
 
   /// Installs an exit ramp from [from] and sets the exiting bit, in one
@@ -383,15 +476,58 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
       family: BoardAnimationFamily.itemEnterExit,
       from: from,
     );
+    _markPresence(id);
+  }
+
+  /// REVERSES an exit in flight: the item comes back as the same id. Reads
+  /// the ramp the exit has reached, clears the exiting bit, and under a
+  /// non-zero itemEnterExit family sets the entering bit and installs an
+  /// enter from that value; under a zero one drops the record, the item
+  /// live at full. One site for the pair of bit writes, as the installers
+  /// are, so the bits and the record cannot disagree: afterwards exactly
+  /// the entering bit is set, or neither.
+  void reverseExit(int id) {
+    assert(
+      _store.isExiting(id) && !_store.isEntering(id),
+      "reverseExit($id): the id is not exiting.",
+    );
+    final ramp = enterExit.progressOf(id);
+    _store.setFlag(id, BoardStore.exitingBit, false);
+    _markPresence(id);
+    if (_styleOf().effectiveItemEnterExit.duration == Duration.zero) {
+      enterExit.clearForId(id);
+      return;
+    }
+    _store.setFlag(id, BoardStore.enteringBit, true);
+    enterExit.animateEnter(
+      id,
+      family: BoardAnimationFamily.itemEnterExit,
+      from: ramp,
+    );
   }
 
   /// The one synchronous retire door: sets the exiting bit and finalizes
   /// in the same statement, so the handler sees exactly the state a
-  /// settled exit hands it. Setting an already-set bit is idempotent,
-  /// which is what lets the re-add door share this path.
-  void retireExitNow(int id, {bool deliver = true}) {
+  /// settled exit hands it. It finalizes on the DEFERRED arm: its callers
+  /// are mutator entries whose own notification drains after this
+  /// release, so at that drain the retired id's own lane change resolves
+  /// to no key, and is skipped, or to the key that took the id back off
+  /// the free list since, which that key's own add names anyway.
+  void retireExitNow(int id) {
     _store.setFlag(id, BoardStore.exitingBit, true);
-    finalizeEnterExit(id, deliver: deliver);
+    finalizeEnterExit(id, deliver: false);
+  }
+
+  /// The enter/exit clock's settle: [finalizeEnterExit] on the delivered
+  /// arm, and for an EXIT, the survivors' relane around it. An animated
+  /// exit keeps its id and its lane until here, so this is where its
+  /// survivors re-lane, and it is not a mutation door that could capture
+  /// them: the controller's callback captures their rectangles while the
+  /// id still holds its lane, and the handler runs the install it returns
+  /// once the lanes have re-resolved.
+  void _settleOnClock(int id) {
+    final relanes = _store.isExiting(id) ? _captureSettleRelanes(id) : null;
+    finalizeEnterExit(id, relanes: relanes);
   }
 
   /// The completion handler: the ONLY code that clears the entering or
@@ -400,12 +536,21 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   ///
   /// EXIT branch, in order: de-register from both indices (marking the
   /// lane bucket dirty), clear the bit, then on the DELIVERED arm flush,
-  /// drain minus the retired key, release, fire; on the DEFERRED arm
-  /// ([deliver] false: a mutator entry whose own notification drains
-  /// later, or dispose) release first and let the drain's null-key filter
-  /// drop the retired id. ENTER branch: clear the bit, drop the record,
-  /// stop.
-  void finalizeEnterExit(int id, {bool deliver = true}) {
+  /// drain minus the retired key, release, run [relanes], fire; on the
+  /// DEFERRED arm ([deliver] false: a mutator entry whose own
+  /// notification drains later, or dispose) release first and let the
+  /// drain's null-key filter drop the retired id. ENTER branch: clear the
+  /// bit, drop the record, stop.
+  ///
+  /// [relanes] is the clock settle's survivor install, run BEFORE the
+  /// notification so that no listener can mutate the board between the
+  /// lanes the capture was measured against and the install. Only the
+  /// delivered arm runs it; no deferred caller passes one.
+  void finalizeEnterExit(
+    int id, {
+    bool deliver = true,
+    VoidCallback? relanes,
+  }) {
     final exiting = _store.isExiting(id);
     final entering = _store.isEntering(id);
     assert(
@@ -419,6 +564,7 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     if (entering) {
       _store.setFlag(id, BoardStore.enteringBit, false);
       enterExit.clearForId(id);
+      _markPresence(id);
       return;
     }
     final key = _store.keyOf(id);
@@ -439,9 +585,15 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
         _store.release(key);
       }
       clearForId(id);
+      relanes?.call();
       _fireStructural(affected);
       return;
     }
+    assert(
+      relanes == null,
+      "finalizeEnterExit($id): a relane install on the deferred arm, "
+      "whose caller notifies later and captures for itself.",
+    );
     if (key != null) {
       _store.release(key);
     }
@@ -453,10 +605,21 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   /// and on the allocation path when the store reports a recycled id;
   /// without both, a recycled id paints a fresh item at a dead one's
   /// residual delta.
+  ///
+  /// It also RELEASES the id's presence: the release path is the one
+  /// every retire reaches, and the allocation path finds none left, so a
+  /// presence ends with its incarnation and never follows the id's next
+  /// occupant.
   void clearForId(int id) {
     slide.clearForId(id);
     makeRoom.clearForId(id);
     enterExit.clearForId(id);
+    final presence = _presences.remove(id);
+    if (presence != null) {
+      presence._released = true;
+      _dirtyPresences.add(presence);
+      _schedulePresenceFlush();
+    }
   }
 
   // ---------------------------------------------------------- dispatch
@@ -492,12 +655,30 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     _dispatch();
   }
 
+  /// Calls every listener, as `ChangeNotifier.notifyListeners` does: a
+  /// throw is reported through [FlutterError.reportError] and the
+  /// listeners after it still run, so an app listener's throw never
+  /// escapes into the tick, mutation or drag call that dispatched.
+  @pragma("vm:notify-debugger-on-exception")
   void _dispatch() {
     if (_listeners.isEmpty) {
       return;
     }
     for (final listener in List<VoidCallback>.of(_listeners)) {
-      listener();
+      try {
+        listener();
+      } catch (exception, stack) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: exception,
+            stack: stack,
+            library: "widgets_extended board",
+            context: ErrorDescription(
+              "while dispatching a board animation notification",
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -514,9 +695,85 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     for (final id in inFlight) {
       finalizeEnterExit(id, deliver: false);
     }
+    // The finalize loop marked presences; their widgets are unmounted by
+    // now, which the controller's empty-listener assert stands for, so the
+    // pending flush notifies nothing.
+    _disposed = true;
+    _dirtyPresences.clear();
+    _presences.clear();
     trackResize.dispose();
     enterExit.dispose();
     slide.dispose();
     makeRoom.dispose();
+  }
+}
+
+/// One item incarnation's enter/exit ramp as an [Animation], handed to an
+/// item builder as `BoardItemView.presence`. The value is the one layout
+/// scales the item's extent by ([BoardAnimationReader.enterExitProgressOf]);
+/// the status is [AnimationStatus.forward] while the entering bit is set,
+/// [AnimationStatus.reverse] while the exiting bit is, and
+/// [AnimationStatus.completed] with neither. Once the id is released it is
+/// 0 and [AnimationStatus.dismissed] for good.
+///
+/// Both are read live. Listeners hear of a change from the coordinator's
+/// flush, which compares each marked presence against what it last
+/// notified, value listeners before status listeners, the order an
+/// `AnimationController` tick uses.
+///
+/// Not exported from the module barrel; the public type is
+/// `Animation<double>`.
+class BoardItemPresence extends Animation<double>
+    with
+        AnimationEagerListenerMixin,
+        AnimationLocalListenersMixin,
+        AnimationLocalStatusListenersMixin {
+  BoardItemPresence._(this._reader, this._id) {
+    _notifiedValue = value;
+    _notifiedStatus = status;
+  }
+
+  final BoardAnimationReader<Object?> _reader;
+  final int _id;
+
+  /// Set by [BoardAnimationCoordinator.clearForId], never cleared.
+  bool _released = false;
+
+  late double _notifiedValue;
+  late AnimationStatus _notifiedStatus;
+
+  @override
+  double get value {
+    if (_released) {
+      return 0.0;
+    }
+    return _reader.enterExitProgressOf(_id);
+  }
+
+  @override
+  AnimationStatus get status {
+    if (_released) {
+      return AnimationStatus.dismissed;
+    }
+    if (_reader.isExitingItem(_id)) {
+      return AnimationStatus.reverse;
+    }
+    if (_reader.isEnteringItem(_id)) {
+      return AnimationStatus.forward;
+    }
+    return AnimationStatus.completed;
+  }
+
+  void _notifyChanges() {
+    final nextValue = value;
+    final nextStatus = status;
+    if (nextValue != _notifiedValue) {
+      _notifiedValue = nextValue;
+      notifyListeners();
+    }
+    if (nextStatus != _notifiedStatus) {
+      _notifiedStatus = nextStatus;
+      notifyStatusListeners(nextStatus);
+    }
   }
 }
