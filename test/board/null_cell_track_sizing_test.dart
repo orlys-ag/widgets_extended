@@ -214,6 +214,30 @@ Widget _relayBoard(
   );
 }
 
+/// Row 1's cells are 100 px tall while unselected and build nothing while
+/// selected; every other cell is 20 px tall. [calls] counts the cell
+/// builder's calls per row.
+Widget _selectionBoard(
+  BoardController<String, _Item> controller,
+  Map<int, int> calls,
+) {
+  return _frame(
+    Board<String, _Item>(
+      controller: controller,
+      cellBuilder: (context, cell) {
+        calls[cell.row] = (calls[cell.row] ?? 0) + 1;
+        if (cell.row == 1) {
+          if (cell.isSelected) {
+            return null;
+          }
+          return SizedBox(key: _cellKey(cell.row, cell.col), height: 100.0);
+        }
+        return SizedBox(key: _cellKey(cell.row, cell.col), height: 20.0);
+      },
+    ),
+  );
+}
+
 void main() {
   testWidgets("a laned content row whose cells build nothing holds its lanes", (
     tester,
@@ -779,6 +803,70 @@ void main() {
     expect(calls[3], isNot(row3BeforeRebuild));
     expect(find.byKey(_cellKey(1, 0)), findsOneWidget);
     // CONTROL: the host showing the delegate's cell is measured.
+    expect(rows.extentOf(1), 100.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a row whose cells a payload write turned to nothing stays at "
+      "its estimate after invalidateCellMeasurements", (tester) async {
+    final controller = _rowsController(tester);
+    controller.addItem(
+      const _Item("k", "on"),
+      const BoardSpan(rowStart: 1, colStart: 0, rowSpan: 2, colSpan: 4),
+    );
+    final calls = <int, int>{};
+    await tester.pumpWidget(_relayBoard(controller, calls));
+    final rows = controller.rows.axis;
+    // Setup sanity: the tall cells hold the row.
+    expect(rows.extentOf(1), 100.0);
+
+    final row3Before = calls[3];
+    controller.updateItem("k", const _Item("k", "off"));
+    await tester.pump();
+    // Setup sanity: the write reached the cells through their hosts, not
+    // through the delegate, and their builder answered null.
+    expect(calls[3], row3Before);
+    expect(find.byKey(_cellKey(1, 0)), findsNothing);
+
+    final row1Before = calls[1];
+    final layouts = _viewport(tester).debugPerformLayoutCount;
+    controller.invalidateCellMeasurements();
+    await tester.pump();
+    // Setup sanity: the invalidation laid the board out again and ran no
+    // builder of row 1, so its hosts still show the empty box.
+    expect(_viewport(tester).debugPerformLayoutCount, greaterThan(layouts));
+    expect(calls[1], row1Before);
+    // TARGET: the empty boxes are taken as no cell, not measured at zero.
+    expect(rows.extentOf(1), 40.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a row whose cells a selection change turns to nothing rests "
+      "at its estimate", (tester) async {
+    final controller = _rowsController(tester);
+    final calls = <int, int>{};
+    await tester.pumpWidget(_selectionBoard(controller, calls));
+    final rows = controller.rows.axis;
+    // Setup sanity: the tall cells hold the row.
+    expect(rows.extentOf(1), 100.0);
+
+    final row1Before = calls[1];
+    final row3Before = calls[3];
+    controller.setSelection(
+      const BoardSelection(anchor: (row: 1, col: 0), focus: (row: 1, col: 3)),
+    );
+    await tester.pump();
+    // Setup sanity: the selection reached row 1's cells through their
+    // hosts, not through the delegate, and their builder answered null.
+    expect(calls[1], isNot(row1Before));
+    expect(calls[3], row3Before);
+    expect(find.byKey(_cellKey(1, 0)), findsNothing);
+    // TARGET.
+    expect(rows.extentOf(1), 40.0);
+
+    controller.setSelection(const BoardSelection.none());
+    await tester.pump();
+    // Control: a builder answering a widget again is measured again.
     expect(rows.extentOf(1), 100.0);
     expect(tester.takeException(), isNull);
   });
