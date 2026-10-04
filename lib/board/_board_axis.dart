@@ -91,7 +91,9 @@ abstract interface class BoardAxis {
   /// end.
   static const double maxTotalExtent = 1.0e12;
 
-  /// Whether any track's extent has not yet been resolved by layout.
+  /// Whether any track's extent is still unsettled: never on an axis that
+  /// takes no measurements, and on a [LazyContentAxis] while any track has
+  /// no recorded measurement.
   bool get isProvisional;
 
   /// Smallest extent this axis can ever report, strictly positive.
@@ -110,8 +112,10 @@ abstract interface class BoardAxis {
   /// measurements.
   bool get acceptsMeasurements;
 
-  /// Whether layout has resolved [track]'s extent, which on a
-  /// [LazyContentAxis] can be [LazyContentAxis.estimate] itself.
+  /// Whether [track]'s extent is settled: always on an axis that takes no
+  /// measurements, and on a [LazyContentAxis] once a measurement is
+  /// recorded for it, which layout does even when it resolves the track
+  /// to [LazyContentAxis.estimate].
   bool isMeasured(int track);
 
   /// Records a measured extent, floored at [minTrackExtent]. Asserts

@@ -23,9 +23,10 @@ This applies only where an axis is `LazyContentAxis`, which is the only kind
 measured from content.
 - Added `BoardController.invalidateCellMeasurements`, which drops every
 mounted cell's cached measurement and schedules one layout that re-measures
-each. Call it after changing something the cell builders' widgets consume and
-the board cannot observe, a theme or a text scale. It costs one measuring
-layout per mounted cell, so it is for the event and not for every frame.
+each, except a cell that shows nothing for a null builder answer. Call it
+after changing something the cell builders' widgets consume and the board
+cannot observe, a theme or a text scale. It costs one measuring layout per
+cell it re-measures, so it is for the event and not for every frame.
 - Added `RenderBoardViewport.debugCheckCellMeasurements`, off by default. With
 it on, a layout re-measures every cell whose cached extent it would otherwise
 use and reports, once per layout, any whose extent moved; the report repeats
