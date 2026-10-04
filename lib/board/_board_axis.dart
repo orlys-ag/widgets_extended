@@ -429,8 +429,9 @@ class DerivedAxis implements BoardAxis {
 /// replaced by a measurement as layout supplies one.
 ///
 /// [estimate] is what an unmeasured track reports, and the value layout
-/// resolves a track to while none of its cells builds anything; the
-/// `BoardCellBuilder` doc states what each kind of cell gives its track.
+/// resolves a track to while none of its cells builds anything, unless
+/// its lanes need more; the `BoardCellBuilder` doc states what each kind
+/// of cell gives its track.
 ///
 /// Storage is one [Fenwick] of length [trackCount] holding
 /// `extentOf(i) - estimate` at every measured `i`, so [offsetOf] is
@@ -441,7 +442,8 @@ class LazyContentAxis implements BoardAxis {
   /// recorded measurement is clamped to, and this is the only
   /// implementation that has to ask the caller for it, because its extents
   /// are not known at construction. It is also what a track of cells that
-  /// take no extent rests at; see `BoardCellBuilder`.
+  /// take no extent rests at, unless its lanes need more; see
+  /// `BoardCellBuilder`.
   LazyContentAxis(this.trackCount, this.estimate, {this.minTrackExtent = 1.0})
     : assert(trackCount >= 0),
       assert(estimate > 0.0, "LazyContentAxis estimate must be positive"),

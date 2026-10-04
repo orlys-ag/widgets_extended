@@ -52,10 +52,11 @@ import 'board_controller.dart';
 ///
 /// A cell that builds null contributes nothing to its content-sized
 /// track. When none of a track's cells builds anything,
-/// `LazyContentAxis.estimate` stands in for them, and the track grows
-/// past it only where its lane cluster needs more. A widget that takes
-/// no extent measures zero, so a track of such cells rests at
-/// `LazyContentAxis.minTrackExtent`.
+/// `LazyContentAxis.estimate` stands in for them. A widget that takes no
+/// extent measures zero, so a track of such cells rests at
+/// `LazyContentAxis.minTrackExtent`. Either track grows past that value
+/// only where its lanes need more: the items stacked in them, or a drag
+/// making room for one.
 typedef BoardCellBuilder<TKey, TItem> =
     Widget? Function(BuildContext context, BoardCellView<TKey, TItem> cell);
 
