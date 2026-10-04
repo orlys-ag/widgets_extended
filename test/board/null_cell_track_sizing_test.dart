@@ -10,6 +10,7 @@ import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
 import 'package:widgets_extended/board/board_controller.dart';
+import 'package:widgets_extended/board/board_views.dart';
 import 'package:widgets_extended/board/board_widget.dart';
 import 'package:widgets_extended/board/render_board_viewport.dart';
 
@@ -103,6 +104,21 @@ BoardController<String, _Item> _rowsController(
   );
 }
 
+/// Adds a cluster of four items `i0` to `i3`, one per lane, over columns
+/// 0 to 2 of [row].
+void _addCluster(BoardController<String, _Item> controller, int row) {
+  for (var i = 0; i < 4; i++) {
+    controller.addItem(
+      _Item("i$i"),
+      BoardSpan(rowStart: row, colStart: 0, colSpan: 3),
+    );
+  }
+}
+
+Widget _itemBox(BuildContext context, BoardItemView<String, _Item> item) {
+  return ColoredBox(key: _itemKey(item.key), color: const Color(0xFF4CAF50));
+}
+
 /// Row 1's cells are 100 px tall while [tall] says so and build nothing
 /// otherwise; every other cell is 20 px tall.
 Widget _tallRowBoard(
@@ -161,12 +177,7 @@ void main() {
     tester,
   ) async {
     final controller = _rowsController(tester, laneExtent: 30.0);
-    for (var i = 0; i < 4; i++) {
-      controller.addItem(
-        _Item("i$i"),
-        const BoardSpan(rowStart: 1, colStart: 0, colSpan: 3),
-      );
-    }
+    _addCluster(controller, 1);
     await tester.pumpWidget(
       _frame(
         Board<String, _Item>(
@@ -174,12 +185,7 @@ void main() {
           cellBuilder: (context, cell) {
             return null;
           },
-          itemBuilder: (context, item) {
-            return ColoredBox(
-              key: _itemKey(item.key),
-              color: const Color(0xFF4CAF50),
-            );
-          },
+          itemBuilder: _itemBox,
         ),
       ),
     );
@@ -209,6 +215,80 @@ void main() {
     // estimate.
     expect(rows.isMeasured(0), isTrue);
     expect(rows.extentOf(0), 40.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a laned content row of small cells takes its lanes' extent", (
+    tester,
+  ) async {
+    final controller = _rowsController(tester, laneExtent: 30.0);
+    _addCluster(controller, 1);
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          cellBuilder: (context, cell) {
+            return SizedBox(key: _cellKey(cell.row, cell.col), height: 20.0);
+          },
+          itemBuilder: _itemBox,
+        ),
+      ),
+    );
+    final rows = controller.rows.axis;
+
+    // Control: the cluster outgrows the cells, and an itemless row takes
+    // its cells' extent.
+    expect(rows.extentOf(1), 120.0);
+    expect(rows.extentOf(0), 20.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a cluster growing above the viewport leaves rows whose cells "
+      "build nothing where they are", (tester) async {
+    final vertical = ScrollController();
+    addTearDown(vertical.dispose);
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(
+        axis: LazyContentAxis(400, 40.0, minTrackExtent: 10.0),
+        laneExtent: 30.0,
+      ),
+      columns: BoardAxisConfig(axis: UniformAxis(4, 50.0)),
+    );
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          verticalDetails: ScrollableDetails.vertical(controller: vertical),
+          cellBuilder: (context, cell) {
+            return null;
+          },
+          itemBuilder: _itemBox,
+        ),
+        height: 300.0,
+      ),
+    );
+    vertical.jumpTo(2000.0);
+    await tester.pump();
+    final viewport = _viewport(tester);
+    final row = viewport.firstVisibleRow;
+    final top = viewport.rectOfCell(row, 0)!.top;
+    // Setup sanity: the row the cluster joins is above the viewport.
+    expect(
+      viewport.rectOfCell(row - 1, 0)!.bottom,
+      lessThanOrEqualTo(0.0 + 1e-6),
+    );
+
+    _addCluster(controller, row - 1);
+    await tester.pump();
+
+    // TARGET: the cluster grows its row.
+    expect(controller.rows.axis.extentOf(row - 1), 120.0);
+    // Control: the growth above the viewport moves nothing in it.
+    expect(
+      viewport.rectOfCell(row, 0)!.top,
+      moreOrLessEquals(top, epsilon: 1e-6),
+    );
     expect(tester.takeException(), isNull);
   });
 
