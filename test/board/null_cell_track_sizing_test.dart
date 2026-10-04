@@ -11,6 +11,7 @@ import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
 import 'package:widgets_extended/board/board_config.dart';
 import 'package:widgets_extended/board/board_controller.dart';
+import 'package:widgets_extended/board/board_drag_controller.dart';
 import 'package:widgets_extended/board/board_views.dart';
 import 'package:widgets_extended/board/board_widget.dart';
 import 'package:widgets_extended/board/render_board_viewport.dart';
@@ -119,6 +120,11 @@ void _addCluster(BoardController<String, _Item> controller, int row) {
   }
 }
 
+const BoardAnimationSpec _zero = BoardAnimationSpec(
+  duration: Duration.zero,
+  curve: Curves.linear,
+);
+
 Widget _itemBox(BuildContext context, BoardItemView<String, _Item> item) {
   return ColoredBox(key: _itemKey(item.key), color: const Color(0xFF4CAF50));
 }
@@ -144,6 +150,37 @@ Widget _rowBoard(
       },
     ),
   );
+}
+
+/// Mounts, under its own [key], a board whose cells all build nothing,
+/// and counts the cell builder's calls on its first layout and on a
+/// 16 px scroll.
+Future<({int first, int scrolled})> _nullBoardCalls(
+  WidgetTester tester,
+  BoardController<String, _Item> controller,
+  ScrollController vertical,
+  Key key,
+) async {
+  var calls = 0;
+  await tester.pumpWidget(
+    _frame(
+      Board<String, _Item>(
+        key: key,
+        controller: controller,
+        verticalDetails: ScrollableDetails.vertical(controller: vertical),
+        cellBuilder: (context, cell) {
+          calls += 1;
+          return null;
+        },
+      ),
+      height: 600.0,
+    ),
+  );
+  final first = calls;
+  calls = 0;
+  vertical.jumpTo(16.0);
+  await tester.pump();
+  return (first: first, scrolled: calls);
 }
 
 /// The fixture of the relay cases: item `k` covers rows 1 and 2 across
@@ -349,10 +386,7 @@ void main() {
           duration: Duration(milliseconds: 300),
           curve: Curves.linear,
         ),
-        itemSlide: BoardAnimationSpec(
-          duration: Duration.zero,
-          curve: Curves.linear,
-        ),
+        itemSlide: _zero,
       ),
     );
     await tester.pumpWidget(_rowBoard(controller, height: 100.0));
@@ -452,6 +486,211 @@ void main() {
     expect(_viewport(tester).debugPerformLayoutCount, greaterThan(layouts));
     // Control: that layout recorded nothing.
     expect(rows.debugRecordCount, records);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("rows whose cells build nothing cost what fixed rows of their "
+      "estimate cost", (tester) async {
+    final lazyVertical = ScrollController();
+    addTearDown(lazyVertical.dispose);
+    final uniformVertical = ScrollController();
+    addTearDown(uniformVertical.dispose);
+    final lazy = _controller(
+      tester,
+      rows: BoardAxisConfig(axis: LazyContentAxis(400, 40.0)),
+      columns: BoardAxisConfig(axis: UniformAxis(4, 50.0)),
+    );
+    final uniform = _controller(
+      tester,
+      rows: BoardAxisConfig(axis: UniformAxis(400, 40.0)),
+      columns: BoardAxisConfig(axis: UniformAxis(4, 50.0)),
+    );
+    final lazyCalls = await _nullBoardCalls(
+      tester,
+      lazy,
+      lazyVertical,
+      const ValueKey<String>("lazy"),
+    );
+    final uniformCalls = await _nullBoardCalls(
+      tester,
+      uniform,
+      uniformVertical,
+      const ValueKey<String>("uniform"),
+    );
+
+    // Setup sanity: every counted layout asked for cells.
+    expect(lazyCalls.first, greaterThan(0));
+    expect(lazyCalls.scrolled, greaterThan(0));
+    expect(uniformCalls.first, greaterThan(0));
+    expect(uniformCalls.scrolled, greaterThan(0));
+    // Control: the content-sized rows ask for the cells the fixed rows
+    // ask for, and rest at their estimate.
+    expect(lazyCalls.first, uniformCalls.first);
+    expect(lazyCalls.scrolled, uniformCalls.scrolled);
+    expect(lazy.rows.axis.extentOf(0), 40.0);
+    // TARGET: such a row is resolved.
+    expect(lazy.rows.axis.isMeasured(0), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a drag over an empty row whose cells build nothing opens the "
+      "lane it would take", (tester) async {
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(
+        axis: LazyContentAxis(6, 30.0, minTrackExtent: 10.0),
+        laneExtent: 40.0,
+        lanePadding: 4.0,
+      ),
+      columns: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
+    );
+    controller.addItem(
+      const _Item("d"),
+      const BoardSpan(rowStart: 5, colStart: 0, colSpan: 3),
+    );
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          cellBuilder: (context, cell) {
+            return null;
+          },
+          itemBuilder: _itemBox,
+        ),
+        width: 280.0,
+      ),
+    );
+    final viewport = _viewport(tester);
+    final origin = tester.getTopLeft(find.byKey(_frameKey));
+    final drag = BoardDragController<String>(
+      boardController: controller,
+      vsync: tester,
+      config: BoardDragConfig<String>(onItemMoved: (key, span) {}),
+    );
+    addTearDown(drag.dispose);
+    expect(
+      drag.startDrag(
+        key: "d",
+        renderPort: viewport,
+        pointerGlobal: origin + viewport.rectOfItem("d")!.center,
+      ),
+      isTrue,
+    );
+    drag.updateDrag(origin + viewport.rectOfCell(3, 1)!.center);
+    await tester.pump();
+
+    // Setup sanity: the drag would land on row 3, which holds the lane it
+    // would take.
+    expect(drag.currentTarget!.span.rowStart, 3);
+    expect(controller.anim.makeRoomSlotsOn(3).toList(), hasLength(1));
+    // TARGET: the row opens that lane, 40 px and the 4 px padding.
+    expect(viewport.rectOfCell(3, 0)!.height, 44.0);
+
+    drag.endDrag(cancel: true);
+    await tester.pumpAndSettle();
+    // Control: the cancel returns the row to its estimate.
+    expect(viewport.rectOfCell(3, 0)!.height, 30.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("a row keeps its recorded height while its window builds "
+      "nothing", (tester) async {
+    final horizontal = ScrollController();
+    addTearDown(horizontal.dispose);
+    final controller = _controller(
+      tester,
+      rows: BoardAxisConfig(axis: LazyContentAxis(6, 30.0)),
+      columns: BoardAxisConfig(axis: UniformAxis(12, 100.0)),
+    );
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          horizontalDetails: ScrollableDetails.horizontal(
+            controller: horizontal,
+          ),
+          cellBuilder: (context, cell) {
+            if (cell.row == 1) {
+              if (cell.col != 11) {
+                return null;
+              }
+              return SizedBox(key: _cellKey(cell.row, cell.col), height: 100.0);
+            }
+            return SizedBox(key: _cellKey(cell.row, cell.col), height: 30.0);
+          },
+        ),
+        width: 300.0,
+        height: 200.0,
+      ),
+    );
+    final rows = controller.rows.axis;
+
+    horizontal.jumpTo(900.0);
+    await tester.pump();
+    // Setup sanity: the tall cell, in view, holds the row.
+    expect(rows.extentOf(1), 100.0);
+
+    horizontal.jumpTo(0.0);
+    await tester.pump();
+    // Setup sanity: the tall cell is out of the window.
+    expect(find.byKey(_cellKey(1, 11)), findsNothing);
+    // Control: its record still holds the row.
+    expect(rows.extentOf(1), 100.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("the last chips leaving a row whose cells build nothing settle "
+      "without a step", (tester) async {
+    final controller = _rowsController(
+      tester,
+      laneExtent: 30.0,
+      style: const BoardAnimationStyle(
+        trackResize: _zero,
+        itemSlide: _zero,
+        itemEnterExit: BoardAnimationSpec(
+          duration: Duration(milliseconds: 300),
+          curve: Curves.linear,
+        ),
+      ),
+    );
+    for (var i = 0; i < 2; i++) {
+      controller.addItem(
+        _Item("c$i"),
+        const BoardSpan(rowStart: 1, colStart: 0, colSpan: 3),
+      );
+    }
+    await tester.pumpWidget(
+      _frame(
+        Board<String, _Item>(
+          controller: controller,
+          cellBuilder: (context, cell) {
+            return null;
+          },
+          itemBuilder: _itemBox,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    // TARGET: two 30 px lanes.
+    expect(controller.rows.axis.extentOf(1), 60.0);
+
+    controller.removeItem("c0");
+    controller.removeItem("c1");
+    await tester.pump();
+    final heights = <double>[viewport.rectOfCell(1, 0)!.height];
+    for (var i = 0; i < 40 && tester.binding.hasScheduledFrame; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      heights.add(viewport.rectOfCell(1, 0)!.height);
+    }
+    // Setup sanity: the exit ran over several frames and settled.
+    expect(heights.length, greaterThan(2));
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    // Control: the row never dips below its estimate, and rests there.
+    for (final height in heights) {
+      expect(height, greaterThanOrEqualTo(40.0 - 1e-6));
+    }
+    expect(heights.last, 40.0);
     expect(tester.takeException(), isNull);
   });
 
