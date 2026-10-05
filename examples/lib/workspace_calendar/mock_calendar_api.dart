@@ -8,6 +8,7 @@ import 'calendar_api.dart';
 import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
+import 'calendar_seed.dart';
 
 /// How long a [MockCalendarApi] takes to answer a call unless told
 /// otherwise.
@@ -39,6 +40,19 @@ class MockCalendarApi implements CalendarApi {
       }
       _store(_nextId(), body);
     }
+  }
+
+  /// A store holding [defaultCalendarSeed] around [today].
+  factory MockCalendarApi.seeded(
+    DateTime today, {
+    Duration latency = defaultCalendarLatency,
+    CalendarFailurePolicy? failurePolicy,
+  }) {
+    return MockCalendarApi(
+      seed: defaultCalendarSeed(today),
+      latency: latency,
+      failurePolicy: failurePolicy,
+    );
   }
 
   final Duration latency;
@@ -147,24 +161,34 @@ class MockCalendarApi implements CalendarApi {
     });
   }
 
-  /// Records [request], asks the policy, and completes after [latency]:
-  /// with the policy's failure, or with what [apply] returns or throws.
+  /// Records [request], asks the policy, and completes after [latency]
+  /// through [_complete].
   Future<T> _call<T>(CalendarRequest request, T Function() apply) {
     _requests.add(request);
     final failure = failurePolicy?.call(request);
     final completer = Completer<T>();
     Timer(latency, () {
-      if (failure != null) {
-        completer.completeError(CalendarFailureException(failure));
-        return;
-      }
-      try {
-        completer.complete(apply());
-      } on CalendarApiException catch (error, stackTrace) {
-        completer.completeError(error, stackTrace);
-      }
+      _complete(completer, failure, apply);
     });
     return completer.future;
+  }
+
+  /// Completes [completer] with the policy's [failure], changing nothing,
+  /// or with what [apply] returns or throws.
+  void _complete<T>(
+    Completer<T> completer,
+    String? failure,
+    T Function() apply,
+  ) {
+    if (failure != null) {
+      completer.completeError(CalendarFailureException(failure));
+      return;
+    }
+    try {
+      completer.complete(apply());
+    } on CalendarApiException catch (error, stackTrace) {
+      completer.completeError(error, stackTrace);
+    }
   }
 
   String _nextId() {

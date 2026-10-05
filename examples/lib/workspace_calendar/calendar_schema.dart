@@ -212,21 +212,16 @@ const TypeSchema _deadlineSchema = TypeSchema(
 );
 
 TypeSchema schemaOf(CalendarItemType type) {
-  final TypeSchema schema;
   switch (type) {
     case CalendarItemType.task:
-      schema = _taskSchema;
+      return _taskSchema;
     case CalendarItemType.meeting:
-      schema = _meetingSchema;
+      return _meetingSchema;
     case CalendarItemType.outOfOffice:
-      schema = _outOfOfficeSchema;
+      return _outOfOfficeSchema;
     case CalendarItemType.deadline:
-      schema = _deadlineSchema;
+      return _deadlineSchema;
   }
-  // Here rather than in the constructor: a const constructor's assert
-  // cannot read a list's length.
-  assert(schema.summaryKeys.length <= 2, "A card shows two summaries at most.");
-  return schema;
 }
 
 /// The length of one slot, and the step every item time is a multiple of.
