@@ -134,6 +134,15 @@ void main() {
     expect(find.text("No tasks"), findsOneWidget);
     expect(find.text("No tasks on this day."), findsOneWidget);
     expect(find.byType(TaskCard), findsNothing);
+
+    final semantics = tester.ensureSemantics();
+    await tapAndSettle(tester, dayFinder(2026, 4, 25));
+    expect(find.text("Saturday, April 25"), findsOneWidget);
+    expect(
+      tester.getSemantics(dayFinder(2026, 4, 25)).label,
+      startsWith("Saturday, April 25"),
+    );
+    semantics.dispose();
   });
 
   testWidgets("tapping a muted day switches the grid to its month", (
