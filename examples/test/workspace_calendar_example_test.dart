@@ -1,13 +1,17 @@
+/// The calendar's month mode: the Monday-first grid, the selection, the
+/// chevrons, the fold into the selected week, the placeholders and the
+/// day list's counts, over the seeded mock.
+library;
+
 import 'package:examples/workspace_calendar/day_cell.dart';
-import 'package:examples/workspace_calendar/task_card.dart';
-import 'package:examples/workspace_calendar_example.dart';
+import 'package:examples/workspace_calendar/day_list.dart';
+import 'package:examples/workspace_calendar/item_card.dart';
+import 'package:examples/workspace_calendar/mock_calendar_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// A Tuesday. April 2026 starts on a Wednesday and has 30 days, so its
-/// Monday-first grid runs from March 30 to May 3 in five weeks.
-final DateTime today = DateTime(2026, 4, 21);
+import 'workspace_calendar/calendar_harness.dart';
 
 Finder gridFinder() {
   return find.byKey(const ValueKey<String>("calendar-grid"));
@@ -15,23 +19,6 @@ Finder gridFinder() {
 
 Finder dayFinder(int year, int month, int day) {
   return find.byKey(dayCellKey(DateTime(year, month, day)));
-}
-
-Future<void> pumpCalendar(
-  WidgetTester tester, {
-  Size size = const Size(390.0, 844.0),
-}) async {
-  tester.view.devicePixelRatio = 1.0;
-  tester.view.physicalSize = size;
-  addTearDown(tester.view.reset);
-  await tester.pumpWidget(
-    MaterialApp(
-      // The M3 ink sparkle shader cannot load under the test binding.
-      theme: ThemeData(splashFactory: NoSplash.splashFactory),
-      home: WorkspaceCalendarExample(today: today),
-    ),
-  );
-  await tester.pumpAndSettle();
 }
 
 Future<void> tapAndSettle(WidgetTester tester, Finder finder) async {
@@ -80,14 +67,18 @@ List<String> topRowShortNames(WidgetTester tester) {
   return <String>[for (final cell in cells) cell.name];
 }
 
+bool hasMarker(WidgetTester tester, int month, int day) {
+  return tester.widget<DayCell>(dayFinder(2026, month, day)).hasItems;
+}
+
 void main() {
-  testWidgets("opens on today's month with today's tasks", (tester) async {
+  testWidgets("E1 opens on today's month with today's items", (tester) async {
     await pumpCalendar(tester);
 
     expect(find.text("April 2026"), findsOneWidget);
     expect(find.text("Month"), findsOneWidget);
     expect(find.text("Today, April 21"), findsOneWidget);
-    expect(find.text("2 tasks"), findsOneWidget);
+    expect(find.text("2 items"), findsOneWidget);
     expect(find.text("Design new UX flow for Michael"), findsOneWidget);
     expect(find.text("Brainstorm with the team"), findsOneWidget);
 
@@ -114,30 +105,31 @@ void main() {
     expect(selected.isSelected, isTrue);
     expect(selected.isToday, isTrue);
     expect(tester.widget<DayCell>(dayFinder(2026, 3, 31)).inMonth, isFalse);
-    // Mock tasks sit at today + 6 and + 7, and none at today + 2.
-    expect(tester.widget<DayCell>(dayFinder(2026, 4, 27)).hasTasks, isTrue);
-    expect(tester.widget<DayCell>(dayFinder(2026, 4, 28)).hasTasks, isTrue);
-    expect(tester.widget<DayCell>(dayFinder(2026, 4, 23)).hasTasks, isFalse);
+    // Kept tasks sit at today + 6 and + 7, "Design critique" on Thursday,
+    // and nothing on Saturday.
+    expect(hasMarker(tester, 4, 27), isTrue);
+    expect(hasMarker(tester, 4, 28), isTrue);
+    expect(hasMarker(tester, 4, 23), isTrue);
+    expect(hasMarker(tester, 4, 25), isFalse);
   });
 
-  testWidgets("tapping a day selects it and lists its tasks", (tester) async {
+  testWidgets("E2 tapping a day selects it and lists its items", (
+    tester,
+  ) async {
     await pumpCalendar(tester);
 
     await tapAndSettle(tester, dayFinder(2026, 4, 27));
     expect(find.text("Monday, April 27"), findsOneWidget);
-    expect(find.text("8 tasks"), findsOneWidget);
+    expect(find.text("8 items"), findsOneWidget);
     expect(tester.widget<DayCell>(dayFinder(2026, 4, 27)).isSelected, isTrue);
     expect(tester.widget<DayCell>(dayFinder(2026, 4, 21)).isSelected, isFalse);
-
-    await tapAndSettle(tester, dayFinder(2026, 4, 23));
-    expect(find.text("Thursday, April 23"), findsOneWidget);
-    expect(find.text("No tasks"), findsOneWidget);
-    expect(find.text("No tasks on this day."), findsOneWidget);
-    expect(find.byType(TaskCard), findsNothing);
 
     final semantics = tester.ensureSemantics();
     await tapAndSettle(tester, dayFinder(2026, 4, 25));
     expect(find.text("Saturday, April 25"), findsOneWidget);
+    expect(find.text("No items"), findsOneWidget);
+    expect(find.text("No items on this day."), findsOneWidget);
+    expect(find.byType(ItemCard), findsNothing);
     expect(
       tester.getSemantics(dayFinder(2026, 4, 25)).label,
       startsWith("Saturday, April 25"),
@@ -145,7 +137,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets("tapping a muted day switches the grid to its month", (
+  testWidgets("E3 tapping a muted day switches the grid to its month", (
     tester,
   ) async {
     await pumpCalendar(tester);
@@ -169,7 +161,7 @@ void main() {
     expect(tester.widget<DayCell>(dayFinder(2026, 4, 1)).inMonth, isFalse);
   });
 
-  testWidgets("the chevrons step by month and keep the day of the month", (
+  testWidgets("E4 the chevrons step by month and keep the day of the month", (
     tester,
   ) async {
     await pumpCalendar(tester);
@@ -199,77 +191,98 @@ void main() {
     expect(find.text("Thursday, April 30"), findsOneWidget);
   });
 
-  testWidgets(
-    "scrolling the task list folds the month into the selected week and "
-    "pulling it down unfolds it",
-    (tester) async {
-      await pumpCalendar(tester);
-      final row = rowHeight(tester);
+  testWidgets("E5 scrolling the list folds the month into the selected week "
+      "and pulling it down unfolds it", (tester) async {
+    const latency = Duration(seconds: 1);
+    await pumpCalendar(
+      tester,
+      api: MockCalendarApi.seeded(today, latency: latency),
+    );
+    final row = rowHeight(tester);
 
-      await tester.drag(find.byType(TaskCard).first, const Offset(0.0, -120.0));
-      await tester.pumpAndSettle();
-      expect(gridHeight(tester), row);
-      expect(find.text("Week"), findsOneWidget);
-      expect(find.text("Month"), findsNothing);
-      final grid = tester.getRect(gridFinder());
-      // The row shows April 20 to 26.
-      expect(tester.getRect(dayFinder(2026, 4, 20)).topLeft, grid.topLeft);
-      expect(
-        tester.getRect(dayFinder(2026, 4, 26)).topRight,
-        offsetMoreOrLessEquals(grid.topRight),
-      );
-      expect(tester.getRect(dayFinder(2026, 4, 19)).bottom, grid.top);
-      expect(topRowShortNames(tester), <String>[
-        "Mo",
-        "Tu",
-        "We",
-        "Th",
-        "Fr",
-        "Sa",
-        "Su",
-      ]);
+    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    await tester.pumpAndSettle();
+    expect(gridHeight(tester), row);
+    expect(find.text("Month"), findsOneWidget);
+    expect(find.text("Week"), findsNothing);
+    final grid = tester.getRect(gridFinder());
+    // The row shows April 20 to 26.
+    expect(tester.getRect(dayFinder(2026, 4, 20)).topLeft, grid.topLeft);
+    expect(
+      tester.getRect(dayFinder(2026, 4, 26)).topRight,
+      offsetMoreOrLessEquals(grid.topRight),
+    );
+    expect(tester.getRect(dayFinder(2026, 4, 19)).bottom, grid.top);
+    expect(topRowShortNames(tester), <String>[
+      "Mo",
+      "Tu",
+      "We",
+      "Th",
+      "Fr",
+      "Sa",
+      "Su",
+    ]);
 
-      // The chevrons now step by week.
-      await tapAndSettle(tester, find.byTooltip("Next week"));
-      expect(find.text("Tuesday, April 28"), findsOneWidget);
-      expect(tester.getRect(dayFinder(2026, 4, 27)).topLeft, grid.topLeft);
-      expect(
-        tester.getRect(dayFinder(2026, 5, 3)).topRight,
-        offsetMoreOrLessEquals(grid.topRight),
-      );
+    // The chevrons now step by week.
+    await tapAndSettle(tester, find.byTooltip("Next week"));
+    expect(find.text("Tuesday, April 28"), findsOneWidget);
+    expect(tester.getRect(dayFinder(2026, 4, 27)).topLeft, grid.topLeft);
+    expect(
+      tester.getRect(dayFinder(2026, 5, 3)).topRight,
+      offsetMoreOrLessEquals(grid.topRight),
+    );
 
-      await tester.drag(find.byType(TaskCard).first, const Offset(0.0, 120.0));
-      await tester.pumpAndSettle();
-      expect(gridHeight(tester), 5 * row);
-      expect(find.text("Month"), findsOneWidget);
-      // The weekday header is back above the grid, so its top moved down.
-      expect(
-        tester.getRect(dayFinder(2026, 3, 30)).topLeft,
-        tester.getRect(gridFinder()).topLeft,
-      );
-    },
-  );
+    await tester.drag(find.byType(DayList), const Offset(0.0, 120.0));
+    await tester.pumpAndSettle();
+    expect(gridHeight(tester), 5 * row);
+    expect(find.text("Month"), findsOneWidget);
+    // The weekday header is back above the grid, so its top moved down.
+    expect(
+      tester.getRect(dayFinder(2026, 3, 30)).topLeft,
+      tester.getRect(gridFinder()).topLeft,
+    );
 
-  testWidgets("a long list folds the month as it scrolls", (tester) async {
+    // Folded again, the next week is May's, whose grid is not read: the
+    // list shows its progress indicator, and pulling it still unfolds.
+    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pump();
+    expect(find.text("Tuesday, May 5"), findsOneWidget);
+    final loading = find.byKey(const ValueKey<String>("day-list-loading"));
+    expect(loading, findsOneWidget);
+    await tester.drag(loading, const Offset(0.0, 120.0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(loading, findsOneWidget);
+    expect(gridHeight(tester), 5 * row);
+    expect(
+      tester.getRect(dayFinder(2026, 4, 27)).topLeft,
+      tester.getRect(gridFinder()).topLeft,
+    );
+    await tester.pump(latency);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("E6 a long list folds the month as it scrolls", (tester) async {
     await pumpCalendar(tester);
     await tapAndSettle(tester, dayFinder(2026, 4, 27));
 
-    await tester.drag(find.byType(TaskCard).first, const Offset(0.0, -60.0));
+    await tester.drag(find.byType(DayList), const Offset(0.0, -60.0));
     await tester.pumpAndSettle();
     expect(gridHeight(tester), rowHeight(tester));
     // A pull that only scrolls back toward the top leaves the week; the
     // one that reaches past the top unfolds the month.
-    await tester.drag(find.byType(TaskCard).first, const Offset(0.0, 20.0));
+    await tester.drag(find.byType(DayList), const Offset(0.0, 20.0));
     await tester.pumpAndSettle();
     expect(gridHeight(tester), rowHeight(tester));
-    await tester.drag(find.byType(TaskCard).first, const Offset(0.0, 200.0));
+    await tester.drag(find.byType(DayList), const Offset(0.0, 200.0));
     await tester.pumpAndSettle();
     expect(gridHeight(tester), 5 * rowHeight(tester));
   });
 
-  testWidgets("the arrow keys move the selection once the board has focus", (
-    tester,
-  ) async {
+  testWidgets("E7 the arrow keys move the selection once the board has "
+      "focus", (tester) async {
     await pumpCalendar(tester);
 
     await tapAndSettle(tester, dayFinder(2026, 4, 21));
@@ -282,14 +295,14 @@ void main() {
     expect(tester.widget<DayCell>(dayFinder(2026, 4, 29)).isSelected, isTrue);
   });
 
-  testWidgets("the Board and Table views are placeholders", (tester) async {
+  testWidgets("E8 the Board and Table views are placeholders", (tester) async {
     await pumpCalendar(tester);
     await tapAndSettle(tester, dayFinder(2026, 4, 27));
 
     await tapAndSettle(tester, find.text("Board"));
     expect(find.text("Board view is not available yet."), findsOneWidget);
     expect(find.byType(DayCell), findsNothing);
-    expect(find.byTooltip("Add task"), findsNothing);
+    expect(find.byTooltip("Add item"), findsNothing);
 
     await tapAndSettle(tester, find.text("Table"));
     expect(find.text("Table view is not available yet."), findsOneWidget);
@@ -299,7 +312,7 @@ void main() {
     expect(tester.widget<DayCell>(dayFinder(2026, 4, 27)).isSelected, isTrue);
   });
 
-  testWidgets("the columns fit the width, before and after it changes", (
+  testWidgets("E9 the columns fit the width, before and after it changes", (
     tester,
   ) async {
     await pumpCalendar(tester);
@@ -327,7 +340,7 @@ void main() {
     );
   });
 
-  testWidgets("the longest month name fits a narrow phone", (tester) async {
+  testWidgets("E10 the longest month name fits a narrow phone", (tester) async {
     await pumpCalendar(tester, size: const Size(320.0, 640.0));
 
     for (var i = 0; i < 5; i++) {
@@ -337,12 +350,10 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets("the unavailable actions say so", (tester) async {
+  testWidgets("E11 More is not available", (tester) async {
     await pumpCalendar(tester);
 
-    await tapAndSettle(tester, find.byTooltip("Add task"));
-    expect(find.text("Adding tasks is not available yet."), findsOneWidget);
-    await tapAndSettle(tester, find.byTooltip("Task actions").first);
-    expect(find.text("Task actions are not available yet."), findsOneWidget);
+    await tapAndSettle(tester, find.byTooltip("More"));
+    expect(find.text("More options are not available yet."), findsOneWidget);
   });
 }
