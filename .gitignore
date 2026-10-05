@@ -29,7 +29,16 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
-examples
+/examples/*
+!/examples/lib/
+/examples/lib/*
+!/examples/lib/workspace_calendar_example.dart
+!/examples/lib/workspace_calendar_main.dart
+!/examples/lib/workspace_calendar/
+!/examples/test/
+/examples/test/*
+!/examples/test/workspace_calendar_example_test.dart
+!/examples/test/workspace_calendar/
 
 # The agent-instruction layer is shared with the team: CLAUDE.md, the
 # AGENTS.md it imports, and the audit method those two point at.
