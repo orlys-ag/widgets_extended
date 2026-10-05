@@ -5,6 +5,7 @@ library;
 
 import 'dart:ui' as ui;
 
+import 'package:examples/workspace_calendar/calendar_data.dart';
 import 'package:examples/workspace_calendar/mock_calendar_api.dart';
 import 'package:examples/workspace_calendar/week_grid.dart';
 import 'package:examples/workspace_calendar_example.dart';
@@ -19,6 +20,84 @@ final DateTime today = DateTime(2026, 4, 21);
 
 /// The latency of the mock [pumpCalendar] builds when given none.
 const Duration harnessLatency = Duration(milliseconds: 100);
+
+// The ids of the seed around [today]: `defaultCalendarSeed` lists the kept
+// tasks first, then the week's meetings and deadlines, then "Day off" and
+// "Conference trip", and the mock numbers them in that order.
+const String uxFlowId = "item-5";
+const String brainstormId = "item-6";
+const String standupId = "item-7";
+const String reviewId = "item-8";
+const String retroPrepId = "item-17";
+const String clientPresentationId = "item-18";
+const String teamOffsiteId = "item-20";
+const String releasePlanningId = "item-21";
+const String designSystemSyncId = "item-22";
+const String designCritiqueId = "item-25";
+const String dayOffId = "item-28";
+
+/// The Monday of [today]'s week.
+final DateTime monday = DateTime(2026, 4, 20);
+
+/// The week grid's row of [minute]: row 0 is the day header.
+int rowOf(int minute) {
+  return 1 + minute ~/ 15;
+}
+
+/// The week grid's column of the day [weekday] days after [monday]:
+/// column 0 is the hour gutter.
+int colOf(int weekday) {
+  return 1 + weekday;
+}
+
+Finder blockFinder(String id) {
+  return find.byKey(blockKey(id));
+}
+
+/// The global rect of the week grid's cell at [row] and [col].
+Rect cellRect(WidgetTester tester, int row, int col) {
+  final viewport = weekViewport(tester);
+  final rect = viewport.rectOfCell(row, col)!;
+  return viewport.localToGlobal(rect.topLeft) & rect.size;
+}
+
+/// Opens the calendar's mode menu and picks [mode], "Month" or "Week".
+Future<void> pickMode(WidgetTester tester, String mode) async {
+  await tester.tap(find.byTooltip("Calendar view"));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(mode).last);
+  await tester.pumpAndSettle();
+}
+
+/// Stores [item] through [api] before the calendar is pumped, and pumps
+/// the latency it answers after.
+Future<void> createBeforePump(
+  WidgetTester tester,
+  MockCalendarApi api,
+  Map<String, Object?> item,
+) async {
+  api.create(item);
+  await tester.pump(api.latency);
+}
+
+/// A Task envelope with status to do.
+Map<String, Object?> taskJson(
+  String title,
+  DateTime day,
+  int start,
+  int end, {
+  int dayCount = 1,
+}) {
+  return <String, Object?>{
+    "type": "task",
+    "title": title,
+    "day": isoDate(day),
+    "startMinute": start,
+    "endMinute": end,
+    "dayCount": dayCount,
+    "fields": <String, Object?>{"status": "toDo"},
+  };
+}
 
 /// Pumps the calendar on [today] over [api], by default a mock seeded
 /// around [today] at [harnessLatency] with no failure policy, at [size],
@@ -102,6 +181,13 @@ class CanvasRecord {
     return paint.color;
   }
 
+  /// Whether the record was drawn in [other]. Compared as 32-bit ARGB: a
+  /// [Paint] hands its colour back from its own storage, which need not
+  /// compare equal to the [Color] it was given.
+  bool isIn(Color other) {
+    return paint.color.toARGB32() == other.toARGB32();
+  }
+
   bool get isFill {
     return paint.style == PaintingStyle.fill;
   }
@@ -117,7 +203,7 @@ class RecordingCanvas implements Canvas {
   Iterable<Rect> fillsOf(Color color) {
     return <Rect>[
       for (final record in records)
-        if (!record.isLine && record.isFill && record.color == color)
+        if (!record.isLine && record.isFill && record.isIn(color))
           record.rect!,
     ];
   }

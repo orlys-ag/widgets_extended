@@ -584,8 +584,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
       return false;
     }
     final local = viewport.globalToLocal(global);
-    final cell = viewport.cellAt(local);
-    if (cell == null || cell.row < 1 || cell.col < 1) {
+    if (_bodyCellAtLocal(viewport, local) == null) {
       return false;
     }
     return viewport.itemAt(local) == null;

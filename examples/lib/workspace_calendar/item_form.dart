@@ -535,14 +535,18 @@ class _ItemFormState extends State<_ItemForm> {
                       style: const TextStyle(color: HarborColors.error),
                     ),
                   ),
-                Row(
+                // Stacks the actions where a narrow screen cannot fit them in
+                // a row.
+                OverflowBar(
+                  alignment: MainAxisAlignment.end,
+                  spacing: 8.0,
+                  overflowAlignment: OverflowBarAlignment.end,
                   children: <Widget>[
                     if (!_isDraft)
                       TextButton(
                         onPressed: _saving ? null : _delete,
                         child: const Text("Delete"),
                       ),
-                    const Spacer(),
                     TextButton(
                       onPressed: _saving
                           ? null
@@ -551,7 +555,6 @@ class _ItemFormState extends State<_ItemForm> {
                             },
                       child: const Text("Cancel"),
                     ),
-                    const SizedBox(width: 8.0),
                     FilledButton(
                       onPressed: _saving ? null : _save,
                       child: _saving
