@@ -245,8 +245,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
   /// that stopped the grid finds this set.
   bool _scrollJustStopped = false;
 
-  /// The week the last [_sync] placed, and whether it was ready then.
-  DateTime? _syncedWeek;
+  /// Whether the last [_sync] found its week ready.
   bool _syncedReady = false;
 
   /// Whether a frame callback will put [weekGridAnimationStyle] back.
@@ -303,10 +302,13 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
       oldWidget.model.removeListener(_handleModel);
       widget.model.addListener(_handleModel);
     }
-    _header.value = (
-      weekStart: widget.weekStart,
-      selectedDay: widget.selectedDay,
-    );
+    if (widget.weekStart != oldWidget.weekStart ||
+        widget.selectedDay != oldWidget.selectedDay) {
+      _header.value = (
+        weekStart: widget.weekStart,
+        selectedDay: widget.selectedDay,
+      );
+    }
     if (modelChanged || widget.weekStart != oldWidget.weekStart) {
       _sync();
     }
@@ -326,6 +328,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
     _tap.dispose();
     _immediateRange.dispose();
     _delayedRange.dispose();
+    _range?.detach();
     widget.model.removeListener(_handleModel);
     _header.dispose();
     // The board has unmounted by now, so nothing still listens to the
@@ -386,10 +389,13 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
   }
 
   /// Sets the board's items to the week's shown items when the week is
-  /// ready, and to none otherwise. Only a sync that follows one showing the
-  /// same week ready animates; any other runs under
+  /// ready, and to none otherwise. A sync animates only when its week is
+  /// ready and the last sync found its own week ready; any other runs under
   /// [BoardAnimationStyle.disabled], and so does every sync until a frame
-  /// callback restores [weekGridAnimationStyle].
+  /// callback restores [weekGridAnimationStyle]. A new week reaches this
+  /// grid only after the model has notified that it shows it, and the sync
+  /// that notification runs finds the old week not ready, so the first sync
+  /// of a new week does not animate.
   void _sync() {
     final weekStart = widget.weekStart;
     final ready = _weekReady;
@@ -404,7 +410,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
         }
       }
     }
-    final animate = ready && _syncedReady && _syncedWeek == weekStart;
+    final animate = ready && _syncedReady;
     if (!animate) {
       _board.animationStyle = BoardAnimationStyle.disabled;
     }
@@ -412,7 +418,6 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
     if (!animate) {
       _scheduleStyleRestore();
     }
-    _syncedWeek = weekStart;
     _syncedReady = ready;
   }
 
@@ -542,26 +547,34 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
     return found;
   }
 
-  /// The body cell painting under [global], or null over the header, the
-  /// gutter or past the lattice.
-  ({int row, int col})? _bodyCellAt(Offset global) {
-    final viewport = _findViewport();
-    if (viewport == null) {
-      return null;
-    }
-    final cell = viewport.cellAt(viewport.globalToLocal(global));
+  /// The body cell painting under [local], a point in the viewport's paint
+  /// space, or null over the header, the gutter or past the lattice.
+  ({int row, int col})? _bodyCellAtLocal(
+    RenderBoardViewport<String> viewport,
+    Offset local,
+  ) {
+    final cell = viewport.cellAt(local);
     if (cell == null || cell.row < 1 || cell.col < 1) {
       return null;
     }
     return cell;
   }
 
-  /// Whether a press at [global] may create: it lies over a body cell, no
-  /// item paints under it, and the grid is neither scrolling nor just
-  /// stopped by this press.
+  /// [_bodyCellAtLocal] for a global point.
+  ({int row, int col})? _bodyCellAt(Offset global) {
+    final viewport = _findViewport();
+    if (viewport == null) {
+      return null;
+    }
+    return _bodyCellAtLocal(viewport, viewport.globalToLocal(global));
+  }
+
+  /// Whether a press at [global] may create: no range runs, it lies over a
+  /// body cell, no item paints under it, and the grid is neither scrolling
+  /// nor just stopped by this press.
   bool _admits(Offset global) {
     final viewport = _findViewport();
-    if (viewport == null || _scrollJustStopped) {
+    if (viewport == null || _scrollJustStopped || _range != null) {
       return false;
     }
     final vertical = viewport.verticalPosition;
@@ -638,11 +651,16 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
   }
 
   Drag? _beginRange(Offset position) {
-    final anchor = _bodyCellAt(position);
+    final viewport = _findViewport();
+    if (viewport == null || _range != null) {
+      return null;
+    }
+    final point = viewport.globalToLocal(position);
+    final anchor = _bodyCellAtLocal(viewport, point);
     if (anchor == null) {
       return null;
     }
-    final range = _RangeDrag(this, anchor, position);
+    final range = _RangeDrag(this, viewport, anchor, point);
     setState(() {
       _range = range;
     });
@@ -787,25 +805,43 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
 }
 
 /// A create range from the press at [anchor] to the body cell under the
-/// pointer. The pointer is tracked by delta: a multi-drag recognizer
+/// pointer.
+///
+/// The pointer is tracked in the viewport's paint space, as the press
+/// converted plus the sum of every update's delta: a multi-drag recognizer
 /// reports the move that accepted it as a delta from the press, with the
-/// press's own position.
+/// press's own position. The range listens to both scroll positions for
+/// its length, so the focus stays the cell under the pointer while content
+/// scrolls beneath it.
 class _RangeDrag extends Drag {
-  _RangeDrag(this._grid, this.anchor, this._position) : focus = anchor;
+  _RangeDrag(this._grid, this._viewport, this.anchor, this._point)
+    : focus = anchor,
+      _vertical = _viewport.verticalPosition,
+      _horizontal = _viewport.horizontalPosition {
+    _vertical?.addListener(_refocus);
+    _horizontal?.addListener(_refocus);
+  }
 
   final _WeekGridState _grid;
+  final RenderBoardViewport<String> _viewport;
+  final ScrollPosition? _vertical;
+  final ScrollPosition? _horizontal;
   final ({int row, int col}) anchor;
 
   /// The body cell last under the pointer: unchanged while the pointer is
   /// over the header, the gutter or past the lattice.
   ({int row, int col}) focus;
 
-  Offset _position;
+  Offset _point;
 
   @override
   void update(DragUpdateDetails details) {
-    _position += details.delta;
-    final cell = _grid._bodyCellAt(_position);
+    _point += details.delta;
+    _refocus();
+  }
+
+  void _refocus() {
+    final cell = _grid._bodyCellAtLocal(_viewport, _point);
     if (cell == null || cell == focus) {
       return;
     }
@@ -814,12 +850,20 @@ class _RangeDrag extends Drag {
 
   @override
   void end(DragEndDetails details) {
+    detach();
     _grid._endRange(this);
   }
 
   @override
   void cancel() {
+    detach();
     _grid._clearRange(this);
+  }
+
+  /// Stops listening to the scroll positions.
+  void detach() {
+    _vertical?.removeListener(_refocus);
+    _horizontal?.removeListener(_refocus);
   }
 }
 
@@ -1019,7 +1063,8 @@ class _LoadOverlay extends StatelessWidget {
 /// The grid behind the cells, drawn for the visible body tracks alone:
 /// the body, the weekend and today's columns, a line at the top of each
 /// slot row and at the left of each day column, and the create range being
-/// dragged. Every paint it draws with is built once.
+/// dragged, filled like today's column and edged in the primary colour so
+/// it shows over that column too. Every paint it draws with is built once.
 class _WeekGridPainter extends BoardBackgroundPainter {
   const _WeekGridPainter({
     required this.weekStart,
@@ -1035,6 +1080,10 @@ class _WeekGridPainter extends BoardBackgroundPainter {
   static final Paint _linePaint = Paint()
     ..color = HarborColors.outline
     ..strokeWidth = 1.0;
+  static final Paint _rangeEdgePaint = Paint()
+    ..color = HarborColors.primary
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.0;
 
   final DateTime weekStart;
   final DateTime today;
@@ -1080,12 +1129,11 @@ class _WeekGridPainter extends BoardBackgroundPainter {
       final left = math.max(math.min(anchor.col, focus.col), firstCol);
       final right = math.min(math.max(anchor.col, focus.col), lastCol);
       if (top <= bottom && left <= right) {
-        canvas.drawRect(
-          geometry
-              .visibleCellRect(top, left)
-              .expandToInclude(geometry.visibleCellRect(bottom, right)),
-          _tintPaint,
-        );
+        final rect = geometry
+            .visibleCellRect(top, left)
+            .expandToInclude(geometry.visibleCellRect(bottom, right));
+        canvas.drawRect(rect, _tintPaint);
+        canvas.drawRect(rect.deflate(1.0), _rangeEdgePaint);
       }
     }
     for (var row = firstRow; row <= lastRow; row++) {
