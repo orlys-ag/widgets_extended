@@ -29,7 +29,7 @@ ItemShape shapeOf(
 }
 
 void main() {
-  group("weekSpanOf", () {
+  group("S1 weekSpanOf", () {
     test("places a day's slots in its column, below the header", () {
       final tuesday = shapeOf(DateTime(2026, 4, 21), 1, 600, 780);
       expect(
@@ -57,7 +57,7 @@ void main() {
     });
   });
 
-  group("shapeFromSpan", () {
+  group("S2 shapeFromSpan and itemFromSpan", () {
     test("a move shifts the first day by the column change and the minutes "
         "by the row change", () {
       final tuesday = shapeOf(DateTime(2026, 4, 21), 1, 600, 780);
@@ -128,38 +128,38 @@ void main() {
       );
       expect(longer, shapeOf(DateTime(2026, 4, 25), 4, 1080, 1170));
     });
-  });
 
-  test("itemFromSpan keeps the item and takes shapeFromSpan's days and "
-      "minutes", () {
-    final item = CalendarItem(
-      id: "item-9",
-      type: CalendarItemType.meeting,
-      title: "Planning",
-      day: DateTime(2026, 4, 25),
-      startMinute: 1080,
-      endMinute: 1140,
-      dayCount: 4,
-      fields: const <String, Object?>{"location": "Room 4B"},
-    );
-    final from = weekSpanOf(item.shape, weekStartDay)!;
-    const to = BoardSpan(rowStart: 69, colStart: 6, rowSpan: 4, colSpan: 1);
-    final moved = itemFromSpan(item, from, to, weekStartDay);
-    final shape = shapeFromSpan(item.shape, from, to, weekStartDay);
-    expect(moved.id, "item-9");
-    expect(moved.type, CalendarItemType.meeting);
-    expect(moved.title, "Planning");
-    expect(moved.fields, const <String, Object?>{"location": "Room 4B"});
-    expect(moved.shape, shape);
-    expect(
-      moved.shape,
-      shapeOf(
-        DateTime(2026, 4, 25),
-        1,
-        1020,
-        1080,
+    test("itemFromSpan keeps the item and takes shapeFromSpan's days and "
+        "minutes", () {
+      final item = CalendarItem(
+        id: "item-9",
         type: CalendarItemType.meeting,
-      ),
-    );
+        title: "Planning",
+        day: DateTime(2026, 4, 25),
+        startMinute: 1080,
+        endMinute: 1140,
+        dayCount: 4,
+        fields: const <String, Object?>{"location": "Room 4B"},
+      );
+      final from = weekSpanOf(item.shape, weekStartDay)!;
+      const to = BoardSpan(rowStart: 69, colStart: 6, rowSpan: 4, colSpan: 1);
+      final moved = itemFromSpan(item, from, to, weekStartDay);
+      final shape = shapeFromSpan(item.shape, from, to, weekStartDay);
+      expect(moved.id, "item-9");
+      expect(moved.type, CalendarItemType.meeting);
+      expect(moved.title, "Planning");
+      expect(moved.fields, const <String, Object?>{"location": "Room 4B"});
+      expect(moved.shape, shape);
+      expect(
+        moved.shape,
+        shapeOf(
+          DateTime(2026, 4, 25),
+          1,
+          1020,
+          1080,
+          type: CalendarItemType.meeting,
+        ),
+      );
+    });
   });
 }
