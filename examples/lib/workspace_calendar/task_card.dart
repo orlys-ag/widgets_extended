@@ -4,7 +4,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'calendar_data.dart';
-import 'palette.dart';
+import 'harbor_theme.dart';
 
 class TaskCard extends StatelessWidget {
   const TaskCard({super.key, required this.task, required this.onMore});
@@ -16,7 +16,7 @@ class TaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: WorkspacePalette.surface,
+        color: HarborColors.surface,
         borderRadius: BorderRadius.circular(14.0),
       ),
       child: Padding(
@@ -38,7 +38,7 @@ class TaskCard extends StatelessWidget {
                           task.timeRange,
                           style: const TextStyle(
                             fontSize: 14.0,
-                            color: WorkspacePalette.textSecondary,
+                            color: HarborColors.textSecondary,
                           ),
                         ),
                       ],
@@ -51,7 +51,7 @@ class TaskCard extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 16.0,
                         fontWeight: FontWeight.w600,
-                        color: WorkspacePalette.textPrimary,
+                        color: HarborColors.text,
                       ),
                     ),
                     const SizedBox(height: 4.0),
@@ -59,7 +59,7 @@ class TaskCard extends StatelessWidget {
                       task.status.label,
                       style: const TextStyle(
                         fontSize: 14.0,
-                        color: WorkspacePalette.textSecondary,
+                        color: HarborColors.textSecondary,
                       ),
                     ),
                   ],
@@ -68,7 +68,7 @@ class TaskCard extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.more_horiz),
-              color: WorkspacePalette.textMuted,
+              color: HarborColors.textMuted,
               tooltip: "Task actions",
               visualDensity: VisualDensity.compact,
               onPressed: onMore,
@@ -90,7 +90,7 @@ class _StatusRing extends StatelessWidget {
       height: 10.0,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: WorkspacePalette.accent, width: 2.5),
+        border: Border.all(color: HarborColors.primary, width: 2.5),
       ),
     );
   }

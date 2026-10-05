@@ -21,7 +21,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_data.dart';
 import 'workspace_calendar/day_cell.dart';
-import 'workspace_calendar/palette.dart';
+import 'workspace_calendar/harbor_theme.dart';
 import 'workspace_calendar/task_card.dart';
 
 enum _WorkspaceView {
@@ -43,20 +43,39 @@ enum _CalendarMode {
   final String label;
 }
 
-class WorkspaceCalendarExample extends StatefulWidget {
+/// The calendar under its own Harbor theme, whatever the host's theme.
+class WorkspaceCalendarExample extends StatelessWidget {
   const WorkspaceCalendarExample({super.key, this.today});
 
   /// The day the calendar opens on and marks as today. Null reads the
   /// clock. The mock tasks are laid out around it.
   final DateTime? today;
 
+  static final ThemeData _theme = buildHarborTheme();
+
   @override
-  State<WorkspaceCalendarExample> createState() {
-    return _WorkspaceCalendarExampleState();
+  Widget build(BuildContext context) {
+    // Above the calendar's state, so every dialog and menu it opens from
+    // its own context captures this theme.
+    return Theme(
+      data: _theme,
+      child: _WorkspaceCalendar(today: today),
+    );
   }
 }
 
-class _WorkspaceCalendarExampleState extends State<WorkspaceCalendarExample>
+class _WorkspaceCalendar extends StatefulWidget {
+  const _WorkspaceCalendar({required this.today});
+
+  final DateTime? today;
+
+  @override
+  State<_WorkspaceCalendar> createState() {
+    return _WorkspaceCalendarState();
+  }
+}
+
+class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     with TickerProviderStateMixin {
   static const double _rowHeight = 48.0;
 
@@ -269,11 +288,7 @@ class _WorkspaceCalendarExampleState extends State<WorkspaceCalendarExample>
         body = _PlaceholderView(name: _view.label);
     }
     return Scaffold(
-      backgroundColor: WorkspacePalette.background,
       appBar: AppBar(
-        backgroundColor: WorkspacePalette.appBar,
-        foregroundColor: WorkspacePalette.surface,
-        surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0.0,
         titleSpacing: 0.0,
         leading: IconButton(
@@ -307,8 +322,6 @@ class _WorkspaceCalendarExampleState extends State<WorkspaceCalendarExample>
       floatingActionButton: _view == _WorkspaceView.calendar
           ? FloatingActionButton(
               tooltip: "Add task",
-              backgroundColor: WorkspacePalette.accent,
-              foregroundColor: WorkspacePalette.surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12.0),
               ),
@@ -394,7 +407,7 @@ class _WorkspaceCalendarExampleState extends State<WorkspaceCalendarExample>
     );
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: WorkspacePalette.surface,
+        color: HarborColors.surface,
         borderRadius: BorderRadius.circular(16.0),
       ),
       child: Padding(
@@ -487,7 +500,7 @@ class _ViewSwitcher extends StatelessWidget {
           const VerticalDivider(
             width: 1.0,
             thickness: 1.0,
-            color: WorkspacePalette.border,
+            color: HarborColors.outline,
           ),
         );
       }
@@ -498,8 +511,8 @@ class _ViewSwitcher extends StatelessWidget {
             selected: isSelected,
             child: Material(
               color: isSelected
-                  ? WorkspacePalette.segmentSelected
-                  : WorkspacePalette.surface,
+                  ? HarborColors.primaryTint
+                  : HarborColors.surface,
               child: InkWell(
                 onTap: () {
                   onSelected(view);
@@ -511,8 +524,8 @@ class _ViewSwitcher extends StatelessWidget {
                       fontSize: 14.0,
                       fontWeight: FontWeight.w600,
                       color: isSelected
-                          ? WorkspacePalette.segmentSelectedText
-                          : WorkspacePalette.textSecondary,
+                          ? HarborColors.primary
+                          : HarborColors.textSecondary,
                     ),
                   ),
                 ),
@@ -525,7 +538,7 @@ class _ViewSwitcher extends StatelessWidget {
     return Container(
       height: 40.0,
       decoration: BoxDecoration(
-        border: Border.all(color: WorkspacePalette.border),
+        border: Border.all(color: HarborColors.outline),
         borderRadius: BorderRadius.circular(10.0),
       ),
       child: ClipRRect(
@@ -560,7 +573,7 @@ class _CalendarHeader extends StatelessWidget {
   static const TextStyle _titleStyle = TextStyle(
     fontSize: 20.0,
     fontWeight: FontWeight.w600,
-    color: WorkspacePalette.textPrimary,
+    color: HarborColors.text,
   );
 
   @override
@@ -574,7 +587,7 @@ class _CalendarHeader extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.chevron_left),
                 tooltip: "Previous $unit",
-                color: WorkspacePalette.textPrimary,
+                color: HarborColors.text,
                 visualDensity: VisualDensity.compact,
                 onPressed: onPrevious,
               ),
@@ -588,7 +601,7 @@ class _CalendarHeader extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.chevron_right),
                 tooltip: "Next $unit",
-                color: WorkspacePalette.textPrimary,
+                color: HarborColors.text,
                 visualDensity: VisualDensity.compact,
                 onPressed: onNext,
               ),
@@ -598,7 +611,7 @@ class _CalendarHeader extends StatelessWidget {
         PopupMenuButton<_CalendarMode>(
           tooltip: "Calendar view",
           initialValue: mode,
-          color: WorkspacePalette.surface,
+          color: HarborColors.surface,
           onSelected: onModeSelected,
           itemBuilder: (context) {
             return <PopupMenuEntry<_CalendarMode>>[
@@ -616,10 +629,7 @@ class _CalendarHeader extends StatelessWidget {
               children: <Widget>[
                 Text(mode.label, style: _titleStyle),
                 const SizedBox(width: 4.0),
-                const Icon(
-                  Icons.keyboard_arrow_down,
-                  color: WorkspacePalette.textPrimary,
-                ),
+                const Icon(Icons.keyboard_arrow_down, color: HarborColors.text),
               ],
             ),
           ),
@@ -649,7 +659,7 @@ class _WeekdayHeader extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 15.0,
                     fontWeight: FontWeight.w600,
-                    color: WorkspacePalette.textPrimary,
+                    color: HarborColors.text,
                   ),
                 ),
               ),
@@ -678,7 +688,7 @@ class _DayHeader extends StatelessWidget {
             style: const TextStyle(
               fontSize: 16.0,
               fontWeight: FontWeight.w700,
-              color: WorkspacePalette.textPrimary,
+              color: HarborColors.text,
             ),
           ),
         ),
@@ -687,7 +697,7 @@ class _DayHeader extends StatelessWidget {
           style: const TextStyle(
             fontSize: 15.0,
             fontWeight: FontWeight.w600,
-            color: WorkspacePalette.textSecondary,
+            color: HarborColors.textSecondary,
           ),
         ),
       ],
@@ -719,10 +729,7 @@ class _TaskList extends StatelessWidget {
             child: Text(
               "No tasks on this day.",
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14.0,
-                color: WorkspacePalette.textMuted,
-              ),
+              style: TextStyle(fontSize: 14.0, color: HarborColors.textMuted),
             ),
           ),
         ],
@@ -754,7 +761,7 @@ class _PlaceholderView extends StatelessWidget {
         "$name view is not available yet.",
         style: const TextStyle(
           fontSize: 15.0,
-          color: WorkspacePalette.textSecondary,
+          color: HarborColors.textSecondary,
         ),
       ),
     );

@@ -6,7 +6,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 
 import 'calendar_data.dart';
-import 'palette.dart';
+import 'harbor_theme.dart';
 
 /// The key of the cell showing [day].
 ValueKey<String> dayCellKey(DateTime day) {
@@ -60,17 +60,13 @@ class DayCell extends StatelessWidget {
   Widget _buildAt(double t) {
     final Color numberColor;
     if (isSelected) {
-      numberColor = WorkspacePalette.surface;
+      numberColor = HarborColors.onPrimary;
     } else if (isToday) {
-      numberColor = WorkspacePalette.accent;
+      numberColor = HarborColors.primary;
     } else if (inMonth) {
-      numberColor = WorkspacePalette.textPrimary;
+      numberColor = HarborColors.text;
     } else {
-      numberColor = Color.lerp(
-        WorkspacePalette.textMuted,
-        WorkspacePalette.textPrimary,
-        t,
-      )!;
+      numberColor = Color.lerp(HarborColors.textMuted, HarborColors.text, t)!;
     }
     final numberWeight = isSelected || isToday
         ? FontWeight.w600
@@ -99,8 +95,8 @@ class DayCell extends StatelessWidget {
                   fontSize: 12.0,
                   height: 1.25,
                   color: isSelected
-                      ? WorkspacePalette.surface
-                      : WorkspacePalette.textMuted,
+                      ? HarborColors.onPrimary
+                      : HarborColors.textMuted,
                 ),
               ),
             ),
@@ -117,7 +113,7 @@ class DayCell extends StatelessWidget {
         alignment: Alignment.center,
         decoration: isSelected
             ? BoxDecoration(
-                color: WorkspacePalette.selectedDay,
+                color: HarborColors.primary,
                 borderRadius: BorderRadius.circular(lerpDouble(19.0, 6.0, t)!),
               )
             : null,
@@ -139,7 +135,7 @@ class DayCell extends StatelessWidget {
         child: Center(
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: WorkspacePalette.surface,
+              color: HarborColors.onPrimary,
               shape: BoxShape.circle,
             ),
             child: SizedBox(width: 4.0, height: 4.0),
@@ -152,7 +148,7 @@ class DayCell extends StatelessWidget {
       height: 5.0,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: WorkspacePalette.accent, width: 1.2),
+        border: Border.all(color: HarborColors.primary, width: 1.2),
       ),
     );
   }
