@@ -637,6 +637,7 @@ class _WeekdayHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
+      key: const ValueKey<String>("weekday-header"),
       height: 32.0,
       child: Row(
         children: <Widget>[

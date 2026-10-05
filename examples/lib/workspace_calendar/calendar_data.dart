@@ -23,30 +23,30 @@ const List<String> monthNames = <String>[
   "December",
 ];
 
-/// Indexed by [weekdayColumn], so Sunday first.
+/// Indexed by [weekdayColumn], so Monday first.
 const List<String> weekdayNames = <String>[
-  "Sunday",
   "Monday",
   "Tuesday",
   "Wednesday",
   "Thursday",
   "Friday",
   "Saturday",
+  "Sunday",
 ];
 
 /// Indexed by [weekdayColumn].
 const List<String> weekdayShortNames = <String>[
-  "Su",
   "Mo",
   "Tu",
   "We",
   "Th",
   "Fr",
   "Sa",
+  "Su",
 ];
 
 /// Indexed by [weekdayColumn].
-const List<String> weekdayLetters = <String>["S", "M", "T", "W", "T", "F", "S"];
+const List<String> weekdayLetters = <String>["M", "T", "W", "T", "F", "S", "S"];
 
 DateTime dateOnly(DateTime date) {
   return DateTime(date.year, date.month, date.day);
@@ -81,9 +81,14 @@ int daysBetween(DateTime from, DateTime to) {
   return end.difference(start).inDays;
 }
 
-/// The column [date] falls in, in a week that starts on Sunday.
+/// The column [date] falls in, in a week that starts on Monday.
 int weekdayColumn(DateTime date) {
-  return date.weekday % 7;
+  return date.weekday - 1;
+}
+
+/// The Monday of [date]'s week, at local midnight.
+DateTime weekStartOf(DateTime date) {
+  return addDays(dateOnly(date), -weekdayColumn(date));
 }
 
 /// Whole days from 1970-01-01 to [date]'s day, counted in UTC from its
@@ -170,7 +175,7 @@ String taskCountLabel(int count) {
   return "$count tasks";
 }
 
-/// The weeks one month occupies, Sunday first. Row 0 holds the month's
+/// The weeks one month occupies, Monday first. Row 0 holds the month's
 /// first day and the last row its last day, so a month takes four to six
 /// rows; the cells before the first day and after the last belong to the
 /// adjacent months.

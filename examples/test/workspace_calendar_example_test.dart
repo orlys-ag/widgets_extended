@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A Tuesday. April 2026 starts on a Wednesday and has 30 days, so its
-/// grid runs from March 29 to May 2 in five weeks.
+/// Monday-first grid runs from March 30 to May 3 in five weeks.
 final DateTime today = DateTime(2026, 4, 21);
 
 Finder gridFinder() {
@@ -47,6 +47,39 @@ double gridHeight(WidgetTester tester) {
   return tester.getSize(gridFinder()).height;
 }
 
+/// The letters of the weekday header, left to right.
+List<String> weekdayHeaderLetters(WidgetTester tester) {
+  final texts = tester.widgetList<Text>(
+    find.descendant(
+      of: find.byKey(const ValueKey<String>("weekday-header")),
+      matching: find.byType(Text),
+    ),
+  );
+  return <String>[for (final text in texts) text.data!];
+}
+
+/// The short weekday names of the cells in the grid's top row, left to
+/// right, as the folded strip shows them.
+List<String> topRowShortNames(WidgetTester tester) {
+  final top = tester.getRect(gridFinder()).top;
+  final cells = <({double left, String name})>[];
+  for (final element in find.byType(DayCell).evaluate()) {
+    final cell = find.byWidget(element.widget);
+    final rect = tester.getRect(cell);
+    if (rect.top != top) {
+      continue;
+    }
+    final texts = tester.widgetList<Text>(
+      find.descendant(of: cell, matching: find.byType(Text)),
+    );
+    cells.add((left: rect.left, name: texts.last.data!));
+  }
+  cells.sort((a, b) {
+    return a.left.compareTo(b.left);
+  });
+  return <String>[for (final cell in cells) cell.name];
+}
+
 void main() {
   testWidgets("opens on today's month with today's tasks", (tester) async {
     await pumpCalendar(tester);
@@ -58,9 +91,23 @@ void main() {
     expect(find.text("Design new UX flow for Michael"), findsOneWidget);
     expect(find.text("Brainstorm with the team"), findsOneWidget);
 
+    expect(weekdayHeaderLetters(tester), <String>[
+      "M",
+      "T",
+      "W",
+      "T",
+      "F",
+      "S",
+      "S",
+    ]);
     expect(find.byType(DayCell), findsNWidgets(35));
-    expect(dayFinder(2026, 3, 29), findsOneWidget);
-    expect(dayFinder(2026, 5, 2), findsOneWidget);
+    final grid = tester.getRect(gridFinder());
+    expect(tester.getRect(dayFinder(2026, 3, 30)).topLeft, grid.topLeft);
+    expect(dayFinder(2026, 3, 29), findsNothing);
+    expect(
+      tester.getRect(dayFinder(2026, 5, 3)).bottomRight,
+      offsetMoreOrLessEquals(grid.bottomRight),
+    );
     expect(gridHeight(tester), 5 * rowHeight(tester));
 
     final selected = tester.widget<DayCell>(dayFinder(2026, 4, 21));
@@ -97,10 +144,15 @@ void main() {
     await tapAndSettle(tester, dayFinder(2026, 3, 31));
     expect(find.text("March 2026"), findsOneWidget);
     expect(find.text("Tuesday, March 31"), findsOneWidget);
-    // March 2026 starts on a Sunday and has 31 days: March 1 to April 4.
-    expect(find.byType(DayCell), findsNWidgets(35));
-    expect(dayFinder(2026, 3, 1), findsOneWidget);
-    expect(dayFinder(2026, 4, 4), findsOneWidget);
+    // March 2026 starts on a Sunday and has 31 days: February 23 to
+    // April 5, six weeks.
+    expect(find.byType(DayCell), findsNWidgets(42));
+    final grid = tester.getRect(gridFinder());
+    expect(tester.getRect(dayFinder(2026, 2, 23)).topLeft, grid.topLeft);
+    expect(
+      tester.getRect(dayFinder(2026, 4, 5)).bottomRight,
+      offsetMoreOrLessEquals(grid.bottomRight),
+    );
     expect(dayFinder(2026, 4, 21), findsNothing);
     final cell = tester.widget<DayCell>(dayFinder(2026, 3, 31));
     expect(cell.isSelected, isTrue);
@@ -116,18 +168,20 @@ void main() {
     await tapAndSettle(tester, find.byTooltip("Next month"));
     expect(find.text("May 2026"), findsOneWidget);
     expect(find.text("Thursday, May 21"), findsOneWidget);
-    // May 2026 starts on a Friday and has 31 days: six weeks.
-    expect(find.byType(DayCell), findsNWidgets(42));
-    expect(gridHeight(tester), 6 * rowHeight(tester));
+    // May 2026 starts on a Friday and has 31 days: April 27 to May 31,
+    // five weeks.
+    expect(find.byType(DayCell), findsNWidgets(35));
+    expect(gridHeight(tester), 5 * rowHeight(tester));
 
     for (var i = 0; i < 3; i++) {
       await tapAndSettle(tester, find.byTooltip("Previous month"));
     }
     expect(find.text("February 2026"), findsOneWidget);
     expect(find.text("Saturday, February 21"), findsOneWidget);
-    // February 2026 starts on a Sunday and has 28 days: four weeks.
-    expect(find.byType(DayCell), findsNWidgets(28));
-    expect(gridHeight(tester), 4 * rowHeight(tester));
+    // February 2026 starts on a Sunday and has 28 days: January 26 to
+    // March 1, five weeks.
+    expect(find.byType(DayCell), findsNWidgets(35));
+    expect(gridHeight(tester), 5 * rowHeight(tester));
 
     // March 31 steps to April 30, the last day April has.
     await tapAndSettle(tester, find.byTooltip("Next month"));
@@ -149,14 +203,31 @@ void main() {
       expect(find.text("Week"), findsOneWidget);
       expect(find.text("Month"), findsNothing);
       final grid = tester.getRect(gridFinder());
-      expect(tester.getRect(dayFinder(2026, 4, 19)).top, grid.top);
-      expect(tester.getRect(dayFinder(2026, 4, 25)).top, grid.top);
-      expect(tester.getRect(dayFinder(2026, 4, 12)).bottom, grid.top);
+      // The row shows April 20 to 26.
+      expect(tester.getRect(dayFinder(2026, 4, 20)).topLeft, grid.topLeft);
+      expect(
+        tester.getRect(dayFinder(2026, 4, 26)).topRight,
+        offsetMoreOrLessEquals(grid.topRight),
+      );
+      expect(tester.getRect(dayFinder(2026, 4, 19)).bottom, grid.top);
+      expect(topRowShortNames(tester), <String>[
+        "Mo",
+        "Tu",
+        "We",
+        "Th",
+        "Fr",
+        "Sa",
+        "Su",
+      ]);
 
       // The chevrons now step by week.
       await tapAndSettle(tester, find.byTooltip("Next week"));
       expect(find.text("Tuesday, April 28"), findsOneWidget);
-      expect(tester.getRect(dayFinder(2026, 4, 26)).top, grid.top);
+      expect(tester.getRect(dayFinder(2026, 4, 27)).topLeft, grid.topLeft);
+      expect(
+        tester.getRect(dayFinder(2026, 5, 3)).topRight,
+        offsetMoreOrLessEquals(grid.topRight),
+      );
 
       await tester.drag(find.byType(TaskCard).first, const Offset(0.0, 120.0));
       await tester.pumpAndSettle();
@@ -164,8 +235,8 @@ void main() {
       expect(find.text("Month"), findsOneWidget);
       // The weekday header is back above the grid, so its top moved down.
       expect(
-        tester.getRect(dayFinder(2026, 3, 29)).top,
-        tester.getRect(gridFinder()).top,
+        tester.getRect(dayFinder(2026, 3, 30)).topLeft,
+        tester.getRect(gridFinder()).topLeft,
       );
     },
   );
@@ -203,17 +274,25 @@ void main() {
         await tapAndSettle(tester, find.byTooltip("Previous week"));
       }
       // April 21 back three weeks is March 31, whose week starts on
-      // March 29 and ends on April 4.
+      // March 30 and ends on April 5.
       expect(find.text("March 2026"), findsOneWidget);
       expect(find.text("Tuesday, March 31"), findsOneWidget);
-      expect(tester.getRect(dayFinder(2026, 3, 29)).top, grid.top);
-      expect(tester.getRect(dayFinder(2026, 4, 4)).top, grid.top);
+      expect(tester.getRect(dayFinder(2026, 3, 30)).topLeft, grid.topLeft);
+      expect(
+        tester.getRect(dayFinder(2026, 4, 5)).topRight,
+        offsetMoreOrLessEquals(grid.topRight),
+      );
+      expect(tester.getRect(dayFinder(2026, 3, 29)).bottom, grid.top);
 
       // A day of the next month in the same week keeps the week showing.
       await tapAndSettle(tester, dayFinder(2026, 4, 2));
       expect(find.text("April 2026"), findsOneWidget);
       expect(find.text("Thursday, April 2"), findsOneWidget);
-      expect(tester.getRect(dayFinder(2026, 3, 29)).top, grid.top);
+      expect(tester.getRect(dayFinder(2026, 3, 30)).topLeft, grid.topLeft);
+      expect(
+        tester.getRect(dayFinder(2026, 4, 5)).topRight,
+        offsetMoreOrLessEquals(grid.topRight),
+      );
       expect(gridHeight(tester), row);
 
       await tester.drag(find.byType(ListView), const Offset(0.0, 120.0));
@@ -269,7 +348,7 @@ void main() {
       moreOrLessEquals(grid.width / 7),
     );
     expect(
-      tester.getRect(dayFinder(2026, 5, 2)).right,
+      tester.getRect(dayFinder(2026, 5, 3)).right,
       moreOrLessEquals(grid.right),
     );
 
@@ -282,7 +361,7 @@ void main() {
       moreOrLessEquals(grid.width / 7),
     );
     expect(
-      tester.getRect(dayFinder(2026, 5, 2)).right,
+      tester.getRect(dayFinder(2026, 5, 3)).right,
       moreOrLessEquals(grid.right),
     );
   });
