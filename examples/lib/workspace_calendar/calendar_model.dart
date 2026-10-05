@@ -2,11 +2,14 @@
 /// range the screen shows, and the lock that keeps one write per item.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
 import 'calendar_api.dart';
 import 'calendar_data.dart';
 import 'calendar_item.dart';
+import 'calendar_schema.dart';
 
 enum CalendarLoadStatus { loading, failed, ready }
 
@@ -210,26 +213,34 @@ class CalendarModel extends ChangeNotifier {
   }
 
   /// Adds the items the cache does not know, marks the read's unread days
-  /// read, and indexes each returned item, as the cache knows it, under
-  /// those days. A day already read keeps what it holds.
+  /// read, and indexes every cached item under those of them its cached
+  /// shape covers, so a known item lies where the cache holds it whether
+  /// or not the answer returned it there. A day already read keeps what it
+  /// holds.
   void _applyRead(_Read read, List<Map<String, Object?>> items) {
     final fresh = <int>{};
     for (var day = read.first; day <= read.last; day++) {
       if (!_readDays.containsKey(day)) {
         _readDays[day] = _showCount;
-        fresh.add(day);
         _idsByDay[day] = <String>{};
+        fresh.add(day);
       }
     }
     for (final json in items) {
       final returned = CalendarItem.fromJson(json);
-      final id = returned.id!;
-      final item = _items.putIfAbsent(id, () {
+      _items.putIfAbsent(returned.id!, () {
         return returned;
       });
-      for (final day in item.dayNumbers) {
+    }
+    if (fresh.isEmpty) {
+      return;
+    }
+    for (final item in _items.values) {
+      final first = math.max(dayNumber(item.day), read.first);
+      final last = math.min(dayNumber(item.day) + item.dayCount - 1, read.last);
+      for (var day = first; day <= last; day++) {
         if (fresh.contains(day)) {
-          _idsByDay[day]!.add(id);
+          _idsByDay[day]!.add(item.id!);
         }
       }
     }
@@ -332,8 +343,9 @@ class CalendarModel extends ChangeNotifier {
 
   /// Writes [item], whose id names a stored item; the item shows pending,
   /// as stored, until the API answers. Completes with the stored item, or
-  /// fails with the API's error, which the caller reports. On a locked
-  /// item it sends nothing and fails with a [CalendarFailureException].
+  /// fails with the API's error, which the caller reports: a failure does
+  /// not reach `onWriteFailed`. On a locked item it sends nothing and fails
+  /// with a [CalendarFailureException].
   Future<CalendarItem> update(CalendarItem item) async {
     final id = item.id!;
     if (!_lock(id, null)) {
@@ -343,7 +355,6 @@ class CalendarModel extends ChangeNotifier {
       final json = await _api.update(id, item.toJson());
       final updated = CalendarItem.fromJson(json);
       if (!_disposed) {
-        _pending.remove(id);
         _applyConfirmed(updated);
         notifyListeners();
       }
@@ -359,10 +370,19 @@ class CalendarModel extends ChangeNotifier {
 
   /// Writes a grid move or resize: [requested] shows, pending, until the
   /// API answers. A failure shows the stored item again and reports
-  /// through `onWriteFailed`, and so does a call on a locked item, which
-  /// sends nothing.
+  /// through `onWriteFailed`. Sends nothing and reports through
+  /// `onWriteFailed` instead for a locked item, and for one that would
+  /// share time, under [itemsConflict], with another item on a read day
+  /// it covers; a conflict on a day not read yet is left to the API.
   void requestMove(CalendarItem requested) {
     final id = requested.id!;
+    if (!isLocked(id)) {
+      final conflicts = _conflictsOf(requested);
+      if (conflicts.isNotEmpty) {
+        _onWriteFailed(CalendarOverlapException(conflicts).message);
+        return;
+      }
+    }
     if (!_lock(id, requested)) {
       _onWriteFailed(_lockedMessage);
       return;
@@ -374,7 +394,6 @@ class CalendarModel extends ChangeNotifier {
             if (_disposed) {
               return;
             }
-            _pending.remove(id);
             _applyConfirmed(CalendarItem.fromJson(json));
             notifyListeners();
           },
@@ -382,6 +401,20 @@ class CalendarModel extends ChangeNotifier {
             _failWrite(id, error);
           },
         );
+  }
+
+  /// The ids of the shown items on [requested]'s read days, other than
+  /// [requested] itself, that it may not share time with.
+  List<String> _conflictsOf(CalendarItem requested) {
+    final shape = requested.shape;
+    final conflicts = <String>[];
+    final last = addDays(requested.day, requested.dayCount - 1);
+    for (final other in itemsBetween(requested.day, last)) {
+      if (other.id != requested.id && itemsConflict(shape, other.item.shape)) {
+        conflicts.add(other.id);
+      }
+    }
+    return conflicts;
   }
 
   /// Deletes [id]: the stored item shows pending until the API answers,
@@ -410,7 +443,8 @@ class CalendarModel extends ChangeNotifier {
   }
 
   /// Locks [id], showing [shown] or, when null, the stored item. False,
-  /// changing nothing, when [id] is locked already.
+  /// changing nothing, when [id] is locked already: every write on an id
+  /// passes here, so an id has one write in flight at most.
   bool _lock(String id, CalendarItem? shown) {
     if (_pending.containsKey(id)) {
       return false;
@@ -429,10 +463,11 @@ class CalendarModel extends ChangeNotifier {
     _onWriteFailed(_messageOf(error));
   }
 
-  /// Replaces the cached [item] and re-indexes it under the read days it
-  /// covers.
+  /// Releases the lock on [item]'s id, replaces the cached item and
+  /// re-indexes it under the read days it covers.
   void _applyConfirmed(CalendarItem item) {
     final id = item.id!;
+    _pending.remove(id);
     _forget(id);
     _items[id] = item;
     for (final day in item.dayNumbers) {
