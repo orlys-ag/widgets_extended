@@ -86,6 +86,59 @@ int weekdayColumn(DateTime date) {
   return date.weekday % 7;
 }
 
+/// Whole days from 1970-01-01 to [date]'s day, counted in UTC from its
+/// year, month and day fields, so the time of day and daylight saving
+/// play no part.
+int dayNumber(DateTime date) {
+  final utc = DateTime.utc(date.year, date.month, date.day);
+  return utc.millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
+}
+
+/// The local midnight of [day], the inverse of [dayNumber].
+DateTime dateOfDayNumber(int day) {
+  final utc = DateTime.fromMillisecondsSinceEpoch(
+    day * Duration.millisecondsPerDay,
+    isUtc: true,
+  );
+  return DateTime(utc.year, utc.month, utc.day);
+}
+
+/// "2026-04-21".
+String isoDate(DateTime date) {
+  final year = date.year.toString().padLeft(4, "0");
+  final month = date.month.toString().padLeft(2, "0");
+  final day = date.day.toString().padLeft(2, "0");
+  return "$year-$month-$day";
+}
+
+final RegExp _isoDatePattern = RegExp(r"^(\d{4})-(\d{2})-(\d{2})$");
+
+/// The local midnight [text] names in the form [isoDate] writes, or null
+/// when it is not a real date in that form.
+DateTime? parseIsoDate(String text) {
+  final match = _isoDatePattern.firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  final year = int.parse(match.group(1)!);
+  final month = int.parse(match.group(2)!);
+  final day = int.parse(match.group(3)!);
+  final date = DateTime(year, month, day);
+  // `DateTime` rolls an out-of-range month or day over into the next
+  // field, so a date that does not exist reads back different fields.
+  if (date.year != year || date.month != month || date.day != day) {
+    return null;
+  }
+  return date;
+}
+
+/// "09:30" for [minute] minutes after midnight; 1440 reads "24:00".
+String clockLabel(int minute) {
+  final hours = (minute ~/ 60).toString().padLeft(2, "0");
+  final minutes = (minute % 60).toString().padLeft(2, "0");
+  return "$hours:$minutes";
+}
+
 /// "Today, April 21", "Monday, April 27", or with the year appended when
 /// [day] is not in [today]'s year.
 String dayTitle(DateTime day, DateTime today) {
@@ -191,14 +244,8 @@ class CalendarTask {
 
   /// "10:00-13:00".
   String get timeRange {
-    return "${_clock(startMinute)}-${_clock(endMinute)}";
+    return "${clockLabel(startMinute)}-${clockLabel(endMinute)}";
   }
-}
-
-String _clock(int minute) {
-  final hours = (minute ~/ 60).toString().padLeft(2, "0");
-  final minutes = (minute % 60).toString().padLeft(2, "0");
-  return "$hours:$minutes";
 }
 
 /// A mock task: `day` counts whole days from today, and `start` and `end`
