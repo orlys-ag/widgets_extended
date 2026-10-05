@@ -1,17 +1,20 @@
-/// A workspace calendar on the board module: a month grid that folds into
-/// the selected day's week while the task list is scrolled, and the
-/// selected day's tasks under it.
+/// A workspace calendar on the board module, over a calendar API: a month
+/// grid that folds into the selected day's week while the day list is
+/// scrolled, the selected day's items under it, and a timed week grid where
+/// items are created, moved, resized, edited and deleted.
 ///
-/// The grid is a [Board] with no items. Each day is a cell, a tap selects
-/// it through the board's cell selection, and the arrow keys move that
-/// selection once the board has focus. The board always holds the whole
-/// month of the selected day; the week view is that board clipped to one
-/// row and shifted so the selected week shows. Selecting a day in another
-/// month, by a tap on a muted day, the chevrons or a key, switches the
-/// board to that month.
+/// The month grid is a [Board] with no items. Each day is a cell, a tap
+/// selects it through the board's cell selection, and the arrow keys move
+/// that selection once the board has focus. The board always holds the
+/// whole month of the selected day; the folded strip is that board clipped
+/// to one row and shifted so the selected week shows. Selecting a day in
+/// another month, by a tap on a muted day, the chevrons or a key, switches
+/// the board to that month.
 ///
-/// The Board and Table views are placeholders, and the add, more and task
-/// menu buttons only report that they are not available.
+/// The calendar reads the range it shows through a [CalendarModel], which
+/// caches the days it has read and writes one change per item at a time.
+/// The Board and Table views are placeholders, and More only reports that
+/// it is not available.
 library;
 
 import 'dart:ui' show lerpDouble;
@@ -19,10 +22,15 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
+import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_data.dart';
+import 'workspace_calendar/calendar_model.dart';
 import 'workspace_calendar/day_cell.dart';
+import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
-import 'workspace_calendar/task_card.dart';
+import 'workspace_calendar/item_form.dart';
+import 'workspace_calendar/mock_calendar_api.dart';
+import 'workspace_calendar/week_grid.dart';
 
 enum _WorkspaceView {
   calendar("Calendar"),
@@ -45,11 +53,16 @@ enum _CalendarMode {
 
 /// The calendar under its own Harbor theme, whatever the host's theme.
 class WorkspaceCalendarExample extends StatelessWidget {
-  const WorkspaceCalendarExample({super.key, this.today});
+  const WorkspaceCalendarExample({super.key, this.today, this.api});
 
   /// The day the calendar opens on and marks as today. Null reads the
-  /// clock. The mock tasks are laid out around it.
+  /// clock.
   final DateTime? today;
+
+  /// The store the calendar reads and writes, read once when the calendar
+  /// is first built. Null uses a [MockCalendarApi] seeded around [today],
+  /// at [defaultCalendarLatency] and with no failures.
+  final CalendarApi? api;
 
   static final ThemeData _theme = buildHarborTheme();
 
@@ -59,15 +72,16 @@ class WorkspaceCalendarExample extends StatelessWidget {
     // its own context captures this theme.
     return Theme(
       data: _theme,
-      child: _WorkspaceCalendar(today: today),
+      child: _WorkspaceCalendar(today: today, api: api),
     );
   }
 }
 
 class _WorkspaceCalendar extends StatefulWidget {
-  const _WorkspaceCalendar({required this.today});
+  const _WorkspaceCalendar({required this.today, required this.api});
 
   final DateTime? today;
+  final CalendarApi? api;
 
   @override
   State<_WorkspaceCalendar> createState() {
@@ -80,9 +94,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   static const double _rowHeight = 48.0;
 
   late final DateTime _today = dateOnly(widget.today ?? DateTime.now());
-  late final Map<DateTime, List<CalendarTask>> _tasksByDay = mockTasksByDay(
-    _today,
-  );
+
+  late final CalendarModel _model;
 
   late DateTime _selected = _today;
 
@@ -94,8 +107,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// The view picked from the menu.
   _CalendarMode _mode = _CalendarMode.month;
 
-  /// Whether a scroll of the task list folded the month view into its
-  /// week. Only meaningful in the month mode.
+  /// Whether a scroll of the day list folded the month into its week. Only
+  /// meaningful in the month mode.
   bool _collapsed = false;
 
   /// The width the column axis was last fitted to.
@@ -117,14 +130,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// to the previous one.
   late final BoardCellBuilder<Object, Object> _cellBuilder = _buildDay;
 
-  bool get _showsWeek {
-    return _mode == _CalendarMode.week || _collapsed;
-  }
-
   @override
   void initState() {
     super.initState();
-    // The board holds no items, so its key and payload types are unused.
+    _model = CalendarModel(
+      api: widget.api ?? MockCalendarApi.seeded(_today),
+      onWriteFailed: _handleWriteFailed,
+    );
+    // The month board holds no items, so its key and payload types are
+    // unused.
     _board = BoardController<Object, Object>(
       vsync: this,
       rows: _rowsFor(_grid),
@@ -135,10 +149,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       },
     );
     _board.setSelection(_selectionOf(_selected));
+    _showRange();
   }
 
   @override
   void dispose() {
+    _model.dispose();
     _board.dispose();
     _collapse.dispose();
     _collapseController.dispose();
@@ -152,6 +168,17 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   BoardSelection _selectionOf(DateTime day) {
     final cell = _grid.cellOf(day);
     return BoardSelection(anchor: cell, focus: cell);
+  }
+
+  /// Shows the month grid's days in the month mode and the selected day's
+  /// week in the week mode, which reads whatever of them is not read yet.
+  void _showRange() {
+    if (_mode == _CalendarMode.week) {
+      final weekStart = weekStartOf(_selected);
+      _model.show(weekStart, addDays(weekStart, 6));
+    } else {
+      _model.show(_grid.firstDay, _grid.lastDay);
+    }
   }
 
   /// Seven equal columns across [width]. Called from the grid's layout
@@ -184,6 +211,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     // Reports back through [_handleBoardSelection], which finds the day
     // already selected.
     _board.setSelection(_selectionOf(day));
+    _showRange();
   }
 
   void _handleBoardSelection(BoardSelection selection) {
@@ -194,10 +222,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _select(_grid.dateAt(focus.row, focus.col));
   }
 
-  /// A week in the week view and a month in the month view; a month step
-  /// keeps the day of the month where it can.
+  bool get _stepsByWeek {
+    return _mode == _CalendarMode.week || _collapsed;
+  }
+
+  /// A week in the week mode and the folded month, a month otherwise; a
+  /// month step keeps the day of the month where it can.
   void _step(int direction) {
-    if (_showsWeek) {
+    if (_stepsByWeek) {
       _select(addDays(_selected, 7 * direction));
     } else {
       _select(addMonths(_selected, direction));
@@ -210,6 +242,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       _collapsed = false;
     });
     _animateCollapse();
+    _showRange();
+  }
+
+  /// The calendar tab's week mode, on the selected day's week.
+  void _openWeekMode() {
+    setState(() {
+      _view = _WorkspaceView.calendar;
+    });
+    _setMode(_CalendarMode.week);
   }
 
   void _setCollapsed(bool collapsed) {
@@ -223,7 +264,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   void _animateCollapse() {
-    if (_showsWeek) {
+    if (_collapsed) {
       _collapseController.forward();
     } else {
       _collapseController.reverse();
@@ -258,22 +299,44 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return false;
   }
 
-  void _showUnavailable(String message) {
+  void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// A grid write or a delete failed, whatever shows now.
+  void _handleWriteFailed(String message) {
+    if (mounted) {
+      _showMessage(message);
+    }
+  }
+
+  Future<void> _deleteFromCard(String id) async {
+    final confirmed = await confirmDelete(context);
+    if (confirmed && mounted) {
+      _model.requestDelete(id);
+    }
+  }
+
   Widget _buildDay(BuildContext context, BoardCellView<Object, Object> cell) {
     final day = _grid.dateAt(cell.row, cell.col);
-    return DayCell(
-      key: dayCellKey(day),
+    final inMonth = _grid.contains(day);
+    final isSelected = cell.isSelected;
+    return DayMarkerListener(
+      model: _model,
       day: day,
-      inMonth: _grid.contains(day),
-      isSelected: cell.isSelected,
-      isToday: day == _today,
-      hasTasks: _tasksByDay.containsKey(day),
-      collapse: _collapse,
+      builder: (context, hasItems) {
+        return DayCell(
+          key: dayCellKey(day),
+          day: day,
+          inMonth: inMonth,
+          isSelected: isSelected,
+          isToday: day == _today,
+          hasItems: hasItems,
+          collapse: _collapse,
+        );
+      },
     );
   }
 
@@ -287,6 +350,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       case _WorkspaceView.table:
         body = _PlaceholderView(name: _view.label);
     }
+    final showsWeek =
+        _view == _WorkspaceView.calendar && _mode == _CalendarMode.week;
     return Scaffold(
       appBar: AppBar(
         scrolledUnderElevation: 0.0,
@@ -303,31 +368,29 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: "Add",
-            onPressed: () {
-              _showUnavailable("Adding items is not available yet.");
-            },
-          ),
+          if (!showsWeek)
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: "Add",
+              onPressed: _openWeekMode,
+            ),
           IconButton(
             icon: const Icon(Icons.more_vert),
             tooltip: "More",
             onPressed: () {
-              _showUnavailable("More options are not available yet.");
+              _showMessage("More options are not available yet.");
             },
           ),
         ],
       ),
-      floatingActionButton: _view == _WorkspaceView.calendar
+      floatingActionButton:
+          _view == _WorkspaceView.calendar && _mode == _CalendarMode.month
           ? FloatingActionButton(
-              tooltip: "Add task",
+              tooltip: "Add item",
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12.0),
               ),
-              onPressed: () {
-                _showUnavailable("Adding tasks is not available yet.");
-              },
+              onPressed: _openWeekMode,
               child: const Icon(Icons.add),
             )
           : null,
@@ -351,8 +414,60 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
+  _CalendarHeader _buildCalendarHeader() {
+    return _CalendarHeader(
+      title: "${monthNames[_selected.month - 1]} ${_selected.year}",
+      mode: _mode,
+      stepsByWeek: _stepsByWeek,
+      onPrevious: () {
+        _step(-1);
+      },
+      onNext: () {
+        _step(1);
+      },
+      onModeSelected: _setMode,
+    );
+  }
+
+  /// The month grid and the day list in the month mode; the week grid,
+  /// across the body's full width, in the week mode.
   Widget _buildCalendarView() {
-    final tasks = _tasksByDay[_selected] ?? const <CalendarTask>[];
+    if (_mode == _CalendarMode.week) {
+      final weekStart = weekStartOf(_selected);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 8.0),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: HarborColors.surface,
+                borderRadius: BorderRadius.circular(16.0),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: _buildCalendarHeader(),
+              ),
+            ),
+          ),
+          Expanded(
+            child: WeekGrid(
+              model: _model,
+              weekStart: weekStart,
+              selectedDay: _selected,
+              today: _today,
+              onSelectDay: _select,
+              onOpenItem: (id) {
+                showEditForm(context, model: _model, id: id);
+              },
+              onCreate: (range) {
+                showCreateFlow(context, model: _model, range: range);
+              },
+            ),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -360,24 +475,45 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 0.0),
           child: _buildCalendarCard(),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16.0, 20.0, 16.0, 12.0),
-          child: _DayHeader(
-            title: dayTitle(_selected, _today),
-            count: tasks.length,
-          ),
-        ),
+        // Only the day header and the list follow the model; the month
+        // board's cells follow it through their own marker listeners.
         Expanded(
-          child: NotificationListener<ScrollNotification>(
-            onNotification: _handleListScroll,
-            // Keyed by day, so another day's list starts at its top.
-            child: _TaskList(
-              key: ValueKey<DateTime>(_selected),
-              tasks: tasks,
-              onMore: () {
-                _showUnavailable("Task actions are not available yet.");
-              },
-            ),
+          child: ListenableBuilder(
+            listenable: _model,
+            builder: (context, child) {
+              final ready = _model.status == CalendarLoadStatus.ready;
+              final entries = _model.itemsOn(_selected);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16.0, 20.0, 16.0, 12.0),
+                    child: _DayHeader(
+                      title: dayTitle(_selected, _today),
+                      count: ready ? entries.length : null,
+                    ),
+                  ),
+                  Expanded(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: _handleListScroll,
+                      // Keyed by day, so another day's list is a new tree
+                      // that starts at its top and does not animate in.
+                      child: DayList(
+                        key: ValueKey<DateTime>(_selected),
+                        status: _model.status,
+                        error: _model.error,
+                        onRetry: _model.retry,
+                        entries: entries,
+                        onEdit: (id) {
+                          showEditForm(context, model: _model, id: id);
+                        },
+                        onDelete: _deleteFromCard,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ],
@@ -396,7 +532,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       ),
       // The board is exactly as large as its lattice, so it never
       // scrolls, and it must not attach to the primary scroll controller
-      // the task list uses.
+      // the day list uses.
       primary: false,
       verticalDetails: const ScrollableDetails.vertical(
         physics: NeverScrollableScrollPhysics(),
@@ -416,17 +552,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            _CalendarHeader(
-              title: "${monthNames[_selected.month - 1]} ${_selected.year}",
-              mode: _showsWeek ? _CalendarMode.week : _CalendarMode.month,
-              onPrevious: () {
-                _step(-1);
-              },
-              onNext: () {
-                _step(1);
-              },
-              onModeSelected: _setMode,
-            ),
+            _buildCalendarHeader(),
             const SizedBox(height: 4.0),
             AnimatedBuilder(
               animation: _collapse,
@@ -556,6 +682,7 @@ class _CalendarHeader extends StatelessWidget {
   const _CalendarHeader({
     required this.title,
     required this.mode,
+    required this.stepsByWeek,
     required this.onPrevious,
     required this.onNext,
     required this.onModeSelected,
@@ -563,8 +690,12 @@ class _CalendarHeader extends StatelessWidget {
 
   final String title;
 
-  /// The view showing, which names the step the chevrons take.
+  /// The mode picked from the menu, which the label names.
   final _CalendarMode mode;
+
+  /// Whether the chevrons step by week, as they do in the week mode and
+  /// while the month is folded.
+  final bool stepsByWeek;
 
   final VoidCallback onPrevious;
   final VoidCallback onNext;
@@ -578,7 +709,7 @@ class _CalendarHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unit = mode == _CalendarMode.week ? "week" : "month";
+    final unit = stepsByWeek ? "week" : "month";
     return Row(
       children: <Widget>[
         Expanded(
@@ -674,10 +805,13 @@ class _DayHeader extends StatelessWidget {
   const _DayHeader({required this.title, required this.count});
 
   final String title;
-  final int count;
+
+  /// The day's item count, or null while the shown range is not ready.
+  final int? count;
 
   @override
   Widget build(BuildContext context) {
+    final count = this.count;
     return Row(
       children: <Widget>[
         Expanded(
@@ -692,59 +826,16 @@ class _DayHeader extends StatelessWidget {
             ),
           ),
         ),
-        Text(
-          taskCountLabel(count),
-          style: const TextStyle(
-            fontSize: 15.0,
-            fontWeight: FontWeight.w600,
-            color: HarborColors.textSecondary,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _TaskList extends StatelessWidget {
-  const _TaskList({super.key, required this.tasks, required this.onMore});
-
-  final List<CalendarTask> tasks;
-  final VoidCallback onMore;
-
-  /// Room under the last card for the floating action button.
-  static const EdgeInsets _padding = EdgeInsets.fromLTRB(16.0, 0.0, 16.0, 88.0);
-
-  @override
-  Widget build(BuildContext context) {
-    // Always scrollable, so a drag on a short list still reports the
-    // overscroll the collapse listens for.
-    const physics = AlwaysScrollableScrollPhysics();
-    if (tasks.isEmpty) {
-      return ListView(
-        physics: physics,
-        padding: _padding,
-        children: const <Widget>[
-          Padding(
-            padding: EdgeInsets.only(top: 32.0),
-            child: Text(
-              "No tasks on this day.",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14.0, color: HarborColors.textMuted),
+        if (count != null)
+          Text(
+            itemCountLabel(count),
+            style: const TextStyle(
+              fontSize: 15.0,
+              fontWeight: FontWeight.w600,
+              color: HarborColors.textSecondary,
             ),
           ),
-        ],
-      );
-    }
-    return ListView.separated(
-      physics: physics,
-      padding: _padding,
-      itemCount: tasks.length,
-      separatorBuilder: (context, index) {
-        return const SizedBox(height: 12.0);
-      },
-      itemBuilder: (context, index) {
-        return TaskCard(task: tasks[index], onMore: onMore);
-      },
+      ],
     );
   }
 }

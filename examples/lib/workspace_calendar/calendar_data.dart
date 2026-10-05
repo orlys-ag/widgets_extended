@@ -165,6 +165,17 @@ String dayTitle(DateTime day, DateTime today) {
   return "$name, $date";
 }
 
+/// "No items", "1 item" or "N items".
+String itemCountLabel(int count) {
+  if (count == 0) {
+    return "No items";
+  }
+  if (count == 1) {
+    return "1 item";
+  }
+  return "$count items";
+}
+
 String taskCountLabel(int count) {
   if (count == 0) {
     return "No tasks";
@@ -196,6 +207,17 @@ class MonthGrid {
 
   int get weekCount {
     return (_leading + daysInMonth(year, month) + 6) ~/ 7;
+  }
+
+  /// The day in row 0's first cell, which may belong to the month before.
+  DateTime get firstDay {
+    return dateAt(0, 0);
+  }
+
+  /// The day in the last row's last cell, which may belong to the month
+  /// after.
+  DateTime get lastDay {
+    return dateAt(weekCount - 1, 6);
   }
 
   DateTime dateAt(int row, int col) {

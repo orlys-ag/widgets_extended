@@ -267,54 +267,6 @@ void main() {
     expect(gridHeight(tester), 5 * rowHeight(tester));
   });
 
-  testWidgets(
-    "the week view steps by week across months and stays folded when the "
-    "list is pulled",
-    (tester) async {
-      await pumpCalendar(tester);
-      final row = rowHeight(tester);
-
-      await tapAndSettle(tester, find.text("Month"));
-      await tapAndSettle(tester, find.text("Week").last);
-      expect(gridHeight(tester), row);
-      final grid = tester.getRect(gridFinder());
-
-      for (var i = 0; i < 3; i++) {
-        await tapAndSettle(tester, find.byTooltip("Previous week"));
-      }
-      // April 21 back three weeks is March 31, whose week starts on
-      // March 30 and ends on April 5.
-      expect(find.text("March 2026"), findsOneWidget);
-      expect(find.text("Tuesday, March 31"), findsOneWidget);
-      expect(tester.getRect(dayFinder(2026, 3, 30)).topLeft, grid.topLeft);
-      expect(
-        tester.getRect(dayFinder(2026, 4, 5)).topRight,
-        offsetMoreOrLessEquals(grid.topRight),
-      );
-      expect(tester.getRect(dayFinder(2026, 3, 29)).bottom, grid.top);
-
-      // A day of the next month in the same week keeps the week showing.
-      await tapAndSettle(tester, dayFinder(2026, 4, 2));
-      expect(find.text("April 2026"), findsOneWidget);
-      expect(find.text("Thursday, April 2"), findsOneWidget);
-      expect(tester.getRect(dayFinder(2026, 3, 30)).topLeft, grid.topLeft);
-      expect(
-        tester.getRect(dayFinder(2026, 4, 5)).topRight,
-        offsetMoreOrLessEquals(grid.topRight),
-      );
-      expect(gridHeight(tester), row);
-
-      await tester.drag(find.byType(ListView), const Offset(0.0, 120.0));
-      await tester.pumpAndSettle();
-      expect(gridHeight(tester), row);
-      expect(find.text("Week"), findsOneWidget);
-
-      await tapAndSettle(tester, find.text("Week"));
-      await tapAndSettle(tester, find.text("Month").last);
-      expect(gridHeight(tester), 5 * row);
-    },
-  );
-
   testWidgets("the arrow keys move the selection once the board has focus", (
     tester,
   ) async {

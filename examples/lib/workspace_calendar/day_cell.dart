@@ -6,6 +6,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 
 import 'calendar_data.dart';
+import 'calendar_model.dart';
 import 'harbor_theme.dart';
 
 /// The key of the cell showing [day].
@@ -13,7 +14,74 @@ ValueKey<String> dayCellKey(DateTime day) {
   return ValueKey<String>("day-${day.year}-${day.month}-${day.day}");
 }
 
-/// A day number with its task marker, on a pill when selected.
+/// Builds [builder] with whether [model] shows a marker for [day], and
+/// builds it again only when that answer changes.
+///
+/// A model change reaches no cell of the month board, whose cell builder
+/// re-runs only when an axis or a cell's selection changes; this listener
+/// is how a cell follows the model, rebuilding only itself.
+class DayMarkerListener extends StatefulWidget {
+  const DayMarkerListener({
+    super.key,
+    required this.model,
+    required this.day,
+    required this.builder,
+  });
+
+  final CalendarModel model;
+  final DateTime day;
+  final Widget Function(BuildContext context, bool hasItems) builder;
+
+  @override
+  State<DayMarkerListener> createState() {
+    return _DayMarkerListenerState();
+  }
+}
+
+class _DayMarkerListenerState extends State<DayMarkerListener> {
+  late bool _hasItems = widget.model.dayHasShownItems(widget.day);
+
+  @override
+  void initState() {
+    super.initState();
+    widget.model.addListener(_handleModel);
+  }
+
+  @override
+  void didUpdateWidget(DayMarkerListener oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.model != oldWidget.model) {
+      oldWidget.model.removeListener(_handleModel);
+      widget.model.addListener(_handleModel);
+    }
+    if (widget.model != oldWidget.model || widget.day != oldWidget.day) {
+      _hasItems = widget.model.dayHasShownItems(widget.day);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.model.removeListener(_handleModel);
+    super.dispose();
+  }
+
+  void _handleModel() {
+    final hasItems = widget.model.dayHasShownItems(widget.day);
+    if (hasItems == _hasItems) {
+      return;
+    }
+    setState(() {
+      _hasItems = hasItems;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(context, _hasItems);
+  }
+}
+
+/// A day number with its item marker, on a pill when selected.
 ///
 /// [collapse] runs from 0, the month grid, to 1, the week strip. At 0 a
 /// day outside the shown month is muted and the weekday name is left to
@@ -28,7 +96,7 @@ class DayCell extends StatelessWidget {
     required this.inMonth,
     required this.isSelected,
     required this.isToday,
-    required this.hasTasks,
+    required this.hasItems,
     required this.collapse,
   });
 
@@ -36,7 +104,7 @@ class DayCell extends StatelessWidget {
   final bool inMonth;
   final bool isSelected;
   final bool isToday;
-  final bool hasTasks;
+  final bool hasItems;
   final Animation<double> collapse;
 
   @override
@@ -46,7 +114,7 @@ class DayCell extends StatelessWidget {
     return Semantics(
       button: true,
       selected: isSelected,
-      label: hasTasks ? "$name, $date, has tasks" : "$name, $date",
+      label: hasItems ? "$name, $date, has items" : "$name, $date",
       excludeSemantics: true,
       child: AnimatedBuilder(
         animation: collapse,
@@ -123,9 +191,9 @@ class DayCell extends StatelessWidget {
   }
 
   /// A dot on the selected pill, a ring elsewhere, and the same space
-  /// when the day has no tasks, so every number sits at the same height.
+  /// when the day has no items, so every number sits at the same height.
   Widget _buildMarker() {
-    if (!hasTasks) {
+    if (!hasItems) {
       return const SizedBox(width: 5.0, height: 5.0);
     }
     if (isSelected) {
