@@ -1203,15 +1203,15 @@ void main() {
     final enterExit = weekGridAnimationStyle.effectiveItemEnterExit.duration;
 
     // The next week shows at once.
-    await tester.tap(find.byTooltip("Next week"));
-    await tester.pump();
-    await tester.pump(oneFrame);
     final nextWeek = await listAll(
       tester,
       api,
       addDays(monday, 7),
       addDays(monday, 13),
     );
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pump();
+    await tester.pump(oneFrame);
     final widths = <String, double>{};
     for (final item in nextWeek) {
       final id = item["id"]! as String;
@@ -1241,7 +1241,12 @@ void main() {
     await tester.pump();
     await tester.pump(api.latency);
     await tester.pump(enterExit ~/ 3);
-    expect(blockFinder(designCritiqueId), findsOneWidget);
+    final dayWidth = cellRect(tester, rowOf(15 * 60), colOf(3)).width;
+    expect(
+      tester.getSize(blockFinder(designCritiqueId)).width,
+      lessThan(dayWidth - 1.0),
+      reason: "mid-exit",
+    );
     await tester.tap(find.byTooltip("Next week"));
     await tester.pump();
     await tester.pump(oneFrame);
@@ -1257,7 +1262,11 @@ void main() {
     await tester.pump();
     await tester.pump(api.latency);
     await tester.pump(enterExit ~/ 3);
-    expect(blockTitled("Sync"), findsOneWidget);
+    expect(
+      tester.getSize(blockTitled("Sync")).width,
+      lessThan(dayWidth - 1.0),
+      reason: "mid-enter",
+    );
     await tester.tap(find.byTooltip("Next week"));
     await tester.pump();
     await tester.pump(oneFrame);
