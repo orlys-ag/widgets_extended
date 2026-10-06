@@ -221,7 +221,7 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   /// relane install to run once the lanes re-resolve, or null.
   final VoidCallback? Function(int id) _captureSettleRelanes;
 
-  /// The live style, for [reverseExit]'s zero test; the sub-sources read
+  /// The live style, for [reverseExit]'s off test; the sub-sources read
   /// the same callback.
   final BoardAnimationStyle Function() _styleOf;
 

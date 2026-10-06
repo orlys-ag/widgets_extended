@@ -380,7 +380,7 @@ extension BoardControllerInternals<TKey, TItem>
   /// Internal-use channel for the drag layer; not part of the supported
   /// surface. The drop-settle glide, riding the slide engine with its own
   /// family; [duration] and [curve] are the session's captured spec,
-  /// while the family's zero kill switch reads the live style. [relane]
+  /// while an off family under the live style dominates them. [relane]
   /// declares the correction an intra-track shift, which a committed
   /// RESIZE's is (it corrects onto the de-lane hold) and a committed
   /// move's is not (it runs from the proxy).

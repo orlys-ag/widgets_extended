@@ -31,23 +31,26 @@
 /// [BoardAnimationStyle.specFor], or the matching `effective` getter, at
 /// install and again on every tick.
 ///
-/// A family whose RESOLVED spec has a [Duration.zero] duration is OFF, and
-/// that kill switch DOMINATES an explicit per-call duration. There is no
-/// master switch: every family gates on its own resolved zero, so an
-/// explicitly configured [BoardAnimationStyle.dropSettle] glide still runs
-/// when [BoardAnimationStyle.itemSlide] is zeroed, and
+/// A family whose RESOLVED spec has a duration that is not positive is
+/// OFF: zero turns it off, and a negative duration, which
+/// [BoardAnimationStyle.debugValidate] reports in a debug build, is
+/// resolved as zero. That kill switch DOMINATES an explicit per-call
+/// duration, and a per-call duration that is not positive is off as well.
+/// [BoardAnimationTiming.durationFor] decides it for every source. There
+/// is no master switch: every family gates on its own resolved duration,
+/// so an explicitly configured [BoardAnimationStyle.dropSettle] glide
+/// still runs when [BoardAnimationStyle.itemSlide] is zeroed, and
 /// [BoardAnimationStyle.disabled] is zeros on both ROOTS rather than a flag.
 ///
-/// What a resolved zero MEANS is decided at each install site, not here
-/// (refuse the install, snap to target, or complete synchronously,
-/// depending on what the family's offset represents); this file only
-/// guarantees that the resolution reads above answer per family. A REFUSED
-/// install creates no motion and destroys none: its change lands at once,
-/// and motion already in flight, of any family, keeps running from the new
-/// geometry. Restyling a family to zero at RUNTIME is a separate
-/// transition the controller's `animationStyle` setter owns: it stops, at
-/// once, the motion of every family the new style resolves to zero, and
-/// of no other.
+/// What OFF MEANS is decided at each install site, not here (refuse the
+/// install, snap to target, or complete synchronously, depending on what
+/// the family's offset represents); this file only guarantees that the
+/// resolution reads above answer per family. A REFUSED install creates no
+/// motion and destroys none: its change lands at once, and motion already
+/// in flight, of any family, keeps running from the new geometry.
+/// Restyling a family off at RUNTIME is a separate transition the
+/// controller's `animationStyle` setter owns: it stops, at once, the
+/// motion of every family the new style turns off, and of no other.
 library;
 
 import 'package:flutter/animation.dart';
@@ -78,12 +81,15 @@ enum BoardAnimationFamily {
 /// A (duration, curve) pair for one animation family.
 @immutable
 class BoardAnimationSpec {
-  /// Creates a spec. A [Duration.zero] duration means the family is off;
-  /// see the library doc for what "off" resolves to per family kind.
+  /// Creates a spec. A duration that is not positive means the family is
+  /// off: [BoardAnimationStyle.debugValidate] rejects a negative one in a
+  /// debug build, and a release build resolves it as zero. See the
+  /// library doc for what "off" resolves to per family kind.
   const BoardAnimationSpec({required this.duration, required this.curve});
 
-  /// Total animation duration. [Duration.zero] means the family snaps
-  /// rather than animating. See the library doc for the kill-switch rule.
+  /// Total animation duration. Zero means the family is off, and so does
+  /// a negative duration, which a release build resolves as zero. See the
+  /// library doc for the kill-switch rule and what off resolves to.
   final Duration duration;
 
   /// Easing curve applied over the animation's progress.

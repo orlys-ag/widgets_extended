@@ -47,8 +47,8 @@ selects on a tap and `.range` on a drag. The controller holds the current
 `BoardSelection`.
 - Added board animation timing in one `BoardAnimationStyle` over five families
 (`trackResize`, `itemEnterExit`, `itemSlide`, `makeRoom`, `dropSettle`), as
-`TreeAnimationStyle` already does for the tree. A family's zero duration is a
-kill switch.
+`TreeAnimationStyle` already does for the tree. A family's zero or negative
+duration is a kill switch.
 - Added `BoardGridPainter` and `BoardBackgroundPainter`, which paint behind the
 lattice from its live track geometry (`BoardGeometryView`), frozen bands
 included.
@@ -131,9 +131,16 @@ when it opens.
 `dropSettle` was set explicitly, and restyling `trackResize` to zero stopped a
 drag's make-room continuation. A restyle now stops at once the motion of every
 family it turns off, including one left inheriting, and of no other.
-- An item move or resize with `duration: Duration.zero`, or under a zero
-`itemSlide` family, lands at once and leaves a slide already in flight for the
-item running, as the documentation now says.
+- An item move or resize with a zero or negative `duration`, or under a zero or
+negative `itemSlide` family, lands at once and leaves a slide already in flight
+for the item running, as the documentation now says.
+- Fix: a negative board animation duration ran its animation backwards and never
+ended it. A `moveItem` or `resizeItem` with a negative `duration` left the item
+painted away from where it rests, and in a release build, where
+`BoardAnimationStyle.debugValidate` does not run, a negative duration in the
+style stranded every animation of its family. A zero or negative duration now
+turns the animation off in every build mode, as zero did; a debug build still
+reports a negative duration in the style.
 - Fix: when an animated removal finished, the items that re-laned into its
 lane stepped there; they now slide on the `itemSlide` clock.
 - Fix: a drag's make-room gap jumped when its clock changed under it: a

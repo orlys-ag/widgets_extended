@@ -712,7 +712,7 @@ class BoardController<TKey, TItem> {
   /// it brings that SAME item back: its exit reverses from where it has
   /// reached and it grows back at the pace of a full enter, its payload
   /// becomes [item], and a different [span] is reached by a slide from
-  /// where it paints, as [moveItem] would. Under a zero itemEnterExit it
+  /// where it paints, as [moveItem] would. Under an off itemEnterExit it
   /// is whole at once.
   void addItem(TItem item, BoardSpan span) {
     _assertNotDisposed();
@@ -1238,7 +1238,7 @@ class BoardController<TKey, TItem> {
   ///
   /// Two guards decide whether anything is captured at all. The install
   /// PREDICATE is the slide engine's own refusal, evaluated once here so
-  /// a board under a zero itemSlide family pays no capture. The STRAND
+  /// a board under an off itemSlide family pays no capture. The STRAND
   /// guard is [_canReadItemGeometry], on the old span and again on the
   /// new one.
   void _reSpan(

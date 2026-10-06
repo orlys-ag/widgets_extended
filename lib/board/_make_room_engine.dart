@@ -583,12 +583,13 @@ class MakeRoomEngine {
   }
 
   /// Opens (or re-targets) the gap for a drag of [draggedId] resolving to
-  /// [prospective]. Never refuses: under a zero family it INSTALLS AND
-  /// SNAPS, because the gap IS the target state and section 9.5 names no
-  /// other drop-feedback mechanism. The snap flag is the kill-switch
-  /// disjunction, resolved here, at one of the family's two declaring
+  /// [prospective]. Never refuses: under an off family, or with a
+  /// [duration] that is not positive, it INSTALLS AND SNAPS, because the
+  /// gap IS the target state and section 9.5 names no other drop-feedback
+  /// mechanism. The snap flag is the kill switch, resolved here through
+  /// [BoardAnimationTiming.isOff], at one of the family's two declaring
   /// sites; [duration] and [curve] are a session's captured values and
-  /// the flag dominates them.
+  /// an off family dominates them.
   void previewGap({
     required int draggedId,
     required BoardSpan prospective,
@@ -662,7 +663,7 @@ class MakeRoomEngine {
       // above is the whole of the in-place feedback on such a board, and
       // the drag proxy is the rest of it. The fold is discarded
       // unpublished here, as it always was on this branch: the case is a
-      // restyle to zero mid-drag on a board with no lanes.
+      // restyle to off mid-drag on a board with no lanes.
       _heldExtent.removeWhere((id, entry) {
         return snap && entry.target == Offset.zero;
       });
@@ -819,9 +820,9 @@ class MakeRoomEngine {
     return minT;
   }
 
-  /// Closes every held offset. The release side reads the SAME snap
-  /// disjunction as the install, so a zero-family drag's gap opens and
-  /// closes instantly as a pair. A live release leaves an offset, an
+  /// Closes every held offset. The release side reads the SAME kill
+  /// switch as the install, so an off-family drag's gap opens and closes
+  /// instantly as a pair. A live release leaves an offset, an
   /// extent or a slot that is already closing on the schedule it started
   /// on, so a second release on the same clock changes no entry.
   void releasePreview({Duration? duration, Curve? curve}) {

@@ -196,8 +196,8 @@ class BoardItemView<TKey, TItem> {
   /// ([AnimationStatus.completed]); once the item has left the board it
   /// is 0 and [AnimationStatus.dismissed]. A key re-added while it leaves
   /// turns back to [AnimationStatus.forward] from where it had reached.
-  /// Under a zero `itemEnterExit` family it is 1 for the item's whole
-  /// time on the board.
+  /// Under an off `itemEnterExit` family, one whose duration is zero or
+  /// negative, it is 1 for the item's whole time on the board.
   ///
   /// A transition built on it runs WITH the board's own growth, which it
   /// does not replace: `FadeTransition(opacity: view.presence, ...)` fades

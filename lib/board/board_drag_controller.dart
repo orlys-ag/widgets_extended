@@ -806,7 +806,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// to where it now rests, on the clock the snap published, whatever
   /// the app's mutation did (a declined report re-lands them where they
   /// came from, on the same clock). Nothing is installed when the snap
-  /// discarded no motion, which is a settled gap or a zero family's
+  /// discarded no motion, which is a settled gap or an off family's
   /// instant one: the structure the report produced is then already
   /// where everything paints. The render's track-sizing hand-off arm
   /// continues each track's residue on this same published clock, so
@@ -933,7 +933,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // The gap closes on the clock the session opened it on: the pair
     // `startDrag` captured, which every preview passed, so a restyle
     // during the session reaches neither the gap nor its close. The live
-    // family's zero still snaps it, the engine reading that itself.
+    // family off still snaps it, the engine reading that itself.
     boardController.releaseMakeRoomPreview(
       duration: session.makeRoomDuration,
       curve: session.makeRoomCurve,

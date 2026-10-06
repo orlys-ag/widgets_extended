@@ -1602,7 +1602,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         // extent it is measured from. The install decides the rest: a
         // residue within tolerance is no motion and drops any state the
         // track still holds, since the track already paints its new
-        // extent, and a zero family refuses. No natural settle installs:
+        // extent, and an off family refuses. No natural settle installs:
         // a state still in flight there keeps its residual over the new
         // record.
         final painted = anim.animatedExtentOf(contentAxis, track);

@@ -50,7 +50,7 @@ class _SlideRecord {
   final BoardAnimationFamily family;
 
   /// Per-call overrides; null falls back to the family spec at tick time,
-  /// so a restyle carries through. The family's zero KILL SWITCH
+  /// so a restyle carries through. An off family, the KILL SWITCH,
   /// dominates an explicit duration either way.
   final Duration? explicitDuration;
   final Curve? explicitCurve;
@@ -222,8 +222,8 @@ class ItemSlideEngine {
   /// Drops every record whose family [off] answers true for, landing its
   /// item at its structural RECTANGLE, and returns whether any went. The
   /// restyle transition: the controller passes the families the NEW style
-  /// resolves to zero, so a family restyled to zero stops its own motion
-  /// and no other's. The caller notifies afterwards, and re-dirties
+  /// turns off, so a family restyled off stops its own motion and no
+  /// other's. The caller notifies afterwards, and re-dirties
   /// layout when a record went, because a purge before a record's first
   /// tick leaves the render where the install frame left it.
   bool purgeWhere(bool Function(BoardAnimationFamily family) off) {

@@ -125,7 +125,7 @@ class _TrackResizeState {
   /// The family whose spec times and shapes this state: trackResize for
   /// a settled-structure resize, makeRoom for a residue the track-sizing
   /// hand-off arm continues on the make-room clock. Read live at every
-  /// tick, so the family's zero dominates [explicitDuration].
+  /// tick, so an off family dominates [explicitDuration].
   final BoardAnimationFamily family;
 
   /// A captured duration and curve, or null for the family's own.
@@ -375,9 +375,9 @@ class TrackResizeAnimator {
 
   /// Drops, landing at its settled extent, every state whose family [off]
   /// answers true for, and returns whether any went. The restyle
-  /// transition: the controller passes the families the NEW style
-  /// resolves to zero, so a family restyled to zero stops its own motion
-  /// and no other's. It dispatches nothing; the caller notifies.
+  /// transition: the controller passes the families the NEW style turns
+  /// off, so a family restyled off stops its own motion and no other's.
+  /// It dispatches nothing; the caller notifies.
   bool finalizeWhere(bool Function(BoardAnimationFamily family) off) {
     var removed = false;
     for (final states in <Map<int, _TrackResizeState>>[
