@@ -405,9 +405,12 @@ class MakeRoomEngine {
       _handOff = null;
       return;
     }
-    final duration = _styleOf().effectiveMakeRoom.duration == Duration.zero
-        ? Duration.zero
-        : _duration;
+    // The captured clock through the resolver: an off family, or a
+    // captured clock that is not positive, publishes no time at all.
+    final duration = _styleOf().durationFor(
+      BoardAnimationFamily.makeRoom,
+      explicit: _duration,
+    );
     _handOff = (
       remaining: duration * (1.0 - minT),
       curve: _CurveTail(_curve, minT),
@@ -529,9 +532,10 @@ class MakeRoomEngine {
     Curve? curve,
   }) {
     final laneAxis = _laneAxisOf();
-    final spec = _styleOf().effectiveMakeRoom;
+    final style = _styleOf();
+    final spec = style.effectiveMakeRoom;
     final resolved = duration ?? spec.duration;
-    final snap = spec.duration == Duration.zero || resolved == Duration.zero;
+    final snap = style.isOff(BoardAnimationFamily.makeRoom, explicit: duration);
     _adoptClock(curve ?? spec.curve, resolved);
     // The dry run needs lane geometry; without it nothing is laned and
     // no gap exists to open, but the EXTENT preview below still does.
@@ -795,9 +799,10 @@ class MakeRoomEngine {
         _heldExtent.isEmpty) {
       return;
     }
-    final spec = _styleOf().effectiveMakeRoom;
+    final style = _styleOf();
+    final spec = style.effectiveMakeRoom;
     final resolved = duration ?? spec.duration;
-    final snap = spec.duration == Duration.zero || resolved == Duration.zero;
+    final snap = style.isOff(BoardAnimationFamily.makeRoom, explicit: duration);
     if (snap) {
       // The commit's snap: fold every offset and slot it drops, so the
       // hand-off carries the clock of whatever was still moving.
@@ -900,12 +905,12 @@ class MakeRoomEngine {
   void _tick(Duration elapsed) {
     final dt = elapsed - _lastElapsed;
     _lastElapsed = elapsed;
-    // The captured clock, under the live family's zero: a restyle to
-    // zero mid-gap drives every clock past 1 on this tick.
-    final spec = _styleOf().effectiveMakeRoom;
-    final durationUs = spec.duration == Duration.zero
-        ? 0
-        : _duration.inMicroseconds;
+    // The captured clock, under the live family's off: a restyle to off
+    // mid-gap drives every clock past 1 on this tick, and so does a
+    // captured clock that is not positive.
+    final durationUs = _styleOf()
+        .durationFor(BoardAnimationFamily.makeRoom, explicit: _duration)
+        .inMicroseconds;
     final delta = durationUs == 0
         ? double.infinity
         : dt.inMicroseconds / durationUs;

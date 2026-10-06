@@ -223,12 +223,13 @@ class BoardAnimationStyle {
 
   /// Debug validation at the injection boundary, meaning
   /// `BoardController`'s constructor and its `animationStyle` setter: every
-  /// CONFIGURED duration must be non-negative. A negative duration has no
-  /// meaning and would STRAND its animations, because progress can never
-  /// reach 1, which for a state-owning family leaves an item exiting
-  /// forever. Lives here rather than in the const constructor because Dart
-  /// forbids non-const expressions in a const constructor's asserts.
-  /// Returns true so it can sit inside an `assert`.
+  /// CONFIGURED duration must be non-negative. A negative duration is a
+  /// configuration error, which a debug build reports here; a release
+  /// build, where this assert is stripped, resolves it as zero, so the
+  /// family is off ([BoardAnimationTiming.durationFor]). Lives here rather
+  /// than in the const constructor because Dart forbids non-const
+  /// expressions in a const constructor's asserts. Returns true so it can
+  /// sit inside an `assert`.
   bool debugValidate() {
     assert(
       !trackResize.duration.isNegative &&
@@ -270,5 +271,31 @@ class BoardAnimationStyle {
         "itemSlide: $itemSlide, "
         "makeRoom: ${_makeRoom ?? "inherit"}, "
         "dropSettle: ${_dropSettle ?? "inherit"})";
+  }
+}
+
+/// The one site that decides whether an animation of a family is OFF.
+/// Every off test and every tick's duration in the module goes through
+/// [durationFor] or [isOff], never through a spec's `duration` directly,
+/// so a duration that is not positive is off everywhere. Not exported:
+/// the barrel's `show` list leaves it out.
+extension BoardAnimationTiming on BoardAnimationStyle {
+  /// The duration an animation of [family] runs over, [explicit]
+  /// replacing the family's own when given. Zero exactly when the
+  /// animation is OFF: the family's resolved duration is not positive,
+  /// which dominates [explicit], or [explicit] is not. Never negative.
+  Duration durationFor(BoardAnimationFamily family, {Duration? explicit}) {
+    final own = specFor(family).duration;
+    if (own <= Duration.zero) {
+      return Duration.zero;
+    }
+    final resolved = explicit ?? own;
+    return resolved <= Duration.zero ? Duration.zero : resolved;
+  }
+
+  /// Whether an animation of [family], timed by [explicit] when given,
+  /// is OFF: [durationFor]'s zero test.
+  bool isOff(BoardAnimationFamily family, {Duration? explicit}) {
+    return durationFor(family, explicit: explicit) == Duration.zero;
   }
 }

@@ -279,17 +279,17 @@ class BoardController<TKey, TItem> {
     _animationStyle = value;
     // DISABLING A FAMILY STOPS ITS MOTION, here and synchronously, and no
     // other family's: every slide record and every track state whose
-    // family the NEW style resolves to zero goes, through `specFor`, so a
-    // family left inheriting stops with its root and one set explicitly
-    // runs on. A slide record purged lands its item at its structural
+    // family the NEW style turns off goes, through `isOff`, so a family
+    // left inheriting stops with its root and one set explicitly runs
+    // on. A slide record purged lands its item at its structural
     // rectangle; a track state dropped lands the track at the settled
     // extent the axis stores, which is why a layout-driving family can be
     // stopped without stranding a partial extent. Two families need no
-    // arm here: itemEnterExit is driven past 1 by its tick-time zero
+    // arm here: itemEnterExit is driven past 1 by its tick-time off
     // guard and retired through its handler, which owns the release, and
     // the make-room engine's held gap is a target, not motion.
     bool off(BoardAnimationFamily family) {
-      return value.specFor(family).duration == Duration.zero;
+      return value.isOff(family);
     }
 
     final purged = _anim.slide.purgeWhere(off);
@@ -640,8 +640,7 @@ class BoardController<TKey, TItem> {
           _store.setSpan(id, placement.span);
           _spanIndex.register(id, bulk: true);
           _lanes.registerItem(id);
-          if (_animationStyle.effectiveItemEnterExit.duration !=
-              Duration.zero) {
+          if (!_animationStyle.isOff(BoardAnimationFamily.itemEnterExit)) {
             _anim.animateEnter(id);
           }
           affected.add(key);
@@ -748,7 +747,7 @@ class BoardController<TKey, TItem> {
     _store.setSpan(id, span);
     _spanIndex.register(id, bulk: _bulkDepth > 0);
     _lanes.registerItem(id);
-    if (_animationStyle.effectiveItemEnterExit.duration != Duration.zero) {
+    if (!_animationStyle.isOff(BoardAnimationFamily.itemEnterExit)) {
       _anim.animateEnter(id);
     }
     if (neighbours != null) {
@@ -806,7 +805,7 @@ class BoardController<TKey, TItem> {
       _anim.animateExit(id, from: r);
       return;
     }
-    if (_animationStyle.effectiveItemEnterExit.duration == Duration.zero) {
+    if (_animationStyle.isOff(BoardAnimationFamily.itemEnterExit)) {
       _anim.retireExitNow(id);
       return;
     }
@@ -866,10 +865,10 @@ class BoardController<TKey, TItem> {
   ///
   /// [duration] and [curve] time the slide from the rectangle the item
   /// paints now to [span]'s, and a null resolves against the itemSlide
-  /// family. A zero [duration], or a zero itemSlide family, moves the
-  /// item without a slide of its own: the change lands this frame, and a
-  /// slide already in flight for the item keeps running from its new
-  /// rectangle, on its own clock.
+  /// family. A zero or negative [duration], or an off itemSlide family,
+  /// moves the item without a slide of its own: the change lands this
+  /// frame, and a slide already in flight for the item keeps running from
+  /// its new rectangle, on its own clock.
   void moveItem(TKey key, BoardSpan span, {Duration? duration, Curve? curve}) {
     _assertNotDisposed();
     _writeSpan(key, span, "moveItem", duration: duration, curve: curve);
@@ -1415,9 +1414,10 @@ class BoardController<TKey, TItem> {
   /// Whether an install would be refused anyway, so the capture beside
   /// it is waste. The engine's own rule, read here once.
   bool _installsSlide(Duration? duration) {
-    final spec = _animationStyle.itemSlide;
-    return spec.duration != Duration.zero &&
-        (duration ?? spec.duration) != Duration.zero;
+    return !_animationStyle.isOff(
+      BoardAnimationFamily.itemSlide,
+      explicit: duration,
+    );
   }
 
   /// Whether the two geometry reads are legal for [id].

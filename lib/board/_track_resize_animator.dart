@@ -209,10 +209,11 @@ class TrackResizeAnimator {
   ///   track already paints its settled extent, so any state it holds is
   ///   DROPPED, which is continuous by that same fact. A state kept there
   ///   would add its residual on top of an extent that already arrived.
-  /// - A zero [family] or a zero [duration] REFUSES: the call creates no
-  ///   motion, so the new geometry lands this frame, and it destroys none,
-  ///   so a state already in flight for the track keeps decaying its
-  ///   residual from the new settled extent.
+  /// - An off [family] or an off [duration] REFUSES, a duration that is
+  ///   not positive being off ([BoardAnimationTiming.isOff]): the call
+  ///   creates no motion, so the new geometry lands this frame, and it
+  ///   destroys none, so a state already in flight for the track keeps
+  ///   decaying its residual from the new settled extent.
   void animateTrackResize(
     Axis axis,
     int track,
@@ -228,9 +229,7 @@ class TrackResizeAnimator {
       _stopIfIdle();
       return;
     }
-    final spec = _styleOf().specFor(family);
-    if (spec.duration == Duration.zero ||
-        (duration ?? spec.duration) == Duration.zero) {
+    if (_styleOf().isOff(family, explicit: duration)) {
       return;
     }
     _statesOf(axis)[track] = _TrackResizeState(
@@ -423,15 +422,14 @@ class TrackResizeAnimator {
       _horizontal,
     ]) {
       states.forEach((track, state) {
-        final spec = style.specFor(state.family);
-        // The family's zero dominates the state's explicit duration. The
-        // restyle to zero stops a family's states in the setter, so this
-        // is the guard against a division by zero rather than the
-        // mechanism: a zero family drives a state past 1 here.
-        final effective = spec.duration == Duration.zero
-            ? Duration.zero
-            : (state.explicitDuration ?? spec.duration);
-        final durationUs = effective.inMicroseconds;
+        // An off family dominates the state's explicit duration, and
+        // either one off answers zero. The restyle to off stops a
+        // family's states in the setter, so this is the guard against a
+        // division by zero or a clock running backwards rather than the
+        // mechanism: an off duration drives a state past 1 here.
+        final durationUs = style
+            .durationFor(state.family, explicit: state.explicitDuration)
+            .inMicroseconds;
         state.t += durationUs == 0
             ? double.infinity
             : dt.inMicroseconds / durationUs;
