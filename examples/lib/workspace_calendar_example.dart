@@ -30,7 +30,7 @@ import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
-import 'workspace_calendar/week_grid.dart';
+import 'workspace_calendar/timed_grid.dart';
 
 enum _WorkspaceView {
   calendar("Calendar"),
@@ -451,9 +451,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
             ),
           ),
           Expanded(
-            child: WeekGrid(
+            child: TimedGrid(
               model: _model,
-              weekStart: weekStart,
+              firstDay: weekStart,
+              dayCount: 7,
               selectedDay: _selected,
               today: _today,
               onSelectDay: _select,

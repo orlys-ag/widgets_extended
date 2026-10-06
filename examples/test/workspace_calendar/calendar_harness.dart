@@ -1,5 +1,5 @@
 /// Helpers the calendar's widget tests share: the fixed day, the host the
-/// calendar is pumped in, the week grid's viewport, a block move, a read
+/// calendar is pumped in, the timed grid's viewport, a block move, a read
 /// of the mock, and a canvas that records what a painter draws.
 library;
 
@@ -7,7 +7,7 @@ import 'dart:ui' as ui;
 
 import 'package:examples/workspace_calendar/calendar_data.dart';
 import 'package:examples/workspace_calendar/mock_calendar_api.dart';
-import 'package:examples/workspace_calendar/week_grid.dart';
+import 'package:examples/workspace_calendar/timed_grid.dart';
 import 'package:examples/workspace_calendar_example.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -39,7 +39,7 @@ const String dayOffId = "item-28";
 /// The Monday of [today]'s week.
 final DateTime monday = DateTime(2026, 4, 20);
 
-/// The week grid's row of [minute]: row 0 is the day header.
+/// The timed grid's row of [minute]: row 0 is the day header.
 int rowOf(int minute) {
   return 1 + minute ~/ 15;
 }
@@ -54,9 +54,9 @@ Finder blockFinder(String id) {
   return find.byKey(blockKey(id));
 }
 
-/// The global rect of the week grid's cell at [row] and [col].
+/// The global rect of the timed grid's cell at [row] and [col].
 Rect cellRect(WidgetTester tester, int row, int col) {
-  final viewport = weekViewport(tester);
+  final viewport = gridViewport(tester);
   final rect = viewport.rectOfCell(row, col)!;
   return viewport.localToGlobal(rect.topLeft) & rect.size;
 }
@@ -123,8 +123,8 @@ Future<MockCalendarApi> pumpCalendar(
   return mock;
 }
 
-/// The week grid's viewport: the one board keyed by item id strings.
-RenderBoardViewport<String> weekViewport(WidgetTester tester) {
+/// The timed grid's viewport: the one board keyed by item id strings.
+RenderBoardViewport<String> gridViewport(WidgetTester tester) {
   return tester.allRenderObjects
       .whereType<RenderBoardViewport<String>>()
       .single;
@@ -142,7 +142,7 @@ Future<void> moveBlock(WidgetTester tester, Finder block, Offset target) async {
   await tester.pump();
   await gesture.up();
   await tester.pump();
-  await tester.pump(weekGridAnimationStyle.effectiveDropSettle.duration);
+  await tester.pump(timedGridAnimationStyle.effectiveDropSettle.duration);
 }
 
 /// What [api]'s `list` returns for [first] to [last], pumped through its
@@ -203,8 +203,7 @@ class RecordingCanvas implements Canvas {
   Iterable<Rect> fillsOf(Color color) {
     return <Rect>[
       for (final record in records)
-        if (!record.isLine && record.isFill && record.isIn(color))
-          record.rect!,
+        if (!record.isLine && record.isFill && record.isIn(color)) record.rect!,
     ];
   }
 
@@ -243,10 +242,10 @@ class RecordingCanvas implements Canvas {
   }
 }
 
-/// Paints the week grid's background onto a new [RecordingCanvas], with
+/// Paints the timed grid's background onto a new [RecordingCanvas], with
 /// the viewport as the geometry.
-RecordingCanvas paintWeekBackground(WidgetTester tester) {
-  final viewport = weekViewport(tester);
+RecordingCanvas paintGridBackground(WidgetTester tester) {
+  final viewport = gridViewport(tester);
   final canvas = RecordingCanvas();
   viewport.background!.paint(canvas, viewport);
   return canvas;

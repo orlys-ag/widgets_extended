@@ -8,7 +8,7 @@ import 'package:examples/workspace_calendar/day_cell.dart';
 import 'package:examples/workspace_calendar/day_list.dart';
 import 'package:examples/workspace_calendar/item_card.dart';
 import 'package:examples/workspace_calendar/mock_calendar_api.dart';
-import 'package:examples/workspace_calendar/week_grid.dart';
+import 'package:examples/workspace_calendar/timed_grid.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -38,7 +38,7 @@ bool hasMarker(WidgetTester tester, DateTime day) {
 /// The week grid's overlay: what covers the grid while its week is not
 /// ready.
 Finder overlayShowing(Finder content) {
-  return find.descendant(of: find.byType(WeekGrid), matching: content);
+  return find.descendant(of: find.byType(TimedGrid), matching: content);
 }
 
 int listCalls(MockCalendarApi api) {
@@ -122,7 +122,7 @@ void main() {
     await tester.tap(dayFinder(today));
     await tester.pumpAndSettle();
     await pickMode(tester, "Week");
-    expect(find.byKey(weekDayHeaderKey(monday)), findsOneWidget);
+    expect(find.byKey(dayHeaderKey(monday)), findsOneWidget);
     expect(api.requests, hasLength(requests));
   });
 
@@ -184,7 +184,7 @@ void main() {
       widths[key.value] = tester.getSize(find.byKey(key)).width;
     }
     expect(widths, contains("block-$teamOffsiteId"));
-    await tester.pump(weekGridAnimationStyle.effectiveItemEnterExit.duration);
+    await tester.pump(timedGridAnimationStyle.effectiveItemEnterExit.duration);
     for (final entry in widths.entries) {
       expect(
         tester.getSize(find.byKey(ValueKey<String>(entry.key))).width,

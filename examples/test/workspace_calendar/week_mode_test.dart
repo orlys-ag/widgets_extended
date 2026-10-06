@@ -13,7 +13,7 @@ import 'package:examples/workspace_calendar/day_list.dart';
 import 'package:examples/workspace_calendar/harbor_theme.dart';
 import 'package:examples/workspace_calendar/item_card.dart';
 import 'package:examples/workspace_calendar/mock_calendar_api.dart';
-import 'package:examples/workspace_calendar/week_grid.dart';
+import 'package:examples/workspace_calendar/timed_grid.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -38,7 +38,7 @@ Matcher nearOffset(Offset value) {
 }
 
 Finder headerFinder(DateTime day) {
-  return find.byKey(weekDayHeaderKey(day));
+  return find.byKey(dayHeaderKey(day));
 }
 
 Offset centerOf(WidgetTester tester, int row, int col) {
@@ -159,7 +159,7 @@ Future<String> idOn(
 
 /// The model the week grid shows.
 CalendarModel model(WidgetTester tester) {
-  return tester.widget<WeekGrid>(find.byType(WeekGrid)).model;
+  return tester.widget<TimedGrid>(find.byType(TimedGrid)).model;
 }
 
 /// The block whose title is [title].
@@ -203,7 +203,7 @@ void main() {
       frames++;
     }
     // The first frame that shows the grid shows its blocks.
-    final viewport = weekViewport(tester);
+    final viewport = gridViewport(tester);
     var checked = 0;
     for (final item in week) {
       final start = item["startMinute"]! as int;
@@ -236,7 +236,7 @@ void main() {
               .width,
     };
     expect(widths, isNotEmpty);
-    await tester.pump(weekGridAnimationStyle.effectiveItemEnterExit.duration);
+    await tester.pump(timedGridAnimationStyle.effectiveItemEnterExit.duration);
     for (final entry in widths.entries) {
       if (blockFinder(entry.key).evaluate().isEmpty) {
         continue;
@@ -297,7 +297,7 @@ void main() {
       find.descendant(of: blockFinder(standupId), matching: find.text("To do")),
       findsNothing,
     );
-    final grid = weekViewport(tester);
+    final grid = gridViewport(tester);
     expect(
       grid.rectOfCell(rowOf(8 * 60), 1)!.top,
       near(grid.scrolledRegion.top),
@@ -427,8 +427,8 @@ void main() {
     );
 
     // A tap on the last slot of the day ends the item at 24:00.
-    weekViewport(tester).verticalPosition!.jumpTo(
-      weekViewport(tester).verticalPosition!.maxScrollExtent,
+    gridViewport(tester).verticalPosition!.jumpTo(
+      gridViewport(tester).verticalPosition!.maxScrollExtent,
     );
     await tester.pumpAndSettle();
     await createAt(tester, rowOf(23 * 60 + 30), colOf(2), "Task");
@@ -528,7 +528,7 @@ void main() {
     await expectForm("14:00", "15:00", "1");
 
     // A touch drag without a hold scrolls and creates nothing.
-    final vertical = weekViewport(tester).verticalPosition!;
+    final vertical = gridViewport(tester).verticalPosition!;
     final before = vertical.pixels;
     await tester.dragFrom(
       centerOf(tester, from, saturday),
@@ -582,11 +582,11 @@ void main() {
     );
     await gesture.moveTo(centerOf(tester, to, sunday));
     await tester.pump();
-    final viewport = weekViewport(tester);
+    final viewport = gridViewport(tester);
     final covered = viewport
         .rectOfCell(from, saturday)!
         .expandToInclude(viewport.rectOfCell(to, sunday)!);
-    var canvas = paintWeekBackground(tester);
+    var canvas = paintGridBackground(tester);
     expect(
       canvas.fillsOf(HarborColors.primaryTint).where((rect) {
         return rect.contains(covered.topLeft + const Offset(1.0, 1.0)) &&
@@ -598,7 +598,7 @@ void main() {
     await tester.pump();
     await tester.pump(oneFrame);
     expect(find.text("New item"), findsNothing);
-    canvas = paintWeekBackground(tester);
+    canvas = paintGridBackground(tester);
     final saturdayColumn = viewport.rectOfCell(from, saturday)!;
     expect(
       canvas.fillsOf(HarborColors.primaryTint).where((rect) {
@@ -616,7 +616,7 @@ void main() {
     );
     await gesture.moveTo(centerOf(tester, rowOf(16 * 60 + 45), tuesday));
     await tester.pump();
-    canvas = paintWeekBackground(tester);
+    canvas = paintGridBackground(tester);
     final todayColumn = viewport.rectOfCell(rowOf(16 * 60), tuesday)!;
     expect(
       canvas.records
@@ -678,9 +678,9 @@ void main() {
     await second.moveTo(centerOf(tester, rowOf(12 * 60 + 15), colOf(4)));
     await tester.pump();
     // The painted range is still the first one.
-    final viewport = weekViewport(tester);
+    final viewport = gridViewport(tester);
     final pressed = viewport.rectOfCell(rowOf(12 * 60), colOf(3))!;
-    var canvas = paintWeekBackground(tester);
+    var canvas = paintGridBackground(tester);
     expect(
       canvas.fillsOf(HarborColors.primaryTint).where((rect) {
         return rect.overlaps(pressed.deflate(1.0));
@@ -700,7 +700,7 @@ void main() {
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
-    canvas = paintWeekBackground(tester);
+    canvas = paintGridBackground(tester);
     final saturdayColumn = viewport.rectOfCell(from, saturday)!;
     expect(
       canvas.fillsOf(HarborColors.primaryTint).where((rect) {
@@ -829,7 +829,7 @@ void main() {
     expect(model(tester).isLocked(brainstormId), isFalse);
     await held.up();
     await tester.pump();
-    await tester.pump(weekGridAnimationStyle.effectiveDropSettle.duration);
+    await tester.pump(timedGridAnimationStyle.effectiveDropSettle.duration);
     expect(api.requests, hasLength(requests + 2));
     expect(
       tester.getRect(blockFinder(uxFlowId)).topLeft,
@@ -1200,7 +1200,7 @@ void main() {
   testWidgets("W11 a new week does not animate", (tester) async {
     final api = await pumpCalendar(tester);
     await pickMode(tester, "Week");
-    final enterExit = weekGridAnimationStyle.effectiveItemEnterExit.duration;
+    final enterExit = timedGridAnimationStyle.effectiveItemEnterExit.duration;
 
     // The next week shows at once.
     final nextWeek = await listAll(
@@ -1282,7 +1282,7 @@ void main() {
     }
     expect(
       find.descendant(
-        of: find.byType(WeekGrid),
+        of: find.byType(TimedGrid),
         matching: find.byType(CircularProgressIndicator),
       ),
       findsOneWidget,
@@ -1517,7 +1517,7 @@ void main() {
   testWidgets("W15 a range drag lays nothing out", (tester) async {
     await pumpCalendar(tester, size: tall);
     await pickMode(tester, "Week");
-    final viewport = weekViewport(tester);
+    final viewport = gridViewport(tester);
     final row = rowOf(18 * 60);
     final col = colOf(2);
 
@@ -1613,12 +1613,12 @@ void main() {
     await tester.pumpAndSettle();
     // Back to 08:00, whose label the narrow grid shows.
     final slot = cellRect(tester, rowOf(8 * 60), colOf(0)).height;
-    weekViewport(tester).verticalPosition!.jumpTo(slot * (rowOf(8 * 60) - 1));
+    gridViewport(tester).verticalPosition!.jumpTo(slot * (rowOf(8 * 60) - 1));
     await tester.pumpAndSettle();
     final eightLabel = find.text("08:00");
     final eightLeft = tester.getRect(eightLabel).left;
     final headerLeft = tester.getRect(mondayHeader).left;
-    final horizontal = weekViewport(tester).horizontalPosition!;
+    final horizontal = gridViewport(tester).horizontalPosition!;
     expect(horizontal.maxScrollExtent, greaterThan(1.0));
     await tester.dragFrom(
       centerOf(tester, rowOf(9 * 60), colOf(5)),
@@ -1732,9 +1732,9 @@ void main() {
       "and colours", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
-    final viewport = weekViewport(tester);
-    final first = paintWeekBackground(tester);
-    final second = paintWeekBackground(tester);
+    final viewport = gridViewport(tester);
+    final first = paintGridBackground(tester);
+    final second = paintGridBackground(tester);
     final rows = viewport.lastVisibleRow - viewport.firstVisibleRow + 1;
     final cols = viewport.lastVisibleCol - viewport.firstVisibleCol + 1;
     expect(rows, lessThan(96));
@@ -1793,11 +1793,11 @@ void main() {
       "columns it shows alone", (tester) async {
     await pumpCalendar(tester, size: const Size(320.0, 640.0));
     await pickMode(tester, "Week");
-    final horizontal = weekViewport(tester).horizontalPosition!;
+    final horizontal = gridViewport(tester).horizontalPosition!;
     horizontal.jumpTo(horizontal.maxScrollExtent);
     await tester.pumpAndSettle();
-    final viewport = weekViewport(tester);
-    final canvas = paintWeekBackground(tester);
+    final viewport = gridViewport(tester);
+    final canvas = paintGridBackground(tester);
     final shown = <int>{
       for (
         var col = viewport.firstVisibleCol;

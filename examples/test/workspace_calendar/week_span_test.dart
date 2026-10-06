@@ -5,7 +5,7 @@ library;
 import 'package:examples/workspace_calendar/calendar_data.dart';
 import 'package:examples/workspace_calendar/calendar_item.dart';
 import 'package:examples/workspace_calendar/calendar_schema.dart';
-import 'package:examples/workspace_calendar/week_grid.dart';
+import 'package:examples/workspace_calendar/timed_grid.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -29,11 +29,11 @@ ItemShape shapeOf(
 }
 
 void main() {
-  group("S1 weekSpanOf", () {
+  group("S1 gridSpanOf", () {
     test("places a day's slots in its column, below the header", () {
       final tuesday = shapeOf(DateTime(2026, 4, 21), 1, 600, 780);
       expect(
-        weekSpanOf(tuesday, weekStartDay),
+        gridSpanOf(tuesday, weekStartDay, 7),
         const BoardSpan(rowStart: 41, colStart: 2, rowSpan: 12, colSpan: 1),
       );
     });
@@ -41,19 +41,19 @@ void main() {
     test("clips the days outside the week", () {
       final fromFriday = shapeOf(DateTime(2026, 4, 17), 4, 1080, 1140);
       expect(
-        weekSpanOf(fromFriday, weekStartDay),
+        gridSpanOf(fromFriday, weekStartDay, 7),
         const BoardSpan(rowStart: 73, colStart: 1, rowSpan: 4, colSpan: 1),
       );
       final fromSaturday = shapeOf(DateTime(2026, 4, 25), 4, 1080, 1140);
       expect(
-        weekSpanOf(fromSaturday, weekStartDay),
+        gridSpanOf(fromSaturday, weekStartDay, 7),
         const BoardSpan(rowStart: 73, colStart: 6, rowSpan: 4, colSpan: 2),
       );
     });
 
     test("is null for an item with no day in the week", () {
       final later = shapeOf(DateTime(2026, 5, 4), 1, 600, 660);
-      expect(weekSpanOf(later, weekStartDay), isNull);
+      expect(gridSpanOf(later, weekStartDay, 7), isNull);
     });
   });
 
@@ -61,7 +61,7 @@ void main() {
     test("a move shifts the first day by the column change and the minutes "
         "by the row change", () {
       final tuesday = shapeOf(DateTime(2026, 4, 21), 1, 600, 780);
-      final from = weekSpanOf(tuesday, weekStartDay)!;
+      final from = gridSpanOf(tuesday, weekStartDay, 7)!;
       final moved = shapeFromSpan(
         tuesday,
         from,
@@ -73,7 +73,7 @@ void main() {
 
     test("a right-edge resize of one column adds a day", () {
       final tuesday = shapeOf(DateTime(2026, 4, 21), 1, 600, 780);
-      final from = weekSpanOf(tuesday, weekStartDay)!;
+      final from = gridSpanOf(tuesday, weekStartDay, 7)!;
       final resized = shapeFromSpan(
         tuesday,
         from,
@@ -85,7 +85,7 @@ void main() {
 
     test("an item clipped at the week's start keeps its hidden days", () {
       final fromFriday = shapeOf(DateTime(2026, 4, 17), 4, 1080, 1140);
-      final from = weekSpanOf(fromFriday, weekStartDay)!;
+      final from = gridSpanOf(fromFriday, weekStartDay, 7)!;
       final moved = shapeFromSpan(
         fromFriday,
         from,
@@ -105,7 +105,7 @@ void main() {
     test("an item clipped at the week's end ends on the column its right "
         "edge is dropped on", () {
       final fromSaturday = shapeOf(DateTime(2026, 4, 25), 4, 1080, 1140);
-      final from = weekSpanOf(fromSaturday, weekStartDay)!;
+      final from = gridSpanOf(fromSaturday, weekStartDay, 7)!;
       final shortened = shapeFromSpan(
         fromSaturday,
         from,
@@ -141,7 +141,7 @@ void main() {
         dayCount: 4,
         fields: const <String, Object?>{"location": "Room 4B"},
       );
-      final from = weekSpanOf(item.shape, weekStartDay)!;
+      final from = gridSpanOf(item.shape, weekStartDay, 7)!;
       const to = BoardSpan(rowStart: 69, colStart: 6, rowSpan: 4, colSpan: 1);
       final moved = itemFromSpan(item, from, to, weekStartDay);
       final shape = shapeFromSpan(item.shape, from, to, weekStartDay);

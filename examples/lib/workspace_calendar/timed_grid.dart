@@ -1,7 +1,7 @@
-/// The calendar's Week mode: one Monday-to-Sunday week as a timed grid on
-/// the board, with a frozen day header and hour gutter, one row per
-/// 15-minute slot, and the week's items as blocks that move, resize and
-/// share their day by the board's own lanes.
+/// The calendar's timed grid: consecutive days on the board, with a frozen
+/// day header and hour gutter, one row per 15-minute slot, and the days'
+/// items as blocks that move, resize and share their day by the board's
+/// own lanes.
 library;
 
 import 'dart:async';
@@ -28,11 +28,11 @@ const double _minDayWidth = 44.0;
 const int _openingRow = 1 + 8 * 60 ~/ minutesPerSlot;
 
 /// The style the grid animates its blocks with: the board's default.
-const BoardAnimationStyle weekGridAnimationStyle = BoardAnimationStyle();
+const BoardAnimationStyle timedGridAnimationStyle = BoardAnimationStyle();
 
 /// The key of the day header cell showing [day].
-ValueKey<String> weekDayHeaderKey(DateTime day) {
-  return ValueKey<String>("week-day-${isoDate(day)}");
+ValueKey<String> dayHeaderKey(DateTime day) {
+  return ValueKey<String>("grid-day-${isoDate(day)}");
 }
 
 /// The key of the block showing the item [id].
@@ -77,14 +77,14 @@ class CreateRange {
   }
 }
 
-/// Where [shape] sits in the week whose Monday is the [dayNumber]
-/// [weekStartDay], in track space: row 0 is the header and column 0 the
+/// Where [shape] sits on a grid of [dayCount] days from the [dayNumber]
+/// [firstDay], in track space: row 0 is the header and column 0 the
 /// gutter, so a slot's row and a day's column count from 1. Days outside
-/// the week are clipped off; null when no day of the item lies in it.
-BoardSpan? weekSpanOf(ItemShape shape, int weekStartDay) {
-  final offset = shape.firstDay - weekStartDay;
+/// the grid's are clipped off; null when no day of the item lies in it.
+BoardSpan? gridSpanOf(ItemShape shape, int firstDay, int dayCount) {
+  final offset = shape.firstDay - firstDay;
   final firstColumn = math.max(0, offset);
-  final colSpan = math.min(7, offset + shape.dayCount) - firstColumn;
+  final colSpan = math.min(dayCount, offset + shape.dayCount) - firstColumn;
   if (colSpan <= 0) {
     return null;
   }
@@ -97,21 +97,21 @@ BoardSpan? weekSpanOf(ItemShape shape, int weekStartDay) {
 }
 
 /// [shape] after a drag took its block from [from] to [to], both track
-/// space, in the week whose Monday is the [dayNumber] [weekStartDay]. Its
+/// space, on a grid whose first column is the [dayNumber] [firstDay]. Its
 /// times are read from [to]'s rows.
 ///
 /// A drop that keeps the column count moves the first day by the change
 /// in the columns and keeps the day count, so the days a clipped item has
-/// outside the week keep their distance. A drop that changes the column
+/// outside the grid keep their distance. A drop that changes the column
 /// count is a resize of the trailing column edge, the only column edge
 /// the grid resizes, which keeps the start: the item keeps its first day
-/// and ends on the day of [to]'s last column, whatever the week clipped
+/// and ends on the day of [to]'s last column, whatever the grid clipped
 /// of it.
 ItemShape shapeFromSpan(
   ItemShape shape,
   BoardSpan from,
   BoardSpan to,
-  int weekStartDay,
+  int firstDay,
 ) {
   final start = (to.rowStart - 1) * minutesPerSlot;
   final end = start + to.rowSpan * minutesPerSlot;
@@ -127,7 +127,7 @@ ItemShape shapeFromSpan(
   return (
     type: shape.type,
     firstDay: shape.firstDay,
-    dayCount: weekStartDay + to.colStart + to.colSpan - 1 - shape.firstDay,
+    dayCount: firstDay + to.colStart + to.colSpan - 1 - shape.firstDay,
     start: start,
     end: end,
   );
@@ -139,9 +139,9 @@ CalendarItem itemFromSpan(
   CalendarItem item,
   BoardSpan from,
   BoardSpan to,
-  int weekStartDay,
+  int firstDay,
 ) {
-  final shape = shapeFromSpan(item.shape, from, to, weekStartDay);
+  final shape = shapeFromSpan(item.shape, from, to, firstDay);
   return item.copyWith(
     day: dateOfDayNumber(shape.firstDay),
     dayCount: shape.dayCount,
@@ -150,32 +150,37 @@ CalendarItem itemFromSpan(
   );
 }
 
-/// The week from [weekStart] on the board, showing what [model] shows for
-/// it. A tap on a block that is not pending reports [onOpenItem]; a tap
-/// on a day header reports [onSelectDay].
+/// The [dayCount] days from [firstDay] on the board, showing what [model]
+/// shows for them. A tap on a block that is not pending reports
+/// [onOpenItem]; a tap on a day header reports [onSelectDay].
 ///
 /// Items keep every board gesture: a long press moves, the bottom band
 /// drags the end time, the right band the day count. Empty body cells
 /// take a create gesture, reported through [onCreate]: a tap picks one
 /// hour from its slot, or up to 24:00; a drag picks the rectangle of
 /// slots it covers, at once for a mouse or a stylus and after a press and
-/// hold on touch, so a touch drag without one scrolls the week.
-class WeekGrid extends StatefulWidget {
-  const WeekGrid({
+/// hold on touch, so a touch drag without one scrolls the grid.
+class TimedGrid extends StatefulWidget {
+  const TimedGrid({
     super.key,
     required this.model,
-    required this.weekStart,
+    required this.firstDay,
+    required this.dayCount,
     required this.selectedDay,
     required this.today,
     required this.onSelectDay,
     required this.onOpenItem,
     required this.onCreate,
-  });
+  }) : assert(dayCount >= 1);
 
   final CalendarModel model;
 
-  /// The Monday the grid shows the week of.
-  final DateTime weekStart;
+  /// The day of the first day column.
+  final DateTime firstDay;
+
+  /// How many day columns the grid shows. Fixed for the life of its
+  /// state: a grid with another count needs its own key.
+  final int dayCount;
 
   final DateTime selectedDay;
   final DateTime today;
@@ -186,14 +191,14 @@ class WeekGrid extends StatefulWidget {
   final ValueChanged<CreateRange> onCreate;
 
   @override
-  State<WeekGrid> createState() {
-    return _WeekGridState();
+  State<TimedGrid> createState() {
+    return _TimedGridState();
   }
 }
 
-typedef _HeaderState = ({DateTime weekStart, DateTime selectedDay});
+typedef _HeaderState = ({DateTime firstDay, DateTime selectedDay});
 
-class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
+class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final BoardController<String, ShownItem> _board;
 
   /// Held in fields because `Board` replaces its delegate, and so rebuilds
@@ -217,7 +222,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
   /// What the header cells show. The cell builder runs only when the board
   /// rebuilds a cell, so the header cells listen to this instead.
   late final ValueNotifier<_HeaderState> _header = ValueNotifier<_HeaderState>((
-    weekStart: widget.weekStart,
+    firstDay: widget.firstDay,
     selectedDay: widget.selectedDay,
   ));
 
@@ -245,10 +250,10 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
   /// that stopped the grid finds this set.
   bool _scrollJustStopped = false;
 
-  /// Whether the last [_sync] found its week ready.
+  /// Whether the last [_sync] found its days ready.
   bool _syncedReady = false;
 
-  /// Whether a frame callback will put [weekGridAnimationStyle] back.
+  /// Whether a frame callback will put [timedGridAnimationStyle] back.
   bool _restoreScheduled = false;
 
   @override
@@ -283,7 +288,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
       keyOf: (entry) {
         return entry.id;
       },
-      animationStyle: weekGridAnimationStyle,
+      animationStyle: timedGridAnimationStyle,
     );
     widget.model.addListener(_handleModel);
     _sync();
@@ -295,21 +300,26 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
   }
 
   @override
-  void didUpdateWidget(WeekGrid oldWidget) {
+  void didUpdateWidget(TimedGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
+    assert(
+      widget.dayCount == oldWidget.dayCount,
+      "A TimedGrid keeps its day count; give a grid with another one its "
+      "own key.",
+    );
     final modelChanged = widget.model != oldWidget.model;
     if (modelChanged) {
       oldWidget.model.removeListener(_handleModel);
       widget.model.addListener(_handleModel);
     }
-    if (widget.weekStart != oldWidget.weekStart ||
+    if (widget.firstDay != oldWidget.firstDay ||
         widget.selectedDay != oldWidget.selectedDay) {
       _header.value = (
-        weekStart: widget.weekStart,
+        firstDay: widget.firstDay,
         selectedDay: widget.selectedDay,
       );
     }
-    if (modelChanged || widget.weekStart != oldWidget.weekStart) {
+    if (modelChanged || widget.firstDay != oldWidget.firstDay) {
       _sync();
     }
   }
@@ -348,25 +358,28 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
     );
   }
 
-  /// Column 0 is the frozen hour gutter; columns 1 to 7 are Monday to
-  /// Sunday. The `laneExtent` makes the day axis the lane axis, so items
-  /// sharing a day's time sit side by side.
+  /// Column 0 is the frozen hour gutter; columns 1 onward are the days
+  /// from [TimedGrid.firstDay]. The `laneExtent` makes the day axis the
+  /// lane axis, so items sharing a day's time sit side by side.
   BoardAxisConfig _columnsConfig(double dayWidth) {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
         _gutterWidth,
-        ...List<double>.filled(7, dayWidth),
+        ...List<double>.filled(widget.dayCount, dayWidth),
       ]),
       frozenStart: 1,
       laneExtent: dayWidth,
     );
   }
 
-  /// Seven days across [width], never narrower than the minimum. Called
+  /// The days across [width], never narrower than the minimum. Called
   /// from the layout callback, so the first frame lays the board out at
   /// its width.
   void _fitColumns(double width) {
-    final dayWidth = math.max(_minDayWidth, (width - _gutterWidth) / 7);
+    final dayWidth = math.max(
+      _minDayWidth,
+      (width - _gutterWidth) / widget.dayCount,
+    );
     if (dayWidth == _dayWidth) {
       return;
     }
@@ -379,32 +392,34 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
     setState(() {});
   }
 
-  /// Whether the model shows exactly this grid's week, every day of it
-  /// read. False for a sync that runs between the model taking a new week
-  /// and this grid getting it.
-  bool get _weekReady {
-    final weekStart = widget.weekStart;
-    return widget.model.status == CalendarLoadStatus.ready &&
-        widget.model.isShown(weekStart, addDays(weekStart, 6));
+  DateTime get _lastDay {
+    return addDays(widget.firstDay, widget.dayCount - 1);
   }
 
-  /// Sets the board's items to the week's shown items when the week is
-  /// ready, and to none otherwise. A sync animates only when its week is
-  /// ready and the last sync found its own week ready; any other runs under
-  /// [BoardAnimationStyle.disabled], and so does every sync until a frame
-  /// callback restores [weekGridAnimationStyle]. A new week reaches this
-  /// grid only after the model has notified that it shows it, and the sync
-  /// that notification runs finds the old week not ready, so the first sync
-  /// of a new week does not animate.
+  /// Whether the model shows exactly this grid's days, every one of them
+  /// read. False for a sync that runs between the model taking new days
+  /// and this grid getting them.
+  bool get _daysReady {
+    return widget.model.status == CalendarLoadStatus.ready &&
+        widget.model.isShown(widget.firstDay, _lastDay);
+  }
+
+  /// Sets the board's items to the days' shown items when the days are
+  /// ready, and to none otherwise. A sync animates only when its days are
+  /// ready and the last sync found its own days ready; any other runs
+  /// under [BoardAnimationStyle.disabled], and so does every sync until a
+  /// frame callback restores [timedGridAnimationStyle]. New days reach
+  /// this grid only after the model has notified that it shows them, and
+  /// the sync that notification runs finds the old days not ready, so the
+  /// first sync of new days does not animate.
   void _sync() {
-    final weekStart = widget.weekStart;
-    final ready = _weekReady;
+    final ready = _daysReady;
     final placements = <BoardPlacement<ShownItem>>[];
     if (ready) {
-      final weekStartDay = dayNumber(weekStart);
-      final shown = widget.model.itemsBetween(weekStart, addDays(weekStart, 6));
+      final firstDay = dayNumber(widget.firstDay);
+      final shown = widget.model.itemsBetween(widget.firstDay, _lastDay);
       for (final entry in shown) {
-        final span = weekSpanOf(entry.item.shape, weekStartDay);
+        final span = gridSpanOf(entry.item.shape, firstDay, widget.dayCount);
         if (span != null) {
           placements.add(BoardPlacement<ShownItem>(entry, span));
         }
@@ -421,7 +436,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
     _syncedReady = ready;
   }
 
-  /// Puts [weekGridAnimationStyle] back in a frame callback scheduled
+  /// Puts [timedGridAnimationStyle] back in a frame callback scheduled
   /// after the diff of the sync that first disabled it. The style setter
   /// stops slides at once but leaves an enter or exit in flight to its
   /// next tick, which reads the style then, and transient callbacks run in
@@ -438,7 +453,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
     SchedulerBinding.instance.scheduleFrameCallback((_) {
       _restoreScheduled = false;
       if (mounted) {
-        _board.animationStyle = weekGridAnimationStyle;
+        _board.animationStyle = timedGridAnimationStyle;
       }
     });
   }
@@ -462,22 +477,22 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
       return true;
     }
     final shape = entry.item.shape;
-    final weekStartDay = dayNumber(widget.weekStart);
-    final converted = shapeFromSpan(shape, from, span, weekStartDay);
+    final firstDay = dayNumber(widget.firstDay);
+    final converted = shapeFromSpan(shape, from, span, firstDay);
     if (!isAllowedDayCount(converted.dayCount)) {
       return false;
     }
-    // The converted shape's own week span, not the candidate's: an item
-    // clipped at the week's start shows more days once moved right.
-    final weekSpan = weekSpanOf(converted, weekStartDay);
-    if (weekSpan == null) {
+    // The converted shape's own span, not the candidate's: an item clipped
+    // at the grid's first day shows more days once moved right.
+    final shownSpan = gridSpanOf(converted, firstDay, widget.dayCount);
+    if (shownSpan == null) {
       return false;
     }
     final others = _board.itemsIn(
-      weekSpan.rowStart,
-      weekSpan.rowStart + weekSpan.rowSpan,
-      weekSpan.colStart,
-      weekSpan.colStart + weekSpan.colSpan,
+      shownSpan.rowStart,
+      shownSpan.rowStart + shownSpan.rowSpan,
+      shownSpan.colStart,
+      shownSpan.colStart + shownSpan.colSpan,
     );
     for (final other in others) {
       if (other == id) {
@@ -508,7 +523,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
       stored,
       from,
       to,
-      dayNumber(widget.weekStart),
+      dayNumber(widget.firstDay),
     );
     if (requested == stored) {
       return;
@@ -625,7 +640,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
   CreateRange _tapRangeOf(({int row, int col}) cell) {
     final start = (cell.row - 1) * minutesPerSlot;
     return CreateRange(
-      day: addDays(widget.weekStart, cell.col - 1),
+      day: addDays(widget.firstDay, cell.col - 1),
       startMinute: start,
       endMinute: math.min(start + 60, minutesPerDay),
       dayCount: 1,
@@ -642,7 +657,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
     final left = math.min(anchor.col, focus.col);
     final right = math.max(anchor.col, focus.col);
     return CreateRange(
-      day: addDays(widget.weekStart, left - 1),
+      day: addDays(widget.firstDay, left - 1),
       startMinute: (top - 1) * minutesPerSlot,
       endMinute: bottom * minutesPerSlot,
       dayCount: right - left + 1,
@@ -768,14 +783,14 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
           controller: _board,
           cellBuilder: _cellBuilder,
           itemBuilder: _itemBuilder,
-          background: _WeekGridPainter(
-            weekStart: widget.weekStart,
+          background: _TimedGridPainter(
+            firstDay: widget.firstDay,
             today: widget.today,
             rangeAnchor: range?.anchor,
             rangeFocus: range?.focus,
           ),
           drag: _dragConfig,
-          // The week scrolls on its own, not with the screen's primary
+          // The grid scrolls on its own, not with the screen's primary
           // scroll controller.
           primary: false,
         ),
@@ -787,7 +802,7 @@ class _WeekGridState extends State<WeekGrid> with TickerProviderStateMixin {
         return Stack(
           children: <Widget>[
             Positioned.fill(child: board),
-            if (!_weekReady)
+            if (!_daysReady)
               Positioned.fill(
                 child: _LoadOverlay(
                   error: model.status == CalendarLoadStatus.failed
@@ -821,7 +836,7 @@ class _RangeDrag extends Drag {
     _horizontal?.addListener(_refocus);
   }
 
-  final _WeekGridState _grid;
+  final _TimedGridState _grid;
   final RenderBoardViewport<String> _viewport;
   final ScrollPosition? _vertical;
   final ScrollPosition? _horizontal;
@@ -884,11 +899,11 @@ class _DayHeaderCell extends StatelessWidget {
     return ValueListenableBuilder<_HeaderState>(
       valueListenable: header,
       builder: (context, value, child) {
-        final day = addDays(value.weekStart, column);
+        final day = addDays(value.firstDay, column);
         final isToday = day == today;
         final isSelected = day == value.selectedDay;
         return GestureDetector(
-          key: weekDayHeaderKey(day),
+          key: dayHeaderKey(day),
           onTap: () {
             onSelectDay(day);
           },
@@ -1021,7 +1036,7 @@ class _Block extends StatelessWidget {
   }
 }
 
-/// Covers the grid while its week is not ready, taking every press: a
+/// Covers the grid while its days are not ready, taking every press: a
 /// progress indicator while it loads, the error and Retry when the read
 /// failed.
 class _LoadOverlay extends StatelessWidget {
@@ -1064,9 +1079,9 @@ class _LoadOverlay extends StatelessWidget {
 /// slot row and at the left of each day column, and the create range being
 /// dragged, filled like today's column and edged in the primary colour so
 /// it shows over that column too. Every paint it draws with is built once.
-class _WeekGridPainter extends BoardBackgroundPainter {
-  const _WeekGridPainter({
-    required this.weekStart,
+class _TimedGridPainter extends BoardBackgroundPainter {
+  const _TimedGridPainter({
+    required this.firstDay,
     required this.today,
     required this.rangeAnchor,
     required this.rangeFocus,
@@ -1084,7 +1099,8 @@ class _WeekGridPainter extends BoardBackgroundPainter {
     ..style = PaintingStyle.stroke
     ..strokeWidth = 2.0;
 
-  final DateTime weekStart;
+  /// The day of column 1.
+  final DateTime firstDay;
   final DateTime today;
   final ({int row, int col})? rangeAnchor;
   final ({int row, int col})? rangeFocus;
@@ -1104,12 +1120,12 @@ class _WeekGridPainter extends BoardBackgroundPainter {
     canvas.save();
     canvas.clipRect(region);
     canvas.drawRect(region, _surfacePaint);
-    final todayColumn = 1 + daysBetween(weekStart, today);
+    final todayColumn = 1 + daysBetween(firstDay, today);
     for (var col = firstCol; col <= lastCol; col++) {
       final Paint fill;
       if (col == todayColumn) {
         fill = _tintPaint;
-      } else if (col >= 6) {
+      } else if (weekdayColumn(addDays(firstDay, col - 1)) >= 5) {
         fill = _backgroundPaint;
       } else {
         continue;
@@ -1147,8 +1163,8 @@ class _WeekGridPainter extends BoardBackgroundPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _WeekGridPainter old) {
-    return old.weekStart != weekStart ||
+  bool shouldRepaint(covariant _TimedGridPainter old) {
+    return old.firstDay != firstDay ||
         old.today != today ||
         old.rangeAnchor != rangeAnchor ||
         old.rangeFocus != rangeFocus;

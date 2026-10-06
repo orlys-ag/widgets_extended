@@ -12,7 +12,7 @@ import 'calendar_item.dart';
 import 'calendar_model.dart';
 import 'calendar_schema.dart';
 import 'harbor_theme.dart';
-import 'week_grid.dart';
+import 'timed_grid.dart';
 
 /// Asks for a type, then opens the form for a new item of it over the
 /// slots [range] picked. Completes when the flow closes, whether or not
