@@ -166,8 +166,8 @@ void main() {
         // A confirmed edit that moves the item past the next one slides
         // both cards.
         await cardAction(tester, standupId, "Edit");
-        await chooseOption(tester, "Start", "11:15");
-        await chooseOption(tester, "End", "11:45");
+        await chooseOption(tester, "Start", "12:00");
+        await chooseOption(tester, "End", "12:30");
         await tester.tap(find.byType(FilledButton));
         await tester.pump();
         await tester.pump(api.latency);

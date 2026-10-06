@@ -1,7 +1,6 @@
 /// The calendar's timed grid: consecutive days on the board, with a frozen
 /// day header and hour gutter, one row per 15-minute slot, and the days'
-/// items as blocks that move, resize and share their day by the board's
-/// own lanes.
+/// items as blocks that move and resize.
 library;
 
 import 'dart:async';
@@ -360,7 +359,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   /// Column 0 is the frozen hour gutter; columns 1 onward are the days
   /// from [TimedGrid.firstDay]. The `laneExtent` makes the day axis the
-  /// lane axis, so items sharing a day's time sit side by side.
+  /// lane axis, so items sharing a day's time sit side by side. No two
+  /// stored items do, but a failed move can return an item under another
+  /// item's pending move until the API refuses that one.
   BoardAxisConfig _columnsConfig(double dayWidth) {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[

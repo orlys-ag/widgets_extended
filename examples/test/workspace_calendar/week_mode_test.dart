@@ -1381,7 +1381,7 @@ void main() {
     expect(find.text("New Task"), findsNothing);
   });
 
-  testWidgets("W14 the resize strips and Share", (tester) async {
+  testWidgets("W14 the resize strips, and no shared time", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
     await createBeforePump(
       tester,
@@ -1469,22 +1469,21 @@ void main() {
     expect(api.requests, hasLength(requests));
     expect(tester.getRect(blockFinder(uxFlowId)), uxFlow);
 
-    // Single-day items share their day.
+    // A single-day item cannot share another single-day item's time: the
+    // grid refuses the drop onto Wednesday 11:00, where "Review onboarding
+    // copy" sits, and sends nothing.
+    requests = api.requests.length;
+    final brainstorm = tester.getRect(blockFinder(brainstormId));
     await moveBlock(
       tester,
       blockFinder(brainstormId),
       cellRect(tester, rowOf(11 * 60), colOf(2)).topLeft,
     );
-    await tester.pump(api.latency);
+    expect(find.byType(SnackBar), findsNothing);
     await tester.pumpAndSettle();
-    expect(
-      tester.getSize(blockFinder(brainstormId)).width,
-      lessThan(dayWidth - 1.0),
-    );
-    expect(
-      tester.getSize(blockFinder(reviewId)).width,
-      lessThan(dayWidth - 1.0),
-    );
+    expect(tester.getRect(blockFinder(brainstormId)), brainstorm);
+    expect(tester.getSize(blockFinder(reviewId)).width, near(dayWidth));
+    expect(api.requests, hasLength(requests));
 
     // The right strip of an item that ends after the week ends it on the
     // column it is dropped on.

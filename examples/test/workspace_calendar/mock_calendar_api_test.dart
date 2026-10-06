@@ -394,9 +394,14 @@ void main() {
     );
     expect(await listed(tester, api, wednesday, wednesday), before);
 
+    // An hour after the Task, so the overlap rule does not refuse it.
     final linkless = await answer(
       tester,
-      api.create(meeting(const <String, Object?>{"videoLink": ""})),
+      api.create(<String, Object?>{
+        ...meeting(const <String, Object?>{"videoLink": ""}),
+        "startMinute": 10 * 60,
+        "endMinute": 11 * 60,
+      }),
     );
     expect(linkless.error, isNull);
     final id = (linkless.value! as Map<String, Object?>)["id"]! as String;
@@ -593,18 +598,39 @@ void main() {
     expect(shortened.error, isNull);
     expect((await fetched(tester, api, away))["endMinute"], 585);
 
-    final shared = await answer(
+    // Two single-day items of any types are kept apart too.
+    final early = await stored(
       tester,
-      api.create(envelope(day: thursday, start: 9 * 60, end: 10 * 60)),
+      api,
+      envelope(day: thursday, start: 9 * 60, end: 10 * 60),
     );
-    expect(shared.error, isNull);
-    final sharing = await answer(
-      tester,
-      api.create(
+    final thursdayBefore = await listed(tester, api, thursday, thursday);
+    expect(
+      await created(
         envelope(day: thursday, start: 9 * 60 + 30, end: 10 * 60 + 30),
       ),
+      overlapWith(<String>[early]),
     );
-    expect(sharing.error, isNull);
+    expect(
+      await created(
+        envelope(
+          type: CalendarItemType.deadline,
+          day: thursday,
+          start: 15 * 60 + 45,
+          end: 16 * 60,
+        ),
+      ),
+      overlapWith(<String>[single]),
+    );
+    final moved = await answer(
+      tester,
+      api.update(
+        single,
+        envelope(day: thursday, start: 9 * 60 + 45, end: 10 * 60 + 15),
+      ),
+    );
+    expect(moved.error, overlapWith(<String>[early]));
+    expect(await listed(tester, api, thursday, thursday), thursdayBefore);
   });
 
   testWidgets("A6 failure policy, latency and the request log", (tester) async {

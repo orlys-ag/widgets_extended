@@ -181,7 +181,8 @@ typedef _WeekEntry = ({
 });
 
 /// On Monday to Wednesday these lie outside 09:00 to 17:00, the hours of
-/// "Day off", which falls on one of those days.
+/// "Day off", which falls on one of those days. Each also misses the hours
+/// of every kept task that can fall on its day, whichever day today is.
 const List<_WeekEntry> _weekEntries = <_WeekEntry>[
   (
     weekday: 0,
@@ -206,8 +207,8 @@ const List<_WeekEntry> _weekEntries = <_WeekEntry>[
     weekday: 3,
     type: CalendarItemType.meeting,
     title: "Design critique",
-    start: 15 * 60,
-    end: 16 * 60,
+    start: 16 * 60,
+    end: 17 * 60,
     fields: <String, Object?>{
       "location": "Studio",
       "attendees": <String>["Lu", "Michael"],
@@ -218,8 +219,8 @@ const List<_WeekEntry> _weekEntries = <_WeekEntry>[
     weekday: 4,
     type: CalendarItemType.meeting,
     title: "Client demo",
-    start: 10 * 60,
-    end: 11 * 60,
+    start: 16 * 60 + 30,
+    end: 17 * 60 + 30,
     fields: <String, Object?>{
       "attendees": <String>["Ana", "Michael", "Sam"],
       "videoLink": "https://meet.example.com/demo",

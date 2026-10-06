@@ -97,7 +97,8 @@ final class CalendarValidationException extends CalendarApiException {
   }
 }
 
-/// The item would share time with items the overlap rule keeps apart.
+/// The item would share time with other items, which the overlap rule
+/// forbids.
 final class CalendarOverlapException extends CalendarApiException {
   const CalendarOverlapException(this.conflictingIds);
 
@@ -105,7 +106,7 @@ final class CalendarOverlapException extends CalendarApiException {
 
   @override
   String get message {
-    return "The item overlaps another item that cannot share its time.";
+    return "The item overlaps another item.";
   }
 }
 

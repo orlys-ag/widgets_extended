@@ -432,19 +432,10 @@ typedef ItemShape = ({
   int end,
 });
 
-/// Whether [a] and [b] may not share time: their days meet, their
-/// half-open minute ranges `[start, end)` meet, and at least one of them
-/// is Out of office or covers more than one day. Two single-day items of
-/// any other type may share, which the board shows as lanes.
+/// Whether [a] and [b] share time, which no two items may: their days
+/// meet and their half-open minute ranges `[start, end)` meet, whatever
+/// their types.
 bool itemsConflict(ItemShape a, ItemShape b) {
-  final exclusive =
-      a.type == CalendarItemType.outOfOffice ||
-      b.type == CalendarItemType.outOfOffice ||
-      a.dayCount > 1 ||
-      b.dayCount > 1;
-  if (!exclusive) {
-    return false;
-  }
   final daysMeet =
       a.firstDay < b.firstDay + b.dayCount &&
       b.firstDay < a.firstDay + a.dayCount;

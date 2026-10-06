@@ -368,10 +368,12 @@ void main() {
       dayCount: 3,
     );
     final single = task("item-2", DateTime(2026, 4, 27), 1020, 1080);
+    final morning = task("item-3", DateTime(2026, 4, 26), 600, 660);
     model.show(DateTime(2026, 4, 25), DateTime(2026, 4, 27));
     harness.lastCall.succeed(<Map<String, Object?>>[
       multi.toJson(),
       single.toJson(),
+      morning.toJson(),
     ]);
     await settle();
     final calls = harness.api.calls.length;
@@ -389,6 +391,21 @@ void main() {
       multi.copyWith(startMinute: 1110, endMinute: 1170).toJson(),
     );
     await settle();
+
+    // Two single-day items are kept apart as well.
+    final reported = harness.failures.length;
+    model.requestMove(
+      single.copyWith(
+        day: DateTime(2026, 4, 26),
+        startMinute: 630,
+        endMinute: 690,
+      ),
+    );
+    expect(harness.api.calls, hasLength(calls + 1));
+    expect(model.isLocked("item-2"), isFalse);
+    expect(harness.failures.sublist(reported), <String>[
+      const CalendarOverlapException(<String>["item-3"]).message,
+    ]);
   });
 
   test("M5 a multi-day item shows on each day it covers", () async {
