@@ -540,6 +540,45 @@ void main() {
     expect(controller.anim.hasLayoutDrivingAnimations, isFalse);
   });
 
+  testWidgets("removing a key mid-enter under an off itemEnterExit re-lanes "
+      "its survivors within the call", (tester) async {
+    final controller = _lanedController(
+      tester,
+      style: const BoardAnimationStyle(
+        trackResize: _zero,
+        itemSlide: _zero,
+        itemEnterExit: _ms240,
+      ),
+    );
+    controller.addItem(const _Item("a"), _chip(0, 1, 2));
+    await tester.pumpAndSettle();
+    // `b` starts a column before `a`, so it takes lane 0 and puts `a` on
+    // lane 1, with no slide while itemSlide is off.
+    controller.addItem(const _Item("b"), _chip(0, 0, 2));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final idB = controller.idOfKey("b");
+    final anim = controller.anim;
+    // Setup sanity: `b` is mid-enter and holds `a` on lane 1.
+    expect(anim.isEnteringItem(idB), isTrue);
+    expect(controller.laneOf("a"), 1);
+
+    controller.animationStyle = const BoardAnimationStyle(
+      trackResize: _zero,
+      itemSlide: _ms240,
+      itemEnterExit: _zero,
+    );
+    // Setup sanity: the restyle left `b` entering, and nothing slides.
+    expect(anim.isEnteringItem(idB), isTrue);
+    expect(anim.hasActiveOffsets, isFalse);
+
+    controller.removeItem("b");
+    // TARGET: `a` re-lanes inside the removal, and its slide is installed
+    // within the call.
+    expect(anim.hasActiveOffsets, isTrue);
+    await tester.pumpAndSettle();
+  });
+
   // DERIVED name. No AC; settle-tick re-entrancy: the first settle's
   // delivered notification reaches an app listener that re-adds the
   // OTHER key settling on the same tick. The re-add reverses that key's
