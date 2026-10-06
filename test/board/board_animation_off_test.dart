@@ -184,6 +184,31 @@ void main() {
     expect(anim.hasLayoutDrivingAnimations, isFalse);
   });
 
+  testWidgets("a negative per-call duration captures no lane bucket", (
+    tester,
+  ) async {
+    final controller = await _gapFixture(tester);
+    controller.debugLaneBucketMemberReadCount = 0;
+    controller.moveItem(
+      "a",
+      const BoardSpan(rowStart: 1, colStart: 2, colSpan: 4),
+      duration: _ms240.duration,
+    );
+    // Setup sanity: a move that slides captures the lane buckets it
+    // disturbs, so the counter observes a capture.
+    expect(controller.debugLaneBucketMemberReadCount, greaterThan(0));
+    await _settlePump(tester);
+    controller.debugLaneBucketMemberReadCount = 0;
+
+    controller.moveItem(
+      "a",
+      const BoardSpan(rowStart: 0, colStart: 2, colSpan: 4),
+      duration: _neg240.duration,
+    );
+    // TARGET: a move that installs no slide captures nothing for one.
+    expect(controller.debugLaneBucketMemberReadCount, 0);
+  });
+
   testWidgets("a negative make-room release closes the gap at once", (
     tester,
   ) async {
