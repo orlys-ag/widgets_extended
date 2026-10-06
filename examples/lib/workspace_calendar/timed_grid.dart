@@ -154,7 +154,8 @@ CalendarItem itemFromSpan(
 /// [onOpenItem]; a tap on a day header reports [onSelectDay].
 ///
 /// Items keep every board gesture: a long press moves, the bottom band
-/// drags the end time, the right band the day count. Empty body cells
+/// drags the end time, and, on more than one day, the right band the day
+/// count. Empty body cells
 /// take a create gesture, reported through [onCreate]: a tap picks one
 /// hour from its slot, or up to 24:00; a drag picks the rectangle of
 /// slots it covers, at once for a mouse or a stylus and after a press and
@@ -207,13 +208,16 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final BoardItemBuilder<String, ShownItem> _itemBuilder = _buildItem;
 
   /// One instance, so a rebuild of this state hands the board the config
-  /// it already has.
+  /// it already has. A single day column has no right strip: there is no
+  /// column to drag its edge onto.
   late final BoardDragConfig<String> _dragConfig = BoardDragConfig<String>(
     canDrag: _canDrag,
     canDropAt: _canDropAt,
     onItemMoved: _commit,
     onItemResized: _commit,
-    resizeEdges: BoardResizeEdges.trailing,
+    resizeEdges: widget.dayCount > 1
+        ? BoardResizeEdges.trailing
+        : BoardResizeEdges.none,
     primaryResizeEdges: BoardResizeEdges.trailing,
     draggedItemOpacity: harborDraggedItemOpacity,
   );

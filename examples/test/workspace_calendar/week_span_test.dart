@@ -1,4 +1,4 @@
-/// How an item's days and minutes map onto the week grid's tracks, and
+/// How an item's days and minutes map onto the timed grid's tracks, and
 /// back from the span a drop reports.
 library;
 
@@ -54,6 +54,17 @@ void main() {
     test("is null for an item with no day in the week", () {
       final later = shapeOf(DateTime(2026, 5, 4), 1, 600, 660);
       expect(gridSpanOf(later, weekStartDay, 7), isNull);
+    });
+
+    test("clips to a one-day grid on both sides", () {
+      final wednesday = dayNumber(DateTime(2026, 4, 22));
+      final threeDays = shapeOf(DateTime(2026, 4, 21), 3, 1080, 1140);
+      expect(
+        gridSpanOf(threeDays, wednesday, 1),
+        const BoardSpan(rowStart: 73, colStart: 1, rowSpan: 4, colSpan: 1),
+      );
+      final thursday = shapeOf(DateTime(2026, 4, 23), 1, 1080, 1140);
+      expect(gridSpanOf(thursday, wednesday, 1), isNull);
     });
   });
 

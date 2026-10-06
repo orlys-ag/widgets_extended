@@ -1,7 +1,8 @@
 /// A workspace calendar on the board module, over a calendar API: a month
 /// grid that folds into the selected day's week while the day list is
-/// scrolled, the selected day's items under it, and a timed week grid where
-/// items are created, moved, resized, edited and deleted.
+/// scrolled, the selected day's items under it, and timed grids of the
+/// selected day's week and of that day alone, where items are created,
+/// moved, resized, edited and deleted.
 ///
 /// The month grid is a [Board] with no items. Each day is a cell, a tap
 /// selects it through the board's cell selection, and the arrow keys move
@@ -44,9 +45,21 @@ enum _WorkspaceView {
 
 enum _CalendarMode {
   month("Month"),
-  week("Week");
+  week("Week"),
+  day("Day");
 
   const _CalendarMode(this.label);
+
+  final String label;
+}
+
+/// What the chevrons step by, which their tooltips name.
+enum _StepUnit {
+  day("day"),
+  week("week"),
+  month("month");
+
+  const _StepUnit(this.label);
 
   final String label;
 }
@@ -170,14 +183,28 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return BoardSelection(anchor: cell, focus: cell);
   }
 
-  /// Shows the month grid's days in the month mode and the selected day's
-  /// week in the week mode, which reads whatever of them is not read yet.
+  /// The days the timed grid shows: the selected day's Monday-to-Sunday
+  /// week in the week mode, the selected day alone in the day mode, and
+  /// null in the month mode. [_showRange] and the grid both read it.
+  ({DateTime first, int count})? get _timedDays {
+    switch (_mode) {
+      case _CalendarMode.month:
+        return null;
+      case _CalendarMode.week:
+        return (first: weekStartOf(_selected), count: 7);
+      case _CalendarMode.day:
+        return (first: _selected, count: 1);
+    }
+  }
+
+  /// Shows the month grid's days in the month mode and [_timedDays]
+  /// otherwise, which reads whatever of them is not read yet.
   void _showRange() {
-    if (_mode == _CalendarMode.week) {
-      final weekStart = weekStartOf(_selected);
-      _model.show(weekStart, addDays(weekStart, 6));
-    } else {
+    final days = _timedDays;
+    if (days == null) {
       _model.show(_grid.firstDay, _grid.lastDay);
+    } else {
+      _model.show(days.first, addDays(days.first, days.count - 1));
     }
   }
 
@@ -222,17 +249,29 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _select(_grid.dateAt(focus.row, focus.col));
   }
 
-  bool get _stepsByWeek {
-    return _mode == _CalendarMode.week || _collapsed;
+  /// A day in the day mode, a week in the week mode and the folded month,
+  /// a month otherwise.
+  _StepUnit get _stepUnit {
+    switch (_mode) {
+      case _CalendarMode.month:
+        return _collapsed ? _StepUnit.week : _StepUnit.month;
+      case _CalendarMode.week:
+        return _StepUnit.week;
+      case _CalendarMode.day:
+        return _StepUnit.day;
+    }
   }
 
-  /// A week in the week mode and the folded month, a month otherwise; a
-  /// month step keeps the day of the month where it can.
+  /// Steps by [_stepUnit]; a month step keeps the day of the month where it
+  /// can.
   void _step(int direction) {
-    if (_stepsByWeek) {
-      _select(addDays(_selected, 7 * direction));
-    } else {
-      _select(addMonths(_selected, direction));
+    switch (_stepUnit) {
+      case _StepUnit.day:
+        _select(addDays(_selected, direction));
+      case _StepUnit.week:
+        _select(addDays(_selected, 7 * direction));
+      case _StepUnit.month:
+        _select(addMonths(_selected, direction));
     }
   }
 
@@ -254,7 +293,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   void _setCollapsed(bool collapsed) {
-    if (collapsed == _collapsed || _mode == _CalendarMode.week) {
+    if (collapsed == _collapsed || _mode != _CalendarMode.month) {
       return;
     }
     setState(() {
@@ -350,8 +389,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       case _WorkspaceView.table:
         body = _PlaceholderView(name: _view.label);
     }
-    final showsWeek =
-        _view == _WorkspaceView.calendar && _mode == _CalendarMode.week;
+    final showsTimedGrid =
+        _view == _WorkspaceView.calendar && _mode != _CalendarMode.month;
     return Scaffold(
       appBar: AppBar(
         scrolledUnderElevation: 0.0,
@@ -368,7 +407,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
-          if (!showsWeek)
+          if (!showsTimedGrid)
             IconButton(
               icon: const Icon(Icons.add_circle_outline),
               tooltip: "Add",
@@ -418,7 +457,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return _CalendarHeader(
       title: "${monthNames[_selected.month - 1]} ${_selected.year}",
       mode: _mode,
-      stepsByWeek: _stepsByWeek,
+      stepUnit: _stepUnit,
       onPrevious: () {
         _step(-1);
       },
@@ -429,11 +468,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// The month grid and the day list in the month mode; the week grid,
-  /// across the body's full width, in the week mode.
+  /// The month grid and the day list in the month mode; a timed grid of
+  /// [_timedDays], across the body's full width, otherwise.
   Widget _buildCalendarView() {
-    if (_mode == _CalendarMode.week) {
-      final weekStart = weekStartOf(_selected);
+    final days = _timedDays;
+    if (days != null) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -452,9 +491,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           ),
           Expanded(
             child: TimedGrid(
+              // A grid keeps its day count, so each mode builds its own.
+              key: ValueKey<_CalendarMode>(_mode),
               model: _model,
-              firstDay: weekStart,
-              dayCount: 7,
+              firstDay: days.first,
+              dayCount: days.count,
               selectedDay: _selected,
               today: _today,
               onSelectDay: _select,
@@ -683,7 +724,7 @@ class _CalendarHeader extends StatelessWidget {
   const _CalendarHeader({
     required this.title,
     required this.mode,
-    required this.stepsByWeek,
+    required this.stepUnit,
     required this.onPrevious,
     required this.onNext,
     required this.onModeSelected,
@@ -694,9 +735,7 @@ class _CalendarHeader extends StatelessWidget {
   /// The mode picked from the menu, which the label names.
   final _CalendarMode mode;
 
-  /// Whether the chevrons step by week, as they do in the week mode and
-  /// while the month is folded.
-  final bool stepsByWeek;
+  final _StepUnit stepUnit;
 
   final VoidCallback onPrevious;
   final VoidCallback onNext;
@@ -710,7 +749,7 @@ class _CalendarHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unit = stepsByWeek ? "week" : "month";
+    final unit = stepUnit.label;
     return Row(
       children: <Widget>[
         Expanded(
