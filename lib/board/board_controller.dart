@@ -758,10 +758,11 @@ class BoardController<TKey, TItem> {
     _notifyStructural(<TKey>{key});
   }
 
-  /// Removes [key] from the live set: synchronously under a zero
-  /// itemEnterExit, and through an exit ramp otherwise. A key removed
-  /// while its own enter is in flight exits from where it currently is,
-  /// and never carries both direction bits.
+  /// Removes [key] from the live set: synchronously under an off
+  /// itemEnterExit, a key whose own enter is still in flight included,
+  /// and through an exit ramp otherwise. Under a live itemEnterExit a key
+  /// removed while its own enter is in flight exits from where it
+  /// currently is, and never carries both direction bits.
   void removeItem(TKey key) {
     _assertNotDisposed();
     final id = _liveIdOrThrow(key, "removeItem");
@@ -789,27 +790,24 @@ class BoardController<TKey, TItem> {
   /// The shared removal route for [removeItem] and [setItems]'s exits.
   void _exitOrRetire(int id) {
     _cancelDragIfDragged(id);
+    var from = 1.0;
     if (_store.isEntering(id)) {
       // Capture the ramp BEFORE the record is dropped: read afterwards
       // it answers 1 and the item pops to full extent before shrinking.
-      final r = _anim.enterExitProgressOf(id);
+      from = _anim.enterExitProgressOf(id);
       // Directly, NOT through retireExitNow: the handler's ENTER branch
       // clears the live entering bit first, which is the only ordering
       // under which a following bit-0 set leaves exactly one bit set.
       _anim.finalizeEnterExit(id);
-      if (r <= precisionErrorTolerance) {
-        // The enter never ticked: retire synchronously, install nothing.
-        _anim.retireExitNow(id);
-        return;
-      }
-      _anim.animateExit(id, from: r);
-      return;
     }
-    if (_animationStyle.isOff(BoardAnimationFamily.itemEnterExit)) {
+    // Retire synchronously, installing nothing, when the family is off or
+    // the enter never ticked.
+    if (_animationStyle.isOff(BoardAnimationFamily.itemEnterExit) ||
+        from <= precisionErrorTolerance) {
       _anim.retireExitNow(id);
       return;
     }
-    _anim.animateExit(id, from: 1.0);
+    _anim.animateExit(id, from: from);
   }
 
   /// The re-add door: a key whose exit is running comes back as the SAME

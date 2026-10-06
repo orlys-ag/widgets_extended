@@ -149,6 +149,11 @@ it.
 cancelled after `canDropAt` refused its last hover releases it, restarted its
 close from where it painted, over a whole duration. A gap or a resize preview
 already closing now keeps the schedule its first release started.
+- Fix: `removeItem`, or a `setItems` dropping the key, on an item whose enter
+was still in flight after a restyle turned `itemEnterExit` off kept the key on
+the board until the next frame, against `removeItem`'s synchronous removal
+under that family. Such an item is now removed within the call, as a settled
+one is.
 - Fix: a screen reader's explore-by-touch found the node painted underneath:
 the content cell scrolled under a frozen header rather than the header, and a
 cell an item covers rather than the item. The board's semantics children are
