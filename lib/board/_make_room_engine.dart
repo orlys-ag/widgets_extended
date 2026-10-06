@@ -250,9 +250,11 @@ class MakeRoomEngine {
 
   /// The CAPTURED clock the offsets, extents and slots run on, resolved
   /// beside [_curve] at the two declaring sites from the caller's
-  /// argument or the live spec and adopted through [_adoptClock]. The
-  /// live spec's ZERO still dominates at the tick and the snap, as the
-  /// kill switch does at the install.
+  /// argument or the live spec and adopted through [_adoptClock]. Its two
+  /// timing readers, the tick and the snap's hand-off, resolve it through
+  /// [BoardAnimationTiming.durationFor]: an off live family still
+  /// dominates it, as the kill switch does at the install, and a captured
+  /// clock that is not positive is off as well.
   Duration _duration = Duration.zero;
 
   /// Makes [curve] and [duration] the clock every entry runs on.

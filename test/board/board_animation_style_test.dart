@@ -343,9 +343,9 @@ void main() {
 
   // No AC. `debugValidate`, the non-negative duration check the Public
   // Surface section's L2 block declares for the injection boundary. A
-  // negative duration strands its animations, since progress can never
-  // reach 1, which for the state-owning family leaves an item exiting
-  // forever.
+  // negative duration is a configuration error, which a debug build
+  // reports here and a release build resolves as zero, turning its family
+  // off.
   // Asserts: a style whose five slots are all non-negative passes and
   // returns true; a negative duration in each of the five slots throws.
   // Falsification: dropping any single conjunct from the assert accepts a

@@ -238,7 +238,8 @@ class BoardAnimationStyle {
           !(_makeRoom?.duration.isNegative ?? false) &&
           !(_dropSettle?.duration.isNegative ?? false),
       "BoardAnimationStyle durations must be non-negative: a negative "
-      "duration strands its animations, since progress can never complete.",
+      "duration is a configuration error, which a release build resolves "
+      "as zero, turning its family off.",
     );
     return true;
   }
