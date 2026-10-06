@@ -37,7 +37,7 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   structural notification. Sub-sources: `TrackResizeAnimator` (a state
   holds a RESIDUAL over the settled extent, not a target, so a settled
   write while one is in flight shows at once and the residual keeps
-  decaying under it; refuse-on-zero, re-target, a within-tolerance
+  decaying under it; refuse-when-off, re-target, a within-tolerance
   install that drops the standing state, `animatedExtentOf` floored at
   zero, offset shifts answered from a per-axis PREFIX over
   the in-flight tracks, rebuilt lazily per generation or restyle and
