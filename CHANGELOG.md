@@ -145,6 +145,10 @@ clock does change continues from where it painted.
 neighbour several pixels past where it lands and back. The continuation of a
 drop now approaches each item's rest from where it painted and never passes
 it.
+- Fix: a make-room gap released a second time while it was closing, as a drag
+cancelled after `canDropAt` refused its last hover releases it, restarted its
+close from where it painted, over a whole duration. A gap or a resize preview
+already closing now keeps the schedule its first release started.
 - Fix: a screen reader's explore-by-touch found the node painted underneath:
 the content cell scrolled under a frozen header rather than the header, and a
 cell an item covers rather than the item. The board's semantics children are

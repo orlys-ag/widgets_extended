@@ -819,7 +819,9 @@ class MakeRoomEngine {
 
   /// Closes every held offset. The release side reads the SAME snap
   /// disjunction as the install, so a zero-family drag's gap opens and
-  /// closes instantly as a pair.
+  /// closes instantly as a pair. A live release leaves an offset, an
+  /// extent or a slot that is already closing on the schedule it started
+  /// on, so a second release on the same clock changes no entry.
   void releasePreview({Duration? duration, Curve? curve}) {
     // THREE COLLECTIONS, not one: a slot-only hover holds no offset at
     // all, and an `_held`-only guard would return without clearing the
@@ -865,26 +867,16 @@ class MakeRoomEngine {
       return;
     }
     _adoptClock(curve ?? spec.curve, resolved);
-    _held.forEach((id, entry) {
-      final current = _valueOf(entry);
-      entry
-        ..target = 0.0
-        ..from = current
-        ..snapped = false
-        ..t = 0.0;
-    });
-    _heldExtent.forEach((id, entry) {
-      final current = extentDeltaOf(id);
-      entry
-        ..target = Offset.zero
-        ..from = current
-        ..snapped = false
-        ..t = 0.0;
-    });
+    // An entry already closing keeps the schedule it started on, the same
+    // idempotence rule the install applies and for the same reason.
+    for (final entry in _held.values) {
+      _retargetOffset(entry, 0.0, false, null);
+    }
+    for (final entry in _heldExtent.values) {
+      _retargetExtent(entry, Offset.zero, false, null);
+    }
     _slots.forEach((track, slots) {
       for (final slot in slots) {
-        // One already closing keeps the schedule it started on, the same
-        // idempotence rule the install applies and for the same reason.
         _retargetSlot(slot, 0.0, false, null);
       }
     });
