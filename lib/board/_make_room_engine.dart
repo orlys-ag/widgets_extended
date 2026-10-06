@@ -325,11 +325,7 @@ class MakeRoomEngine {
     if (entry == null) {
       return Offset.zero;
     }
-    if (entry.snapped) {
-      return entry.target;
-    }
-    final eased = _curve.transform(entry.t.clamp(0.0, 1.0));
-    return entry.from + (entry.target - entry.from) * eased;
+    return _extentValueOf(entry);
   }
 
   /// Any offset or slot unsnapped with clock below 1.
@@ -455,6 +451,15 @@ class MakeRoomEngine {
             _curve.transform(entry.t.clamp(0.0, 1.0));
   }
 
+  /// A held extent's current value, in content space per axis.
+  Offset _extentValueOf(_HeldExtent entry) {
+    if (entry.snapped) {
+      return entry.target;
+    }
+    final eased = _curve.transform(entry.t.clamp(0.0, 1.0));
+    return entry.from + (entry.target - entry.from) * eased;
+  }
+
   double _valueOfSlot(_Slot slot) {
     if (slot.snapped) {
       return slot.target;
@@ -496,6 +501,59 @@ class MakeRoomEngine {
     }
     final current = _valueOfSlot(slot);
     slot
+      ..from = snap ? target : current
+      ..target = target
+      ..snapped = snap
+      ..t = 0.0;
+    return minT;
+  }
+
+  /// Re-targets one held offset in place, by [_retargetSlot]'s rule: LEFT
+  /// UNTOUCHED when its target already equals [target] and the call is
+  /// not a snap. A free or fraction snap re-enters [previewGap] on every
+  /// frame of the resize it caused, and a drag releases again at its
+  /// teardown, so restarting the clock there would keep a gap from ever
+  /// settling. A SNAP always re-targets, since the kill switch dominates
+  /// a captured value, and folds the entry's clock into [minT] first.
+  /// [target] is a content-space offset on the lane axis. Returns the
+  /// fold.
+  double? _retargetOffset(
+    _HeldOffset entry,
+    double target,
+    bool snap,
+    double? minT,
+  ) {
+    if (!snap && entry.target == target) {
+      return minT;
+    }
+    if (snap) {
+      minT = _foldClock(minT, entry.snapped, entry.t, entry.from, entry.target);
+    }
+    final current = _valueOf(entry);
+    entry
+      ..from = snap ? target : current
+      ..target = target
+      ..snapped = snap
+      ..t = 0.0;
+    return minT;
+  }
+
+  /// [_retargetOffset] for a held extent; [target] is a content-space
+  /// length per axis, as [extentDeltaOf] answers.
+  double? _retargetExtent(
+    _HeldExtent entry,
+    Offset target,
+    bool snap,
+    double? minT,
+  ) {
+    if (!snap && entry.target == target) {
+      return minT;
+    }
+    if (snap && !entry.snapped && entry.t < 1.0 && entry.from != entry.target) {
+      minT = minT == null || entry.t < minT ? entry.t : minT;
+    }
+    final current = _extentValueOf(entry);
+    entry
       ..from = snap ? target : current
       ..target = target
       ..snapped = snap
@@ -580,30 +638,15 @@ class MakeRoomEngine {
     }
     extentTargets.forEach((id, extent) {
       final existing = _heldExtent[id];
-      if (extent == Offset.zero && existing == null) {
-        // Nothing to hold.
+      if (existing != null) {
+        minT = _retargetExtent(existing, extent, snap, minT);
         return;
       }
-      if (snap) {
-        // The same fold the offsets' snap arm makes, in the inline form
-        // the release arm uses for an Offset entry.
-        if (existing != null &&
-            !existing.snapped &&
-            existing.t < 1.0 &&
-            existing.from != existing.target) {
-          final current = minT;
-          minT = current == null || existing.t < current ? existing.t : current;
-        }
+      if (extent != Offset.zero) {
         _heldExtent[id] = _HeldExtent(
           target: extent,
-          from: extent,
-          snapped: true,
-        );
-      } else if (existing == null || existing.target != extent) {
-        _heldExtent[id] = _HeldExtent(
-          target: extent,
-          from: existing == null ? Offset.zero : extentDeltaOf(id),
-          snapped: false,
+          from: snap ? extent : Offset.zero,
+          snapped: snap,
         );
       }
     });
@@ -666,32 +709,16 @@ class MakeRoomEngine {
     }
     targets.forEach((id, target) {
       final existing = _held[id];
-      if (target == 0.0 && existing == null) {
+      if (existing != null) {
+        minT = _retargetOffset(existing, target, snap, minT);
         return;
       }
-      if (!snap && existing != null && existing.target == target) {
-        // IDEMPOTENT FOR AN UNCHANGED TARGET. A free or fraction snap
-        // re-enters this method on every frame of the resize it caused,
-        // and restarting every clock there means the gap never settles
-        // and the ticker never stops. The SNAP arm still replaces
-        // unconditionally: the kill switch dominates a captured value,
-        // so a re-send under a zero family must force instant arrival.
-        return;
-      }
-      final from = existing == null ? 0.0 : _valueOf(existing);
-      if (snap) {
-        if (existing != null) {
-          minT = _foldClock(
-            minT,
-            existing.snapped,
-            existing.t,
-            existing.from,
-            existing.target,
-          );
-        }
-        _held[id] = _HeldOffset(target: target, from: target, snapped: true);
-      } else {
-        _held[id] = _HeldOffset(target: target, from: from, snapped: false);
+      if (target != 0.0) {
+        _held[id] = _HeldOffset(
+          target: target,
+          from: snap ? target : 0.0,
+          snapped: snap,
+        );
       }
     });
     if (lifted) {
