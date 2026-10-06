@@ -130,6 +130,22 @@ void main() {
     expect(inheriting.isOff(BoardAnimationFamily.itemEnterExit), isTrue);
   });
 
+  testWidgets("a debug build rejects a negative style at the constructor", (
+    tester,
+  ) async {
+    expect(() {
+      BoardController<String, _Item>(
+        vsync: tester,
+        rows: BoardAxisConfig(axis: UniformAxis(6, 50.0)),
+        columns: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
+        keyOf: (item) {
+          return item.key;
+        },
+        animationStyle: const BoardAnimationStyle(itemSlide: _neg240),
+      );
+    }, throwsAssertionError);
+  });
+
   testWidgets("a negative per-call duration moves and resizes without a "
       "slide", (tester) async {
     final controller = BoardController<String, _Item>(
