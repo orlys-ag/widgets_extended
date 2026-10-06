@@ -375,17 +375,12 @@ class MakeRoomEngine {
   MakeRoomHandOff? _handOff;
 
   /// Folds one discarded entry's clock into the running minimum [minT]:
-  /// an entry that was unsnapped, below clock 1 and actually moving had
+  /// an entry that was unsnapped, below clock 1 and [moving] (its `from`
+  /// differs from its target, compared in the entry's own type) had
   /// motion left, and the EARLIEST such clock is the one the hand-off
   /// continues from. Anything else folds to [minT] unchanged.
-  double? _foldClock(
-    double? minT,
-    bool snapped,
-    double t,
-    double from,
-    double target,
-  ) {
-    if (snapped || t >= 1.0 || from == target) {
+  double? _foldClock(double? minT, bool snapped, double t, bool moving) {
+    if (snapped || t >= 1.0 || !moving) {
       return minT;
     }
     return minT == null || t < minT ? t : minT;
@@ -475,7 +470,7 @@ class MakeRoomEngine {
   double? _discardSlots(double? minT) {
     for (final slots in _slots.values) {
       for (final slot in slots) {
-        minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
+        minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
       }
     }
     _slots.clear();
@@ -497,7 +492,7 @@ class MakeRoomEngine {
       return minT;
     }
     if (snap) {
-      minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
+      minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
     }
     final current = _valueOfSlot(slot);
     slot
@@ -527,7 +522,12 @@ class MakeRoomEngine {
       return minT;
     }
     if (snap) {
-      minT = _foldClock(minT, entry.snapped, entry.t, entry.from, entry.target);
+      minT = _foldClock(
+        minT,
+        entry.snapped,
+        entry.t,
+        entry.from != entry.target,
+      );
     }
     final current = _valueOf(entry);
     entry
@@ -549,8 +549,13 @@ class MakeRoomEngine {
     if (!snap && entry.target == target) {
       return minT;
     }
-    if (snap && !entry.snapped && entry.t < 1.0 && entry.from != entry.target) {
-      minT = minT == null || entry.t < minT ? entry.t : minT;
+    if (snap) {
+      minT = _foldClock(
+        minT,
+        entry.snapped,
+        entry.t,
+        entry.from != entry.target,
+      );
     }
     final current = _extentValueOf(entry);
     entry
@@ -797,7 +802,7 @@ class MakeRoomEngine {
   double? _snapSlots(double? minT) {
     _slots.removeWhere((track, slots) {
       slots.removeWhere((slot) {
-        minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
+        minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
         if (slot.target != 0.0) {
           slot.snapped = true;
           return false;
@@ -839,18 +844,16 @@ class MakeRoomEngine {
           minT,
           entry.snapped,
           entry.t,
-          entry.from,
-          entry.target,
+          entry.from != entry.target,
         );
       }
       for (final entry in _heldExtent.values) {
-        // The same fold the offsets get, on the same three terms: an
-        // entry unsnapped, below clock 1 and actually moving had motion
-        // left, and the earliest such clock is the one the hand-off
-        // continues from.
-        if (!entry.snapped && entry.t < 1.0 && entry.from != entry.target) {
-          minT = minT == null || entry.t < minT ? entry.t : minT;
-        }
+        minT = _foldClock(
+          minT,
+          entry.snapped,
+          entry.t,
+          entry.from != entry.target,
+        );
       }
       _held.clear();
       _heldExtent.clear();
