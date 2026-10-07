@@ -587,8 +587,8 @@ class MakeRoomEngine {
   /// Opens (or re-targets) the gap for a drag of [draggedId] resolving to
   /// [prospective]. Never refuses: under an off family, or with a
   /// [duration] that is not positive, it INSTALLS AND SNAPS, because the
-  /// gap IS the target state and section 9.5 names no other drop-feedback
-  /// mechanism. The snap flag is the kill switch, resolved here through
+  /// gap IS the target state, and an off family removes its motion, not
+  /// the gap. The snap flag is the kill switch, resolved here through
   /// [BoardAnimationTiming.isOff], at one of the family's two declaring
   /// sites; [duration] and [curve] are a session's captured values and
   /// an off family dominates them.

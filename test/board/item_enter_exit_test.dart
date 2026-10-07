@@ -1,7 +1,8 @@
 /// The board's item enter and exit animations: an exiting item's place in
 /// the index, hit-testing, retention and lanes, an entering item's ramp,
 /// re-adding a key mid-exit, removing one mid-enter under a live or an off
-/// itemEnterExit, and the settle's re-entrancy and layout.
+/// itemEnterExit, adding one under an off itemEnterExit, and the settle's
+/// re-entrancy and layout.
 library;
 
 import 'package:flutter/material.dart';
@@ -538,6 +539,27 @@ void main() {
     expect(controller.idOfKey("b"), -1);
     // TARGET b: no exit record stands.
     expect(controller.anim.hasLayoutDrivingAnimations, isFalse);
+  });
+
+  testWidgets("setItems adding a key under an off itemEnterExit installs "
+      "no enter", (tester) async {
+    final controller = _lanedController(
+      tester,
+      style: const BoardAnimationStyle(
+        trackResize: _ms240,
+        itemSlide: _ms240,
+        itemEnterExit: _zero,
+      ),
+    );
+
+    controller.setItems(<BoardPlacement<_Item>>[
+      BoardPlacement<_Item>(const _Item("b"), _chip(0, 0, 2)),
+    ]);
+    final idB = controller.idOfKey("b");
+    // Setup sanity: `b` is on the board.
+    expect(idB, isNot(-1));
+    // TARGET: `b` shows whole at once, with no enter in flight.
+    expect(controller.anim.isEnteringItem(idB), isFalse);
   });
 
   testWidgets("removing a key mid-enter under an off itemEnterExit re-lanes "
