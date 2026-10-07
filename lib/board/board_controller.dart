@@ -760,7 +760,8 @@ class BoardController<TKey, TItem> {
 
   /// Removes [key] from the live set: synchronously under an off
   /// itemEnterExit, a key whose own enter is still in flight included,
-  /// and through an exit ramp otherwise. Under a live itemEnterExit a key
+  /// and for a key whose enter has not yet left its start; through an exit
+  /// ramp otherwise. Under a live itemEnterExit a key
   /// removed while its own enter is in flight exits from where it
   /// currently is, and never carries both direction bits.
   void removeItem(TKey key) {

@@ -36,7 +36,7 @@
 /// [BoardAnimationStyle.debugValidate] reports in a debug build, is
 /// resolved as zero. That kill switch DOMINATES an explicit per-call
 /// duration, and a per-call duration that is not positive is off as well.
-/// [BoardAnimationTiming.durationFor] decides it for every source. There
+/// `BoardAnimationTiming.durationFor` decides it for every source. There
 /// is no master switch: every family gates on its own resolved duration,
 /// so an explicitly configured [BoardAnimationStyle.dropSettle] glide
 /// still runs when [BoardAnimationStyle.itemSlide] is zeroed, and
