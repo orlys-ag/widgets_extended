@@ -232,7 +232,7 @@ class BoardAnimationStyle {
   /// CONFIGURED duration must be non-negative. A negative duration is a
   /// configuration error, which a debug build reports here; a release
   /// build, where this assert is stripped, resolves it as zero, so the
-  /// family is off ([BoardAnimationTiming.durationFor]). Lives here rather
+  /// family is off. Lives here rather
   /// than in the const constructor because Dart forbids non-const
   /// expressions in a const constructor's asserts. Returns true so it can
   /// sit inside an `assert`.

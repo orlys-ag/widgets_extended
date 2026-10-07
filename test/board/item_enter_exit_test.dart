@@ -140,7 +140,7 @@ Future<BoardController<String, _Item>> _midEnterUnderOffFamily(
 }
 
 void main() {
-  // AC8 exiting item, four consumers, plus a fifth assertion.
+  // An exiting item's four consumers, plus a fifth assertion.
   // Asserts: absent from itemsAt; itemAt at its rect returns null; a live
   // neighbour's laneOf and laneCountOf are unchanged, because a LANE is
   // held whole until settle; and the track's rectOfCell extent, measured
@@ -192,7 +192,7 @@ void main() {
     },
   );
 
-  // AC16 exiting item off-window.
+  // An exiting item off-window.
   // Asserts: the probe widget is findable mid-exit after its span is
   // scrolled past the cache region, and absent after pumpAndSettle. The
   // release is the sweep's no-obtain case, reached by the layout the
@@ -242,7 +242,7 @@ void main() {
     },
   );
 
-  // DERIVED name. The retention map is keyed by vicinity, and an exiting
+  // The retention map is keyed by vicinity, and an exiting
   // item's ordinal can shift mid-exit.
   // Asserts: after a rank insert on the exiting item's start track (a new
   // item whose span-axis start sorts earlier), the off-window exiting
@@ -297,7 +297,7 @@ void main() {
     },
   );
 
-  // DERIVED name. The same shift with the exiting item IN the window:
+  // The same shift with the exiting item IN the window:
   // the retained entry must not overwrite the live occupant's id mapping.
   // Asserts: after the rank insert, itemAt at the NEW item's painted
   // center resolves the new item.
@@ -335,7 +335,7 @@ void main() {
     },
   );
 
-  // DERIVED name. No AC; the only assertion for what enterExitProgressOf
+  // The only assertion for what enterExitProgressOf
   // scales.
   // Asserts: mid-enter, the item's painted lane-axis extent is strictly
   // between 0 and laneExtent and its track's extent is strictly between
@@ -369,7 +369,7 @@ void main() {
     expect(tester.getRect(find.byKey(_itemKey("n"))).height, 18.0);
   });
 
-  // DERIVED name. No AC; one of the two id-lifecycle cases.
+  // One of the two id-lifecycle cases.
   // Asserts: remove a key, pump to mid-exit, addItem the same key;
   // contains is true immediately, spanOf reports the NEW span,
   // laneCountOf on a neighbour is the live value, and after pumpAndSettle
@@ -404,7 +404,7 @@ void main() {
     expect(find.byKey(_itemKey("b"), skipOffstage: false), findsOneWidget);
   });
 
-  // DERIVED name. No AC; the clearForId case.
+  // The clearForId case.
   // Asserts: moveItem a key to install a slide, removeItem it inside the
   // same itemSlide duration with itemEnterExit zero so the id is released
   // at once, addItem a DIFFERENT key which under LIFO takes that id back,
@@ -448,7 +448,7 @@ void main() {
     expect(controller.anim.hasActiveOffsets, isFalse);
   });
 
-  // DERIVED name. No AC; the first of the two mid-enter removal cases.
+  // The first of the two mid-enter removal cases.
   // Asserts: the SETUP first, isEnteringItem true with
   // enterExitProgressOf strictly between 0 and 1; then on the frame of
   // the removeItem with no pump, isEnteringItem false, isExitingItem true
@@ -490,7 +490,7 @@ void main() {
     },
   );
 
-  // DERIVED name. No AC; the second of the two mid-enter removal cases.
+  // The second of the two mid-enter removal cases.
   // Asserts: addItem and removeItem one key inside a single runBatch
   // under a non-zero family; hasLayoutDrivingAnimations is false on exit
   // from the batch and a following addItem of a DIFFERENT key takes the
@@ -579,7 +579,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  // DERIVED name. No AC; settle-tick re-entrancy: the first settle's
+  // Settle-tick re-entrancy: the first settle's
   // delivered notification reaches an app listener that re-adds the
   // OTHER key settling on the same tick. The re-add reverses that key's
   // exit on the SAME id, replacing its record with an enter's, so the
@@ -643,7 +643,7 @@ void main() {
     },
   );
 
-  // DERIVED name. No AC; the falsifiable case for the prior-tick latch,
+  // The falsifiable case for the prior-tick latch,
   // and the only one.
   // Asserts: addItem under a non-zero itemEnterExit with no other
   // mutation in flight; pump to just before the settle and assert the
