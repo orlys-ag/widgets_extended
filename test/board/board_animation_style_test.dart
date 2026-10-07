@@ -341,11 +341,10 @@ void main() {
     );
   });
 
-  // No AC. `debugValidate`, the non-negative duration check the Public
-  // Surface section's L2 block declares for the injection boundary. A
-  // negative duration is a configuration error, which a debug build
-  // reports here and a release build resolves as zero, turning its family
-  // off.
+  // `debugValidate` is the non-negative duration check the controller
+  // asserts wherever a style enters it. A negative duration is a
+  // configuration error, which a debug build reports here and a release
+  // build resolves as zero, turning its family off.
   // Asserts: a style whose five slots are all non-negative passes and
   // returns true; a negative duration in each of the five slots throws.
   // Falsification: dropping any single conjunct from the assert accepts a

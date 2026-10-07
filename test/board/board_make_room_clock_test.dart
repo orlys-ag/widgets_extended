@@ -165,7 +165,7 @@ void _addTwoLaneFixture(BoardController<String, _Item> controller) {
 }
 
 void main() {
-  // Test 1. A commit's continuation runs every discarded motion on ONE
+  // A commit's continuation runs every discarded motion on ONE
   // clock, the earliest, and on that clock's curve tail renormalised by
   // `1 - curve(t)`. Under an overshooting curve with the earliest clock
   // just short of where the curve crosses 1, that divisor is small, and a
@@ -253,12 +253,12 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  // Test 2. A mid-session restyle of the makeRoom CURVE, then a cancel.
+  // A mid-session restyle of the makeRoom CURVE, then a cancel.
   // The gap ran on the curve the session captured; the close must start
   // where the gap painted. Two mechanisms hold this, the close on the
   // session's pair and the engine's re-base on a changed pair, and the
-  // case is red only with both removed: it pins the property, and tests
-  // 3 and 4 pin each mechanism.
+  // case is red only with both removed: it pins the property, and the
+  // two cases after it pin one mechanism each.
   testWidgets("a cancel after a mid-session curve restyle closes from "
       "where the gap painted", (tester) async {
     const style = BoardAnimationStyle(itemSlide: _ms300, makeRoom: _ms300);
@@ -306,7 +306,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  // Test 3. A mid-session restyle of the makeRoom DURATION, then a cancel.
+  // A mid-session restyle of the makeRoom DURATION, then a cancel.
   // The session captured 300ms so the gap's clock ignores a restyle; the
   // close is the same gap's, and runs on the same clock.
   testWidgets("a cancel after a mid-session duration restyle closes on "
@@ -361,10 +361,10 @@ void main() {
     expect(_top(tester, "b"), closeTo(restingB, 0.01));
   });
 
-  // Test 4. The engine holds ONE clock, a duration and a curve, for every
-  // entry; an install whose pair differs from it used to swap it under
-  // the entries it leaves alone, so each jumped to the value the new
-  // curve gives at its old clock.
+  // The engine holds ONE clock, a duration and a curve, for every entry;
+  // an install whose pair differs from it first re-bases every entry
+  // still in motion, or an entry it leaves alone would jump to the value
+  // the new curve gives at its old clock.
   testWidgets("an install with a new clock keeps every entry where it "
       "painted", (tester) async {
     final controller = _controller(

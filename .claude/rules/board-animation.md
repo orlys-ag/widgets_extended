@@ -76,6 +76,10 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   because the dry run re-sweeps the stored bucket, and the one term held
   still is the lifted item's own band; an install is IDEMPOTENT for an
   unchanged target, which is what lets a free-snap drag settle at all;
+  a live RELEASE is idempotent the same way, so an offset, an extent or
+  a slot already closing keeps the schedule it started on, and the drag
+  layer's teardown release after a refused hover's release leaves the
+  close on the refusal's schedule;
   ONE clock, a curve and a duration, serves every entry, adopted at the
   two declaring sites, and a CHANGED clock first re-bases every entry
   still in motion (its current value becomes its `from`, its clock

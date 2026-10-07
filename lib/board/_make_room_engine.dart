@@ -508,9 +508,11 @@ class MakeRoomEngine {
   /// Re-targets one held offset in place, by [_retargetSlot]'s rule: LEFT
   /// UNTOUCHED when its target already equals [target] and the call is
   /// not a snap. A free or fraction snap re-enters [previewGap] on every
-  /// frame of the resize it caused, and a drag releases again at its
-  /// teardown, so restarting the clock there would keep a gap from ever
-  /// settling. A SNAP always re-targets, since the kill switch dominates
+  /// frame of the resize it caused, where restarting the clock would keep
+  /// a gap from ever settling; a drag releases again at its teardown,
+  /// where a restart would end the close one duration after that release
+  /// instead of on the first release's schedule. A SNAP always
+  /// re-targets, since the kill switch dominates
   /// a captured value, and folds the entry's clock into [minT] first.
   /// [target] is a content-space offset on the lane axis. Returns the
   /// fold.
@@ -870,8 +872,8 @@ class MakeRoomEngine {
       return;
     }
     _adoptClock(curve ?? spec.curve, resolved);
-    // An entry already closing keeps the schedule it started on, the same
-    // idempotence rule the install applies and for the same reason.
+    // An entry already closing keeps the schedule it started on, by the
+    // idempotence rule the install applies.
     for (final entry in _held.values) {
       _retargetOffset(entry, 0.0, false, null);
     }

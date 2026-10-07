@@ -402,6 +402,37 @@ void main() {
       expect(animator.hasActive, isFalse);
     });
 
+    testWidgets("the enter/exit animator on an exit", (tester) async {
+      const style = BoardAnimationStyle(itemEnterExit: _neg240);
+      final settled = <int>[];
+      late final ItemEnterExitAnimator animator;
+      animator = ItemEnterExitAnimator(
+        vsync: tester,
+        styleOf: () {
+          return style;
+        },
+        isExitingOf: (id) {
+          return true;
+        },
+        onSettle: (id) {
+          settled.add(id);
+          animator.clearForId(id);
+        },
+        onTick: () {},
+      );
+      addTearDown(animator.dispose);
+      animator.animateExit(
+        1,
+        family: BoardAnimationFamily.itemEnterExit,
+        from: 1.0,
+      );
+      await tester.pump();
+      // TARGET a: the exit settled on its first tick.
+      expect(settled, <int>[1]);
+      // TARGET b: no record is left running.
+      expect(animator.hasActive, isFalse);
+    });
+
     testWidgets("the make-room engine", (tester) async {
       var style = const BoardAnimationStyle(makeRoom: _neg240);
       final engine = MakeRoomEngine(
