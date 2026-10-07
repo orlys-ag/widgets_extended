@@ -14,14 +14,18 @@ down it. Start from these and add the plan's own:
 1. Mechanism: the components and their interactions.
 2. Public surface: signatures, types, exports, naming.
 3. Consumers and call sites: everything that must change (section 8).
-4. Contracts with the documents the plan depends on, or that depend on it.
+4. Contracts with the documents the plan depends on, or that depend on it,
+   including a documented contract the plan changes without saying so.
 5. The test list: each test writable, failing on unfixed code, following the
    house conventions, and each new test seam justified against an existing one.
 6. Citations and claims (section 3).
 7. House conventions: the profile's convention documents and the module
    guidance of the code the plan touches.
-8. Failure paths: what happens when a precondition is not met.
-9. Lifecycle: creation, teardown, and every site that destroys the thing.
+8. Failure paths: what happens when a precondition is not met, empty and
+   single-element inputs included.
+9. Lifecycle: creation, teardown, every site that destroys the thing, and every
+   path that recreates, detaches or re-attaches it without the change's own
+   code running.
 10. Performance bounds: what is O(what), and whether the stated bound is the
     one that can blow up.
 
@@ -86,9 +90,11 @@ there belongs in its audit file (section 4), which the plan names at most once.
 
 Each architecture, performance or algorithm choice is a subsection of the
 plan's Decisions section, anchored `d<N>`: the decision; a problem statement
-when it answers a defect in today's behaviour; for a rule that lands in code,
-its code site and the test that pins it (section 9); and a table with the
-columns Rank, Option, Gate, Evidence and Assessment.
+when it answers a defect in today's behaviour; its rules, a list giving for
+each the rule, its code site and the test that pins it (section 9); and a table
+with the columns Rank, Option, Gate, Evidence and Assessment. A rule is one
+condition, branch or value whose change alters an observable outcome, so a
+decision that adds two branches lists two rules.
 
 - Gate: pass or fail, with the reason. An option passes when it is correct,
   meets the goals and requirements, preserves every documented invariant, is
@@ -111,6 +117,11 @@ columns Rank, Option, Gate, Evidence and Assessment.
 
 The owner may supply decisions with their evidence before the plan is written;
 the architect adopts each as its starting table and may add options.
+
+### 2.8 Guidance documents
+
+A plan changes a guidance document only to state an invariant the change adds
+or alters.
 
 ---
 
@@ -171,7 +182,7 @@ no memory of an earlier round.
 |---|---|---|
 | `correctness` | standard | Angles 1, 8 and 9 |
 | `performance` | standard | Angle 10, and whether each measured or computed evidence cell supports its rank |
-| `design` | standard | Angles 2, 3, 4, 6 and 7 at decision level; each acceptance criterion traced to a check that can fail in the direction it claims; scope; the option set; new test seams; section 9's guidance rule |
+| `design` | standard | Angles 2, 3, 4, 5, 6 and 7 at decision level; each acceptance criterion traced to a check that can fail in the direction it claims; scope; the option set; rule 2.8 |
 | `interaction` | fresh | The feature crossed with every other component, layer and entry point, a space reading samples and never covers |
 | `timing` | fresh | Behaviour under real timing (ordering, settle transitions, re-entrancy): which risks only running the code settles, and whether each is a named test rather than an argument |
 | `consistency` | after a revision | The revision against its snapshot, the findings it received and its obligations (section 5) |
@@ -184,7 +195,8 @@ no memory of an earlier round.
   alone.
 - A fresh lens runs only after a clean standard round, and once per plan.
 - The design critic receives the requirements; without them it reports
-  `coverage`. The profile adds each lens's project addendum and reading list.
+  `coverage`. The profile adds each lens's reading list and project addendum,
+  and the addendum of the module the change touches.
 - Every dispatched lens must report. A lens that returns nothing, or reports
   `coverage`, is dispatched once more in the same round. If it still cannot
   review, the run ends; the next run dispatches that round again with all its
@@ -328,8 +340,10 @@ Never write an unqualified "fit to implement". Write:
 A trial applies the plan's highest-risk section on a branch, runs the section's
 repro against unfixed and fixed code, and runs the profile gates that apply. It
 catches a section that reads correctly and builds wrong. A trial passes when its
-repro fails before and passes after, every gate that applies passes, and it
-found no plan defect.
+repro fails before and passes after, each rule it lands fails its named test
+when broken (section 9), every gate that applies passes, and it found no plan
+defect. A named test that passes with its rule broken shows the plan's pin
+claim wrong, which a revision corrects before approval.
 
 A trial is kept, never reverted:
 
@@ -373,24 +387,37 @@ applies:
 
 ## 9. Closing
 
-The checklist's last phase opens with one item per decision. For a decision
-whose code site lies under the profile's code paths it is a mutation: break the
-rule there, observe a named test fail, restore the file, and record the test
-name and the file's SHA-256 before and after, which must match. For a decision
-that lands only in documents it is the check section 8 names for it. Showing
-that each new assertion can fail does not show that each rule is pinned; only a
-mutation of the rule does. The profile's gates that apply follow, so the suite
-runs after the last restore.
+The checklist's last phase opens with one item per rule the decisions list
+(section 2.7). For a rule whose code site lies under the profile's code paths it
+is a mutation: break the rule there, observe a named test fail, restore the
+file, and record the test name and the file's SHA-256 before and after, which
+must match. When the named test passes with a right rule broken, the implementer
+adds a test that fails and records the plan's wrong claim without stopping; only
+a wrong rule stops the work. For a rule that lands only in documents it is the
+check section 8 names for it. Showing that each new assertion can fail does not
+show that each rule is pinned; only a mutation of the rule does. The profile's
+gates that apply follow, so the suite runs after the last restore.
 
 A reviewer who never reads the plan closes the run. It receives the request and
 the acceptance criteria verbatim, the commit the run started from and the branch
 holding the change; reads every file the change touched in full; runs the tests
 the criteria name; and writes the acceptance document: each criterion quoted
-and marked met, partial or unmet with its evidence, then its findings. Gaps go
-to the owner, to fix by hand or through a successor plan.
+and marked met, partial or unmet with its evidence, then its findings.
 
-A plan changes a guidance document only to state an invariant the change adds
-or alters.
+The owner may also require implementation audits after the run. In each round
+a critic who wrote none of the code reads the plan against the code on the
+run's branch, sweeping angles no earlier round of the audit swept, and mutates
+every rule the change lands, listed or not, on a scratch copy of the branch.
+The owner states how many successive clean rounds close the work. An
+acceptance gap or an audit finding goes one of two ways:
+
+- The code or its tests fall short of the plan: it is fixed by hand on the
+  run's branch, each new assertion shown to fail first, and the next round
+  audits the fix with the rest. In the workflow, a queued finding fixed this
+  way is passed to the next run as `resolved` (contracts section 13).
+- The plan is wrong (a premise, a decision or a rule): it starts a successor
+  plan (section 5), never a fix by hand, because a design change needs the
+  rounds and the trial a hand fix skips.
 
 ---
 
@@ -422,7 +449,9 @@ cannot read files. Every key has a reader:
 - `gates`: each with `name`, `command`, `pass` (its pass condition) and `when`
   (when it applies; `always` for every change).
 - `modules`: each with `paths` (regular expressions over repository paths),
-  `guidance` (its architecture rules) and `vocabulary`.
+  `guidance` (its architecture rules), `vocabulary`, and optionally
+  `lensAddenda` (by lens key, text appended to the lens's focus when the change
+  touches this module).
 - `lenses`: one entry per lens of section 4, each with `reads` (the files the
   lens reads, where `moduleGuidance` and `conventionDocs` expand to those
   lists) and `addendum` (project text appended to the lens's focus).

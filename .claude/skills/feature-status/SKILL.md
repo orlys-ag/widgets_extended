@@ -30,18 +30,18 @@ normal before the checklist phase.
 - Audit file: the `## Round N` records (the findings each revision or approval
   step received, with their outcomes); the last `## Trial Log` record; the
   `## Run` records (the base commit and each run's status). A plan written
-  before the audit file keeps these under its own audit-log heading.
+  outside the workflow keeps these under its own audit-log heading until the
+  revision that adopts it moves them.
 - Run record: the `phase` the next run starts at, `roundsRun`, `freshSpent` and
   `branch`.
 - Acceptance document: each criterion's status.
 - Checklist: whether `CHECKLIST-FOR` names the plan (if not, the pair is
   malformed: say so and report no progress from it); `CHECKLIST-STATUS`; the
-  ticked and total items under Phase 1 to 4 only; the Discovered items, split
-  by `Blocking:`.
+  ticked and total items under Phase 1 to 4 only; the unticked Discovered
+  items, split by `Blocking:` (a ticked one is resolved).
 
-The trial passed when its Trial Log records the repro failing before and
-passing after, every applying gate passed, and no blocking finding
-(`plans/AUDIT-METHOD.md` section 7).
+The trial passed when its Trial Log meets the pass condition of
+`plans/AUDIT-METHOD.md` section 7.
 
 ## Step 3: check citation drift
 
@@ -82,7 +82,8 @@ Short form:
 ```
 
 Report what the files show: no ticks means no item has passed its acceptance
-signal, not that no work happened. `CHECKLIST-STATUS: complete` with a blocking
-discovery is a contract violation, not success. Close with the next action:
-`/feature-start` for a new cycle, `/feature-start` on the slug to resume when
-the run record's phase is not `done`, or nothing when the cycle is finished.
+signal, not that no work happened. `CHECKLIST-STATUS: complete` with an unticked
+blocking discovery is a contract violation, not success. Close with the next
+action: `/feature-start` for a new cycle, `/feature-start` on the slug to resume
+when the run record's phase is not `done`, or nothing when the cycle is
+finished.

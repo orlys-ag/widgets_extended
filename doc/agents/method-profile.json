@@ -1,7 +1,9 @@
 {
   "codePaths": [
     "lib",
-    "test"
+    "test",
+    "examples/lib",
+    "examples/test"
   ],
   "conventionDocs": [
     ".claude/rules/testing.md",
@@ -12,6 +14,7 @@
     "CLAUDE.md",
     "doc/agents/feature-workflow-contracts.md",
     "doc/agents/method-profile.json",
+    "doc/agents/porting-guide.md",
     "plans/AUDIT-METHOD.md",
     "plans/check_citations.py",
     ".claude/rules/plans.md",
@@ -43,13 +46,13 @@
       "name": "examples-test",
       "command": "cd examples && flutter test",
       "pass": "no test failure beyond those before the change",
-      "when": "examples/ exists"
+      "when": "examples/pubspec.yaml exists"
     },
     {
       "name": "examples-analyze",
       "command": "cd examples && flutter analyze",
       "pass": "no issue beyond the count before the change",
-      "when": "examples/ exists"
+      "when": "examples/pubspec.yaml exists"
     },
     {
       "name": "workflow-harness",
@@ -77,7 +80,12 @@
         ".claude/rules/board-widget.md",
         ".claude/rules/board-drag.md"
       ],
-      "vocabulary": "Module vocabulary: dense item ids in BoardStore with idOfKey/keyOfId (there are no nids and no onCapacityGrew; per-id arrays grow in lockstep in the store), TWO coordinate spaces (content and viewport-paint, plus track space for spans), the animation sources under BoardAnimationCoordinator (TrackResizeAnimator, ItemEnterExitAnimator, ItemSlideEngine, MakeRoomEngine), obtain-to-retain retention, OverlapLaneResolver lanes, the BoardDragController drag layer with BoardDropResolver, and BoardAnimationStyle families with a per-family zero kill switch. Where a lens focus names a sliver_tree construct (exit ghost, sticky pin, pending-deletion node, defunct scrollable), read it as the board analogue: an exiting item held by retention, a frozen track, an item mid-exit, an unlaid or detached port."
+      "vocabulary": "Module vocabulary: dense item ids in BoardStore with idOfKey/keyOfId (there are no nids and no onCapacityGrew; per-id arrays grow in lockstep in the store), TWO coordinate spaces (content and viewport-paint, plus track space for spans), the animation sources under BoardAnimationCoordinator (TrackResizeAnimator, ItemEnterExitAnimator, ItemSlideEngine, MakeRoomEngine), obtain-to-retain retention, OverlapLaneResolver lanes, the BoardDragController drag layer with BoardDropResolver, and BoardAnimationStyle families with a per-family kill switch: a family whose resolved duration is not positive is off.",
+      "lensAddenda": {
+        "correctness": "Degradation also includes an item mid-exit and an unlaid or detached port.",
+        "performance": "Hot paths that hash keys instead of using the id-keyed reads.",
+        "interaction": "A plan silent on what happens when its change coincides with a bulk animation, a drag's make-room preview, an exiting item held by retention or a frozen track has not covered it."
+      }
     },
     "sliver_tree": {
       "paths": [
@@ -91,7 +99,12 @@
         ".claude/rules/sliver-tree-reorder.md",
         ".claude/rules/sliver-tree-sync.md"
       ],
-      "vocabulary": "Module vocabulary: nids and the *Nid hot-path variants, three coordinate spaces (sliver scroll, sliver paint, viewport scroll), five animation sources under AnimationCoordinator, exit and edge ghosts, sticky pins, pending-deletion nodes, TreeAnimationStyle families with a per-family zero kill switch."
+      "vocabulary": "Module vocabulary: nids and the *Nid hot-path variants, three coordinate spaces (sliver scroll, sliver paint, viewport scroll), five animation sources under AnimationCoordinator, exit and edge ghosts, sticky pins, pending-deletion nodes, TreeAnimationStyle families with a per-family zero kill switch.",
+      "lensAddenda": {
+        "correctness": "Degradation also includes a defunct scrollable and a pending-deletion node.",
+        "performance": "Hot paths that hash keys instead of using the *Nid method variants.",
+        "interaction": "A plan silent on what happens when its change coincides with a bulk animation, a reorder preview, an exit ghost or a sticky pin has not covered it."
+      }
     }
   },
   "lenses": {
@@ -99,14 +112,14 @@
       "reads": [
         "moduleGuidance"
       ],
-      "addendum": "In this codebase re-entrancy includes anything that can abort and re-run a layout, plus frame ordering and settle transitions. Teardown includes dispose, ticker cancellation and recognizer disposal. Degradation includes a zero-duration animation family (a kill switch that dominates explicit per-call durations), a defunct scrollable, a pending-deletion node, hot reload, and a mutation issued mid-animation, mid-drag or inside a batch."
+      "addendum": "In this codebase re-entrancy includes anything that can abort and re-run a layout, plus frame ordering and settle transitions. Teardown includes dispose, ticker cancellation and recognizer disposal. Degradation includes an animation family switched off (a kill switch that dominates explicit per-call durations), hot reload, and a mutation issued mid-animation, mid-drag or inside a batch. Lifecycle includes what the framework does without the feature's code running: a build that throws, after which the element shows an ErrorWidget and its next build creates new children; a kept-alive child dropped from its sliver and adopted back without a rebuild; and a GlobalKey moving a subtree, whose render objects are detached and attached under the new parent."
     },
     "performance": {
       "reads": [
         "moduleGuidance",
         ".claude/rules/testing.md"
       ],
-      "addendum": "Hot paths that hash keys instead of using the *Nid method variants (sliver_tree) or the id-keyed reads (board). Per-frame allocation. Debug counters pin performance contracts here, so a plan names the counter and its expected value."
+      "addendum": "Per-frame allocation. Debug counters pin performance contracts here, so a plan names the counter and its expected value."
     },
     "design": {
       "reads": [
@@ -120,7 +133,7 @@
       "reads": [
         "moduleGuidance"
       ],
-      "addendum": "Here the crossings are every animation source, paint pass, mutator, widget layer and entry point. A plan silent on what happens when its change coincides with a bulk animation, a reorder preview, an exit ghost or a sticky pin has not covered it."
+      "addendum": "Here the crossings are every animation source, paint pass, mutator, widget layer and entry point."
     },
     "timing": {
       "reads": [

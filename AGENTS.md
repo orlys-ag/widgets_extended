@@ -22,16 +22,17 @@ flutter test test/sliver_tree/tree_controller_test.dart   # one file
 flutter analyze
 
 # examples/: a separate package that uses the library through its barrel, as
-# an app does. Gitignored, so it exists only in a local checkout.
+# an app does. Gitignored except the workspace calendar demo's files, so it
+# builds only in a local checkout that holds examples/pubspec.yaml.
 cd examples
 flutter test
 flutter analyze
 ```
 
 After a behaviour change under `lib/`, also run the examples' tests and
-analyzer when `examples/` exists: they can fail where `test/` passes.
-`flutter analyze` does not report zero issues on this tree, so compare the
-issue count before and after your change.
+analyzer when `examples/pubspec.yaml` exists: they can fail where `test/`
+passes. `flutter analyze` does not report zero issues on this tree, so compare
+the issue count before and after your change.
 
 ## Code Quality
 

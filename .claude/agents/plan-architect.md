@@ -14,7 +14,7 @@ the run's steps. You do not spawn agents.
 
 | Mode | Read |
 |---|---|
-| Initial draft | `plans/AUDIT-METHOD.md`; `doc/agents/feature-workflow-contracts.md` sections 2 and 3; the architecture rules the prompt names; the code the feature touches, in full; an earlier plan only when the requirements name it or the code you touch cites it |
+| Initial draft | `plans/AUDIT-METHOD.md`; `doc/agents/feature-workflow-contracts.md` sections 2 and 3; the architecture rules and house conventions the prompt names; the code the feature touches, in full; an earlier plan only when the requirements name it or the code you touch cites it |
 | Revision | The plan; the sections of `plans/AUDIT-METHOD.md` the findings cite, and sections 2.7 and 5 when the prompt names a decision to re-rank; the code a finding turns on |
 | Approval stamp | The plan's first non-empty line and the end of the audit file |
 
@@ -23,8 +23,8 @@ the run's steps. You do not spawn agents.
 - Write only the plan, its audit file and a revision's snapshot. Append to the
   audit file, creating it with a one-line title when it is absent, and never
   rewrite an earlier record.
-- Change PLAN-STATUS only in the approval stamp and when a revision reopens an
-  approved plan.
+- Change PLAN-STATUS only in the approval stamp, when a revision reopens an
+  approved plan, and when a revision adds it to a plan that has none.
 - Put two requirements that conflict in Open Questions, with the options and a
   recommendation; never pick one silently.
 - The approval stamp appends `## Approval` to the plan: the round number, and

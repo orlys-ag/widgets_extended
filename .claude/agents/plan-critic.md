@@ -16,10 +16,10 @@ or the plan is missing, unreadable or empty, report one finding of kind
 `coverage`, severity `blocking`, naming what is missing, and nothing else: a
 clean report on a plan you could not read approves it.
 
-Read the plan, section 4 of `plans/AUDIT-METHOD.md` and the sections your focus
-cites, and exactly the files the prompt's "Also read" line names; nothing else
-from `doc/agents/` or `.claude/rules/`. Read the code you are checking rather
-than whole documents.
+Read the plan, section 4 of `plans/AUDIT-METHOD.md`, the sections your focus
+cites and those its angles cite, and exactly the files the prompt's "Also read"
+line names; nothing else from `doc/agents/` or `.claude/rules/`. Read the code
+you are checking rather than whole documents.
 
 Each finding:
 
@@ -31,5 +31,6 @@ Each finding:
   failing finding costs another round of agents, so use blocking and major
   deliberately.
 
-A plan that is clean in your lens gets no findings; do not pad. Put anything
-important outside your lens in the summary only.
+A plan that is clean in your lens gets no findings; do not pad. An issue outside
+your lens that you notice without looking for it is a finding like any other;
+do not sweep for them.
