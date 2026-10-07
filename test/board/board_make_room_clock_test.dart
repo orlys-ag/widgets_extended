@@ -1,8 +1,10 @@
 /// The make-room engine's clock. A gap's motion keeps its position when
 /// the clock it runs on changes, a drag's close runs on the clock the
 /// session captured, a commit's continuation never carries an item past
-/// where it rests, and a second release leaves a gap or an extent that is
-/// already closing on the schedule the first release started.
+/// where it rests, an install that stops displacing a held neighbour
+/// closes it from where it was held on the install's clock, and a second
+/// release leaves a gap or an extent that is already closing on the
+/// schedule the first release started.
 library;
 
 import 'package:flutter/material.dart';
@@ -407,6 +409,43 @@ void main() {
     );
     controller.releaseMakeRoomPreview();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets("an install that stops displacing a held neighbour closes it "
+      "on the install's clock", (tester) async {
+    final controller = _controller(tester, _gapStyle);
+    _addTwoLaneFixture(controller);
+    await _settlePump(tester);
+    final idA = controller.idOfKey("a");
+    final anim = controller.anim;
+    final half = _ms240.duration ~/ 2;
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 0, colStart: 0, colSpan: 3),
+      lifted: true,
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await _settlePump(tester);
+    // Setup sanity: the preview displaces `a` one lane.
+    expect(anim.offsetOfItem(idA).dy, 18.0);
+
+    // Row 5 is empty, so `d` there displaces nobody.
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 5, colStart: 0, colSpan: 3),
+      lifted: true,
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await tester.pump();
+    await tester.pump(half);
+    // TARGET a: `a` closes from where it was held, on the install's clock.
+    expect(anim.offsetOfItem(idA).dy, closeTo(9.0, 0.01));
+    await tester.pump(half);
+    // TARGET b: `a` is at rest when that clock ends.
+    expect(anim.offsetOfItem(idA), Offset.zero);
+    controller.releaseMakeRoomPreview(duration: Duration.zero);
   });
 
   testWidgets("a second release leaves a closing gap on its schedule", (

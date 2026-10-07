@@ -321,6 +321,16 @@ void main() {
         ),
         isFalse,
       );
+      // TARGET b: the family dominates a positive per-call duration.
+      expect(
+        engine.animateSlideFrom(
+          1,
+          const Offset(10.0, 0.0),
+          family: BoardAnimationFamily.itemSlide,
+          duration: _ms240.duration,
+        ),
+        isFalse,
+      );
       style = const BoardAnimationStyle(itemSlide: _ms240);
       // Setup sanity: the engine installs on a positive family.
       expect(
@@ -334,7 +344,7 @@ void main() {
       style = const BoardAnimationStyle(itemSlide: _neg240);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 16));
-      // TARGET b: the record in flight settled.
+      // TARGET c: the record in flight settled.
       expect(engine.hasActive, isFalse);
     });
 
@@ -451,6 +461,81 @@ void main() {
       expect(handOff, isNotNull);
       // TARGET c: the hand-off carries no time.
       expect(handOff!.remaining, Duration.zero);
+    });
+  });
+
+  group("a source refuses a negative per-call duration under a live "
+      "family", () {
+    testWidgets("the slide engine", (tester) async {
+      final engine = ItemSlideEngine(
+        vsync: tester,
+        styleOf: () {
+          return const BoardAnimationStyle(itemSlide: _ms240);
+        },
+        notifyNow: () {},
+        notifyCoalesced: () {},
+      );
+      addTearDown(engine.dispose);
+      // Setup sanity: the engine installs on a positive per-call
+      // duration under this family.
+      expect(
+        engine.animateSlideFrom(
+          2,
+          const Offset(10.0, 0.0),
+          family: BoardAnimationFamily.itemSlide,
+          duration: _ms240.duration,
+        ),
+        isTrue,
+      );
+      await _settlePump(tester);
+
+      // TARGET a: the install is refused.
+      expect(
+        engine.animateSlideFrom(
+          1,
+          const Offset(10.0, 0.0),
+          family: BoardAnimationFamily.itemSlide,
+          duration: _neg240.duration,
+        ),
+        isFalse,
+      );
+      // TARGET b: the item paints at its structural rectangle.
+      expect(engine.deltaOf(1), Offset.zero);
+    });
+
+    testWidgets("the track animator", (tester) async {
+      final animator = TrackResizeAnimator(
+        vsync: tester,
+        styleOf: () {
+          return const BoardAnimationStyle(trackResize: _ms240);
+        },
+        settledExtentOf: (axis, track) {
+          return 20.0;
+        },
+        onTick: () {},
+      );
+      addTearDown(animator.dispose);
+      animator.animateTrackResize(
+        Axis.vertical,
+        1,
+        30.0,
+        duration: _ms240.duration,
+      );
+      // Setup sanity: the animator installs on a positive per-call
+      // duration under this family.
+      expect(animator.hasActive, isTrue);
+      await _settlePump(tester);
+
+      animator.animateTrackResize(
+        Axis.vertical,
+        1,
+        30.0,
+        duration: _neg240.duration,
+      );
+      // TARGET a: the install is refused.
+      expect(animator.hasActive, isFalse);
+      // TARGET b: the track paints its settled extent.
+      expect(animator.animatedExtentOf(Axis.vertical, 1), 20.0);
     });
   });
 }
