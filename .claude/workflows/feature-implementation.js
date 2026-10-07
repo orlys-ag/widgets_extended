@@ -7,7 +7,7 @@ export const meta = {
     { title: 'Critique', detail: 'The standard lenses in parallel, at decision level; after a revision, the lenses plans/AUDIT-METHOD.md section 4 names.' },
     { title: 'Revise', detail: 'Address every finding received, re-rank a decision whose ranking keeps failing, and add a check for a recurring defect class.' },
     { title: 'Fresh Angle', detail: 'One lens drawn from a pool of angles that have not run yet, spent after one use. A clean standard sweep alone measures the lens, not the artifact, and neither does a lens clearing on its second pass.' },
-    { title: 'Trial', detail: 'Apply the highest-risk section on a branch and run the profile gates. The diff is kept.' },
+    { title: 'Trial', detail: 'Apply the highest-risk section on a branch, mutate each rule it lands, and run the profile gates. The diff is kept.' },
     { title: 'Approve', detail: 'Stamp PLAN-STATUS ready-to-implement and record the clean rounds.' },
     { title: 'Checklist', detail: 'Emit the phased checklist, with the carried implementation findings and the mutation items.' },
     { title: 'Implement', detail: 'Execute the checklist, ticking only on acceptance.' },
@@ -113,36 +113,43 @@ function criticFinding(defectClasses) {
   }
 }
 
-// The lens set. The generic focus of each lens is method text and lives here;
-// what a project adds to it, and what each lens reads, come from the profile,
-// whose `lenses` keys must equal these.
+// The lens set. Each lens names the angles of plans/AUDIT-METHOD.md section 1
+// it sweeps, which the critic reads there, and adds only what the angles do
+// not say. What a project or a module adds to a lens, and what each lens
+// reads, come from the profile, whose `lenses` keys must equal these.
 const LENS_DEFINITIONS = {
   correctness: {
     stage: 'standard',
-    focus: 'Angles 1, 8 and 9 of the angle list in plans/AUDIT-METHOD.md section 1. Will each decision do what the goals say? Logical gaps where something reads state nothing writes, ordering violations, re-entrancy. Lifecycle: creation, teardown, and every site that destroys the thing. Degradation: what happens when a precondition is not met, on empty and single-element cases. Judge at decision level: an edge case or a missing test is kind implementation.',
+    angles: [1, 8, 9],
+    focus: 'Will each decision do what the goals say? Look for state read that nothing writes, ordering violations and re-entrancy. Judge at decision level: an edge case or a missing test is kind implementation.',
   },
   performance: {
     stage: 'standard',
+    angles: [10],
     ranking: true,
-    focus: 'Angle 10 of the angle list in plans/AUDIT-METHOD.md section 1. What is O(what), and is the stated bound the one that can blow up? Anything that turns a targeted lookup into a full scan, and allocation on a hot path. Does each measured or computed evidence cell in a decision table support its rank, and does each counted contract name its check and expected value?',
+    focus: 'Look for anything that turns a targeted lookup into a full scan, and allocation on a hot path. Does each measured or computed evidence cell in a decision table support its rank, and does each counted contract name its check and expected value?',
   },
   design: {
     stage: 'standard',
+    angles: [2, 3, 4, 5, 6, 7],
     ranking: true,
     requirements: true,
-    focus: 'Angles 2, 3, 4, 6 and 7 of the angle list in plans/AUDIT-METHOD.md section 1, at decision level. Interfaces: signatures, types, naming, exports, and every consumer of a changed interface verified per plans/AUDIT-METHOD.md section 8 (derive, check in code, read; a search only locates). Contracts: does the plan contradict a document it depends on, or change a documented contract without saying so? Citations and claims: run python plans/check_citations.py on the plan (a non-zero exit is itself a finding) and read that the cited lines say what the plan says; every count carries its command, and every because, only, never and exactly carries its own citation. Decisions: does each table follow the ranking rule, is a valid option missing, does each evidence cell support its rank? Requirements: is each acceptance criterion traced to a named check, and can each named check fail in the direction it claims? Is each new test seam justified against an existing one? Scope: is a requirement missing, ambiguous or in conflict (kind scope)? Guidance: does the plan change a guidance document only to state an invariant it adds or alters?',
+    focus: 'Judge them at decision level. Decisions: does each table follow the ranking rule, is a valid option missing, does each evidence cell support its rank, and does each decision list every rule it lands, each with its code site and a test that pins it? Requirements: is each acceptance criterion traced to a named check that can fail in the direction it claims? Scope: is a requirement missing, ambiguous or in conflict (kind scope)? Guidance documents: plans/AUDIT-METHOD.md rule 2.8.',
   },
   interaction: {
     stage: 'fresh',
-    focus: 'The interaction lens of plans/AUDIT-METHOD.md section 4: the feature crossed with every other component, layer and entry point. Look for the crossings the plan does not mention AT ALL rather than the ones it handles badly. A crossing whose handling would change a decision is kind rank or surface; otherwise it is implementation.',
+    angles: [],
+    focus: 'The interaction lens of plans/AUDIT-METHOD.md section 4. Look for the crossings the plan does not mention AT ALL rather than the ones it handles badly. A crossing whose handling would change a decision is kind rank or surface; otherwise it is implementation.',
   },
   timing: {
     stage: 'fresh',
-    focus: 'The timing lens of plans/AUDIT-METHOD.md section 4: behaviour under real timing. The correctness lens already swept ordering and re-entrancy as design questions, so do NOT repeat that. Ask instead which of this plan\'s timing risks only running the code can close, and whether the plan turns each one into a named test rather than prose that argues it is fine. Name every timing risk the plan settles by assertion instead of by a test.',
+    angles: [],
+    focus: 'The timing lens of plans/AUDIT-METHOD.md section 4. The correctness lens already swept ordering and re-entrancy as design questions, so do NOT repeat that. Name every timing risk the plan settles by argument instead of by a named test.',
   },
   consistency: {
     stage: 'consistency',
-    focus: 'The revision that just happened, checked for self-inflicted damage, and against the obligations plans/AUDIT-METHOD.md section 5 gives it. Diff the revision snapshot against the plan. Read the summary sections specifically: overview, landing order, testing plan, and any decisions list, since those are where staleness collects; read every section that used the vocabulary the revision replaced. Cross-references must resolve, numbering must be contiguous, and each fact must have exactly one normative site. You are also the guard for the lenses that were NOT re-run this round, and for the obligations the revision was given. History or defensive prose the revision added to the plan breaks plans/AUDIT-METHOD.md rule 2.6.',
+    angles: [],
+    focus: 'The revision that just happened, against the obligations plans/AUDIT-METHOD.md section 5 gives it and the writing rules of section 2. Diff the revision snapshot against the plan, and read every section that used the vocabulary the revision replaced, the summary sections above all (rule 2.2). You also guard the lenses that did not run again this round.',
   },
 }
 const LENS_KEYS = Object.keys(LENS_DEFINITIONS)
@@ -150,7 +157,7 @@ const STANDARD_KEYS = LENS_KEYS.filter(k => LENS_DEFINITIONS[k].stage === 'stand
 const FRESH_KEYS = LENS_KEYS.filter(k => LENS_DEFINITIONS[k].stage === 'fresh')
 const CONSISTENCY_KEY = 'consistency'
 
-const TRIAL_REQUIRED = ['section', 'branch', 'repro_failed_before', 'repro_passes_after', 'gates', 'commit', 'notes', 'blocking_findings']
+const TRIAL_REQUIRED = ['section', 'branch', 'repro_failed_before', 'repro_passes_after', 'gates', 'mutations', 'commit', 'notes', 'blocking_findings']
 // The trial result's fields its Trial Log record carries: everything the
 // script's pass decision reads, so a reader of the log can tell the outcome.
 const TRIAL_LOG_FIELDS = TRIAL_REQUIRED.filter(f => f !== 'notes')
@@ -163,7 +170,7 @@ const PROFILE_KEYS = ['codePaths', 'conventionDocs', 'methodFiles', 'gates', 'mo
 const REQUIRED_FIELDS = ['summary', 'user_visible_behavior', 'acceptance_criteria', 'modules_touched', 'constraints', 'non_goals', 'open_questions']
 // Every argument the script reads. An unknown name is a caller's typo, which
 // would otherwise fall back to a default with no message anywhere.
-const ARG_NAMES = ['slug', 'date', 'request', 'baseRef', 'profile', 'requirements', 'module', 'maxRounds', 'trial', 'priorFindings', 'resume', 'start', 'ownerApproval', 'killed']
+const ARG_NAMES = ['slug', 'date', 'request', 'baseRef', 'profile', 'requirements', 'module', 'maxRounds', 'trial', 'priorFindings', 'resume', 'start', 'ownerApproval', 'killed', 'resolved']
 const REQUIRED_ARGS = ['slug', 'date', 'request', 'baseRef', 'profile', 'requirements']
 
 // ---- args ----------------------------------------------------------------
@@ -183,6 +190,7 @@ if (argsObj?.describe === true) {
     lensKeys: LENS_KEYS,
     standardLenses: STANDARD_KEYS,
     freshLenses: FRESH_KEYS,
+    lensAngles: Object.fromEntries(LENS_KEYS.map(k => [k, LENS_DEFINITIONS[k].angles])),
     consistencyLens: CONSISTENCY_KEY,
     kinds: KINDS,
     baseFindingFields: BASE_FIELDS,
@@ -325,6 +333,16 @@ function validateProfile(p) {
     for (const pattern of m.paths) {
       try { new RegExp(pattern) } catch { fail(`.modules.${key}.paths holds an invalid pattern ${JSON.stringify(pattern)}`) }
     }
+    if (m.lensAddenda !== undefined) {
+      if (!m.lensAddenda || typeof m.lensAddenda !== 'object' || Array.isArray(m.lensAddenda)) {
+        fail(`.modules.${key}.lensAddenda must map lens keys to text`)
+      }
+      for (const [lensKey, text] of Object.entries(m.lensAddenda)) {
+        if (!LENS_KEYS.includes(lensKey) || typeof text !== 'string' || text.length === 0) {
+          fail(`.modules.${key}.lensAddenda.${lensKey} must name one of ${LENS_KEYS.join(', ')} and hold text`)
+        }
+      }
+    }
   }
   if (!p.lenses || typeof p.lenses !== 'object') {
     fail('.lenses must be an object')
@@ -428,8 +446,13 @@ if (resume !== null) {
   if (resume.version !== STATE_VERSION) {
     fail(`has version ${JSON.stringify(resume.version)}, expected ${STATE_VERSION}`)
   }
-  if (!RESUMABLE.includes(resume.phase)) {
-    fail(`.phase must be one of ${RESUMABLE.join(', ')}, got ${JSON.stringify(resume.phase)}`)
+  if (!PHASES.includes(resume.phase)) {
+    fail(`.phase must be one of ${PHASES.join(', ')}, got ${JSON.stringify(resume.phase)}`)
+  }
+  // A done run's plan is not reopened (plans/AUDIT-METHOD.md section 5); only
+  // its acceptance review runs again, after a fix by hand on its branch.
+  if (resume.phase === 'done' && argsObj.start !== 'accept') {
+    fail('is done: only its acceptance review runs again, with start: "accept"')
   }
   if (resume.baseRef !== baseRef) {
     fail(`.baseRef ${JSON.stringify(resume.baseRef)} is not args.baseRef ${JSON.stringify(baseRef)}`)
@@ -473,6 +496,9 @@ if (resume !== null && !initialRecord) {
   if (resume.lastRevision !== null && (typeof resume.lastRevision !== 'object' || !Array.isArray(resume.lastRevision.changed_decisions))) {
     fail('.lastRevision must be null or a revision record')
   }
+  if (resume.ownerApproval != null && (typeof resume.ownerApproval !== 'string' || resume.ownerApproval.trim().length === 0)) {
+    fail('.ownerApproval must be null or the owner\'s stated basis')
+  }
   const o = resume.lastObligations
   if (!o || !Array.isArray(o.rerank) || !Array.isArray(o.mechanize)) {
     fail('.lastObligations must hold rerank and mechanize arrays')
@@ -498,19 +524,43 @@ const START = resume !== null ? (argsObj.start ?? resume.phase) : priorFindings.
 if (priorFindings.length > 0 && START !== 'revise') {
   throw new Error(`args.priorFindings go to a revision, but this run starts at ${START}. Pass start: "revise" with them.`)
 }
+// Queued findings the owner settled without a revision, each with how. They
+// leave the queue, and every result returns them as resolvedFindings for the
+// audit file.
+const resolvedArg = argsObj?.resolved
+const queuedFindings = resume !== null && !initialRecord ? [...resume.revise, ...resume.received.filter(isFailing)] : []
+if (resolvedArg !== undefined) {
+  if (queuedFindings.length === 0) {
+    throw new Error('args.resolved needs a run record that queues findings: it settles them.')
+  }
+  if (!Array.isArray(resolvedArg) || resolvedArg.length === 0
+    || resolvedArg.some(r => !r || typeof r.id !== 'string' || typeof r.resolution !== 'string' || r.resolution.trim().length === 0)) {
+    throw new Error('args.resolved must be a non-empty array of {id, resolution} strings.')
+  }
+  const unknownIds = resolvedArg.map(r => r.id).filter(id => !queuedFindings.some(f => f.id === id))
+  if (unknownIds.length > 0) {
+    throw new Error(`args.resolved names ${unknownIds.join(', ')}, which the run record does not queue. Queued: ${queuedFindings.map(f => f.id).join(', ')}.`)
+  }
+}
+const resolutions = new Map((resolvedArg ?? []).map(r => [r.id, r.resolution]))
+const resolvedFindings = queuedFindings.filter(f => resolutions.has(f.id)).map(f => ({ ...f, resolution: resolutions.get(f.id) }))
+const unresolved = f => !resolutions.has(f.id)
 // Queued revision findings, and failing findings no architect step has
 // received, reach an agent only through a revision.
 if (resume !== null && PHASES.indexOf(START) > PHASES.indexOf('revise')) {
-  const owed = (resume.revise ?? []).length + (resume.received ?? []).filter(isFailing).length
+  const owed = (resume.revise ?? []).filter(unresolved).length + (resume.received ?? []).filter(f => isFailing(f) && unresolved(f)).length
   if (owed > 0) {
-    throw new Error(`args.start ${START} would skip ${owed} finding(s) the next revision must receive. Start at revise.`)
+    throw new Error(`args.start ${START} would skip ${owed} finding(s) the next revision must receive. Start at revise, or pass the ones the owner settled as resolved.`)
   }
 }
 // A run that starts past the critique without a fresh angle that cleared needs
-// the owner's stated basis (plans/AUDIT-METHOD.md section 6).
-const ownerApproval = argsObj?.ownerApproval
-if (PHASES.indexOf(START) > PHASES.indexOf('critique') && !resume?.clearedFresh
-  && (typeof ownerApproval !== 'string' || ownerApproval.trim().length === 0)) {
+// the owner's stated basis (plans/AUDIT-METHOD.md section 6). The run record
+// keeps it until a revision changes the plan.
+if (argsObj?.ownerApproval !== undefined && (typeof argsObj.ownerApproval !== 'string' || argsObj.ownerApproval.trim().length === 0)) {
+  throw new Error('args.ownerApproval must be the owner\'s stated basis, a non-empty string.')
+}
+let ownerApproval = argsObj?.ownerApproval ?? resume?.ownerApproval ?? null
+if (PHASES.indexOf(START) > PHASES.indexOf('critique') && !resume?.clearedFresh && !ownerApproval) {
   throw new Error(`args.ownerApproval is required to start at ${START}: no fresh angle has cleared this version of the plan, so the owner states why it is approved.`)
 }
 // A run killed before it returned left no state, so the record is older than
@@ -550,7 +600,9 @@ const gateLines = profile.gates.map(g => `- ${g.name}: \`${g.command}\`, passes 
 const planRulesBlock = profile.planRules.length > 0
   ? `Project plan rules, which the plan must meet:\n${profile.planRules.map(r => `- ${r}`).join('\n')}`
   : ``
-const conventionsLine = `House conventions, read before writing code or tests: ${profile.conventionDocs.join(', ')}.`
+const conventionDocs = profile.conventionDocs.join(', ')
+const conventionsLine = conventionDocs ? `House conventions, read before writing code or tests: ${conventionDocs}.` : ``
+const planConventionsLine = conventionDocs ? `House conventions, which the Testing Plan follows: ${conventionDocs}.` : ``
 
 // ---- lenses --------------------------------------------------------------
 
@@ -559,13 +611,20 @@ function readsFor(key) {
     r === 'moduleGuidance' ? MODULE.guidance : r === 'conventionDocs' ? profile.conventionDocs : [r])
   return [...new Set(expanded)]
 }
+function angleLine(angles) {
+  if (angles.length === 0) {
+    return ``
+  }
+  const list = angles.length === 1 ? `Angle ${angles[0]}` : `Angles ${angles.slice(0, -1).join(', ')} and ${angles[angles.length - 1]}`
+  return `${list} of the angle list in plans/AUDIT-METHOD.md section 1.`
+}
 function lens(key) {
-  const addendum = profile.lenses[key].addendum
+  const definition = LENS_DEFINITIONS[key]
   return {
     key,
-    ...LENS_DEFINITIONS[key],
+    ...definition,
     reads: readsFor(key),
-    focus: addendum ? `${LENS_DEFINITIONS[key].focus} ${addendum}` : LENS_DEFINITIONS[key].focus,
+    focus: [angleLine(definition.angles), definition.focus, profile.lenses[key].addendum, MODULE.lensAddenda?.[key]].filter(Boolean).join(' '),
   }
 }
 const STANDARD = STANDARD_KEYS.map(lens)
@@ -576,13 +635,9 @@ const CONSISTENCY_LENS = lens(CONSISTENCY_KEY)
 
 const FINDINGS_SCHEMA = {
   type: 'object',
-  required: ['lens', 'plan_path', 'plan_status', 'summary', 'findings'],
+  required: ['findings'],
   additionalProperties: false,
   properties: {
-    lens: { type: 'string' },
-    plan_path: { type: 'string' },
-    plan_status: { type: 'string' },
-    summary: { type: 'string' },
     findings: { type: 'array', items: criticFinding(profile.defectClasses) },
   },
 }
@@ -617,6 +672,20 @@ const TRIAL_SCHEMA = {
           name: { type: 'string', enum: GATE_NAMES },
           applies: { type: 'boolean' },
           passed: { type: 'boolean' },
+        },
+      },
+    },
+    mutations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['decision', 'rule', 'test', 'failed'],
+        additionalProperties: false,
+        properties: {
+          decision: { type: 'string', pattern: '^d[0-9]+$' },
+          rule: { type: 'string' },
+          test: { type: 'string' },
+          failed: { type: 'boolean' },
         },
       },
     },
@@ -718,10 +787,10 @@ const plain = m => Object.fromEntries([...m].map(([k, v]) => [k, [...v].sort((a,
 // the approval step receives all of them and records each in the audit file.
 // A run that ends before an architect step carries them in its state to the
 // next run's first one, and returns them as unrecordedFindings.
-let received = [...(S.received ?? [])]
+let received = (S.received ?? []).filter(unresolved)
 // Findings from outside the critics that the next revision receives: a
 // trial's, the checklist's or the implementer's blocking findings.
-let pendingRevise = [...(S.revise ?? [])]
+let pendingRevise = (S.revise ?? []).filter(unresolved)
 // Every implementation finding of the plan's audit, for the checklist.
 const implementationFindings = [...(S.carried ?? [])]
 // Rounds in which each decision had a failing rank finding (R1), and in which
@@ -757,7 +826,8 @@ if (killed && PHASES.indexOf(START) <= PHASES.indexOf('critique')) {
 // dispatches again.
 let pendingLenses = S.pendingLenses ?? null
 // The branch the run's commits are on, the trial's commit, the branches an
-// earlier revision retired, and every file an implementer reported changing.
+// earlier revision retired, and every file an implementer reported changing on
+// the current branch.
 let workflowBranch = S.branch ?? null
 let trialCommit = S.trialCommit ?? null
 const previousBranches = [...(S.previousBranches ?? [])]
@@ -771,6 +841,7 @@ function exportState(next) {
     roundsRun,
     freshSpent: [...freshSpent],
     clearedFresh: clearedFreshLens,
+    ownerApproval,
     pendingLenses,
     rankFailRounds: plain(rankFailRounds),
     failRounds: plain(failRounds),
@@ -792,13 +863,17 @@ function exportState(next) {
   }
 }
 
-// Every result: its status, its fields, and the state whose phase is where the
+// Every result: its status, its fields, a note saying what to do next, the
+// findings this run's resolved settled, and the state whose phase is where the
 // next run starts.
 function end(status, next, fields) {
   if (!NEXT_PHASES[status]?.includes(next)) {
     throw new Error(`${status} cannot start the next run at ${next}; NEXT_PHASES allows ${NEXT_PHASES[status]?.join(', ')}`)
   }
-  return { status, ...fields, state: exportState(next) }
+  if (typeof fields.note !== 'string' || fields.note.length === 0) {
+    throw new Error(`${status} returns no note; every result says what to do next`)
+  }
+  return { status, ...fields, ...(resolvedFindings.length > 0 ? { resolvedFindings } : {}), state: exportState(next) }
 }
 
 function isFailing(f) {
@@ -825,7 +900,7 @@ function consistencyContext() {
   return [
     lastRevision?.snapshot
       ? `Revision snapshot: ${lastRevision.snapshot}. Diff it against the plan with git diff --no-index ${lastRevision.snapshot} ${planPath}.`
-      : `No revision snapshot exists for this round, because the revision returned no result. Read the revision's record in ${auditPath} instead, and say in your summary that scope was checked by reading.`,
+      : `No revision snapshot exists for this round, because the revision returned no result. Read the revision's record in ${auditPath} instead.`,
     `Decisions the revision reports it changed: ${(lastRevision?.changed_decisions ?? []).join(', ') || 'none'}.`,
     `Obligations the revision was given: re-rank ${lastObligations.rerank.join(', ') || 'none'}; add a check for defect class ${lastObligations.mechanize.join(', ') || 'none'}.`,
     `Findings the revision received:`,
@@ -880,8 +955,7 @@ async function runLens(lens, phaseTitle, round, withConsistency) {
 }
 
 // Returns `{lens, findings, reported}` per lens, where `lens` is the lens
-// object this scope DISPATCHED, not the `lens` string the critic reported, so
-// a model-side spelling of a lens key cannot drop it from the re-critique set.
+// object this scope dispatched.
 function critiqueRound(lenses, phaseTitle, round) {
   return parallel(lenses.map(l => () => runLens(l, phaseTitle, round, l.key === CONSISTENCY_KEY)))
 }
@@ -939,12 +1013,13 @@ function diagnosis() {
 
 // A revision changes the plan, so the evidence about an earlier version no
 // longer stands: the workflow branch is retired, the next trial or
-// implementation branches from the base commit, and no fresh angle has cleared
-// the new version.
+// implementation branches from the base commit, and neither a fresh angle nor
+// the owner has approved the new version.
 async function revise(findings, round, note, obligations) {
   phase('Revise')
   retireBranch()
   clearedFreshLens = null
+  ownerApproval = null
   const result = await agent(
     [
       `Mode: revision (round ${round}).`,
@@ -957,8 +1032,9 @@ async function revise(findings, round, note, obligations) {
       `Requirements, as the owner last settled them; the revised plan must meet them:`,
       requirementsMarkdown,
       planRulesBlock,
+      planConventionsLine,
       ``,
-      `If the plan's first non-empty line is <!-- PLAN-STATUS: ready-to-implement -->, first replace it with <!-- PLAN-STATUS: draft -->: a revision reopens an approved plan. Change PLAN-STATUS in no other way.`,
+      `If the plan's first non-empty line is <!-- PLAN-STATUS: ready-to-implement -->, first replace it with <!-- PLAN-STATUS: draft -->: a revision reopens an approved plan. If the plan has no PLAN-STATUS line, add <!-- PLAN-STATUS: draft --> as its first line. Change PLAN-STATUS in no other way.`,
       `Before editing, copy the plan to the first free ${planPath}.r<N> (N = 1, 2, ...) and report that path as snapshot.`,
       ``,
       `Findings received, every finding raised since the last architect step, at every severity:`,
@@ -972,7 +1048,7 @@ async function revise(findings, round, note, obligations) {
         ? `These defect classes recurred in two rounds: ${obligations.mechanize.join(', ')}. Add a check for each, preferring a code check per plans/AUDIT-METHOD.md section 8 (derive, check in code, read; a search only locates), and name it in your record.`
         : ``,
       `A fix rewrites the sentence that was wrong; it never appends a note, and the plan never says what it used to say (plans/AUDIT-METHOD.md rule 2.6).`,
-      `Append a "## Round ${round - 1}" record to ${auditPath}, creating the file with a one-line title if it does not exist: one line per finding received, giving its id, lens, kind, severity and outcome (fixed, naming the section; re-ranked; rejected, with the evidence; carried; or left open, with the reason). No other prose.`,
+      `Append a "## Round ${round - 1}" record to ${auditPath}: one line per finding received, giving its id, lens, kind, severity and outcome (fixed, naming the section; re-ranked; rejected, with the evidence; carried; or left open, with the reason). No other prose.`,
       `Run the consistency pass: write down the vocabulary you replaced and read every section that used it. Then run python plans/check_citations.py ${planPath} --rebase, naming with --accept each CHANGED citation whose claim you re-read and kept at its number; it must exit 0.`,
       `Report via StructuredOutput: changed_decisions (the d<N> anchors whose decision text or table you changed) and snapshot.`,
     ].filter(Boolean).join('\n'),
@@ -1010,6 +1086,7 @@ function retireBranch() {
     previousBranches.push(workflowBranch)
     workflowBranch = null
     trialCommit = null
+    changedFiles = []
   }
 }
 
@@ -1044,11 +1121,11 @@ if (START === 'draft') {
       `Requirements:`,
       requirementsMarkdown,
       planRulesBlock,
+      planConventionsLine,
       ``,
       rankingLine,
       `Write the plan with PLAN-STATUS: draft and every required section from doc/agents/feature-workflow-contracts.md section 3, each followed by its anchor. Every architecture, performance or algorithm choice goes in the Decisions section as a ranking table, per plans/AUDIT-METHOD.md. Write the design, not its history (rule 2.6): concise, final-state, nothing an implementer or reviewer does not need.`,
       `Map every Acceptance Criteria item to a concrete check in the Testing Plan, and resolve every Open Question in the body unless it genuinely needs a user decision.`,
-      `Create the audit file ${auditPath} with a one-line title if it does not exist.`,
       `Stamp the citations with python plans/check_citations.py ${planPath} --stamp; it must exit 0.`,
     ].join('\n'),
     {
@@ -1068,7 +1145,7 @@ if (START === 'draft') {
   if (typeof draft === 'string' && /^\s*ABORT:/m.test(draft)) {
     return end(STATUS.DRAFT_ABORTED, 'revise', {
       planPath,
-      note: `The architect refused to draft: ${draft.trim().slice(0, 300)}`,
+      note: `The architect refused to draft. Pick another slug or date, or resume at the revision with priorFindings. Its message: ${draft.trim().slice(0, 300)}`,
     })
   }
   log(`Draft written to ${planPath}`)
@@ -1266,10 +1343,12 @@ if (runTrial && reaches('trial')) {
       `3. Create the branch ${trialBranch} from the base commit (git switch -c ${trialBranch} ${baseRef}), or ${trialBranch}-2, -3 when that name is taken (git rev-parse --verify --quiet). Report the name in branch.`,
       `4. Write the section's repro test first and confirm it fails on unfixed code; record the failure. A repro that passes before any change is a blocking finding.`,
       `5. Apply that section's change.`,
-      `6. Run the repro again, then the gates above.`,
-      `7. Commit on that branch whether or not the gates passed.`,
-      `8. Run python plans/check_citations.py ${planPath}, without rebasing, and say in notes which citations it reports CHANGED: lines your change edited or removed, which is evidence about the plan.`,
-      `9. Append a "## Trial Log" record to ${auditPath}, creating it with a one-line title if it does not exist, with these fields of your result: ${TRIAL_LOG_FIELDS.join(', ')}.`,
+      `6. Run the repro again.`,
+      `7. Mutate each rule a Decisions subsection lists whose code site your change touched, as your system prompt says: break the rule there and run the test the plan names for it. Report each in mutations, with failed true when that test failed. A test you wrote unlike its Testing Plan entry is your slip: fix it and mutate again.`,
+      `8. Run the gates above.`,
+      `9. Commit on that branch whether or not the gates passed.`,
+      `10. Run python plans/check_citations.py ${planPath}, without rebasing, and say in notes which citations it reports CHANGED: lines your change edited or removed, which is evidence about the plan.`,
+      `11. Append a "## Trial Log" record to ${auditPath} with these fields of your result: ${TRIAL_LOG_FIELDS.join(', ')}.`,
       ``,
       `A plan defect, as opposed to an implementation slip, goes in blocking_findings. Do not invent design to make a gate pass.`,
       `Report via StructuredOutput.`,
@@ -1283,16 +1362,20 @@ if (runTrial && reaches('trial')) {
   )
 
   // Every profile gate is reported exactly once by name, every one that
-  // applies passed, and the trial found no plan defect. A missing name is a
-  // gate nobody ran.
+  // applies passed, every rule the trial mutated failed its named test, and
+  // the trial found no plan defect. A missing name is a gate nobody ran. A
+  // named test that passed with its rule broken shows the plan's pin claim
+  // wrong, which the next revision receives as a finding.
   const reported = trial?.gates ?? []
   const namesMatch = reported.length === GATE_NAMES.length
     && GATE_NAMES.every(n => reported.filter(g => g.name === n).length === 1)
+  const survivors = (trial?.mutations ?? []).filter(m => !m.failed)
   const passed = Boolean(trial)
     && trial.repro_failed_before
     && trial.repro_passes_after
     && namesMatch
     && reported.every(g => !g.applies || g.passed)
+    && survivors.length === 0
     && trial.blocking_findings.length === 0
   // Only a passing trial becomes the workflow branch. A failed one is kept as a
   // retired branch, so no later phase reads it as evidence or builds on it.
@@ -1300,7 +1383,17 @@ if (runTrial && reaches('trial')) {
     if (trial?.branch) {
       previousBranches.push(trial.branch)
     }
-    pendingRevise = trial?.blocking_findings ?? []
+    pendingRevise = [
+      ...(trial?.blocking_findings ?? []),
+      ...survivors.map((m, i) => ({
+        id: `trial-mutation-${i + 1}`,
+        location: m.decision,
+        severity: 'blocking',
+        title: `${m.decision}, ${m.rule}: ${m.test} passes with the rule broken`,
+        why: 'The trial broke the rule at its code site and the test the plan names for it still passed, so the plan does not pin the rule as it claims.',
+        suggested_direction: 'Name a test that fails when the rule is broken, or add one to the Testing Plan.',
+      })),
+    ]
     return end(STATUS.TRIAL_FAILED, pendingRevise.length > 0 ? 'revise' : 'trial', {
       planPath,
       auditPath,
@@ -1312,7 +1405,7 @@ if (runTrial && reaches('trial')) {
         ? 'The trial agent returned no result: it died or was skipped, possibly after switching branches. Restore the checkout (feature-start, "Restoring the checkout"), then resume to run the trial again.'
         : pendingRevise.length > 0
           ? 'The trial exposed plan defects, which go to the next revision with the run state. Resume to revise; the trial branch is kept, and the next trial branches from the base commit under a suffixed name.'
-          : 'The trial did not pass its gates and reported no plan defect. Read its notes, then resume to run the trial again.',
+          : 'The trial did not pass and reported no plan defect. Read its notes; a modified code path means the checkout changed during the run, and the owner moves that work first. Then resume to run the trial again.',
     })
   }
   workflowBranch = trial.branch
@@ -1343,7 +1436,7 @@ if (reaches('approve')) {
         : ``,
       trialCommit ? `The trial passed all gates on branch ${workflowBranch} at ${trialCommit}.` : `No trial was run for this version of the plan.`,
       ``,
-      `Findings received since the last revision, none of them failing. Append a "## Round ${roundsRun}" record to the audit file, creating it with a one-line title if it does not exist: one line per finding, giving its id, lens, kind, severity and outcome (carried for an implementation finding, otherwise left open with a reason):`,
+      `Findings received since the last revision, none of them failing. Append a "## Round ${roundsRun}" record to the audit file: one line per finding, giving its id, lens, kind, severity and outcome (carried for an implementation finding, otherwise left open with a reason):`,
       approvalFindings.length > 0 ? JSON.stringify(approvalFindings, null, 2) : `(none)`,
       ``,
       `In the plan, use Edit for both changes, never a full-file Write: flip PLAN-STATUS to ready-to-implement and append the Approval section per your system prompt. Change nothing else in the plan.`,
@@ -1385,7 +1478,7 @@ if (reaches('checklist')) {
       ``,
       `If a checklist already exists at the checklist path, rename it to the first free ${checklistPath.replace(/\.md$/, '')}.superseded-<n>.md before writing: a reopened plan keeps the record of what its last checklist ticked.`,
       `Verify the plan is ready-to-implement, then emit the grouped checklist per your system prompt and doc/agents/feature-workflow-contracts.md section 5.`,
-      `Phase 4, in this order: one item per decision, a mutation when its code site, as its Decisions subsection names it, lies under ${profile.codePaths.join(', ')}, and otherwise the check plans/AUDIT-METHOD.md section 8 names for it; then one item per gate below whose condition applies.`,
+      `Phase 4, in this order: one item per rule the Decisions subsections list, a mutation when the rule's code site lies under ${profile.codePaths.join(', ')}, and otherwise the check plans/AUDIT-METHOD.md section 8 names for it; then one item per gate below whose condition applies.`,
       ...gateLines,
       `Carried implementation findings from the audit. Make each an item whose acceptance is a test shown to fail first, a mutation, or the check plans/AUDIT-METHOD.md section 8 names for a consumer. List one that no longer applies to the approved plan under Discovered with Blocking: no and the reason:`,
       implementationFindings.length > 0 ? JSON.stringify(implementationFindings, null, 2) : `(none)`,
@@ -1544,7 +1637,7 @@ if (reaches('implement')) {
       branch: workflowBranch,
       implementation,
       note: pendingRevise.length > 0
-        ? 'The implementer stopped on blocking Discovered items, which go to the next revision. Its work is committed on the branch. Resume to revise the plan.'
+        ? 'The implementer stopped on blocking Discovered items, which go to the next revision. Its work is committed on the branch. Resume to revise the plan. A discovery the owner judges not to be a plan defect is instead fixed by hand on the branch, ticked with how it was resolved, and passed to the next run in resolved.'
         : 'The implementer stopped before the checklist was complete, with no blocking discovery: on a precondition, such as a dirty tree, with nothing changed, or part-way, with its work committed on the branch. Its report says which. Clear a failed precondition, then resume to continue the implementation.',
     })
   }
@@ -1616,6 +1709,6 @@ return end(allMet && serious.length === 0 ? STATUS.ACCEPTED : STATUS.ACCEPTANCE_
   ...base,
   acceptance,
   note: allMet && serious.length === 0
-    ? 'Every acceptance criterion is met and the reviewer raised no blocking or major finding.'
-    : 'Gaps remain: a criterion is not met, was not quoted verbatim, or the reviewer raised a blocking or major finding. Fix them by hand, or start a successor run through feature-start with them as its requirements.',
+    ? 'Every acceptance criterion is met and the reviewer raised no blocking or major finding. Review the branch\'s diff, the acceptance document and the checklist\'s Discovered section; merging is the owner\'s decision.'
+    : 'Gaps remain: a criterion is not met, was not quoted verbatim, or the reviewer raised a blocking or major finding. A gap where the code falls short of the plan is fixed by hand on the branch, then reviewed again by resuming with start: "accept". A gap that shows the plan wrong starts a successor run through feature-start once this branch is merged (plans/AUDIT-METHOD.md section 9).',
 })

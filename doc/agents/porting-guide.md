@@ -89,12 +89,12 @@ that lacks any of these keys or leaves a required list empty.
 
 | Key | Write |
 |---|---|
-| `codePaths` | DST's source and test directories; non-empty. The launch, the trial and the implementer require them clean, and a decision's Phase 4 item is a mutation when its code site lies under them |
+| `codePaths` | DST's source and test directories; non-empty. The launch, the trial and the implementer require them clean, and a rule's Phase 4 item is a mutation when its code site lies under them |
 | `conventionDocs` | `.claude/rules/testing.md`, `.claude/rules/comments.md`, and any other house convention document DST has |
 | `methodFiles` | SRC's list, unchanged |
 | `gates` | Each of DST's checks as `name`, `command`, `pass` and `when`, with unique names, plus SRC's `workflow-harness` and `citations-self-test` entries unchanged. A check not at zero today passes on "no issue beyond the count before the change". `when` is `always` or a condition |
-| `modules` | At least one, keyed by name: `paths` (regular expressions over repository paths, such as `^src/payments/`), `guidance` (exactly the step 3 rules whose `paths:` fall under it; harness T3j) and `vocabulary` (one paragraph naming the module's central types and concepts, for the critics) |
-| `lenses` | Exactly `correctness`, `performance`, `design`, `interaction`, `timing` and `consistency`. Copy SRC's `reads`. Each `addendum` says what the lens's hazards are in DST, or is `""`: re-entrancy, teardown and degraded modes for correctness; hot-path anti-patterns and how DST pins performance; the components a change can cross, for interaction; ordering that is assumed but not tested, for timing |
+| `modules` | At least one, keyed by name: `paths` (regular expressions over repository paths, such as `^src/payments/`), `guidance` (exactly the step 3 rules whose `paths:` fall under it; harness T3j), `vocabulary` (one paragraph naming the module's central types and concepts, for the critics) and, optionally, `lensAddenda` (by lens key, the hazards of this module alone) |
+| `lenses` | Exactly `correctness`, `performance`, `design`, `interaction`, `timing` and `consistency`. Copy SRC's `reads`. Each `addendum` says what the lens's hazards are across DST, or is `""`: re-entrancy, teardown, degraded modes and the lifecycle paths DST's framework drives without the change's code running, for correctness; hot-path anti-patterns and how DST pins performance; the components a change can cross, for interaction; ordering that is assumed but not tested, for timing. A hazard of one module goes in that module's `lensAddenda` |
 | `defectClasses` | SRC's four, unchanged; never `other` |
 | `ranking` | DST's decision criteria, most important first. Keep `hot-path-performance`: the script's ranking line names it |
 | `hotPaths` | Where hot-path performance applies in DST, such as `per request`; non-empty |
@@ -150,6 +150,8 @@ In `.gitignore`, add SRC's entries, with their comments:
 
 - `/plans/*`, with `!/plans/AUDIT-METHOD.md` and `!/plans/check_citations.py`;
 - `/.claude/worktrees/` and `/.claude/settings.local.json`.
+
+In `.gitattributes`, add SRC's `.claude/**` entry, with its comment.
 
 `doc/agents/` stays tracked. If DST ignores `doc/`, re-include `doc/agents/`
 the way SRC does.

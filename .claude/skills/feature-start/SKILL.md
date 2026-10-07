@@ -37,15 +37,18 @@ session before launching.
 ls plans/ | grep -i "<slug>"
 ```
 
-If a plan for the slug exists, do not overwrite it: report it and ask whether to
-resume it ("Resuming") or pick another slug.
+If a plan for the slug exists, do not overwrite it. With a run record, report it
+and ask whether to resume it ("Resuming") or pick another slug. Without one, it
+was written outside the workflow: adopt it ("Adopting a plan written outside the
+workflow").
 
-A plan whose run record's phase is `done` is not resumed: propose a successor
-plan under a new slug that cites it. Launch the successor only once the earlier
-run's change is in the branch you are on. `git merge-base --is-ancestor <branch>
-HEAD`, with the run record's `branch`, exits 0 after a merge; after a squash or
-rebase merge, which it does not detect, ask the user to confirm the change is
-merged. Merging is the user's decision.
+A plan whose run record's phase is `done` is not resumed, except to review a fix
+made by hand on its branch again (`start: "accept"`, contracts section 13):
+propose a successor plan under a new slug that cites it. Launch the successor
+only once the earlier run's change is in the branch you are on. `git merge-base
+--is-ancestor <branch> HEAD`, with the run record's `branch`, exits 0 after a
+merge; after a squash or rebase merge, which it does not detect, ask the user to
+confirm the change is merged. Merging is the user's decision.
 
 ## Step 3: ground the request
 
@@ -102,8 +105,8 @@ mechanism:
   writes only the header row, verified by a test that reads the file back" is a
   criterion.
 - `slug` matches `^[a-z0-9]+(-[a-z0-9]+)*$`.
-- `date` is today's date, which you supply: a workflow script cannot call
-  `new Date()`.
+- `date` is today's date, or an adopted plan's own, which you supply: a workflow
+  script cannot call `new Date()`.
 - `request` is verbatim: the acceptance reviewer judges the result against it
   without reading the plan.
 - `profile` is the parsed contents of `doc/agents/method-profile.json`, which
@@ -148,16 +151,19 @@ Launch only on an explicit yes via `AskUserQuestion`. The user can set
    or switches branches in this checkout.
 4. When the result arrives, write its `state` to the run record,
    `plans/<date>-<slug>-run.json`, and append a `## Run` record to the audit
-   file with the status and the state's `phase`. Report the result; never
-   report or predict it before it arrives.
+   file with the status, the state's `phase`, and each of its
+   `resolvedFindings` with its resolution. Report the status and the result's
+   `note`, which says what to do next; never report or predict a result before
+   it arrives.
 
 ## Resuming
 
 Pass the run record's contents as `resume`, with the args of the first launch
 and any requirement the user settled corrected. The run starts at the record's
-`phase` (contracts section 13). `start`, `priorFindings`, `ownerApproval` and
-`killed` change a resumed run as contracts section 13 says; a `priorFindings`
-entry has these fields, all required strings:
+`phase` (contracts section 13). `start`, `priorFindings`, `ownerApproval`,
+`killed` and `resolved` change a resumed run as contracts section 13 says. Pass
+a finding as `resolved` only on the user's word that it is settled and how; a
+`priorFindings` entry has these fields, all required strings:
 
 ```json
 {
@@ -189,6 +195,26 @@ A run killed before its result arrived wrote no new record:
   the killed run wrote it: ask the user whether it is complete, and resume with
   `start: "critique"` if so; otherwise delete it first.
 
+## Adopting a plan written outside the workflow
+
+No workflow lens has read such a plan, and it may lack the format of contracts
+section 3, from which the checklist derives its items and its mutations.
+
+1. Take the slug and the date from the plan's file name, so that every path the
+   workflow derives names that plan.
+2. Launch per step 7, passing the initial run record as `resume`,
+   `start: "revise"`, and one `priorFindings` entry: `id` `adopt-format`,
+   `location` the plan path, `severity` `major`, `title` "Bring the plan to the
+   workflow's format", `why` naming every required section, anchor and status
+   line it lacks, and `suggested_direction` "Restructure the plan into the
+   required sections, keeping every decision, rule, test and citation, list
+   each decision's rules, and move its audit log to the audit file." The
+   standard lenses and the consistency lens then read the plan before its fresh
+   angle and its trial.
+3. A later `start` skips those lenses and needs `ownerApproval`. Before asking
+   for it, tell the user that no workflow lens has read the plan, and name the
+   required sections it lacks.
+
 ## Restoring the checkout
 
 An agent that dies, is skipped or is killed after switching branches leaves the
@@ -202,23 +228,3 @@ checkout on its branch, possibly with uncommitted changes. Run
 - Changes in the code paths on any other branch are not the run's to touch: ask
   the user to commit them elsewhere, stash or discard them.
 
-## Possible outcomes
-
-| `status` | Meaning | Next step |
-|---|---|---|
-| `accepted` | Every acceptance criterion is met and the reviewer raised no blocking or major finding | Review the branch's diff, the acceptance document and the checklist's Discovered section |
-| `acceptance-gaps` | A criterion is unmet, partial or unquoted, or the reviewer raised a blocking or major finding | Read `acceptance`; fix by hand, or start a successor run with the gaps as its requirements once this branch is merged (step 2) |
-| `acceptance-failed` | The acceptance reviewer returned nothing | Restore the checkout, then resume: the review runs again |
-| `implementation-stopped` | The implementer stopped before the checklist was complete: on a blocking discovery, part-way (its `report` says where), or on a failed precondition such as a dirty tree, which changes nothing. Any work it did is committed on the branch | Clear a failed precondition, then resume: a blocking discovery is revised into the plan, otherwise the implementation continues |
-| `implementation-failed` | The implementer returned nothing | Restore the checkout, then resume: the implementation continues on the same branch from the first unticked item |
-| `needs-scope` | A requirement is missing, ambiguous or in conflict | Settle it with the user, correct `requirements`, then resume |
-| `blocked-after-revisions` | Failing findings survived `maxRounds` | Read `diagnosis`; usually the requirements were underspecified. Resuming revises with a fresh budget |
-| `trial-failed` | The trial did not pass, found a plan defect, or returned nothing | Restore the checkout if it returned nothing. A dirty code path means the checkout changed during the run: have the user move that work, then resume. A plan defect is revised into the plan; otherwise the trial runs again. A trial branch it made is kept |
-| `approval-failed` | The approval step did not stamp the plan | Check the plan's status line, then resume |
-| `checklist-blocked` | The checklist could not derive every item from the plan, or the plan failed a checklist precondition | Resume: the gaps are revised into the plan |
-| `critique-aborted-insufficient-coverage` | A lens could not review on two attempts | Resume: the round runs again with all its lenses, and its first attempt's findings are discarded. This is an infrastructure failure or a missing input, not a plan defect |
-| `fresh-angles-exhausted` | Both fresh angles have run on this plan, so none is left to come back clean on a first pass | Resume with `ownerApproval` stating the basis. Findings from an angle opened by hand go to a revision first, as `priorFindings` with `start: "revise"` |
-| `checklist-failed` | The checklist agent returned nothing, or wrote its checklist at another path | Resume: the checklist runs again |
-| `checklist-malformed` | The checklist has no phase items, or too few in Phase 4 | Resume: the checklist runs again; the plan is unchanged |
-| `draft-failed` | The architect returned nothing, so the plan may be missing or partial | Delete a partial plan, then resume. If it repeats, look at the requirements |
-| `draft-aborted` | A plan already exists at that path, so the architect refused to overwrite it | Pick another slug or date, or resume at the revision with `priorFindings` |

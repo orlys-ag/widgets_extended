@@ -107,7 +107,7 @@ const FIXTURE = {
     { name: 'test', command: 'make test', pass: '0 failed', when: 'always' },
     { name: 'docs', command: 'make docs', pass: '0 warnings', when: 'docs/ exists' },
   ],
-  modules: { core: { paths: ['^src/core/'], guidance: ['docs/core.md', 'docs/core-io.md'], vocabulary: 'Core vocabulary.' } },
+  modules: { core: { paths: ['^src/core/'], guidance: ['docs/core.md', 'docs/core-io.md'], vocabulary: 'Core vocabulary.', lensAddenda: { correctness: 'Core correctness hazard.' } } },
   lenses: {
     correctness: { reads: ['moduleGuidance'], addendum: 'Correctness addendum.' },
     performance: { reads: ['moduleGuidance', 'docs/testing.md'], addendum: '' },
@@ -170,41 +170,31 @@ function finding(over = {}) {
     ...over,
   }
 }
-function critic(key, findings = []) {
-  return { lens: key, plan_path: PLAN, plan_status: 'draft', summary: 'Summary.', findings }
-}
-function lensOf(label) {
-  return label.split(':')[1]
+// A critic's report. The lens names the reporting lens at the call site only:
+// the script keys each report by the lens it dispatched.
+function critic(lens, findings = []) {
+  return { findings }
 }
 
-// Defaults follow the schema the script passed, so a run against an earlier
-// script, whose trial result has two gate booleans and whose implementer has
-// no schema, still completes.
-function defaultFor(label, opts, prompt, nthRevision) {
+function defaultFor(label, nthRevision) {
   if (label === 'plan:draft') {
     return 'Drafted.'
   }
   if (label.startsWith('plan:revise')) {
-    return opts.schema ? { changed_decisions: [], snapshot: `${PLAN}.r${nthRevision}` } : 'Revised.'
+    return { changed_decisions: [], snapshot: `${PLAN}.r${nthRevision}` }
   }
   if (label.startsWith('critic:') || label.startsWith('fresh:')) {
-    return critic(lensOf(label))
+    return critic()
   }
   if (label === 'trial') {
-    const required = opts.schema?.required ?? []
-    const result = {
+    return {
       section: 'S', branch: `${SLUG}-trial`, repro_failed_before: true, repro_passes_after: true,
+      gates: FIXTURE.gates.map(g => ({ name: g.name, applies: true, passed: true })), mutations: [],
       commit: 'def5678', notes: '', blocking_findings: [],
     }
-    if (required.includes('gates')) {
-      result.gates = FIXTURE.gates.map(g => ({ name: g.name, applies: true, passed: true }))
-    } else {
-      Object.assign(result, { analyzer_clean: true, suite_green: true })
-    }
-    return result
   }
   if (label === 'plan:approve') {
-    return opts.schema ? { stamped: true } : 'Stamped.'
+    return { stamped: true }
   }
   if (label === 'checklist') {
     return {
@@ -215,14 +205,10 @@ function defaultFor(label, opts, prompt, nthRevision) {
     }
   }
   if (label === 'implement') {
-    if (!opts.schema) {
-      return 'Done.'
+    return {
+      changed_files: ['src/core/widget.ts', 'tests/core/widget_test.ts', CHECKLIST], report: 'Done.',
+      branch: `${SLUG}-trial`, commit: 'fed9876', complete: true, blocking_discoveries: [],
     }
-    const result = { changed_files: ['src/core/widget.ts', 'tests/core/widget_test.ts', CHECKLIST], report: 'Done.' }
-    if ((opts.schema.required ?? []).includes('complete')) {
-      Object.assign(result, { branch: `${SLUG}-trial`, commit: 'fed9876', complete: true, blocking_discoveries: [] })
-    }
-    return result
   }
   if (label === 'accept') {
     return { criteria: CRITERIA.map(c => ({ criterion: c, status: 'met', evidence: 'tests/core/widget_test.ts passed' })), findings: [] }
@@ -247,7 +233,7 @@ async function run({ args, respond } = {}) {
     calls.push({ label, prompt, opts })
     let value = respond ? respond(label, n, prompt) : undefined
     if (value === undefined) {
-      value = defaultFor(label, opts, prompt, revisions)
+      value = defaultFor(label, revisions)
     }
     if (value === null) {
       return null
@@ -606,6 +592,23 @@ const T1 = [
         ? { criteria: [], findings: [{ id: 'a1', location: 'x', severity: 'minor', title: 't', why: 'w', suggested_direction: 's', kind: 'rank' }] } : undefined,
     })
     expect(kinded.schemaErrors.some(e => e.label === 'accept'), 'a reviewer finding carrying kind passed validation')
+
+    const stoppedState = (await run({
+      respond: label => label === 'implement' ? { ...defaultFor('implement'), complete: false, blocking_discoveries: [BASE_ITEM] } : undefined,
+    })).result?.state
+    const resolution = 'Pinned on the branch by a new test.'
+    const settled = await run({ args: baseArgs({ resume: stoppedState, start: 'accept', resolved: [{ id: 'b1', resolution }] }) })
+    expect(!settled.error && settled.labels.join(' ') === 'accept', `a stop the owner resolved by hand: ${settled.error?.message ?? settled.labels.join(' ')}`)
+    expect((settled.result?.resolvedFindings ?? []).map(f => `${f.id}: ${f.resolution}`).join() === `b1: ${resolution}`, `resolvedFindings ${JSON.stringify(settled.result?.resolvedFindings)}`)
+    expect(settled.result?.state?.revise?.length === 0, 'a resolved finding is still queued for the revision')
+    const typo = await run({ args: baseArgs({ resume: stoppedState, resolved: [{ id: 'b2', resolution }] }) })
+    expect(typo.error && typo.calls.length === 0, 'a resolved id that names no queued finding did not throw')
+    const orphanResolved = await run({ args: baseArgs({ resolved: [{ id: 'b1', resolution }] }) })
+    expect(orphanResolved.error && orphanResolved.calls.length === 0, 'resolved without a run record did not throw')
+    const again = await run({ args: baseArgs({ resume: r.result?.state, start: 'accept' }) })
+    expect(!again.error && again.labels.join(' ') === 'accept', `a done run's review run again: ${again.error?.message ?? again.labels.join(' ')}`)
+    const reopened = await run({ args: baseArgs({ resume: r.result?.state }) })
+    expect(reopened.error && reopened.calls.length === 0, 'a done run resumed without start accept did not throw')
   }],
 
   ['T1k', 'arguments are validated before the first agent', async ({ expect }) => {
@@ -622,6 +625,7 @@ const T1 = [
     const req = baseArgs().requirements
     await throwsEarly(baseArgs({ requirements: { ...req, decisions: 'd1: use X' } }), 'non-array decisions')
     await throwsEarly(baseArgs({ requirements: { ...req, decisions: ['d1: use X', ''] } }), 'an empty decision')
+    await throwsEarly(baseArgs({ profile: { ...FIXTURE, modules: { core: { ...FIXTURE.modules.core, lensAddenda: { mechanism: 'x' } } } } }), 'a module addendum for a lens that does not exist')
 
     await throwsEarly(baseArgs({ start: 'checklist' }), 'start without resume')
     const state = (await run({ respond: label => label === 'checklist' ? null : undefined })).result?.state
@@ -632,7 +636,7 @@ const T1 = [
     await throwsEarly(baseArgs({ resume: { ...state, clearedFresh: 'correctness' } }), 'a cleared angle that is not a fresh lens')
     await throwsEarly(baseArgs({ resume: { ...state, pendingLenses: [] } }), 'an empty pending lens list')
     const queued = (await run({
-      respond: label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), blocking_findings: [BASE_ITEM] } : undefined,
+      respond: label => label === 'trial' ? { ...defaultFor('trial'), blocking_findings: [BASE_ITEM] } : undefined,
     })).result?.state
     await throwsEarly(baseArgs({ resume: queued, start: 'trial', ownerApproval: 'Owner.' }), 'a start that skips findings queued for the revision')
 
@@ -651,6 +655,9 @@ const T1 = [
       const line = (r.prompt(`critic:${key}:r1`).match(/Also read: (.*)\./) ?? [])[1]
       expect(line === expected.join(', '), `${key} reads "${line}", expected "${expected.join(', ')}"`)
     }
+    const hazard = FIXTURE.modules.core.lensAddenda.correctness
+    expect(r.prompt('critic:correctness:r1').includes(hazard), 'the module addendum is missing from its lens')
+    expect(!r.prompt('critic:performance:r1').includes(hazard), 'a module addendum reached another lens')
   }],
 
   ['T1m', 'finding shapes derive from one base item', async ({ expect }) => {
@@ -661,10 +668,15 @@ const T1 = [
     const base = { id: 'b1', location: 'x', severity: 'blocking', title: 't', why: 'w', suggested_direction: 's' }
     const trial = await run({
       respond: label => label === 'trial'
-        ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), repro_passes_after: false, blocking_findings: [base] } : undefined,
+        ? { ...defaultFor('trial'), repro_passes_after: false, blocking_findings: [base] } : undefined,
     })
     expect(!trial.schemaErrors.some(e => e.label === 'trial'), `a base-field trial finding failed validation: ${JSON.stringify(trial.schemaErrors)}`)
     expect(trial.result?.status === 'trial-failed', `trial status ${trial.result?.status}`)
+
+    const bare = await run({ respond: label => label === 'critic:design:r1' ? { findings: [] } : undefined })
+    expect(!bare.schemaErrors.some(e => e.label === 'critic:design:r1'), `a critic report of findings alone failed validation: ${JSON.stringify(bare.schemaErrors)}`)
+    const extra = await run({ respond: label => label === 'critic:design:r1' ? { findings: [], summary: 'Out of lens.' } : undefined })
+    expect(extra.schemaErrors.some(e => e.label === 'critic:design:r1' && e.errors.some(x => /unexpected property summary/.test(x))), 'a critic report carrying a summary nothing reads passed validation')
   }],
 
   ['T1o', 'a resumed run continues the rounds, the spent fresh angles and the carried findings', async ({ expect }) => {
@@ -674,7 +686,7 @@ const T1 = [
           return critic('correctness', [finding({ id: 'impl-1' })])
         }
         if (label === 'trial') {
-          return { ...defaultFor('trial', { schema: { required: ['gates'] } }), blocking_findings: [BASE_ITEM] }
+          return { ...defaultFor('trial'), blocking_findings: [BASE_ITEM] }
         }
         return undefined
       },
@@ -689,7 +701,7 @@ const T1 = [
 
     const second = await run({
       args: baseArgs({ resume: JSON.parse(JSON.stringify(st)) }),
-      respond: label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), branch: `${SLUG}-trial-2` } : undefined,
+      respond: label => label === 'trial' ? { ...defaultFor('trial'), branch: `${SLUG}-trial-2` } : undefined,
     })
     expect(second.labels[0] === 'plan:revise-r2', `the resumed run opened with ${second.labels[0]}`)
     const revise = second.prompt('plan:revise-r2')
@@ -717,10 +729,25 @@ const T1 = [
     expect(coverage.phase === 'critique' && coverage.roundsRun === 0, `a coverage failure leaves phase ${coverage.phase}, round ${coverage.roundsRun}`)
     const again = await run({ args: baseArgs({ resume: coverage }) })
     expect(again.labels.slice(0, 3).join(' ') === 'critic:correctness:r1 critic:performance:r1 critic:design:r1', `the re-dispatched round is ${again.labels.slice(0, 3).join(' ')}`)
+
+    const basis = 'Accepted under the yield rule.'
+    const ownerStopped = (await run({
+      args: baseArgs({ resume: { ...st, phase: 'trial', clearedFresh: null }, ownerApproval: basis }),
+      respond: label => label === 'implement' ? null : undefined,
+    })).result?.state ?? {}
+    expect(ownerStopped.ownerApproval === basis, `the run record keeps the owner's approval as ${JSON.stringify(ownerStopped.ownerApproval)}`)
+    const ownerResumed = await run({ args: baseArgs({ resume: ownerStopped }) })
+    expect(!ownerResumed.error && ownerResumed.labels.join(' ') === 'implement accept', `an owner-approved run resumed without restating it: ${ownerResumed.error?.message ?? ownerResumed.labels.join(' ')}`)
+    const ownerTrialed = (await run({
+      args: baseArgs({ resume: { ...st, phase: 'trial', clearedFresh: null }, ownerApproval: basis }),
+      respond: label => label === 'trial' ? { ...defaultFor('trial'), blocking_findings: [BASE_ITEM] } : undefined,
+    })).result?.state
+    const ownerRevised = await run({ args: baseArgs({ resume: ownerTrialed }) })
+    expect(ownerRevised.labels[0]?.startsWith('plan:revise') && ownerRevised.result?.state?.ownerApproval === null, `after a revision the owner's approval is ${JSON.stringify(ownerRevised.result?.state?.ownerApproval)}`)
   }],
 
   ['T1q', 'a stopped implementation is committed and not reviewed', async ({ expect }) => {
-    const implementWith = over => label => label === 'implement' ? { ...defaultFor('implement', { schema: { required: ['complete'] } }), ...over } : undefined
+    const implementWith = over => label => label === 'implement' ? { ...defaultFor('implement'), ...over } : undefined
     const stopped = await run({ respond: implementWith({ complete: false, blocking_discoveries: [BASE_ITEM] }) })
     expect(stopped.result?.status === 'implementation-stopped', `status ${stopped.result?.status}`)
     expect(!stopped.labels.includes('accept'), 'the reviewer ran on a stopped implementation')
@@ -728,6 +755,9 @@ const T1 = [
     const unfinished = await run({ respond: implementWith({ complete: false }) })
     expect(unfinished.result?.state?.phase === 'implement', `an unfinished implementation leaves phase ${unfinished.result?.state?.phase}`)
     expect(/Commit each item's files on that branch when its acceptance signal passes, before you tick it, and commit any remaining change before you stop for any reason/.test(stopped.prompt('implement')), 'the implementer is not told to commit each item and before every stop')
+    const retired = await run({ respond: implementWith({ complete: false, blocking_discoveries: [BASE_ITEM], changed_files: ['src/core/retired_only.ts'] }) })
+    const next = await run({ args: baseArgs({ resume: retired.result?.state }) })
+    expect(next.labels.includes('accept') && !next.prompt('accept').includes('retired_only.ts'), 'a file only a retired branch changed reached the reviewer')
   }],
 
   ['T1r', 'the approval and the acceptance gates read what the agents report', async ({ expect }) => {
@@ -742,7 +772,7 @@ const T1 = [
     expect(omitted.result?.status === 'acceptance-gaps', `a criterion the reviewer left out: status ${omitted.result?.status}`)
     const absolute = await run({
       respond: label => label === 'implement'
-        ? { ...defaultFor('implement', { schema: { required: ['complete'] } }), changed_files: ['src/core/widget.ts', 'C:\\repo\\plans\\x-checklist.md'] } : undefined,
+        ? { ...defaultFor('implement'), changed_files: ['src/core/widget.ts', 'C:\\repo\\plans\\x-checklist.md'] } : undefined,
     })
     expect(!absolute.prompt('accept').includes('x-checklist.md'), 'an absolute plans path reached the reviewer')
     expect(absolute.prompt('accept').includes(`git diff --name-only abc1234 ${SLUG}-trial`), 'the reviewer is not told to diff the branch')
@@ -760,13 +790,16 @@ const T1 = [
     }
     expect(!r.prompt('critic:correctness:r1').includes(rule), 'the plan rules reached a lens that does not check them')
     expect(r.prompt('implement').includes('House conventions, read before writing code or tests: docs/testing.md.'), 'the implementer is not given the convention documents')
+    for (const label of ['plan:draft', 'plan:revise-r2']) {
+      expect(r.prompt(label).includes(FIXTURE.conventionDocs[0]), `${label} does not name the convention documents`)
+    }
     const unknown = await run({ args: { ...baseArgs(), maxround: 3 } })
     expect(unknown.error && unknown.calls.length === 0, 'an unknown argument did not throw before the first agent')
   }],
 
   ['T1t', 'a revision clears the fresh angle, so a later approval needs a new one or the owner', async ({ expect }) => {
     const first = await run({
-      respond: label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), blocking_findings: [BASE_ITEM] } : undefined,
+      respond: label => label === 'trial' ? { ...defaultFor('trial'), blocking_findings: [BASE_ITEM] } : undefined,
     })
     expect(first.result?.state?.clearedFresh === 'interaction', `before the revision: ${first.result?.state?.clearedFresh}`)
     const second = await run({
@@ -781,7 +814,7 @@ const T1 = [
 
   ['T1u', 'a failed trial is retired; a run without a trial branches from the base commit', async ({ expect }) => {
     const failed = await run({
-      respond: label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), repro_failed_before: false } : undefined,
+      respond: label => label === 'trial' ? { ...defaultFor('trial'), repro_failed_before: false } : undefined,
     })
     const st = failed.result?.state ?? {}
     expect(failed.result?.status === 'trial-failed' && st.phase === 'trial', `status ${failed.result?.status}, next ${st.phase}`)
@@ -805,7 +838,7 @@ const T1 = [
   ['T1x', 'every field of the run state survives a resume', async ({ expect }) => {
     const full = {
       version: 1, phase: 'approve', baseRef: 'abc1234', roundsRun: 3,
-      freshSpent: ['interaction', 'timing'], clearedFresh: 'timing', pendingLenses: null,
+      freshSpent: ['interaction', 'timing'], clearedFresh: 'timing', ownerApproval: 'Owner basis.', pendingLenses: null,
       rankFailRounds: { d1: [1, 2] }, failRounds: { d1: [1, 2], none: [2] }, reranked: ['d1'],
       classRounds: { 'unverified-claim': [1, 3] }, mechanizeIssued: ['unverified-claim'], pendingMechanize: ['stale-summary'],
       pendingRerank: ['d2'], lastRevision: { round: 3, changed_decisions: ['d1'], snapshot: `${PLAN}.r2` },
@@ -859,13 +892,13 @@ const T1 = [
 
     const floor = FIXTURE.gates.filter(g => g.when === 'always').length
     const thin = await run({
-      respond: label => label === 'checklist' ? { ...defaultFor('checklist', {}), phase_counts: { phase1: 1, phase2: 1, phase3: 0, phase4: floor - 1 } } : undefined,
+      respond: label => label === 'checklist' ? { ...defaultFor('checklist'), phase_counts: { phase1: 1, phase2: 1, phase3: 0, phase4: floor - 1 } } : undefined,
     })
     expect(thin.result?.status === 'checklist-malformed', `a Phase 4 below the floor: status ${thin.result?.status}`)
 
     const blocked = await run({
       respond: label => label === 'checklist'
-        ? { ...defaultFor('checklist', {}), phase_counts: { phase1: 0, phase2: 0, phase3: 0, phase4: 0 }, blocking_discoveries: [{ title: 'Gap', plan_section: 'testing-plan', why: 'No signal.' }] } : undefined,
+        ? { ...defaultFor('checklist'), phase_counts: { phase1: 0, phase2: 0, phase3: 0, phase4: 0 }, blocking_discoveries: [{ title: 'Gap', plan_section: 'testing-plan', why: 'No signal.' }] } : undefined,
     })
     expect(blocked.result?.status === 'checklist-blocked' && blocked.result?.state?.phase === 'revise' && (blocked.result?.state?.revise ?? []).length === 1,
       `a blocking discovery with no items: status ${blocked.result?.status}, next ${blocked.result?.state?.phase}`)
@@ -880,18 +913,27 @@ const T1 = [
     expect(FIXTURE.gates.every(g => trialPrompt.includes(`- ${g.name}: \`${g.command}\``)), 'a gate is missing from the trial prompt')
     expect(trialPrompt.includes(`git status --porcelain -- ${FIXTURE.codePaths.join(' ')}`), 'the trial prompt does not check the profile code paths')
     const checklistPrompt = r.prompt('checklist')
-    expect(/Phase 4, in this order: one item per decision, a mutation when its code site/.test(checklistPrompt), 'the checklist prompt lacks the Phase 4 order')
-    expect(/Trial Log" record [^\n]*with these fields of your result: section, branch, repro_failed_before, repro_passes_after, gates, commit, blocking_findings\./.test(trialPrompt), 'the trial is not told to log every field its pass decision reads')
+    expect(/Phase 4, in this order: one item per rule the Decisions subsections list, a mutation when the rule's code site/.test(checklistPrompt), 'the checklist prompt lacks the Phase 4 order')
+    expect(/Trial Log" record [^\n]*with these fields of your result: section, branch, repro_failed_before, repro_passes_after, gates, mutations, commit, blocking_findings\./.test(trialPrompt), 'the trial is not told to log every field its pass decision reads')
+    expect(/break the rule there/.test(trialPrompt), 'the trial is not told to mutate the rules it lands')
     expect(FIXTURE.gates.every(g => checklistPrompt.includes(`- ${g.name}:`)), 'a gate is missing from the checklist prompt')
 
     const gates = FIXTURE.gates.map(g => ({ name: g.name, applies: true, passed: true }))
-    const trialWith = gateList => label => label === 'trial' ? { ...defaultFor('trial', { schema: { required: ['gates'] } }), gates: gateList } : undefined
+    const trialWith = gateList => label => label === 'trial' ? { ...defaultFor('trial'), gates: gateList } : undefined
     const missingGate = await run({ respond: trialWith(gates.slice(1)) })
     expect(missingGate.result?.status === 'trial-failed', `a missing gate: status ${missingGate.result?.status}`)
     const failedGate = await run({ respond: trialWith(gates.map((g, i) => i === 0 ? { ...g, passed: false } : g)) })
     expect(failedGate.result?.status === 'trial-failed', `an applying gate failed: status ${failedGate.result?.status}`)
     const skippedGate = await run({ respond: trialWith(gates.map((g, i) => i === 0 ? { ...g, applies: false, passed: false } : g)) })
     expect(skippedGate.result?.status === 'accepted', `a gate that does not apply blocked the trial: status ${skippedGate.result?.status}`)
+
+    const mutatedWith = mutations => label => label === 'trial' ? { ...defaultFor('trial'), mutations } : undefined
+    const survived = await run({ respond: mutatedWith([{ decision: 'd2', rule: 'rule 1', test: 'T4', failed: false }, { decision: 'd1', rule: 'rule 1', test: 'T1', failed: true }]) })
+    expect(survived.result?.status === 'trial-failed' && survived.result?.state?.phase === 'revise', `a rule whose test passed with it broken: status ${survived.result?.status}, next ${survived.result?.state?.phase}`)
+    const queued = survived.result?.state?.revise ?? []
+    expect(queued.length === 1 && queued[0].location === 'd2' && queued[0].severity === 'blocking' && queued[0].title.includes('T4'), `the surviving mutation reached the revision as ${JSON.stringify(queued)}`)
+    const caught = await run({ respond: mutatedWith([{ decision: 'd1', rule: 'rule 1', test: 'T1', failed: true }]) })
+    expect(caught.result?.status === 'accepted', `a mutation its test caught: status ${caught.result?.status}`)
   }],
 ]
 
@@ -974,6 +1016,7 @@ const CORE_HEADINGS = [
   '### 2.5 Landing order',
   '### 2.6 Write the design, not its history',
   '### 2.7 Decisions are ranking tables',
+  '### 2.8 Guidance documents',
   '## 3. Citations and claims',
   '## 4. Rounds, lenses and findings',
   '## 5. Revisions and loop control',
@@ -1071,7 +1114,7 @@ function profileTerms(profile) {
     .filter(g => !methodPaths.some(p => g.command.includes(p)))
     .map(g => g.command.replace(/^cd \S+ && /, '').split(/\s+/)[0])
   const prose = [
-    ...Object.values(profile.modules).map(m => m.vocabulary),
+    ...Object.values(profile.modules).flatMap(m => [m.vocabulary, ...Object.values(m.lensAddenda ?? {})]),
     ...Object.values(profile.lenses).map(l => l.addendum),
     ...profile.planRules,
   ].join(' ')
@@ -1092,6 +1135,22 @@ function profileTerms(profile) {
 // Each row of the core's lens table: the lens key and its stage column.
 function lensStages(core) {
   return [...core.matchAll(/^\| `([a-z]+)` \| ([a-z ]+) \|/gm)].map(m => [m[1], m[2].trim()])
+}
+
+// The numbers of the core's angle list, section 1.
+function angleNumbers(core) {
+  const start = core.indexOf('## 1. Angles')
+  const section = start < 0 ? '' : core.slice(start, core.indexOf('\n---', start))
+  return [...section.matchAll(/^(\d+)\. /gm)].map(m => Number(m[1]))
+}
+
+// The angles each row of the core's lens table names at the start of its
+// Sweeps cell, keyed by lens.
+function tableAngles(core) {
+  return Object.fromEntries([...core.matchAll(/^\| `([a-z]+)` \| [a-z ]+ \| (.*) \|$/gm)].map(m => {
+    const named = m[2].match(/^Angles? (\d+(?:(?:, | and )\d+)*)/)
+    return [m[1], named ? named[1].match(/\d+/g).map(Number) : []]
+  }))
 }
 
 function lensTable(core) {
@@ -1154,16 +1213,6 @@ const T3 = [
       const identifier = profileTerms(profile).find(t => t.source === 'identifier')
       fs.appendFileSync(path.join(root, STATUS_SKILL), `\nSee ${profile.codePaths[0]}/ and ${identifier?.term ?? ''} for an example.\n`)
     }],
-
-  ['T3c', 'the feature-start outcomes table lists exactly the script statuses', [START],
-    (root, ctx) => {
-      const text = read(root, START)
-      const table = text.slice(text.indexOf('## Possible outcomes'))
-      const listed = [...table.matchAll(/^\| `([a-z-]+)` \|/gm)].map(m => m[1]).filter(s => s !== 'status')
-      return sameSet(listed, ctx.describe.statuses) && listed.length === ctx.describe.statuses.length
-        ? [] : [`table ${listed.join(',')} vs script ${ctx.describe.statuses.join(',')}`]
-    },
-    root => fs.writeFileSync(path.join(root, START), read(root, START).replace(/^\| `accepted` \|.*\n/m, ''))],
 
   ['T3d', 'the feature-start args template names exactly what the script reads', [START],
     (root, ctx) => {
@@ -1456,6 +1505,36 @@ const T3 = [
       return Number(m[1]) === ctx.describe.defaultRounds ? [] : [`the document says ${m[1]}, the script defaults to ${ctx.describe.defaultRounds}`]
     },
     root => fs.writeFileSync(path.join(root, CONTRACTS), read(root, CONTRACTS).replace(/default budget of (\d+) rounds/, (_, n) => `default budget of ${Number(n) + 1} rounds`))],
+
+  ['T3u', 'the standard lenses sweep every angle on the core\'s list', [CORE],
+    (root, ctx) => {
+      const listed = angleNumbers(read(root, CORE))
+      const swept = ctx.describe.standardLenses.flatMap(k => ctx.describe.lensAngles[k])
+      const unswept = listed.filter(n => !swept.includes(n))
+      const unknown = swept.filter(n => !listed.includes(n))
+      return listed.length === 0 ? ['no angle list in the core']
+        : [...unswept.map(n => `angle ${n} is swept by no standard lens`), ...unknown.map(n => `a lens sweeps angle ${n}, which the core does not list`)]
+    },
+    root => fs.writeFileSync(path.join(root, CORE), read(root, CORE).replace('10. Performance bounds', '11. An added angle.\n10. Performance bounds'))],
+
+  ['T3v', 'the core\'s lens table names the angles each lens sweeps in the script', [CORE],
+    (root, ctx) => {
+      const table = tableAngles(read(root, CORE))
+      return ctx.describe.lensKeys
+        .filter(k => (table[k] ?? []).join() !== ctx.describe.lensAngles[k].join())
+        .map(k => `${k}: the core names angles ${(table[k] ?? []).join(',')}, the script ${ctx.describe.lensAngles[k].join(',')}`)
+    },
+    root => fs.writeFileSync(path.join(root, CORE), read(root, CORE).replace(/^(\| `design` \| standard \| Angles? )\d+, /m, '$1'))],
+
+  // The Workflow tool refuses a script holding a control character, a carriage
+  // return included, and `read` strips carriage returns, so this reads bytes.
+  ['T3t', 'the workflow script holds no control character but the newline', [SCRIPT_REL],
+    (root) => {
+      const bytes = fs.readFileSync(path.join(root, SCRIPT_REL))
+      const at = bytes.findIndex(b => (b < 0x20 && b !== 0x0a) || b === 0x7f)
+      return at < 0 ? [] : [`byte 0x${bytes[at].toString(16)} at offset ${at}`]
+    },
+    root => fs.writeFileSync(path.join(root, SCRIPT_REL), fs.readFileSync(path.join(root, SCRIPT_REL), 'utf8').replace(/\n/g, '\r\n'))],
 ]
 
 function copyInto(tmp, rel) {

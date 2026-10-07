@@ -1,0 +1,3 @@
+# Claude Code parses these files, and its Workflow tool refuses a script that
+# holds a carriage return, so every checkout keeps them LF.
+.claude/** text eol=lf

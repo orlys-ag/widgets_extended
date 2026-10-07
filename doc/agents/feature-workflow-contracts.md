@@ -33,9 +33,9 @@ checker writes the CITATIONS marker on the line after it.
 | `ready-to-implement` | Approved: a standard round came back clean and a fresh angle then came back clean on its first pass, or the owner approved this version (`ownerApproval`, section 13). |
 
 Only `plan-architect` changes it: the draft writes `draft`, the approval stamp
-writes `ready-to-implement`, and a revision of an approved plan sets it back to
-`draft`. A plan whose run is done is not reopened (`plans/AUDIT-METHOD.md`
-section 5).
+writes `ready-to-implement`, a revision of an approved plan sets it back to
+`draft`, and a revision of a plan that has no status line adds it as `draft`.
+A plan whose run is done is not reopened (`plans/AUDIT-METHOD.md` section 5).
 
 ## 3. Plan body and audit file
 
@@ -85,8 +85,9 @@ Audit file records:
 | `Trial Log` | `plan-implementer` in trial mode | The fields section 9 lists |
 | `Run` | `feature-start` | The first launch's base commit and branch, then each result's status and the phase the next run starts at |
 
-A plan written before the audit file keeps these records in the plan under
-`## Audit log`, where the citation checker's live text ends.
+A plan written outside the workflow may keep these records in the plan under
+`## Audit log`, where the citation checker's live text ends, until the revision
+that adopts it moves them to the audit file.
 
 ## 4. Checklist status
 
@@ -98,7 +99,8 @@ The checklist's first two non-empty lines are:
 ```
 
 The status is `pending` until every Phase 1 to 4 item is ticked and no
-Discovered item has `Blocking: yes`; then `plan-implementer` sets `complete`.
+unticked Discovered item has `Blocking: yes`; then `plan-implementer` sets
+`complete`.
 CHECKLIST-FOR pairs the checklist with its plan: when it does not name the plan
 path, the pair is malformed and the implementer stops without changing
 anything. A regenerated checklist first renames the existing one to the
@@ -128,8 +130,8 @@ Plan: [<plan file>](<plan file>)
 
 ## Phase 4 - Verification
 <a id="phase-4-verification"></a>
-- [ ] **Mutation: dN's rule** - [S dN](<plan file>#dN)
-  - Files: `<the decision's code site>`
+- [ ] **Mutation: dN, <the rule>** - [S dN](<plan file>#dN)
+  - Files: `<the rule's code site>`
   - Acceptance: break the rule at its site; `<the named test>` fails; restore;
     the file's `sha256sum` before and after match
 - [ ] **Gate: <gate name>** - [S Testing Plan](<plan file>#testing-plan)
@@ -145,9 +147,10 @@ Every Phase 1 to 4 item has a bold title, a plan link
 `- Acceptance:` line with a checkable signal. An item that cannot have all four
 goes under `## Discovered` with `Blocking: yes`.
 
-Phase 4 holds, in order, one item per decision (`plans/AUDIT-METHOD.md` section
-9: a mutation when its code site lies under the profile's `codePaths`, otherwise
-the check that pins it), then one `Gate:` item per profile gate that applies.
+Phase 4 holds, in order, one item per rule the plan's decisions list
+(`plans/AUDIT-METHOD.md` section 9: a mutation when the rule's code site lies
+under the profile's `codePaths`, otherwise the check that pins it), then one
+`Gate:` item per profile gate that applies.
 The workflow rejects a Phase 4 with fewer items than the gates whose `when` is
 `always`.
 
@@ -167,12 +170,13 @@ and the reason.
 
 `Plan section:` is parsed as the finding's location: the anchor goes on that
 line only, or `unspecified`. `Blocking: yes` means implementation cannot
-proceed; `Blocking: no` is nice-to-fix.
+proceed; `Blocking: no` is nice-to-fix. An item is ticked once it is resolved,
+with a `- Resolved:` line saying how, and a ticked item blocks nothing.
 
 ## 7. Counting
 
 Progress counts the `- [ ]` and `- [x]` items under `## Phase 1` to `## Phase 4`
-only. The blocker count is the Discovered items with `Blocking: yes`.
+only. The blocker count is the unticked Discovered items with `Blocking: yes`.
 
 ## 8. The checkout
 
@@ -204,14 +208,17 @@ after the fresh angle clears and before the approval stamp.
 - It cuts `<slug>-trial` from the base commit, or `-2`, `-3` when the name is
   taken (`git switch -c` refuses an existing branch), and reports the name it
   used; every later phase reads that name.
+- It mutates each rule it lands, as a `Mutation:` item does (section 5), and
+  reports each with whether its named test failed. A named test that passed
+  becomes a blocking finding.
 - It commits on that branch whether or not it passes, staging by path.
 - It checks the plan's citations on the branch without rebasing: a CHANGED
   citation on a line it edited is evidence about the plan, reported in its
   notes.
 - It appends a `## Trial Log` record to the audit file with these fields of its
   result: `section`, `branch`, `commit`, `repro_failed_before`,
-  `repro_passes_after`, `gates` and `blocking_findings`. It reports every
-  profile gate by name; an unreported gate is one nobody ran.
+  `repro_passes_after`, `gates`, `mutations` and `blocking_findings`. It reports
+  every profile gate by name; an unreported gate is one nobody ran.
 - A plan defect is a blocking finding, and goes to a revision. A failed trial's
   branch is retired: no later phase builds on it or reads it as evidence, and
   the implementer is told its name to reuse what still matches the plan.
@@ -254,8 +261,7 @@ session's model.
 
 Every agent that decides or reviews runs the frontier model. The checklist agent
 decides nothing, and the script and the implementer check its output, so it
-runs a smaller one. Whether these model IDs resolve in frontmatter is unverified
-until a run uses them; each subagent transcript records its model.
+runs a smaller one.
 
 ## 12. Agent memory
 
@@ -265,8 +271,9 @@ needs comes from the maintained documents and the code.
 
 ## 13. Run record and resume
 
-Every result carries `state`: the phase the next run starts at, the base
-commit, the round count, the fresh angles spent, the loop history that
+Every result carries a `note`, which says what to do next, and `state`: the
+phase the next run starts at, the base commit, the round count, the fresh
+angles spent, the owner's approval, the loop history that
 `plans/AUDIT-METHOD.md` section 5 reads, the findings no architect step has
 received, the findings queued for the next revision, the carried implementation
 findings, and the workflow branch. The script is its only author, except for
@@ -299,15 +306,23 @@ the record as `args.resume` and starts at its `phase`:
 | `acceptance-gaps` | `done` |
 
 A revision that opens a resumed run is followed by a round of the standard
-lenses and the consistency lens. Four args change a resumed run:
+lenses and the consistency lens. These args change a resumed run:
 
-- `start` overrides the phase.
+- `start` overrides the phase. On a record whose phase is `done`, only
+  `start: "accept"` runs, and it runs the acceptance review again after a fix
+  by hand on the run's branch.
 - `priorFindings` adds findings from outside the workflow to a run that starts
   at `revise`.
 - `ownerApproval` is required to start past the critique when no fresh angle
   cleared this version of the plan. It states the owner's basis under
   `plans/AUDIT-METHOD.md` section 6: an angle opened by hand that came back
-  clean on its first pass, or the yield rule.
+  clean on its first pass, or the yield rule. The record keeps it until a
+  revision changes the plan.
+- `resolved` lists queued findings the owner settled without a revision, each
+  as `{id, resolution}`. They leave the queue, so the run may start past
+  `revise`, and the result returns them as `resolvedFindings`. A finding that
+  shows the plan wrong is not settled this way (`plans/AUDIT-METHOD.md`
+  section 9).
 - `killed` marks the record as older than a run that was killed before it
   returned. When the resumed run starts at or before the critique, the fresh
   angle the killed run could have opened counts as spent.
