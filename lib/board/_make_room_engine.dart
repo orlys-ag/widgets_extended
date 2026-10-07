@@ -250,9 +250,11 @@ class MakeRoomEngine {
 
   /// The CAPTURED clock the offsets, extents and slots run on, resolved
   /// beside [_curve] at the two declaring sites from the caller's
-  /// argument or the live spec and adopted through [_adoptClock]. The
-  /// live spec's ZERO still dominates at the tick and the snap, as the
-  /// kill switch does at the install.
+  /// argument or the live spec and adopted through [_adoptClock]. Its two
+  /// timing readers, the tick and the snap's hand-off, resolve it through
+  /// [BoardAnimationTiming.durationFor]: an off live family still
+  /// dominates it, as the kill switch does at the install, and a captured
+  /// clock that is not positive is off as well.
   Duration _duration = Duration.zero;
 
   /// Makes [curve] and [duration] the clock every entry runs on.
@@ -325,11 +327,7 @@ class MakeRoomEngine {
     if (entry == null) {
       return Offset.zero;
     }
-    if (entry.snapped) {
-      return entry.target;
-    }
-    final eased = _curve.transform(entry.t.clamp(0.0, 1.0));
-    return entry.from + (entry.target - entry.from) * eased;
+    return _extentValueOf(entry);
   }
 
   /// Any offset or slot unsnapped with clock below 1.
@@ -379,17 +377,12 @@ class MakeRoomEngine {
   MakeRoomHandOff? _handOff;
 
   /// Folds one discarded entry's clock into the running minimum [minT]:
-  /// an entry that was unsnapped, below clock 1 and actually moving had
+  /// an entry that was unsnapped, below clock 1 and [moving] (its `from`
+  /// differs from its target, compared in the entry's own type) had
   /// motion left, and the EARLIEST such clock is the one the hand-off
   /// continues from. Anything else folds to [minT] unchanged.
-  double? _foldClock(
-    double? minT,
-    bool snapped,
-    double t,
-    double from,
-    double target,
-  ) {
-    if (snapped || t >= 1.0 || from == target) {
+  double? _foldClock(double? minT, bool snapped, double t, bool moving) {
+    if (snapped || t >= 1.0 || !moving) {
       return minT;
     }
     return minT == null || t < minT ? t : minT;
@@ -405,9 +398,12 @@ class MakeRoomEngine {
       _handOff = null;
       return;
     }
-    final duration = _styleOf().effectiveMakeRoom.duration == Duration.zero
-        ? Duration.zero
-        : _duration;
+    // The captured clock through the resolver: an off family, or a
+    // captured clock that is not positive, publishes no time at all.
+    final duration = _styleOf().durationFor(
+      BoardAnimationFamily.makeRoom,
+      explicit: _duration,
+    );
     _handOff = (
       remaining: duration * (1.0 - minT),
       curve: _CurveTail(_curve, minT),
@@ -452,6 +448,15 @@ class MakeRoomEngine {
             _curve.transform(entry.t.clamp(0.0, 1.0));
   }
 
+  /// A held extent's current value, in content space per axis.
+  Offset _extentValueOf(_HeldExtent entry) {
+    if (entry.snapped) {
+      return entry.target;
+    }
+    final eased = _curve.transform(entry.t.clamp(0.0, 1.0));
+    return entry.from + (entry.target - entry.from) * eased;
+  }
+
   double _valueOfSlot(_Slot slot) {
     if (slot.snapped) {
       return slot.target;
@@ -467,7 +472,7 @@ class MakeRoomEngine {
   double? _discardSlots(double? minT) {
     for (final slots in _slots.values) {
       for (final slot in slots) {
-        minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
+        minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
       }
     }
     _slots.clear();
@@ -489,10 +494,73 @@ class MakeRoomEngine {
       return minT;
     }
     if (snap) {
-      minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
+      minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
     }
     final current = _valueOfSlot(slot);
     slot
+      ..from = snap ? target : current
+      ..target = target
+      ..snapped = snap
+      ..t = 0.0;
+    return minT;
+  }
+
+  /// Re-targets one held offset in place, by [_retargetSlot]'s rule: LEFT
+  /// UNTOUCHED when its target already equals [target] and the call is
+  /// not a snap. A free or fraction snap re-enters [previewGap] on every
+  /// frame of the resize it caused, and a drag releases again at its
+  /// teardown, so restarting the clock there would keep a gap from ever
+  /// settling. A SNAP always re-targets, since the kill switch dominates
+  /// a captured value, and folds the entry's clock into [minT] first.
+  /// [target] is a content-space offset on the lane axis. Returns the
+  /// fold.
+  double? _retargetOffset(
+    _HeldOffset entry,
+    double target,
+    bool snap,
+    double? minT,
+  ) {
+    if (!snap && entry.target == target) {
+      return minT;
+    }
+    if (snap) {
+      minT = _foldClock(
+        minT,
+        entry.snapped,
+        entry.t,
+        entry.from != entry.target,
+      );
+    }
+    final current = _valueOf(entry);
+    entry
+      ..from = snap ? target : current
+      ..target = target
+      ..snapped = snap
+      ..t = 0.0;
+    return minT;
+  }
+
+  /// [_retargetOffset] for a held extent; [target] is a content-space
+  /// length per axis, as [extentDeltaOf] answers.
+  double? _retargetExtent(
+    _HeldExtent entry,
+    Offset target,
+    bool snap,
+    double? minT,
+  ) {
+    if (!snap && entry.target == target) {
+      return minT;
+    }
+    if (snap) {
+      minT = _foldClock(
+        minT,
+        entry.snapped,
+        entry.t,
+        entry.from != entry.target,
+      );
+    }
+    final current = _extentValueOf(entry);
+    entry
       ..from = snap ? target : current
       ..target = target
       ..snapped = snap
@@ -515,12 +583,13 @@ class MakeRoomEngine {
   }
 
   /// Opens (or re-targets) the gap for a drag of [draggedId] resolving to
-  /// [prospective]. Never refuses: under a zero family it INSTALLS AND
-  /// SNAPS, because the gap IS the target state and section 9.5 names no
-  /// other drop-feedback mechanism. The snap flag is the kill-switch
-  /// disjunction, resolved here, at one of the family's two declaring
+  /// [prospective]. Never refuses: under an off family, or with a
+  /// [duration] that is not positive, it INSTALLS AND SNAPS, because the
+  /// gap IS the target state and section 9.5 names no other drop-feedback
+  /// mechanism. The snap flag is the kill switch, resolved here through
+  /// [BoardAnimationTiming.isOff], at one of the family's two declaring
   /// sites; [duration] and [curve] are a session's captured values and
-  /// the flag dominates them.
+  /// an off family dominates them.
   void previewGap({
     required int draggedId,
     required BoardSpan prospective,
@@ -529,9 +598,10 @@ class MakeRoomEngine {
     Curve? curve,
   }) {
     final laneAxis = _laneAxisOf();
-    final spec = _styleOf().effectiveMakeRoom;
+    final style = _styleOf();
+    final spec = style.effectiveMakeRoom;
     final resolved = duration ?? spec.duration;
-    final snap = spec.duration == Duration.zero || resolved == Duration.zero;
+    final snap = style.isOff(BoardAnimationFamily.makeRoom, explicit: duration);
     _adoptClock(curve ?? spec.curve, resolved);
     // The dry run needs lane geometry; without it nothing is laned and
     // no gap exists to open, but the EXTENT preview below still does.
@@ -576,30 +646,15 @@ class MakeRoomEngine {
     }
     extentTargets.forEach((id, extent) {
       final existing = _heldExtent[id];
-      if (extent == Offset.zero && existing == null) {
-        // Nothing to hold.
+      if (existing != null) {
+        minT = _retargetExtent(existing, extent, snap, minT);
         return;
       }
-      if (snap) {
-        // The same fold the offsets' snap arm makes, in the inline form
-        // the release arm uses for an Offset entry.
-        if (existing != null &&
-            !existing.snapped &&
-            existing.t < 1.0 &&
-            existing.from != existing.target) {
-          final current = minT;
-          minT = current == null || existing.t < current ? existing.t : current;
-        }
+      if (extent != Offset.zero) {
         _heldExtent[id] = _HeldExtent(
           target: extent,
-          from: extent,
-          snapped: true,
-        );
-      } else if (existing == null || existing.target != extent) {
-        _heldExtent[id] = _HeldExtent(
-          target: extent,
-          from: existing == null ? Offset.zero : extentDeltaOf(id),
-          snapped: false,
+          from: snap ? extent : Offset.zero,
+          snapped: snap,
         );
       }
     });
@@ -608,7 +663,7 @@ class MakeRoomEngine {
       // above is the whole of the in-place feedback on such a board, and
       // the drag proxy is the rest of it. The fold is discarded
       // unpublished here, as it always was on this branch: the case is a
-      // restyle to zero mid-drag on a board with no lanes.
+      // restyle to off mid-drag on a board with no lanes.
       _heldExtent.removeWhere((id, entry) {
         return snap && entry.target == Offset.zero;
       });
@@ -662,32 +717,16 @@ class MakeRoomEngine {
     }
     targets.forEach((id, target) {
       final existing = _held[id];
-      if (target == 0.0 && existing == null) {
+      if (existing != null) {
+        minT = _retargetOffset(existing, target, snap, minT);
         return;
       }
-      if (!snap && existing != null && existing.target == target) {
-        // IDEMPOTENT FOR AN UNCHANGED TARGET. A free or fraction snap
-        // re-enters this method on every frame of the resize it caused,
-        // and restarting every clock there means the gap never settles
-        // and the ticker never stops. The SNAP arm still replaces
-        // unconditionally: the kill switch dominates a captured value,
-        // so a re-send under a zero family must force instant arrival.
-        return;
-      }
-      final from = existing == null ? 0.0 : _valueOf(existing);
-      if (snap) {
-        if (existing != null) {
-          minT = _foldClock(
-            minT,
-            existing.snapped,
-            existing.t,
-            existing.from,
-            existing.target,
-          );
-        }
-        _held[id] = _HeldOffset(target: target, from: target, snapped: true);
-      } else {
-        _held[id] = _HeldOffset(target: target, from: from, snapped: false);
+      if (target != 0.0) {
+        _held[id] = _HeldOffset(
+          target: target,
+          from: snap ? target : 0.0,
+          snapped: snap,
+        );
       }
     });
     if (lifted) {
@@ -766,7 +805,7 @@ class MakeRoomEngine {
   double? _snapSlots(double? minT) {
     _slots.removeWhere((track, slots) {
       slots.removeWhere((slot) {
-        minT = _foldClock(minT, slot.snapped, slot.t, slot.from, slot.target);
+        minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
         if (slot.target != 0.0) {
           slot.snapped = true;
           return false;
@@ -781,9 +820,11 @@ class MakeRoomEngine {
     return minT;
   }
 
-  /// Closes every held offset. The release side reads the SAME snap
-  /// disjunction as the install, so a zero-family drag's gap opens and
-  /// closes instantly as a pair.
+  /// Closes every held offset. The release side reads the SAME kill
+  /// switch as the install, so an off-family drag's gap opens and closes
+  /// instantly as a pair. A live release leaves an offset, an
+  /// extent or a slot that is already closing on the schedule it started
+  /// on, so a second release on the same clock changes no entry.
   void releasePreview({Duration? duration, Curve? curve}) {
     // THREE COLLECTIONS, not one: a slot-only hover holds no offset at
     // all, and an `_held`-only guard would return without clearing the
@@ -795,9 +836,10 @@ class MakeRoomEngine {
         _heldExtent.isEmpty) {
       return;
     }
-    final spec = _styleOf().effectiveMakeRoom;
+    final style = _styleOf();
+    final spec = style.effectiveMakeRoom;
     final resolved = duration ?? spec.duration;
-    final snap = spec.duration == Duration.zero || resolved == Duration.zero;
+    final snap = style.isOff(BoardAnimationFamily.makeRoom, explicit: duration);
     if (snap) {
       // The commit's snap: fold every offset and slot it drops, so the
       // hand-off carries the clock of whatever was still moving.
@@ -807,18 +849,16 @@ class MakeRoomEngine {
           minT,
           entry.snapped,
           entry.t,
-          entry.from,
-          entry.target,
+          entry.from != entry.target,
         );
       }
       for (final entry in _heldExtent.values) {
-        // The same fold the offsets get, on the same three terms: an
-        // entry unsnapped, below clock 1 and actually moving had motion
-        // left, and the earliest such clock is the one the hand-off
-        // continues from.
-        if (!entry.snapped && entry.t < 1.0 && entry.from != entry.target) {
-          minT = minT == null || entry.t < minT ? entry.t : minT;
-        }
+        minT = _foldClock(
+          minT,
+          entry.snapped,
+          entry.t,
+          entry.from != entry.target,
+        );
       }
       _held.clear();
       _heldExtent.clear();
@@ -830,26 +870,16 @@ class MakeRoomEngine {
       return;
     }
     _adoptClock(curve ?? spec.curve, resolved);
-    _held.forEach((id, entry) {
-      final current = _valueOf(entry);
-      entry
-        ..target = 0.0
-        ..from = current
-        ..snapped = false
-        ..t = 0.0;
-    });
-    _heldExtent.forEach((id, entry) {
-      final current = extentDeltaOf(id);
-      entry
-        ..target = Offset.zero
-        ..from = current
-        ..snapped = false
-        ..t = 0.0;
-    });
+    // An entry already closing keeps the schedule it started on, the same
+    // idempotence rule the install applies and for the same reason.
+    for (final entry in _held.values) {
+      _retargetOffset(entry, 0.0, false, null);
+    }
+    for (final entry in _heldExtent.values) {
+      _retargetExtent(entry, Offset.zero, false, null);
+    }
     _slots.forEach((track, slots) {
       for (final slot in slots) {
-        // One already closing keeps the schedule it started on, the same
-        // idempotence rule the install applies and for the same reason.
         _retargetSlot(slot, 0.0, false, null);
       }
     });
@@ -900,12 +930,12 @@ class MakeRoomEngine {
   void _tick(Duration elapsed) {
     final dt = elapsed - _lastElapsed;
     _lastElapsed = elapsed;
-    // The captured clock, under the live family's zero: a restyle to
-    // zero mid-gap drives every clock past 1 on this tick.
-    final spec = _styleOf().effectiveMakeRoom;
-    final durationUs = spec.duration == Duration.zero
-        ? 0
-        : _duration.inMicroseconds;
+    // The captured clock, under the live family's off: a restyle to off
+    // mid-gap drives every clock past 1 on this tick, and so does a
+    // captured clock that is not positive.
+    final durationUs = _styleOf()
+        .durationFor(BoardAnimationFamily.makeRoom, explicit: _duration)
+        .inMicroseconds;
     final delta = durationUs == 0
         ? double.infinity
         : dt.inMicroseconds / durationUs;

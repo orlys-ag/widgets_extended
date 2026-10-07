@@ -50,7 +50,7 @@ class _SlideRecord {
   final BoardAnimationFamily family;
 
   /// Per-call overrides; null falls back to the family spec at tick time,
-  /// so a restyle carries through. The family's zero KILL SWITCH
+  /// so a restyle carries through. An off family, the KILL SWITCH,
   /// dominates an explicit duration either way.
   final Duration? explicitDuration;
   final Curve? explicitCurve;
@@ -176,14 +176,15 @@ class ItemSlideEngine {
   /// current interpolated value plus the argument, the clock resets, and
   /// the spec is re-read.
   ///
-  /// Returns false for a REFUSED install, a zero family or a zero
-  /// resolved duration. A refusal creates no motion: the change the call
-  /// describes lands this frame, both deltas of it, never one without the
-  /// other. And it destroys none: a record already standing for [id] is
-  /// left as it is, its deltas measured from whatever structural
-  /// rectangle the item now has, and it finishes on its own clock.
-  /// Stopping motion is the restyle transition's job ([purgeWhere]),
-  /// never a side effect of another install.
+  /// Returns false for a REFUSED install: the family or [duration] is
+  /// off, which [BoardAnimationTiming.isOff] decides, a duration that is
+  /// not positive being off. A refusal creates no motion: the change the
+  /// call describes lands this frame, both deltas of it, never one
+  /// without the other. And it destroys none: a record already standing
+  /// for [id] is left as it is, its deltas measured from whatever
+  /// structural rectangle the item now has, and it finishes on its own
+  /// clock. Stopping motion is the restyle transition's job
+  /// ([purgeWhere]), never a side effect of another install.
   ///
   /// [relane] declares that [delta] is an intra-track shift on the lane
   /// axis (see the library doc). The composed record keeps the mark only
@@ -199,9 +200,7 @@ class ItemSlideEngine {
     Offset extentDelta = Offset.zero,
     bool relane = false,
   }) {
-    final spec = _styleOf().specFor(family);
-    if (spec.duration == Duration.zero ||
-        (duration ?? spec.duration) == Duration.zero) {
+    if (_styleOf().isOff(family, explicit: duration)) {
       return false;
     }
     debugInstallCount += 1;
@@ -223,8 +222,8 @@ class ItemSlideEngine {
   /// Drops every record whose family [off] answers true for, landing its
   /// item at its structural RECTANGLE, and returns whether any went. The
   /// restyle transition: the controller passes the families the NEW style
-  /// resolves to zero, so a family restyled to zero stops its own motion
-  /// and no other's. The caller notifies afterwards, and re-dirties
+  /// turns off, so a family restyled off stops its own motion and no
+  /// other's. The caller notifies afterwards, and re-dirties
   /// layout when a record went, because a purge before a record's first
   /// tick leaves the render where the install frame left it.
   bool purgeWhere(bool Function(BoardAnimationFamily family) off) {
@@ -264,15 +263,14 @@ class ItemSlideEngine {
     final style = _styleOf();
     var anyCompleted = false;
     _records.forEach((id, record) {
-      final spec = style.specFor(record.family);
-      // The family's zero dominates the record's explicit duration. The
-      // restyle to zero purges a family's records in the setter, so this
-      // is the guard against a division by zero rather than the
-      // mechanism: a zero family drives a record past 1 here.
-      final effective = spec.duration == Duration.zero
-          ? Duration.zero
-          : (record.explicitDuration ?? spec.duration);
-      final durationUs = effective.inMicroseconds;
+      // An off family dominates the record's explicit duration, and
+      // either one off answers zero. The restyle to off purges a
+      // family's records in the setter, so this is the guard against a
+      // division by zero or a clock running backwards rather than the
+      // mechanism: an off duration drives a record past 1 here.
+      final durationUs = style
+          .durationFor(record.family, explicit: record.explicitDuration)
+          .inMicroseconds;
       record.t += durationUs == 0
           ? double.infinity
           : dt.inMicroseconds / durationUs;

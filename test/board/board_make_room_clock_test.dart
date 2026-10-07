@@ -1,13 +1,10 @@
-/// Tests for item 5B of the board audit fixes: the make-room engine's
-/// clock. A gap's motion keeps its position when the clock it runs on
-/// changes, a drag's close runs on the clock the session captured, and a
-/// commit's continuation never carries an item past where it rests.
-///
-/// Source: `plans/2026-09-23-board-audit-fixes-plan.md`, "Item 5B", the
-/// Tests list. Case numbers in the comments are that list's.
-///
-/// Every TARGET was red on the tree item 5A left, with every setup sanity
-/// assertion before it passing.
+/// The make-room engine's clock. A gap's motion keeps its position when
+/// the clock it runs on changes, a drag's close runs on the clock the
+/// session captured, a commit's continuation never carries an item past
+/// where it rests, an install that stops displacing a held neighbour
+/// closes it from where it was held on the install's clock, and a second
+/// release leaves a gap or an extent that is already closing on the
+/// schedule the first release started.
 library;
 
 import 'package:flutter/material.dart';
@@ -33,6 +30,31 @@ const BoardAnimationSpec _ms300 = BoardAnimationSpec(
   duration: Duration(milliseconds: 300),
   curve: Curves.linear,
 );
+
+const BoardAnimationSpec _ms240 = BoardAnimationSpec(
+  duration: Duration(milliseconds: 240),
+  curve: Curves.linear,
+);
+
+const BoardAnimationSpec _zero = BoardAnimationSpec(
+  duration: Duration.zero,
+  curve: Curves.linear,
+);
+
+/// itemEnterExit inherits the zero trackResize, so an add installs no
+/// enter.
+const BoardAnimationStyle _gapStyle = BoardAnimationStyle(
+  trackResize: _zero,
+  itemSlide: _ms240,
+  makeRoom: _ms240,
+);
+
+/// The ticker's first frame, at zero elapsed, then one frame past the
+/// end of a motion started on [_ms240].
+Future<void> _settlePump(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 250));
+}
 
 /// Content-sized rows carrying an 18px lane, so a neighbour displaced one
 /// lane moves exactly 18px (a fixed lane axis would slice its track
@@ -386,6 +408,190 @@ void main() {
       closeTo(restingB + 9.0 + 9.0 * Curves.easeIn.transform(0.5), 0.5),
     );
     controller.releaseMakeRoomPreview();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("an install that stops displacing a held neighbour closes it "
+      "on the install's clock", (tester) async {
+    final controller = _controller(tester, _gapStyle);
+    _addTwoLaneFixture(controller);
+    await _settlePump(tester);
+    final idA = controller.idOfKey("a");
+    final anim = controller.anim;
+    final half = _ms240.duration ~/ 2;
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 0, colStart: 0, colSpan: 3),
+      lifted: true,
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await _settlePump(tester);
+    // Setup sanity: the preview displaces `a` one lane.
+    expect(anim.offsetOfItem(idA).dy, 18.0);
+
+    // Row 5 is empty, so `d` there displaces nobody.
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 5, colStart: 0, colSpan: 3),
+      lifted: true,
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await tester.pump();
+    await tester.pump(half);
+    // TARGET a: `a` closes from where it was held, on the install's clock.
+    expect(anim.offsetOfItem(idA).dy, closeTo(9.0, 0.01));
+    await tester.pump(half);
+    // TARGET b: `a` is at rest when that clock ends.
+    expect(anim.offsetOfItem(idA), Offset.zero);
+    controller.releaseMakeRoomPreview(duration: Duration.zero);
+  });
+
+  testWidgets("a second release leaves a closing gap on its schedule", (
+    tester,
+  ) async {
+    final controller = _controller(tester, _gapStyle);
+    _addTwoLaneFixture(controller);
+    await _settlePump(tester);
+    final idA = controller.idOfKey("a");
+    final anim = controller.anim;
+    final half = _ms240.duration ~/ 2;
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 0, colStart: 0, colSpan: 3),
+      lifted: true,
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await _settlePump(tester);
+    // Setup sanity: the preview displaces `a` one lane.
+    expect(anim.offsetOfItem(idA).dy, 18.0);
+
+    controller.releaseMakeRoomPreview(
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await tester.pump();
+    await tester.pump(half);
+    // Setup sanity: the first release closes on the configured clock.
+    expect(anim.offsetOfItem(idA).dy, closeTo(9.0, 0.01));
+
+    controller.releaseMakeRoomPreview(
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await tester.pump(half);
+    // TARGET a: `a` is at rest when the first release's close ends.
+    expect(anim.offsetOfItem(idA), Offset.zero);
+    // TARGET b: no held offset is left to close.
+    expect(anim.hasActiveOffsets, isFalse);
+  });
+
+  testWidgets("a second release leaves a closing extent on its schedule", (
+    tester,
+  ) async {
+    final controller = BoardController<String, _Item>(
+      vsync: tester,
+      rows: BoardAxisConfig(axis: UniformAxis(6, 50.0)),
+      columns: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
+      keyOf: (item) {
+        return item.key;
+      },
+      animationStyle: _gapStyle,
+    );
+    addTearDown(controller.dispose);
+    controller.addItem(
+      const _Item("a"),
+      const BoardSpan(rowStart: 0, colStart: 0),
+    );
+    final idA = controller.idOfKey("a");
+    final anim = controller.anim;
+    final half = _ms240.duration ~/ 2;
+    // A resize preview of `a` over three columns, which holds the two
+    // columns it adds as `a`'s extent.
+    controller.previewMakeRoomGap(
+      draggedKey: "a",
+      prospective: const BoardSpan(rowStart: 0, colStart: 0, colSpan: 3),
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await _settlePump(tester);
+    // Setup sanity: the preview holds the extent of two columns.
+    expect(anim.extentDeltaOf(idA), const Offset(80.0, 0.0));
+
+    controller.releaseMakeRoomPreview(
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await tester.pump();
+    await tester.pump(half);
+    // Setup sanity: the first release closes on the configured clock.
+    expect(anim.extentDeltaOf(idA), const Offset(40.0, 0.0));
+
+    controller.releaseMakeRoomPreview(
+      duration: _ms240.duration,
+      curve: _ms240.curve,
+    );
+    await tester.pump(half);
+    // TARGET a: `a` is at its extent when the first release's close ends.
+    expect(anim.extentDeltaOf(idA), Offset.zero);
+    // TARGET b: no held extent is left to close.
+    expect(anim.hasMakeRoomExtent, isFalse);
+  });
+
+  testWidgets("a refused hover then a cancel closes the gap on the "
+      "refusal's schedule", (tester) async {
+    final controller = _controller(tester, _gapStyle);
+    _unmountFirst(tester);
+    _addTwoLaneFixture(controller);
+    await tester.pumpWidget(_board(controller));
+    await tester.pumpAndSettle();
+    final viewport = _viewport(tester);
+    final restingB = _top(tester, "b");
+    final half = _ms240.duration ~/ 2;
+    final drag = BoardDragController<String>(
+      boardController: controller,
+      vsync: tester,
+      config: BoardDragConfig<String>(
+        onItemMoved: (key, span) {},
+        canDropAt: (key, span) {
+          return span.colStart == 0;
+        },
+        autoScrollEdgeZone: 0.0,
+      ),
+    );
+    addTearDown(drag.dispose);
+    // Lift d at its leading cell so the grab offset is one cell's worth.
+    final lift = viewport.rectOfItem("d")!.topLeft + const Offset(20.0, 10.0);
+    expect(
+      drag.startDrag(
+        key: "d",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, lift),
+      ),
+      isTrue,
+    );
+    drag.updateDrag(_global(tester, const Offset(20.0, 10.0)));
+    await _settlePump(tester);
+    // Setup sanity: column 0 is admitted and its gap is open.
+    expect(drag.currentTarget, isNotNull);
+    expect(_top(tester, "b"), closeTo(restingB + 18.0, 0.01));
+
+    drag.updateDrag(_global(tester, const Offset(60.0, 10.0)));
+    // Setup sanity: column 1 is refused, and the refusal releases the gap.
+    expect(drag.currentTarget, isNull);
+    await tester.pump();
+    await tester.pump(half);
+    // Setup sanity: the gap is half closed on the refusal's release.
+    expect(_top(tester, "b"), closeTo(restingB + 9.0, 0.5));
+
+    drag.endDrag(cancel: true);
+    await tester.pump(half);
+    await tester.pump(const Duration(milliseconds: 16));
+    // TARGET: the cancel's release left the close on the refusal's
+    // schedule, so `b` is at rest.
+    expect(_top(tester, "b"), closeTo(restingB, 0.01));
     await tester.pumpAndSettle();
   });
 }

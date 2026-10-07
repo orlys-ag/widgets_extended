@@ -47,8 +47,8 @@ selects on a tap and `.range` on a drag. The controller holds the current
 `BoardSelection`.
 - Added board animation timing in one `BoardAnimationStyle` over five families
 (`trackResize`, `itemEnterExit`, `itemSlide`, `makeRoom`, `dropSettle`), as
-`TreeAnimationStyle` already does for the tree. A family's zero duration is a
-kill switch.
+`TreeAnimationStyle` already does for the tree. A family's zero or negative
+duration is a kill switch.
 - Added `BoardGridPainter` and `BoardBackgroundPainter`, which paint behind the
 lattice from its live track geometry (`BoardGeometryView`), frozen bands
 included.
@@ -131,9 +131,16 @@ when it opens.
 `dropSettle` was set explicitly, and restyling `trackResize` to zero stopped a
 drag's make-room continuation. A restyle now stops at once the motion of every
 family it turns off, including one left inheriting, and of no other.
-- An item move or resize with `duration: Duration.zero`, or under a zero
-`itemSlide` family, lands at once and leaves a slide already in flight for the
-item running, as the documentation now says.
+- An item move or resize with a zero or negative `duration`, or under a zero or
+negative `itemSlide` family, lands at once and leaves a slide already in flight
+for the item running, as the documentation now says.
+- Fix: a negative board animation duration ran its animation backwards and never
+ended it. A `moveItem` or `resizeItem` with a negative `duration` left the item
+painted away from where it rests, and in a release build, where
+`BoardAnimationStyle.debugValidate` does not run, a negative duration in the
+style stranded every animation of its family. A zero or negative duration now
+turns the animation off in every build mode, as zero did; a debug build still
+reports a negative duration in the style.
 - Fix: when an animated removal finished, the items that re-laned into its
 lane stepped there; they now slide on the `itemSlide` clock.
 - Fix: a drag's make-room gap jumped when its clock changed under it: a
@@ -145,6 +152,15 @@ clock does change continues from where it painted.
 neighbour several pixels past where it lands and back. The continuation of a
 drop now approaches each item's rest from where it painted and never passes
 it.
+- Fix: a make-room gap released a second time while it was closing, as a drag
+cancelled after `canDropAt` refused its last hover releases it, restarted its
+close from where it painted, over a whole duration. A gap or a resize preview
+already closing now keeps the schedule its first release started.
+- Fix: `removeItem`, or a `setItems` dropping the key, on an item whose enter
+was still in flight after a restyle turned `itemEnterExit` off kept the key on
+the board until the next frame, against `removeItem`'s synchronous removal
+under that family. Such an item is now removed within the call, as a settled
+one is.
 - Fix: a screen reader's explore-by-touch found the node painted underneath:
 the content cell scrolled under a frozen header rather than the header, and a
 cell an item covers rather than the item. The board's semantics children are

@@ -1,11 +1,7 @@
-/// Tests for the board Testing Plan.
-///
-/// Source: `plans/2026-08-29-board-view-plan.md`, the Testing Plan section
-/// (anchor `testing-plan`). Case names are the plan's names VERBATIM unless
-/// a comment marks the name DERIVED, which means the plan describes the case
-/// in prose and quotes no name for it.
-///
-/// Landed at Landing Order step 9 with the animation sources.
+/// The board's item enter and exit animations: an exiting item's place in
+/// the index, hit-testing, retention and lanes, an entering item's ramp,
+/// re-adding a key mid-exit, removing one mid-enter under a live or an off
+/// itemEnterExit, and the settle's re-entrancy and layout.
 library;
 
 import 'package:flutter/material.dart';
@@ -25,6 +21,11 @@ class _Item {
 
 const BoardAnimationSpec _ms300 = BoardAnimationSpec(
   duration: Duration(milliseconds: 300),
+  curve: Curves.linear,
+);
+
+const BoardAnimationSpec _ms240 = BoardAnimationSpec(
+  duration: Duration(milliseconds: 240),
   curve: Curves.linear,
 );
 
@@ -106,6 +107,36 @@ RenderBoardViewport<String> _viewport(WidgetTester tester) {
 
 BoardSpan _chip(int row, int colStart, int colSpan) {
   return BoardSpan(rowStart: row, colStart: colStart, colSpan: colSpan);
+}
+
+/// A laned controller with no board, holding `b` mid-enter on [_ms240]
+/// and then restyled to [BoardAnimationStyle.disabled], which leaves the
+/// enter's record to its next tick.
+Future<BoardController<String, _Item>> _midEnterUnderOffFamily(
+  WidgetTester tester,
+) async {
+  final controller = _lanedController(
+    tester,
+    style: const BoardAnimationStyle(
+      trackResize: _zero,
+      itemSlide: _zero,
+      itemEnterExit: _ms240,
+    ),
+  );
+  controller.addItem(const _Item("b"), _chip(0, 0, 2));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 100));
+  final idB = controller.idOfKey("b");
+  final anim = controller.anim;
+  // Setup sanity 1: mid-enter, so a removal cannot take the retire of an
+  // enter that never ticked.
+  expect(anim.isEnteringItem(idB), isTrue);
+  expect(anim.enterExitProgressOf(idB), greaterThan(0.0));
+  expect(anim.enterExitProgressOf(idB), lessThan(1.0));
+  controller.animationStyle = BoardAnimationStyle.disabled;
+  // Setup sanity 2: the restyle left the enter in flight.
+  expect(anim.isEnteringItem(idB), isTrue);
+  return controller;
 }
 
 void main() {
@@ -483,6 +514,68 @@ void main() {
     expect(controller.anim.hasLayoutDrivingAnimations, isFalse);
     controller.addItem(const _Item("y"), _chip(2, 0, 2));
     expect(controller.idOfKey("y"), xId);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("removing a key mid-enter under an off itemEnterExit retires "
+      "it at once", (tester) async {
+    final controller = await _midEnterUnderOffFamily(tester);
+
+    controller.removeItem("b");
+    // TARGET a: the id is released within the call.
+    expect(controller.idOfKey("b"), -1);
+    // TARGET b: no exit record stands, the one record that could drive
+    // layout under a disabled style.
+    expect(controller.anim.hasLayoutDrivingAnimations, isFalse);
+  });
+
+  testWidgets("setItems dropping a key mid-enter under an off itemEnterExit "
+      "retires it at once", (tester) async {
+    final controller = await _midEnterUnderOffFamily(tester);
+
+    controller.setItems(const <BoardPlacement<_Item>>[]);
+    // TARGET a: the id is released within the call.
+    expect(controller.idOfKey("b"), -1);
+    // TARGET b: no exit record stands.
+    expect(controller.anim.hasLayoutDrivingAnimations, isFalse);
+  });
+
+  testWidgets("removing a key mid-enter under an off itemEnterExit re-lanes "
+      "its survivors within the call", (tester) async {
+    final controller = _lanedController(
+      tester,
+      style: const BoardAnimationStyle(
+        trackResize: _zero,
+        itemSlide: _zero,
+        itemEnterExit: _ms240,
+      ),
+    );
+    controller.addItem(const _Item("a"), _chip(0, 1, 2));
+    await tester.pumpAndSettle();
+    // `b` starts a column before `a`, so it takes lane 0 and puts `a` on
+    // lane 1, with no slide while itemSlide is off.
+    controller.addItem(const _Item("b"), _chip(0, 0, 2));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final idB = controller.idOfKey("b");
+    final anim = controller.anim;
+    // Setup sanity: `b` is mid-enter and holds `a` on lane 1.
+    expect(anim.isEnteringItem(idB), isTrue);
+    expect(controller.laneOf("a"), 1);
+
+    controller.animationStyle = const BoardAnimationStyle(
+      trackResize: _zero,
+      itemSlide: _ms240,
+      itemEnterExit: _zero,
+    );
+    // Setup sanity: the restyle left `b` entering, and nothing slides.
+    expect(anim.isEnteringItem(idB), isTrue);
+    expect(anim.hasActiveOffsets, isFalse);
+
+    controller.removeItem("b");
+    // TARGET: `a` re-lanes inside the removal, and its slide is installed
+    // within the call.
+    expect(anim.hasActiveOffsets, isTrue);
     await tester.pumpAndSettle();
   });
 

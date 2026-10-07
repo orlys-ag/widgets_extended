@@ -221,7 +221,7 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   /// relane install to run once the lanes re-resolve, or null.
   final VoidCallback? Function(int id) _captureSettleRelanes;
 
-  /// The live style, for [reverseExit]'s zero test; the sub-sources read
+  /// The live style, for [reverseExit]'s off test; the sub-sources read
   /// the same callback.
   final BoardAnimationStyle Function() _styleOf;
 
@@ -481,8 +481,8 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
 
   /// REVERSES an exit in flight: the item comes back as the same id. Reads
   /// the ramp the exit has reached, clears the exiting bit, and under a
-  /// non-zero itemEnterExit family sets the entering bit and installs an
-  /// enter from that value; under a zero one drops the record, the item
+  /// live itemEnterExit family sets the entering bit and installs an
+  /// enter from that value; under an off one drops the record, the item
   /// live at full. One site for the pair of bit writes, as the installers
   /// are, so the bits and the record cannot disagree: afterwards exactly
   /// the entering bit is set, or neither.
@@ -494,7 +494,7 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     final ramp = enterExit.progressOf(id);
     _store.setFlag(id, BoardStore.exitingBit, false);
     _markPresence(id);
-    if (_styleOf().effectiveItemEnterExit.duration == Duration.zero) {
+    if (_styleOf().isOff(BoardAnimationFamily.itemEnterExit)) {
       enterExit.clearForId(id);
       return;
     }

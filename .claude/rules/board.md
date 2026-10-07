@@ -74,20 +74,24 @@ Normative for `lib/board/`. This rule holds the conventions every layer follows;
   `trackResize` and `itemSlide` are the roots; `itemEnterExit` inherits
   `trackResize` when unset (both animate an EXTENT; reading it as falling
   back to `itemSlide` is the blunder the style doc names), and
-  `makeRoom`/`dropSettle` inherit `itemSlide`. A family's zero duration is a kill switch read live at
-  every install; per-call durations are captured values the switch
-  dominates. A REFUSED install creates no motion and destroys none: its
+  `makeRoom`/`dropSettle` inherit `itemSlide`. A family is OFF when its
+  resolved duration is not positive, a negative one counting as zero, and
+  that kill switch is read live at every install and every tick through
+  ONE resolver, `BoardAnimationTiming.durationFor` and its zero test
+  `isOff`, which no timing read bypasses; per-call durations are captured
+  values the switch dominates, and one that is not positive is off as
+  well. A REFUSED install creates no motion and destroys none: its
   change lands at once, and a slide record or track state already in
   flight keeps running from the new geometry, because both hold a delta
-  over the settled geometry rather than a target. Restyling a family to
-  zero STOPS, in the setter, every slide record and track state whose
-  family the new style resolves to zero and no other, so an explicit
-  `dropSettle` survives an `itemSlide` zero and an inheriting one does
-  not; a stopped track lands at the settled extent the axis stores, so
-  nothing strands, and an empty structural notification follows, because
-  a stop before a record's first tick leaves the render where the install
-  frame left it. `itemEnterExit` and the make-room engine keep their
-  tick-time zero guards.
+  over the settled geometry rather than a target. Restyling a family off
+  STOPS, in the setter, every slide record and track state whose family
+  the new style turns off and no other, so an explicit `dropSettle`
+  survives an `itemSlide` turned off and an inheriting one does not; a
+  stopped track lands at the settled extent the axis stores, so nothing
+  strands, and an empty structural notification follows, because a stop
+  before a record's first tick leaves the render where the install frame
+  left it. `itemEnterExit` and the make-room engine keep their tick-time
+  off guards.
 - **Retention is obtaining.** An exiting item that must outlive the built
   window stays mounted because `_obtainRetained` obtains its vicinity
   every layout: head release (drop entries whose id no longer reports

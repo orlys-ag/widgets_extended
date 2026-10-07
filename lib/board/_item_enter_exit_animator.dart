@@ -22,8 +22,8 @@ class _EnterExitRecord {
   /// starts from the value that exit had reached.
   final double from;
 
-  /// Resolved through `specFor` on every tick, so a restyle carries
-  /// through (and a restyle to zero drives the clock past 1).
+  /// Resolved through `durationFor` on every tick, so a restyle carries
+  /// through (and a restyle to off drives the clock past 1).
   final BoardAnimationFamily family;
 
   /// The 0-to-1 animation clock, advanced by tick deltas.
@@ -140,14 +140,14 @@ class ItemEnterExitAnimator {
     final style = _styleOf();
     List<int>? settled;
     _records.forEach((id, record) {
-      final spec = style.specFor(record.family);
       // The scaled denominators: an exit's clock runs over
       // `from * duration`, an enter's over `(1 - from) * duration`. A zero
-      // product, which a zero FAMILY produces, and an enter reversing an
-      // exit that had not begun, maps to an INFINITE delta rather than a
-      // division, driving the record past 1 and through the normal settle
-      // on this very tick.
-      final baseUs = spec.duration.inMicroseconds;
+      // product, which an OFF family produces (its resolved duration is
+      // zero, never negative), and an enter reversing an exit that had
+      // not begun, maps to an INFINITE delta rather than a division,
+      // driving the record past 1 and through the normal settle on this
+      // very tick.
+      final baseUs = style.durationFor(record.family).inMicroseconds;
       final durationUs = _isExitingOf(id)
           ? (baseUs * record.from).round()
           : (baseUs * (1.0 - record.from)).round();
