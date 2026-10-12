@@ -1639,24 +1639,28 @@ class BoardController<TKey, TItem> {
   /// its stored lanes give it while [prospective] stays laned in that
   /// track, and a VACATE once it does not. An unlaned item holds neither,
   /// being no member of any track's term, and neither does a fixed lane
-  /// axis, whose tracks the term never sizes.
+  /// axis, whose tracks the term never sizes. On any lane axis it JOINS a
+  /// track when the dry run's [assignment] lanes it in a track whose
+  /// bucket it is not in.
   MakeRoomResizeTerm _resizeTermOf(
     int id,
     BoardSpan prospective,
     ({int lane, int laneCount, int laneSpan})? assignment,
   ) {
     final axis = _lanes.laneAxis;
-    if (axis == null || !_lanes.isLaned(id)) {
-      return (band: 0.0, vacates: false);
+    if (axis == null) {
+      return (band: 0.0, vacates: false, joins: false);
     }
+    final prospectiveTrack = trackIndexOf(prospective.startTrackOn(axis));
+    final laned = _lanes.isLaned(id);
+    final track = laned ? _store.startIndexOf(id, axis) : null;
+    final joins = assignment != null && prospectiveTrack != track;
     final config = axis == Axis.vertical ? _rows : _columns;
-    if (!config.axis.acceptsMeasurements) {
-      return (band: 0.0, vacates: false);
+    if (track == null || !config.axis.acceptsMeasurements) {
+      return (band: 0.0, vacates: false, joins: joins);
     }
-    final track = _store.startIndexOf(id, axis);
-    if (assignment == null ||
-        trackIndexOf(prospective.startTrackOn(axis)) != track) {
-      return (band: 0.0, vacates: true);
+    if (assignment == null || prospectiveTrack != track) {
+      return (band: 0.0, vacates: true, joins: joins);
     }
     final band =
         config.laneBandEdgeOn(
@@ -1671,7 +1675,7 @@ class BoardController<TKey, TItem> {
           laneCountOfId(id),
           laneSpanOfId(id).toDouble(),
         );
-    return (band: band, vacates: false);
+    return (band: band, vacates: false, joins: false);
   }
 
   /// The EXTENT the geometry rule would give [id] under [prospective]

@@ -538,8 +538,9 @@ extension BoardControllerInternals<TKey, TItem>
   }
 
   /// Debug-only: the id whose prospective make-room occupancy the slots
-  /// carry, or null. Non-null exactly while a slot exists, which is the
-  /// only observable separating a leaked lifecycle key from a clean one.
+  /// carry, a lifted item's or a resized item's that joins a track, or
+  /// null. Non-null exactly while a slot exists, which is the only
+  /// observable separating a leaked lifecycle key from a clean one.
   int? get debugMakeRoomLiftedId {
     return _anim.makeRoom.liftedId;
   }

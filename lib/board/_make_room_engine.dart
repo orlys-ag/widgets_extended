@@ -24,12 +24,13 @@
 /// itself resizes.
 ///
 /// Beside the offsets the engine holds prospective lane SLOTS for the
-/// LIFTED item: a slot has no paint half at all and exists only so the
-/// track-sizing walk can count the lane the drop would occupy. The
-/// contribution reaches the SOURCE track as well as the prospective one,
-/// because the dry run re-sweeps the stored bucket; the one term held
-/// still is the lifted item's own band, which its in-place widget keeps
-/// painting. An install is IDEMPOTENT for an unchanged target, which is
+/// session's item, a LIFTED one or a resized one the preview lanes in a
+/// track it is not laned in: a slot has no paint half at all and exists
+/// only so the track-sizing walk can count the lane the drop would
+/// occupy. The contribution reaches the SOURCE track as well as the
+/// prospective one, because the dry run re-sweeps the stored bucket; the
+/// one term held still is the lifted item's own band, which its in-place
+/// widget keeps painting. An install is IDEMPOTENT for an unchanged target, which is
 /// what lets a closing entry ever retire under a per-frame re-resolve.
 ///
 /// Not exported from the module barrel.
@@ -51,9 +52,11 @@ typedef MakeRoomResizeGeometry = ({Offset lead, Offset extent});
 /// A resize session's term targets for its own item on the lane axis: the
 /// BAND, a content-space length the item's lane band adds to its stored
 /// track's term while it stays laned there, and whether it VACATES that
-/// track instead. Both are zero for an item that is not laned in a track
-/// of a content-sized lane axis.
-typedef MakeRoomResizeTerm = ({double band, bool vacates});
+/// track instead, both zero for an item that is not laned in a track of a
+/// content-sized lane axis; and whether it JOINS a track, the prospective
+/// lanes laning it in a lane-axis track whose bucket it is not in, where
+/// it then holds a slot.
+typedef MakeRoomResizeTerm = ({double band, bool vacates, bool joins});
 
 /// The geometry or the term targets of a resize session's item [id] under
 /// [prospective] and the dry run's [assignment], null when the dry run
@@ -311,9 +314,10 @@ class MakeRoomEngine {
   /// correction pass, so a flat list would be a full scan per ask.
   final Map<int, List<_Slot>> _slots = <int, List<_Slot>>{};
 
-  /// The slots' lifecycle key, and it carries no other duty. ONE RULE
-  /// governs it and it is total: non-null exactly while [_slots] is
-  /// non-empty.
+  /// The slots' lifecycle key, and it carries no other duty: the id of
+  /// the session that owns the slots, a lifted item's or a resized item's
+  /// that joins a track. ONE RULE governs it and it is total: non-null
+  /// exactly while [_slots] is non-empty.
   int? _liftedId;
 
   int _generation = 0;
@@ -485,7 +489,8 @@ class MakeRoomEngine {
     _snapGeneration += 1;
   }
 
-  /// The id whose prospective occupancy the slots carry, or null.
+  /// The id whose prospective occupancy the slots carry, a lifted item's
+  /// or a resized item's that joins a track, or null.
   int? get liftedId {
     return _liftedId;
   }
@@ -1005,20 +1010,25 @@ class MakeRoomEngine {
     targets.forEach((id, target) {
       minT = _installOffset(_held, id, target, snap, minT);
     });
-    if (lifted) {
+    // THE SLOTS: a LIFTED item's, and a RESIZED item's while its preview
+    // lanes it in a track it is not laned in; an install by the slots'
+    // own session runs the block too, so a resize that stops joining
+    // closes its slot by the same re-target.
+    final joins = term?.joins ?? false;
+    if (lifted || joins || _liftedId == draggedId) {
       if (_liftedId != null && _liftedId != draggedId) {
         // A PREVIOUS session's item, whose closing slot is still ramping
         // down. Snap-drop it, or its phantom occupancy outlives the
-        // session that owned it, on a track it never reached. A LIFTED
-        // install for the SAME id takes the re-target path below.
+        // session that owned it, on a track it never reached. An install
+        // for the SAME id takes the re-target path below.
         minT = _discardSlots(minT);
       }
       // Both halves of the desired slot's identity come from inputs this
       // method already has: the TRACK from `prospective` on the lane
       // axis, the LANE from the dry run, present exactly when the run
-      // laned the dragged id.
+      // laned the dragged id. A resize that no longer joins desires none.
       final prospectiveTrack = trackIndexOf(prospective.startTrackOn(laneAxis));
-      final desiredLane = dry[draggedId]?.lane;
+      final desiredLane = lifted || joins ? dry[draggedId]?.lane : null;
       _slots.forEach((track, slots) {
         for (final slot in slots) {
           final desired =

@@ -694,7 +694,6 @@ void main() {
           off: true,
         );
       },
-      skip: true,
     );
 
     testWidgets("a resize preview follows the track it vacates", (
@@ -930,7 +929,6 @@ void main() {
           expect(controller.debugMakeRoomLiftedId, isNull);
         }
       },
-      skip: true,
     );
 
     testWidgets(
@@ -1041,7 +1039,7 @@ void main() {
       expect(_rowHeight(viewport, 1), 40.0);
       // TARGET b: the anchor held still.
       expect(viewport.rectOfCell(12, 0)!.top, row12);
-    }, skip: true);
+    });
 
     testWidgets(
       "a resize that de-lanes its track's only laned item previews the "

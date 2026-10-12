@@ -83,9 +83,11 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   block follows the finger while the model stays unwritten, and an
   extent that vanishes without motion (the commit snap) reaches layout
   through the render router's own settle latch for it; beside the offsets
-  it holds a prospective lane SLOT for the lifted item, paintless, so
-  track sizing can count the lane the drop would occupy, with a lifecycle
-  key that is non-null exactly while a slot exists; the make-room
+  it holds a prospective lane SLOT for the session's item, the lifted one
+  or a resized one the preview lanes in a track it is not laned in,
+  paintless, so track sizing can count the lane the drop would occupy,
+  with a lifecycle key, naming that session's item, that is non-null
+  exactly while a slot exists; the make-room
   contribution reaches the SOURCE track as well as the prospective one,
   because the dry run re-sweeps the stored bucket, and the one term held
   still is the lifted item's own band; an install is IDEMPOTENT for an
