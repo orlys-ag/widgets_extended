@@ -105,4 +105,9 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   curve's tail, CLAMPED to `[0, 1]`, and bumps the snap generation
   exactly then, so the drag layer and the render continue the discarded
   motion on one clock, and the clamp keeps a motion that was on a later
-  clock from being carried past its rest by the renormalisation).
+  clock from being carried past its rest by the renormalisation; a
+  commit's snap under a live family leaves another session's CLOSING
+  resize hold, its lead, band and vacate and that id's closing extent, on
+  its clock, neither folded nor removed, so a commit made inside a
+  cancelled resize's close continues only what it discards while that
+  hold finishes closing in lockstep).

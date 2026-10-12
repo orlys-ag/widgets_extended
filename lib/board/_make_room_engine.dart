@@ -1146,34 +1146,21 @@ class MakeRoomEngine {
     final snap = style.isOff(BoardAnimationFamily.makeRoom, explicit: duration);
     if (snap) {
       // The commit's snap: fold every entry and slot it drops, so the
-      // hand-off carries the clock of whatever was still moving.
-      double? minT;
-      for (final map in <Map<int, _HeldOffset>>[
-        _held,
-        _heldBand,
-        _heldVacate,
-      ]) {
-        for (final entry in map.values) {
-          minT = _foldClock(
-            minT,
-            entry.snapped,
-            entry.t,
-            entry.from != entry.target,
-          );
-        }
-        map.clear();
-      }
-      for (final map in <Map<int, _HeldAxes>>[_heldExtent, _heldLead]) {
-        for (final entry in map.values) {
-          minT = _foldClock(
-            minT,
-            entry.snapped,
-            entry.t,
-            entry.from != entry.target,
-          );
-        }
-        map.clear();
-      }
+      // hand-off carries the clock of whatever was still moving. Under a
+      // LIVE family the snap is the commit's own zero duration, not the
+      // kill switch, and another session's CLOSING resize hold is no part
+      // of this commit: its lead, band and vacate, and that id's closing
+      // extent, stay on their clock, neither folded nor removed, so they
+      // finish closing in lockstep while the commit's hand-off continues
+      // only what this snap discards. Read before the session ends.
+      final survivors = style.isOff(BoardAnimationFamily.makeRoom)
+          ? null
+          : _closingHoldsBeside(_sessionId);
+      var minT = _discardOffsets(_held, null, null);
+      minT = _discardOffsets(_heldBand, survivors, minT);
+      minT = _discardOffsets(_heldVacate, survivors, minT);
+      minT = _discardAxes(_heldLead, survivors, minT);
+      minT = _discardAxes(_heldExtent, survivors, minT);
       minT = _discardSlots(minT);
       _clearSession();
       _publishSnap(minT);
@@ -1312,6 +1299,58 @@ class MakeRoomEngine {
     }
     _notifyNow();
     _stopIfIdle();
+  }
+
+  /// The ids other than [sessionId] holding a CLOSING lead, band or
+  /// vacate: a cancelled or refused resize's hold, still on its clock.
+  Set<int> _closingHoldsBeside(int? sessionId) {
+    final ids = <int>{};
+    _heldLead.forEach((id, entry) {
+      if (id != sessionId && entry.target == Offset.zero) {
+        ids.add(id);
+      }
+    });
+    for (final map in <Map<int, _HeldOffset>>[_heldBand, _heldVacate]) {
+      map.forEach((id, entry) {
+        if (id != sessionId && entry.target == 0.0) {
+          ids.add(id);
+        }
+      });
+    }
+    return ids;
+  }
+
+  /// The snap's discard of [map]: every entry goes, its clock folded into
+  /// [minT], but a CLOSING one of an id in [keep]. Returns the fold.
+  double? _discardOffsets(
+    Map<int, _HeldOffset> map,
+    Set<int>? keep,
+    double? minT,
+  ) {
+    map.removeWhere((id, entry) {
+      if (keep != null && entry.target == 0.0 && keep.contains(id)) {
+        return false;
+      }
+      minT = _foldClock(minT, entry.snapped, entry.t, entry.from != entry.target);
+      return true;
+    });
+    return minT;
+  }
+
+  /// [_discardOffsets] for held per-axis values.
+  double? _discardAxes(
+    Map<int, _HeldAxes> map,
+    Set<int>? keep,
+    double? minT,
+  ) {
+    map.removeWhere((id, entry) {
+      if (keep != null && entry.target == Offset.zero && keep.contains(id)) {
+        return false;
+      }
+      minT = _foldClock(minT, entry.snapped, entry.t, entry.from != entry.target);
+      return true;
+    });
+    return minT;
   }
 
   /// Advances every moving entry of [map] by [delta] and answers whether

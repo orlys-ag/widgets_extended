@@ -2037,5 +2037,210 @@ void main() {
         await release();
       },
     );
+
+    testWidgets(
+      "a commit inside a cancelled resize's close leaves its hold closing",
+      (tester) async {
+        const deLane = BoardSpan(
+          rowStart: 0,
+          colStart: 0,
+          rowSpan: 2,
+          colSpan: 5,
+        );
+        const deRest = Rect.fromLTRB(0.0, 4.0, 200.0, 22.0);
+
+        Future<void> pump100() async {
+          for (var i = 0; i < 6; i++) {
+            await tester.pump(_frame);
+          }
+          await tester.pump(const Duration(milliseconds: 4));
+        }
+
+        /// T14's board with `n` at row 3, column 6: `d`'s de-laning
+        /// preview settled, then cancelled, 100 ms into its close.
+        Future<(BoardController<String, _Item>, RenderBoardViewport<String>)>
+        cancelled({bool enter = false}) async {
+          final controller = _contentLaned(
+            tester,
+            style: BoardAnimationStyle(
+              itemSlide: _ms200,
+              trackResize: _ms200,
+              itemEnterExit: enter ? _ms200 : _zero,
+            ),
+          );
+          controller.addItem(
+            const _Item("d"),
+            const BoardSpan(rowStart: 0, colStart: 0, colSpan: 5),
+          );
+          controller.addItem(
+            const _Item("n"),
+            const BoardSpan(rowStart: 3, colStart: 6),
+          );
+          final viewport = await _mount(tester, controller, cellHeight: _twoPx);
+          controller.previewMakeRoomGap(draggedKey: "d", prospective: deLane);
+          await tester.pumpAndSettle(_frame);
+          // Setup sanity: the vacate settled.
+          expect(_rowHeight(viewport, 0), 2.0);
+          controller.releaseMakeRoomPreview();
+          if (enter) {
+            controller.addItem(
+              const _Item("e"),
+              const BoardSpan(rowStart: 0, colStart: 6),
+            );
+          }
+          await tester.pump();
+          await pump100();
+          // Setup sanity: row 0 half way back, or held higher by the
+          // entering item's ramp.
+          expect(_rowHeight(viewport, 0), enter ? 13.0 : 11.0);
+          return (controller, viewport);
+        }
+
+        /// A lifted drag of `n` to [row], committed in the frame it moved.
+        void commitMove(
+          BoardController<String, _Item> controller,
+          RenderBoardViewport<String> viewport,
+          int row,
+        ) {
+          final drag = _drag(tester, controller);
+          final lift = viewport.paintedRectOfItem("n")!.center;
+          expect(
+            drag.startDrag(
+              key: "n",
+              renderPort: viewport,
+              pointerGlobal: _global(tester, lift),
+            ),
+            isTrue,
+          );
+          drag.updateDrag(
+            _global(
+              tester,
+              Offset(lift.dx, viewport.rectOfCell(row, 6)!.center.dy),
+            ),
+          );
+          // Setup sanity: the move resolves the row it was taken to.
+          expect(drag.currentTarget?.span.rowStart, row);
+          drag.endDrag(cancel: false);
+        }
+
+        {
+          // A commit of another item mid-close.
+          final (controller, viewport) = await cancelled();
+          final row0 = _rowHeight(viewport, 0);
+          final before = viewport.paintedRectOfItem("d")!;
+          commitMove(controller, viewport, 4);
+          await tester.pump();
+          // TARGET a: the close continues, neither row 0 nor `d` steps.
+          expect(_rowHeight(viewport, 0), moreOrLessEquals(row0, epsilon: 0.5));
+          _expectRect(viewport.paintedRectOfItem("d"), before, epsilon: 0.5);
+          await tester.pumpAndSettle(_frame);
+          expect(_rowHeight(viewport, 0), 22.0);
+          _expectRect(viewport.paintedRectOfItem("d"), deRest);
+          await tester.pumpWidget(const SizedBox.shrink());
+        }
+        {
+          // A leading-edge resize's far edge across another's commit.
+          final controller = _uniform(
+            tester,
+            style: const BoardAnimationStyle(
+              makeRoom: _ms200,
+              itemSlide: _ms200,
+              itemEnterExit: _zero,
+            ),
+          );
+          controller.addItem(
+            const _Item("m"),
+            const BoardSpan(rowStart: 2, colStart: 1, rowSpan: 2),
+          );
+          controller.addItem(
+            const _Item("n"),
+            const BoardSpan(rowStart: 0, colStart: 5),
+          );
+          final viewport = await _mount(tester, controller);
+          controller.previewMakeRoomGap(
+            draggedKey: "m",
+            prospective: const BoardSpan(rowStart: 3, colStart: 1),
+          );
+          await tester.pumpAndSettle(_frame);
+          controller.releaseMakeRoomPreview();
+          await tester.pump();
+          await pump100();
+          // Setup sanity: half way through the close.
+          _expectRect(
+            viewport.paintedRectOfItem("m"),
+            const Rect.fromLTRB(40.0, 125.0, 80.0, 200.0),
+          );
+          final drag = _drag(
+            tester,
+            controller,
+            primaryResizeEdges: BoardResizeEdges.trailing,
+          );
+          expect(
+            drag.startDrag(
+              key: "n",
+              renderPort: viewport,
+              pointerGlobal: _global(tester, const Offset(220.0, 45.0)),
+              edge: BoardResizeEdges.trailing,
+              axis: Axis.vertical,
+            ),
+            isTrue,
+          );
+          drag.updateDrag(_global(tester, const Offset(220.0, 95.0)));
+          // Setup sanity: rows [0, 2).
+          _expectSpan(
+            drag.currentTarget?.span,
+            rowStart: 0.0,
+            rowEnd: 2.0,
+            colStart: 5.0,
+            colEnd: 6.0,
+          );
+          drag.endDrag(cancel: false);
+          var frames = 0;
+          await tester.pump();
+          do {
+            // TARGET b: `m`'s far edge holds through the commit and the
+            // rest of its close.
+            expect(
+              viewport.paintedRectOfItem("m")!.bottom,
+              moreOrLessEquals(200.0, epsilon: 0.01),
+            );
+            await tester.pump(_frame);
+            frames += 1;
+          } while (tester.binding.hasScheduledFrame && frames < 60);
+          _expectRect(
+            viewport.paintedRectOfItem("m"),
+            const Rect.fromLTRB(40.0, 100.0, 80.0, 200.0),
+          );
+          await tester.pumpWidget(const SizedBox.shrink());
+        }
+        {
+          // The same commit while an entering item keeps row 0 latched.
+          final (controller, viewport) = await cancelled(enter: true);
+          final row0 = _rowHeight(viewport, 0);
+          commitMove(controller, viewport, 4);
+          await tester.pump();
+          // TARGET c: row 0 does not step.
+          expect(_rowHeight(viewport, 0), moreOrLessEquals(row0, epsilon: 0.5));
+          await tester.pumpAndSettle(_frame);
+          _expectRect(viewport.paintedRectOfItem("d"), deRest);
+          await tester.pumpWidget(const SizedBox.shrink());
+        }
+        {
+          // A commit into row 0 beside `d`.
+          final (controller, viewport) = await cancelled();
+          commitMove(controller, viewport, 0);
+          await tester.pump();
+          // TARGET d: `n`'s band lands in row 0 at once, the surviving
+          // vacate keeping the row latched.
+          expect(_rowHeight(viewport, 0), 22.0);
+          await tester.pumpAndSettle(_frame);
+          _expectRect(viewport.paintedRectOfItem("d"), deRest);
+          _expectRect(
+            viewport.paintedRectOfItem("n"),
+            const Rect.fromLTRB(240.0, 4.0, 280.0, 22.0),
+          );
+        }
+      },
+    );
   });
 }
