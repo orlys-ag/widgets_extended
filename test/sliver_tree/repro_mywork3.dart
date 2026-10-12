@@ -179,6 +179,7 @@ void main() {
       // ignore: avoid_print
       print("MID (render):");
       mid.forEach((k, v) {
+        // ignore: avoid_print
         print(
           "  $k  offset=${v.offset.toStringAsFixed(2)} "
           "extent=${v.visibleExtent.toStringAsFixed(2)} "
@@ -204,6 +205,7 @@ void main() {
       // ignore: avoid_print
       print("POST (render):");
       post.forEach((k, v) {
+        // ignore: avoid_print
         print(
           "  $k  offset=${v.offset.toStringAsFixed(2)} "
           "extent=${v.visibleExtent.toStringAsFixed(2)} "
@@ -279,6 +281,7 @@ void main() {
       // ignore: avoid_print
       print("MID collapsed (render):");
       mid.forEach((k, v) {
+        // ignore: avoid_print
         print(
           "  $k  offset=${v.offset.toStringAsFixed(2)} "
           "extent=${v.visibleExtent.toStringAsFixed(2)}",
@@ -300,6 +303,7 @@ void main() {
       // ignore: avoid_print
       print("POST collapsed (render):");
       post.forEach((k, v) {
+        // ignore: avoid_print
         print(
           "  $k  offset=${v.offset.toStringAsFixed(2)} "
           "extent=${v.visibleExtent.toStringAsFixed(2)}",
@@ -329,6 +333,7 @@ void main() {
       // ignore: avoid_print
       print("DONE collapsed (render):");
       done.forEach((k, v) {
+        // ignore: avoid_print
         print(
           "  $k  offset=${v.offset.toStringAsFixed(2)} "
           "extent=${v.visibleExtent.toStringAsFixed(2)}",

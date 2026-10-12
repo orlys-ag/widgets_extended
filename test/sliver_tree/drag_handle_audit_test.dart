@@ -16,7 +16,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 /// A row whose `State` records its own creation, so a re-inflation is
 /// observable rather than inferred.
 class _Fragile extends StatefulWidget {
-  const _Fragile({required this.id, required this.built, super.key});
+  const _Fragile({required this.id, required this.built});
 
   final String id;
   final List<String> built;

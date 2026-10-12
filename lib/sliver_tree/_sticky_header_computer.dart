@@ -39,9 +39,8 @@ typedef FindFirstVisibleIndex = int Function(double scrollOffset);
 class StickyHeaderComputer<TKey, TData> {
   StickyHeaderComputer({
     required TreeController<TKey, TData> controller,
-    int maxStickyDepth = 0,
-  }) : _controller = controller,
-       _maxStickyDepth = maxStickyDepth;
+    this.maxStickyDepth = 0,
+  }) : _controller = controller;
 
   TreeController<TKey, TData> _controller;
 
@@ -55,14 +54,9 @@ class StickyHeaderComputer<TKey, TData> {
     _controller = value;
   }
 
-  int _maxStickyDepth;
-
   /// How many ancestor levels may pin at once. Zero disables sticky
   /// headers entirely, and is the candidate probe's first early-out.
-  int get maxStickyDepth => _maxStickyDepth;
-  set maxStickyDepth(int value) {
-    _maxStickyDepth = value;
-  }
+  int maxStickyDepth;
 
   // ────────────────────────────────────────────────────────────────────────
   // PER-FRAME LAYOUT STATE
@@ -94,7 +88,7 @@ class StickyHeaderComputer<TKey, TData> {
   ///
   /// Backed by an [Int32List] with explicit length tracking
   /// ([_writtenStickyNidsLen]) so per-frame appends don't box ints.
-  /// Capacity is bounded by [_maxStickyDepth] in practice.
+  /// Capacity is bounded by [maxStickyDepth] in practice.
   Int32List _writtenStickyNids = Int32List(8);
   int _writtenStickyNidsLen = 0;
 
@@ -336,12 +330,12 @@ class StickyHeaderComputer<TKey, TData> {
     onCandidate,
     double Function(int visibleIndex)? freshOffsetAt,
   }) {
-    if (_maxStickyDepth <= 0 || visibleNodes.isEmpty) return;
+    if (maxStickyDepth <= 0 || visibleNodes.isEmpty) return;
 
     double stackTop = math.max(0.0, overlap);
     TKey? parentStickyId;
 
-    for (int targetDepth = 0; targetDepth < _maxStickyDepth; targetDepth++) {
+    for (int targetDepth = 0; targetDepth < maxStickyDepth; targetDepth++) {
       final probeScrollY = scrollOffset + stackTop;
       final probeIndex = findFirstVisibleIndex(probeScrollY);
       if (probeIndex >= visibleNodes.length) break;

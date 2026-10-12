@@ -114,6 +114,7 @@ void main() {
       // ignore: avoid_print
       print("POST (no intervening pump):");
       post.forEach((k, v) {
+        // ignore: avoid_print
         print(
           "  $k  offset=${v.offset.toStringAsFixed(2)} "
           "extent=${v.visibleExtent.toStringAsFixed(2)}",

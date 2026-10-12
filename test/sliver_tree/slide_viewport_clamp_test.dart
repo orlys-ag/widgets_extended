@@ -24,7 +24,6 @@ import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
 const _kRowHeight = 50.0;
 const _kViewportHeight = 500.0;
-const _kOverhang = _kViewportHeight * 0.1; // 50 px
 const _kSlideDuration = Duration(milliseconds: 400);
 
 /// Stages the slide baseline on the rendered tree, runs [mutation], and
@@ -233,7 +232,6 @@ void main() {
 
       // Reorder r25 to position 27 (both off-screen below).
       // Both prior and new structural are below viewport.
-      final newOrder = controller.visibleNodes.cast<String>().toList();
       // Use raw row order — reorderRoots wants the new top-level order.
       final allKeys = [for (var i = 0; i < 30; i++) "r$i"];
       // Move r25 (currently index 25) to index 27.

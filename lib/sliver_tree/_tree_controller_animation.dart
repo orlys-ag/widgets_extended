@@ -202,11 +202,10 @@ extension _TreeControllerAnimationOps<TKey, TData>
     }
   }
 
-  /// Called when the bulk animation completes or is dismissed. The
-  /// [_unusedStatus] parameter matches the BulkAnimator's onStatusChanged
-  /// callback contract; the body reads the status from the controller
-  /// directly.
-  void _onBulkAnimationComplete([AnimationStatus? _unusedStatus]) {
+  /// Called when the bulk animation completes or is dismissed. The ignored
+  /// parameter matches the BulkAnimator's onStatusChanged callback contract;
+  /// the body reads the status from the controller directly.
+  void _onBulkAnimationComplete([AnimationStatus? _]) {
     if (_activeBulkGroup == null) {
       return;
     }

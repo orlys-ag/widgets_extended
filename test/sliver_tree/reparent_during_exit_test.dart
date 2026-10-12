@@ -15,7 +15,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
-import 'package:widgets_extended/sliver_tree/types.dart';
 
 Widget _harness(
   TreeController<String, String> controller, {

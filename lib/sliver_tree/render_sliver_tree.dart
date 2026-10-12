@@ -4357,7 +4357,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       role: PhantomClipRole.entry,
     );
 
-    final paintChild = (PaintingContext ctx, Offset off) {
+    void paintChild(PaintingContext ctx, Offset off) {
       if (controller.isAnimatingNid(nid) && nodeExtent < child.size.height) {
         final yOffset = -(child.size.height - nodeExtent);
         ctx.pushClipRect(
@@ -4371,7 +4371,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       } else {
         ctx.paintChild(child, off);
       }
-    };
+    }
 
     if (phantomAnchor != null) {
       // Push a clip rect covering the visible region OUTSIDE the anchor's

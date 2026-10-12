@@ -38,6 +38,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 
@@ -56,7 +57,7 @@ Widget _harness(
         height: height,
         child: CustomScrollView(
           controller: scrollController,
-          cacheExtent: cacheExtent,
+          scrollCacheExtent: ScrollCacheExtent.pixels(cacheExtent),
           slivers: <Widget>[
             SliverTree<String, int>(
               controller: controller,

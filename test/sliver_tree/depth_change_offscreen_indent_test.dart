@@ -35,7 +35,7 @@ Widget _harness(
         height: height,
         child: CustomScrollView(
           controller: scrollController,
-          cacheExtent: 0.0,
+          scrollCacheExtent: const ScrollCacheExtent.pixels(0.0),
           slivers: <Widget>[
             SliverTree<String, int>(
               controller: controller,

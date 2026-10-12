@@ -223,6 +223,7 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   }
 
   @override
+  // ignore: unnecessary_overrides
   void performRebuild() {
     super.performRebuild();
     // Deliberately queues NOTHING. Two causes mark this element dirty:

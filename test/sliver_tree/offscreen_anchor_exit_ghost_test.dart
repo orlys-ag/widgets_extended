@@ -408,7 +408,7 @@ void main() {
       if (prevDistanceToEdge != null) {
         expect(
           distance,
-          lessThanOrEqualTo(prevDistanceToEdge! + 0.5),
+          lessThanOrEqualTo(prevDistanceToEdge + 0.5),
           reason:
               "Frame $i: ghost must converge toward the bottom edge "
               "(distance $distance must not grow past previous "

@@ -113,6 +113,7 @@ void main() {
     // ignore: avoid_print
     print("MID:");
     mid.forEach(
+      // ignore: avoid_print
       (k, v) => print(
         "  $k  offset=${v.offset.toStringAsFixed(2)} extent=${v.visibleExtent.toStringAsFixed(2)}",
       ),
@@ -126,6 +127,7 @@ void main() {
     // ignore: avoid_print
     print("POST:");
     post.forEach(
+      // ignore: avoid_print
       (k, v) => print(
         "  $k  offset=${v.offset.toStringAsFixed(2)} extent=${v.visibleExtent.toStringAsFixed(2)}",
       ),
@@ -161,6 +163,7 @@ void main() {
     // ignore: avoid_print
     print("DONE:");
     done.forEach(
+      // ignore: avoid_print
       (k, v) => print(
         "  $k  offset=${v.offset.toStringAsFixed(2)} extent=${v.visibleExtent.toStringAsFixed(2)}",
       ),

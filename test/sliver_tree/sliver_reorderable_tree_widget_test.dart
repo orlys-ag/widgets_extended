@@ -1,9 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/sliver_tree/render_sliver_tree.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
-import 'package:widgets_extended/sliver_tree/sliver_tree_widget.dart';
 
 class _Harness {
   _Harness({required this.tree, required this.reorder});
