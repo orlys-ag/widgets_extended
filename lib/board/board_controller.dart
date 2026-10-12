@@ -22,6 +22,8 @@ import '_board_scroll_orchestrator.dart';
 import '_board_axis.dart';
 import '_board_span.dart';
 import '_board_store.dart';
+import '_make_room_engine.dart'
+    show MakeRoomResizeGeometry, MakeRoomResizeTerm;
 import '_overlap_lanes.dart';
 import '_span_index.dart';
 import 'board_animation_style.dart';
@@ -158,6 +160,8 @@ class BoardController<TKey, TItem> {
       prospectiveExtentOf: _prospectiveExtentDelta,
       laneOfId: laneOfId,
       laneCountOfId: laneCountOfId,
+      resizeGeometryOf: _resizeGeometryOf,
+      resizeTermOf: _resizeTermOf,
       captureSettleRelanes: _captureSettleRelanes,
     );
     _orchestrator = BoardScrollOrchestrator<TKey>(
@@ -223,6 +227,13 @@ class BoardController<TKey, TItem> {
   /// mounted on it or its render object is detached. Written only by
   /// [attachRenderPort], [detachRenderPort] and [dispose].
   BoardRenderPort<TKey>? _renderPort;
+
+  /// The window floors the render's last geometry refresh passed, per
+  /// axis, from which a resize session's geometry targets measure the
+  /// trackResize shifts, as the render's per-item geometry does. Written
+  /// only by `refreshResizeGeometry`; track space.
+  int _resizeShiftFloorRow = 0;
+  int _resizeShiftFloorCol = 0;
 
   bool _disposed = false;
 
@@ -1486,9 +1497,18 @@ class BoardController<TKey, TItem> {
     );
   }
 
-  ({double lead, double extent}) _settledGeometryOn(Axis axis, int id) {
+  /// [id]'s geometry on [axis] under its stored span and lanes. A non-null
+  /// [shiftFloor] has each edge take the trackResize shift at its own
+  /// track from that floor, a laned item's lead alone, as the render's
+  /// per-item geometry does; null takes none.
+  ({double lead, double extent}) _settledGeometryOn(
+    Axis axis,
+    int id, {
+    int? shiftFloor,
+  }) {
     final config = axis == Axis.vertical ? _rows : _columns;
     final start = _store.startTrackOf(id, axis);
+    final leadShift = _shiftOf(axis, shiftFloor, start);
     if (_lanes.laneAxis == axis && _lanes.isLaned(id)) {
       return config.itemGeometryOn(
         start: start,
@@ -1496,11 +1516,15 @@ class BoardController<TKey, TItem> {
         lane: laneOfId(id),
         laneCount: laneCountOfId(id),
         laneSpan: laneSpanOfId(id),
+        leadShift: leadShift,
       );
     }
+    final end = _store.endTrackOf(id, axis);
     return config.itemGeometryOn(
       start: start,
-      end: _store.endTrackOf(id, axis),
+      end: end,
+      leadShift: leadShift,
+      trailShift: _shiftOf(axis, shiftFloor, end),
     );
   }
 
@@ -1508,14 +1532,16 @@ class BoardController<TKey, TItem> {
   /// run's [assignment] on [axis]: laned when [axis] is the lane axis and
   /// the dry run laned it, which is exactly when the resolver's own
   /// criterion holds for the prospective span; its track is the
-  /// prospective one.
+  /// prospective one. [shiftFloor] as for [_settledGeometryOn].
   ({double lead, double extent}) _prospectiveGeometryOn(
     Axis axis,
     BoardSpan prospective,
-    ({int lane, int laneCount, int laneSpan})? assignment,
-  ) {
+    ({int lane, int laneCount, int laneSpan})? assignment, {
+    int? shiftFloor,
+  }) {
     final config = axis == Axis.vertical ? _rows : _columns;
     final start = prospective.startTrackOn(axis);
+    final leadShift = _shiftOf(axis, shiftFloor, start);
     if (_lanes.laneAxis == axis && assignment != null) {
       return config.itemGeometryOn(
         start: start,
@@ -1523,12 +1549,129 @@ class BoardController<TKey, TItem> {
         lane: assignment.lane,
         laneCount: assignment.laneCount,
         laneSpan: assignment.laneSpan,
+        leadShift: leadShift,
       );
     }
+    final end = prospective.endTrackOn(axis);
     return config.itemGeometryOn(
       start: start,
-      end: prospective.endTrackOn(axis),
+      end: end,
+      leadShift: leadShift,
+      trailShift: _shiftOf(axis, shiftFloor, end),
     );
+  }
+
+  /// The trackResize shift layout gives the track of the track-space
+  /// [edge] on [axis], measured from [floor]; 0.0 for a null floor.
+  double _shiftOf(Axis axis, int? floor, double edge) {
+    if (floor == null) {
+      return 0.0;
+    }
+    return _anim.trackResize.offsetShiftBetween(
+      axis,
+      floor,
+      trackIndexOf(edge),
+    );
+  }
+
+  /// A resize session's GEOMETRY targets for its item [id], which the
+  /// make-room engine asks at the install and at every layout's geometry
+  /// refresh: per axis, the rule's lead and extent under [prospective]
+  /// and the dry run's [assignment], minus the ones under the stored span
+  /// and lanes, both over the lattice as it paints. While a trackResize
+  /// runs and the item's stored pin on the axis is none, every edge takes
+  /// the shift at its track from the floor the last geometry refresh
+  /// passed, as the render's per-item geometry takes it at the stored
+  /// edges; otherwise none, so the targets are over the settled geometry.
+  /// Each difference has its floating-point residue zeroed as an extent's
+  /// is, a lead's being a difference of two offsets too.
+  MakeRoomResizeGeometry _resizeGeometryOf(
+    int id,
+    BoardSpan prospective,
+    ({int lane, int laneCount, int laneSpan})? assignment,
+  ) {
+    final horizontal = _resizeGeometryOn(
+      Axis.horizontal,
+      id,
+      prospective,
+      assignment,
+    );
+    final vertical = _resizeGeometryOn(
+      Axis.vertical,
+      id,
+      prospective,
+      assignment,
+    );
+    return (
+      lead: Offset(horizontal.lead, vertical.lead),
+      extent: Offset(horizontal.extent, vertical.extent),
+    );
+  }
+
+  ({double lead, double extent}) _resizeGeometryOn(
+    Axis axis,
+    int id,
+    BoardSpan prospective,
+    ({int lane, int laneCount, int laneSpan})? assignment,
+  ) {
+    final shiftFloor =
+        _anim.trackResize.hasActive && pinOfId(id, axis) == BoardPin.none
+        ? (axis == Axis.vertical
+              ? _resizeShiftFloorRow
+              : _resizeShiftFloorCol)
+        : null;
+    final now = _settledGeometryOn(axis, id, shiftFloor: shiftFloor);
+    final next = _prospectiveGeometryOn(
+      axis,
+      prospective,
+      assignment,
+      shiftFloor: shiftFloor,
+    );
+    return (
+      lead: _extentDeltaOn(next.lead, now.lead),
+      extent: _extentDeltaOn(next.extent, now.extent),
+    );
+  }
+
+  /// A resize session's TERM targets for its item [id], read from lanes
+  /// alone: on a content-sized lane axis, for an item laned in its stored
+  /// track, the BAND its prospective lanes give it there minus the band
+  /// its stored lanes give it while [prospective] stays laned in that
+  /// track, and a VACATE once it does not. An unlaned item holds neither,
+  /// being no member of any track's term, and neither does a fixed lane
+  /// axis, whose tracks the term never sizes.
+  MakeRoomResizeTerm _resizeTermOf(
+    int id,
+    BoardSpan prospective,
+    ({int lane, int laneCount, int laneSpan})? assignment,
+  ) {
+    final axis = _lanes.laneAxis;
+    if (axis == null || !_lanes.isLaned(id)) {
+      return (band: 0.0, vacates: false);
+    }
+    final config = axis == Axis.vertical ? _rows : _columns;
+    if (!config.axis.acceptsMeasurements) {
+      return (band: 0.0, vacates: false);
+    }
+    final track = _store.startIndexOf(id, axis);
+    if (assignment == null ||
+        trackIndexOf(prospective.startTrackOn(axis)) != track) {
+      return (band: 0.0, vacates: true);
+    }
+    final band =
+        config.laneBandEdgeOn(
+          track,
+          assignment.lane,
+          assignment.laneCount,
+          assignment.laneSpan.toDouble(),
+        ) -
+        config.laneBandEdgeOn(
+          track,
+          laneOfId(id),
+          laneCountOfId(id),
+          laneSpanOfId(id).toDouble(),
+        );
+    return (band: band, vacates: false);
   }
 
   /// The EXTENT the geometry rule would give [id] under [prospective]

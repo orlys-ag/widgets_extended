@@ -384,7 +384,9 @@ extension BoardControllerInternals<TKey, TItem>
   /// declares the correction an intra-track shift on the lane axis,
   /// which a committed resize's is when the item is laned in one
   /// lane-axis track before and after the report, and a committed move's
-  /// never is (it runs from the proxy).
+  /// never is (it runs from the proxy). [band] declares, beside it, that
+  /// [extentDelta] is a change of the item's lane band inside that
+  /// track, which the sizing term then reads as well.
   void animateDropSettle(
     TKey key,
     Offset delta, {
@@ -392,6 +394,7 @@ extension BoardControllerInternals<TKey, TItem>
     required Curve curve,
     Offset extentDelta = Offset.zero,
     bool relane = false,
+    bool band = false,
   }) {
     _assertNotDisposed();
     final id = _liveIdOrThrow(key, "animateDropSettle");
@@ -403,6 +406,7 @@ extension BoardControllerInternals<TKey, TItem>
       curve: curve,
       extentDelta: extentDelta,
       relane: relane,
+      band: band,
     );
   }
 
@@ -506,6 +510,31 @@ extension BoardControllerInternals<TKey, TItem>
       }
     }
     return keys;
+  }
+
+  /// Internal-use channel for the render object; not part of the
+  /// supported surface. Re-derives a standing resize preview's BAND and
+  /// VACATE from its source; layout calls it right after its lane flush,
+  /// so the sizing term reads them against the lanes as they now
+  /// resolve. Forwards and decides nothing; notifies nothing.
+  void refreshResizeTerm() {
+    _anim.makeRoom.refreshResizeTerm();
+  }
+
+  /// Internal-use channel for the render object; not part of the
+  /// supported surface. Re-derives a standing resize preview's LEAD and
+  /// EXTENT from its source over the lattice as it paints; layout calls
+  /// it after its pass loop, which may have moved tracks, and before
+  /// positioning. Keeps [rowShiftFloor] and [colShiftFloor], the window
+  /// floors that layout measured trackResize shifts from, for the
+  /// geometry targets, then forwards; notifies nothing.
+  void refreshResizeGeometry({
+    required int rowShiftFloor,
+    required int colShiftFloor,
+  }) {
+    _resizeShiftFloorRow = rowShiftFloor;
+    _resizeShiftFloorCol = colShiftFloor;
+    _anim.makeRoom.refreshResizeGeometry();
   }
 
   /// Debug-only: the id whose prospective make-room occupancy the slots

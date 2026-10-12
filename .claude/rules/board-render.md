@@ -131,12 +131,23 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   On a FIXED lane axis the router never CLASSIFIES a gap or a relane as
   layout-driving (a gap that displaces a neighbour still lays out through
   the admitted-bound arm). The sizing step's cluster term reads each member's
-  LANE BAND: the lane origin plus the two intra-track LEAD numbers paint
-  adds to it, its held make-room delta and its relane slide's lead, plus
-  the member's STORED span scaled by its ramp, plus the engine's slots.
-  It reads no in-flight EXTENT, so a track's edge follows what paints AT
-  REST and can lag it while an extent animates on a different clock; a
-  cross-track slide carries no relane mark and never reaches the term. It
+  LANE BAND through the item-geometry rule's `laneBandEdgeOn`: its stored
+  lanes with its STORED span scaled by its ramp, plus two intra-track
+  numbers, the make-room preview's term delta (a held gap offset, or a
+  resized item's held band) and its relane slide's lead plus a
+  band-marked record's extent, plus the engine's slots through the same
+  rule; a resized member whose preview vacates the track contributes its
+  whole term, padding included, scaled by the share it has not yet
+  vacated, and counts as a make-room contribution without marking the
+  track seen. It reads no in-flight EXTENT but a band-marked record's,
+  so a track's edge follows what paints AT REST and can lag it while an
+  extent animates on a different clock; a cross-track slide carries no
+  relane mark and never reaches the term. Each layout re-derives a
+  standing resize preview's targets at two points: the term's right
+  after the lane flush, so a re-lane of its bucket shows in the same
+  frame, and the geometry's after the pass loop and before positioning,
+  over the tracks as that layout left them, handing the controller the
+  shift floors the settling pass wrote. The term
   records per pass under two latch sets (ramp, make-room contribution),
   with no hand-in for a trackResize in flight (its residual rides under
   the recorded term), and at the hand-off continues the track from where

@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/board/_board_animation_coordinator.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
@@ -140,6 +141,59 @@ double _tenPx(int row) {
 
 double _twoPx(int row) {
   return 2.0;
+}
+
+double _twentyPx(int row) {
+  return 20.0;
+}
+
+/// The cost pin's board: content-sized rows of 18 px lanes under a 4 px
+/// padding and 20 px cells; `a` and `b` laned in row 1 on two lanes, `c`
+/// unlaned on rows [2, 4), `f` unlaned and fractional, `g` laned and
+/// fractional.
+Future<(BoardController<String, _Item>, RenderBoardViewport<String>)>
+_costBoard(WidgetTester tester) async {
+  final controller = _controller(
+    tester,
+    rows: BoardAxisConfig(
+      axis: LazyContentAxis(60, 30.0),
+      laneExtent: 18.0,
+      lanePadding: 4.0,
+    ),
+  );
+  controller.addItem(
+    const _Item("a"),
+    const BoardSpan(rowStart: 1, colStart: 0, colSpan: 3),
+  );
+  controller.addItem(
+    const _Item("b"),
+    const BoardSpan(rowStart: 1, colStart: 1, colSpan: 3),
+  );
+  controller.addItem(
+    const _Item("c"),
+    const BoardSpan(rowStart: 2, colStart: 4, rowSpan: 2),
+  );
+  controller.addItem(
+    const _Item("f"),
+    const BoardSpan(
+      rowStart: 4,
+      colStart: 5,
+      rowFraction: 0.25,
+      rowSpanFraction: 0.5,
+    ),
+  );
+  controller.addItem(
+    const _Item("g"),
+    const BoardSpan(
+      rowStart: 6,
+      colStart: 0,
+      rowFraction: 0.25,
+      rowSpan: 0,
+      rowSpanFraction: 0.5,
+    ),
+  );
+  final viewport = await _mount(tester, controller, cellHeight: _twentyPx);
+  return (controller, viewport);
 }
 
 /// Mounts [controller] and settles it, unmounting before the controller's
@@ -345,7 +399,6 @@ void main() {
         );
         await run(const BoardSnap.free(), moveBy: 30.0, rowStart: 2.6);
       },
-      skip: true,
     );
 
     testWidgets(
@@ -386,7 +439,6 @@ void main() {
         _expectRect(painted, expected);
         _expectRect(committed, expected);
       },
-      skip: true,
     );
 
     testWidgets(
@@ -440,7 +492,6 @@ void main() {
         _expectRect(painted, expected);
         _expectRect(committed, expected);
       },
-      skip: true,
     );
 
     testWidgets(
@@ -455,9 +506,7 @@ void main() {
         final viewport = await _mount(
           tester,
           controller,
-          verticalDetails: const ScrollableDetails(
-            direction: AxisDirection.up,
-          ),
+          verticalDetails: const ScrollableDetails(direction: AxisDirection.up),
         );
         // Setup sanity: the reversed rows paint `m` at the same rect.
         _expectRect(
@@ -493,7 +542,6 @@ void main() {
         _expectRect(painted, expected);
         _expectRect(committed, expected);
       },
-      skip: true,
     );
 
     testWidgets(
@@ -551,51 +599,46 @@ void main() {
           );
         }
       },
-      skip: true,
     );
 
-    testWidgets(
-      "a resize that lanes an item into another track previews that "
-      "track's slice",
-      (tester) async {
-        final controller = _controller(
-          tester,
-          rows: BoardAxisConfig(
-            axis: ExplicitAxis(<double>[100.0, 200.0, 50.0, 50.0]),
-            laneExtent: 20.0,
-          ),
-          columns: BoardAxisConfig(axis: UniformAxis(4, 40.0)),
-        );
-        controller.addItem(
-          const _Item("m"),
-          const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 2),
-        );
-        final viewport = await _mount(
-          tester,
-          controller,
-          width: 160.0,
-          height: 400.0,
-        );
-        // Setup sanity: rows 0 and 1, unlaned.
-        _expectRect(
-          viewport.paintedRectOfItem("m"),
-          const Rect.fromLTRB(0.0, 0.0, 40.0, 300.0),
-        );
-        const prospective = BoardSpan(rowStart: 1, colStart: 0);
-        controller.previewMakeRoomGap(draggedKey: "m", prospective: prospective);
-        await tester.pump();
-        final painted = viewport.paintedRectOfItem("m");
-        controller.releaseMakeRoomPreview(duration: Duration.zero);
-        controller.resizeItem("m", prospective);
-        await tester.pump();
-        final committed = viewport.paintedRectOfItem("m");
-        const expected = Rect.fromLTRB(0.0, 100.0, 40.0, 300.0);
-        // TARGET: row 1's slice, at row 1.
-        _expectRect(painted, expected);
-        _expectRect(committed, expected);
-      },
-      skip: true,
-    );
+    testWidgets("a resize that lanes an item into another track previews that "
+        "track's slice", (tester) async {
+      final controller = _controller(
+        tester,
+        rows: BoardAxisConfig(
+          axis: ExplicitAxis(<double>[100.0, 200.0, 50.0, 50.0]),
+          laneExtent: 20.0,
+        ),
+        columns: BoardAxisConfig(axis: UniformAxis(4, 40.0)),
+      );
+      controller.addItem(
+        const _Item("m"),
+        const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 2),
+      );
+      final viewport = await _mount(
+        tester,
+        controller,
+        width: 160.0,
+        height: 400.0,
+      );
+      // Setup sanity: rows 0 and 1, unlaned.
+      _expectRect(
+        viewport.paintedRectOfItem("m"),
+        const Rect.fromLTRB(0.0, 0.0, 40.0, 300.0),
+      );
+      const prospective = BoardSpan(rowStart: 1, colStart: 0);
+      controller.previewMakeRoomGap(draggedKey: "m", prospective: prospective);
+      await tester.pump();
+      final painted = viewport.paintedRectOfItem("m");
+      controller.releaseMakeRoomPreview(duration: Duration.zero);
+      controller.resizeItem("m", prospective);
+      await tester.pump();
+      final committed = viewport.paintedRectOfItem("m");
+      const expected = Rect.fromLTRB(0.0, 100.0, 40.0, 300.0);
+      // TARGET: row 1's slice, at row 1.
+      _expectRect(painted, expected);
+      _expectRect(committed, expected);
+    });
 
     testWidgets(
       "a resize that lanes an item holds a slot in the track it joins",
@@ -610,11 +653,7 @@ void main() {
             const _Item("m"),
             const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 2, colSpan: 2),
           );
-          final viewport = await _mount(
-            tester,
-            controller,
-            cellHeight: _tenPx,
-          );
+          final viewport = await _mount(tester, controller, cellHeight: _tenPx);
           // Setup sanity: row 1 holds one lane, and `m` is unlaned.
           expect(_rowHeight(viewport, 1), 22.0);
           expect(controller.isLanedId(controller.idOfKey("m")), isFalse);
@@ -658,43 +697,41 @@ void main() {
       skip: true,
     );
 
-    testWidgets(
-      "a resize preview follows the track it vacates",
-      (tester) async {
-        final controller = _contentLaned(tester);
-        controller.addItem(
-          const _Item("a"),
-          const BoardSpan(rowStart: 0, colStart: 0, colSpan: 4),
-        );
-        controller.addItem(
-          const _Item("d"),
-          const BoardSpan(rowStart: 0, colStart: 0, colSpan: 5),
-        );
-        final viewport = await _mount(tester, controller, cellHeight: _tenPx);
-        // Setup sanity: both laned in row 0, which holds two lanes.
-        expect(_rowHeight(viewport, 0), 40.0);
-        const prospective = BoardSpan(
-          rowStart: 0,
-          colStart: 0,
-          rowSpan: 2,
-          colSpan: 5,
-        );
-        controller.previewMakeRoomGap(draggedKey: "d", prospective: prospective);
-        const expected = Rect.fromLTRB(0.0, 0.0, 200.0, 32.0);
-        for (var i = 0; i < 3; i++) {
-          await tester.pump();
-          // TARGET a: row 0 sheds `d`'s lane as the commit will.
-          expect(_rowHeight(viewport, 0), 22.0);
-          // TARGET b: `d` spans the two rows as they paint.
-          _expectRect(viewport.paintedRectOfItem("d"), expected);
-        }
-        controller.releaseMakeRoomPreview(duration: Duration.zero);
-        controller.resizeItem("d", prospective);
+    testWidgets("a resize preview follows the track it vacates", (
+      tester,
+    ) async {
+      final controller = _contentLaned(tester);
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 0, colStart: 0, colSpan: 4),
+      );
+      controller.addItem(
+        const _Item("d"),
+        const BoardSpan(rowStart: 0, colStart: 0, colSpan: 5),
+      );
+      final viewport = await _mount(tester, controller, cellHeight: _tenPx);
+      // Setup sanity: both laned in row 0, which holds two lanes.
+      expect(_rowHeight(viewport, 0), 40.0);
+      const prospective = BoardSpan(
+        rowStart: 0,
+        colStart: 0,
+        rowSpan: 2,
+        colSpan: 5,
+      );
+      controller.previewMakeRoomGap(draggedKey: "d", prospective: prospective);
+      const expected = Rect.fromLTRB(0.0, 0.0, 200.0, 32.0);
+      for (var i = 0; i < 3; i++) {
         await tester.pump();
+        // TARGET a: row 0 sheds `d`'s lane as the commit will.
+        expect(_rowHeight(viewport, 0), 22.0);
+        // TARGET b: `d` spans the two rows as they paint.
         _expectRect(viewport.paintedRectOfItem("d"), expected);
-      },
-      skip: true,
-    );
+      }
+      controller.releaseMakeRoomPreview(duration: Duration.zero);
+      controller.resizeItem("d", prospective);
+      await tester.pump();
+      _expectRect(viewport.paintedRectOfItem("d"), expected);
+    });
 
     testWidgets(
       "a leading-edge resize of a pinned item previews its committed rect",
@@ -745,7 +782,6 @@ void main() {
         _expectRect(committed, expected);
         expect(controller.pinOfId(id, Axis.vertical), BoardPin.leading);
       },
-      skip: true,
     );
 
     testWidgets(
@@ -756,7 +792,10 @@ void main() {
         {
           final controller = _uniform(
             tester,
-            style: const BoardAnimationStyle(itemSlide: _ms300, makeRoom: _zero),
+            style: const BoardAnimationStyle(
+              itemSlide: _ms300,
+              makeRoom: _zero,
+            ),
           );
           controller.addItem(
             const _Item("m"),
@@ -812,7 +851,6 @@ void main() {
           expect(controller.anim.hasMakeRoomMotion, isFalse);
         }
       },
-      skip: true,
     );
 
     testWidgets(
@@ -939,7 +977,7 @@ void main() {
           colStart: 0.0,
           colEnd: 2.0,
         );
-        for (var elapsed = 0; elapsed < 100; elapsed += 16) {
+        for (var i = 0; i < 6; i++) {
           await tester.pump(_frame);
         }
         await tester.pump(const Duration(milliseconds: 4));
@@ -968,44 +1006,42 @@ void main() {
       },
     );
 
-    testWidgets(
-      "a resize slot above the view keeps the scroll anchor still",
-      (tester) async {
-        final controller = _contentLaned(tester, rowCount: 30);
-        controller.addItem(
-          const _Item("a"),
-          const BoardSpan(rowStart: 1, colStart: 0, colSpan: 4),
-        );
-        controller.addItem(
-          const _Item("m"),
-          const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 2, colSpan: 2),
-        );
-        final viewport = await _mount(
-          tester,
-          controller,
-          height: 100.0,
-          cellHeight: _tenPx,
-        );
-        controller.jumpToCell(10, 0);
-        await tester.pump();
-        // Setup sanity: row 1 is measured at one lane and lies above the
-        // view.
-        expect(_rowHeight(viewport, 1), 22.0);
-        expect(viewport.rectOfCell(1, 0)!.bottom, lessThan(0.0));
-        final row12 = viewport.rectOfCell(12, 0)!.top;
-        controller.previewMakeRoomGap(
-          draggedKey: "m",
-          prospective: const BoardSpan(rowStart: 1, colStart: 0, colSpan: 2),
-        );
-        await tester.pump();
-        await tester.pump();
-        // TARGET a: the slot grew row 1.
-        expect(_rowHeight(viewport, 1), 40.0);
-        // TARGET b: the anchor held still.
-        expect(viewport.rectOfCell(12, 0)!.top, row12);
-      },
-      skip: true,
-    );
+    testWidgets("a resize slot above the view keeps the scroll anchor still", (
+      tester,
+    ) async {
+      final controller = _contentLaned(tester, rowCount: 30);
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 1, colStart: 0, colSpan: 4),
+      );
+      controller.addItem(
+        const _Item("m"),
+        const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 2, colSpan: 2),
+      );
+      final viewport = await _mount(
+        tester,
+        controller,
+        height: 100.0,
+        cellHeight: _tenPx,
+      );
+      controller.jumpToCell(10, 0);
+      await tester.pump();
+      // Setup sanity: row 1 is measured at one lane and lies above the
+      // view.
+      expect(_rowHeight(viewport, 1), 22.0);
+      expect(viewport.rectOfCell(1, 0)!.bottom, lessThan(0.0));
+      final row12 = viewport.rectOfCell(12, 0)!.top;
+      controller.previewMakeRoomGap(
+        draggedKey: "m",
+        prospective: const BoardSpan(rowStart: 1, colStart: 0, colSpan: 2),
+      );
+      await tester.pump();
+      await tester.pump();
+      // TARGET a: the slot grew row 1.
+      expect(_rowHeight(viewport, 1), 40.0);
+      // TARGET b: the anchor held still.
+      expect(viewport.rectOfCell(12, 0)!.top, row12);
+    }, skip: true);
 
     testWidgets(
       "a resize that de-lanes its track's only laned item previews the "
@@ -1102,7 +1138,6 @@ void main() {
           }
         }
       },
-      skip: true,
     );
 
     testWidgets(
@@ -1161,7 +1196,7 @@ void main() {
           colStart: 3.0,
           colEnd: 6.0,
         );
-        for (var elapsed = 0; elapsed < 100; elapsed += 16) {
+        for (var i = 0; i < 6; i++) {
           await tester.pump(_frame);
         }
         await tester.pump(const Duration(milliseconds: 4));
@@ -1182,7 +1217,6 @@ void main() {
           const Rect.fromLTRB(120.0, 58.0, 240.0, 76.0),
         );
       },
-      skip: true,
     );
 
     testWidgets(
@@ -1310,7 +1344,6 @@ void main() {
           drag.endDrag(cancel: true);
         }
       },
-      skip: true,
     );
 
     testWidgets(
@@ -1489,7 +1522,6 @@ void main() {
           controller.releaseMakeRoomPreview(duration: Duration.zero);
         }
       },
-      skip: true,
     );
 
     testWidgets(
@@ -1546,7 +1578,6 @@ void main() {
           const Rect.fromLTRB(40.0, 50.0, 80.0, 220.0),
         );
       },
-      skip: true,
     );
   });
 
@@ -1554,52 +1585,7 @@ void main() {
     "the per-item geometry path reads the content axis the pinned number "
     "of times",
     (tester) async {
-      final controller = _controller(
-        tester,
-        rows: BoardAxisConfig(
-          axis: LazyContentAxis(60, 30.0),
-          laneExtent: 18.0,
-          lanePadding: 4.0,
-        ),
-      );
-      controller.addItem(
-        const _Item("a"),
-        const BoardSpan(rowStart: 1, colStart: 0, colSpan: 3),
-      );
-      controller.addItem(
-        const _Item("b"),
-        const BoardSpan(rowStart: 1, colStart: 1, colSpan: 3),
-      );
-      controller.addItem(
-        const _Item("c"),
-        const BoardSpan(rowStart: 2, colStart: 4, rowSpan: 2),
-      );
-      controller.addItem(
-        const _Item("f"),
-        const BoardSpan(
-          rowStart: 4,
-          colStart: 5,
-          rowFraction: 0.25,
-          rowSpanFraction: 0.5,
-        ),
-      );
-      controller.addItem(
-        const _Item("g"),
-        const BoardSpan(
-          rowStart: 6,
-          colStart: 0,
-          rowFraction: 0.25,
-          rowSpan: 0,
-          rowSpanFraction: 0.5,
-        ),
-      );
-      final viewport = await _mount(
-        tester,
-        controller,
-        cellHeight: (row) {
-          return 20.0;
-        },
-      );
+      final (controller, viewport) = await _costBoard(tester);
       final fenwick = (controller.rows.axis as LazyContentAxis).debugFenwick;
       // Setup sanity: `a`, `b` and `g` are laned, `c` and `f` are not.
       for (final key in <String>["a", "b", "g"]) {
@@ -1643,7 +1629,7 @@ void main() {
       await tester.pump();
       // Setup sanity: the move preview holds `a` a lane down.
       expect(
-        controller.anim.makeRoomDeltaOf(controller.idOfKey("a")),
+        controller.anim.makeRoomTermDeltaOf(controller.idOfKey("a")),
         const Offset(0.0, 18.0),
       );
       final third = await forcedLayout();
@@ -1686,15 +1672,372 @@ void main() {
       expect(viewport.debugLastCorrectionPassCount, greaterThanOrEqualTo(2));
       await release();
 
+      // The reads one geometry refresh of `c`'s preview makes: the rule at
+      // rows 2 and 4 (stored) and 2 and 5 (prospective), whose prefix
+      // sums touch as many nodes as each index has set bits, 1, 1, 1 and
+      // 2, the uniform columns none, and no shift with no trackResize.
+      const refresh = 5;
       // TARGET: each count is the one measured on the library before the
-      // resize hold existed.
+      // resize hold existed, a layout under a standing resize preview
+      // adding one refresh however many passes it takes.
       expect(first, 1772);
       expect(second, <String, int>{"a": 1, "c": 2, "f": 10, "g": 2});
       expect(third, 1781);
       expect(fourth, 2);
-      expect(fifth, 1869);
+      expect(fifth, 1869 + refresh);
       expect(sixth, 1);
-      expect(seventh, 4753);
+      expect(seventh, 4753 + refresh);
     },
   );
+
+  group("pins", () {
+    testWidgets(
+      "a resize that vacates a track above the view keeps the scroll anchor "
+      "still",
+      (tester) async {
+        final controller = _contentLaned(tester, rowCount: 30);
+        controller.addItem(
+          const _Item("d"),
+          const BoardSpan(rowStart: 1, colStart: 0, colSpan: 5),
+        );
+        final viewport = await _mount(
+          tester,
+          controller,
+          height: 100.0,
+          cellHeight: _tenPx,
+        );
+        controller.jumpToCell(10, 0);
+        await tester.pump();
+        // Setup sanity: row 1 holds `d`'s lane and lies above the view.
+        expect(_rowHeight(viewport, 1), 22.0);
+        expect(viewport.rectOfCell(1, 0)!.bottom, lessThan(0.0));
+        final row12 = viewport.rectOfCell(12, 0)!.top;
+        controller.previewMakeRoomGap(
+          draggedKey: "d",
+          prospective: const BoardSpan(
+            rowStart: 1,
+            colStart: 0,
+            rowSpan: 2,
+            colSpan: 5,
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        // TARGET a: the vacate shrank row 1 to its cells.
+        expect(_rowHeight(viewport, 1), 10.0);
+        // TARGET b: the anchor held still.
+        expect(viewport.rectOfCell(12, 0)!.top, row12);
+      },
+    );
+
+    testWidgets(
+      "a de-laning resize committed mid-ramp hands its track off with no "
+      "step",
+      (tester) async {
+        final controller = _contentLaned(
+          tester,
+          style: const BoardAnimationStyle(
+            itemSlide: _ms200,
+            trackResize: _ms200,
+            itemEnterExit: _zero,
+          ),
+        );
+        controller.addItem(
+          const _Item("d"),
+          const BoardSpan(rowStart: 1, colStart: 0, colSpan: 5),
+        );
+        final viewport = await _mount(
+          tester,
+          controller,
+          cellHeight: (row) {
+            return row == 0 ? 40.0 : 2.0;
+          },
+        );
+        // Setup sanity: row 1 holds `d`'s lane.
+        expect(_rowHeight(viewport, 1), 22.0);
+        _expectRect(
+          viewport.paintedRectOfItem("d"),
+          const Rect.fromLTRB(0.0, 44.0, 200.0, 62.0),
+        );
+        final drag = _drag(
+          tester,
+          controller,
+          primaryResizeEdges: BoardResizeEdges.leading,
+        );
+        await _resizeTo(
+          tester,
+          drag,
+          viewport,
+          key: "d",
+          edge: BoardResizeEdges.leading,
+          axis: Axis.vertical,
+          lift: const Offset(100.0, 49.0),
+          to: const Offset(100.0, 9.0),
+        );
+        // Setup sanity: rows [0, 2), which de-lanes `d`.
+        _expectSpan(
+          drag.currentTarget?.span,
+          rowStart: 0.0,
+          rowEnd: 2.0,
+          colStart: 0.0,
+          colEnd: 5.0,
+        );
+        for (var i = 0; i < 6; i++) {
+          await tester.pump(_frame);
+        }
+        await tester.pump(const Duration(milliseconds: 4));
+        // Setup sanity: half way, row 1 holds half of `d`'s term.
+        expect(_rowHeight(viewport, 1), moreOrLessEquals(11.0, epsilon: 1.0));
+        var row1 = _rowHeight(viewport, 1);
+        var rect = viewport.paintedRectOfItem("d")!;
+        drag.endDrag(cancel: false);
+        await tester.pump();
+        // TARGET a: the commit steps neither row 1 nor `d`.
+        expect(_rowHeight(viewport, 1), moreOrLessEquals(row1, epsilon: 0.5));
+        _expectRect(viewport.paintedRectOfItem("d"), rect, epsilon: 0.5);
+        row1 = _rowHeight(viewport, 1);
+        rect = viewport.paintedRectOfItem("d")!;
+        var frames = 0;
+        while (tester.binding.hasScheduledFrame && frames < 60) {
+          await tester.pump(_frame);
+          frames += 1;
+          // TARGET b: both continue from where they painted.
+          expect(
+            (_rowHeight(viewport, 1) - row1).abs(),
+            lessThanOrEqualTo(2.0),
+          );
+          final next = viewport.paintedRectOfItem("d")!;
+          expect((next.left - rect.left).abs(), lessThanOrEqualTo(4.0));
+          expect((next.top - rect.top).abs(), lessThanOrEqualTo(4.0));
+          expect((next.right - rect.right).abs(), lessThanOrEqualTo(4.0));
+          expect((next.bottom - rect.bottom).abs(), lessThanOrEqualTo(4.0));
+          row1 = _rowHeight(viewport, 1);
+          rect = next;
+        }
+        // TARGET c: they land where the commit puts them.
+        expect(_rowHeight(viewport, 1), 2.0);
+        _expectRect(
+          viewport.paintedRectOfItem("d"),
+          const Rect.fromLTRB(0.0, 0.0, 200.0, 42.0),
+        );
+      },
+    );
+
+    testWidgets("removing a resized item leaves its recycled id clean", (
+      tester,
+    ) async {
+      Future<void> run(
+        BoardAnimationStyle style, {
+        required bool closing,
+      }) async {
+        final controller = _contentLaned(tester, style: style);
+        controller.addItem(
+          const _Item("d"),
+          const BoardSpan(rowStart: 0, colStart: 0, colSpan: 5),
+        );
+        final viewport = await _mount(tester, controller, cellHeight: _twoPx);
+        final dId = controller.idOfKey("d");
+        controller.previewMakeRoomGap(
+          draggedKey: "d",
+          prospective: const BoardSpan(
+            rowStart: 0,
+            colStart: 0,
+            rowSpan: 2,
+            colSpan: 5,
+          ),
+        );
+        await tester.pumpAndSettle(_frame);
+        if (closing) {
+          controller.releaseMakeRoomPreview();
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 100));
+          // Setup sanity: the hold is closing.
+          expect(controller.makeRoomHeldKeys, <String>["d"]);
+          expect(controller.anim.hasMakeRoomMotion, isTrue);
+        } else {
+          // Setup sanity: the hold stands.
+          expect(controller.makeRoomHeldKeys, <String>["d"]);
+        }
+        controller.removeItem("d");
+        controller.addItem(
+          const _Item("e"),
+          const BoardSpan(rowStart: 0, colStart: 0, colSpan: 5),
+        );
+        // Setup sanity: `e` took `d`'s id.
+        expect(controller.idOfKey("e"), dId);
+        await tester.pump();
+        // TARGET: the recycled id holds nothing of `d`'s preview.
+        expect(controller.makeRoomHeldKeys, isEmpty);
+        expect(_rowHeight(viewport, 0), 22.0);
+        _expectRect(
+          viewport.paintedRectOfItem("e"),
+          const Rect.fromLTRB(0.0, 4.0, 200.0, 22.0),
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+
+      await run(BoardAnimationStyle.disabled, closing: false);
+      await run(
+        const BoardAnimationStyle(
+          makeRoom: _ms200,
+          itemEnterExit: _zero,
+          trackResize: _zero,
+        ),
+        closing: true,
+      );
+    });
+
+    testWidgets(
+      "a resize hold that moves only an item's lead widens the item window "
+      "by it",
+      (tester) async {
+        final controller = _controller(
+          tester,
+          rows: BoardAxisConfig(axis: UniformAxis(30, 50.0)),
+        );
+        controller.addItem(
+          const _Item("d"),
+          const BoardSpan(rowStart: 3, colStart: 1),
+        );
+        final viewport = await _mount(tester, controller);
+        controller.jumpToCell(18, 0);
+        await tester.pump();
+        // Setup sanity: `d`'s span lies outside the window, unbuilt.
+        expect(viewport.verticalOffset.pixels, 900.0);
+        expect(find.text("d"), findsNothing);
+        controller.previewMakeRoomGap(
+          draggedKey: "d",
+          prospective: const BoardSpan(rowStart: 20, colStart: 1),
+        );
+        await tester.pump();
+        // TARGET a: the bound carries the lead.
+        expect(controller.anim.composedOffsetBound, (dx: 0.0, dy: 850.0));
+        // TARGET b: `d` is obtained, and paints at its preview.
+        expect(find.text("d"), findsOneWidget);
+        _expectRect(
+          viewport.paintedRectOfItem("d"),
+          const Rect.fromLTRB(40.0, 100.0, 80.0, 150.0),
+        );
+      },
+    );
+
+    testWidgets(
+      "a resize preview's refreshes and readers make the computed reads",
+      (tester) async {
+        final (controller, viewport) = await _costBoard(tester);
+        final fenwick = (controller.rows.axis as LazyContentAxis).debugFenwick;
+        final coordinator =
+            controller.anim as BoardAnimationCoordinator<String>;
+        final shifts = coordinator.trackResize;
+
+        ({int fenwick, int shifts}) geometryReads() {
+          fenwick.debugOpCount = 0;
+          shifts.debugShiftCallCount = 0;
+          controller.refreshResizeGeometry(rowShiftFloor: 0, colShiftFloor: 0);
+          return (
+            fenwick: fenwick.debugOpCount,
+            shifts: shifts.debugShiftCallCount,
+          );
+        }
+
+        ({int fenwick, int shifts}) termReads() {
+          fenwick.debugOpCount = 0;
+          shifts.debugShiftCallCount = 0;
+          controller.refreshResizeTerm();
+          return (
+            fenwick: fenwick.debugOpCount,
+            shifts: shifts.debugShiftCallCount,
+          );
+        }
+
+        Future<void> release() async {
+          controller.releaseMakeRoomPreview(duration: Duration.zero);
+          await tester.pump();
+        }
+
+        Future<int> forcedLayoutHoldReads() async {
+          coordinator.makeRoom.debugResizeHoldReadCount = 0;
+          viewport.markNeedsLayout();
+          await tester.pump();
+          return coordinator.makeRoom.debugResizeHoldReadCount;
+        }
+
+        const previews = <String, BoardSpan>{
+          // Unlaned under both spans.
+          "c": BoardSpan(rowStart: 2, colStart: 4, rowSpan: 3),
+          // A vacate: laned in row 1, then over two rows.
+          "a": BoardSpan(rowStart: 1, colStart: 0, rowSpan: 2, colSpan: 3),
+          // A band: from lane 1 of 2 to lane 0 of 1 in row 1.
+          "b": BoardSpan(rowStart: 1, colStart: 3),
+        };
+        // The refresh arm: the rule at the stored and the prospective
+        // spans, whose prefix sums touch as many nodes as each index has
+        // set bits: `c` at rows 2 and 4, then 2 and 5; `a` laned at row
+        // 1, then at rows 1 and 3; `b` laned at row 1 twice. The term
+        // refresh reads lanes alone.
+        const geometry = <String, int>{"c": 5, "a": 4, "b": 2};
+        for (final entry in previews.entries) {
+          controller.previewMakeRoomGap(
+            draggedKey: entry.key,
+            prospective: entry.value,
+          );
+          await tester.pump();
+          // TARGET a: the computed reads, and no shift read with no
+          // trackResize in flight.
+          expect(geometryReads(), (fenwick: geometry[entry.key]!, shifts: 0));
+          expect(termReads(), (fenwick: 0, shifts: 0));
+          await release();
+        }
+
+        // The shift arm: a trackResize in flight under `c`'s preview.
+        controller.previewMakeRoomGap(
+          draggedKey: "c",
+          prospective: previews["c"]!,
+        );
+        await tester.pump();
+        controller.animationStyle = const BoardAnimationStyle(
+          trackResize: _ms200,
+          itemSlide: _zero,
+          itemEnterExit: _zero,
+        );
+        await tester.pumpWidget(
+          _board(
+            controller,
+            cellHeight: (row) {
+              return row == 0 ? 30.0 : 20.0;
+            },
+          ),
+        );
+        // Setup sanity: row 0 re-measured and animates its growth.
+        expect(controller.anim.hasActiveTrackResize, isTrue);
+        // TARGET b: a lead and a trail per span per axis.
+        expect(geometryReads().shifts, 8);
+        expect(termReads(), (fenwick: 0, shifts: 0));
+        await tester.pump(const Duration(milliseconds: 400));
+        await release();
+        controller.animationStyle = BoardAnimationStyle.disabled;
+        await tester.pump();
+
+        // The map arm.
+        // TARGET c: with no resize hold, no reader looks a hold map up.
+        expect(await forcedLayoutHoldReads(), 0);
+        controller.previewMakeRoomGap(
+          draggedKey: "c",
+          prospective: const BoardSpan(rowStart: 1, colStart: 0, colSpan: 4),
+          lifted: true,
+        );
+        await tester.pump();
+        expect(await forcedLayoutHoldReads(), 0);
+        await release();
+        controller.previewMakeRoomGap(
+          draggedKey: "b",
+          prospective: previews["b"]!,
+        );
+        await tester.pump();
+        // Setup sanity: a resize hold's readers do count.
+        expect(await forcedLayoutHoldReads(), greaterThan(0));
+        await release();
+      },
+    );
+  });
 }

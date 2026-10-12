@@ -6,14 +6,22 @@
 /// come from a DRY-RUN lane resolution over at most two lane-axis
 /// buckets, supplied by the controller; the model is never written.
 ///
-/// Beside the offsets the engine holds a HELD EXTENT per id: for a RESIZE
-/// session's own item, the length its prospective span would give it
-/// minus the length it has now, so the block follows the finger while
-/// the model stays unwritten; and for every member the dry run touched,
-/// the slice its prospective lane count would give it minus the slice it
-/// has, so a neighbour on a FIXED lane axis shrinks or widens with the
-/// gap instead of after the drop. Extents ride the offsets' clock and
-/// their two doors.
+/// Beside the offsets the engine holds a HELD EXTENT per id: for every
+/// member the dry run touched, the band its prospective lanes would give
+/// it minus the band it has, so a neighbour on a FIXED lane axis shrinks
+/// or widens with the gap instead of after the drop. Extents ride the
+/// offsets' clock and their two doors.
+///
+/// A RESIZE session's own item holds no offset. It holds a LEAD and an
+/// EXTENT, deltas over the geometry the render gives its STORED span, so
+/// its dragged edge moves and its far edge holds while the model stays
+/// unwritten, and on a content-sized lane axis a BAND, the term its lane
+/// band adds while it stays laned in its track, or a VACATE, the share of
+/// its term it gives up while it leaves that track. The controller
+/// computes their targets through the item-geometry rule, and the layout
+/// re-derives them every frame from the session's prospective span and
+/// lane assignment, its SOURCE, so they follow every track the preview
+/// itself resizes.
 ///
 /// Beside the offsets the engine holds prospective lane SLOTS for the
 /// LIFTED item: a slot has no paint half at all and exists only so the
@@ -33,6 +41,29 @@ import 'package:flutter/scheduler.dart';
 
 import '_board_span.dart';
 import 'board_animation_style.dart';
+
+/// A resize session's geometry targets for its own item, per axis and in
+/// content space: the LEAD and the EXTENT the item-geometry rule gives it
+/// under the prospective span and lanes, minus the ones the stored span
+/// and lanes give it, both over the lattice as it paints.
+typedef MakeRoomResizeGeometry = ({Offset lead, Offset extent});
+
+/// A resize session's term targets for its own item on the lane axis: the
+/// BAND, a content-space length the item's lane band adds to its stored
+/// track's term while it stays laned there, and whether it VACATES that
+/// track instead. Both are zero for an item that is not laned in a track
+/// of a content-sized lane axis.
+typedef MakeRoomResizeTerm = ({double band, bool vacates});
+
+/// The geometry or the term targets of a resize session's item [id] under
+/// [prospective] and the dry run's [assignment], null when the dry run
+/// did not lane it.
+typedef MakeRoomResizeTargets<T> =
+    T Function(
+      int id,
+      BoardSpan prospective,
+      ({int lane, int laneCount, int laneSpan})? assignment,
+    );
 
 /// What a SNAP discarded: the clock left on the unsnapped motion it
 /// dropped, and the make-room curve's tail from where that motion stood,
@@ -79,17 +110,16 @@ class _CurveTail extends Curve {
   }
 }
 
-/// A HELD EXTENT preview for one item: the length its prospective span
-/// and lane count would give it, minus the length its stored ones give
-/// it now, per axis. Paint adds it to the item's extent exactly as a
-/// held offset is added to its lead, so a resized block follows the
-/// finger and a displaced neighbour takes its prospective slice while
-/// the model stays unwritten.
+/// A HELD per-axis value, in content space: an EXTENT preview, which
+/// paint adds to the item's extent, or a resized item's LEAD, which paint
+/// adds to its lead, so a resized block follows the finger and a
+/// displaced neighbour takes its prospective slice while the model stays
+/// unwritten.
 ///
 /// Zero means this entry is CLOSING and is removed when it settles, the
 /// rule its sibling below uses.
-class _HeldExtent {
-  _HeldExtent({
+class _HeldAxes {
+  _HeldAxes({
     required this.target,
     required this.from,
     required this.snapped,
@@ -101,6 +131,9 @@ class _HeldExtent {
   double t = 0.0;
 }
 
+/// A HELD single value: a gap offset or a resized item's band, both
+/// content-space lengths on the lane axis, or a resized item's vacate, a
+/// unitless share.
 class _HeldOffset {
   _HeldOffset({
     required this.target,
@@ -108,8 +141,8 @@ class _HeldOffset {
     required this.snapped,
   });
 
-  /// The held value on the lane axis. Zero means this entry is CLOSING
-  /// and is removed when it settles.
+  /// The held value. Zero means this entry is CLOSING and is removed when
+  /// it settles.
   double target;
 
   /// The value at clock 0, for a re-target that composes from where the
@@ -174,6 +207,8 @@ class MakeRoomEngine {
     prospectiveExtentOf,
     required int Function(int id) laneOfId,
     required int Function(int id) laneCountOfId,
+    MakeRoomResizeTargets<MakeRoomResizeGeometry>? resizeGeometryOf,
+    MakeRoomResizeTargets<MakeRoomResizeTerm>? resizeTermOf,
   }) : _styleOf = styleOf,
        _notifyNow = notifyNow,
        _notifyCoalesced = notifyCoalesced,
@@ -182,7 +217,9 @@ class MakeRoomEngine {
        _laneOriginOfId = laneOriginOfId,
        _prospectiveExtentOf = prospectiveExtentOf,
        _laneOfId = laneOfId,
-       _laneCountOfId = laneCountOfId {
+       _laneCountOfId = laneCountOfId,
+       _resizeGeometryOf = resizeGeometryOf,
+       _resizeTermOf = resizeTermOf {
     _ticker = vsync.createTicker(_tick);
   }
 
@@ -221,6 +258,12 @@ class MakeRoomEngine {
   final int Function(int id) _laneOfId;
   final int Function(int id) _laneCountOfId;
 
+  /// The two resize callbacks. A RESIZE session holds its lead and its
+  /// term only when both are given; without them its extent comes from
+  /// [_prospectiveExtentOf] and it holds nothing else.
+  final MakeRoomResizeTargets<MakeRoomResizeGeometry>? _resizeGeometryOf;
+  final MakeRoomResizeTargets<MakeRoomResizeTerm>? _resizeTermOf;
+
   late final Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
 
@@ -230,7 +273,37 @@ class MakeRoomEngine {
   /// own item and every dry-run member whose slice would change. Empty
   /// on a content-sized lane axis for a pure lane change, where every
   /// slice is the one lane extent and the delta is exactly zero.
-  final Map<int, _HeldExtent> _heldExtent = <int, _HeldExtent>{};
+  final Map<int, _HeldAxes> _heldExtent = <int, _HeldAxes>{};
+
+  /// A resize session's item's LEAD, per axis: paint only, beside its
+  /// extent. Read by [deltaOf] only while non-empty.
+  final Map<int, _HeldAxes> _heldLead = <int, _HeldAxes>{};
+
+  /// A resize session's item's BAND on the lane axis: term only. Read by
+  /// [termDeltaOf] only while non-empty.
+  final Map<int, _HeldOffset> _heldBand = <int, _HeldOffset>{};
+
+  /// A resize session's item's VACATE, `0` to `1`: term only, the share
+  /// of its stored track's term it has given up. Read by [vacatedOf] only
+  /// while non-empty.
+  final Map<int, _HeldOffset> _heldVacate = <int, _HeldOffset>{};
+
+  /// The SESSION: the dragged id of the last install, and for a resize
+  /// given both callbacks its SOURCE, the prospective span and the dry
+  /// run's assignment the refreshes re-derive its targets from. A source
+  /// stands exactly while [_resizeSpan] is non-null; a release and a
+  /// clear of the id tear the session down.
+  int? _sessionId;
+  BoardSpan? _resizeSpan;
+  ({int lane, int laneCount, int laneSpan})? _resizeAssignment;
+
+  /// Debug-only: the lookups of [_heldLead], [_heldBand] and
+  /// [_heldVacate] that [deltaOf], [termDeltaOf] and [vacatedOf] have
+  /// made since tests last assigned it 0. A field on an unexported class,
+  /// as `Fenwick.debugOpCount` is: a reader that looks up an empty map
+  /// paints and sizes what one that does not paints and sizes, so no
+  /// widget-level seam observes the cost.
+  int debugResizeHoldReadCount = 0;
 
   /// KEYED BY LANE-AXIS TRACK, and an emptied bucket is removed, so
   /// `_slots.isEmpty` is exactly "no slot exists". The sizing walk asks
@@ -271,20 +344,24 @@ class MakeRoomEngine {
     if (curve == _curve && duration == _duration) {
       return;
     }
-    for (final entry in _held.values) {
-      if (!entry.snapped && entry.t < 1.0) {
-        entry
-          ..from = _valueOf(entry)
-          ..t = 0.0;
+    for (final map in <Map<int, _HeldOffset>>[_held, _heldBand, _heldVacate]) {
+      for (final entry in map.values) {
+        if (!entry.snapped && entry.t < 1.0) {
+          entry
+            ..from = _valueOf(entry)
+            ..t = 0.0;
+        }
       }
     }
-    _heldExtent.forEach((id, entry) {
-      if (!entry.snapped && entry.t < 1.0) {
-        entry
-          ..from = extentDeltaOf(id)
-          ..t = 0.0;
+    for (final map in <Map<int, _HeldAxes>>[_heldExtent, _heldLead]) {
+      for (final entry in map.values) {
+        if (!entry.snapped && entry.t < 1.0) {
+          entry
+            ..from = _axesValueOf(entry)
+            ..t = 0.0;
+        }
       }
-    });
+    }
     for (final slots in _slots.values) {
       for (final slot in slots) {
         if (!slot.snapped && slot.t < 1.0) {
@@ -298,8 +375,10 @@ class MakeRoomEngine {
     _duration = duration;
   }
 
+  /// Whether a held paint offset stands: a gap offset or a resized item's
+  /// lead.
   bool get hasActive {
-    return _held.isNotEmpty;
+    return _held.isNotEmpty || _heldLead.isNotEmpty;
   }
 
   /// Whether an extent preview stands at all. The render lays out on a
@@ -313,12 +392,7 @@ class MakeRoomEngine {
   /// layout-driving; a settled one is a constant and would otherwise
   /// lay the board out per tick for a whole drag.
   bool get hasExtentMotion {
-    for (final entry in _heldExtent.values) {
-      if (!entry.snapped && entry.t < 1.0) {
-        return true;
-      }
-    }
-    return false;
+    return _axesMoving(_heldExtent);
   }
 
   /// The held extent preview for [id], zero for no entry.
@@ -327,18 +401,18 @@ class MakeRoomEngine {
     if (entry == null) {
       return Offset.zero;
     }
-    return _extentValueOf(entry);
+    return _axesValueOf(entry);
   }
 
-  /// Any offset or slot unsnapped with clock below 1.
+  /// Any offset, extent, lead, band, vacate or slot unsnapped with clock
+  /// below 1.
   bool get hasMotion {
-    if (hasExtentMotion) {
+    if (_axesMoving(_heldExtent) ||
+        _axesMoving(_heldLead) ||
+        _offsetsMoving(_held) ||
+        _offsetsMoving(_heldBand) ||
+        _offsetsMoving(_heldVacate)) {
       return true;
-    }
-    for (final entry in _held.values) {
-      if (!entry.snapped && entry.t < 1.0) {
-        return true;
-      }
     }
     for (final slots in _slots.values) {
       for (final slot in slots) {
@@ -427,14 +501,25 @@ class MakeRoomEngine {
     });
   }
 
-  /// The ids holding entries, offset or extent, for the composed per-id
-  /// bound and the commit's painted-truth capture. A lane-0 neighbour
-  /// holds a zero offset and a non-zero extent, so an offset-only
-  /// enumeration would leave it out of both.
+  /// The ids holding entries, offset, extent or lead, for the composed
+  /// per-id bound and the commit's painted-truth capture. A lane-0
+  /// neighbour holds a zero offset and a non-zero extent, so an
+  /// offset-only enumeration would leave it out of both; a resized item
+  /// can hold a lead alone. A band and a vacate have no paint half. The
+  /// leads are appended only while one stands, so a board with no resize
+  /// hold builds what it would without them.
   Iterable<int> get activeIds {
-    return _held.keys.followedBy(
+    final held = _held.keys.followedBy(
       _heldExtent.keys.where((id) {
         return !_held.containsKey(id);
+      }),
+    );
+    if (_heldLead.isEmpty) {
+      return held;
+    }
+    return held.followedBy(
+      _heldLead.keys.where((id) {
+        return !_held.containsKey(id) && !_heldExtent.containsKey(id);
       }),
     );
   }
@@ -448,8 +533,8 @@ class MakeRoomEngine {
             _curve.transform(entry.t.clamp(0.0, 1.0));
   }
 
-  /// A held extent's current value, in content space per axis.
-  Offset _extentValueOf(_HeldExtent entry) {
+  /// A held per-axis value's current value, in content space per axis.
+  Offset _axesValueOf(_HeldAxes entry) {
     if (entry.snapped) {
       return entry.target;
     }
@@ -542,10 +627,10 @@ class MakeRoomEngine {
     return minT;
   }
 
-  /// [_retargetOffset] for a held extent; [target] is a content-space
-  /// length per axis, as [extentDeltaOf] answers.
-  double? _retargetExtent(
-    _HeldExtent entry,
+  /// [_retargetOffset] for a held per-axis value; [target] is a
+  /// content-space length per axis, as [extentDeltaOf] answers.
+  double? _retargetAxes(
+    _HeldAxes entry,
     Offset target,
     bool snap,
     double? minT,
@@ -561,7 +646,7 @@ class MakeRoomEngine {
         entry.from != entry.target,
       );
     }
-    final current = _extentValueOf(entry);
+    final current = _axesValueOf(entry);
     entry
       ..from = snap ? target : current
       ..target = target
@@ -570,18 +655,200 @@ class MakeRoomEngine {
     return minT;
   }
 
-  /// The held delta for [id], on the lane axis, zero for no entry.
+  /// An install's write of [id]'s entry in [map]: a re-target of the
+  /// entry it holds, or a new entry for a non-zero [target], opening from
+  /// zero on a live install and landed on a snapped one. Returns the
+  /// fold.
+  double? _installAxes(
+    Map<int, _HeldAxes> map,
+    int id,
+    Offset target,
+    bool snap,
+    double? minT,
+  ) {
+    final existing = map[id];
+    if (existing != null) {
+      return _retargetAxes(existing, target, snap, minT);
+    }
+    if (target != Offset.zero) {
+      map[id] = _HeldAxes(
+        target: target,
+        from: snap ? target : Offset.zero,
+        snapped: snap,
+      );
+    }
+    return minT;
+  }
+
+  /// [_installAxes] for a held single value.
+  double? _installOffset(
+    Map<int, _HeldOffset> map,
+    int id,
+    double target,
+    bool snap,
+    double? minT,
+  ) {
+    final existing = map[id];
+    if (existing != null) {
+      return _retargetOffset(existing, target, snap, minT);
+    }
+    if (target != 0.0) {
+      map[id] = _HeldOffset(
+        target: target,
+        from: snap ? target : 0.0,
+        snapped: snap,
+      );
+    }
+    return minT;
+  }
+
+  /// The held PAINT delta for [id], both axes, zero for no entry: its gap
+  /// offset on the lane axis plus, for a resized item, its lead on both.
+  /// [_heldLead] is looked up only while it is non-empty.
   Offset deltaOf(int id) {
+    var delta = Offset.zero;
     final entry = _held[id];
-    if (entry == null) {
+    if (entry != null) {
+      final axis = _laneAxisOf();
+      if (axis != null) {
+        final value = _valueOf(entry);
+        delta = axis == Axis.vertical ? Offset(0.0, value) : Offset(value, 0.0);
+      }
+    }
+    if (_heldLead.isNotEmpty) {
+      debugResizeHoldReadCount += 1;
+      final lead = _heldLead[id];
+      if (lead != null) {
+        delta += _axesValueOf(lead);
+      }
+    }
+    return delta;
+  }
+
+  /// The held TERM delta for [id] on the lane axis, zero for no entry or
+  /// with no lane axis: its gap offset plus, for a resized item, its
+  /// band. What the sizing term adds to a member's ceiling, which a
+  /// resized item's lead never reaches. [_heldBand] is looked up only
+  /// while it is non-empty.
+  Offset termDeltaOf(int id) {
+    final entry = _held[id];
+    _HeldOffset? band;
+    if (_heldBand.isNotEmpty) {
+      debugResizeHoldReadCount += 1;
+      band = _heldBand[id];
+    }
+    if (entry == null && band == null) {
       return Offset.zero;
     }
     final axis = _laneAxisOf();
     if (axis == null) {
       return Offset.zero;
     }
-    final value = _valueOf(entry);
+    final value =
+        (entry == null ? 0.0 : _valueOf(entry)) +
+        (band == null ? 0.0 : _valueOf(band));
     return axis == Axis.vertical ? Offset(0.0, value) : Offset(value, 0.0);
+  }
+
+  /// The share of its stored track's term a resized item has given up,
+  /// `0` to `1`, zero for no entry. [_heldVacate] is looked up only while
+  /// it is non-empty.
+  double vacatedOf(int id) {
+    if (_heldVacate.isEmpty) {
+      return 0.0;
+    }
+    debugResizeHoldReadCount += 1;
+    final entry = _heldVacate[id];
+    return entry == null ? 0.0 : _valueOf(entry);
+  }
+
+  /// Re-derives the resize session's BAND and VACATE from its source, the
+  /// lanes having resolved; see [_rebaseOffset]. Returns at once without
+  /// a source.
+  void refreshResizeTerm() {
+    final id = _sessionId;
+    final span = _resizeSpan;
+    final termOf = _resizeTermOf;
+    if (id == null || span == null || termOf == null) {
+      return;
+    }
+    final term = termOf(id, span, _resizeAssignment);
+    _rebaseOffset(_heldBand, id, term.band);
+    _rebaseOffset(_heldVacate, id, term.vacates ? 1.0 : 0.0);
+  }
+
+  /// Re-derives the resize session's LEAD and EXTENT from its source, over
+  /// the lattice as it paints; see [_rebaseOffset]. Returns at once
+  /// without a source.
+  void refreshResizeGeometry() {
+    final id = _sessionId;
+    final span = _resizeSpan;
+    final geometryOf = _resizeGeometryOf;
+    if (id == null || span == null || geometryOf == null) {
+      return;
+    }
+    final geometry = geometryOf(id, span, _resizeAssignment);
+    _rebaseAxes(_heldLead, id, geometry.lead);
+    _rebaseAxes(_heldExtent, id, geometry.extent);
+  }
+
+  /// RE-BASES [id]'s entry in [map] onto a re-derived [target]: the target
+  /// and the `from` move by the same difference, so the entry keeps its
+  /// clock and paints over the stored span's new geometry where it
+  /// painted over the old one, moved only by the change in the target. A
+  /// missing entry counts as one at rest at zero, so a non-zero target
+  /// creates it at rest; an entry at rest whose target becomes zero is
+  /// removed, and one in motion closes on its clock, by the rule that
+  /// zero means closing. Notifies nothing, bumps no generation and
+  /// leaves the ticker alone, so it is safe inside a layout.
+  void _rebaseOffset(Map<int, _HeldOffset> map, int id, double target) {
+    final entry = map[id];
+    if (entry == null) {
+      if (target != 0.0) {
+        map[id] = _HeldOffset(target: target, from: target, snapped: false)
+          ..t = 1.0;
+      }
+      return;
+    }
+    if (entry.target == target) {
+      return;
+    }
+    if (target == 0.0 && (entry.snapped || entry.t >= 1.0)) {
+      map.remove(id);
+      return;
+    }
+    entry
+      ..from = entry.from + (target - entry.target)
+      ..target = target;
+  }
+
+  /// [_rebaseOffset] for a held per-axis value.
+  void _rebaseAxes(Map<int, _HeldAxes> map, int id, Offset target) {
+    final entry = map[id];
+    if (entry == null) {
+      if (target != Offset.zero) {
+        map[id] = _HeldAxes(target: target, from: target, snapped: false)
+          ..t = 1.0;
+      }
+      return;
+    }
+    if (entry.target == target) {
+      return;
+    }
+    if (target == Offset.zero && (entry.snapped || entry.t >= 1.0)) {
+      map.remove(id);
+      return;
+    }
+    entry
+      ..from = entry.from + (target - entry.target)
+      ..target = target;
+  }
+
+  /// Ends the session: its id and its source.
+  void _clearSession() {
+    _sessionId = null;
+    _resizeSpan = null;
+    _resizeAssignment = null;
   }
 
   /// Opens (or re-targets) the gap for a drag of [draggedId] resolving to
@@ -610,6 +877,23 @@ class MakeRoomEngine {
     final dry = laneAxis == null
         ? const <int, ({int lane, int laneCount, int laneSpan})>{}
         : _dryRunOf(draggedId, prospective);
+    // THE SESSION. A RESIZE given both callbacks records its SOURCE, the
+    // span and the dry run's assignment its targets are re-derived from
+    // every layout; any other install records none, so no refresh runs
+    // for it. The discriminator is the session's argument, NOT the
+    // dragging bit: that bit is set for every session and carries no
+    // kind.
+    final geometryOf = _resizeGeometryOf;
+    final termOf = _resizeTermOf;
+    final resizes = !lifted && geometryOf != null && termOf != null;
+    final assignment = dry[draggedId];
+    _sessionId = draggedId;
+    _resizeSpan = resizes ? prospective : null;
+    _resizeAssignment = resizes ? assignment : null;
+    final geometry = resizes
+        ? geometryOf(draggedId, prospective, assignment)
+        : null;
+    final term = resizes ? termOf(draggedId, prospective, assignment) : null;
     // The hand-off fold: the earliest clock among everything this call
     // discards mid-motion. A snapped install discards every entry it
     // replaces and every slot it snaps; a live install discards only a
@@ -625,15 +909,13 @@ class MakeRoomEngine {
     // and left alone for an unchanged target, the two rules the offsets
     // use and for the same reasons. BEFORE the lane-axis gate: an extent
     // needs no lane geometry, and on a board with none it is the whole
-    // of the drag's in-place feedback.
+    // of the drag's in-place feedback. The resized item's LEAD and TERM
+    // entries follow the same rules.
     final extentTargets = <int, Offset>{};
     if (!lifted) {
-      final assignment = dry[draggedId];
-      extentTargets[draggedId] = _prospectiveExtentOf(
-        draggedId,
-        prospective,
-        assignment,
-      );
+      extentTargets[draggedId] =
+          geometry?.extent ??
+          _prospectiveExtentOf(draggedId, prospective, assignment);
     }
     dry.forEach((id, assignment) {
       if (id == draggedId) {
@@ -647,28 +929,50 @@ class MakeRoomEngine {
       });
     }
     extentTargets.forEach((id, extent) {
-      final existing = _heldExtent[id];
-      if (existing != null) {
-        minT = _retargetExtent(existing, extent, snap, minT);
-        return;
-      }
-      if (extent != Offset.zero) {
-        _heldExtent[id] = _HeldExtent(
-          target: extent,
-          from: snap ? extent : Offset.zero,
-          snapped: snap,
-        );
-      }
+      minT = _installAxes(_heldExtent, id, extent, snap, minT);
+    });
+    final leadTargets = <int, Offset>{
+      if (geometry != null) draggedId: geometry.lead,
+    };
+    for (final id in _heldLead.keys) {
+      leadTargets.putIfAbsent(id, () {
+        return Offset.zero;
+      });
+    }
+    leadTargets.forEach((id, lead) {
+      minT = _installAxes(_heldLead, id, lead, snap, minT);
+    });
+    final bandTargets = <int, double>{
+      if (term != null) draggedId: term.band,
+    };
+    final vacateTargets = <int, double>{
+      if (term != null) draggedId: term.vacates ? 1.0 : 0.0,
+    };
+    for (final id in _heldBand.keys) {
+      bandTargets.putIfAbsent(id, () {
+        return 0.0;
+      });
+    }
+    for (final id in _heldVacate.keys) {
+      vacateTargets.putIfAbsent(id, () {
+        return 0.0;
+      });
+    }
+    bandTargets.forEach((id, band) {
+      minT = _installOffset(_heldBand, id, band, snap, minT);
+    });
+    vacateTargets.forEach((id, vacate) {
+      minT = _installOffset(_heldVacate, id, vacate, snap, minT);
     });
     if (laneAxis == null) {
-      // No lane geometry exists to open a gap in; the extent preview
-      // above is the whole of the in-place feedback on such a board, and
-      // the drag proxy is the rest of it. The fold is discarded
-      // unpublished here, as it always was on this branch: the case is a
-      // restyle to off mid-drag on a board with no lanes.
-      _heldExtent.removeWhere((id, entry) {
-        return snap && entry.target == Offset.zero;
-      });
+      // No lane geometry exists to open a gap in; the extent and lead
+      // preview above is the whole of the in-place feedback on such a
+      // board, and the drag proxy is the rest of it. The fold is
+      // discarded unpublished here, as it always was on this branch: the
+      // case is a restyle to off mid-drag on a board with no lanes.
+      if (snap) {
+        _removeClosed();
+      }
       _generation += 1;
       if (snap) {
         _notifyNow();
@@ -679,11 +983,10 @@ class MakeRoomEngine {
     }
     final targets = <int, double>{};
     dry.forEach((id, assignment) {
-      if (id == draggedId && lifted) {
-        // A LIFTED (moved) item paints as the proxy, not as a gap. A
-        // resize is not lifted and keeps its own held offset. The
-        // discriminator is the session's argument, NOT the dragging bit:
-        // that bit is set for every session and carries no kind.
+      if (id == draggedId) {
+        // The dragged item holds no offset: a LIFTED (moved) one paints
+        // as the proxy, not as a gap, and a RESIZED one holds its lead
+        // in [_heldLead], over the geometry its stored span is given.
         return;
       }
       final target =
@@ -693,24 +996,6 @@ class MakeRoomEngine {
         targets[id] = target;
       }
     });
-    // The dragged item's DE-LANING arm: prospectively unlaned, so absent
-    // from the dry result, while its stored lane holds a slice it is
-    // growing out of. Its held offset carries it onto the track's
-    // leading edge.
-    if (!dry.containsKey(draggedId) &&
-        !lifted &&
-        (_laneOfId(draggedId) != 0 || _laneCountOfId(draggedId) != 1)) {
-      final target =
-          _laneOriginOfId(draggedId, 0, 1) -
-          _laneOriginOfId(
-            draggedId,
-            _laneOfId(draggedId),
-            _laneCountOfId(draggedId),
-          );
-      if (target != 0.0) {
-        targets[draggedId] = target;
-      }
-    }
     // Entries not re-targeted close back to zero.
     for (final id in _held.keys) {
       targets.putIfAbsent(id, () {
@@ -718,18 +1003,7 @@ class MakeRoomEngine {
       });
     }
     targets.forEach((id, target) {
-      final existing = _held[id];
-      if (existing != null) {
-        minT = _retargetOffset(existing, target, snap, minT);
-        return;
-      }
-      if (target != 0.0) {
-        _held[id] = _HeldOffset(
-          target: target,
-          from: snap ? target : 0.0,
-          snapped: snap,
-        );
-      }
+      minT = _installOffset(_held, id, target, snap, minT);
     });
     if (lifted) {
       if (_liftedId != null && _liftedId != draggedId) {
@@ -781,12 +1055,7 @@ class MakeRoomEngine {
     // for.
     _generation += 1;
     if (snap) {
-      _held.removeWhere((id, entry) {
-        return entry.target == 0.0;
-      });
-      _heldExtent.removeWhere((id, entry) {
-        return entry.target == Offset.zero;
-      });
+      _removeClosed();
       minT = _snapSlots(minT);
       _publishSnap(minT);
       _notifyNow();
@@ -799,6 +1068,21 @@ class MakeRoomEngine {
       _publishSnap(minT);
     }
     _ensureTicking();
+  }
+
+  /// The install's snap tail for every held entry: one a snap re-targeted
+  /// to zero is closed, and goes.
+  void _removeClosed() {
+    for (final map in <Map<int, _HeldOffset>>[_held, _heldBand, _heldVacate]) {
+      map.removeWhere((id, entry) {
+        return entry.target == 0.0;
+      });
+    }
+    for (final map in <Map<int, _HeldAxes>>[_heldExtent, _heldLead]) {
+      map.removeWhere((id, entry) {
+        return entry.target == Offset.zero;
+      });
+    }
   }
 
   /// The install's snap tail for slots: every slot lands on its target,
@@ -826,16 +1110,24 @@ class MakeRoomEngine {
   /// switch as the install, so an off-family drag's gap opens and closes
   /// instantly as a pair. A live release leaves an offset, an
   /// extent or a slot that is already closing on the schedule it started
-  /// on, so a second release on the same clock changes no entry.
+  /// on, so a second release on the same clock changes no entry. Both
+  /// arms end the session, so no refresh re-derives a target the release
+  /// closed.
   void releasePreview({Duration? duration, Curve? curve}) {
-    // THREE COLLECTIONS, not one: a slot-only hover holds no offset at
+    // EVERY COLLECTION, not one: a slot-only hover holds no offset at
     // all, and an `_held`-only guard would return without clearing the
     // slots, leaving the target track's phantom occupancy standing for
-    // the rest of the board's life.
+    // the rest of the board's life; a resize source left standing would
+    // re-open its targets on the next layout.
     if (_held.isEmpty &&
         _slots.isEmpty &&
         _liftedId == null &&
-        _heldExtent.isEmpty) {
+        _heldExtent.isEmpty &&
+        _heldLead.isEmpty &&
+        _heldBand.isEmpty &&
+        _heldVacate.isEmpty &&
+        _resizeSpan == null) {
+      _clearSession();
       return;
     }
     final style = _styleOf();
@@ -843,28 +1135,37 @@ class MakeRoomEngine {
     final resolved = duration ?? spec.duration;
     final snap = style.isOff(BoardAnimationFamily.makeRoom, explicit: duration);
     if (snap) {
-      // The commit's snap: fold every offset and slot it drops, so the
+      // The commit's snap: fold every entry and slot it drops, so the
       // hand-off carries the clock of whatever was still moving.
       double? minT;
-      for (final entry in _held.values) {
-        minT = _foldClock(
-          minT,
-          entry.snapped,
-          entry.t,
-          entry.from != entry.target,
-        );
+      for (final map in <Map<int, _HeldOffset>>[
+        _held,
+        _heldBand,
+        _heldVacate,
+      ]) {
+        for (final entry in map.values) {
+          minT = _foldClock(
+            minT,
+            entry.snapped,
+            entry.t,
+            entry.from != entry.target,
+          );
+        }
+        map.clear();
       }
-      for (final entry in _heldExtent.values) {
-        minT = _foldClock(
-          minT,
-          entry.snapped,
-          entry.t,
-          entry.from != entry.target,
-        );
+      for (final map in <Map<int, _HeldAxes>>[_heldExtent, _heldLead]) {
+        for (final entry in map.values) {
+          minT = _foldClock(
+            minT,
+            entry.snapped,
+            entry.t,
+            entry.from != entry.target,
+          );
+        }
+        map.clear();
       }
-      _held.clear();
-      _heldExtent.clear();
       minT = _discardSlots(minT);
+      _clearSession();
       _publishSnap(minT);
       _generation += 1;
       _stopIfIdle();
@@ -874,11 +1175,15 @@ class MakeRoomEngine {
     _adoptClock(curve ?? spec.curve, resolved);
     // An entry already closing keeps the schedule it started on, by the
     // idempotence rule the install applies.
-    for (final entry in _held.values) {
-      _retargetOffset(entry, 0.0, false, null);
+    for (final map in <Map<int, _HeldOffset>>[_held, _heldBand, _heldVacate]) {
+      for (final entry in map.values) {
+        _retargetOffset(entry, 0.0, false, null);
+      }
     }
-    for (final entry in _heldExtent.values) {
-      _retargetExtent(entry, Offset.zero, false, null);
+    for (final map in <Map<int, _HeldAxes>>[_heldExtent, _heldLead]) {
+      for (final entry in map.values) {
+        _retargetAxes(entry, Offset.zero, false, null);
+      }
     }
     _slots.forEach((track, slots) {
       for (final slot in slots) {
@@ -890,6 +1195,7 @@ class MakeRoomEngine {
       // key is cleared at the settle, when `_tick` removes the last one.
       _liftedId = null;
     }
+    _clearSession();
     _generation += 1;
     _ensureTicking();
   }
@@ -899,9 +1205,17 @@ class MakeRoomEngine {
     // offset has a paint half.
     var removed = _held.remove(id) != null;
     removed = _heldExtent.remove(id) != null || removed;
+    removed = _heldLead.remove(id) != null || removed;
+    removed = _heldBand.remove(id) != null || removed;
+    removed = _heldVacate.remove(id) != null || removed;
     if (id == _liftedId) {
       removed = removed || _slots.isNotEmpty;
       _discardSlots(null);
+    }
+    if (id == _sessionId) {
+      // A recycled id must not have the next layout re-derive the dead
+      // item's targets for its new occupant.
+      _clearSession();
     }
     if (removed) {
       // Conditional: this runs on every exit release, and an
@@ -941,26 +1255,13 @@ class MakeRoomEngine {
     final delta = durationUs == 0
         ? double.infinity
         : dt.inMicroseconds / durationUs;
-    var anyClosed = false;
-    _heldExtent.forEach((id, entry) {
-      if (entry.snapped || entry.t >= 1.0) {
-        return;
-      }
-      entry.t += delta;
-      if (entry.t >= 1.0 && entry.target == Offset.zero) {
-        anyClosed = true;
-      }
-    });
-    _held.forEach((id, entry) {
-      if (entry.snapped || entry.t >= 1.0) {
-        return;
-      }
-      entry.t += delta;
-      if (entry.t >= 1.0 && entry.target == 0.0) {
-        anyClosed = true;
-      }
-    });
-    // Both iterations complete before the first dispatch.
+    // Every iteration runs, none short-circuited by an earlier close, and
+    // all complete before the first dispatch.
+    var anyClosed = _advanceAxes(_heldExtent, delta);
+    anyClosed = _advanceAxes(_heldLead, delta) || anyClosed;
+    anyClosed = _advanceOffsets(_held, delta) || anyClosed;
+    anyClosed = _advanceOffsets(_heldBand, delta) || anyClosed;
+    anyClosed = _advanceOffsets(_heldVacate, delta) || anyClosed;
     _slots.forEach((track, slots) {
       for (final slot in slots) {
         if (slot.snapped || slot.t >= 1.0) {
@@ -983,12 +1284,11 @@ class MakeRoomEngine {
     // settled values before a closing entry is removed, then the
     // idle transition. Both synchronous.
     _notifyNow();
-    _held.removeWhere((id, entry) {
-      return entry.t >= 1.0 && entry.target == 0.0;
-    });
-    _heldExtent.removeWhere((id, entry) {
-      return entry.t >= 1.0 && entry.target == Offset.zero;
-    });
+    _held.removeWhere(_offsetClosed);
+    _heldBand.removeWhere(_offsetClosed);
+    _heldVacate.removeWhere(_offsetClosed);
+    _heldExtent.removeWhere(_axesClosed);
+    _heldLead.removeWhere(_axesClosed);
     _slots.removeWhere((track, slots) {
       slots.removeWhere((slot) {
         return slot.t >= 1.0 && slot.target == 0.0;
@@ -1002,6 +1302,67 @@ class MakeRoomEngine {
     }
     _notifyNow();
     _stopIfIdle();
+  }
+
+  /// Advances every moving entry of [map] by [delta] and answers whether
+  /// one of them CLOSED on this tick.
+  static bool _advanceOffsets(Map<int, _HeldOffset> map, double delta) {
+    var closed = false;
+    for (final entry in map.values) {
+      if (entry.snapped || entry.t >= 1.0) {
+        continue;
+      }
+      entry.t += delta;
+      if (entry.t >= 1.0 && entry.target == 0.0) {
+        closed = true;
+      }
+    }
+    return closed;
+  }
+
+  /// [_advanceOffsets] for held per-axis values.
+  static bool _advanceAxes(Map<int, _HeldAxes> map, double delta) {
+    var closed = false;
+    for (final entry in map.values) {
+      if (entry.snapped || entry.t >= 1.0) {
+        continue;
+      }
+      entry.t += delta;
+      if (entry.t >= 1.0 && entry.target == Offset.zero) {
+        closed = true;
+      }
+    }
+    return closed;
+  }
+
+  /// Whether [entry] closed and settled, so the tick removes it.
+  static bool _offsetClosed(int id, _HeldOffset entry) {
+    return entry.t >= 1.0 && entry.target == 0.0;
+  }
+
+  /// [_offsetClosed] for a held per-axis value.
+  static bool _axesClosed(int id, _HeldAxes entry) {
+    return entry.t >= 1.0 && entry.target == Offset.zero;
+  }
+
+  /// Whether an entry of [map] is unsnapped with clock below 1.
+  static bool _offsetsMoving(Map<int, _HeldOffset> map) {
+    for (final entry in map.values) {
+      if (!entry.snapped && entry.t < 1.0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// [_offsetsMoving] for held per-axis values.
+  static bool _axesMoving(Map<int, _HeldAxes> map) {
+    for (final entry in map.values) {
+      if (!entry.snapped && entry.t < 1.0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void dispose() {

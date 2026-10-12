@@ -89,11 +89,12 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   both read through `rectOfItem`, which composes the preview and any
   in-flight FLIP, so the continuation cancels the report's own FLIP by
   construction), and composes whenever either half is non-zero; it is
-  marked RELANE only when the item is laned in one lane-axis track before
-  and after the report, so the track's term reads an intra-track
-  correction and never one that carries the item into or out of a track,
-  and a move's glide, which runs from the proxy, never is; a cancel
-  closes the gap by animation. `BoardDropResolver` turns a drag's samples into a
+  marked RELANE, and BAND, only when the item is laned in one lane-axis
+  track before and after the report, so the track's term reads an
+  intra-track correction, its lead and the change of its band, and never
+  one that carries the item into or out of a track, and a move's glide,
+  which runs from the proxy, never is; a cancel closes the gap by
+  animation. `BoardDropResolver` turns a drag's samples into a
   span, arithmetic on the `trackSampleAt` samples `_resolve` takes once
   per resolve: the pointer's, and for a move the proxy's content-LEADING
   corner's (see the coordinate-spaces entry above) and its centre's; a

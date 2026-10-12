@@ -868,8 +868,8 @@ void main() {
     );
   });
 
-  // T9b. An UNLANED item's committed resize has a zero corner
-  // correction, there being no de-lane hold to correct off, so the glide
+  // T9b. An UNLANED item's trailing-edge resize has a zero corner
+  // correction, a trailing-edge resize holding no lead, so the glide
   // runs only because an extent continuation stands. Released one frame
   // after the move, so the preview is barely started and the whole
   // remainder is what the glide carries: the MID-preview twin of T9. Its
