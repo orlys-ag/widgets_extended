@@ -966,7 +966,6 @@ void main() {
           const Rect.fromLTRB(0.0, 32.0, 80.0, 50.0),
         );
       },
-      skip: true,
     );
 
     testWidgets(

@@ -716,6 +716,9 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // glide corrects onto this. A cancelled resize glides from nothing:
     // teardown's animated release closes its preview.
     Rect? glideFrom;
+    // A committed resize's lane-axis track BEFORE the report, read with
+    // the glide's rect, for the glide's relane mark.
+    int? lanedTrackBefore;
     if (session.kind == BoardDragKind.move) {
       final pointer = _pointerPosition.value;
       final size = proxySize;
@@ -724,6 +727,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       }
     } else if (report) {
       glideFrom = session.port.paintedRectOfItem(session.key);
+      lanedTrackBefore = _lanedTrackOf(session.key);
     }
     Map<TKey, Rect>? paintedByKey;
     if (report) {
@@ -771,7 +775,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       if (paintedByKey != null) {
         _installMakeRoomHandOff(session, paintedByKey);
       }
-      _installDropSettle(session, glideFrom);
+      _installDropSettle(session, glideFrom, lanedTrackBefore);
     } finally {
       // After the report, so an app hears the drop, then the end; and
       // queued even when the report threw, which still propagates.
@@ -854,7 +858,13 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// preview had it at, so the item never leaves what the preview showed.
   /// Null installs nothing, which is also the mutation-cancel path's
   /// case: there the mutation's own animation is the feedback.
-  void _installDropSettle(_DragSession<TKey> session, Rect? from) {
+  /// [lanedTrackBefore] is the lane-axis track a committed resize was
+  /// laned in before the report, null when it was not laned.
+  void _installDropSettle(
+    _DragSession<TKey> session,
+    Rect? from,
+    int? lanedTrackBefore,
+  ) {
     final key = session.key;
     if (from == null || !boardController.contains(key)) {
       return;
@@ -883,11 +893,27 @@ class BoardDragController<TKey> extends ChangeNotifier {
       extentDelta: extent,
       duration: session.dropSettleDuration,
       curve: session.dropSettleCurve,
-      // A RESIZE's correction is the de-lane hold's intra-track lead, so
-      // the item stays a term of its own track; a MOVE's runs from the
-      // proxy and is cross-track.
-      relane: session.kind != BoardDragKind.move,
+      // RELANE only for a resize laned in one lane-axis track before and
+      // after the report: its correction then moves it inside that
+      // track, so the item stays a term of it. A resize that joins or
+      // leaves a track corrects across tracks, and a MOVE runs from the
+      // proxy; the term must read neither.
+      relane:
+          session.kind != BoardDragKind.move &&
+          lanedTrackBefore != null &&
+          _lanedTrackOf(key) == lanedTrackBefore,
     );
+  }
+
+  /// The lane-axis track [key] is laned in, or null when it is not laned
+  /// or the board has no lane axis.
+  int? _lanedTrackOf(TKey key) {
+    final axis = boardController.laneAxis;
+    final id = boardController.idOfKey(key);
+    if (axis == null || id < 0 || !boardController.isLanedId(id)) {
+      return null;
+    }
+    return boardController.startIndexOfId(id, axis);
   }
 
   /// The content-space correction that paints an item resting at [to]

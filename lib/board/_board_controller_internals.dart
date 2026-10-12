@@ -381,9 +381,10 @@ extension BoardControllerInternals<TKey, TItem>
   /// surface. The drop-settle glide, riding the slide engine with its own
   /// family; [duration] and [curve] are the session's captured spec,
   /// while an off family under the live style dominates them. [relane]
-  /// declares the correction an intra-track shift, which a committed
-  /// RESIZE's is (it corrects onto the de-lane hold) and a committed
-  /// move's is not (it runs from the proxy).
+  /// declares the correction an intra-track shift on the lane axis,
+  /// which a committed resize's is when the item is laned in one
+  /// lane-axis track before and after the report, and a committed move's
+  /// never is (it runs from the proxy).
   void animateDropSettle(
     TKey key,
     Offset delta, {
