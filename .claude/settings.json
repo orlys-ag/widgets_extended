@@ -5,6 +5,10 @@
       "Bash(flutter analyze:*)",
       "Bash(flutter pub:*)",
       "Bash(python plans/check_citations.py:*)",
+      "Bash(node .claude/workflows/feature-delivery.harness.mjs:*)",
+      "Bash(python .claude/hooks/deny_forbidden_characters.py --self-test)",
+      "Bash(python .claude/hooks/audit_shell_command.py --self-test)",
+      "Bash(python .claude/hooks/verify_hooks_load.py)",
       "Bash(git rev-parse:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
@@ -21,22 +25,49 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/forbid_attribution.py\"",
+            "shell": "bash",
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/forbid_attribution.py\"",
             "timeout": 15,
             "statusMessage": "Checking commit attribution"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/deny_forbidden_characters.py\"",
+            "timeout": 15,
+            "statusMessage": "Checking written text for forbidden characters"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/forbid_symbols.py\"",
-            "timeout": 15,
-            "statusMessage": "Checking for forbidden symbols"
+            "shell": "bash",
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/audit_shell_command.py\"",
+            "timeout": 30,
+            "statusMessage": "Auditing the command's writes and commit"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/verify_hooks_load.py\"",
+            "timeout": 20,
+            "statusMessage": "Verifying hook scripts load"
           }
         ]
       }

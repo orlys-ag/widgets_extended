@@ -1,0 +1,264 @@
+{
+  "version": 1,
+  "artifactsDir": "plans/delivery",
+  "codePaths": [
+    "lib",
+    "test",
+    "pubspec.yaml",
+    "analysis_options.yaml",
+    "README.md",
+    "CHANGELOG.md",
+    "doc/synced_sliver_tree_tutorial.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "doc/agents",
+    ".claude",
+    "plans/check_citations.py"
+  ],
+  "isolation": "checkout",
+  "conventionDocs": [
+    ".claude/rules/testing.md",
+    ".claude/rules/comments.md"
+  ],
+  "modules": {
+    "board": {
+      "paths": [
+        "^lib/board/",
+        "^test/board/"
+      ],
+      "guidance": [
+        ".claude/rules/board.md",
+        ".claude/rules/board-model.md",
+        ".claude/rules/board-animation.md",
+        ".claude/rules/board-render.md",
+        ".claude/rules/board-widget.md",
+        ".claude/rules/board-drag.md"
+      ],
+      "vocabulary": "Module vocabulary: dense item ids that BoardStore assigns, read through the controller's idOfKey/keyOfId (not nids; every per-id array grows in lockstep in BoardStore._onCapacityGrew, the store's one growth path, with no external capacity callback such as sliver_tree's NodeStore.onCapacityGrew), TWO coordinate spaces (content and viewport-paint, plus track space for spans), the animation sources under BoardAnimationCoordinator (TrackResizeAnimator, ItemEnterExitAnimator, ItemSlideEngine, MakeRoomEngine), obtain-to-retain retention, OverlapLaneResolver lanes, the BoardDragController drag layer with BoardDropResolver, and BoardAnimationStyle families with a per-family kill switch: a family whose resolved duration is not positive is off."
+    },
+    "sliver_tree": {
+      "paths": [
+        "^lib/sliver_tree/",
+        "^lib/sectioned_sliver_list/",
+        "^test/sliver_tree/",
+        "^test/sectioned_sliver_list/"
+      ],
+      "guidance": [
+        ".claude/rules/sliver-tree.md",
+        ".claude/rules/sliver-tree-core.md",
+        ".claude/rules/sliver-tree-animation.md",
+        ".claude/rules/sliver-tree-reorder.md",
+        ".claude/rules/sliver-tree-sync.md"
+      ],
+      "vocabulary": "Module vocabulary: nids and the *Nid hot-path variants, three coordinate spaces (sliver scroll, sliver paint, viewport scroll), five animation sources under AnimationCoordinator, exit and edge ghosts, sticky pins, pending-deletion nodes, TreeAnimationStyle families with a per-family zero kill switch."
+    }
+  },
+  "gates": [
+    {
+      "name": "analyze",
+      "command": "flutter analyze lib test",
+      "pass": "it prints No issues found!",
+      "when": {
+        "paths": [
+          "^lib/",
+          "^test/",
+          "^pubspec\\.yaml$",
+          "^analysis_options\\.yaml$"
+        ]
+      },
+      "scope": "step"
+    },
+    {
+      "name": "test",
+      "command": "flutter test",
+      "pass": "it prints All tests passed!",
+      "when": {
+        "paths": [
+          "^lib/",
+          "^test/",
+          "^pubspec\\.yaml$"
+        ]
+      },
+      "scope": "step"
+    },
+    {
+      "name": "examples-analyze",
+      "command": "(cd examples && flutter analyze)",
+      "pass": "examples/pubspec.yaml does not exist in this checkout, or each issue it reports also appears, matched by file, lint code and message rather than line, in its output with the checkout at the base commit (git switch --detach to it, run, switch back; Git ignores examples/, so it stays), or is a break of examples/ that the plan names as expected",
+      "when": {
+        "paths": [
+          "^lib/",
+          "^pubspec\\.yaml$"
+        ]
+      },
+      "scope": "final"
+    },
+    {
+      "name": "examples-test",
+      "command": "(cd examples && flutter test)",
+      "pass": "examples/pubspec.yaml does not exist in this checkout, or each test that fails also fails, by name, with the checkout at the base commit (git switch --detach to it, run, switch back; Git ignores examples/, so it stays), or is a break of examples/ that the plan names as expected",
+      "when": {
+        "paths": [
+          "^lib/",
+          "^pubspec\\.yaml$"
+        ]
+      },
+      "scope": "final"
+    },
+    {
+      "name": "delivery-harness",
+      "command": "node .claude/workflows/feature-delivery.harness.mjs",
+      "pass": "0 failed",
+      "when": {
+        "paths": [
+          "^AGENTS\\.md$",
+          "^CLAUDE\\.md$",
+          "^doc/agents/",
+          "^\\.claude/(rules|workflows|agents|skills)/"
+        ]
+      },
+      "scope": "final"
+    },
+    {
+      "name": "citations-self-test",
+      "command": "python plans/check_citations.py --self-test",
+      "pass": "0 failed",
+      "when": {
+        "paths": [
+          "^plans/check_citations\\.py$"
+        ]
+      },
+      "scope": "final"
+    },
+    {
+      "name": "hooks",
+      "command": "python .claude/hooks/deny_forbidden_characters.py --self-test && python .claude/hooks/audit_shell_command.py --self-test && python .claude/hooks/verify_hooks_load.py",
+      "pass": "each self-test prints self-test: 0 failed, and verify_hooks_load.py prints nothing",
+      "when": {
+        "paths": [
+          "^\\.claude/hooks/",
+          "^\\.claude/settings\\.json$"
+        ]
+      },
+      "scope": "final"
+    }
+  ],
+  "lenses": {
+    "correctness": {
+      "reads": [
+        "moduleGuidance"
+      ],
+      "addendum": "In this codebase re-entrancy includes anything that can abort and re-run a layout, plus frame ordering and settle transitions. Teardown includes dispose, ticker cancellation and recognizer disposal. Degradation includes an animation family switched off (a kill switch that dominates explicit per-call durations), hot reload, and a mutation issued mid-animation, mid-drag or inside a batch; in board also an item mid-exit and an unlaid or detached port, and in sliver_tree a defunct scrollable and a pending-deletion node. Lifecycle includes what the framework does without the feature's code running: a build that throws, after which the element shows an ErrorWidget and its next build creates new children; a kept-alive child dropped from its sliver and adopted back without a rebuild; and a GlobalKey moving a subtree, whose render objects are detached and attached under the new parent."
+    },
+    "performance": {
+      "reads": [
+        "moduleGuidance",
+        ".claude/rules/testing.md"
+      ],
+      "addendum": "Hot-path anti-patterns here: an allocation per frame, per layout or per pointer move, and a hot path that hashes keys instead of using the id-keyed reads in board or the *Nid method variants in sliver_tree. Debug counters on the render object or the controller pin performance contracts, so a plan names the counter and its expected value, and a timed claim names the committed comparison script that will judge it."
+    },
+    "surface": {
+      "reads": [
+        "moduleGuidance",
+        "conventionDocs"
+      ]
+    },
+    "claims": {
+      "reads": [
+        "moduleGuidance"
+      ],
+      "addendum": "Flutter framework behaviour is read in the SDK source under the citation settings' SDK root and cited as a path from that root, such as widgets/framework.dart, which the citation check resolves there. Dart SDK and pub package behaviour is read in their source and cited by symbol, since the citation check does not resolve those paths."
+    },
+    "acceptance": {
+      "reads": [
+        ".claude/rules/testing.md"
+      ]
+    },
+    "executability": {
+      "reads": [
+        "moduleGuidance",
+        "conventionDocs"
+      ],
+      "addendum": "Here a step's commit must pass the analyze and test gates on its own: after a deletion or rename, every user is changed in the same step, the barrel exports and the tests included. Git ignores examples/, so no step can commit a change there: a public API change that breaks code in examples/ is named in the plan as an expected break, which the examples gates accept."
+    },
+    "integration": {
+      "reads": [
+        "moduleGuidance"
+      ],
+      "addendum": "Here the crossings are every animation source, paint pass, mutator, widget layer and entry point. A plan silent on what happens when its change coincides with a bulk animation has not covered it, nor in board one silent on a drag's make-room preview, an exiting item held by retention or a frozen track, nor in sliver_tree one silent on a reorder preview, an exit ghost or a sticky pin. Timing risks here: a settle transition whose notify order is described but not asserted, a scroll correction whose re-entrancy is reasoned about but not exercised, and a tick whose paint-only or layout-triggering status is claimed but not pinned by a debug counter. Running a frame in a widget test is the test."
+    },
+    "consistency": {
+      "reads": []
+    }
+  },
+  "ranking": [
+    "hot-path-performance",
+    "user-visible-behaviour",
+    "architecture-fit",
+    "extensibility",
+    "developer-experience",
+    "blast-radius"
+  ],
+  "hotPaths": [
+    "per frame",
+    "per layout",
+    "per pointer move"
+  ],
+  "planRules": [
+    "Every geometric value the plan introduces is tagged with its coordinate space, as the module's architecture rules name the spaces.",
+    "An animation the plan installs declares its style family once, at the site that resolves its spec; nothing downstream re-derives it.",
+    "Every public symbol states whether the barrel exports it: the package exports through explicit show clauses, so an undeclared export is unnameable by app code.",
+    "New per-id storage names its growth path and the sites that clear it on release.",
+    "A new debug counter or @visibleForTesting member is a test seam: the Testing Plan names the existing seam it rejected and why."
+  ],
+  "planChecks": [
+    {
+      "name": "citations",
+      "stamp": "python plans/check_citations.py {plan} --stamp",
+      "verify": "python plans/check_citations.py {plan}",
+      "rebase": "python plans/check_citations.py {plan} --rebase",
+      "note": "Its citation form and statuses are in its own docstring. On the rebase, name with --accept <path:line> each CHANGED citation whose claim you re-read and kept at its number; it writes nothing while another is CHANGED."
+    }
+  ],
+  "citations": {
+    "sdkRoot": "C:/flutter_sdk/flutter/packages/flutter/lib/src",
+    "extensions": [
+      "dart",
+      "md",
+      "js",
+      "mjs",
+      "py",
+      "yaml",
+      "json"
+    ]
+  },
+  "defectClasses": [
+    "stale-summary",
+    "unenumerated-consumer",
+    "unverified-claim",
+    "plan-history"
+  ],
+  "roles": {
+    "planner": {
+      "effort": "xhigh"
+    },
+    "critic": {
+      "effort": "xhigh"
+    },
+    "extractor": {
+      "model": "sonnet",
+      "effort": "high"
+    },
+    "builder": {
+      "effort": "xhigh"
+    },
+    "reviewer": {
+      "effort": "xhigh"
+    }
+  },
+  "budget": {
+    "rounds": 4,
+    "implementationRevisions": 2,
+    "fixLoops": 1
+  }
+}

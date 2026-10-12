@@ -1,8 +1,6 @@
 # AGENTS.md
 
-Instructions for every agent in this repository. Claude Code reads this file
-through `CLAUDE.md`; other agent tools read it directly. Keep it
-self-contained, with no import directives: not every tool expands them.
+Instructions for every agent in this repository.
 
 ## Project Overview
 
@@ -19,26 +17,28 @@ The barrel file `lib/widgets_extended.dart` re-exports each of them.
 ```bash
 flutter test                                              # all tests
 flutter test test/sliver_tree/tree_controller_test.dart   # one file
-flutter analyze
+flutter analyze lib test                                  # the package
 
 # examples/: a separate package that uses the library through its barrel, as
-# an app does. Gitignored except the workspace calendar demo's files, so it
-# builds only in a local checkout that holds examples/pubspec.yaml.
-cd examples
-flutter test
-flutter analyze
+# an app does. Git ignores it, so it exists only in a local checkout that
+# holds examples/pubspec.yaml. The subshell keeps the shell at the root.
+(cd examples && flutter test)
+(cd examples && flutter analyze)
 ```
 
-After a behaviour change under `lib/`, also run the examples' tests and
-analyzer when `examples/pubspec.yaml` exists: they can fail where `test/`
-passes. `flutter analyze` does not report zero issues on this tree, so compare
-the issue count before and after your change.
+- After a behaviour change under `lib/`, also run the examples' tests and
+  analyzer when `examples/pubspec.yaml` exists: they can fail where `test/`
+  passes.
+- `flutter analyze lib test` reports no issues; keep it that way. A plain
+  `flutter analyze` also analyzes `examples/`, where neither command reports
+  zero problems, so there compare what each reports before and after your
+  change.
 
 ## Code Quality
 
-- Research first: read the code before describing it ("Verified claims").
 - Code and tests define current behaviour. A plan in `plans/` is proposed work
-  until the code and tests agree with it.
+  until the code and tests agree with it; continuing an unbuilt one is a
+  feature-delivery run whose requirements name it.
 - Prefer correct, complete implementations over minimal ones. Use appropriate
   data structures and algorithms; do not brute-force what has a known better
   solution.
@@ -49,60 +49,38 @@ the issue count before and after your change.
   from the evidence. Do not stack speculative fixes.
 - A performance claim needs a measurement, such as a debug counter or a timed
   run, not only a plausible mechanism. A timed comparison follows
-  `plans/AUDIT-METHOD.md` section 10.
+  `doc/agents/delivery-method.md` section 11.
 - Preserve existing work. Change nothing outside the change you were asked to
   make; the working tree may hold uncommitted work that is not yours.
 - When a requested change needs error handling or validation to work reliably,
   include it without asking.
+- Work governed by an audit, issue or specification closes against that
+  original source, never a paraphrase or a derived checklist: each of its
+  criteria quoted and marked met, partial or unmet with its evidence, in the
+  acceptance document format of `.claude/agents/delivery-reviewer.md`.
 - Do not be biased: disagree with the user on any claim that is wrong, and be
   brutally honest at all times.
 
-## Verified claims
+## Verify before asserting
 
-Never assert anything about code, APIs or behaviour that you have not checked in
-this session: in chat replies, plans, design documents, audits, code comments
-and commit messages alike.
+Assert nothing about code, APIs or behaviour that you have not checked in this
+session, in replies, documents, code comments and commit messages alike. Say
+"unverified" in the sentence that carries anything you have not checked.
 
-- Cite what you assert. A claim about existing code carries the `file:line` you
-  read; a claim without one is not verified and is not written. Source comments
-  are verified the same way but carry no citations (`.claude/rules/comments.md`).
-- Put each citation immediately after the claim it supports. A causal clause
-  ("because", "so", "therefore"), a statement of what the framework does, and
-  an absolute ("never", "only", "exactly", "cannot", "every") each carry their
-  own: observing an outcome does not license explaining it.
-- Counts come from commands. Files affected, tests affected, "N places do X",
-  how much work something is: run the command and use its output, and never
-  approximate a number you could measure. A count of a code symbol's users comes
-  from code, by the next rule, never from a text search.
-- Before changing a shared declaration (an interface, abstract class, mixin or
-  exported symbol), list every implementer and call site, tests included, and
-  verify the list in code: best, the users derive from one source and cannot
-  disagree; next, `flutter analyze` or a test fails when a user disagrees;
-  otherwise, read the code that uses it. A text search only locates what to read
-  (`plans/AUDIT-METHOD.md` section 8).
-- Read framework behaviour in the Flutter or Dart source before stating it:
-  what a widget builds, what a recognizer fires on disposal, what a default
-  resolves to. Recall of framework internals is a hypothesis.
-- A regression, hazard or failure mode is either demonstrated (a failing test,
-  a traced code path) or labelled unverified.
-- Tool and subagent output is a lead, not a finding: confirm it against the
-  source before repeating it.
-- Do not claim a plan, an audit or a colleague got something wrong until you
-  have run their check. If their statement was verified and yours is inferred,
-  theirs stands.
-- Keep write-ups short enough to verify: what changed, what was checked, and
-  how. Every extra sentence is another claim to verify.
-- Mark anything unverified in the sentence that carries it ("unverified", "I
-  have not checked this", "this needs a test"). A confident guess reads exactly
-  like a fact, which makes it worse than saying nothing.
-
-Prefer running a check to reasoning toward the answer, and match the tool to
-the question. A text search tells you whether a string appears, so use it to
-find what to read; `flutter analyze` decides what a symbol resolves to and what
-a rename or deletion breaks; a named test going red decides whether a guard
-fires. When a text search could give the wrong answer, change tools rather than
-narrowing the pattern. When a change is small and fails by compile error or
-failing test, implement it rather than reason further.
+- Cite what you read beside the claim it supports: a `file:line` in replies
+  and plans, a symbol in code comments (`.claude/rules/comments.md`). An
+  explanation ("because") or an absolute ("always", "never") needs its own
+  check.
+- Take counts and lists of a symbol's users from a command or the analyzer,
+  never from memory; a text search only finds what to read.
+- Before changing a shared declaration, find every user, tests included, and
+  let `flutter analyze` or a failing test confirm the list.
+- Read Flutter and Dart behaviour in the SDK and package source before stating
+  it: what a widget builds, what a recognizer fires on disposal, what a default
+  resolves to. Recall is a hypothesis.
+- Tool and subagent output is a lead until you confirm it in the source.
+- Prefer running a check to reasoning toward an answer; a small change that
+  the analyzer or a test would judge is made, not argued about.
 
 ## Response style
 
@@ -116,21 +94,26 @@ These rules apply to every answer given to the user.
   a vague one to make the answer sound simpler.
 - Be precise rather than exhaustive. Answer what was asked, and leave out
   background the reader did not ask for and does not need.
+- Keep write-ups short enough to verify: what changed, what was checked, and
+  how.
 
 ## Code Style
 
 - Always use double quotes `"` for string literals, except for imports; use single quotes `'` on imports.
 - Always create braces for code blocks.
 - Always use block bodies where possible.
-- Never use em-dashes, en-dashes, icons, emoji, or any other non-plain-text symbol (arrows, bullets beyond Markdown's own `-`, trademark, copyright, registered, degree, etc.) in code, comments, documentation, changelogs, commit messages, or chat replies. Use plain ASCII punctuation: a colon, semicolon, comma, parenthesis, or a separate sentence in place of a dash.
+- Write plain ASCII in code, comments, documents, changelogs, commit messages
+  and chat replies: no em or en dashes, arrows, icons, emoji, bullets other
+  than Markdown's `-`, or symbols such as trademark, copyright or degree signs.
+  In place of a dash, use a colon, semicolon, comma, parentheses or a new
+  sentence.
 - Never add Claude, Claude Code, or Anthropic as a co-author, author, or attribution anywhere. No `Co-Authored-By` trailers, no "Generated with" lines in commit messages, PR descriptions, changelogs, or file headers.
 
 ## Guidance map
 
-Read a row's files before the work its When column names. Claude Code also loads
-a rule file by itself when it reads, writes or edits a file the rule's `paths:`
-names, but not when a shell command touches it. A module rule lists its layer
-rules, and a layer rule's `paths:` names the files it governs.
+Read a row's files before the work its When column names, unless their contents
+already appear in your context. A module rule lists its layer rules, and a
+layer rule's `paths:` names the files it governs.
 
 | Read | When |
 |---|---|
@@ -138,28 +121,5 @@ rules, and a layer rule's `paths:` names the files it governs.
 | [board architecture](.claude/rules/board.md), and the `board-*.md` layer rules naming the file | Editing `lib/board/**` or its tests |
 | [Testing patterns](.claude/rules/testing.md) | Writing or changing tests under `test/**` |
 | [Comments](.claude/rules/comments.md) | Adding or changing a comment in Dart source under `lib/`, `test/` or `examples/` |
-| [Audit method](plans/AUDIT-METHOD.md) | Writing, auditing or revising a plan in `plans/` |
-| [Feature workflow contracts](doc/agents/feature-workflow-contracts.md) | Running or resuming the feature workflow, or producing or reading its files |
-| [Agent configuration](.claude/rules/agent-config.md) | Editing `AGENTS.md`, `CLAUDE.md`, `.claude/`, `doc/agents/`, `plans/AUDIT-METHOD.md` or `plans/check_citations.py` |
-
-Before finishing a change to the agent configuration, `plans/AUDIT-METHOD.md` or
-`plans/check_citations.py`, run every gate in `doc/agents/method-profile.json`
-whose condition applies.
-
-## The feature workflow
-
-`/feature-start` decides whether a change warrants the `feature-implementation`
-workflow (`.claude/workflows/`), then launches or resumes it; `/feature-status`
-reports on one. The workflow drafts a plan, critiques and revises it, opens a
-fresh angle, runs a kept trial, approves the plan, writes a checklist,
-implements it, and closes with a review by an agent that never reads the plan.
-
-## Plans and audits
-
-Plans live in `plans/` as `YYYY-MM-DD-<topic>-plan.md`. Before writing or
-auditing one, read `plans/AUDIT-METHOD.md`: its rules cannot be reconstructed
-by reasoning. A plan states the feature, its goals and its design as they will
-be built, never its history (`plans/AUDIT-METHOD.md` rule 2.6). Its citations
-are checked by `plans/check_citations.py` against a snapshot of the tree they
-were read on; the citation form and the procedure are `plans/AUDIT-METHOD.md`
-section 3.
+| [Feature delivery method](doc/agents/delivery-method.md) | Writing a plan, or running, resuming or reading a feature-delivery run, whose files are under `plans/delivery/` |
+| [Agent configuration](.claude/rules/agent-config.md) | Editing `AGENTS.md`, `CLAUDE.md`, `.claude/`, `doc/agents/` or `plans/check_citations.py` |

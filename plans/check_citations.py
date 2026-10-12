@@ -29,15 +29,20 @@ Statuses:
     PAST-END    a NEW citation past the end of its file
     DANGLING    a bare `:N` after a citation whose extension the profile does
                 not list
-Verify exits 1 on any status but OK and MOVED, and 2 when it cannot check.
+    MALFORMED   a line reference to a file whose extension the profile lists,
+                written in a form the checker does not read
+Verify exits 1 on any status but OK and MOVED, or when the plan holds no
+citation, and 2 when it cannot check.
 
 --rebase renumbers the MOVED citations, keeps the NEW ones and those named by
 --accept as written, and stamps the current tree. It writes nothing while a
-citation is UNRESOLVED, PAST-END, DANGLING, or CHANGED and not accepted.
+citation is UNRESOLVED, PAST-END, DANGLING, MALFORMED, or CHANGED and not
+accepted. --stamp and --rebase write nothing for a plan that holds no citation.
 
 A citation is a backticked `name.ext:N` or `name.ext:N-M` whose extension the
 profile's `citations.extensions` lists, or a bare `:N` continuing the last
-one. A name with a directory is a path from the repository root, or else from
+one; the profile is doc/agents/delivery-profile.json unless --profile names
+another. A name with a directory is a path from the repository root, or else from
 the profile's `citations.sdkRoot`; a bare name must match exactly one file git
 tracks or would track. Only the live text is read: everything from the line
 `## Audit log` on is history.
@@ -61,7 +66,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-PROFILE = Path("doc") / "agents" / "method-profile.json"
+PROFILE = Path("doc") / "agents" / "delivery-profile.json"
 LIVE_END = re.compile(r"^## Audit log[ \t]*\r?$", re.M)
 REF_PREFIX = "refs/citations/"
 MARKER = re.compile(r"<!-- CITATIONS: repo (?P<repo>[0-9a-f]{40})(?: sdk (?P<sdk>[0-9a-f]{40}))? -->")
@@ -69,7 +74,9 @@ CITATION = re.compile(
     r"`(?P<path>[A-Za-z0-9_./-]+\.(?P<ext>[A-Za-z0-9]+)):(?P<start>\d+)(?:-(?P<end>\d+))?`"
     r"|`:(?P<bstart>\d+)(?:-(?P<bend>\d+))?`"
 )
-FAILING = ("CHANGED", "NEW", "UNRESOLVED", "PAST-END", "DANGLING")
+FAILING = ("CHANGED", "NEW", "UNRESOLVED", "PAST-END", "DANGLING", "MALFORMED")
+UNREAD_FIX = "write it as a backticked path:line or path:line-line, or cite it by symbol"
+NO_CITATION = "the plan holds no citation: write each as a backticked path:line or path:line-line"
 # A fixed identity and algorithm, so a stamp and a verify do not depend on the
 # configuration of the machine that runs them.
 TOOL_ENV = {
@@ -148,6 +155,24 @@ class Occurrence:
 def split_live(text: str) -> tuple[str, str]:
     m = LIVE_END.search(text)
     return (text, "") if m is None else (text[:m.start()], text[m.start():])
+
+
+def malformed(live: str, cfg: Config) -> list[str]:
+    """The line references outside every citation: `name.ext:N`, `:LN` or `#LN`
+    for a listed extension, unbackticked or with characters a citation cannot
+    hold. The checker would pass the claim each one supports unread."""
+    if not cfg.extensions:
+        return []
+    like = re.compile(r"(?<![A-Za-z0-9_./@-])[A-Za-z0-9_./@-]*\.(?:"
+                      + "|".join(map(re.escape, cfg.extensions))
+                      + r")(?::\d+(?:-\d+)?|:L\d+|#L\d+)")
+    outside = CITATION.sub(lambda m: " " * len(m.group(0)), live)
+    return [m.group(0) for m in like.finditer(outside)]
+
+
+def cites(live: str) -> bool:
+    """Whether the plan cites any file, listed extension or not."""
+    return any(m.group("path") for m in CITATION.finditer(live))
 
 
 def occurrences(live: str, cfg: Config) -> tuple[list[Occurrence], list[str]]:
@@ -308,8 +333,8 @@ def analyze(text: str, cfg: Config) -> tuple[re.Match, list[Occurrence], list[st
     return marker, occs, dangling, result
 
 
-def report(occs: list[Occurrence], dangling: list[str], result: dict[str, Status],
-           verbose: bool) -> int:
+def report(occs: list[Occurrence], dangling: list[str], unread: list[str],
+           result: dict[str, Status], verbose: bool, cited: bool) -> int:
     counts = {s: 0 for s in ("OK", "MOVED", *FAILING)}
     for key, st in result.items():
         counts[st.status] += 1
@@ -321,9 +346,14 @@ def report(occs: list[Occurrence], dangling: list[str], result: dict[str, Status
     for item in dangling:
         counts["DANGLING"] += 1
         print(f"  DANGLING   {item}  after an extension the profile does not list")
+    for item in unread:
+        counts["MALFORMED"] += 1
+        print(f"  MALFORMED  {item}  {UNREAD_FIX}")
+    if not cited:
+        print(f"  {NO_CITATION}")
     print(f"{len(occs)} citations, {len(result)} distinct: "
           + ", ".join(f"{k.lower()} {v}" for k, v in counts.items()))
-    return 1 if any(counts[s] for s in FAILING) else 0
+    return 1 if any(counts[s] for s in FAILING) or not cited else 0
 
 
 def snapshot(cfg: Config, plan: Path, repo_paths: list[str], entries: list[str]) -> str:
@@ -356,6 +386,9 @@ def stamp(plan: Path, text: str, cfg: Config) -> int:
     occs, dangling = occurrences(live, cfg)
     tree = Tree(cfg)
     problems = [f"  DANGLING   {item}" for item in dangling]
+    problems += [f"  MALFORMED  {item}  {UNREAD_FIX}" for item in malformed(live, cfg)]
+    if not cites(live):
+        problems.append(f"  {NO_CITATION}")
     where: dict[str, tuple[str, str]] = {}
     for occ in occs:
         if occ.key in where:
@@ -401,6 +434,7 @@ def rebase(plan: Path, text: str, cfg: Config, accepted: list[str]) -> int:
         if st.status in ("UNRESOLVED", "PAST-END") or (st.status == "CHANGED" and key not in accepted):
             refused.append(f"  {st.status:<10} {key}  {st.detail}")
     refused += [f"  DANGLING   {item}" for item in dangling]
+    refused += [f"  MALFORMED  {item}  {UNREAD_FIX}" for item in malformed(split_live(text)[0], cfg)]
     if refused:
         print("\n".join(refused))
         print("nothing written: re-read each CHANGED claim, write its current line, and name it with --accept")
@@ -453,7 +487,8 @@ def run(argv: list[str]) -> int:
         if "--rebase" in flags:
             return rebase(plan, text, cfg, accepted)
         _, occs, dangling, result = analyze(text, cfg)
-        return report(occs, dangling, result, "--verbose" in flags)
+        live = split_live(text)[0]
+        return report(occs, dangling, malformed(live, cfg), result, "--verbose" in flags, cites(live))
     except Refused as why:
         print(why)
         return 2
@@ -610,6 +645,27 @@ def self_test() -> int:
         expect("a stamp keeps CRLF and puts the marker after the status line",
                len(rows) > 2 and rows[1].startswith("<!-- PLAN-STATUS:") and MARKER.match(rows[2]) is not None
                and "\n" not in "".join(rows))
+        odd = repo / "plans/odd-plan.md"
+        put(odd, "`b.dart:1` b.dart:2 `lib/b.dart:1:3` `pkg@1/b.dart:2` `b.dart:L2` `b.dart::Main` `c.yaml:1`\n")
+        expect("a malformed line reference refuses the stamp", quiet(str(odd), "--stamp") == 1
+               and not MARKER.search(odd.read_text(encoding="utf-8")))
+        expect("each malformed form is found, and a symbol or unlisted reference is not",
+               malformed(odd.read_text(encoding="utf-8"), load_config(repo, None))
+               == ["b.dart:2", "lib/b.dart:1", "pkg@1/b.dart:2", "b.dart:L2"])
+        put(odd, "`b.dart:1`\n")
+        quiet(str(odd), "--stamp")
+        put(odd, odd.read_text(encoding="utf-8") + "See b.dart:3.\n")
+        expect("verify fails on MALFORMED", quiet(str(odd)) == 1)
+        expect("rebase refuses a MALFORMED reference", quiet(str(odd), "--rebase") == 1)
+        bare = repo / "plans/bare-plan.md"
+        put(bare, "# B\nThe main entry is `b.dart::Main`.\n")
+        expect("a plan with no citation refuses the stamp",
+               quiet(str(bare), "--stamp") == 1 and not MARKER.search(bare.read_text(encoding="utf-8")))
+        put(bare, "# B\n`b.dart:1`\n")
+        quiet(str(bare), "--stamp")
+        put(bare, bare.read_text(encoding="utf-8").replace("`b.dart:1`", "The main entry is `b.dart::Main`."))
+        expect("verify fails on a plan with no citation", quiet(str(bare)) == 1)
+        expect("rebase writes nothing for a plan with no citation", quiet(str(bare), "--rebase") == 1)
         inline = repo / "plans/inline-plan.md"
         put(inline, "See the ## Audit log below. `b.dart:1`\n## Audit log\n`b.dart:99`\n")
         quiet(str(inline), "--stamp")
