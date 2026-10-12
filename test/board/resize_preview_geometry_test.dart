@@ -1550,4 +1550,152 @@ void main() {
       skip: true,
     );
   });
+
+  testWidgets(
+    "the per-item geometry path reads the content axis the pinned number "
+    "of times",
+    (tester) async {
+      final controller = _controller(
+        tester,
+        rows: BoardAxisConfig(
+          axis: LazyContentAxis(60, 30.0),
+          laneExtent: 18.0,
+          lanePadding: 4.0,
+        ),
+      );
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 1, colStart: 0, colSpan: 3),
+      );
+      controller.addItem(
+        const _Item("b"),
+        const BoardSpan(rowStart: 1, colStart: 1, colSpan: 3),
+      );
+      controller.addItem(
+        const _Item("c"),
+        const BoardSpan(rowStart: 2, colStart: 4, rowSpan: 2),
+      );
+      controller.addItem(
+        const _Item("f"),
+        const BoardSpan(
+          rowStart: 4,
+          colStart: 5,
+          rowFraction: 0.25,
+          rowSpanFraction: 0.5,
+        ),
+      );
+      controller.addItem(
+        const _Item("g"),
+        const BoardSpan(
+          rowStart: 6,
+          colStart: 0,
+          rowFraction: 0.25,
+          rowSpan: 0,
+          rowSpanFraction: 0.5,
+        ),
+      );
+      final viewport = await _mount(
+        tester,
+        controller,
+        cellHeight: (row) {
+          return 20.0;
+        },
+      );
+      final fenwick = (controller.rows.axis as LazyContentAxis).debugFenwick;
+      // Setup sanity: `a`, `b` and `g` are laned, `c` and `f` are not.
+      for (final key in <String>["a", "b", "g"]) {
+        expect(controller.isLanedId(controller.idOfKey(key)), isTrue);
+      }
+      for (final key in <String>["c", "f"]) {
+        expect(controller.isLanedId(controller.idOfKey(key)), isFalse);
+      }
+
+      Future<int> forcedLayout() async {
+        fenwick.debugOpCount = 0;
+        viewport.markNeedsLayout();
+        await tester.pump();
+        return fenwick.debugOpCount;
+      }
+
+      int rectOf(String key) {
+        fenwick.debugOpCount = 0;
+        viewport.rectOfItem(key);
+        return fenwick.debugOpCount;
+      }
+
+      Future<void> release() async {
+        controller.releaseMakeRoomPreview(duration: Duration.zero);
+        await tester.pump();
+      }
+
+      // First: one forced layout.
+      final first = await forcedLayout();
+      // Second: one rectOfItem per arm and kind of item.
+      final second = <String, int>{
+        for (final key in <String>["a", "c", "f", "g"]) key: rectOf(key),
+      };
+      // Third: a forced layout under a settled move preview, which the dry
+      // run lanes on lane 0 of row 1, moving `a` and `b` down a lane.
+      controller.previewMakeRoomGap(
+        draggedKey: "c",
+        prospective: const BoardSpan(rowStart: 1, colStart: 0, colSpan: 4),
+        lifted: true,
+      );
+      await tester.pump();
+      // Setup sanity: the move preview holds `a` a lane down.
+      expect(
+        controller.anim.makeRoomDeltaOf(controller.idOfKey("a")),
+        const Offset(0.0, 18.0),
+      );
+      final third = await forcedLayout();
+      await release();
+      // Sixth: rectOfItem of `a` under a resize preview that de-lanes it.
+      controller.previewMakeRoomGap(
+        draggedKey: "a",
+        prospective: const BoardSpan(
+          rowStart: 1,
+          colStart: 0,
+          rowSpan: 2,
+          colSpan: 3,
+        ),
+      );
+      await tester.pump();
+      final sixth = rectOf("a");
+      await release();
+      // Fourth and fifth: rectOfItem of `c` and a forced layout under a
+      // settled resize preview of `c`.
+      controller.previewMakeRoomGap(
+        draggedKey: "c",
+        prospective: const BoardSpan(rowStart: 2, colStart: 4, rowSpan: 3),
+      );
+      await tester.pump();
+      final fourth = rectOf("c");
+      final fifth = await forcedLayout();
+      // Setup sanity: that layout took one pass.
+      expect(viewport.debugLastCorrectionPassCount, 1);
+      // Seventh: the same preview standing, a layout that scrolls into
+      // rows no layout has measured, above a measured anchor. The jump to
+      // row 40 measures the rows around it and leaves a gap above them,
+      // which the jump back to row 32 obtains above its anchor.
+      controller.jumpToCell(40, 0);
+      await tester.pump();
+      controller.jumpToCell(32, 0);
+      fenwick.debugOpCount = 0;
+      await tester.pump();
+      final seventh = fenwick.debugOpCount;
+      // Setup sanity: that layout took more than one pass.
+      expect(viewport.debugLastCorrectionPassCount, greaterThanOrEqualTo(2));
+      await release();
+
+      // TARGET: each count is the one measured on the library before the
+      // resize hold existed.
+      expect(first, 1772);
+      expect(second, <String, int>{"a": 1, "c": 2, "f": 10, "g": 2});
+      expect(third, 1781);
+      expect(fourth, 2);
+      expect(fifth, 1869);
+      expect(sixth, 1);
+      expect(seventh, 4753);
+    },
+  );
 }
