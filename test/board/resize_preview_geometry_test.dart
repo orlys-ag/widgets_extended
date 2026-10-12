@@ -70,7 +70,7 @@ BoardController<String, _Item> _controller(
   return controller;
 }
 
-/// Criterion 1's board: six 50 px rows, seven 40 px columns, no lanes.
+/// Six 50 px rows, seven 40 px columns, no lanes.
 BoardController<String, _Item> _uniform(
   WidgetTester tester, {
   BoardAnimationStyle style = BoardAnimationStyle.disabled,
@@ -82,8 +82,7 @@ BoardController<String, _Item> _uniform(
   );
 }
 
-/// Criterion 7's axes: content-sized rows carrying 18 px lanes under a
-/// 4 px padding.
+/// Content-sized rows carrying 18 px lanes under a 4 px padding.
 BoardController<String, _Item> _contentLaned(
   WidgetTester tester, {
   int rowCount = 6,
@@ -1675,9 +1674,8 @@ void main() {
       // sums touch as many nodes as each index has set bits, 1, 1, 1 and
       // 2, the uniform columns none, and no shift with no trackResize.
       const refresh = 5;
-      // TARGET: each count is the one measured on the library before the
-      // resize hold existed, a layout under a standing resize preview
-      // adding one refresh however many passes it takes.
+      // TARGET: the reads each path makes, a layout under a standing
+      // resize preview adding one refresh however many passes it takes.
       expect(first, 1772);
       expect(second, <String, int>{"a": 1, "c": 2, "f": 10, "g": 2});
       expect(third, 1781);
@@ -2056,8 +2054,9 @@ void main() {
           await tester.pump(const Duration(milliseconds: 4));
         }
 
-        /// T14's board with `n` at row 3, column 6: `d`'s de-laning
-        /// preview settled, then cancelled, 100 ms into its close.
+        /// `d` laned alone in row 0 over 2 px cells and `n` at row 3,
+        /// column 6: `d`'s de-laning preview settled, then cancelled,
+        /// 100 ms into its close.
         Future<(BoardController<String, _Item>, RenderBoardViewport<String>)>
         cancelled({bool enter = false}) async {
           final controller = _contentLaned(
