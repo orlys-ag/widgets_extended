@@ -105,11 +105,20 @@ abstract interface class BoardAnimationReader<TKey> {
   /// which continue the discarded motion on it.
   MakeRoomHandOff? get makeRoomHandOff;
 
-  /// The held make-room delta ALONE, both axes, zero for no entry.
-  /// [offsetOfItem] composes it with slides; the track-sizing term must
-  /// not compose non-relane slides, whose leads can be cross-track, and
-  /// reads [relaneDeltaOf] for the ones that cannot.
-  Offset makeRoomDeltaOf(int itemId);
+  /// The delta the track-sizing term adds to a member's ceiling for the
+  /// make-room preview, on the lane axis, zero for no entry: its held gap
+  /// offset plus, for a resized item, its held BAND. Not the paint half:
+  /// [offsetOfItem] composes the engine's paint delta, which carries a
+  /// resized item's lead and no band. The term must not compose
+  /// non-relane slides, whose leads can be cross-track, and reads
+  /// [relaneDeltaOf] for the ones that cannot.
+  Offset makeRoomTermDeltaOf(int itemId);
+
+  /// The share of its stored track's term a resized item has given up
+  /// while its preview leaves that track, `0` to `1`, zero for every
+  /// other item. The sizing term scales the member's whole contribution,
+  /// padding included, by one minus it.
+  double makeRoomVacatedOf(int itemId);
 
   /// The prospective lane occupancies on lane-axis track [track].
   /// `value` is in `[0, 1]`.
@@ -128,9 +137,12 @@ abstract interface class BoardAnimationReader<TKey> {
   /// axis: an extent changes layout wherever it is, unlike a gap.
   bool get hasMakeRoomExtent;
 
-  /// The lead delta of a RELANE record, zero for every other record and
-  /// for no record: an intra-track shift on the lane axis, which is what
-  /// lets the track-sizing term add it to its own track's extent.
+  /// The delta a RELANE record adds to its member's lane band in the
+  /// track-sizing term, zero for every other record and for no record:
+  /// its lead, an intra-track shift on the lane axis, plus, for a
+  /// BAND-marked record, its extent, a change of the band's size inside
+  /// the track. That is what lets the term add it to its own track's
+  /// extent.
   Offset relaneDeltaOf(int itemId);
 
   /// Whether any relane record stands. The render composes it with its
@@ -166,6 +178,8 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
     prospectiveExtentOf,
     required int Function(int id) laneOfId,
     required int Function(int id) laneCountOfId,
+    required MakeRoomResizeTargets<MakeRoomResizeGeometry> resizeGeometryOf,
+    required MakeRoomResizeTargets<MakeRoomResizeTerm> resizeTermOf,
     required VoidCallback? Function(int id) captureSettleRelanes,
   }) : _store = store,
        _spanIndex = spanIndex,
@@ -204,6 +218,8 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
       prospectiveExtentOf: prospectiveExtentOf,
       laneOfId: laneOfId,
       laneCountOfId: laneCountOfId,
+      resizeGeometryOf: resizeGeometryOf,
+      resizeTermOf: resizeTermOf,
     );
   }
 
@@ -330,8 +346,13 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   }
 
   @override
-  Offset makeRoomDeltaOf(int itemId) {
-    return makeRoom.deltaOf(itemId);
+  Offset makeRoomTermDeltaOf(int itemId) {
+    return makeRoom.termDeltaOf(itemId);
+  }
+
+  @override
+  double makeRoomVacatedOf(int itemId) {
+    return makeRoom.vacatedOf(itemId);
   }
 
   @override

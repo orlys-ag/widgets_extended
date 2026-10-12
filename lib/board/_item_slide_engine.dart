@@ -6,7 +6,7 @@
 /// belongs. A repeat install COMPOSES from the record's current
 /// interpolated deltas rather than replacing them.
 ///
-/// A record carries two deltas and one mark. The LEAD is paint-only, a
+/// A record carries two deltas and two marks. The LEAD is paint-only, a
 /// shift the render composes at paint. The EXTENT is LAYOUT-DRIVING: the
 /// geometry rule adds it to the item's extent, so the child is laid out
 /// at the animated size and the coordinator's layout-driving union
@@ -14,7 +14,9 @@
 /// composed into the record was an INTRA-TRACK shift on the lane axis,
 /// which is what lets the track-sizing term read that lead as a term of
 /// its own track; the install site decides it, and a compose that mixes
-/// the two kinds drops it.
+/// the two kinds drops it. The BAND mark, carried only beside RELANE,
+/// says the record's extent is an intra-track change of the item's lane
+/// band as well, so the term reads that extent beside the lead.
 ///
 /// Not exported from the module barrel.
 library;
@@ -29,6 +31,7 @@ class _SlideRecord {
     required this.start,
     required this.startExtent,
     required this.relane,
+    required this.band,
     required this.family,
     required this.explicitDuration,
     required this.explicitCurve,
@@ -46,6 +49,11 @@ class _SlideRecord {
   /// Whether every lead composed into this record was an intra-track
   /// shift on the lane axis. See the library doc.
   final bool relane;
+
+  /// Whether the record's extent is an intra-track change of the item's
+  /// lane band, which the term reads beside the lead. Only ever set
+  /// beside [relane]. See the library doc.
+  final bool band;
 
   final BoardAnimationFamily family;
 
@@ -153,15 +161,18 @@ class ItemSlideEngine {
     return record.startExtent * (1.0 - _easedOf(record));
   }
 
-  /// [deltaOf] for a RELANE record and zero for every other, which is
-  /// what the track-sizing term reads: a lead it may add to its own
-  /// track's extent.
+  /// What a RELANE record adds to its member's lane band in the
+  /// track-sizing term, and zero for every other record: its [deltaOf],
+  /// plus its [extentDeltaOf] for a BAND-marked record, read in the one
+  /// lookup.
   Offset relaneDeltaOf(int id) {
     final record = _records[id];
     if (record == null || !record.relane) {
       return Offset.zero;
     }
-    return record.start * (1.0 - _easedOf(record));
+    final remaining = 1.0 - _easedOf(record);
+    final lead = record.start * remaining;
+    return record.band ? lead + record.startExtent * remaining : lead;
   }
 
   double _easedOf(_SlideRecord record) {
@@ -191,6 +202,10 @@ class ItemSlideEngine {
   /// when both the record and this install carry it, so a compose that
   /// mixes an intra-track lead with a cross-track one drops it and the
   /// track-sizing term stops reading a lead that is no longer one.
+  /// [band] declares that [extentDelta] is an intra-track change of the
+  /// item's lane band; the composed record keeps it when it keeps
+  /// [relane] and either the record or this install carries it, so a
+  /// band glide composed onto the same item's relane FLIP keeps it.
   bool animateSlideFrom(
     int id,
     Offset delta, {
@@ -199,6 +214,7 @@ class ItemSlideEngine {
     Curve? curve,
     Offset extentDelta = Offset.zero,
     bool relane = false,
+    bool band = false,
   }) {
     if (_styleOf().isOff(family, explicit: duration)) {
       return false;
@@ -207,10 +223,14 @@ class ItemSlideEngine {
     final existing = _records[id];
     final composedStart = deltaOf(id) + delta;
     final composedExtent = extentDeltaOf(id) + extentDelta;
+    final composedRelane = existing == null
+        ? relane
+        : (relane && existing.relane);
     _records[id] = _SlideRecord(
       start: composedStart,
       startExtent: composedExtent,
-      relane: existing == null ? relane : (relane && existing.relane),
+      relane: composedRelane,
+      band: composedRelane && (band || (existing?.band ?? false)),
       family: family,
       explicitDuration: duration,
       explicitCurve: curve,

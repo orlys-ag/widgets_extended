@@ -896,6 +896,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // ARM 1 of the lane flush: resolution precedes track sizing, so the
     // cluster term below never reads a stale laneCount.
     _controller.flushLanesForLayout();
+    // A resize preview's TERM targets, re-derived against the lanes just
+    // resolved and before any pass sizes a track, so the term reads its
+    // band in the same frame a re-lane of its bucket lands.
+    _controller.refreshResizeTerm();
     final recordKey = (
       _controller.rows.axis,
       _controller.columns.axis,
@@ -1061,6 +1065,14 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       }());
     }
 
+    // A resize preview's GEOMETRY targets, re-derived after the passes,
+    // whose sizing can move any track, and before the positioning sweep
+    // reads them: over the lattice as it now paints, the trackResize
+    // shifts measured from the floors the settling pass wrote.
+    _controller.refreshResizeGeometry(
+      rowShiftFloor: _shiftFloorRow,
+      colShiftFloor: _shiftFloorCol,
+    );
     // Retention is obtaining: exit-retained vicinities and the drag
     // pin's stay active children wherever the window went, positioned at
     // their structural rects, which the base's per-child isVisible skip
@@ -1461,33 +1473,38 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       if (laneAxisIsContent) {
         // The item-cluster term: the track must hold its deepest
         // cluster's lanes, each member's ceiling SCALED by its enter/exit
-        // ramp and SHIFTED by the two intra-track numbers paint adds to
-        // the same member, its held make-room delta and its RELANE
-        // slide's lead, so the track's edge is a function of what paints.
-        // Zero members and no slot contribute NO term; an itemless track
-        // keeps its cells-only measurement. NO MEMBER IS SKIPPED, the
-        // lifted one included: nothing collapses the dragged item's
-        // in-place widget, so the track must keep holding it, and the
-        // engine answers a zero delta for a lifted id anyway.
+        // ramp and SHIFTED by the two intra-track numbers the make-room
+        // preview and a RELANE slide add to the same member's band, so
+        // the track's edge is a function of what paints. Zero members and
+        // no slot contribute NO term; an itemless track keeps its
+        // cells-only measurement. EVERY MEMBER IS READ, the lifted one
+        // included: nothing collapses the dragged item's in-place widget,
+        // so the track must keep holding it, and the engine answers a
+        // zero delta for a lifted id anyway. A resized member whose
+        // preview leaves the track is read too, its whole contribution,
+        // padding included, scaled by the share it has not yet vacated,
+        // so the track gives up exactly what the commit will take.
         // Lane resolution ran at the layout head.
         final members = _controller.laneBucketMembersOn(track);
         var deepest = 0.0;
+        var vacating = 0.0;
         var seen = false;
         for (final member in members) {
-          seen = true;
           if (anim.isEnteringItem(member) || anim.isExitingItem(member)) {
             contributorRamping = true;
           }
           // Content space, on the lane axis; a delta is the same number
-          // in both spaces.
+          // in both spaces. The make-room preview's term delta: a held
+          // gap offset, or a resized item's held band.
           final delta = contentAxis == Axis.vertical
-              ? anim.makeRoomDeltaOf(member).dy
-              : anim.makeRoomDeltaOf(member).dx;
-          // A RELANE lead is the second number paint adds to a member's
-          // lane origin: an intra-track shift, so it belongs to THIS
-          // track's term. A cross-track slide never reaches here, which
-          // is what the relane mark decides and what keeps the reader's
-          // "the term must not compose non-relane slides" rule whole.
+              ? anim.makeRoomTermDeltaOf(member).dy
+              : anim.makeRoomTermDeltaOf(member).dx;
+          // A RELANE record adds its lead to a member's band, and a
+          // band-marked one its extent too: intra-track changes, so they
+          // belong to THIS track's term. A cross-track slide never
+          // reaches here, which is what the relane mark decides and what
+          // keeps the reader's "the term must not compose non-relane
+          // slides" rule whole.
           final relane = contentAxis == Axis.vertical
               ? anim.relaneDeltaOf(member).dy
               : anim.relaneDeltaOf(member).dx;
@@ -1495,18 +1512,38 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
             makeRoomContributes = true;
           }
           // A LANE BAND measure and not an extent: the band's position
-          // (the lane origin plus the two intra-track LEAD numbers paint
-          // adds) plus the band's SIZE, the member's stored span, scaled
-          // by its ramp. It reads no in-flight extent, so it agrees with
-          // paint AT REST and can lag it while an extent animates on a
-          // different clock.
+          // and SIZE, the member's stored lanes with its stored span
+          // scaled by its ramp, plus the two numbers above. It reads no
+          // in-flight extent but a band-marked record's, so it agrees
+          // with paint AT REST and can lag it while an extent animates on
+          // a different clock.
           final ceiling =
-              _controller.laneOfId(member) * config.laneExtent! +
+              config.laneBandEdgeOn(
+                track,
+                _controller.laneOfId(member),
+                _controller.laneCountOfId(member),
+                anim.enterExitProgressOf(member) *
+                    _controller.laneSpanOfId(member),
+              ) +
               delta +
-              relane +
-              anim.enterExitProgressOf(member) *
-                  _controller.laneSpanOfId(member) *
-                  config.laneExtent!;
+              relane;
+          final vacated = anim.makeRoomVacatedOf(member);
+          if (vacated != 0.0) {
+            // Its own maximum, and no mark of the track as seen: once it
+            // has vacated wholly the track holds nothing for it, not even
+            // the padding. It still counts as a make-room contribution,
+            // so the track is recorded on that latch and never animated
+            // by a trackResize under an off makeRoom family.
+            makeRoomContributes = true;
+            final share =
+                (1.0 - vacated) *
+                (math.max(0.0, ceiling) + config.lanePadding);
+            if (share > vacating) {
+              vacating = share;
+            }
+            continue;
+          }
+          seen = true;
           if (ceiling > deepest) {
             deepest = ceiling;
           }
@@ -1518,16 +1555,22 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           // the max takes one or the other, never their sum.
           seen = true;
           makeRoomContributes = true;
-          final ceiling = (slot.lane + slot.value) * config.laneExtent!;
+          final ceiling = config.laneBandEdgeOn(
+            track,
+            slot.lane,
+            slot.lane + 1,
+            slot.value,
+          );
           if (ceiling > deepest) {
             deepest = ceiling;
           }
         }
-        if (seen) {
-          final term = deepest + config.lanePadding;
-          if (term > to) {
-            to = term;
-          }
+        var term = vacating;
+        if (seen && deepest + config.lanePadding > term) {
+          term = deepest + config.lanePadding;
+        }
+        if (term > to) {
+          to = term;
         }
       }
       // COLLECTED here and REPORTED after the pass loop, never thrown
@@ -1853,115 +1896,71 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     }
   }
 
-  /// An item's content-space leading edge and extent on [axis], the
-  /// two-arm rule: a LANED item on the lane axis takes its track's edge
-  /// plus the lane term and its whole lane BAND, the slice multiplied by
-  /// its lane span, for its extent (its own fractions on that axis are
-  /// ignored, because its position inside the track is decided by its
-  /// lane); everything else takes the exact fractional endpoints, which
-  /// is the only arm that consumes them.
+  /// An item's content-space leading edge and extent on [axis]: the
+  /// item-geometry rule ([BoardAxisConfigItemGeometry.itemGeometryOn]),
+  /// fed the item's stored span and lanes and the three animation terms
+  /// layout composes, which this method gathers and the rule applies.
   ///
   /// THE ONE SITE THAT ADDS THE IN-FLIGHT EXTENT DELTA, on every arm,
   /// before the enter/exit ramp multiplies. Layout's tight constraints
-  /// and `rectOfItem` both read this rule, so a child is laid out at the
-  /// size the port reports; splitting them would report one size and
-  /// paint another. The delta is SIGNED, a growth carrying a negative
-  /// one, so the floor is on the SUM and never on the delta alone. The
-  /// LEAD takes no such term: a slide's lead is the paint shift.
+  /// and `rectOfItem` both read this, so a child is laid out at the size
+  /// the port reports; splitting them would report one size and paint
+  /// another. The delta is SIGNED, a growth carrying a negative one, so
+  /// the floor is on the SUM and never on the delta alone. The LEAD takes
+  /// no such term: a slide's lead is the paint shift.
+  ///
+  /// A PINNED axis reads settled track offsets, exactly as its band's
+  /// frozen cells do (`_frozenNormalizedPosition`): a track resize in
+  /// flight shifts the scrolled lattice, not the band. Elsewhere a resize
+  /// in flight shifts each edge by the shift at its own track, a laned
+  /// item's lead only, since its band lies inside one track. The ramp
+  /// scales the lane axis, or the PRIMARY axis when there is none: a
+  /// non-laned item on the lane axis ramps over its own full extent, the
+  /// span axis is never scaled (a chip entering a week row grows in
+  /// height, not in day count), and with no lane axis an item entering or
+  /// leaving would otherwise show nothing for the whole ramp and then pop.
   ({double lead, double extent}) _itemSpanGeometry(
     int id,
     Axis axis,
     BoardPin pin,
   ) {
-    final config = axis == Axis.vertical
-        ? _controller.rows
-        : _controller.columns;
-    // A PINNED axis reads settled track offsets, exactly as its band's
-    // frozen cells do (`_frozenNormalizedPosition`): a track resize in
-    // flight shifts the scrolled lattice, not the band.
-    final pinned = pin != BoardPin.none;
-    final boardAxis = config.axis;
-    final extentDelta = axis == Axis.vertical
-        ? _controller.anim.extentDeltaOf(id).dy
-        : _controller.anim.extentDeltaOf(id).dx;
-    final laned = _controller.laneAxis == axis && _controller.isLanedId(id);
-    if (laned) {
-      // Clamped exactly as the fractional arm below clamps: an axis swap
-      // can strand a live span past the lattice, and these reads must
-      // stay total for every consumer, rectOfItem included.
-      final track = math.min(
-        _controller.startIndexOfId(id, axis),
-        boardAxis.trackCount,
-      );
-      final lane = _controller.laneOfId(id);
-      final laneCount = _controller.laneCountOfId(id);
-      final laneSpan = _controller.laneSpanOfId(id);
-      final trackLead = pinned
-          ? boardAxis.offsetOf(track)
-          : _animatedOffsetOf(axis, boardAxis, track);
-      final laneExtent = config.laneExtent;
-      final padding = config.lanePadding;
-      if (boardAxis.acceptsMeasurements) {
-        // Content-sized lane axis: fixed slices from the padded edge; the
-        // track grew to hold them through the cluster term. The item
-        // takes its whole BAND, the span multiplying INSIDE the floor and
-        // BEFORE the ramp, so the delta and the progress compose exactly
-        // as they did on one slice. The extent ramps with the item's own
-        // enter/exit progress.
-        return (
-          lead: trackLead + padding + lane * laneExtent!,
-          extent:
-              math.max(0.0, laneExtent * laneSpan + extentDelta) *
-              _controller.anim.enterExitProgressOf(id),
-        );
-      }
-      // Fixed lane axis: the track's extent past the padding is divided
-      // evenly among the cluster's lanes.
-      // Floored at zero: a lanePadding wider than the track would
-      // otherwise hand layout a negative tight constraint. A clamped
-      // out-of-lattice track has no extent at all.
-      final trackExtent = track >= boardAxis.trackCount
-          ? 0.0
-          : boardAxis.extentOf(track);
-      final slice = math.max(0.0, trackExtent - padding) / laneCount;
-      return (
-        // The lead reads the SETTLED slice and takes NO span: the lane
-        // origin is the item's OWN lane's, and is where the item's own
-        // animated extent does not reach.
-        lead: trackLead + padding + lane * slice,
-        extent:
-            math.max(0.0, slice * laneSpan + extentDelta) *
-            _controller.anim.enterExitProgressOf(id),
-      );
-    }
-    final startTrack = axis == Axis.vertical
+    final vertical = axis == Axis.vertical;
+    final config = vertical ? _controller.rows : _controller.columns;
+    final anim = _controller.anim;
+    final extentDelta = vertical
+        ? anim.extentDeltaOf(id).dy
+        : anim.extentDeltaOf(id).dx;
+    final shifts = pin == BoardPin.none && anim.hasActiveTrackResize;
+    final ramp = axis == (_controller.laneAxis ?? _controller.primaryAxis)
+        ? anim.enterExitProgressOf(id)
+        : 1.0;
+    final start = vertical
         ? _controller.rowStartTrackOfId(id)
         : _controller.colStartTrackOfId(id);
-    final endTrack = axis == Axis.vertical
+    final leadShift = shifts ? _shiftTo(axis, trackIndexOf(start)) : 0.0;
+    if (_controller.laneAxis == axis && _controller.isLanedId(id)) {
+      return config.itemGeometryOn(
+        start: start,
+        laned: true,
+        lane: _controller.laneOfId(id),
+        laneCount: _controller.laneCountOfId(id),
+        laneSpan: _controller.laneSpanOfId(id),
+        leadShift: leadShift,
+        extentDelta: extentDelta,
+        ramp: ramp,
+      );
+    }
+    final end = vertical
         ? _controller.rowEndTrackOfId(id)
         : _controller.colEndTrackOfId(id);
-    var lead = boardAxis.offsetOfFraction(
-      math.min(startTrack, boardAxis.trackCount.toDouble()),
+    return config.itemGeometryOn(
+      start: start,
+      end: end,
+      leadShift: leadShift,
+      trailShift: shifts ? _shiftTo(axis, trackIndexOf(end)) : 0.0,
+      extentDelta: extentDelta,
+      ramp: ramp,
     );
-    var trail = boardAxis.offsetOfFraction(
-      math.min(endTrack, boardAxis.trackCount.toDouble()),
-    );
-    if (!pinned && _controller.anim.hasActiveTrackResize) {
-      lead += _shiftTo(axis, trackIndexOf(startTrack));
-      trail += _shiftTo(axis, trackIndexOf(endTrack));
-    }
-    var extent = math.max(0.0, trail - lead + extentDelta);
-    if (axis == (_controller.laneAxis ?? _controller.primaryAxis)) {
-      // The third form of the scaled lane-axis extent: a non-laned item
-      // on the lane axis ramps over its own full extent. The span axis
-      // is never scaled; a chip entering a week row grows in height, not
-      // in day count. With NO lane axis the PRIMARY axis takes its place,
-      // or an item entering or leaving such a board would show nothing
-      // for the whole ramp and then pop: on a gantt, rows primary and
-      // time across, a bar grows in thickness and not in duration.
-      extent *= _controller.anim.enterExitProgressOf(id);
-    }
-    return (lead: lead, extent: extent);
   }
 
   /// The half-open track ranges of [config]'s frozen bands, leading then

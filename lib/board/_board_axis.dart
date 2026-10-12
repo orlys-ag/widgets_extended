@@ -1,5 +1,6 @@
 /// L0 axis geometry for the board module: the [BoardAxis] interface, its
-/// four implementations, [BoardAxisConfig] and [TrackAlignment].
+/// four implementations, [BoardAxisConfig] and [TrackAlignment], and the
+/// two rules a config answers, the bands and an item's geometry.
 ///
 /// Every offset and extent below is BOARD CONTENT space: pixels along one
 /// axis measured from that axis's leading edge. Track indices and the
@@ -7,8 +8,11 @@
 /// space. Reversal is not applied here; the viewport applies it.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
+import '_board_span.dart' show trackIndexOf;
 import '_fenwick.dart';
 
 /// What a cell does with the surplus when the resolved track extent
@@ -787,5 +791,98 @@ extension BoardAxisConfigBands on BoardAxisConfig {
   int _trailingBandStartOf(int count, int lead) {
     final start = count - frozenEnd;
     return start > lead ? start : lead;
+  }
+}
+
+/// The ITEM-GEOMETRY RULE on one axis: an item's content-space lead and
+/// extent from its track-space span there and, when it is laned on this
+/// axis, its lane, lane count and lane span. Internal, and not shown by
+/// the barrel.
+///
+/// The one site of both arms. The controller's settled and prospective
+/// geometry, the render object's per-item geometry and the sizing term's
+/// lane-band measure all evaluate it; the render object adds its
+/// animation terms as inputs, which default to none, and a zero shift, a
+/// zero delta and a unit ramp leave every value as it is.
+///
+/// - LANED: the item takes its start track's leading edge, the padding
+///   and its lane's slice offset for its lead, and its whole lane BAND,
+///   the slice times its lane span, for its extent. A slice is one
+///   [BoardAxisConfig.laneExtent] on an axis that accepts measurements,
+///   whose tracks grow to hold their lanes, and the track's extent past
+///   the padding divided among the cluster's lanes otherwise. The start
+///   track is clamped onto the lattice's end, where a track has no
+///   extent, so a span stranded past a shrunken axis reads total.
+/// - FRACTIONAL: the exact endpoints, each clamped the same way.
+extension BoardAxisConfigItemGeometry on BoardAxisConfig {
+  /// The rule. [start] and [end] are track space; [leadShift] and
+  /// [trailShift] are content-space shifts of the two edges, [extentDelta]
+  /// a content-space length added to the extent before the floor at zero,
+  /// and [ramp] a factor applied after it. The laned arm reads no [end]
+  /// and no [trailShift]; the fractional arm reads no lane input and
+  /// asserts a non-null [end].
+  ({double lead, double extent}) itemGeometryOn({
+    required double start,
+    double? end,
+    bool laned = false,
+    int lane = 0,
+    int laneCount = 1,
+    int laneSpan = 1,
+    double leadShift = 0.0,
+    double trailShift = 0.0,
+    double extentDelta = 0.0,
+    double ramp = 1.0,
+  }) {
+    if (laned) {
+      final count = axis.trackCount;
+      final index = trackIndexOf(start);
+      final track = index < count ? index : count;
+      final slice = _sliceOn(track, laneCount);
+      return (
+        lead: _lanedLead(axis.offsetOf(track), leadShift, lane, slice),
+        extent: math.max(0.0, slice * laneSpan + extentDelta) * ramp,
+      );
+    }
+    assert(end != null, "itemGeometryOn: the fractional arm reads an end.");
+    final count = axis.trackCount.toDouble();
+    final lead =
+        axis.offsetOfFraction(start < count ? start : count) + leadShift;
+    final trail =
+        axis.offsetOfFraction(end! < count ? end : count) + trailShift;
+    return (
+      lead: lead,
+      extent: math.max(0.0, trail - lead + extentDelta) * ramp,
+    );
+  }
+
+  /// The laned arm's lead measured from [track]'s leading edge, with no
+  /// shift: where lane [lane] of [laneCount] starts inside the track.
+  double laneOriginOn(int track, int lane, int laneCount) {
+    return _lanedLead(0.0, 0.0, lane, _sliceOn(track, laneCount));
+  }
+
+  /// The far edge of a band of [laneSpan] slices starting at lane [lane]
+  /// of [laneCount] in [track], measured from the track's padded edge.
+  /// [laneSpan] is a count of slices and may be fractional, which is how
+  /// the sizing term scales a band by a ramp or a slot's value.
+  double laneBandEdgeOn(int track, int lane, int laneCount, double laneSpan) {
+    final slice = _sliceOn(track, laneCount);
+    return lane * slice + laneSpan * slice;
+  }
+
+  double _lanedLead(double trackLead, double shift, int lane, double slice) {
+    return trackLead + shift + lanePadding + lane * slice;
+  }
+
+  /// One lane's extent in [track]: the lane extent on an axis that
+  /// accepts measurements, and otherwise the track's extent past the
+  /// padding, floored at zero, divided among [laneCount] lanes, a track
+  /// at or past the lattice's end having no extent.
+  double _sliceOn(int track, int laneCount) {
+    if (axis.acceptsMeasurements) {
+      return laneExtent!;
+    }
+    final trackExtent = track >= axis.trackCount ? 0.0 : axis.extentOf(track);
+    return math.max(0.0, trackExtent - lanePadding) / laneCount;
   }
 }

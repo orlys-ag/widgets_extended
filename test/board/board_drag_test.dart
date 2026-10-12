@@ -1256,10 +1256,10 @@ void main() {
     },
   );
 
-  // DERIVED name. The commit handoff's RESIZE sibling: the de-lane arm
-  // holds the RESIZED item itself at its prospective lane, and the
-  // commit's own FLIP slide starts from its old lane origin, so without
-  // a painted-truth correction the item jumps back a lane and re-slides
+  // DERIVED name. The commit handoff's RESIZE sibling: the preview holds
+  // the RESIZED item itself at its prospective lane, and the commit's
+  // own FLIP slide starts from its old lane origin, so without a
+  // painted-truth correction the item jumps back a lane and re-slides
   // to where the preview already had it.
   // Asserts: the resized item's painted position is IDENTICAL on the
   // frame after the drop, mid-window, and at settle.
@@ -1305,8 +1305,8 @@ void main() {
       );
       final viewport = _viewport(tester);
 
-      // Growing b past a re-ranks it into lane 0: the de-lane hold
-      // paints b at lane 0 and displaces a to lane 1.
+      // Growing b past a re-ranks it into lane 0: the preview holds b
+      // at lane 0 and displaces a to lane 1.
       final edge = viewport.rectOfItem("b")!;
       expect(
         drag.startDrag(

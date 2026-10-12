@@ -48,30 +48,46 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   `ItemSlideEngine` (transient composed RECT deltas, a lead and an
   extent on one clock; installs compose in place, and a record carries a
   RELANE mark saying every lead composed into it was an intra-track shift
-  on the lane axis, which a compose mixing the two kinds drops. The lead
-  is paint-only; the EXTENT is layout-driving, the geometry rule adding
-  it to the item's extent so the child is laid out at the animated size),
-  `MakeRoomEngine` (HELD offsets from the dry run; the
-  session's `lifted` argument discriminates move from resize, and the
-  de-lane arm carries a resized item out of its slice; beside each
-  offset the engine holds a HELD EXTENT per id: a RESIZE session's own
-  item gets the length its prospective span would give it minus the
-  length it has, and EVERY dry-run member but the lifted item gets the
-  BAND its prospective lane count and prospective LANE SPAN would give
-  it minus the band it has, so on a FIXED lane axis a neighbour shrinks
-  or widens WITH the gap rather than after the drop (on a content-sized
-  lane axis a slice is the one lane extent, so a pure prospective
-  LANE-COUNT change still creates no entry there, while a prospective
-  SPAN change does: the band is the lane extent times the span, and the
-  install loop keeps any non-zero target); extents are installed BEFORE
+  on the lane axis, which a compose mixing the two kinds drops, and,
+  only beside it, a BAND mark saying its extent is an intra-track change
+  of the item's lane band, so the sizing term reads that extent too. The
+  lead is paint-only; the EXTENT is layout-driving, the geometry rule
+  adding it to the item's extent so the child is laid out at the animated
+  size),
+  `MakeRoomEngine` (HELD offsets from the dry run for every member but
+  the session's own item; the session's `lifted` argument discriminates
+  move from resize; beside each offset the engine holds a HELD EXTENT
+  per id: EVERY dry-run member but the session's item gets the BAND its
+  prospective lane count and prospective LANE SPAN would give it minus
+  the band it has, so on a FIXED lane axis a neighbour shrinks or widens
+  WITH the gap rather than after the drop (on a content-sized lane axis
+  a slice is the one lane extent, so a pure prospective LANE-COUNT
+  change still creates no entry there, while a prospective SPAN change
+  does: the band is the lane extent times the span, and the install loop
+  keeps any non-zero target); a RESIZE session's own item holds no
+  offset but a LEAD and an EXTENT, deltas over the geometry the render
+  gives its STORED span, and on a content-sized lane axis a BAND, the
+  change of its lane band while it stays laned in its stored track, or
+  a VACATE, the share of that track's term it gives up while it leaves
+  it; the controller computes their targets through the item-geometry
+  rule from the session's SOURCE, its prospective span and the dry run's
+  assignment, and the layout re-derives them every frame, the term's
+  right after the lane flush and the geometry's after the pass loop,
+  over the lattice as it paints, trackResize shifts included, RE-BASING
+  each entry onto its new target so it keeps its clock (a missing entry
+  is one at rest at zero, and one at rest whose target becomes zero
+  goes); either release and a clear of the id end the source, so no
+  refresh re-opens a closing hold; extents are installed BEFORE
   the lane-axis gate because an extent needs no lane geometry and
   is the whole of the in-place feedback on a board with none, so the
   block follows the finger while the model stays unwritten, and an
   extent that vanishes without motion (the commit snap) reaches layout
   through the render router's own settle latch for it; beside the offsets
-  it holds a prospective lane SLOT for the lifted item, paintless, so
-  track sizing can count the lane the drop would occupy, with a lifecycle
-  key that is non-null exactly while a slot exists; the make-room
+  it holds a prospective lane SLOT for the session's item, the lifted one
+  or a resized one the preview lanes in a track it is not laned in,
+  paintless, so track sizing can count the lane the drop would occupy,
+  with a lifecycle key, naming that session's item, that is non-null
+  exactly while a slot exists; the make-room
   contribution reaches the SOURCE track as well as the prospective one,
   because the dry run re-sweeps the stored bucket, and the one term held
   still is the lifted item's own band; an install is IDEMPOTENT for an
@@ -89,4 +105,9 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   curve's tail, CLAMPED to `[0, 1]`, and bumps the snap generation
   exactly then, so the drag layer and the render continue the discarded
   motion on one clock, and the clamp keeps a motion that was on a later
-  clock from being carried past its rest by the renormalisation).
+  clock from being carried past its rest by the renormalisation; a
+  commit's snap under a live family leaves another session's CLOSING
+  resize hold, its lead, band and vacate and that id's closing extent, on
+  its clock, neither folded nor removed, so a commit made inside a
+  cancelled resize's close continues only what it discards while that
+  hold finishes closing in lockstep).
