@@ -36,6 +36,15 @@ The contract of `Fenwick`, the axes, spans and the start rule, `SpanIndex`, `Ove
   and never compares `frozenStart` or `frozenEnd` with a track count
   itself: where the counts overlap, a copy without the leading clamp
   counts as trailing the tracks the render object paints as leading.
+  `BoardAxisConfigItemGeometry`, beside it and not shown by the barrel,
+  is the one site of the ITEM-GEOMETRY RULE (`itemGeometryOn`, with
+  `laneOriginOn` and `laneBandEdgeOn`): an item's lead and extent on one
+  axis from its span there and, when laned, its lane, lane count and lane
+  span, the start track clamped onto the lattice's end. The controller's
+  settled and prospective geometry, the render object's per-item geometry
+  and the sizing term's lane-band measure evaluate it, the render passing
+  its animation terms (the track-resize shifts, the in-flight extent
+  delta, the enter/exit ramp) as inputs; no other site restates an arm.
 - **`BoardSpan` / `BoardPlacement`** (`_board_span.dart`): fractional
   track-space rectangles; spans assert a positive extent.
 - **The start rule** (`_board_span.dart`): `trackIndexOf`, the floor

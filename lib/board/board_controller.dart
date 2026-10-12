@@ -1363,8 +1363,8 @@ class BoardController<TKey, TItem> {
   }
 
   /// The install half of [_reSpan], reading the POST-mutation rectangle
-  /// through the same two accessors, whose lane reads flush the buckets
-  /// the write dirtied.
+  /// through the accessor [_captureRect] reads, whose lane reads flush
+  /// the buckets the write dirtied.
   void _installReSpan(
     int id,
     _CapturedRect<TKey> captured, {
@@ -1384,14 +1384,13 @@ class BoardController<TKey, TItem> {
     // neighbour's install are suppressed inside a drag commit's report:
     // the preview already moved it and sized it, and the hand-off owns
     // its landing.
-    final suppressed = neighbour && _relaneSlidesSuppressed;
-    final delta = suppressed
-        ? Offset.zero
-        : (captured.lead - captured.pinTerm) -
-              (_itemLeadOfId(id) - _pinTermOf(id));
-    final extentDelta = suppressed
-        ? Offset.zero
-        : _extentDelta(captured.extent, _itemExtentOfId(id));
+    if (neighbour && _relaneSlidesSuppressed) {
+      return;
+    }
+    final settled = _settledGeometryOf(id);
+    final delta =
+        (captured.lead - captured.pinTerm) - (settled.lead - _pinTermOf(id));
+    final extentDelta = _extentDelta(captured.extent, settled.extent);
     if (delta == Offset.zero && extentDelta == Offset.zero) {
       return;
     }
@@ -1419,12 +1418,13 @@ class BoardController<TKey, TItem> {
     );
   }
 
-  /// Whether the two geometry reads are legal for [id].
+  /// Whether a slide may be captured or installed for [id].
   ///
-  /// Their LANED arms index the lane axis unclamped, so an item stranded
-  /// past a shrunken lane axis (a legal state the render clamps for on
-  /// purpose) would assert. The fractional arms clamp, so an unlaned id
-  /// always reads.
+  /// A LANED item stranded past a shrunken lane axis, a legal state an
+  /// axis swap leaves, gets none: the item-geometry rule clamps its rect
+  /// onto the lattice's end, where its track has no extent, so a rect
+  /// captured or installed there is no track's lane. An unlaned id always
+  /// reads.
   bool _canReadItemGeometry(int id) {
     final axis = _lanes.laneAxis;
     if (axis == null || !_lanes.isLaned(id)) {
@@ -1474,69 +1474,61 @@ class BoardController<TKey, TItem> {
     return delta.abs() <= precisionErrorTolerance * scale ? 0.0 : delta;
   }
 
-  /// The item-geometry rule's leading corner in CONTENT space, both axes.
-  Offset _itemLeadOfId(int id) {
-    return Offset(
-      _itemLeadOn(Axis.horizontal, id),
-      _itemLeadOn(Axis.vertical, id),
+  /// [id]'s SETTLED lead and extent in CONTENT space, both axes: the
+  /// item-geometry rule ([BoardAxisConfigItemGeometry.itemGeometryOn]) on
+  /// its stored span and lanes, with no animation term.
+  ({Offset lead, Offset extent}) _settledGeometryOf(int id) {
+    final horizontal = _settledGeometryOn(Axis.horizontal, id);
+    final vertical = _settledGeometryOn(Axis.vertical, id);
+    return (
+      lead: Offset(horizontal.lead, vertical.lead),
+      extent: Offset(horizontal.extent, vertical.extent),
     );
   }
 
-  double _itemLeadOn(Axis axis, int id) {
+  ({double lead, double extent}) _settledGeometryOn(Axis axis, int id) {
     final config = axis == Axis.vertical ? _rows : _columns;
-    final boardAxis = config.axis;
-    if (_lanes.laneAxis == axis && _lanes.isLaned(id)) {
-      final track = _store.startIndexOf(id, axis);
-      return boardAxis.offsetOf(track) +
-          _laneOriginOfId(id, laneOfId(id), laneCountOfId(id));
-    }
     final start = _store.startTrackOf(id, axis);
-    final clamped = start < boardAxis.trackCount.toDouble()
-        ? start
-        : boardAxis.trackCount.toDouble();
-    return boardAxis.offsetOfFraction(clamped);
-  }
-
-  /// The item-geometry rule's EXTENT in CONTENT space, both axes: the
-  /// mirror of [_itemLeadOfId], arm for arm, and settled for the reason
-  /// the lead is.
-  Offset _itemExtentOfId(int id) {
-    return Offset(
-      _itemExtentOn(Axis.horizontal, id),
-      _itemExtentOn(Axis.vertical, id),
+    if (_lanes.laneAxis == axis && _lanes.isLaned(id)) {
+      return config.itemGeometryOn(
+        start: start,
+        laned: true,
+        lane: laneOfId(id),
+        laneCount: laneCountOfId(id),
+        laneSpan: laneSpanOfId(id),
+      );
+    }
+    return config.itemGeometryOn(
+      start: start,
+      end: _store.endTrackOf(id, axis),
     );
   }
 
-  double _itemExtentOn(Axis axis, int id) {
+  /// The geometry the rule gives an item under [prospective] and the dry
+  /// run's [assignment] on [axis]: laned when [axis] is the lane axis and
+  /// the dry run laned it, which is exactly when the resolver's own
+  /// criterion holds for the prospective span; its track is the
+  /// prospective one.
+  ({double lead, double extent}) _prospectiveGeometryOn(
+    Axis axis,
+    BoardSpan prospective,
+    ({int lane, int laneCount, int laneSpan})? assignment,
+  ) {
     final config = axis == Axis.vertical ? _rows : _columns;
-    final boardAxis = config.axis;
-    if (_lanes.laneAxis == axis && _lanes.isLaned(id)) {
-      // A LANED item on the lane axis takes its lane BAND, not its
-      // fractional span: its own slice multiplied by the number of
-      // consecutive lanes the resolver gave it. One slice is one lane
-      // extent where the axis is content-sized, and the track's extent
-      // past the padding divided by the cluster's lane count where it is
-      // not. The same two modes [_laneOriginOfId] multiplies by the lane
-      // index, and the span enters HERE and never there.
-      final span = laneSpanOfId(id);
-      if (boardAxis.acceptsMeasurements) {
-        return config.laneExtent! * span;
-      }
-      final track = _store.startIndexOf(id, axis);
-      return (boardAxis.extentOf(track) - config.lanePadding).clamp(
-            0.0,
-            double.infinity,
-          ) /
-          laneCountOfId(id) *
-          span;
+    final start = prospective.startTrackOn(axis);
+    if (_lanes.laneAxis == axis && assignment != null) {
+      return config.itemGeometryOn(
+        start: start,
+        laned: true,
+        lane: assignment.lane,
+        laneCount: assignment.laneCount,
+        laneSpan: assignment.laneSpan,
+      );
     }
-    // Both endpoints clamped exactly as the fractional lead arm clamps
-    // its start, so an axis swap that strands a span reads total.
-    final count = boardAxis.trackCount.toDouble();
-    final start = _store.startTrackOf(id, axis);
-    final end = _store.endTrackOf(id, axis);
-    return boardAxis.offsetOfFraction(end < count ? end : count) -
-        boardAxis.offsetOfFraction(start < count ? start : count);
+    return config.itemGeometryOn(
+      start: start,
+      end: prospective.endTrackOn(axis),
+    );
   }
 
   /// The EXTENT the geometry rule would give [id] under [prospective]
@@ -1544,112 +1536,78 @@ class BoardController<TKey, TItem> {
   /// what the make-room extent preview holds, for a RESIZE session's own
   /// item and for every dry-run member. A null [prospective] is the
   /// item's own stored span, which is what a neighbour's install passes:
-  /// its span is unchanged and only its lane count moves.
+  /// its span is unchanged and only its lanes move.
   ///
-  /// Per axis, and the same two arms the settled read uses. An item
-  /// LANED on the lane axis under BOTH spans takes the slice its
-  /// prospective lane count gives it minus the slice its stored one
-  /// does, both on the stored track, which is the prospective one
-  /// whenever this arm runs (a neighbour's span is its own, and a resize
-  /// moves one edge while the other pins the track); a span that
-  /// crosses between the arms takes each arm's answer on its own side.
+  /// Both sides read a span, the stored one and the prospective one,
+  /// through the same rule: one side alone would hold a delta that is
+  /// only the two reads disagreeing, for the whole hover, and step the
+  /// item by it at the commit.
   Offset _prospectiveExtentDelta(
     int id,
     BoardSpan? prospective,
     ({int lane, int laneCount, int laneSpan})? assignment,
   ) {
-    return Offset(
-      _prospectiveExtentOn(Axis.horizontal, id, prospective, assignment),
-      _prospectiveExtentOn(Axis.vertical, id, prospective, assignment),
+    if (prospective == null) {
+      return _neighbourExtentDelta(id, assignment);
+    }
+    final now = _settledGeometryOf(id).extent;
+    final next = Offset(
+      _prospectiveGeometryOn(Axis.horizontal, prospective, assignment).extent,
+      _prospectiveGeometryOn(Axis.vertical, prospective, assignment).extent,
     );
+    return _extentDelta(next, now);
   }
 
-  double _prospectiveExtentOn(
-    Axis axis,
+  /// A dry-run neighbour's held extent: it keeps its span and its track,
+  /// so only its lane BAND on the lane axis can change, the band its
+  /// [assignment] gives it minus the one its stored lanes give it, and
+  /// the other axis holds nothing. A band's extent reads no track offset,
+  /// on either kind of lane axis.
+  Offset _neighbourExtentDelta(
     int id,
-    BoardSpan? prospective,
     ({int lane, int laneCount, int laneSpan})? assignment,
   ) {
+    final axis = _lanes.laneAxis;
+    if (axis == null || assignment == null || !_lanes.isLaned(id)) {
+      return Offset.zero;
+    }
     final config = axis == Axis.vertical ? _rows : _columns;
-    final boardAxis = config.axis;
-    final isLaneAxis = _lanes.laneAxis == axis;
-    final wasLaned = isLaneAxis && _lanes.isLaned(id);
-    // The dry run lanes an id exactly when the resolver's own criterion
-    // holds for the prospective span, which is what a non-null
-    // assignment reports.
-    final willBeLaned = isLaneAxis && assignment != null;
-    final count = boardAxis.trackCount.toDouble();
-    double spanExtent(double start, double end) {
-      return boardAxis.offsetOfFraction(end < count ? end : count) -
-          boardAxis.offsetOfFraction(start < count ? start : count);
-    }
-
-    double lanedExtent(int forLaneCount, int forLaneSpan) {
-      if (boardAxis.acceptsMeasurements) {
-        return config.laneExtent! * forLaneSpan;
-      }
-      final track = _store.startIndexOf(id, axis);
-      if (track < 0 || track >= boardAxis.trackCount) {
-        return 0.0;
-      }
-      return (boardAxis.extentOf(track) - config.lanePadding).clamp(
-            0.0,
-            double.infinity,
-          ) /
-          forLaneCount *
-          forLaneSpan;
-    }
-
-    // P2: BOTH sides read a span, the stored one and the dry run's. One
-    // side alone yields a preview delta that is a pure artifact of the
-    // two rules disagreeing, held for the whole hover, and steps the
-    // item by that much at the commit.
-    final now = wasLaned
-        ? lanedExtent(laneCountOfId(id), laneSpanOfId(id))
-        : spanExtent(
-            _store.startTrackOf(id, axis),
-            _store.endTrackOf(id, axis),
-          );
-    final double next;
-    if (willBeLaned) {
-      next = lanedExtent(assignment.laneCount, assignment.laneSpan);
-    } else if (prospective == null) {
-      next = now;
-    } else {
-      next = spanExtent(
-        prospective.startTrackOn(axis),
-        prospective.endTrackOn(axis),
-      );
-    }
-    return _extentDeltaOn(next, now);
+    final track = _store.startIndexOf(id, axis);
+    final next = config.laneBandEdgeOn(
+      track,
+      0,
+      assignment.laneCount,
+      assignment.laneSpan.toDouble(),
+    );
+    final now = config.laneBandEdgeOn(
+      track,
+      0,
+      laneCountOfId(id),
+      laneSpanOfId(id).toDouble(),
+    );
+    final delta = _extentDeltaOn(next, now);
+    return axis == Axis.vertical ? Offset(0.0, delta) : Offset(delta, 0.0);
   }
 
-  /// The two-mode lane origin, measured from the item's lane-axis
-  /// track's leading edge.
+  /// The lane origin of lane [lane] of [laneCount] in [id]'s lane-axis
+  /// track, measured from the track's leading edge.
   double _laneOriginOfId(int id, int lane, int laneCount) {
     final axis = _lanes.laneAxis;
     if (axis == null) {
       return 0.0;
     }
     final config = axis == Axis.vertical ? _rows : _columns;
-    final padding = config.lanePadding;
-    if (config.axis.acceptsMeasurements) {
-      return padding + lane * config.laneExtent!;
-    }
-    final track = _store.startIndexOf(id, axis);
-    final slice =
-        (config.axis.extentOf(track) - padding).clamp(0.0, double.infinity) /
-        laneCount;
-    return padding + lane * slice;
+    return config.laneOriginOn(_store.startIndexOf(id, axis), lane, laneCount);
   }
 
   /// The settled rectangle of [id], captured for an install after a
   /// write; see [_CapturedRect].
   _CapturedRect<TKey> _captureRect(int id, TKey key) {
+    final settled = _settledGeometryOf(id);
     return (
       key: key,
-      lead: _itemLeadOfId(id),
-      extent: _itemExtentOfId(id),
+      lead: settled.lead,
+      extent: settled.extent,
       pinTerm: _pinTermOf(id),
       laneTrack: _laneStartTrackOf(id),
     );
