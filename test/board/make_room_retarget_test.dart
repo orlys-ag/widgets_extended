@@ -57,14 +57,27 @@ MakeRoomEngine _engine(WidgetTester tester, _Inputs inputs) {
     laneOriginOfId: (id, lane, laneCount) {
       return lane * 18.0;
     },
-    prospectiveExtentOf: (id, prospective, assignment) {
-      return id == 1 ? inputs.extent : Offset.zero;
+    neighbourExtentOf: (id, assignment) {
+      return Offset.zero;
     },
     laneOfId: (id) {
       return 0;
     },
     laneCountOfId: (id) {
       return 1;
+    },
+    resizeGeometryOf: (id, prospective, assignment, out) {
+      out
+        ..leadDx = 0.0
+        ..leadDy = 0.0
+        ..extentDx = id == 1 ? inputs.extent.dx : 0.0
+        ..extentDy = id == 1 ? inputs.extent.dy : 0.0;
+    },
+    resizeTermOf: (id, prospective, assignment, out) {
+      out
+        ..band = 0.0
+        ..vacates = false
+        ..joins = false;
     },
   );
   addTearDown(engine.dispose);

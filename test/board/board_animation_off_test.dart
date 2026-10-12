@@ -451,14 +451,27 @@ void main() {
         laneOriginOfId: (id, lane, laneCount) {
           return 0.0;
         },
-        prospectiveExtentOf: (id, prospective, assignment) {
-          return const Offset(40.0, 0.0);
+        neighbourExtentOf: (id, assignment) {
+          return Offset.zero;
         },
         laneOfId: (id) {
           return 0;
         },
         laneCountOfId: (id) {
           return 1;
+        },
+        resizeGeometryOf: (id, prospective, assignment, out) {
+          out
+            ..leadDx = 0.0
+            ..leadDy = 0.0
+            ..extentDx = 40.0
+            ..extentDy = 0.0;
+        },
+        resizeTermOf: (id, prospective, assignment, out) {
+          out
+            ..band = 0.0
+            ..vacates = false
+            ..joins = false;
         },
       );
       addTearDown(engine.dispose);
