@@ -22,8 +22,7 @@ import '_board_scroll_orchestrator.dart';
 import '_board_axis.dart';
 import '_board_span.dart';
 import '_board_store.dart';
-import '_make_room_engine.dart'
-    show MakeRoomResizeGeometry, MakeRoomResizeTerm;
+import '_make_room_engine.dart' show MakeRoomResizeTargets;
 import '_overlap_lanes.dart';
 import '_span_index.dart';
 import 'board_animation_style.dart';
@@ -157,7 +156,7 @@ class BoardController<TKey, TItem> {
       },
       dryRunOf: _dryRunLanes,
       laneOriginOfId: _laneOriginOfId,
-      prospectiveExtentOf: _prospectiveExtentDelta,
+      neighbourExtentOf: _neighbourExtentDelta,
       laneOfId: laneOfId,
       laneCountOfId: laneCountOfId,
       resizeGeometryOf: _resizeGeometryOf,
@@ -1584,35 +1583,24 @@ class BoardController<TKey, TItem> {
   /// passed, as the render's per-item geometry takes it at the stored
   /// edges; otherwise none, so the targets are over the settled geometry.
   /// Each difference has its floating-point residue zeroed as an extent's
-  /// is, a lead's being a difference of two offsets too.
-  MakeRoomResizeGeometry _resizeGeometryOf(
+  /// is, a lead's being a difference of two offsets too. Written into
+  /// [out].
+  void _resizeGeometryOf(
     int id,
     BoardSpan prospective,
     ({int lane, int laneCount, int laneSpan})? assignment,
+    MakeRoomResizeTargets out,
   ) {
-    final horizontal = _resizeGeometryOn(
-      Axis.horizontal,
-      id,
-      prospective,
-      assignment,
-    );
-    final vertical = _resizeGeometryOn(
-      Axis.vertical,
-      id,
-      prospective,
-      assignment,
-    );
-    return (
-      lead: Offset(horizontal.lead, vertical.lead),
-      extent: Offset(horizontal.extent, vertical.extent),
-    );
+    _resizeGeometryOn(Axis.horizontal, id, prospective, assignment, out);
+    _resizeGeometryOn(Axis.vertical, id, prospective, assignment, out);
   }
 
-  ({double lead, double extent}) _resizeGeometryOn(
+  void _resizeGeometryOn(
     Axis axis,
     int id,
     BoardSpan prospective,
     ({int lane, int laneCount, int laneSpan})? assignment,
+    MakeRoomResizeTargets out,
   ) {
     final shiftFloor =
         _anim.trackResize.hasActive && pinOfId(id, axis) == BoardPin.none
@@ -1627,10 +1615,17 @@ class BoardController<TKey, TItem> {
       assignment,
       shiftFloor: shiftFloor,
     );
-    return (
-      lead: _extentDeltaOn(next.lead, now.lead),
-      extent: _extentDeltaOn(next.extent, now.extent),
-    );
+    final lead = _extentDeltaOn(next.lead, now.lead);
+    final extent = _extentDeltaOn(next.extent, now.extent);
+    if (axis == Axis.vertical) {
+      out
+        ..leadDy = lead
+        ..extentDy = extent;
+    } else {
+      out
+        ..leadDx = lead
+        ..extentDx = extent;
+    }
   }
 
   /// A resize session's TERM targets for its item [id], read from lanes
@@ -1641,28 +1636,34 @@ class BoardController<TKey, TItem> {
   /// being no member of any track's term, and neither does a fixed lane
   /// axis, whose tracks the term never sizes. On any lane axis it JOINS a
   /// track when the dry run's [assignment] lanes it in a track whose
-  /// bucket it is not in.
-  MakeRoomResizeTerm _resizeTermOf(
+  /// bucket it is not in. Written into [out].
+  void _resizeTermOf(
     int id,
     BoardSpan prospective,
     ({int lane, int laneCount, int laneSpan})? assignment,
+    MakeRoomResizeTargets out,
   ) {
+    out
+      ..band = 0.0
+      ..vacates = false
+      ..joins = false;
     final axis = _lanes.laneAxis;
     if (axis == null) {
-      return (band: 0.0, vacates: false, joins: false);
+      return;
     }
     final prospectiveTrack = trackIndexOf(prospective.startTrackOn(axis));
     final laned = _lanes.isLaned(id);
     final track = laned ? _store.startIndexOf(id, axis) : null;
-    final joins = assignment != null && prospectiveTrack != track;
+    out.joins = assignment != null && prospectiveTrack != track;
     final config = axis == Axis.vertical ? _rows : _columns;
     if (track == null || !config.axis.acceptsMeasurements) {
-      return (band: 0.0, vacates: false, joins: joins);
+      return;
     }
     if (assignment == null || prospectiveTrack != track) {
-      return (band: 0.0, vacates: true, joins: joins);
+      out.vacates = true;
+      return;
     }
-    final band =
+    out.band =
         config.laneBandEdgeOn(
           track,
           assignment.lane,
@@ -1675,34 +1676,6 @@ class BoardController<TKey, TItem> {
           laneCountOfId(id),
           laneSpanOfId(id).toDouble(),
         );
-    return (band: band, vacates: false, joins: false);
-  }
-
-  /// The EXTENT the geometry rule would give [id] under [prospective]
-  /// and the dry run's lane assignment, minus the one it gives it now:
-  /// what the make-room extent preview holds, for a RESIZE session's own
-  /// item and for every dry-run member. A null [prospective] is the
-  /// item's own stored span, which is what a neighbour's install passes:
-  /// its span is unchanged and only its lanes move.
-  ///
-  /// Both sides read a span, the stored one and the prospective one,
-  /// through the same rule: one side alone would hold a delta that is
-  /// only the two reads disagreeing, for the whole hover, and step the
-  /// item by it at the commit.
-  Offset _prospectiveExtentDelta(
-    int id,
-    BoardSpan? prospective,
-    ({int lane, int laneCount, int laneSpan})? assignment,
-  ) {
-    if (prospective == null) {
-      return _neighbourExtentDelta(id, assignment);
-    }
-    final now = _settledGeometryOf(id).extent;
-    final next = Offset(
-      _prospectiveGeometryOn(Axis.horizontal, prospective, assignment).extent,
-      _prospectiveGeometryOn(Axis.vertical, prospective, assignment).extent,
-    );
-    return _extentDelta(next, now);
   }
 
   /// A dry-run neighbour's held extent: it keeps its span and its track,

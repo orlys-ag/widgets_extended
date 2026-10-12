@@ -447,6 +447,41 @@ void main() {
     expect(vsync.ticker!.isActive, isFalse);
   });
 
+  testWidgets("a relane compose keeps the band mark the record carries", (
+    tester,
+  ) async {
+    final engine = ItemSlideEngine(
+      vsync: _TestVSync(),
+      styleOf: () {
+        return _slideOnly;
+      },
+      notifyNow: () {},
+      notifyCoalesced: () {},
+    );
+    addTearDown(engine.dispose);
+    engine.animateSlideFrom(
+      1,
+      const Offset(0.0, 10.0),
+      family: BoardAnimationFamily.itemSlide,
+      extentDelta: const Offset(0.0, 6.0),
+      relane: true,
+      band: true,
+    );
+    // Setup sanity: a band record adds its extent to its lead.
+    expect(engine.relaneDeltaOf(1), const Offset(0.0, 16.0));
+    engine.animateSlideFrom(
+      1,
+      const Offset(0.0, 4.0),
+      family: BoardAnimationFamily.itemSlide,
+      relane: true,
+    );
+    // TARGET: the composed record still adds the extent.
+    expect(engine.relaneDeltaOf(1), const Offset(0.0, 20.0));
+    engine.purgeWhere((family) {
+      return true;
+    });
+  });
+
   // T1. AC: a resize animates the extent from the old size.
   // Falsification: an install that writes the span before capturing the
   // old extent produces a zero delta and fails the first assertion.
