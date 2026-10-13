@@ -1021,11 +1021,12 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// its centre's. A resize samples the pointer on the lattice as it would
   /// paint without the session's own make-room preview
   /// (`trackSampleWithoutOwnPreview`), so its target moves with every
-  /// change to the lattice but that preview's, and a move on the lattice
-  /// as it paints. A null sample leaves the target unchanged, and so does
-  /// a resize's sample within the tolerance of the last one it resolved
-  /// ([_heldResizeSample]). With the
-  /// current samples in hand it RE-DERIVES a lift sample taken under
+  /// change to the lattice but that preview's until the preview has wholly
+  /// closed, when a scroll it left moves the target once, and a move on
+  /// the lattice as it paints. A null sample leaves the target unchanged,
+  /// and so does a resize's sample within the tolerance of the last one it
+  /// resolved ([_heldResizeSample]). With the current samples in hand it
+  /// RE-DERIVES a lift sample taken under
   /// other axis configs (a different track count or band bound on an
   /// axis): the sample the lift point gives at the lift's scroll offsets
   /// under the current configs, so the resolver never compares samples

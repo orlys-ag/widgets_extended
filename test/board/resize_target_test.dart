@@ -1303,4 +1303,60 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    "a resize whose own preview closed with the board scrolled steps once to "
+    "the pointer and then holds",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      _addDelaneItems(controller, row: 39);
+      final viewport = await _mount(tester, controller);
+      final position = viewport.verticalPosition!;
+      position.jumpTo(130.0);
+      await tester.pump();
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 266.0),
+      );
+      _move(tester, drag, const Offset(40.0, 236.0));
+      await tester.pump(_frame);
+      expect(
+        drag.currentTarget?.span,
+        const BoardSpan(rowStart: 36, colStart: 0, rowSpan: 4, colSpan: 5),
+      );
+      expect(position.pixels, 112.0);
+      // Back to the lift point: the stored span, whose install closes the
+      // vacate and leaves the pixels at 112, 18 px short of where the
+      // own-free lattice read them.
+      _move(tester, drag, const Offset(40.0, 266.0));
+      expect(
+        drag.currentTarget?.span,
+        const BoardSpan(rowStart: 39, colStart: 0, colSpan: 5),
+      );
+      // The layout that closes the preview takes the scroll it left as the
+      // board's own, and the resolve after it reads the pointer on row
+      // 37.8, so the leading edge steps once, to row 38.
+      const stepped = BoardSpan(
+        rowStart: 38,
+        colStart: 0,
+        rowSpan: 2,
+        colSpan: 5,
+      );
+      await tester.pump(_frame);
+      expect(drag.currentTarget?.span, stepped);
+      for (var pump = 1; pump <= 6; pump++) {
+        await tester.pump(_frame);
+        expect(drag.currentTarget?.span, stepped, reason: "pump $pump");
+      }
+      expect(position.pixels, 112.0);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
 }

@@ -39,7 +39,9 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   (`trackSampleWithoutOwnPreview`, the sampler the render registers
   beside the port), so the re-resolve moves its target with every change
   to the lattice but that preview's: the preview it installs never moves
-  the target it was installed for. That preview is the engine's
+  the target it was installed for, until that preview has wholly closed,
+  when a scroll it left becomes the board's own and moves the target
+  once. That preview is the engine's
   own-preview scope, which `startDrag` opens for a resize on the
   statement after `_session = session` and keeps the epoch of on the
   session, and the teardown ends on the statement after `_session =
