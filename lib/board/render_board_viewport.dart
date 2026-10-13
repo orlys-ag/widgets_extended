@@ -290,6 +290,14 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   final Set<int> _makeRoomWroteRows = <int>{};
   final Set<int> _makeRoomWroteCols = <int>{};
 
+  /// What the last [_laneTermOf] call wrote: the track's item-cluster
+  /// term, a content-space length on the lane axis, and whether a member
+  /// was ramping and whether the make-room preview or a relane slide
+  /// contributed, the two conditions the sizing step's latch sets keep.
+  double _laneTerm = 0.0;
+  bool _laneTermRamping = false;
+  bool _laneTermMakeRoom = false;
+
   /// The engine generations the last layout ran against, recorded at the
   /// END of `layoutChildSequence` so every pass of one layout compares
   /// against the same values.
@@ -1471,106 +1479,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       var contributorRamping = false;
       var makeRoomContributes = false;
       if (laneAxisIsContent) {
-        // The item-cluster term: the track must hold its deepest
-        // cluster's lanes, each member's ceiling SCALED by its enter/exit
-        // ramp and SHIFTED by the two intra-track numbers the make-room
-        // preview and a RELANE slide add to the same member's band, so
-        // the track's edge is a function of what paints. Zero members and
-        // no slot contribute NO term; an itemless track keeps its
-        // cells-only measurement. EVERY MEMBER IS READ, the lifted one
-        // included: nothing collapses the dragged item's in-place widget,
-        // so the track must keep holding it, and the engine answers a
-        // zero delta for a lifted id anyway. A resized member whose
-        // preview leaves the track is read too, its whole contribution,
-        // padding included, scaled by the share it has not yet vacated,
-        // so the track gives up exactly what the commit will take.
-        // Lane resolution ran at the layout head.
-        final members = _controller.laneBucketMembersOn(track);
-        var deepest = 0.0;
-        var vacating = 0.0;
-        var seen = false;
-        for (final member in members) {
-          if (anim.isEnteringItem(member) || anim.isExitingItem(member)) {
-            contributorRamping = true;
-          }
-          // Content space, on the lane axis; a delta is the same number
-          // in both spaces. The make-room preview's term delta: a held
-          // gap offset, or a resized item's held band.
-          final delta = contentAxis == Axis.vertical
-              ? anim.makeRoomTermDeltaOf(member).dy
-              : anim.makeRoomTermDeltaOf(member).dx;
-          // A RELANE record adds its lead to a member's band, and a
-          // band-marked one its extent too: intra-track changes, so they
-          // belong to THIS track's term. A cross-track slide never
-          // reaches here, which is what the relane mark decides and what
-          // keeps the reader's "the term must not compose non-relane
-          // slides" rule whole.
-          final relane = contentAxis == Axis.vertical
-              ? anim.relaneDeltaOf(member).dy
-              : anim.relaneDeltaOf(member).dx;
-          if (delta != 0.0 || relane != 0.0) {
-            makeRoomContributes = true;
-          }
-          // A LANE BAND measure and not an extent: the band's position
-          // and SIZE, the member's stored lanes with its stored span
-          // scaled by its ramp, plus the two numbers above. It reads no
-          // in-flight extent but a band-marked record's, so it agrees
-          // with paint AT REST and can lag it while an extent animates on
-          // a different clock.
-          final ceiling =
-              config.laneBandEdgeOn(
-                track,
-                _controller.laneOfId(member),
-                _controller.laneCountOfId(member),
-                anim.enterExitProgressOf(member) *
-                    _controller.laneSpanOfId(member),
-              ) +
-              delta +
-              relane;
-          final vacated = anim.makeRoomVacatedOf(member);
-          if (vacated != 0.0) {
-            // Its own maximum, and no mark of the track as seen: once it
-            // has vacated wholly the track holds nothing for it, not even
-            // the padding. It still counts as a make-room contribution,
-            // so the track is recorded on that latch and never animated
-            // by a trackResize under an off makeRoom family.
-            makeRoomContributes = true;
-            final share =
-                (1.0 - vacated) *
-                (math.max(0.0, ceiling) + config.lanePadding);
-            if (share > vacating) {
-              vacating = share;
-            }
-            continue;
-          }
-          seen = true;
-          if (ceiling > deepest) {
-            deepest = ceiling;
-          }
-        }
-        for (final slot in anim.makeRoomSlotsOn(track)) {
-          // A PROSPECTIVE lane occupancy: the enter/exit formula with the
-          // slot's value in the role of progress. On the lifted item's
-          // own track its member ceiling and its slot can both appear and
-          // the max takes one or the other, never their sum.
-          seen = true;
-          makeRoomContributes = true;
-          final ceiling = config.laneBandEdgeOn(
-            track,
-            slot.lane,
-            slot.lane + 1,
-            slot.value,
-          );
-          if (ceiling > deepest) {
-            deepest = ceiling;
-          }
-        }
-        var term = vacating;
-        if (seen && deepest + config.lanePadding > term) {
-          term = deepest + config.lanePadding;
-        }
-        if (term > to) {
-          to = term;
+        _laneTermOf(track, config, contentAxis);
+        contributorRamping = _laneTermRamping;
+        makeRoomContributes = _laneTermMakeRoom;
+        if (_laneTerm > to) {
+          to = _laneTerm;
         }
       }
       // COLLECTED here and REPORTED after the pass loop, never thrown
@@ -1689,6 +1602,115 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         _controller.animateTrackResize(contentAxis, track, from);
       }
     }
+  }
+
+  /// The item-cluster term of [track] on the content-sized lane axis
+  /// [contentAxis], whose config is [config], written into [_laneTerm],
+  /// with [_laneTermRamping] and [_laneTermMakeRoom] beside it: fields, so
+  /// a call builds nothing to return them.
+  ///
+  /// The track must hold its deepest cluster's lanes, each member's
+  /// ceiling SCALED by its enter/exit ramp and SHIFTED by the two
+  /// intra-track numbers the make-room preview and a RELANE slide add to
+  /// the same member's band, so the track's edge is a function of what
+  /// paints. Zero members and no slot contribute NO term, a zero
+  /// [_laneTerm], and an itemless track keeps its cells-only measurement.
+  /// EVERY MEMBER IS READ, the lifted one included: nothing collapses the
+  /// dragged item's in-place widget, so the track must keep holding it,
+  /// and the engine answers a zero delta for a lifted id anyway. A
+  /// resized member whose preview leaves the track is read too, its whole
+  /// contribution, padding included, scaled by the share it has not yet
+  /// vacated, so the track gives up exactly what the commit will take.
+  /// Lane resolution ran at the layout head.
+  void _laneTermOf(int track, BoardAxisConfig config, Axis contentAxis) {
+    final anim = _controller.anim;
+    var ramping = false;
+    var makeRoomContributes = false;
+    var deepest = 0.0;
+    var vacating = 0.0;
+    var seen = false;
+    for (final member in _controller.laneBucketMembersOn(track)) {
+      if (anim.isEnteringItem(member) || anim.isExitingItem(member)) {
+        ramping = true;
+      }
+      // Content space, on the lane axis; a delta is the same number in
+      // both spaces. The make-room preview's term delta: a held gap
+      // offset, or a resized item's held band.
+      final delta = contentAxis == Axis.vertical
+          ? anim.makeRoomTermDeltaOf(member).dy
+          : anim.makeRoomTermDeltaOf(member).dx;
+      // A RELANE record adds its lead to a member's band, and a
+      // band-marked one its extent too: intra-track changes, so they
+      // belong to THIS track's term. A cross-track slide never reaches
+      // here, which is what the relane mark decides and what keeps the
+      // reader's "the term must not compose non-relane slides" rule whole.
+      final relane = contentAxis == Axis.vertical
+          ? anim.relaneDeltaOf(member).dy
+          : anim.relaneDeltaOf(member).dx;
+      if (delta != 0.0 || relane != 0.0) {
+        makeRoomContributes = true;
+      }
+      // A LANE BAND measure and not an extent: the band's position and
+      // SIZE, the member's stored lanes with its stored span scaled by its
+      // ramp, plus the two numbers above. It reads no in-flight extent but
+      // a band-marked record's, so it agrees with paint AT REST and can lag
+      // it while an extent animates on a different clock.
+      final ceiling =
+          config.laneBandEdgeOn(
+            track,
+            _controller.laneOfId(member),
+            _controller.laneCountOfId(member),
+            anim.enterExitProgressOf(member) *
+                _controller.laneSpanOfId(member),
+          ) +
+          delta +
+          relane;
+      final vacated = anim.makeRoomVacatedOf(member);
+      if (vacated != 0.0) {
+        // Its own maximum, and no mark of the track as seen: once it has
+        // vacated wholly the track holds nothing for it, not even the
+        // padding. It still counts as a make-room contribution, so the
+        // track is recorded on that latch and never animated by a
+        // trackResize under an off makeRoom family.
+        makeRoomContributes = true;
+        final share =
+            (1.0 - vacated) * (math.max(0.0, ceiling) + config.lanePadding);
+        if (share > vacating) {
+          vacating = share;
+        }
+        continue;
+      }
+      seen = true;
+      if (ceiling > deepest) {
+        deepest = ceiling;
+      }
+    }
+    final slots = anim.makeRoomSlotCountOn(track);
+    for (var index = 0; index < slots; index++) {
+      // A PROSPECTIVE lane occupancy: the enter/exit formula with the
+      // slot's value in the role of progress. On the lifted item's own
+      // track its member ceiling and its slot can both appear and the max
+      // takes one or the other, never their sum.
+      seen = true;
+      makeRoomContributes = true;
+      final lane = anim.makeRoomSlotLaneAt(track, index);
+      final ceiling = config.laneBandEdgeOn(
+        track,
+        lane,
+        lane + 1,
+        anim.makeRoomSlotValueAt(track, index),
+      );
+      if (ceiling > deepest) {
+        deepest = ceiling;
+      }
+    }
+    var term = vacating;
+    if (seen && deepest + config.lanePadding > term) {
+      term = deepest + config.lanePadding;
+    }
+    _laneTerm = term;
+    _laneTermRamping = ramping;
+    _laneTermMakeRoom = makeRoomContributes;
   }
 
   /// One cell of the obtain pass: obtain, measure, and feed the

@@ -520,6 +520,25 @@ class MakeRoomEngine {
     });
   }
 
+  /// The number of slots on lane-axis track [track]: the ones [slotsOn]
+  /// maps, which [slotLaneAt] and [slotValueAt] read one at a time and in
+  /// its order, so a per-layout walk builds no iterable.
+  int slotCountOn(int track) {
+    return _slots[track]?.length ?? 0;
+  }
+
+  /// The lane of the slot at [index] on lane-axis track [track], below
+  /// [slotCountOn].
+  int slotLaneAt(int track, int index) {
+    return _slots[track]![index].lane;
+  }
+
+  /// The value, in `[0, 1]`, of the slot at [index] on lane-axis track
+  /// [track], below [slotCountOn].
+  double slotValueAt(int track, int index) {
+    return _valueOfSlot(_slots[track]![index]);
+  }
+
   /// The ids holding entries, offset, extent or lead, for the composed
   /// per-id bound and the commit's painted-truth capture. A lane-0
   /// neighbour holds a zero offset and a non-zero extent, so an

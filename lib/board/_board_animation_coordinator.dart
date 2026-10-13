@@ -124,6 +124,20 @@ abstract interface class BoardAnimationReader<TKey> {
   /// `value` is in `[0, 1]`.
   Iterable<({int lane, double value})> makeRoomSlotsOn(int track);
 
+  /// The number of [makeRoomSlotsOn]'s occupancies on lane-axis track
+  /// [track], which [makeRoomSlotLaneAt] and [makeRoomSlotValueAt] read
+  /// one at a time and in its order, so the per-layout sizing term walks
+  /// them without building the iterable.
+  int makeRoomSlotCountOn(int track);
+
+  /// The lane of the occupancy at [index] on lane-axis track [track],
+  /// below [makeRoomSlotCountOn].
+  int makeRoomSlotLaneAt(int track, int index);
+
+  /// The value, in `[0, 1]`, of the occupancy at [index] on lane-axis
+  /// track [track], below [makeRoomSlotCountOn].
+  double makeRoomSlotValueAt(int track, int index);
+
   /// The in-flight EXTENT delta for an item, `dx` on the horizontal axis
   /// and `dy` on the vertical, a content-space LENGTH per axis the
   /// painted extent adds to the structural one: a slide's TRANSIENT
@@ -357,6 +371,21 @@ class BoardAnimationCoordinator<TKey> implements BoardAnimationReader<TKey> {
   @override
   Iterable<({int lane, double value})> makeRoomSlotsOn(int track) {
     return makeRoom.slotsOn(track);
+  }
+
+  @override
+  int makeRoomSlotCountOn(int track) {
+    return makeRoom.slotCountOn(track);
+  }
+
+  @override
+  int makeRoomSlotLaneAt(int track, int index) {
+    return makeRoom.slotLaneAt(track, index);
+  }
+
+  @override
+  double makeRoomSlotValueAt(int track, int index) {
+    return makeRoom.slotValueAt(track, index);
   }
 
   /// The two per-item slide reads, behind ONE boolean: an idle board
