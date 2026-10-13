@@ -344,6 +344,39 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
   });
 
+  testWidgets(
+    "an entry an earlier target of the scope left closing stays out of the "
+    "own-free read",
+    (tester) async {
+      final inputs = _Inputs()
+        ..style = _live
+        ..lane = 1
+        ..joins = true;
+      final engine = _engine(tester, inputs);
+      engine.beginOwnPreview();
+      _install(engine);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(engine.termDeltaOf(2).dy, moreOrLessEquals(9.0));
+      expect(engine.slotValueAt(0, 0), moreOrLessEquals(0.5));
+
+      inputs
+        ..lane = 0
+        ..joins = false;
+      _install(engine);
+      expect(engine.termDeltaWithoutOwnOf(2), 0.0);
+      expect(engine.slotValueWithoutOwnAt(0, 0), 0.0);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(engine.termDeltaOf(2).dy, moreOrLessEquals(4.5));
+      expect(engine.slotValueAt(0, 0), moreOrLessEquals(0.25));
+      expect(engine.termDeltaWithoutOwnOf(2), 0.0);
+      expect(engine.slotValueWithoutOwnAt(0, 0), 0.0);
+      expect(_ownIds(engine), <int>[2]);
+      expect(_ownSlotTracks(engine), <int>[0]);
+      await tester.pump(const Duration(milliseconds: 200));
+    },
+  );
+
   testWidgets("a vacate the scope writes reads zero without it", (
     tester,
   ) async {
