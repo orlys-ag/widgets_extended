@@ -905,26 +905,6 @@ class MakeRoomEngine {
     }
   }
 
-  /// A write that restarts the clock of [id]'s standing [entry] of [kind],
-  /// or snaps it, joins it BEFORE the write: an absent pair is recorded
-  /// with the value the entry holds, a recorded one takes its foreign
-  /// value at this instant, and a snap leaves nothing foreign.
-  void _joinRestart(_HeldOffset entry, int id, int kind, bool snap) {
-    if (_ownEpoch == 0) {
-      return;
-    }
-    final table = _ownEntries ??= _PairTable();
-    final at = table.find(id, kind);
-    if (at < 0) {
-      table.add(id, kind, snap ? 0.0 : _valueOf(entry));
-    } else {
-      table.setValueAt(
-        at,
-        snap ? 0.0 : _remainderOf(table.valueAt(at), entry.snapped, entry.t),
-      );
-    }
-  }
-
   /// A re-base of [id]'s standing [entry] of [kind], which keeps its
   /// clock, joins it BEFORE the write: an absent pair is recorded with the
   /// entry's `from`, which a closing entry's value decays from on that
@@ -950,23 +930,6 @@ class MakeRoomEngine {
       table.add(track, lane, 0.0);
     } else {
       table.setValueAt(at, 0.0);
-    }
-  }
-
-  /// [_joinRestart] for [slot] on [track].
-  void _joinRestartSlot(_Slot slot, int track, bool snap) {
-    if (_ownEpoch == 0) {
-      return;
-    }
-    final table = _ownSlots ??= _PairTable();
-    final at = table.find(track, slot.lane);
-    if (at < 0) {
-      table.add(track, slot.lane, snap ? 0.0 : _valueOfSlot(slot));
-    } else {
-      table.setValueAt(
-        at,
-        snap ? 0.0 : _remainderOf(table.valueAt(at), slot.snapped, slot.t),
-      );
     }
   }
 
@@ -1131,8 +1094,24 @@ class MakeRoomEngine {
     if (snap) {
       minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
     }
-    _joinRestartSlot(slot, track, snap);
-    final current = _valueOfSlot(slot);
+    // The JOIN, before the write and from the one curve evaluation that
+    // gives the value the slot restarts from: an absent pair is recorded
+    // with that value, a recorded one's remainder decays to its foreign
+    // value at this instant, and a snap leaves nothing foreign.
+    final eased = slot.snapped ? 1.0 : _curve.transform(slot.t.clamp(0.0, 1.0));
+    final current = slot.snapped
+        ? slot.target
+        : slot.from + (slot.target - slot.from) * eased;
+    if (_ownEpoch != 0) {
+      final table = _ownSlots ??= _PairTable();
+      final at = table.find(track, slot.lane);
+      if (at < 0) {
+        table.add(track, slot.lane, snap ? 0.0 : current);
+      } else {
+        final values = table._values!;
+        values[at] = snap ? 0.0 : values[at] * (1.0 - eased);
+      }
+    }
     slot
       ..from = snap ? target : current
       ..target = target
@@ -1171,8 +1150,26 @@ class MakeRoomEngine {
         entry.from != entry.target,
       );
     }
-    _joinRestart(entry, id, kind, snap);
-    final current = _valueOf(entry);
+    // The JOIN, before the write and from the one curve evaluation that
+    // gives the value the entry restarts from: an absent pair is recorded
+    // with that value, a recorded one's remainder decays to its foreign
+    // value at this instant, and a snap leaves nothing foreign.
+    final eased = entry.snapped
+        ? 1.0
+        : _curve.transform(entry.t.clamp(0.0, 1.0));
+    final current = entry.snapped
+        ? entry.target
+        : entry.from + (entry.target - entry.from) * eased;
+    if (_ownEpoch != 0) {
+      final table = _ownEntries ??= _PairTable();
+      final at = table.find(id, kind);
+      if (at < 0) {
+        table.add(id, kind, snap ? 0.0 : current);
+      } else {
+        final values = table._values!;
+        values[at] = snap ? 0.0 : values[at] * (1.0 - eased);
+      }
+    }
     entry
       ..from = snap ? target : current
       ..target = target

@@ -120,7 +120,10 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   an open-addressed `_PairTable` over typed buffers kept across scopes,
   with its REMAINDER beside it, the share that entry held for whoever
   wrote it before (its value at a restart, its `from` at a re-base, zero
-  for a creation or a snap), and a lead or an extent never joins; each
+  for a creation or a snap), a re-target taking the entry's new `from`
+  and a recorded pair's decayed remainder from ONE curve evaluation and
+  writing that remainder into the record in place, `_retargetOffset` and
+  `_retargetSlot` alike, and a lead or an extent never joins; each
   removal from `_held`, `_heldBand`, `_heldVacate` or `_slots` drops its
   pair, so the record holds only standing entries and a toggled
   neighbour never adds a second pair; the reads named `WithoutOwn`

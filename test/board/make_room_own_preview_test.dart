@@ -312,6 +312,75 @@ void main() {
     });
   });
 
+  group("a joined entry's foreign share keeps decaying through the scope's "
+      "later re-targets", () {
+    testWidgets("a held offset", (tester) async {
+      final inputs = _Inputs()
+        ..style = _live
+        ..lane = 1;
+      final engine = _engine(tester, inputs);
+      _install(engine);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      engine.releasePreview(duration: _ms200.duration, curve: _ms200.curve);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      engine.beginOwnPreview();
+      inputs.lane = 2;
+      _install(engine);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(engine.termDeltaWithoutOwnOf(2), moreOrLessEquals(4.5));
+      expect(engine.termDeltaOf(2).dy, moreOrLessEquals(22.5));
+
+      // Back to its own lane: the re-target restarts the clock from 22.5
+      // toward 0, and the foreign share it carries is the 4.5 it had left.
+      inputs.lane = 0;
+      _install(engine);
+      expect(engine.termDeltaWithoutOwnOf(2), moreOrLessEquals(4.5));
+      expect(engine.termDeltaOf(2).dy, moreOrLessEquals(22.5));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(engine.termDeltaWithoutOwnOf(2), moreOrLessEquals(2.25));
+      expect(engine.termDeltaOf(2).dy, moreOrLessEquals(11.25));
+      await tester.pump(const Duration(milliseconds: 200));
+    });
+
+    testWidgets("a slot", (tester) async {
+      final inputs = _Inputs()..style = _live;
+      final engine = _engine(tester, inputs);
+      void lift(int row) {
+        _install(
+          engine,
+          draggedId: 5,
+          lifted: true,
+          prospective: BoardSpan(rowStart: row, colStart: 0),
+        );
+      }
+
+      lift(3);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      engine.releasePreview(duration: _ms200.duration, curve: _ms200.curve);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(engine.slotValueAt(3, 0), moreOrLessEquals(0.5));
+      engine.beginOwnPreview();
+      lift(3);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(engine.slotValueWithoutOwnAt(3, 0), moreOrLessEquals(0.25));
+      expect(engine.slotValueAt(3, 0), moreOrLessEquals(0.75));
+
+      // To another track: the slot on track 3 restarts from 0.75 toward 0,
+      // carrying the 0.25 of its foreign share it had left.
+      lift(2);
+      expect(engine.slotValueWithoutOwnAt(3, 0), moreOrLessEquals(0.25));
+      expect(engine.slotValueAt(3, 0), moreOrLessEquals(0.75));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(engine.slotValueWithoutOwnAt(3, 0), moreOrLessEquals(0.125));
+      expect(engine.slotValueAt(3, 0), moreOrLessEquals(0.375));
+      await tester.pump(const Duration(milliseconds: 200));
+    });
+  });
+
   testWidgets("a slot the scope opened is not in the own-free read and another "
       "session's closing slot is", (tester) async {
     final inputs = _Inputs()..style = _live;
