@@ -6,6 +6,8 @@
 /// Points are paint space in the board's frame.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
@@ -243,6 +245,134 @@ const BoardSpan _delaneTarget = BoardSpan(
   colSpan: 5,
 );
 
+/// `d`'s stored span on criterion 1's board.
+const BoardSpan _joinStored = BoardSpan(
+  rowStart: 0,
+  colStart: 0,
+  rowSpan: 2,
+  colSpan: 5,
+);
+
+/// The ids the make-room engine's own-preview scope has recorded.
+List<int> _ownIds(BoardController<String, _Item> controller) {
+  return <int>[
+    for (var index = 0; index < controller.makeRoomOwnIdCount; index++)
+      controller.makeRoomOwnIdAt(index),
+  ];
+}
+
+/// The lane bucket member reads of one forced layout of [viewport], which
+/// runs one placement pass.
+Future<int> _readsOverForcedLayout(
+  WidgetTester tester,
+  BoardController<String, _Item> controller,
+  RenderBoardViewport<String> viewport,
+) async {
+  controller.debugLaneBucketMemberReadCount = 0;
+  viewport.markNeedsLayout();
+  await tester.pump();
+  expect(viewport.debugLastCorrectionPassCount, 1);
+  return controller.debugLaneBucketMemberReadCount;
+}
+
+/// The track-space coordinate of the paint-space [y] on rows whose tops
+/// and extents are [tops] and [extents], from the board's leading edge.
+double _coordinateOn(List<double> tops, List<double> extents, double y) {
+  if (y < 0.0) {
+    return y / extents.first;
+  }
+  for (var row = 0; row < tops.length; row++) {
+    if (y < tops[row] + extents[row]) {
+      return row + (y - tops[row]) / extents[row];
+    }
+  }
+  final total = tops.last + extents.last;
+  return tops.length + (y - total) / extents.last;
+}
+
+/// Lifts `d`'s trailing edge at (40, [lift]) and moves it through
+/// [steps], one pump after each. At each step the row at the target's
+/// end paints within the change the session's own preview made to the
+/// rows between the lift and the pointer of where the track snap puts the
+/// end on the rows at rest, read before the lift; and where the preview
+/// spans more than one row, `d`'s painted bottom is that row's top.
+Future<void> _sweepEdge(
+  WidgetTester tester,
+  BoardController<String, _Item> controller,
+  RenderBoardViewport<String> viewport, {
+  required double lift,
+  required List<double> steps,
+  required double storedEnd,
+}) async {
+  final count = controller.rows.axis.trackCount;
+  final tops = <double>[];
+  final extents = <double>[];
+  for (var row = 0; row < count; row++) {
+    final rect = viewport.rectOfCell(row, 0)!;
+    tops.add(rect.top);
+    extents.add(rect.height);
+  }
+  double restTopOf(int row) {
+    return row == count ? tops.last + extents.last : tops[row];
+  }
+
+  double paintedTopOf(int row) {
+    return row == count
+        ? viewport.rectOfCell(count - 1, 0)!.bottom
+        : viewport.rectOfCell(row, 0)!.top;
+  }
+
+  final drag = _drag(tester, controller);
+  _lift(
+    tester,
+    drag,
+    viewport,
+    key: "d",
+    edge: BoardResizeEdges.trailing,
+    axis: Axis.vertical,
+    local: Offset(40.0, lift),
+  );
+  final liftCoordinate = _coordinateOn(tops, extents, lift);
+  for (final y in steps) {
+    _move(tester, drag, Offset(40.0, y));
+    await tester.pump(_frame);
+    final target = drag.currentTarget!.span;
+    final end = target.endTrackOn(Axis.vertical).round();
+    final snapped =
+        (storedEnd + _coordinateOn(tops, extents, y) - liftCoordinate)
+            .roundToDouble()
+            .clamp(1.0, count.toDouble())
+            .toInt();
+    final low = math.min(lift, y);
+    final high = math.max(lift, y);
+    var allowance = 0.0;
+    for (var row = 0; row < count; row++) {
+      final painted = viewport.rectOfCell(row, 0)!;
+      final restMeets = tops[row] <= high && tops[row] + extents[row] >= low;
+      final paintedMeets = painted.top <= high && painted.bottom >= low;
+      if (restMeets || paintedMeets) {
+        allowance += (painted.height - extents[row]).abs();
+      }
+    }
+    final edge = paintedTopOf(end);
+    expect(
+      (edge - restTopOf(snapped)).abs(),
+      lessThanOrEqualTo(allowance + 1e-9),
+      reason: "y $y, end $end, snapped $snapped",
+    );
+    if (target.endTrackOn(Axis.vertical) - target.startTrackOn(Axis.vertical) >
+        1.0) {
+      expect(
+        viewport.paintedRectOfItem("d")!.bottom,
+        moreOrLessEquals(edge, epsilon: 1e-9),
+        reason: "y $y",
+      );
+    }
+  }
+  drag.endDrag(cancel: true);
+  await tester.pumpAndSettle(_frame);
+}
+
 void main() {
   testWidgets("a resize that lanes an item keeps its target with motion off", (
     tester,
@@ -274,7 +404,8 @@ void main() {
       expect(_rowExtent(viewport, 1), 40.0, reason: "pump $pump");
     }
     drag.endDrag(cancel: true);
-  }, skip: true);
+    await tester.pumpAndSettle(_frame);
+  });
 
   testWidgets(
     "a resize that lanes an item keeps its target while its slot animates",
@@ -304,8 +435,8 @@ void main() {
       }
       expect(_rowExtent(viewport, 1), 40.0);
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -333,8 +464,8 @@ void main() {
         expect(drag.currentTarget?.span, _delaneTarget, reason: "pump $pump");
       }
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -361,8 +492,8 @@ void main() {
         expect(drag.currentTarget?.span, _delaneTarget, reason: "pump $pump");
       }
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
     },
-    skip: true,
   );
 
   testWidgets("a pointer moving down never moves the leading edge up", (
@@ -393,7 +524,8 @@ void main() {
       before = start;
     }
     drag.endDrag(cancel: true);
-  }, skip: true);
+    await tester.pumpAndSettle(_frame);
+  });
 
   testWidgets("a pointer moving down reaches every row boundary", (
     tester,
@@ -426,7 +558,8 @@ void main() {
       expect(ends, contains(end), reason: "the end row $end");
     }
     drag.endDrag(cancel: true);
-  }, skip: true);
+    await tester.pumpAndSettle(_frame);
+  });
 
   testWidgets(
     "the horizontal mirror of a resize that lanes an item keeps its target",
@@ -471,8 +604,8 @@ void main() {
         expect(_columnExtent(viewport, 1), 40.0, reason: "pump $pump");
       }
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -519,8 +652,8 @@ void main() {
         expect(drag.currentTarget?.span, target, reason: "pump $pump");
       }
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -559,8 +692,8 @@ void main() {
         expect(drag.currentTarget?.span, stored, reason: "pump $pump");
       }
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
     },
-    skip: true,
   );
 
   testWidgets("a resize under a reversed axis keeps its target", (
@@ -590,7 +723,8 @@ void main() {
       expect(_rowExtent(viewport, 1), 40.0, reason: "pump $pump");
     }
     drag.endDrag(cancel: true);
-  }, skip: true);
+    await tester.pumpAndSettle(_frame);
+  });
 
   testWidgets("a free-snap resize keeps its target while its vacate animates", (
     tester,
@@ -619,7 +753,8 @@ void main() {
       );
     }
     drag.endDrag(cancel: true);
-  }, skip: true);
+    await tester.pumpAndSettle(_frame);
+  });
 
   testWidgets(
     "a resize whose vacate clamps the scroll offset keeps its target",
@@ -658,8 +793,8 @@ void main() {
         expect(drag.currentTarget?.span, target, reason: "pump $pump");
       }
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -703,7 +838,469 @@ void main() {
       }
       expect(position.pixels, 112.0);
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
     },
-    skip: true,
+  );
+
+  testWidgets(
+    "another session's closing preview moves a resize target under a still "
+    "pointer",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 8, style: _animated);
+      _addDelaneItems(controller);
+      controller.addItem(
+        const _Item("e"),
+        const BoardSpan(rowStart: 0, colStart: 5, colSpan: 2),
+      );
+      final viewport = await _mount(tester, controller);
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.trailing,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 20.0),
+      );
+      _move(tester, drag, const Offset(40.0, 50.0));
+      for (var pump = 1; pump <= 20; pump++) {
+        await tester.pump(_frame);
+      }
+      expect(_rowExtent(viewport, 0), 22.0);
+      drag.endDrag(cancel: true);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "e",
+        edge: BoardResizeEdges.trailing,
+        axis: Axis.vertical,
+        local: const Offset(220.0, 20.0),
+      );
+      _move(tester, drag, const Offset(220.0, 50.0));
+      expect(
+        drag.currentTarget?.span,
+        const BoardSpan(rowStart: 0, colStart: 5, rowSpan: 4, colSpan: 2),
+      );
+      final ends = <double>[];
+      for (var pump = 1; pump <= 20; pump++) {
+        await tester.pump(_frame);
+        final end = _endRow(drag);
+        if (ends.isNotEmpty) {
+          expect(end, lessThanOrEqualTo(ends.last), reason: "pump $pump");
+        }
+        ends.add(end);
+      }
+      expect(ends.first, 4.0);
+      expect(ends.last, 2.0);
+      expect(_rowExtent(viewport, 0), 40.0);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a scroll under a still pointer moves a resize target while its own "
+    "preview stands",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      _addDelaneItems(controller);
+      final viewport = await _mount(tester, controller);
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.trailing,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 20.0),
+      );
+      _move(tester, drag, const Offset(40.0, 50.0));
+      await tester.pump(_frame);
+      expect(drag.currentTarget?.span, _delaneTarget);
+      expect(_rowExtent(viewport, 0), 22.0);
+      const scrolled = BoardSpan(
+        rowStart: 0,
+        colStart: 0,
+        rowSpan: 4,
+        colSpan: 5,
+      );
+      viewport.verticalPosition!.jumpTo(12.0);
+      expect(drag.currentTarget?.span, scrolled);
+      await tester.pump(_frame);
+      expect(drag.currentTarget?.span, scrolled);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a vacate above the scroll anchor leaves a resize target where the "
+    "scroll put it",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40, style: _animated);
+      _addDelaneItems(controller);
+      final viewport = await _mount(tester, controller);
+      final position = viewport.verticalPosition!;
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.trailing,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 20.0),
+      );
+      _move(tester, drag, const Offset(40.0, 50.0));
+      const target = BoardSpan(
+        rowStart: 0,
+        colStart: 0,
+        rowSpan: 7,
+        colSpan: 5,
+      );
+      position.jumpTo(45.0);
+      expect(drag.currentTarget?.span, target);
+      for (var pump = 1; pump <= 20; pump++) {
+        await tester.pump(_frame);
+        expect(drag.currentTarget?.span, target, reason: "pump $pump");
+      }
+      expect(position.pixels, moreOrLessEquals(27.0, epsilon: 1e-9));
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "another item's enter ramp moves a resize target under a still pointer",
+    (tester) async {
+      final controller = _rowsLaned(
+        tester,
+        style: const BoardAnimationStyle(
+          trackResize: _ms200,
+          itemSlide: BoardAnimationSpec(
+            duration: Duration.zero,
+            curve: Curves.linear,
+          ),
+        ),
+      );
+      _addJoinItems(controller);
+      final viewport = await _mount(tester, controller);
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 9.0),
+      );
+      _move(tester, drag, const Offset(40.0, 20.0));
+      await tester.pump(_frame);
+      await tester.pump(_frame);
+      expect(drag.currentTarget?.span, _joinTarget);
+      expect(_rowExtent(viewport, 1), 40.0);
+      controller.addItem(
+        const _Item("f"),
+        const BoardSpan(rowStart: 0, colStart: 0, colSpan: 3),
+      );
+      expect(drag.currentTarget?.span, _joinTarget);
+      for (var pump = 1; pump <= 20; pump++) {
+        await tester.pump(_frame);
+      }
+      expect(drag.currentTarget?.span, _joinStored);
+      expect(_rowExtent(viewport, 0), 22.0);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a resize that a pointerPosition listener ends inside startDrag leaves "
+    "no scope open",
+    (tester) async {
+      final controller = _rowsLaned(tester);
+      _addJoinItems(controller);
+      final viewport = await _mount(tester, controller);
+      final drag = _drag(tester, controller);
+      var ended = false;
+      void listener() {
+        if (!ended && drag.pointerPosition.value != null) {
+          ended = true;
+          drag.endDrag(cancel: true);
+        }
+      }
+
+      drag.pointerPosition.addListener(listener);
+      addTearDown(() {
+        drag.pointerPosition.removeListener(listener);
+      });
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 9.0),
+      );
+      expect(ended, isTrue);
+      expect(controller.makeRoomOwnPreviewEpoch, 0);
+    },
+  );
+
+  group("a resize's dragged edge paints within its own preview's change of "
+      "where the snap puts it", () {
+    testWidgets("(a) a sweep down that de-lanes the item", (tester) async {
+      final controller = _rowsLaned(tester);
+      _addDelaneItems(controller);
+      final viewport = await _mount(tester, controller);
+      await _sweepEdge(
+        tester,
+        controller,
+        viewport,
+        lift: 20.0,
+        steps: <double>[for (var y = 21; y <= 80; y++) y.toDouble()],
+        storedEnd: 1.0,
+      );
+    });
+
+    testWidgets("(b) a sweep up that lanes the item", (tester) async {
+      final controller = _rowsLaned(tester);
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 0, colStart: 0, colSpan: 4),
+      );
+      controller.addItem(
+        const _Item("d"),
+        const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 3, colSpan: 5),
+      );
+      final viewport = await _mount(tester, controller);
+      await _sweepEdge(
+        tester,
+        controller,
+        viewport,
+        lift: 41.0,
+        steps: <double>[for (var y = 40; y >= 1; y--) y.toDouble()],
+        storedEnd: 3.0,
+      );
+    });
+  });
+
+  testWidgets(
+    "an axis-config change re-derives a resize's lift without its own "
+    "preview",
+    (tester) async {
+      final controller = _rowsLaned(tester);
+      _addDelaneItems(controller);
+      final viewport = await _mount(tester, controller);
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.trailing,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 20.0),
+      );
+      _move(tester, drag, const Offset(40.0, 50.0));
+      await tester.pump(_frame);
+      expect(drag.currentTarget?.span, _delaneTarget);
+      expect(_rowExtent(viewport, 0), 22.0);
+      // One more track, which re-derives the lift: the lift point reads
+      // row 20 / 22 as the rows paint and 0.5 without the preview.
+      controller.rows = BoardAxisConfig(
+        axis: LazyContentAxis(7, 80.0),
+        laneExtent: 18.0,
+        lanePadding: 4.0,
+      );
+      for (var pump = 1; pump <= 4; pump++) {
+        await tester.pump(_frame);
+        if (pump == 1) {
+          expect(_rowExtent(viewport, 0), 22.0);
+        }
+        expect(drag.currentTarget?.span, _delaneTarget, reason: "pump $pump");
+      }
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a track resize in flight on the track its own preview changes moves a "
+    "resize target",
+    (tester) async {
+      final controller = _rowsLaned(
+        tester,
+        style: const BoardAnimationStyle(
+          trackResize: _ms200,
+          itemSlide: BoardAnimationSpec(
+            duration: Duration.zero,
+            curve: Curves.linear,
+          ),
+          itemEnterExit: BoardAnimationSpec(
+            duration: Duration.zero,
+            curve: Curves.linear,
+          ),
+        ),
+      );
+      _addDelaneItems(controller);
+      final viewport = await _mount(tester, controller);
+      // A third lane in row 0, which a track resize grows the row to.
+      controller.addItem(
+        const _Item("f"),
+        const BoardSpan(rowStart: 0, colStart: 0, colSpan: 3),
+      );
+      await tester.pump(_frame);
+      expect(_rowExtent(viewport, 0), 40.0);
+      expect(controller.anim.hasActiveTrackResize, isTrue);
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.trailing,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 20.0),
+      );
+      _move(tester, drag, const Offset(40.0, 50.0));
+      expect(drag.currentTarget?.span, _delaneTarget);
+      final ends = <double>[];
+      for (var pump = 1; pump <= 20; pump++) {
+        await tester.pump(_frame);
+        final end = _endRow(drag);
+        if (ends.isNotEmpty) {
+          expect(end, lessThanOrEqualTo(ends.last), reason: "pump $pump");
+        }
+        ends.add(end);
+      }
+      expect(ends.first, 2.0);
+      expect(ends.last, 1.0);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets("an id recycled on an own track is not own", (tester) async {
+    final controller = _rowsLaned(tester);
+    _addJoinItems(controller);
+    final viewport = await _mount(tester, controller);
+    final drag = _drag(tester, controller);
+    _lift(
+      tester,
+      drag,
+      viewport,
+      key: "d",
+      edge: BoardResizeEdges.leading,
+      axis: Axis.vertical,
+      local: const Offset(40.0, 9.0),
+    );
+    _move(tester, drag, const Offset(40.0, 20.0));
+    await tester.pump(_frame);
+    final id = controller.idOfKey("a");
+    expect(drag.currentTarget?.span, _joinTarget);
+    expect(_rowExtent(viewport, 1), 40.0);
+    expect(_ownIds(controller), <int>[id]);
+    controller.removeItem("a");
+    await tester.pump(_frame);
+    expect(_ownIds(controller), isEmpty);
+    expect(drag.currentTarget?.span, _joinTarget);
+    controller.addItem(
+      const _Item("g"),
+      const BoardSpan(rowStart: 1, colStart: 5, colSpan: 2),
+    );
+    expect(controller.idOfKey("g"), id);
+    for (var pump = 1; pump <= 4; pump++) {
+      await tester.pump(_frame);
+      expect(_ownIds(controller), isEmpty, reason: "pump $pump");
+      expect(drag.currentTarget?.span, _joinTarget, reason: "pump $pump");
+    }
+    drag.endDrag(cancel: true);
+    await tester.pumpAndSettle(_frame);
+  });
+
+  testWidgets(
+    "with no resize preview standing a layout does no own-free work",
+    (tester) async {
+      for (final style in <BoardAnimationStyle>[
+        BoardAnimationStyle.disabled,
+        _animated,
+      ]) {
+        final controller = _rowsLaned(tester, style: style);
+        _addJoinItems(controller);
+        final viewport = await _mount(tester, controller);
+        final idle = await _readsOverForcedLayout(tester, controller, viewport);
+        final drag = _drag(tester, controller);
+        if (identical(style, BoardAnimationStyle.disabled)) {
+          // (i) A move of `a` into row 4, whose slot stands there.
+          expect(
+            drag.startDrag(
+              key: "a",
+              renderPort: viewport,
+              pointerGlobal: _global(tester, const Offset(40.0, 20.0)),
+            ),
+            isTrue,
+          );
+          _move(tester, drag, const Offset(40.0, 60.0));
+          await tester.pump(_frame);
+          expect(controller.anim.makeRoomSlotsOn(4).length, 1);
+          expect(
+            await _readsOverForcedLayout(tester, controller, viewport),
+            idle,
+            reason: "a move",
+          );
+          drag.endDrag(cancel: true);
+          await tester.pump(_frame);
+          // (ii) A resize whose target is the stored span.
+          _lift(
+            tester,
+            drag,
+            viewport,
+            key: "d",
+            edge: BoardResizeEdges.leading,
+            axis: Axis.vertical,
+            local: const Offset(40.0, 9.0),
+          );
+          _move(tester, drag, const Offset(40.0, 12.0));
+          await tester.pump(_frame);
+          expect(drag.currentTarget?.span, _joinStored);
+          expect(
+            await _readsOverForcedLayout(tester, controller, viewport),
+            idle,
+            reason: "a resize at its stored span",
+          );
+          drag.endDrag(cancel: true);
+          await tester.pumpAndSettle(_frame);
+        } else {
+          // (iii) R2's session, cancelled while its slot animates.
+          _lift(
+            tester,
+            drag,
+            viewport,
+            key: "d",
+            edge: BoardResizeEdges.leading,
+            axis: Axis.vertical,
+            local: const Offset(40.0, 9.0),
+          );
+          _move(tester, drag, const Offset(40.0, 20.0));
+          await tester.pump(_frame);
+          await tester.pump(_frame);
+          drag.endDrag(cancel: true);
+          await tester.pump(_frame);
+          expect(controller.anim.makeRoomSlotsOn(1).length, 1);
+          expect(
+            await _readsOverForcedLayout(tester, controller, viewport),
+            idle,
+            reason: "a cancelled resize's closing preview",
+          );
+          await tester.pumpAndSettle(_frame);
+        }
+      }
+    },
   );
 }

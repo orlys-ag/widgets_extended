@@ -1,6 +1,9 @@
 /// The narrow contract the board's collaborators use to reach the render
 /// object: geometry, scroll positions, and the two pin operations a drag
-/// session needs.
+/// session needs. The drag's one read beside it is a resize's sample of
+/// the lattice as it would paint without that session's own make-room
+/// preview, which the render object registers as a sampler beside itself
+/// and `BoardControllerInternals.trackSampleWithoutOwnPreview` calls.
 ///
 /// `RenderBoardViewport.attach` registers itself through
 /// `BoardControllerInternals.attachRenderPort`, whose parameter type is this

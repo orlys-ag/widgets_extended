@@ -32,8 +32,20 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   subscriptions and unbound in teardown, and each dispatch schedules ONE
   post-frame re-resolve from the last pointer position, so a track
   resizing above a stationary pointer moves the drop target with the cell
-  under it (a free-snap session re-enters the install on every motion
-  frame, which the engine's idempotence makes a no-op). The STRUCTURAL
+  under it (a free-snap move re-enters the install on every motion
+  frame, which the engine's idempotence makes a no-op). A RESIZE samples
+  the pointer, and re-derives its lift, on the lattice as it would paint
+  without the session's OWN make-room preview
+  (`trackSampleWithoutOwnPreview`, the sampler the render registers
+  beside the port), so the re-resolve moves its target with every change
+  to the lattice but that preview's: the preview it installs never moves
+  the target it was installed for. That preview is the engine's
+  own-preview scope, which `startDrag` opens for a resize on the
+  statement after `_session = session` and keeps the epoch of on the
+  session, and the teardown ends on the statement after `_session =
+  null`, before the release, so a session app code ends inside
+  `startDrag` leaves no scope open and one started inside the release's
+  dispatch keeps its own. The STRUCTURAL
   channel is the fourth, bound and unbound beside it: a board change
   under a parked pointer clears the early-out's record and schedules the
   same one resolve, so the drop gate is re-asked for the placement the
@@ -102,10 +114,11 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   one that carries the item into or out of a track, and a move's glide,
   which runs from the proxy, never is; a cancel closes the gap by
   animation. `BoardDropResolver` turns a drag's samples into a
-  span, arithmetic on the `trackSampleAt` samples `_resolve` takes once
-  per resolve: the pointer's, and for a move the proxy's content-LEADING
-  corner's (see the coordinate-spaces entry above) and its centre's; a
-  null sample leaves the target unchanged. EVERY move quantizes the
+  span, arithmetic on the samples `_resolve` takes once per resolve: the
+  pointer's, on the lattice without the session's own preview for a
+  resize and through `trackSampleAt` for a move, and for a move the
+  proxy's content-LEADING corner's (see the coordinate-spaces entry
+  above) and its centre's; a null sample leaves the target unchanged. EVERY move quantizes the
   corner, a track snap rounding it to the nearest track and a fraction
   snap to the nearest quantum, and clamps it into a WINDOW of starts, so
   the cells committed are the cells the item covers. The corner is read
