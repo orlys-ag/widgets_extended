@@ -1726,8 +1726,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// [withoutOwnPreview] evaluates the ONE term formula without the make-room
   /// engine's own-preview scope, reading its three make-room inputs, a
   /// member's term delta and vacate and a slot's value, at their foreign
-  /// values and everything else as the painted evaluation does, and leaves
-  /// the two flags alone.
+  /// values, a slot whose foreign value is zero as no slot, and everything
+  /// else as the painted evaluation does, and leaves the two flags alone.
   ///
   /// The track must hold its deepest cluster's lanes, each member's
   /// ceiling SCALED by its enter/exit ramp and SHIFTED by the two
@@ -1817,6 +1817,15 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     }
     final slots = anim.makeRoomSlotCountOn(track);
     for (var index = 0; index < slots; index++) {
+      final value = withoutOwnPreview
+          ? _controller.makeRoomSlotValueWithoutOwnAt(track, index)
+          : anim.makeRoomSlotValueAt(track, index);
+      if (withoutOwnPreview && value == 0.0) {
+        // The scope created it, or the share another session left in it
+        // has closed. Read at zero it would mark the track seen and put its
+        // lane edge and the padding into a term the track lacks without it.
+        continue;
+      }
       // A PROSPECTIVE lane occupancy: the enter/exit formula with the
       // slot's value in the role of progress. On the lifted item's own
       // track its member ceiling and its slot can both appear and the max
@@ -1824,14 +1833,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       seen = true;
       makeRoomContributes = true;
       final lane = anim.makeRoomSlotLaneAt(track, index);
-      final ceiling = config.laneBandEdgeOn(
-        track,
-        lane,
-        lane + 1,
-        withoutOwnPreview
-            ? _controller.makeRoomSlotValueWithoutOwnAt(track, index)
-            : anim.makeRoomSlotValueAt(track, index),
-      );
+      final ceiling = config.laneBandEdgeOn(track, lane, lane + 1, value);
       if (ceiling > deepest) {
         deepest = ceiling;
       }

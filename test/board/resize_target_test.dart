@@ -253,6 +253,15 @@ const BoardSpan _joinStored = BoardSpan(
   colSpan: 5,
 );
 
+/// `d`'s stored span on a board whose 2 px cells measure less than the
+/// lane padding: rows [0, 3), unlaned.
+const BoardSpan _shortCellsStored = BoardSpan(
+  rowStart: 0,
+  colStart: 0,
+  rowSpan: 3,
+  colSpan: 5,
+);
+
 /// The ids the make-room engine's own-preview scope has recorded.
 List<int> _ownIds(BoardController<String, _Item> controller) {
   return <int>[
@@ -434,6 +443,92 @@ void main() {
         before = extent;
       }
       expect(_rowExtent(viewport, 1), 40.0);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a resize that lanes an item in a track whose cells measure less than "
+    "the lane padding keeps its target",
+    (tester) async {
+      final controller = _rowsLaned(tester);
+      controller.addItem(const _Item("d"), _shortCellsStored);
+      final viewport = await _mount(
+        tester,
+        controller,
+        cell: const Size(40.0, 2.0),
+      );
+      expect(_rowExtent(viewport, 2), 2.0);
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 1.8),
+      );
+      const target = BoardSpan(rowStart: 2, colStart: 0, colSpan: 5);
+      _move(tester, drag, const Offset(40.0, 4.9));
+      expect(drag.currentTarget?.span, target);
+      for (var pump = 1; pump <= 20; pump++) {
+        await tester.pump(_frame);
+        expect(drag.currentTarget?.span, target, reason: "pump $pump");
+        expect(
+          controller.anim.makeRoomSlotsOn(2).length,
+          1,
+          reason: "pump $pump",
+        );
+        expect(_rowExtent(viewport, 2), 22.0, reason: "pump $pump");
+        // Without the preview, row 2 is its cells' 2 px.
+        expect(
+          controller
+              .trackSampleWithoutOwnPreview(viewport, const Offset(40.0, 5.0))!
+              .row
+              .painted,
+          moreOrLessEquals(2.5, epsilon: 1e-9),
+          reason: "pump $pump",
+        );
+      }
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a free-snap resize that lanes an item in a track whose cells measure "
+    "less than the lane padding keeps its target",
+    (tester) async {
+      final controller = _rowsLaned(tester);
+      controller.addItem(const _Item("d"), _shortCellsStored);
+      final viewport = await _mount(
+        tester,
+        controller,
+        cell: const Size(40.0, 2.0),
+      );
+      final drag = _drag(tester, controller, snap: const BoardSnap.free());
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 0.5),
+      );
+      _move(tester, drag, const Offset(40.0, 5.0));
+      expect(_startRow(drag), moreOrLessEquals(2.25, epsilon: 1e-9));
+      for (var pump = 1; pump <= 20; pump++) {
+        await tester.pump(_frame);
+        expect(
+          _startRow(drag),
+          moreOrLessEquals(2.25, epsilon: 1e-9),
+          reason: "pump $pump",
+        );
+      }
+      expect(controller.anim.makeRoomSlotsOn(2).length, 1);
       drag.endDrag(cancel: true);
       await tester.pumpAndSettle(_frame);
     },
