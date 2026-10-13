@@ -640,20 +640,32 @@ extension BoardControllerInternals<TKey, TItem>
     _anim.trackResize.invalidateShiftCache();
   }
 
-  /// Registers [port] as the render object driving this controller.
+  /// Registers [port] as the render object driving this controller, and
+  /// beside it [sampleWithoutOwnPreview], the render's sampler of a point
+  /// on the lattice as it would paint without the open own-preview
+  /// scope's preview, which [trackSampleWithoutOwnPreview] calls.
   ///
   /// Called from `RenderBoardViewport.attach`, and idempotent, because a
   /// `GlobalKey` move detaches and reattaches. A second registration by a
   /// DIFFERENT render object replaces the first, which is the order a
   /// `GlobalKey` move produces: the new render object attaches before the
   /// old one detaches.
-  void attachRenderPort(BoardRenderPort<TKey> port) {
+  void attachRenderPort(
+    BoardRenderPort<TKey> port, {
+    ({BoardAxisSample row, BoardAxisSample col})? Function(
+      Offset local,
+      double? verticalPixels,
+      double? horizontalPixels,
+    )?
+    sampleWithoutOwnPreview,
+  }) {
     _assertNotDisposed();
     _renderPort = port;
+    _sampleWithoutOwnPreview = sampleWithoutOwnPreview;
   }
 
-  /// Clears the registration [attachRenderPort] made, and ONLY when the
-  /// registered port IS [port].
+  /// Clears the registration [attachRenderPort] made, the port and its
+  /// sampler, and ONLY when the registered port IS [port].
   ///
   /// The identity test is what keeps a `GlobalKey` move from clearing a
   /// live binding: the new render object has already registered by the
@@ -664,7 +676,36 @@ extension BoardControllerInternals<TKey, TItem>
       // ScrollPosition that is no longer in a tree.
       _orchestrator.cancelInFlight();
       _renderPort = null;
+      _sampleWithoutOwnPreview = null;
     }
+  }
+
+  /// Internal-use channel for the drag layer; not part of the supported
+  /// surface. [port]'s `trackSampleAt` of [local], taken on the lattice as
+  /// it would paint without the open own-preview scope's preview: the
+  /// sampler the registered render object passed to [attachRenderPort]
+  /// when [port] IS that render object, and [port]'s own `trackSampleAt`
+  /// otherwise, so a port that is not this board's, a test's fake
+  /// included, samples the lattice as it paints. [verticalPixels] and
+  /// [horizontalPixels] are as `trackSampleAt` takes them; where neither
+  /// names an offset the sample is read at the scroll offset the content
+  /// axis would have without that preview, which its `scrollPixels`
+  /// records.
+  ({BoardAxisSample row, BoardAxisSample col})? trackSampleWithoutOwnPreview(
+    BoardRenderPort<TKey> port,
+    Offset local, {
+    double? verticalPixels,
+    double? horizontalPixels,
+  }) {
+    final sampler = _sampleWithoutOwnPreview;
+    if (sampler == null || !identical(port, _renderPort)) {
+      return port.trackSampleAt(
+        local,
+        verticalPixels: verticalPixels,
+        horizontalPixels: horizontalPixels,
+      );
+    }
+    return sampler(local, verticalPixels, horizontalPixels);
   }
 
   /// The narrow read interface the render layer binds to. Read off the

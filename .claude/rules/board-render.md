@@ -100,7 +100,34 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   over, a point past the viewport beside a band included; and
   `visibleFrom` and `visibleTo`, the scrolled coordinates at the bands'
   inner edges, between which a scrolled span SHOWS. Beside the sample
-  the pass yields the clamp-free coordinate `cellAt` reads.
+  the pass yields the clamp-free coordinate `cellAt` reads. The mapping
+  has an OWN-FREE mode, which `_sampleWithoutOwnPreview`, the sampler the
+  render registers through `attachRenderPort` beside itself, reads for a
+  resize: on the content-sized lane axis, while the OWN-DATA KEY (the
+  make-room scope's epoch, the controller and the content axis instance)
+  is current and the data holds an own track, a residue or an own scroll
+  shift beyond the tolerance, every content-axis read is the lattice
+  without the scope's own preview: an offset less `D(k)`, the own deltas
+  of the own tracks below it, an extent less its own delta, the total
+  and each band's extent less the deltas inside it, which moves the
+  region bounds, a track lookup a segment search over the own tracks
+  then one descent, and the scroll offset `P - S + R * f` at the live
+  pixels; everywhere else it is the painted mapping. The OWN TRACKS are
+  MARKED at the layout head, after the term refresh, from the scope's
+  join record (each recorded laned id's lane-axis track, each recorded
+  slot's track); each pass gives each own track it sized its OWN DELTA,
+  the extent it stores less the larger of its cell term and the
+  own-free evaluation of `_laneTermOf`, floored as the sizing step
+  floors, and a literal zero to an unmarked one; after the pass loop an
+  unmarked own track whose pass wrote zero is dropped. The OWN SCROLL
+  SHIFT `S` changes in layout only: by the change of the own deltas
+  between the leading band's end and the anchor at each pass, by the
+  fold of a standing RESIDUE at the layout head, and in
+  `_applyContentDimensions`, which attributes a clamp after a change of
+  the maximum and, where the position did not enforce its boundary, its
+  whole move now and a residue for the spring-back that follows outside
+  layout. A changed key resets the data, `S` and the residue at the
+  layout head, and a sample treats data under another key as absent.
   `trackSpaceAt` is the sample's `painted` projection, `frozenCellAt`
   answers where the pass reports a band, and `resolveDropCell` and the
   selection resolve each axis among the cells of the REGION the point

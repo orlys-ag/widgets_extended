@@ -45,6 +45,13 @@ double snapToTrackEdge(double trackSpace) {
 /// paint, the frozen bands' and the scrolled tracks', with the band
 /// geometry a drop reads. `BoardRenderPort.trackSampleAt` produces it.
 ///
+/// An OWN-FREE sample, which the controller's internal
+/// `trackSampleWithoutOwnPreview` produces for a resize, maps the point on
+/// the lattice as it would paint without that session's own make-room
+/// preview: its `painted` and every other coordinate are that lattice's,
+/// and its `scrollPixels` is the offset it was read at, the one asked for
+/// or the one the board would have without that preview.
+///
 /// `painted`: the coordinate `BoardRenderPort.trackSpaceAt` answers on the
 /// axis, the integer track plus the fraction into it of the lattice that
 /// paints at the point.

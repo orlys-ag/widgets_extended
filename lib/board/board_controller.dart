@@ -227,6 +227,17 @@ class BoardController<TKey, TItem> {
   /// [attachRenderPort], [detachRenderPort] and [dispose].
   BoardRenderPort<TKey>? _renderPort;
 
+  /// The sampler [_renderPort] registered beside itself, which samples a
+  /// point on the lattice as it would paint without the open own-preview
+  /// scope's preview; null exactly when [_renderPort] is or when it
+  /// registered none. Written only where [_renderPort] is.
+  ({BoardAxisSample row, BoardAxisSample col})? Function(
+    Offset local,
+    double? verticalPixels,
+    double? horizontalPixels,
+  )?
+  _sampleWithoutOwnPreview;
+
   /// The window floors the render's last geometry refresh passed, per
   /// axis, from which a resize session's geometry targets measure the
   /// trackResize shifts, as the render's per-item geometry does. Written
@@ -1154,6 +1165,7 @@ class BoardController<TKey, TItem> {
     _animationListeners.clear();
     _selection.dispose();
     _renderPort = null;
+    _sampleWithoutOwnPreview = null;
     _disposed = true;
   }
 

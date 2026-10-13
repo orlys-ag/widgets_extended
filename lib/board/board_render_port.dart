@@ -138,7 +138,11 @@ abstract interface class BoardRenderPort<TKey> {
   /// it. Null exactly when [trackSpaceAt] is. A null sample leaves the
   /// drag session's target UNCHANGED and installs no gap.
   ///
-  /// This is the ONE producer of a fractional track coordinate.
+  /// This is the ONE producer of a fractional track coordinate of the
+  /// lattice as it paints. The controller's internal
+  /// `trackSampleWithoutOwnPreview` samples through the same mapping of
+  /// the board's render object the lattice as it would paint without a
+  /// resize session's own make-room preview.
   ///
   /// [verticalPixels] and [horizontalPixels] sample the point as the
   /// board would at those scroll offsets, each null for the board's own:
