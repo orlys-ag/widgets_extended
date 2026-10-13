@@ -319,8 +319,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// the spring runs: [_ownResidue] spread over the pixels from
   /// [_ownResidueFrom] to [_ownResidueTo]. Content-space lengths on the
   /// content axis, written in layout only: by the pass correction's own
-  /// share, the layout head's fold of the residue and
-  /// [_applyContentDimensions].
+  /// share, the layout head's reset ([_ownShiftAtSwap]) and its fold of
+  /// the residue, and [_applyContentDimensions].
   double _ownScrollShift = 0.0;
   bool _hasOwnResidue = false;
   double _ownResidue = 0.0;
@@ -332,12 +332,22 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   double? _lastContentMaxPassed;
 
   /// The OWN-DATA KEY the own data was computed under: the scope's epoch,
-  /// the controller and the content axis instance. The layout head resets
+  /// the controller, the content axis instance and that instance's
+  /// measurement resets ([_measurementResetsOf]). The layout head resets
   /// the data when it differs, and a sample treats data under another key
   /// as absent.
   int _ownKeyEpoch = 0;
   Object? _ownKeyController;
   Object? _ownKeyAxis;
+  int _ownKeyResets = 0;
+
+  /// The content-space scroll offset the zoom anchor put on a new content
+  /// axis instance less the one it computed over the old instance's
+  /// own-free lattice, which the reset of the own data in the same layout
+  /// head takes as the own scroll shift; null where the anchor computed no
+  /// own-free target, and cleared at every layout head before the anchor
+  /// runs ([_anchorSwappedAxes]).
+  double? _ownShiftAtSwap;
 
   /// The engine generations the last layout ran against, recorded at the
   /// END of `layoutChildSequence` so every pass of one layout compares
@@ -874,6 +884,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// controller swap, a new model rather than a zoom, and not for a config
   /// that keeps its axis instance.
   void _anchorSwappedAxes() {
+    _ownShiftAtSwap = null;
     final rows = _controller.rows;
     final columns = _controller.columns;
     if (identical(_laidOutController, _controller)) {
@@ -928,10 +939,42 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         ? ((content - oldAxis.offsetOf(track)) / extent).clamp(0.0, 1.0)
         : 0.0;
     final anchor = (track + into).clamp(0.0, newAxis.trackCount.toDouble());
+    final maxTarget = math.max(0.0, newAxis.totalExtent - viewportExtent);
     final target = (newAxis.offsetOfFraction(anchor) - newBand).clamp(
       0.0,
-      math.max(0.0, newAxis.totalExtent - viewportExtent),
+      maxTarget,
     );
+    if (_ownDataStandsOn(oldAxis)) {
+      // The OWN-FREE TARGET: the same steps over the old instance's
+      // lattice without the own preview, from the scroll offset the board
+      // would have without it, so the own scroll shift the new instance
+      // starts from is the difference of the two targets.
+      final axis = identical(offset, verticalOffset)
+          ? Axis.vertical
+          : Axis.horizontal;
+      final ownFree =
+          _ownFreePixelsAt(offset.pixels) +
+          oldBand -
+          _ownDeltasBelow(old.leadingBandEnd);
+      final ownTrack = _ownFreeTrackAt(axis, oldAxis, ownFree, animated: false);
+      final ownExtent = oldAxis.extentOf(ownTrack) - _ownDeltaOf(ownTrack);
+      final ownInto = ownExtent > 0.0
+          ? ((ownFree -
+                        (oldAxis.offsetOf(ownTrack) -
+                            _ownDeltasBelow(ownTrack))) /
+                    ownExtent)
+                .clamp(0.0, 1.0)
+          : 0.0;
+      final ownAnchor = (ownTrack + ownInto).clamp(
+        0.0,
+        newAxis.trackCount.toDouble(),
+      );
+      final ownTarget = (newAxis.offsetOfFraction(ownAnchor) - newBand).clamp(
+        0.0,
+        maxTarget,
+      );
+      _ownShiftAtSwap = target - ownTarget;
+    }
     final correction = target - offset.pixels;
     if (correction.abs() >= precisionErrorTolerance) {
       offset.correctBy(correction);
@@ -1792,17 +1835,21 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   /// The own data's layout head, after the resize term's refresh. Resets
-  /// the data, the own scroll shift and the residue when the own-data key
-  /// changed (a new scope, a scope's end, a controller swap, a new content
-  /// axis instance) or no content-sized lane axis exists; folds a standing
-  /// residue at the current pixels; then MARKS, among the own tracks, the
-  /// lane-axis track of each recorded id that is laned and each recorded
-  /// slot's track, adding each one absent with a zero delta. With no
-  /// recorded pair and no own track nothing is marked.
+  /// the data and the residue when the own-data key changed (a new scope,
+  /// a scope's end, a controller swap, a new content axis instance) or no
+  /// content-sized lane axis exists, the own scroll shift to what the zoom
+  /// anchor left in [_ownShiftAtSwap] and to zero where it left nothing;
+  /// drops the own tracks alone at a measurement reset of the same
+  /// instance; folds a standing residue at the current pixels; then
+  /// MARKS, among the own tracks, the lane-axis track of each recorded id
+  /// that is laned and each recorded slot's track, adding each one absent
+  /// with a zero delta. With no recorded pair and no own track nothing is
+  /// marked.
   void _ownDataAtLayoutHead() {
     final contentAxis = _contentAxis;
     final epoch = _controller.makeRoomOwnPreviewEpoch;
     final axisInstance = _contentAxisInstance;
+    final resets = _measurementResetsOf(axisInstance);
     final laned = contentAxis != null && _controller.laneAxis == contentAxis;
     if (epoch != _ownKeyEpoch ||
         !identical(_controller, _ownKeyController) ||
@@ -1811,9 +1858,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       _ownKeyEpoch = epoch;
       _ownKeyController = _controller;
       _ownKeyAxis = axisInstance;
+      _ownKeyResets = resets;
       _ownCount = 0;
-      _ownScrollShift = 0.0;
+      _ownScrollShift = laned ? (_ownShiftAtSwap ?? 0.0) : 0.0;
       _hasOwnResidue = false;
+    } else if (resets != _ownKeyResets) {
+      // A measurement reset of the same instance returned every stored
+      // extent to the estimate, which holds no own contribution, so every
+      // own delta is stale; it moved neither the painted scroll offset nor
+      // the own-free one, so the shift and the residue stand.
+      _ownKeyResets = resets;
+      _ownCount = 0;
     }
     if (_hasOwnResidue) {
       _ownScrollShift -=
@@ -2042,6 +2097,14 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     if (_contentAxis != axis || _controller.laneAxis != axis) {
       return false;
     }
+    return _ownDataStandsOn(_contentAxisInstance);
+  }
+
+  /// Whether the own data holds what turns the point mapping's own-free
+  /// mode on, an own track, a residue, or an own scroll shift farther than
+  /// the tolerance from zero, under a key that names the current scope,
+  /// the controller and [axisInstance] as it stands.
+  bool _ownDataStandsOn(BoardAxis? axisInstance) {
     if (_ownCount == 0 &&
         !_hasOwnResidue &&
         _ownScrollShift.abs() <= precisionErrorTolerance) {
@@ -2049,7 +2112,13 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     }
     return _ownKeyEpoch == _controller.makeRoomOwnPreviewEpoch &&
         identical(_ownKeyController, _controller) &&
-        identical(_ownKeyAxis, _contentAxisInstance);
+        identical(_ownKeyAxis, axisInstance) &&
+        _ownKeyResets == _measurementResetsOf(axisInstance);
+  }
+
+  /// [axisInstance]'s measurement resets, zero for an axis that has none.
+  static int _measurementResetsOf(BoardAxis? axisInstance) {
+    return axisInstance is LazyContentAxis ? axisInstance.measurementResets : 0;
   }
 
   /// The content axis's scroll offset without the scope's preview at the

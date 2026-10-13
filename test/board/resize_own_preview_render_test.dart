@@ -42,6 +42,7 @@ const BoardAnimationStyle _animated = BoardAnimationStyle(
 BoardController<String, _Item> _rowsLaned(
   WidgetTester tester, {
   int rowCount = 6,
+  double estimate = 80.0,
   int frozenStart = 0,
   int frozenEnd = 0,
   BoardAnimationStyle style = BoardAnimationStyle.disabled,
@@ -49,7 +50,7 @@ BoardController<String, _Item> _rowsLaned(
   final controller = BoardController<String, _Item>(
     vsync: tester,
     rows: BoardAxisConfig(
-      axis: LazyContentAxis(rowCount, 80.0),
+      axis: LazyContentAxis(rowCount, estimate),
       laneExtent: 18.0,
       lanePadding: 4.0,
       frozenStart: frozenStart,
@@ -413,7 +414,8 @@ void main() {
     },
   );
 
-  group("the own scroll shift resets with the own data", () {
+  group("the own scroll shift resets with the own data and follows the zoom "
+      "anchor", () {
     /// S2 (a)'s board after its 20 pumps: pixels 27, the shift -18, nothing
     /// in motion.
     Future<(BoardController<String, _Item>, RenderBoardViewport<String>, int)>
@@ -460,8 +462,13 @@ void main() {
       expectSamples(controller, viewport);
     });
 
-    testWidgets("(c) at a new axis instance", (tester) async {
+    testWidgets("(c) at a new axis instance whose two anchors agree", (
+      tester,
+    ) async {
       final (controller, viewport, _) = await settled(tester);
+      // The painted leading edge, 27 over row 0's 22 px, and the own-free
+      // one, 45 over its 40 px, both read row 1.5, so both anchor at 15 on
+      // the new 10 px estimates and the shift starts at zero.
       controller.rows = BoardAxisConfig(
         axis: LazyContentAxis(40, 10.0),
         laneExtent: 18.0,
@@ -470,11 +477,140 @@ void main() {
       await tester.pump();
       expect(
         viewport.verticalPosition!.pixels,
-        moreOrLessEquals(27.0, epsilon: 1e-9),
+        moreOrLessEquals(15.0, epsilon: 1e-9),
       );
-      expectSamples(controller, viewport);
+      const point = Offset(40.0, 50.0);
+      expect(
+        _ownFree(controller, viewport, point).painted,
+        moreOrLessEquals(3.5, epsilon: 1e-9),
+      );
+      expect(
+        _painted(viewport, point).painted,
+        moreOrLessEquals(5.3, epsilon: 1e-9),
+      );
+    });
+
+    testWidgets("(d) at a new axis instance whose two anchors differ", (
+      tester,
+    ) async {
+      final (controller, viewport) = await _vacateAtEnd(tester, 130.0);
+      controller.beginOwnMakeRoomPreview();
+      _install(controller, _endTarget);
+      await tester.pump();
+      expect(viewport.verticalPosition!.pixels, 112.0);
+      // The painted leading edge reads row 11.2 and the own-free one, at
+      // 130, row 13.0, so the anchors are 112 and 130 on the new instance
+      // and the shift stays -18.
+      controller.rows = BoardAxisConfig(
+        axis: LazyContentAxis(50, 10.0),
+        laneExtent: 18.0,
+        lanePadding: 4.0,
+      );
+      await tester.pump();
+      expect(viewport.verticalPosition!.pixels, 112.0);
+      const point = Offset(40.0, 236.0);
+      expect(
+        _ownFree(controller, viewport, point).painted,
+        moreOrLessEquals(36.6, epsilon: 1e-9),
+      );
+      expect(
+        _painted(viewport, point).painted,
+        moreOrLessEquals(34.8, epsilon: 1e-9),
+      );
     });
   });
+
+  testWidgets(
+    "an axis instance change whose zoom anchor computes no target resets the "
+    "own scroll shift to zero",
+    (tester) async {
+      final (controller, viewport) = await _vacateAtEnd(tester, 130.0);
+      final position = viewport.verticalPosition!;
+      controller.beginOwnMakeRoomPreview();
+      _install(controller, _endTarget);
+      await tester.pump();
+      expect(position.pixels, 112.0);
+      BoardAxisConfig rows(int count) {
+        return BoardAxisConfig(
+          axis: LazyContentAxis(count, 10.0),
+          laneExtent: 18.0,
+          lanePadding: 4.0,
+        );
+      }
+
+      // An anchor that computes both targets, keeping the shift at -18.
+      controller.rows = rows(50);
+      await tester.pump();
+      const point = Offset(40.0, 236.0);
+      expect(
+        _ownFree(controller, viewport, point).painted,
+        moreOrLessEquals(36.6, epsilon: 1e-9),
+      );
+      // Two anchors that compute none, onto an empty axis and from it.
+      controller.rows = rows(0);
+      await tester.pump();
+      expect(position.pixels, 0.0);
+      controller.rows = rows(50);
+      await tester.pump();
+      expect(position.pixels, 0.0);
+      const above = Offset(40.0, 50.0);
+      expect(
+        _ownFree(controller, viewport, above).painted,
+        moreOrLessEquals(5.0, epsilon: 1e-9),
+      );
+      expect(
+        _painted(viewport, above).painted,
+        moreOrLessEquals(5.0, epsilon: 1e-9),
+      );
+    },
+  );
+
+  testWidgets(
+    "a measurement reset of the content axis instance drops the own deltas "
+    "and keeps the own scroll shift",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 100, estimate: 10.0);
+      _addDelaneItems(controller);
+      final viewport = await _mount(tester, controller);
+      final position = viewport.verticalPosition!;
+      position.jumpTo(45.0);
+      await tester.pump();
+      controller.beginOwnMakeRoomPreview();
+      _install(
+        controller,
+        const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 3, colSpan: 5),
+      );
+      await tester.pump();
+      expect(position.pixels, 27.0);
+      // Row 0, the own track, now lies outside every window a pass sizes.
+      position.jumpTo(600.0);
+      await tester.pump();
+      const point = Offset(40.0, 50.0);
+      expect(
+        _ownFree(controller, viewport, point).painted,
+        moreOrLessEquals(63.8, epsilon: 1e-9),
+      );
+      expect(_rowExtent(viewport, 0), 22.0);
+      // The same instance under another lane padding, whose setter resets
+      // the instance's measurements.
+      controller.rows = BoardAxisConfig(
+        axis: controller.rows.axis,
+        laneExtent: 18.0,
+        lanePadding: 6.0,
+      );
+      await tester.pump();
+      expect(position.pixels, 600.0);
+      expect(_rowExtent(viewport, 0), 10.0);
+      expect(
+        _painted(viewport, point).painted,
+        moreOrLessEquals(65.0, epsilon: 1e-9),
+      );
+      expect(
+        _ownFree(controller, viewport, point).painted,
+        moreOrLessEquals(66.8, epsilon: 1e-9),
+      );
+    },
+  );
 
   testWidgets(
     "a standing own preview adds one lane-term read per own track per pass",
@@ -583,6 +719,51 @@ void main() {
         expect(_rowExtent(viewport, 1), 22.0);
       }
       expect(reads[true], reads[false]);
+    },
+  );
+
+  testWidgets(
+    "an axis instance change with no own preview standing reads the old "
+    "instance as the painted zoom anchor does",
+    (tester) async {
+      final counts = <int>[];
+      for (final arm in <int>[1, 2, 3]) {
+        final controller = _rowsLaned(tester, rowCount: 40);
+        _addDelaneItems(controller);
+        final viewport = await _mount(tester, controller);
+        final position = viewport.verticalPosition!;
+        position.jumpTo(45.0);
+        await tester.pump();
+        if (arm > 1) {
+          controller.beginOwnMakeRoomPreview();
+          _install(
+            controller,
+            const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 3, colSpan: 5),
+          );
+          await tester.pump();
+          expect(position.pixels, 27.0, reason: "arm $arm");
+          if (arm == 2) {
+            _install(
+              controller,
+              const BoardSpan(rowStart: 0, colStart: 0, colSpan: 5),
+            );
+            await tester.pump();
+            expect(position.pixels, 45.0, reason: "arm $arm");
+          }
+        }
+        final held = controller.rows.axis as LazyContentAxis;
+        controller.rows = BoardAxisConfig(
+          axis: LazyContentAxis(40, 10.0),
+          laneExtent: 18.0,
+          lanePadding: 4.0,
+        );
+        held.debugFenwick.debugOpCount = 0;
+        await tester.pump();
+        counts.add(held.debugFenwick.debugOpCount);
+        controller.releaseMakeRoomPreview();
+      }
+      expect(counts[1], counts[0], reason: "$counts");
+      expect(counts[2], greaterThan(counts[0]), reason: "$counts");
     },
   );
 }

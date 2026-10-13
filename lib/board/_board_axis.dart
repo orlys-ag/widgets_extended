@@ -591,6 +591,22 @@ class LazyContentAxis implements BoardAxis {
     _deltas.clear();
     _measured.fillRange(0, _measured.length, 0);
     _measuredCount = 0;
+    _measurementResets += 1;
+  }
+
+  /// How many times [resetMeasurements] has run on this instance, which
+  /// [LazyContentAxisResets] reads.
+  int _measurementResets = 0;
+}
+
+/// The measurement resets of a [LazyContentAxis] instance, which tell a
+/// reader that holds data derived from the extents the axis stored that a
+/// reset since has returned them to the estimate. Internal, and not shown
+/// by the barrel.
+extension LazyContentAxisResets on LazyContentAxis {
+  /// How many times `resetMeasurements` has run on this instance.
+  int get measurementResets {
+    return _measurementResets;
   }
 }
 

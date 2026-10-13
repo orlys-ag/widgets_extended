@@ -57,7 +57,12 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   instance under the same controller has the track-space coordinate at
   the scrolled region's leading edge put back there by one `correctBy`
   at the next layout's head, clamped into the new scroll range (a
-  controller swap is a new model and anchors nothing); obtain-to-retain retention plus the drag pin's
+  controller swap is a new model and anchors nothing), and, where the
+  content axis's instance changes while the own data (see the point
+  mapping's OWN-FREE mode below) stands under a key naming the old
+  instance, the OWN-FREE TARGET, the same steps over the old instance's
+  own-free lattice from the own-free scroll offset, whose difference
+  from the painted target becomes the new instance's `S`; obtain-to-retain retention plus the drag pin's
   per-layout vicinity derivation; PINNED ITEMS: an item whose span
   lies wholly inside a frozen band on an axis (`BoardControllerInternals.pinOfId`,
   the one site of the rule, reading a laned item on the lane axis by its
@@ -104,8 +109,8 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   has an OWN-FREE mode, which `_sampleWithoutOwnPreview`, the sampler the
   render registers through `attachRenderPort` beside itself, reads for a
   resize: on the content-sized lane axis, while the OWN-DATA KEY (the
-  make-room scope's epoch, the controller and the content axis instance)
-  is current and the data holds an own track, a residue or an own scroll
+  make-room scope's epoch, the controller, the content axis instance and
+  that instance's measurement resets) is current and the data holds an own track, a residue or an own scroll
   shift beyond the tolerance, every content-axis read is the lattice
   without the scope's own preview: an offset less `D(k)`, the own deltas
   of the own tracks below it, an extent less its own delta, the total
@@ -126,8 +131,12 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   `_applyContentDimensions`, which attributes a clamp after a change of
   the maximum and, where the position did not enforce its boundary, its
   whole move now and a residue for the spring-back that follows outside
-  layout. A changed key resets the data, `S` and the residue at the
-  layout head, and a sample treats data under another key as absent.
+  layout. A changed key resets the data and the residue at the layout
+  head, and `S` to the zoom anchor's difference where it computed the
+  own-free target and to zero elsewhere, except that a measurement reset
+  of the same instance drops only the own tracks, the stored extents
+  holding no own contribution and neither scroll offset moving; a sample
+  treats data under another key as absent.
   `trackSpaceAt` is the sample's `painted` projection, `frozenCellAt`
   answers where the pass reports a band, and `resolveDropCell` and the
   selection resolve each axis among the cells of the REGION the point
