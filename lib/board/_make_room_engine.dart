@@ -36,6 +36,8 @@
 /// Not exported from the module barrel.
 library;
 
+import 'dart:typed_data';
+
 import 'package:flutter/animation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
@@ -200,6 +202,188 @@ class _Slot {
   double t = 0.0;
 }
 
+/// A set of int pairs `(a, b)`, each with a double beside it, open
+/// addressed over typed buffers: the pairs lie dense in [_a] and [_b],
+/// their values in [_values], and [_index], twice the dense capacity and
+/// a power of two, holds each pair's dense position plus one at its HOME,
+/// `(a * 31 + b) & (length - 1)`, or at the first empty position after
+/// it, probed linearly, and zero where empty. A removal moves the last
+/// pair into the removed one's dense position and empties the removed
+/// one's index position by backward shift, so the index holds no
+/// tombstone and its load stays at most one half: an insert, a lookup and
+/// a removal are each one probe sequence. The buffers are allocated at
+/// the first insert, double when full and are kept by [clear], so once
+/// they have reached a board's need nothing here allocates.
+class _PairTable {
+  static const int _initialCapacity = 8;
+
+  Int32List? _a;
+  Int32List? _b;
+  Float64List? _values;
+  Int32List? _index;
+  int _count = 0;
+
+  /// The number of pairs, which the dense reads below index.
+  int get count {
+    return _count;
+  }
+
+  int aAt(int position) {
+    return _a![position];
+  }
+
+  int bAt(int position) {
+    return _b![position];
+  }
+
+  double valueAt(int position) {
+    return _values![position];
+  }
+
+  void setValueAt(int position, double value) {
+    _values![position] = value;
+  }
+
+  static int _home(int a, int b, int mask) {
+    return (a * 31 + b) & mask;
+  }
+
+  /// The dense position of `(a, b)`, or -1 when it is absent.
+  int find(int a, int b) {
+    if (_count == 0) {
+      return -1;
+    }
+    final index = _index!;
+    final pairsA = _a!;
+    final pairsB = _b!;
+    final mask = index.length - 1;
+    var slot = _home(a, b, mask);
+    while (true) {
+      final entry = index[slot];
+      if (entry == 0) {
+        return -1;
+      }
+      final position = entry - 1;
+      if (pairsA[position] == a && pairsB[position] == b) {
+        return position;
+      }
+      slot = (slot + 1) & mask;
+    }
+  }
+
+  /// Adds `(a, b)` with [value]; the caller has found it absent.
+  void add(int a, int b, double value) {
+    var pairsA = _a;
+    if (pairsA == null || _count == pairsA.length) {
+      _grow();
+      pairsA = _a!;
+    }
+    final position = _count;
+    pairsA[position] = a;
+    _b![position] = b;
+    _values![position] = value;
+    _count += 1;
+    _indexPosition(position);
+  }
+
+  /// Removes the pair at the dense [position].
+  void removeAt(int position) {
+    final index = _index!;
+    final mask = index.length - 1;
+    _emptyIndexAt(_slotOf(position, mask), mask);
+    final last = _count - 1;
+    if (position != last) {
+      final pairsA = _a!;
+      final pairsB = _b!;
+      final values = _values!;
+      pairsA[position] = pairsA[last];
+      pairsB[position] = pairsB[last];
+      values[position] = values[last];
+      index[_slotOf(last, mask)] = position + 1;
+    }
+    _count = last;
+  }
+
+  /// Removes every pair, keeping the buffers.
+  void clear() {
+    if (_count == 0) {
+      return;
+    }
+    final index = _index!;
+    index.fillRange(0, index.length, 0);
+    _count = 0;
+  }
+
+  /// The index position holding the dense [position].
+  int _slotOf(int position, int mask) {
+    final index = _index!;
+    var slot = _home(_a![position], _b![position], mask);
+    while (index[slot] != position + 1) {
+      slot = (slot + 1) & mask;
+    }
+    return slot;
+  }
+
+  /// Files the dense [position] at its home or the first empty position
+  /// after it.
+  void _indexPosition(int position) {
+    final index = _index!;
+    final mask = index.length - 1;
+    var slot = _home(_a![position], _b![position], mask);
+    while (index[slot] != 0) {
+      slot = (slot + 1) & mask;
+    }
+    index[slot] = position + 1;
+  }
+
+  /// Empties the index position [hole] by backward shift: each entry
+  /// after it, up to the next empty position, whose home does not lie
+  /// cyclically in `(hole, slot]` moves back into the hole, which moves
+  /// to where it was.
+  void _emptyIndexAt(int hole, int mask) {
+    final index = _index!;
+    var slot = hole;
+    while (true) {
+      slot = (slot + 1) & mask;
+      final entry = index[slot];
+      if (entry == 0) {
+        break;
+      }
+      final home = _home(_a![entry - 1], _b![entry - 1], mask);
+      final reachable = hole < slot
+          ? home > hole && home <= slot
+          : home > hole || home <= slot;
+      if (!reachable) {
+        index[hole] = entry;
+        hole = slot;
+      }
+    }
+    index[hole] = 0;
+  }
+
+  /// Doubles the dense capacity, the first allocation included, and
+  /// re-files every pair in an index twice its size.
+  void _grow() {
+    final old = _a;
+    final capacity = old == null ? _initialCapacity : old.length * 2;
+    final pairsA = Int32List(capacity);
+    final pairsB = Int32List(capacity);
+    final values = Float64List(capacity);
+    if (old != null) {
+      pairsA.setRange(0, _count, old);
+      pairsB.setRange(0, _count, _b!);
+      values.setRange(0, _count, _values!);
+    }
+    _a = pairsA;
+    _b = pairsB;
+    _values = values;
+    _index = Int32List(capacity * 2);
+    for (var position = 0; position < _count; position++) {
+      _indexPosition(position);
+    }
+  }
+}
+
 /// Owns the held gap offsets, their one ticker, and the two
 /// family-declaring sites `previewGap` and `releasePreview`.
 class MakeRoomEngine {
@@ -314,6 +498,30 @@ class MakeRoomEngine {
   BoardSpan? _resizeSpan;
   ({int lane, int laneCount, int laneSpan})? _resizeAssignment;
 
+  /// The OWN-PREVIEW SCOPE's epoch, 0 while no scope is open, and the
+  /// count the next one is taken from. While a scope is open every write
+  /// that changes a held offset, band or vacate or a slot JOINS the
+  /// entry: its pair goes into the JOIN RECORD, [_ownEntries] for
+  /// `(id, kind)` and [_ownSlots] for a slot's `(track, lane)`, once, with
+  /// its REMAINDER, the value that entry held for whoever wrote it before
+  /// the scope did, beside it. An entry is OWN while its pair is
+  /// recorded. Each removal from [_held], [_heldBand], [_heldVacate] or
+  /// [_slots] drops the removed entry's pair, so the record holds only
+  /// standing entries, and each change of the epoch empties it
+  /// ([_emptyOwnRecord]). Lead and extent entries never join.
+  int _ownEpoch = 0;
+  int _ownEpochCount = 0;
+
+  /// The join record's two tables, created at their first join and kept
+  /// across scopes. The entry table's `b` is one of [_offsetKind],
+  /// [_bandKind] and [_vacateKind], naming the map the entry is in.
+  _PairTable? _ownEntries;
+  _PairTable? _ownSlots;
+
+  static const int _offsetKind = 0;
+  static const int _bandKind = 1;
+  static const int _vacateKind = 2;
+
   /// Debug-only: the lookups of [_heldLead], [_heldBand] and
   /// [_heldVacate] that [deltaOf], [termDeltaOf] and [vacatedOf] have
   /// made since tests last assigned it 0. A field on an unexported class,
@@ -321,6 +529,15 @@ class MakeRoomEngine {
   /// paints and sizes what one that does not paints and sizes, so no
   /// widget-level seam observes the cost.
   int debugResizeHoldReadCount = 0;
+
+  /// Debug-only: the point-mapping calls the render object has made in
+  /// its OWN-FREE mode, the lattice without the own-preview scope's
+  /// preview, since tests last assigned it 0. Here beside the scope that
+  /// mode leaves out, and forwarded by the controller's internals, because
+  /// the mode makes the same axis reads as the painted mapping does, so
+  /// no axis counter tells the two apart, and a field on the render object
+  /// would be a member of an exported type.
+  int debugOwnFreeMappingCount = 0;
 
   /// KEYED BY LANE-AXIS TRACK, and an emptied bucket is removed, so
   /// `_slots.isEmpty` is exactly "no slot exists". The sizing walk asks
@@ -362,6 +579,7 @@ class MakeRoomEngine {
     if (curve == _curve && duration == _duration) {
       return;
     }
+    _rebaseOwnRemainders();
     for (final map in <Map<int, _HeldOffset>>[_held, _heldBand, _heldVacate]) {
       for (final entry in map.values) {
         if (!entry.snapped && entry.t < 1.0) {
@@ -520,6 +738,282 @@ class MakeRoomEngine {
     });
   }
 
+  /// The number of slots on lane-axis track [track]: the ones [slotsOn]
+  /// maps, which [slotLaneAt] and [slotValueAt] read one at a time and in
+  /// its order, so a per-layout walk builds no iterable.
+  int slotCountOn(int track) {
+    return _slots[track]?.length ?? 0;
+  }
+
+  /// The lane of the slot at [index] on lane-axis track [track], below
+  /// [slotCountOn].
+  int slotLaneAt(int track, int index) {
+    return _slots[track]![index].lane;
+  }
+
+  /// The value, in `[0, 1]`, of the slot at [index] on lane-axis track
+  /// [track], below [slotCountOn].
+  double slotValueAt(int track, int index) {
+    return _valueOfSlot(_slots[track]![index]);
+  }
+
+  /// Opens a new own-preview scope and returns its epoch, emptying the
+  /// join record; a scope still open is replaced.
+  int beginOwnPreview() {
+    _ownEpochCount += 1;
+    _ownEpoch = _ownEpochCount;
+    _emptyOwnRecord();
+    return _ownEpoch;
+  }
+
+  /// Closes the scope [epoch] opened and empties the join record, while
+  /// [epoch] is the open one; any other epoch changes nothing, so a
+  /// session's teardown never closes a scope a later session opened.
+  void endOwnPreview(int epoch) {
+    if (epoch == 0 || epoch != _ownEpoch) {
+      return;
+    }
+    _ownEpoch = 0;
+    _emptyOwnRecord();
+  }
+
+  /// The open scope's epoch, 0 while none is open.
+  int get ownPreviewEpoch {
+    return _ownEpoch;
+  }
+
+  /// The ids of the entry table's pairs, in its dense order: an id once
+  /// per kind of entry it holds that the scope recorded.
+  int get ownIdCount {
+    return _ownEntries?.count ?? 0;
+  }
+
+  int ownIdAt(int index) {
+    return _ownEntries!.aAt(index);
+  }
+
+  /// The tracks of the slot table's pairs, in its dense order: a track
+  /// once per lane the scope recorded a slot of there.
+  int get ownSlotTrackCount {
+    return _ownSlots?.count ?? 0;
+  }
+
+  int ownSlotTrackAt(int index) {
+    return _ownSlots!.aAt(index);
+  }
+
+  /// [termDeltaOf]'s lane-axis length with every own entry's value
+  /// replaced by its FOREIGN value ([_foreignOf]), so it answers the term
+  /// delta as it would stand without the scope's own preview. Zero for no
+  /// entry or with no lane axis.
+  double termDeltaWithoutOwnOf(int id) {
+    final entry = _held[id];
+    final band = _heldBand.isEmpty ? null : _heldBand[id];
+    if (entry == null && band == null) {
+      return 0.0;
+    }
+    if (_laneAxisOf() == null) {
+      return 0.0;
+    }
+    return (entry == null ? 0.0 : _foreignOf(entry, id, _offsetKind)) +
+        (band == null ? 0.0 : _foreignOf(band, id, _bandKind));
+  }
+
+  /// [vacatedOf] with an own entry's value replaced by its foreign value.
+  double vacatedWithoutOwnOf(int id) {
+    if (_heldVacate.isEmpty) {
+      return 0.0;
+    }
+    final entry = _heldVacate[id];
+    return entry == null ? 0.0 : _foreignOf(entry, id, _vacateKind);
+  }
+
+  /// [slotValueAt] with an own slot's value replaced by its foreign
+  /// value.
+  double slotValueWithoutOwnAt(int track, int index) {
+    final slot = _slots[track]![index];
+    final table = _ownSlots;
+    if (table == null || table.count == 0) {
+      return _valueOfSlot(slot);
+    }
+    final at = table.find(track, slot.lane);
+    if (at < 0) {
+      return _valueOfSlot(slot);
+    }
+    return _remainderOf(table.valueAt(at), slot.snapped, slot.t);
+  }
+
+  /// The FOREIGN value of [entry], [id]'s entry of [kind]: its whole value
+  /// when its pair is not recorded, and otherwise its remainder decaying on
+  /// the entry's own clock ([_remainderOf]).
+  double _foreignOf(_HeldOffset entry, int id, int kind) {
+    final table = _ownEntries;
+    if (table == null || table.count == 0) {
+      return _valueOf(entry);
+    }
+    final at = table.find(id, kind);
+    if (at < 0) {
+      return _valueOf(entry);
+    }
+    return _remainderOf(table.valueAt(at), entry.snapped, entry.t);
+  }
+
+  /// A recorded entry's foreign value: [foreignFrom] scaled by what its
+  /// clock [t] has left on the curve, clamped as [_valueOf] clamps it, so a
+  /// clock past 1 or driven to infinity by an off family reads zero; zero
+  /// when [snapped]. An entry's value is `from * (1 - c) + target * c`, and
+  /// the remainder is the share of its `from` that was not the scope's.
+  double _remainderOf(double foreignFrom, bool snapped, double t) {
+    if (snapped) {
+      return 0.0;
+    }
+    return foreignFrom * (1.0 - _curve.transform(t.clamp(0.0, 1.0)));
+  }
+
+  /// The map an entry of [kind] lives in.
+  Map<int, _HeldOffset> _offsetsOf(int kind) {
+    switch (kind) {
+      case _offsetKind:
+        return _held;
+      case _bandKind:
+        return _heldBand;
+      default:
+        return _heldVacate;
+    }
+  }
+
+  /// The slot on [track] at [lane]; the record holds only standing slots.
+  _Slot _slotOf(int track, int lane) {
+    for (final slot in _slots[track]!) {
+      if (slot.lane == lane) {
+        return slot;
+      }
+    }
+    throw StateError("No slot on track $track at lane $lane.");
+  }
+
+  /// Empties both tables of the join record, keeping their buffers. The
+  /// one site that does, run by each change of the scope's epoch.
+  void _emptyOwnRecord() {
+    _ownEntries?.clear();
+    _ownSlots?.clear();
+  }
+
+  /// A write that CREATES [id]'s entry of [kind] joins it with a zero
+  /// remainder: nothing of it was anyone else's.
+  void _joinCreated(int id, int kind) {
+    if (_ownEpoch == 0) {
+      return;
+    }
+    final table = _ownEntries ??= _PairTable();
+    final at = table.find(id, kind);
+    if (at < 0) {
+      table.add(id, kind, 0.0);
+    } else {
+      table.setValueAt(at, 0.0);
+    }
+  }
+
+  /// A re-base of [id]'s standing [entry] of [kind], which keeps its
+  /// clock, joins it BEFORE the write: an absent pair is recorded with the
+  /// entry's `from`, which a closing entry's value decays from on that
+  /// clock; a recorded one keeps its remainder.
+  void _joinRebase(_HeldOffset entry, int id, int kind) {
+    if (_ownEpoch == 0) {
+      return;
+    }
+    final table = _ownEntries ??= _PairTable();
+    if (table.find(id, kind) < 0) {
+      table.add(id, kind, entry.from);
+    }
+  }
+
+  /// [_joinCreated] for the slot at [lane] on [track].
+  void _joinCreatedSlot(int track, int lane) {
+    if (_ownEpoch == 0) {
+      return;
+    }
+    final table = _ownSlots ??= _PairTable();
+    final at = table.find(track, lane);
+    if (at < 0) {
+      table.add(track, lane, 0.0);
+    } else {
+      table.setValueAt(at, 0.0);
+    }
+  }
+
+  /// Drops the pair of [id]'s entry of [kind], removed beside this call;
+  /// nothing while the entry table is empty.
+  void _dropEntry(int id, int kind) {
+    final table = _ownEntries;
+    if (table == null || table.count == 0) {
+      return;
+    }
+    final at = table.find(id, kind);
+    if (at >= 0) {
+      table.removeAt(at);
+    }
+  }
+
+  /// Drops the pair of every recorded entry [closed] answers true for,
+  /// before the caller removes those entries. Walked from the dense end,
+  /// so the pair a drop moves into the dropped position has been read.
+  void _dropClosedEntries(bool Function(_HeldOffset entry) closed) {
+    final table = _ownEntries;
+    if (table == null) {
+      return;
+    }
+    for (var at = table.count - 1; at >= 0; at--) {
+      final entry = _offsetsOf(table.bAt(at))[table.aAt(at)]!;
+      if (closed(entry)) {
+        table.removeAt(at);
+      }
+    }
+  }
+
+  /// [_dropClosedEntries] for the recorded slots.
+  void _dropClosedSlots(bool Function(_Slot slot) closed) {
+    final table = _ownSlots;
+    if (table == null) {
+      return;
+    }
+    for (var at = table.count - 1; at >= 0; at--) {
+      if (closed(_slotOf(table.aAt(at), table.bAt(at)))) {
+        table.removeAt(at);
+      }
+    }
+  }
+
+  /// A changed clock re-bases every entry still in motion; a recorded one
+  /// first takes its foreign value on the old clock as its remainder, so
+  /// it decays on the new clock from where it stood.
+  void _rebaseOwnRemainders() {
+    final entries = _ownEntries;
+    if (entries != null) {
+      for (var at = 0; at < entries.count; at++) {
+        final entry = _offsetsOf(entries.bAt(at))[entries.aAt(at)]!;
+        if (!entry.snapped && entry.t < 1.0) {
+          entries.setValueAt(
+            at,
+            _remainderOf(entries.valueAt(at), entry.snapped, entry.t),
+          );
+        }
+      }
+    }
+    final slots = _ownSlots;
+    if (slots != null) {
+      for (var at = 0; at < slots.count; at++) {
+        final slot = _slotOf(slots.aAt(at), slots.bAt(at));
+        if (!slot.snapped && slot.t < 1.0) {
+          slots.setValueAt(
+            at,
+            _remainderOf(slots.valueAt(at), slot.snapped, slot.t),
+          );
+        }
+      }
+    }
+  }
+
   /// The ids holding entries, offset, extent or lead, for the composed
   /// per-id bound and the commit's painted-truth capture. A lane-0
   /// neighbour holds a zero offset and a non-zero extent, so an
@@ -572,7 +1066,8 @@ class MakeRoomEngine {
   /// Drops every slot and the lifecycle key with them, folding each
   /// slot's clock into [minT] for the caller to publish. The callers are
   /// a LIFTED first install for a DIFFERENT id, the snap release arm and
-  /// [clearForId], which discards the fold.
+  /// [clearForId], which discards the fold. The join record's slot table
+  /// empties with them.
   double? _discardSlots(double? minT) {
     for (final slots in _slots.values) {
       for (final slot in slots) {
@@ -580,6 +1075,7 @@ class MakeRoomEngine {
       }
     }
     _slots.clear();
+    _ownSlots?.clear();
     _liftedId = null;
     return minT;
   }
@@ -592,15 +1088,39 @@ class MakeRoomEngine {
   /// A SNAP folds the slot's clock into [minT] BEFORE the re-target
   /// resets it: the snap tail reads the flag after this has set it, so
   /// the discard has to be folded from here or the hand-off never learns
-  /// of it. Returns the fold.
-  double? _retargetSlot(_Slot slot, double target, bool snap, double? minT) {
+  /// of it. A re-target that writes joins the slot, filed under [track].
+  /// Returns the fold.
+  double? _retargetSlot(
+    _Slot slot,
+    int track,
+    double target,
+    bool snap,
+    double? minT,
+  ) {
     if (!snap && slot.target == target) {
       return minT;
     }
     if (snap) {
       minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
     }
-    final current = _valueOfSlot(slot);
+    // The JOIN, before the write and from the one curve evaluation that
+    // gives the value the slot restarts from: an absent pair is recorded
+    // with that value, a recorded one's remainder decays to its foreign
+    // value at this instant, and a snap leaves nothing foreign.
+    final eased = slot.snapped ? 1.0 : _curve.transform(slot.t.clamp(0.0, 1.0));
+    final current = slot.snapped
+        ? slot.target
+        : slot.from + (slot.target - slot.from) * eased;
+    if (_ownEpoch != 0) {
+      final table = _ownSlots ??= _PairTable();
+      final at = table.find(track, slot.lane);
+      if (at < 0) {
+        table.add(track, slot.lane, snap ? 0.0 : current);
+      } else {
+        final values = table._values!;
+        values[at] = snap ? 0.0 : values[at] * (1.0 - eased);
+      }
+    }
     slot
       ..from = snap ? target : current
       ..target = target
@@ -618,10 +1138,12 @@ class MakeRoomEngine {
   /// instead of on the first release's schedule. A SNAP always
   /// re-targets, since the kill switch dominates
   /// a captured value, and folds the entry's clock into [minT] first.
-  /// [target] is a content-space offset on the lane axis. Returns the
-  /// fold.
+  /// [target] is a content-space offset on the lane axis. A re-target
+  /// that writes joins the entry, [id]'s of [kind]. Returns the fold.
   double? _retargetOffset(
     _HeldOffset entry,
+    int id,
+    int kind,
     double target,
     bool snap,
     double? minT,
@@ -637,7 +1159,26 @@ class MakeRoomEngine {
         entry.from != entry.target,
       );
     }
-    final current = _valueOf(entry);
+    // The JOIN, before the write and from the one curve evaluation that
+    // gives the value the entry restarts from: an absent pair is recorded
+    // with that value, a recorded one's remainder decays to its foreign
+    // value at this instant, and a snap leaves nothing foreign.
+    final eased = entry.snapped
+        ? 1.0
+        : _curve.transform(entry.t.clamp(0.0, 1.0));
+    final current = entry.snapped
+        ? entry.target
+        : entry.from + (entry.target - entry.from) * eased;
+    if (_ownEpoch != 0) {
+      final table = _ownEntries ??= _PairTable();
+      final at = table.find(id, kind);
+      if (at < 0) {
+        table.add(id, kind, snap ? 0.0 : current);
+      } else {
+        final values = table._values!;
+        values[at] = snap ? 0.0 : values[at] * (1.0 - eased);
+      }
+    }
     entry
       ..from = snap ? target : current
       ..target = target
@@ -715,32 +1256,36 @@ class MakeRoomEngine {
     return minT;
   }
 
-  /// [_closeAxesBeside] for a held single value.
+  /// [_closeAxesBeside] for a held single value, over the entries of
+  /// [kind].
   double? _closeOffsetsBeside(
-    Map<int, _HeldOffset> map,
+    int kind,
     int? keep,
     bool snap,
     double? minT,
   ) {
+    final map = _offsetsOf(kind);
     for (final id in map.keys) {
       if (id != keep) {
-        minT = _retargetOffset(map[id]!, 0.0, snap, minT);
+        minT = _retargetOffset(map[id]!, id, kind, 0.0, snap, minT);
       }
     }
     return minT;
   }
 
-  /// [_installAxes] for a held single value.
+  /// [_installAxes] for a held single value, [id]'s entry of [kind]; a
+  /// new entry joins.
   double? _installOffset(
-    Map<int, _HeldOffset> map,
+    int kind,
     int id,
     double target,
     bool snap,
     double? minT,
   ) {
+    final map = _offsetsOf(kind);
     final existing = map[id];
     if (existing != null) {
-      return _retargetOffset(existing, target, snap, minT);
+      return _retargetOffset(existing, id, kind, target, snap, minT);
     }
     if (target != 0.0) {
       map[id] = _HeldOffset(
@@ -748,6 +1293,7 @@ class MakeRoomEngine {
         from: snap ? target : 0.0,
         snapped: snap,
       );
+      _joinCreated(id, kind);
     }
     return minT;
   }
@@ -823,8 +1369,8 @@ class MakeRoomEngine {
     }
     final targets = _resizeTargets!;
     _resizeTermOf(id, span, _resizeAssignment, targets);
-    _rebaseOffset(_heldBand, id, targets.band);
-    _rebaseOffset(_heldVacate, id, targets.vacates ? 1.0 : 0.0);
+    _rebaseOffset(_bandKind, id, targets.band);
+    _rebaseOffset(_vacateKind, id, targets.vacates ? 1.0 : 0.0);
   }
 
   /// Re-derives the resize session's LEAD and EXTENT from its source, over
@@ -842,21 +1388,24 @@ class MakeRoomEngine {
     _rebaseAxes(_heldExtent, id, targets.extentDx, targets.extentDy);
   }
 
-  /// RE-BASES [id]'s entry in [map] onto a re-derived [target]: the target
-  /// and the `from` move by the same difference, so the entry keeps its
-  /// clock and paints over the stored span's new geometry where it
-  /// painted over the old one, moved only by the change in the target. A
-  /// missing entry counts as one at rest at zero, so a non-zero target
+  /// RE-BASES [id]'s entry of [kind] onto a re-derived [target]: the
+  /// target and the `from` move by the same difference, so the entry
+  /// keeps its clock and paints over the stored span's new geometry where
+  /// it painted over the old one, moved only by the change in the target.
+  /// A missing entry counts as one at rest at zero, so a non-zero target
   /// creates it at rest; an entry at rest whose target becomes zero is
   /// removed, and one in motion closes on its clock, by the rule that
-  /// zero means closing. Notifies nothing, bumps no generation and
+  /// zero means closing. A creation and a move join the entry, and a
+  /// removal drops its pair. Notifies nothing, bumps no generation and
   /// leaves the ticker alone, so it is safe inside a layout.
-  void _rebaseOffset(Map<int, _HeldOffset> map, int id, double target) {
+  void _rebaseOffset(int kind, int id, double target) {
+    final map = _offsetsOf(kind);
     final entry = map[id];
     if (entry == null) {
       if (target != 0.0) {
         map[id] = _HeldOffset(target: target, from: target, snapped: false)
           ..t = 1.0;
+        _joinCreated(id, kind);
       }
       return;
     }
@@ -865,8 +1414,10 @@ class MakeRoomEngine {
     }
     if (target == 0.0 && (entry.snapped || entry.t >= 1.0)) {
       map.remove(id);
+      _dropEntry(id, kind);
       return;
     }
+    _joinRebase(entry, id, kind);
     entry
       ..from = entry.from + (target - entry.target)
       ..target = target;
@@ -986,8 +1537,8 @@ class MakeRoomEngine {
     // entries install.
     final keep = resize == null ? null : draggedId;
     minT = _closeAxesBeside(_heldLead, keep, snap, minT);
-    minT = _closeOffsetsBeside(_heldBand, keep, snap, minT);
-    minT = _closeOffsetsBeside(_heldVacate, keep, snap, minT);
+    minT = _closeOffsetsBeside(_bandKind, keep, snap, minT);
+    minT = _closeOffsetsBeside(_vacateKind, keep, snap, minT);
     if (resize != null) {
       minT = _installAxes(
         _heldLead,
@@ -996,9 +1547,9 @@ class MakeRoomEngine {
         snap,
         minT,
       );
-      minT = _installOffset(_heldBand, draggedId, resize.band, snap, minT);
+      minT = _installOffset(_bandKind, draggedId, resize.band, snap, minT);
       minT = _installOffset(
-        _heldVacate,
+        _vacateKind,
         draggedId,
         resize.vacates ? 1.0 : 0.0,
         snap,
@@ -1044,7 +1595,7 @@ class MakeRoomEngine {
       });
     }
     targets.forEach((id, target) {
-      minT = _installOffset(_held, id, target, snap, minT);
+      minT = _installOffset(_offsetKind, id, target, snap, minT);
     });
     // THE SLOTS: a LIFTED item's, and a RESIZED item's while its preview
     // lanes it in a track it is not laned in; an install by the slots'
@@ -1073,7 +1624,7 @@ class MakeRoomEngine {
                   slot.lane == desiredLane
               ? 1.0
               : 0.0;
-          minT = _retargetSlot(slot, desired, snap, minT);
+          minT = _retargetSlot(slot, track, desired, snap, minT);
         }
       });
       if (desiredLane != null) {
@@ -1091,6 +1642,7 @@ class MakeRoomEngine {
           slots.add(
             _Slot(lane: desiredLane, target: 1.0, from: 0.0, snapped: snap),
           );
+          _joinCreatedSlot(prospectiveTrack, desiredLane);
         }
       }
       _liftedId = _slots.isEmpty ? null : draggedId;
@@ -1117,8 +1669,9 @@ class MakeRoomEngine {
   }
 
   /// The install's snap tail for every held entry: one a snap re-targeted
-  /// to zero is closed, and goes.
+  /// to zero is closed, and goes, its pair dropped.
   void _removeClosed() {
+    _dropClosedEntries(_targetsZero);
     for (final map in <Map<int, _HeldOffset>>[_held, _heldBand, _heldVacate]) {
       map.removeWhere((id, entry) {
         return entry.target == 0.0;
@@ -1133,8 +1686,10 @@ class MakeRoomEngine {
 
   /// The install's snap tail for slots: every slot lands on its target,
   /// and a slot at 0 is removed. Either lands a slot that was still
-  /// mid-motion without ramping it there, so both fold into [minT].
+  /// mid-motion without ramping it there, so both fold into [minT]. A
+  /// removed slot's pair is dropped.
   double? _snapSlots(double? minT) {
+    _dropClosedSlots(_slotTargetsZero);
     _slots.removeWhere((track, slots) {
       slots.removeWhere((slot) {
         minT = _foldClock(minT, slot.snapped, slot.t, slot.from != slot.target);
@@ -1192,9 +1747,9 @@ class MakeRoomEngine {
       final survivors = style.isOff(BoardAnimationFamily.makeRoom)
           ? null
           : _closingHoldsBeside(_sessionId);
-      var minT = _discardOffsets(_held, null, null);
-      minT = _discardOffsets(_heldBand, survivors, minT);
-      minT = _discardOffsets(_heldVacate, survivors, minT);
+      var minT = _discardOffsets(_offsetKind, null, null);
+      minT = _discardOffsets(_bandKind, survivors, minT);
+      minT = _discardOffsets(_vacateKind, survivors, minT);
       minT = _discardAxes(_heldLead, survivors, minT);
       minT = _discardAxes(_heldExtent, survivors, minT);
       minT = _discardSlots(minT);
@@ -1208,11 +1763,9 @@ class MakeRoomEngine {
     _adoptClock(curve ?? spec.curve, resolved);
     // An entry already closing keeps the schedule it started on, by the
     // idempotence rule the install applies.
-    for (final map in <Map<int, _HeldOffset>>[_held, _heldBand, _heldVacate]) {
-      for (final entry in map.values) {
-        _retargetOffset(entry, 0.0, false, null);
-      }
-    }
+    _closeOffsetsBeside(_offsetKind, null, false, null);
+    _closeOffsetsBeside(_bandKind, null, false, null);
+    _closeOffsetsBeside(_vacateKind, null, false, null);
     for (final map in <Map<int, _HeldAxes>>[_heldExtent, _heldLead]) {
       for (final entry in map.values) {
         _retargetAxes(entry, Offset.zero, false, null);
@@ -1220,7 +1773,7 @@ class MakeRoomEngine {
     }
     _slots.forEach((track, slots) {
       for (final slot in slots) {
-        _retargetSlot(slot, 0.0, false, null);
+        _retargetSlot(slot, track, 0.0, false, null);
       }
     });
     if (_slots.isEmpty) {
@@ -1236,11 +1789,11 @@ class MakeRoomEngine {
   void clearForId(int id) {
     // THIS REMOVAL NEVER BUMPS THE SNAP GENERATION, on either branch: an
     // offset has a paint half.
-    var removed = _held.remove(id) != null;
+    var removed = _removeHeld(_offsetKind, id);
     removed = _heldExtent.remove(id) != null || removed;
     removed = _heldLead.remove(id) != null || removed;
-    removed = _heldBand.remove(id) != null || removed;
-    removed = _heldVacate.remove(id) != null || removed;
+    removed = _removeHeld(_bandKind, id) || removed;
+    removed = _removeHeld(_vacateKind, id) || removed;
     if (id == _liftedId) {
       removed = removed || _slots.isNotEmpty;
       _discardSlots(null);
@@ -1257,6 +1810,16 @@ class MakeRoomEngine {
       _generation += 1;
     }
     _stopIfIdle();
+  }
+
+  /// Removes [id]'s entry of [kind] and drops its pair; whether there was
+  /// one.
+  bool _removeHeld(int kind, int id) {
+    if (_offsetsOf(kind).remove(id) == null) {
+      return false;
+    }
+    _dropEntry(id, kind);
+    return true;
   }
 
   void _ensureTicking() {
@@ -1317,6 +1880,8 @@ class MakeRoomEngine {
     // settled values before a closing entry is removed, then the
     // idle transition. Both synchronous.
     _notifyNow();
+    _dropClosedEntries(_settledClosed);
+    _dropClosedSlots(_slotSettledClosed);
     _held.removeWhere(_offsetClosed);
     _heldBand.removeWhere(_offsetClosed);
     _heldVacate.removeWhere(_offsetClosed);
@@ -1356,18 +1921,16 @@ class MakeRoomEngine {
     return ids;
   }
 
-  /// The snap's discard of [map]: every entry goes, its clock folded into
-  /// [minT], but a CLOSING one of an id in [keep]. Returns the fold.
-  double? _discardOffsets(
-    Map<int, _HeldOffset> map,
-    Set<int>? keep,
-    double? minT,
-  ) {
-    map.removeWhere((id, entry) {
+  /// The snap's discard of the entries of [kind]: every entry goes, its
+  /// clock folded into [minT] and its pair dropped, but a CLOSING one of an
+  /// id in [keep]. Returns the fold.
+  double? _discardOffsets(int kind, Set<int>? keep, double? minT) {
+    _offsetsOf(kind).removeWhere((id, entry) {
       if (keep != null && entry.target == 0.0 && keep.contains(id)) {
         return false;
       }
       minT = _foldClock(minT, entry.snapped, entry.t, entry.from != entry.target);
+      _dropEntry(id, kind);
       return true;
     });
     return minT;
@@ -1422,7 +1985,24 @@ class MakeRoomEngine {
 
   /// Whether [entry] closed and settled, so the tick removes it.
   static bool _offsetClosed(int id, _HeldOffset entry) {
+    return _settledClosed(entry);
+  }
+
+  static bool _settledClosed(_HeldOffset entry) {
     return entry.t >= 1.0 && entry.target == 0.0;
+  }
+
+  static bool _slotSettledClosed(_Slot slot) {
+    return slot.t >= 1.0 && slot.target == 0.0;
+  }
+
+  /// Whether a snap re-targeted [entry] to zero, so its tail removes it.
+  static bool _targetsZero(_HeldOffset entry) {
+    return entry.target == 0.0;
+  }
+
+  static bool _slotTargetsZero(_Slot slot) {
+    return slot.target == 0.0;
   }
 
   /// [_offsetClosed] for a held per-axis value.

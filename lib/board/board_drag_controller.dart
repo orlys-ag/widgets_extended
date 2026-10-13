@@ -2,11 +2,13 @@
 /// behaviour a session owns.
 ///
 /// Key-only: layout and commit reporting never read an item's payload.
-/// The controller talks to the render layer exclusively through
-/// `BoardRenderPort` and owns policy, the coalesced notification channel,
-/// the per-move `pointerPosition`, and the explicit commit script; drag
-/// TIMING is not owned here, it is read off the board controller's
-/// `animationStyle` once per session.
+/// The controller talks to the render layer through two routes only:
+/// `BoardRenderPort`, and for a resize's samples the sampler the render
+/// object registers beside it, which the board controller's internal
+/// `trackSampleWithoutOwnPreview` calls. It owns policy, the coalesced
+/// notification channel, the per-move `pointerPosition`, and the explicit
+/// commit script; drag TIMING is not owned here, it is read off the board
+/// controller's `animationStyle` once per session.
 library;
 
 import 'dart:async';
@@ -92,6 +94,11 @@ class _DragSession<TKey> {
 
   /// The target last queued for `onDragTargetChanged`.
   BoardDropTarget? reportedTarget;
+
+  /// The epoch of the make-room engine's own-preview scope a RESIZE
+  /// session opens in `startDrag` and its teardown ends; 0 for a move,
+  /// which opens none.
+  int ownPreviewEpoch = 0;
 
   ScrollPosition? verticalSubscription;
   ScrollPosition? horizontalSubscription;
@@ -217,6 +224,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // scan even when the pointer's placement has not moved.
     _lastResolvedSpan = null;
     _lastResolvedWindows = null;
+    _heldResizeSample = null;
     _scheduleResolve();
   }
 
@@ -247,6 +255,15 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// window by a grid step while the span stays the same, and a nudge
   /// chosen from the old window would otherwise stand.
   ({BoardStartWindow rows, BoardStartWindow cols})? _lastResolvedWindows;
+
+  /// A RESIZE's sample on its resized axis from the last [_resolve] that
+  /// reached the resolver, null for a move. A sample within the
+  /// tolerance of it resolves nothing ([_holdsResizeSample]): the
+  /// lattice a resize samples is computed afresh per sample, and a
+  /// pointer on a snap's tie would otherwise flip the target between two
+  /// spans on rounding alone. Cleared wherever [_lastResolvedSpan] is, so
+  /// a new config, a board change and a new session resolve again.
+  BoardAxisSample? _heldResizeSample;
 
   /// Whether a post-frame re-resolve is already scheduled for this
   /// frame, so a frame with several animation dispatches resolves once.
@@ -537,6 +554,14 @@ class BoardDragController<TKey> extends ChangeNotifier {
       ),
     );
     _session = session;
+    // A resize's own-preview scope opens on the statement after the
+    // session's, before any call below can reach app code, and the
+    // teardown ends it on the statement after the session's null, so a
+    // session app code ends inside this method leaves no scope open and
+    // one started inside the teardown's release keeps its own.
+    if (kind != BoardDragKind.move) {
+      session.ownPreviewEpoch = boardController.beginOwnMakeRoomPreview();
+    }
     // One of this session's two writes to the narrow channel; the
     // teardown's null is the other. A resize writes the null it already
     // holds, which notifies nobody.
@@ -960,6 +985,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// The single teardown site: every exit runs these same statements.
   void _teardown(_DragSession<TKey> session) {
     _session = null;
+    boardController.endOwnMakeRoomPreview(session.ownPreviewEpoch);
     // The gap closes on the clock the session opened it on: the pair
     // `startDrag` captured, which every preview passed, so a restyle
     // during the session reaches neither the gap nor its close. The live
@@ -980,6 +1006,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _currentTarget = null;
     _lastResolvedSpan = null;
     _lastResolvedWindows = null;
+    _heldResizeSample = null;
     _pointerPosition.value = null;
     _movedItem.value = null;
     notifyListeners();
@@ -991,8 +1018,15 @@ class BoardDragController<TKey> extends ChangeNotifier {
   ///
   /// Takes every sample the resolver reads, once per resolve: the
   /// pointer's, and for a move the proxy's content-leading corner's and
-  /// its centre's. A null sample leaves the target unchanged. With the
-  /// current samples in hand it RE-DERIVES a lift sample taken under
+  /// its centre's. A resize samples the pointer on the lattice as it would
+  /// paint without the session's own make-room preview
+  /// (`trackSampleWithoutOwnPreview`), so its target moves with every
+  /// change to the lattice but that preview's until the preview has wholly
+  /// closed, when a scroll it left moves the target once, and a move on
+  /// the lattice as it paints. A null sample leaves the target unchanged,
+  /// and so does a resize's sample within the tolerance of the last one it
+  /// resolved ([_heldResizeSample]). With the current samples in hand it
+  /// RE-DERIVES a lift sample taken under
   /// other axis configs (a different track count or band bound on an
   /// axis): the sample the lift point gives at the lift's scroll offsets
   /// under the current configs, so the resolver never compares samples
@@ -1001,14 +1035,17 @@ class BoardDragController<TKey> extends ChangeNotifier {
   void _resolve(_DragSession<TKey> session, Offset local) {
     _repointScrollSubscriptions(session);
     final port = session.port;
-    final pointer = port.trackSampleAt(local);
+    final move = session.kind == BoardDragKind.move;
+    final pointer = move
+        ? port.trackSampleAt(local)
+        : boardController.trackSampleWithoutOwnPreview(port, local);
     if (pointer == null) {
       return;
     }
     final draggedSpan = boardController.spanOf(session.key)!;
     final BoardDropTarget resolved;
     ({BoardStartWindow rows, BoardStartWindow cols})? windows;
-    if (session.kind == BoardDragKind.move) {
+    if (move) {
       // A move resolves from the proxy's content-LEADING corner, the
       // point its span starts at, which is the proxy's painted top-left
       // only where both axes run forward; the region under the proxy's
@@ -1028,12 +1065,14 @@ class BoardDragController<TKey> extends ChangeNotifier {
         session.liftPointer,
         session.liftPointerLocal,
         pointer,
+        withoutOwnPreview: false,
       );
       session.liftCorner = _rederived(
         port,
         session.liftCorner,
         session.liftCornerLocal,
         corner,
+        withoutOwnPreview: false,
       );
       final answer = BoardDropResolver.resolveMove(
         corner: corner,
@@ -1052,12 +1091,20 @@ class BoardDragController<TKey> extends ChangeNotifier {
       windows = (rows: answer.rows, cols: answer.cols);
     } else {
       // A resize resolves from the pointer's displacement since the
-      // lift, in track space.
+      // lift, in track space, and only once its resized axis's sample
+      // has moved past the tolerance since the last resolve.
+      final sample = _resizedAxisSampleOf(session.kind, pointer);
+      final held = _heldResizeSample;
+      if (held != null && _holdsResizeSample(held, sample)) {
+        return;
+      }
+      _heldResizeSample = sample;
       session.liftPointer = _rederived(
         port,
         session.liftPointer,
         session.liftPointerLocal,
         pointer,
+        withoutOwnPreview: true,
       );
       resolved = BoardDropResolver.resolveResize(
         pointer: pointer,
@@ -1120,6 +1167,48 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _reportTarget(session);
   }
 
+  /// The sample a resize of [kind] reads: its resized axis's.
+  static BoardAxisSample _resizedAxisSampleOf(
+    BoardDragKind kind,
+    BoardPointSample pointer,
+  ) {
+    return kind == BoardDragKind.resizeRowStart ||
+            kind == BoardDragKind.resizeRowEnd
+        ? pointer.row
+        : pointer.col;
+  }
+
+  /// Whether a resize's sample [now] resolves to what [held] did: the
+  /// same band, track count and band bounds, the same visible bounds
+  /// present, and its coordinates (track space) and scroll offset
+  /// (pixels) each within [precisionErrorTolerance] of [held]'s. Compares
+  /// fields and allocates nothing.
+  static bool _holdsResizeSample(BoardAxisSample held, BoardAxisSample now) {
+    return held.band == now.band &&
+        held.trackCount == now.trackCount &&
+        held.leadingBandEnd == now.leadingBandEnd &&
+        held.trailingBandStart == now.trailingBandStart &&
+        _within(held.painted, now.painted) &&
+        _within(held.paintedExtended, now.paintedExtended) &&
+        _within(held.scrolled, now.scrolled) &&
+        _within(held.scrollPixels, now.scrollPixels) &&
+        _withinOrAbsent(held.visibleFrom, now.visibleFrom) &&
+        _withinOrAbsent(held.visibleTo, now.visibleTo);
+  }
+
+  static bool _within(double a, double b) {
+    return (a - b).abs() <= precisionErrorTolerance;
+  }
+
+  /// [_within] for an optional bound: both absent, or both present and
+  /// within the tolerance.
+  static bool _withinOrAbsent(double? a, double? b) {
+    if (a == null || b == null) {
+      return a == null && b == null;
+    }
+    return _within(a, b);
+  }
+
   /// The band [key] is pinned in on each axis, as [sample]'s bounds give
   /// the band `pinOfId` names, or null where it scrolls.
   BoardPins _pinsAt(TKey key, BoardPointSample sample) {
@@ -1147,15 +1236,19 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// [lift] with each axis whose [current] sample was taken under another
   /// track count or band bound RE-DERIVED: [liftLocal] sampled again
   /// under the current configs at the scroll offsets the lift's samples
-  /// record, and that axis's component taken whole. The sample keeps
-  /// those offsets, so a chain of config changes loses nothing of the
-  /// lift. A null record or component stays null.
-  static BoardLiftSamples? _rederived(
-    BoardRenderPort<Object?> port,
+  /// record, and that axis's component taken whole, on the lattice
+  /// without the session's own make-room preview when [withoutOwnPreview]
+  /// (a resize, whose [current] is sampled so) and as it paints
+  /// otherwise. The sample keeps those offsets, so a chain of config
+  /// changes loses nothing of the lift. A null record or component stays
+  /// null.
+  BoardLiftSamples? _rederived(
+    BoardRenderPort<TKey> port,
     BoardLiftSamples? lift,
     Offset? liftLocal,
-    BoardPointSample current,
-  ) {
+    BoardPointSample current, {
+    required bool withoutOwnPreview,
+  }) {
     if (lift == null || liftLocal == null) {
       return lift;
     }
@@ -1171,11 +1264,18 @@ class BoardDragController<TKey> extends ChangeNotifier {
     if (!rowStale && !colStale) {
       return lift;
     }
-    final fresh = port.trackSampleAt(
-      liftLocal,
-      verticalPixels: lift.row?.scrollPixels,
-      horizontalPixels: lift.col?.scrollPixels,
-    );
+    final fresh = withoutOwnPreview
+        ? boardController.trackSampleWithoutOwnPreview(
+            port,
+            liftLocal,
+            verticalPixels: lift.row?.scrollPixels,
+            horizontalPixels: lift.col?.scrollPixels,
+          )
+        : port.trackSampleAt(
+            liftLocal,
+            verticalPixels: lift.row?.scrollPixels,
+            horizontalPixels: lift.col?.scrollPixels,
+          );
     if (fresh == null) {
       return lift;
     }
@@ -1494,6 +1594,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
   void _handleStructuralChange(Set<TKey>? affectedKeys) {
     _lastResolvedSpan = null;
     _lastResolvedWindows = null;
+    _heldResizeSample = null;
     _scheduleResolve();
   }
 

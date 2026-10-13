@@ -57,7 +57,12 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   instance under the same controller has the track-space coordinate at
   the scrolled region's leading edge put back there by one `correctBy`
   at the next layout's head, clamped into the new scroll range (a
-  controller swap is a new model and anchors nothing); obtain-to-retain retention plus the drag pin's
+  controller swap is a new model and anchors nothing), and, where the
+  content axis's instance changes while the own data (see the point
+  mapping's OWN-FREE mode below) stands under a key naming the old
+  instance, the OWN-FREE TARGET, the same steps over the old instance's
+  own-free lattice from the own-free scroll offset, whose difference
+  from the painted target becomes the new instance's `S`; obtain-to-retain retention plus the drag pin's
   per-layout vicinity derivation; PINNED ITEMS: an item whose span
   lies wholly inside a frozen band on an axis (`BoardControllerInternals.pinOfId`,
   the one site of the rule, reading a laned item on the lane axis by its
@@ -100,7 +105,49 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   over, a point past the viewport beside a band included; and
   `visibleFrom` and `visibleTo`, the scrolled coordinates at the bands'
   inner edges, between which a scrolled span SHOWS. Beside the sample
-  the pass yields the clamp-free coordinate `cellAt` reads.
+  the pass yields the clamp-free coordinate `cellAt` reads. The mapping
+  has an OWN-FREE mode, which `_sampleWithoutOwnPreview`, the sampler the
+  render registers through `attachRenderPort` beside itself, reads for a
+  resize: on the content-sized lane axis, while the OWN-DATA KEY (the
+  make-room scope's epoch, the controller, the content axis instance and
+  that instance's measurement resets) is current and the data holds an own track, a residue or an own scroll
+  shift beyond the tolerance, every content-axis read is the lattice
+  without the scope's own preview: an offset less `D(k)`, the own deltas
+  of the own tracks below it, an extent less its own delta, the total
+  and each band's extent less the deltas inside it, which moves the
+  region bounds, a track lookup on settled offsets a segment search over
+  the OWN STARTS (the own-free start of the segment after each own
+  track, kept in a typed buffer beside the own deltas and rewritten
+  wherever their prefix sums are, from the settled offsets the axis
+  then stores) then one descent, and while a trackResize is in flight
+  the painted search over the own-free offsets, and the scroll offset
+  `P - S + R * f` at the live pixels; everywhere else it is the painted
+  mapping, and each call that takes the mode counts in the engine's
+  `debugOwnFreeMappingCount`. The OWN TRACKS are
+  MARKED at the layout head, after the term refresh, from the scope's
+  join record (each recorded laned id's lane-axis track, each recorded
+  slot's track); each pass gives each own track it sized its OWN DELTA,
+  the extent it stores less the larger of its cell term and the
+  own-free evaluation of `_laneTermOf`, floored as the sizing step
+  floors, and a literal zero to an unmarked one; after the pass loop an
+  unmarked own track whose pass wrote zero is dropped. The OWN SCROLL
+  SHIFT `S` changes in layout only: by the change of the own deltas
+  between the leading band's end and the anchor at each pass, by the
+  fold of a standing RESIDUE at the layout head, and in
+  `_applyContentDimensions`, which attributes a clamp after a change of
+  the maximum and, where the position did not enforce its boundary, its
+  whole move now and a residue for the spring-back that follows outside
+  layout; the CLOSING RULE, after the pass loop and the drop, sets it to
+  zero once no own track and no residue stands, so a scroll the preview
+  left is the board's own once that preview has wholly closed, and with
+  no own track, residue or `S` a layout computes none of these rules,
+  the dimension rule only recording the maximum it passed. A changed
+  key resets the data and the residue at the layout head, and `S` to
+  the zoom anchor's difference where it computed the
+  own-free target and to zero elsewhere, except that a measurement reset
+  of the same instance drops only the own tracks, the stored extents
+  holding no own contribution and neither scroll offset moving; a sample
+  treats data under another key as absent.
   `trackSpaceAt` is the sample's `painted` projection, `frozenCellAt`
   answers where the pass reports a band, and `resolveDropCell` and the
   selection resolve each axis among the cells of the REGION the point

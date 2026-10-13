@@ -290,6 +290,71 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   final Set<int> _makeRoomWroteRows = <int>{};
   final Set<int> _makeRoomWroteCols = <int>{};
 
+  /// What the last [_laneTermOf] call wrote: the track's item-cluster
+  /// term, a content-space length on the lane axis, and whether a member
+  /// was ramping and whether the make-room preview or a relane slide
+  /// contributed, the two conditions the sizing step's latch sets keep.
+  double _laneTerm = 0.0;
+  bool _laneTermRamping = false;
+  bool _laneTermMakeRoom = false;
+
+  /// The OWN DATA, kept on a content-sized lane axis while the make-room
+  /// engine's own-preview scope has recorded entries, and read by the
+  /// point mapping's own-free mode ([_trackCoordinateAt]): the OWN TRACKS,
+  /// ascending, each with its MARK (it holds a recorded entry at this
+  /// layout's head), its OWN DELTA (the extent the scope's preview adds to
+  /// it, a content-space length: the stored extent minus the extent it
+  /// would size to without that preview) and, in [_ownPrefix], the sum of
+  /// the deltas below it, so `_ownPrefix[i]` is the sum over the first `i`
+  /// own tracks; beside them the OWN STARTS, `_ownStarts[j]` the own-free
+  /// content offset of the track after own track `j`, where the segment of
+  /// tracks up to the next own track begins (infinite past the last
+  /// track). Typed buffers grown by doubling and kept across scopes.
+  Int32List? _ownTracks;
+  Uint8List? _ownMarks;
+  Float64List? _ownDeltas;
+  Float64List? _ownPrefix;
+  Float64List? _ownStarts;
+  int _ownCount = 0;
+
+  /// The OWN SCROLL SHIFT, the content axis's scroll offset minus the one
+  /// it would have without the scope's preview, and the RESIDUE, the
+  /// share of a spring-back that preview started which the shift takes as
+  /// the spring runs: [_ownResidue] spread over the pixels from
+  /// [_ownResidueFrom] to [_ownResidueTo]. Content-space lengths on the
+  /// content axis, written in layout only: by the pass correction's own
+  /// share, the layout head's reset ([_ownShiftAtSwap]) and its fold of
+  /// the residue, [_applyContentDimensions], and the CLOSING RULE after
+  /// the pass loop, which zeroes the shift once no own track and no
+  /// residue stands, so it stands only while some of the preview does.
+  double _ownScrollShift = 0.0;
+  bool _hasOwnResidue = false;
+  double _ownResidue = 0.0;
+  double _ownResidueFrom = 0.0;
+  double _ownResidueTo = 0.0;
+
+  /// The content axis's maximum scroll extent [_applyContentDimensions]
+  /// passed last, which tells a clamp from a call that changed nothing.
+  double? _lastContentMaxPassed;
+
+  /// The OWN-DATA KEY the own data was computed under: the scope's epoch,
+  /// the controller, the content axis instance and that instance's
+  /// measurement resets ([_measurementResetsOf]). The layout head resets
+  /// the data when it differs, and a sample treats data under another key
+  /// as absent.
+  int _ownKeyEpoch = 0;
+  Object? _ownKeyController;
+  Object? _ownKeyAxis;
+  int _ownKeyResets = 0;
+
+  /// The content-space scroll offset the zoom anchor put on a new content
+  /// axis instance less the one it computed over the old instance's
+  /// own-free lattice, which the reset of the own data in the same layout
+  /// head takes as the own scroll shift; null where the anchor computed no
+  /// own-free target, and cleared at every layout head before the anchor
+  /// runs ([_anchorSwappedAxes]).
+  double? _ownShiftAtSwap;
+
   /// The engine generations the last layout ran against, recorded at the
   /// END of `layoutChildSequence` so every pass of one layout compares
   /// against the same values.
@@ -484,7 +549,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     _controller.addItemDataListener(_handleItemDataChange);
     _controller.addAnimationListener(_handleAnimationTick);
     _controller.selection.addListener(_handleSelectionChanged);
-    _controller.attachRenderPort(this);
+    _controller.attachRenderPort(
+      this,
+      sampleWithoutOwnPreview: _sampleWithoutOwnPreview,
+    );
   }
 
   /// The single unsubscribe site. Idempotent for the same reason.
@@ -822,6 +890,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// controller swap, a new model rather than a zoom, and not for a config
   /// that keeps its axis instance.
   void _anchorSwappedAxes() {
+    _ownShiftAtSwap = null;
     final rows = _controller.rows;
     final columns = _controller.columns;
     if (identical(_laidOutController, _controller)) {
@@ -876,10 +945,42 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         ? ((content - oldAxis.offsetOf(track)) / extent).clamp(0.0, 1.0)
         : 0.0;
     final anchor = (track + into).clamp(0.0, newAxis.trackCount.toDouble());
+    final maxTarget = math.max(0.0, newAxis.totalExtent - viewportExtent);
     final target = (newAxis.offsetOfFraction(anchor) - newBand).clamp(
       0.0,
-      math.max(0.0, newAxis.totalExtent - viewportExtent),
+      maxTarget,
     );
+    if (_ownDataStandsOn(oldAxis)) {
+      // The OWN-FREE TARGET: the same steps over the old instance's
+      // lattice without the own preview, from the scroll offset the board
+      // would have without it, so the own scroll shift the new instance
+      // starts from is the difference of the two targets.
+      final axis = identical(offset, verticalOffset)
+          ? Axis.vertical
+          : Axis.horizontal;
+      final ownFree =
+          _ownFreePixelsAt(offset.pixels) +
+          oldBand -
+          _ownDeltasBelow(old.leadingBandEnd);
+      final ownTrack = _ownFreeTrackAt(axis, oldAxis, ownFree, animated: false);
+      final ownExtent = oldAxis.extentOf(ownTrack) - _ownDeltaOf(ownTrack);
+      final ownInto = ownExtent > 0.0
+          ? ((ownFree -
+                        (oldAxis.offsetOf(ownTrack) -
+                            _ownDeltasBelow(ownTrack))) /
+                    ownExtent)
+                .clamp(0.0, 1.0)
+          : 0.0;
+      final ownAnchor = (ownTrack + ownInto).clamp(
+        0.0,
+        newAxis.trackCount.toDouble(),
+      );
+      final ownTarget = (newAxis.offsetOfFraction(ownAnchor) - newBand).clamp(
+        0.0,
+        maxTarget,
+      );
+      _ownShiftAtSwap = target - ownTarget;
+    }
     final correction = target - offset.pixels;
     if (correction.abs() >= precisionErrorTolerance) {
       offset.correctBy(correction);
@@ -910,6 +1011,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       _cellRecord.clear();
       _cellRecordKey = recordKey;
     }
+    // After the term refresh above, the last make-room write layout makes
+    // to the join record: from here on the record holds still, so the
+    // marks it gives stand for every pass.
+    _ownDataAtLayoutHead();
 
     // The WINDOW RULE's two terms, read ONCE per `layoutChildSequence`.
     // Both are per-axis content-space magnitudes.
@@ -1065,6 +1170,13 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       }());
     }
 
+    _dropUnmarkedOwnTracks();
+    // THE CLOSING RULE, after both calls of [_applyContentDimensions]: once
+    // no own track and no residue stands, the scope's preview has wholly
+    // closed, and a scroll it left is the board's own from here on.
+    if (_ownCount == 0 && !_hasOwnResidue) {
+      _ownScrollShift = 0.0;
+    }
     // A resize preview's GEOMETRY targets, re-derived after the passes,
     // whose sizing can move any track, and before the positioning sweep
     // reads them: over the lattice as it now paints, the trackResize
@@ -1398,6 +1510,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         break;
       }
     }
+    if (anchorAxis != null && _ownCount > 0) {
+      // The correction holds the anchor relative to the leading band's
+      // end, so its OWN share is the change of the own deltas between the
+      // band's end and the anchor, whether or not the pass applies it.
+      final lead = anchorConfig!.leadingBandEnd;
+      final before = anchorTrack >= 0 ? _ownDeltaSumIn(lead, anchorTrack) : 0.0;
+      _refreshOwnDeltas(anchorAxis, anchorConfig, contentAxis!);
+      if (anchorTrack >= 0) {
+        _ownScrollShift += _ownDeltaSumIn(lead, anchorTrack) - before;
+      }
+    }
     _recordVisibleWindow();
 
     if (anchorAxis == null || anchorTrack < 0) {
@@ -1471,106 +1594,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       var contributorRamping = false;
       var makeRoomContributes = false;
       if (laneAxisIsContent) {
-        // The item-cluster term: the track must hold its deepest
-        // cluster's lanes, each member's ceiling SCALED by its enter/exit
-        // ramp and SHIFTED by the two intra-track numbers the make-room
-        // preview and a RELANE slide add to the same member's band, so
-        // the track's edge is a function of what paints. Zero members and
-        // no slot contribute NO term; an itemless track keeps its
-        // cells-only measurement. EVERY MEMBER IS READ, the lifted one
-        // included: nothing collapses the dragged item's in-place widget,
-        // so the track must keep holding it, and the engine answers a
-        // zero delta for a lifted id anyway. A resized member whose
-        // preview leaves the track is read too, its whole contribution,
-        // padding included, scaled by the share it has not yet vacated,
-        // so the track gives up exactly what the commit will take.
-        // Lane resolution ran at the layout head.
-        final members = _controller.laneBucketMembersOn(track);
-        var deepest = 0.0;
-        var vacating = 0.0;
-        var seen = false;
-        for (final member in members) {
-          if (anim.isEnteringItem(member) || anim.isExitingItem(member)) {
-            contributorRamping = true;
-          }
-          // Content space, on the lane axis; a delta is the same number
-          // in both spaces. The make-room preview's term delta: a held
-          // gap offset, or a resized item's held band.
-          final delta = contentAxis == Axis.vertical
-              ? anim.makeRoomTermDeltaOf(member).dy
-              : anim.makeRoomTermDeltaOf(member).dx;
-          // A RELANE record adds its lead to a member's band, and a
-          // band-marked one its extent too: intra-track changes, so they
-          // belong to THIS track's term. A cross-track slide never
-          // reaches here, which is what the relane mark decides and what
-          // keeps the reader's "the term must not compose non-relane
-          // slides" rule whole.
-          final relane = contentAxis == Axis.vertical
-              ? anim.relaneDeltaOf(member).dy
-              : anim.relaneDeltaOf(member).dx;
-          if (delta != 0.0 || relane != 0.0) {
-            makeRoomContributes = true;
-          }
-          // A LANE BAND measure and not an extent: the band's position
-          // and SIZE, the member's stored lanes with its stored span
-          // scaled by its ramp, plus the two numbers above. It reads no
-          // in-flight extent but a band-marked record's, so it agrees
-          // with paint AT REST and can lag it while an extent animates on
-          // a different clock.
-          final ceiling =
-              config.laneBandEdgeOn(
-                track,
-                _controller.laneOfId(member),
-                _controller.laneCountOfId(member),
-                anim.enterExitProgressOf(member) *
-                    _controller.laneSpanOfId(member),
-              ) +
-              delta +
-              relane;
-          final vacated = anim.makeRoomVacatedOf(member);
-          if (vacated != 0.0) {
-            // Its own maximum, and no mark of the track as seen: once it
-            // has vacated wholly the track holds nothing for it, not even
-            // the padding. It still counts as a make-room contribution,
-            // so the track is recorded on that latch and never animated
-            // by a trackResize under an off makeRoom family.
-            makeRoomContributes = true;
-            final share =
-                (1.0 - vacated) *
-                (math.max(0.0, ceiling) + config.lanePadding);
-            if (share > vacating) {
-              vacating = share;
-            }
-            continue;
-          }
-          seen = true;
-          if (ceiling > deepest) {
-            deepest = ceiling;
-          }
-        }
-        for (final slot in anim.makeRoomSlotsOn(track)) {
-          // A PROSPECTIVE lane occupancy: the enter/exit formula with the
-          // slot's value in the role of progress. On the lifted item's
-          // own track its member ceiling and its slot can both appear and
-          // the max takes one or the other, never their sum.
-          seen = true;
-          makeRoomContributes = true;
-          final ceiling = config.laneBandEdgeOn(
-            track,
-            slot.lane,
-            slot.lane + 1,
-            slot.value,
-          );
-          if (ceiling > deepest) {
-            deepest = ceiling;
-          }
-        }
-        var term = vacating;
-        if (seen && deepest + config.lanePadding > term) {
-          term = deepest + config.lanePadding;
-        }
-        if (term > to) {
-          to = term;
+        _laneTermOf(track, config, contentAxis, withoutOwnPreview: false);
+        contributorRamping = _laneTermRamping;
+        makeRoomContributes = _laneTermMakeRoom;
+        if (_laneTerm > to) {
+          to = _laneTerm;
         }
       }
       // COLLECTED here and REPORTED after the pass loop, never thrown
@@ -1689,6 +1717,512 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         _controller.animateTrackResize(contentAxis, track, from);
       }
     }
+  }
+
+  /// The item-cluster term of [track] on the content-sized lane axis
+  /// [contentAxis], whose config is [config], written into [_laneTerm],
+  /// with [_laneTermRamping] and [_laneTermMakeRoom] beside it on the
+  /// painted evaluation: fields, so a call builds nothing to return them.
+  /// [withoutOwnPreview] evaluates the ONE term formula without the make-room
+  /// engine's own-preview scope, reading its three make-room inputs, a
+  /// member's term delta and vacate and a slot's value, at their foreign
+  /// values, a slot whose foreign value is zero as no slot, and everything
+  /// else as the painted evaluation does, and leaves the two flags alone.
+  ///
+  /// The track must hold its deepest cluster's lanes, each member's
+  /// ceiling SCALED by its enter/exit ramp and SHIFTED by the two
+  /// intra-track numbers the make-room preview and a RELANE slide add to
+  /// the same member's band, so the track's edge is a function of what
+  /// paints. Zero members and no slot contribute NO term, a zero
+  /// [_laneTerm], and an itemless track keeps its cells-only measurement.
+  /// EVERY MEMBER IS READ, the lifted one included: nothing collapses the
+  /// dragged item's in-place widget, so the track must keep holding it,
+  /// and the engine answers a zero delta for a lifted id anyway. A
+  /// resized member whose preview leaves the track is read too, its whole
+  /// contribution, padding included, scaled by the share it has not yet
+  /// vacated, so the track gives up exactly what the commit will take.
+  /// Lane resolution ran at the layout head.
+  @pragma("vm:prefer-inline")
+  void _laneTermOf(
+    int track,
+    BoardAxisConfig config,
+    Axis contentAxis, {
+    required bool withoutOwnPreview,
+  }) {
+    final anim = _controller.anim;
+    var ramping = false;
+    var makeRoomContributes = false;
+    var deepest = 0.0;
+    var vacating = 0.0;
+    var seen = false;
+    for (final member in _controller.laneBucketMembersOn(track)) {
+      if (anim.isEnteringItem(member) || anim.isExitingItem(member)) {
+        ramping = true;
+      }
+      // Content space, on the lane axis; a delta is the same number in
+      // both spaces. The make-room preview's term delta: a held gap
+      // offset, or a resized item's held band.
+      final delta = withoutOwnPreview
+          ? _controller.makeRoomTermDeltaWithoutOwnOf(member)
+          : contentAxis == Axis.vertical
+          ? anim.makeRoomTermDeltaOf(member).dy
+          : anim.makeRoomTermDeltaOf(member).dx;
+      // A RELANE record adds its lead to a member's band, and a
+      // band-marked one its extent too: intra-track changes, so they
+      // belong to THIS track's term. A cross-track slide never reaches
+      // here, which is what the relane mark decides and what keeps the
+      // reader's "the term must not compose non-relane slides" rule whole.
+      final relane = contentAxis == Axis.vertical
+          ? anim.relaneDeltaOf(member).dy
+          : anim.relaneDeltaOf(member).dx;
+      if (delta != 0.0 || relane != 0.0) {
+        makeRoomContributes = true;
+      }
+      // A LANE BAND measure and not an extent: the band's position and
+      // SIZE, the member's stored lanes with its stored span scaled by its
+      // ramp, plus the two numbers above. It reads no in-flight extent but
+      // a band-marked record's, so it agrees with paint AT REST and can lag
+      // it while an extent animates on a different clock.
+      final ceiling =
+          config.laneBandEdgeOn(
+            track,
+            _controller.laneOfId(member),
+            _controller.laneCountOfId(member),
+            anim.enterExitProgressOf(member) *
+                _controller.laneSpanOfId(member),
+          ) +
+          delta +
+          relane;
+      final vacated = withoutOwnPreview
+          ? _controller.makeRoomVacatedWithoutOwnOf(member)
+          : anim.makeRoomVacatedOf(member);
+      if (vacated != 0.0) {
+        // Its own maximum, and no mark of the track as seen: once it has
+        // vacated wholly the track holds nothing for it, not even the
+        // padding. It still counts as a make-room contribution, so the
+        // track is recorded on that latch and never animated by a
+        // trackResize under an off makeRoom family.
+        makeRoomContributes = true;
+        final share =
+            (1.0 - vacated) * (math.max(0.0, ceiling) + config.lanePadding);
+        if (share > vacating) {
+          vacating = share;
+        }
+        continue;
+      }
+      seen = true;
+      if (ceiling > deepest) {
+        deepest = ceiling;
+      }
+    }
+    final slots = anim.makeRoomSlotCountOn(track);
+    for (var index = 0; index < slots; index++) {
+      final value = withoutOwnPreview
+          ? _controller.makeRoomSlotValueWithoutOwnAt(track, index)
+          : anim.makeRoomSlotValueAt(track, index);
+      if (withoutOwnPreview && value == 0.0) {
+        // The scope created it, or the share another session left in it
+        // has closed. Read at zero it would mark the track seen and put its
+        // lane edge and the padding into a term the track lacks without it.
+        continue;
+      }
+      // A PROSPECTIVE lane occupancy: the enter/exit formula with the
+      // slot's value in the role of progress. On the lifted item's own
+      // track its member ceiling and its slot can both appear and the max
+      // takes one or the other, never their sum.
+      seen = true;
+      makeRoomContributes = true;
+      final lane = anim.makeRoomSlotLaneAt(track, index);
+      final ceiling = config.laneBandEdgeOn(track, lane, lane + 1, value);
+      if (ceiling > deepest) {
+        deepest = ceiling;
+      }
+    }
+    var term = vacating;
+    if (seen && deepest + config.lanePadding > term) {
+      term = deepest + config.lanePadding;
+    }
+    _laneTerm = term;
+    if (!withoutOwnPreview) {
+      _laneTermRamping = ramping;
+      _laneTermMakeRoom = makeRoomContributes;
+    }
+  }
+
+  /// The own data's layout head, after the resize term's refresh. Resets
+  /// the data and the residue when the own-data key changed (a new scope,
+  /// a scope's end, a controller swap, a new content axis instance) or no
+  /// content-sized lane axis exists, the own scroll shift to what the zoom
+  /// anchor left in [_ownShiftAtSwap] and to zero where it left nothing;
+  /// drops the own tracks alone at a measurement reset of the same
+  /// instance; folds a standing residue at the current pixels; then
+  /// MARKS, among the own tracks, the lane-axis track of each recorded id
+  /// that is laned and each recorded slot's track, adding each one absent
+  /// with a zero delta. With no recorded pair and no own track nothing is
+  /// marked.
+  void _ownDataAtLayoutHead() {
+    final contentAxis = _contentAxis;
+    final epoch = _controller.makeRoomOwnPreviewEpoch;
+    final axisInstance = _contentAxisInstance;
+    final resets = _measurementResetsOf(axisInstance);
+    final laned = contentAxis != null && _controller.laneAxis == contentAxis;
+    if (epoch != _ownKeyEpoch ||
+        !identical(_controller, _ownKeyController) ||
+        !identical(axisInstance, _ownKeyAxis) ||
+        !laned) {
+      _ownKeyEpoch = epoch;
+      _ownKeyController = _controller;
+      _ownKeyAxis = axisInstance;
+      _ownKeyResets = resets;
+      _ownCount = 0;
+      _ownScrollShift = laned ? (_ownShiftAtSwap ?? 0.0) : 0.0;
+      _hasOwnResidue = false;
+    } else if (resets != _ownKeyResets) {
+      // A measurement reset of the same instance returned every stored
+      // extent to the estimate, which holds no own contribution, so every
+      // own delta is stale; it moved neither the painted scroll offset nor
+      // the own-free one, so the shift and the residue stand.
+      _ownKeyResets = resets;
+      _ownCount = 0;
+    }
+    if (_hasOwnResidue) {
+      _ownScrollShift -=
+          _ownResidue * _residueProgressAt(_contentViewportOffset!.pixels);
+      _hasOwnResidue = false;
+    }
+    if (!laned) {
+      return;
+    }
+    final ids = _controller.makeRoomOwnIdCount;
+    final slots = _controller.makeRoomOwnSlotTrackCount;
+    if (ids == 0 && slots == 0 && _ownCount == 0) {
+      return;
+    }
+    final marks = _ownMarks;
+    if (marks != null) {
+      marks.fillRange(0, _ownCount, 0);
+    }
+    final trackCount = _contentAxisInstance!.trackCount;
+    for (var index = 0; index < ids; index++) {
+      final id = _controller.makeRoomOwnIdAt(index);
+      if (_controller.isLanedId(id)) {
+        _markOwnTrack(_controller.startIndexOfId(id, contentAxis), trackCount);
+      }
+    }
+    for (var index = 0; index < slots; index++) {
+      _markOwnTrack(_controller.makeRoomOwnSlotTrackAt(index), trackCount);
+    }
+    _rebuildOwnPrefix();
+  }
+
+  /// The content-sized axis's [BoardAxis] instance, or null.
+  BoardAxis? get _contentAxisInstance {
+    switch (_contentAxis) {
+      case Axis.vertical:
+        return _controller.rows.axis;
+      case Axis.horizontal:
+        return _controller.columns.axis;
+      case null:
+        return null;
+    }
+  }
+
+  /// Marks [track] own, adding it with a zero delta where it is absent;
+  /// a track outside `[0, trackCount)` is not a track and is skipped.
+  void _markOwnTrack(int track, int trackCount) {
+    if (track < 0 || track >= trackCount) {
+      return;
+    }
+    final at = _ownIndexOf(track);
+    if (at < _ownCount && _ownTracks![at] == track) {
+      _ownMarks![at] = 1;
+      return;
+    }
+    _ensureOwnCapacity(_ownCount + 1);
+    final tracks = _ownTracks!;
+    final marks = _ownMarks!;
+    final deltas = _ownDeltas!;
+    tracks.setRange(at + 1, _ownCount + 1, tracks, at);
+    marks.setRange(at + 1, _ownCount + 1, marks, at);
+    deltas.setRange(at + 1, _ownCount + 1, deltas, at);
+    tracks[at] = track;
+    marks[at] = 1;
+    deltas[at] = 0.0;
+    _ownCount += 1;
+  }
+
+  /// Grows the own data's buffers, by doubling from 8, to hold [count]
+  /// own tracks.
+  void _ensureOwnCapacity(int count) {
+    final tracks = _ownTracks;
+    if (tracks != null && tracks.length >= count) {
+      return;
+    }
+    var capacity = tracks == null ? 8 : tracks.length * 2;
+    while (capacity < count) {
+      capacity *= 2;
+    }
+    final nextTracks = Int32List(capacity);
+    final nextMarks = Uint8List(capacity);
+    final nextDeltas = Float64List(capacity);
+    if (tracks != null) {
+      nextTracks.setRange(0, _ownCount, tracks);
+      nextMarks.setRange(0, _ownCount, _ownMarks!);
+      nextDeltas.setRange(0, _ownCount, _ownDeltas!);
+    }
+    _ownTracks = nextTracks;
+    _ownMarks = nextMarks;
+    _ownDeltas = nextDeltas;
+    _ownPrefix = Float64List(capacity + 1);
+    _ownStarts = Float64List(capacity);
+  }
+
+  /// The position of the first own track at or past [track]: a binary
+  /// search over the ascending own tracks.
+  int _ownIndexOf(int track) {
+    final tracks = _ownTracks;
+    var lo = 0;
+    var hi = _ownCount;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (tracks![mid] < track) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  /// Rebuilds the prefix sums of the own deltas and, wherever they are
+  /// rebuilt, the own starts from the settled offsets the content axis
+  /// stores now, which only the sizing step and a measurement reset
+  /// change; the own-data key covers the reset.
+  void _rebuildOwnPrefix() {
+    if (_ownCount == 0) {
+      return;
+    }
+    final tracks = _ownTracks!;
+    final deltas = _ownDeltas!;
+    final prefix = _ownPrefix!;
+    final starts = _ownStarts!;
+    final axis = _contentAxisInstance!;
+    final count = axis.trackCount;
+    var sum = 0.0;
+    prefix[0] = 0.0;
+    for (var index = 0; index < _ownCount; index++) {
+      sum += deltas[index];
+      prefix[index + 1] = sum;
+      final first = tracks[index] + 1;
+      starts[index] = first >= count
+          ? double.infinity
+          : axis.offsetOf(first) - sum;
+    }
+  }
+
+  /// `D(k)`: the sum of the own deltas of the own tracks below [track].
+  double _ownDeltasBelow(int track) {
+    if (_ownCount == 0) {
+      return 0.0;
+    }
+    return _ownPrefix![_ownIndexOf(track)];
+  }
+
+  /// [track]'s own delta, zero for a track that is not own.
+  double _ownDeltaOf(int track) {
+    if (_ownCount == 0) {
+      return 0.0;
+    }
+    final at = _ownIndexOf(track);
+    return at < _ownCount && _ownTracks![at] == track
+        ? _ownDeltas![at]
+        : 0.0;
+  }
+
+  /// The sum of the own deltas of the own tracks in `[from, to)`.
+  double _ownDeltaSumIn(int from, int to) {
+    var sum = 0.0;
+    final tracks = _ownTracks!;
+    final deltas = _ownDeltas!;
+    for (var index = 0; index < _ownCount; index++) {
+      final track = tracks[index];
+      if (track >= from && track < to) {
+        sum += deltas[index];
+      }
+    }
+    return sum;
+  }
+
+  /// The pass's OWN DELTA refresh, after its obtain-and-size rounds: each
+  /// own track the pass sized (a key of [_contentTrackExtents]) gets the
+  /// extent [axis] now stores minus the one it would size to without the
+  /// scope's preview, the larger of its cell term and its own-free lane
+  /// term floored as the sizing step floors, or a literal zero for an
+  /// unmarked track, which holds no recorded entry, so its own-free term
+  /// equals the painted one and is not evaluated. A track the pass did not
+  /// size keeps the delta its stored extent still carries.
+  void _refreshOwnDeltas(
+    BoardAxis axis,
+    BoardAxisConfig config,
+    Axis contentAxis,
+  ) {
+    final standIn = axis is LazyContentAxis ? axis.estimate : 0.0;
+    final tracks = _ownTracks!;
+    final marks = _ownMarks!;
+    final deltas = _ownDeltas!;
+    for (var index = 0; index < _ownCount; index++) {
+      final track = tracks[index];
+      if (!_contentTrackExtents.containsKey(track)) {
+        continue;
+      }
+      if (marks[index] == 0) {
+        deltas[index] = 0.0;
+        continue;
+      }
+      // The cell term as the sizing step folded it: the record, or the
+      // estimate where none stands.
+      final cells = _cellRecord[track]?.extent ?? standIn;
+      _laneTermOf(track, config, contentAxis, withoutOwnPreview: true);
+      var ownFree = _laneTerm > cells ? _laneTerm : cells;
+      if (ownFree < axis.minTrackExtent) {
+        ownFree = axis.minTrackExtent;
+      }
+      deltas[index] = axis.extentOf(track) - ownFree;
+    }
+    _rebuildOwnPrefix();
+  }
+
+  /// After the pass loop: drops each unmarked own track whose own delta
+  /// is the zero its pass wrote, so a track leaves in the layout whose
+  /// pass sized it with no own input, and one no pass sized keeps the
+  /// delta its stored extent still carries.
+  void _dropUnmarkedOwnTracks() {
+    if (_ownCount == 0) {
+      return;
+    }
+    final tracks = _ownTracks!;
+    final marks = _ownMarks!;
+    final deltas = _ownDeltas!;
+    var kept = 0;
+    for (var index = 0; index < _ownCount; index++) {
+      if (marks[index] == 0 && deltas[index] == 0.0) {
+        continue;
+      }
+      tracks[kept] = tracks[index];
+      marks[kept] = marks[index];
+      deltas[kept] = deltas[index];
+      kept += 1;
+    }
+    _ownCount = kept;
+    _rebuildOwnPrefix();
+  }
+
+  /// Whether the point mapping's own-free mode acts on [axis]: the
+  /// content-sized lane axis, while the own data's key is current and it
+  /// holds an own track, a residue, or an own scroll shift farther than
+  /// the tolerance from zero.
+  bool _ownFreeOn(Axis axis) {
+    if (_contentAxis != axis || _controller.laneAxis != axis) {
+      return false;
+    }
+    return _ownDataStandsOn(_contentAxisInstance);
+  }
+
+  /// Whether the own data holds what turns the point mapping's own-free
+  /// mode on, an own track, a residue, or an own scroll shift farther than
+  /// the tolerance from zero, under a key that names the current scope,
+  /// the controller and [axisInstance] as it stands.
+  bool _ownDataStandsOn(BoardAxis? axisInstance) {
+    if (_ownCount == 0 &&
+        !_hasOwnResidue &&
+        _ownScrollShift.abs() <= precisionErrorTolerance) {
+      return false;
+    }
+    return _ownKeyEpoch == _controller.makeRoomOwnPreviewEpoch &&
+        identical(_ownKeyController, _controller) &&
+        identical(_ownKeyAxis, axisInstance) &&
+        _ownKeyResets == _measurementResetsOf(axisInstance);
+  }
+
+  /// [axisInstance]'s measurement resets, zero for an axis that has none.
+  static int _measurementResetsOf(BoardAxis? axisInstance) {
+    return axisInstance is LazyContentAxis ? axisInstance.measurementResets : 0;
+  }
+
+  /// The content axis's scroll offset without the scope's preview at the
+  /// live [pixels]: `pixels - S + R * f`, `f` the residue's progress.
+  double _ownFreePixelsAt(double pixels) {
+    final free = pixels - _ownScrollShift;
+    if (!_hasOwnResidue) {
+      return free;
+    }
+    return free + _ownResidue * _residueProgressAt(pixels);
+  }
+
+  /// How far a spring-back from [_ownResidueFrom] toward [_ownResidueTo]
+  /// has come at [pixels], clamped into `[0, 1]`.
+  double _residueProgressAt(double pixels) {
+    final span = _ownResidueFrom - _ownResidueTo;
+    if (span == 0.0) {
+      return 0.0;
+    }
+    return ((_ownResidueFrom - pixels) / span).clamp(0.0, 1.0);
+  }
+
+  /// The own-free lattice's track at its content-space [content] on
+  /// [axisEnum], settled or [animated] as the mapping reads it, in the
+  /// painted lookup's two forms. While a trackResize is in flight an
+  /// [animated] lookup is the painted binary search over the axis's
+  /// tracks, on each probe's animated offset less the own deltas below it.
+  /// On settled offsets it is a SEGMENT SEARCH, then one lookup of the
+  /// axis's own: over the tracks after own track `o(j)` through `o(j + 1)`
+  /// the own-free offset is the settled one less one constant,
+  /// `_ownPrefix[j + 1]`, so the binary search compares [content] with the
+  /// own starts, and the track is the axis's lookup at [content] plus that
+  /// constant, clamped into the segment, which an own shrink of its last
+  /// track widens past where the painted lookup ends it.
+  int _ownFreeTrackAt(
+    Axis axisEnum,
+    BoardAxis axis,
+    double content, {
+    required bool animated,
+  }) {
+    final tracks = _ownTracks!;
+    final prefix = _ownPrefix!;
+    if (animated && _controller.anim.hasActiveTrackResize) {
+      var lo = 0;
+      var hi = axis.trackCount - 1;
+      while (lo < hi) {
+        final mid = (lo + hi + 1) >> 1;
+        if (_animatedOffsetOf(axisEnum, axis, mid) - prefix[_ownIndexOf(mid)] <=
+            content) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return lo;
+    }
+    final starts = _ownStarts!;
+    var lo = 0;
+    var hi = _ownCount;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) >> 1;
+      if (starts[mid - 1] <= content) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    final at = math.max(0.0, content + prefix[lo]);
+    var track = axis.trackAt(at);
+    if (lo < _ownCount && track > tracks[lo]) {
+      track = tracks[lo];
+    }
+    if (lo > 0 && track <= tracks[lo - 1]) {
+      track = tracks[lo - 1] + 1;
+    }
+    return track;
   }
 
   /// One cell of the obtain pass: obtain, measure, and feed the
@@ -2406,17 +2940,94 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// offsets must receive dimensions. The maximum is clamped at zero,
   /// because `applyContentDimensions` asserts
   /// `minScrollExtent <= maxScrollExtent`.
+  ///
+  /// On the content axis it also attributes to the own scroll shift what
+  /// the scope's preview made the position do ([_attributeOwnScroll]).
   bool _applyContentDimensions() {
     final extent = viewportDimension;
+    final contentAxis = _contentAxis;
+    final contentOffset = _contentViewportOffset;
+    // With no own track, residue or shift standing there is nothing to
+    // attribute, and the position is not read for it.
+    final ownStands = _ownCount > 0 || _hasOwnResidue || _ownScrollShift != 0.0;
+    final before = ownStands && contentOffset != null && contentOffset.hasPixels
+        ? contentOffset.pixels
+        : null;
+    final verticalMax = math.max(
+      0.0,
+      _controller.rows.axis.totalExtent - extent.height,
+    );
+    final horizontalMax = math.max(
+      0.0,
+      _controller.columns.axis.totalExtent - extent.width,
+    );
     final verticalAccepted = verticalOffset.applyContentDimensions(
       0.0,
-      math.max(0.0, _controller.rows.axis.totalExtent - extent.height),
+      verticalMax,
     );
     final horizontalAccepted = horizontalOffset.applyContentDimensions(
       0.0,
-      math.max(0.0, _controller.columns.axis.totalExtent - extent.width),
+      horizontalMax,
     );
+    if (contentAxis != null) {
+      final vertical = contentAxis == Axis.vertical;
+      final maxPassed = vertical ? verticalMax : horizontalMax;
+      final changed = maxPassed != _lastContentMaxPassed;
+      _lastContentMaxPassed = maxPassed;
+      if (before != null) {
+        _attributeOwnScroll(
+          before,
+          contentOffset!.pixels,
+          maxPassed,
+          changed,
+          vertical ? extent.height : extent.width,
+        );
+      }
+    }
     return verticalAccepted && horizontalAccepted;
+  }
+
+  /// The own scroll shift's share of one dimension change on the content
+  /// axis, whose position took the maximum [maxPassed] ([changed] from the
+  /// last call's) and moved from [pixelsBefore] to [pixelsAfter]. The
+  /// position without the scope's preview, `Q0 = pixelsBefore - S`, would
+  /// have clamped into its own maximum `M'`, the axis's own-free total less
+  /// [viewportExtent]. A position that ends inside `[0, maxPassed]` after a
+  /// change of the maximum clamped or kept its pixels, and the shift takes
+  /// the difference of the two moves. One that ends outside it did not
+  /// enforce its boundary and springs back to the nearer bound outside
+  /// layout, so the shift takes its whole move now and the RESIDUE takes
+  /// the share of the spring the own-free position does not make, read at
+  /// the live pixels by [_ownFreePixelsAt] and folded at the next layout's
+  /// head.
+  void _attributeOwnScroll(
+    double pixelsBefore,
+    double pixelsAfter,
+    double maxPassed,
+    bool changed,
+    double viewportExtent,
+  ) {
+    final free = pixelsBefore - _ownScrollShift;
+    final ownMax = math.max(
+      0.0,
+      _contentAxisInstance!.totalExtent -
+          (_ownCount == 0 ? 0.0 : _ownPrefix![_ownCount]) -
+          viewportExtent,
+    );
+    final freeClamped = free.clamp(0.0, ownMax);
+    if (pixelsAfter >= 0.0 && pixelsAfter <= maxPassed) {
+      if (changed) {
+        _ownScrollShift +=
+            (pixelsAfter - pixelsBefore) - (freeClamped - free);
+      }
+      return;
+    }
+    final bound = pixelsAfter.clamp(0.0, maxPassed);
+    _ownScrollShift += pixelsAfter - pixelsBefore;
+    _ownResidue = (pixelsAfter - bound) - (free - freeClamped);
+    _ownResidueFrom = pixelsAfter;
+    _ownResidueTo = bound;
+    _hasOwnResidue = _ownResidue != 0.0;
   }
 
   /// The axis layout may feed measurements back into, or null when
@@ -3068,9 +3679,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// THE POINT MAPPING: one pass over the paint-space coordinate [paint]
   /// on [axis] that yields the axis's whole [BoardAxisSample], and beside
   /// it `contained`, the coordinate of the track that paints there or
-  /// null wherever none does. Every point query on the port reads it, so
-  /// a selection, a drop and a probe agree with each other and with
-  /// paint. Null when the axis has no tracks.
+  /// null wherever none does. Every point query on the port reads it on
+  /// the lattice as it paints, so a selection, a drop and a probe agree
+  /// with each other and with paint; a resize's sample reads it in its
+  /// own-free mode below. Null when the axis has no tracks.
   ///
   /// Three regions along the axis, in NORMALIZED space ([scrolledRegion]
   /// in paint space): the leading band's tracks inside `[0, lo)`, where
@@ -3094,14 +3706,33 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// at `lo` and at `hi`. The formula reads the scroll offset [pixels]
   /// when given and the board's otherwise, and the sample records which
   /// as `scrollPixels`.
+  ///
+  /// [withoutOwnPreview] maps the point on the lattice as it would paint
+  /// without the make-room engine's own-preview scope, where that mode
+  /// acts ([_ownFreeOn]): every content-axis read is own-free, an offset
+  /// less `D(k)`, the own deltas below its track, an extent less its own
+  /// delta, the total and each band's extent less the deltas inside it,
+  /// which moves the region bounds, a track lookup through
+  /// [_ownFreeTrackAt], and the scroll offset the one given or the
+  /// own-free one ([_ownFreePixelsAt]). Everywhere else every read is the
+  /// painted one. Each call that takes the mode adds one to the
+  /// controller's `debugOwnFreeMappingCount`. Reversal needs nothing of
+  /// its own: the mode acts on normalized coordinates.
   ({BoardAxisSample sample, double? contained})? _trackCoordinateAt(
     Axis axis,
     double paint, {
     double? pixels,
+    bool withoutOwnPreview = false,
   }) {
     final vertical = axis == Axis.vertical;
-    final offset =
-        pixels ?? (vertical ? verticalOffset.pixels : horizontalOffset.pixels);
+    final own = withoutOwnPreview && _ownFreeOn(axis);
+    if (own) {
+      _controller.debugOwnFreeMappingCount += 1;
+    }
+    final livePixels = vertical
+        ? verticalOffset.pixels
+        : horizontalOffset.pixels;
+    final offset = pixels ?? (own ? _ownFreePixelsAt(livePixels) : livePixels);
     final config = vertical ? _controller.rows : _controller.columns;
     final boardAxis = config.axis;
     final count = boardAxis.trackCount;
@@ -3113,7 +3744,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final viewport = vertical
         ? viewportDimension.height
         : viewportDimension.width;
-    final region = _unfrozenNormalized(axis);
+    final region = _unfrozenNormalized(axis, withoutOwnPreview: own);
     final normalized = _normalizedFromPaint(axis, paint);
     final ({int start, int end})? band;
     final double painted;
@@ -3122,29 +3753,52 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final double? contained;
     if (lead > 0 && normalized < region.lo) {
       band = (start: 0, end: lead);
-      painted = _settledCoordinateOf(boardAxis, math.max(0.0, normalized));
+      painted = _settledCoordinateOf(
+        axis,
+        boardAxis,
+        math.max(0.0, normalized),
+        own: own,
+      );
       if (normalized < 0.0) {
-        paintedExtended = normalized / boardAxis.extentOf(0);
+        paintedExtended =
+            normalized /
+            (boardAxis.extentOf(0) - (own ? _ownDeltaOf(0) : 0.0));
         contained = null;
       } else {
         paintedExtended = painted;
         contained = painted;
       }
-      scrolled = _scrolledCoordinateAt(axis, boardAxis, normalized, offset);
+      scrolled = _scrolledCoordinateAt(
+        axis,
+        boardAxis,
+        normalized,
+        offset,
+        own: own,
+      );
     } else if (trailFrom < count && normalized >= region.hi) {
       band = (start: trailFrom, end: count);
-      final content =
-          boardAxis.totalExtent - (viewport - math.min(normalized, viewport));
-      painted = _settledCoordinateOf(boardAxis, content);
+      final total =
+          boardAxis.totalExtent - (own ? _ownDeltasBelow(count) : 0.0);
+      final content = total - (viewport - math.min(normalized, viewport));
+      painted = _settledCoordinateOf(axis, boardAxis, content, own: own);
       if (normalized >= viewport) {
         paintedExtended =
-            count + (normalized - viewport) / boardAxis.extentOf(count - 1);
+            count +
+            (normalized - viewport) /
+                (boardAxis.extentOf(count - 1) -
+                    (own ? _ownDeltaOf(count - 1) : 0.0));
         contained = null;
       } else {
         paintedExtended = painted;
         contained = painted;
       }
-      scrolled = _scrolledCoordinateAt(axis, boardAxis, normalized, offset);
+      scrolled = _scrolledCoordinateAt(
+        axis,
+        boardAxis,
+        normalized,
+        offset,
+        own: own,
+      );
     } else {
       band = null;
       final coordinate = _scrolledCoordinateAt(
@@ -3152,6 +3806,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         boardAxis,
         normalized,
         offset,
+        own: own,
       );
       painted = coordinate.clamp(lead.toDouble(), trailFrom.toDouble());
       paintedExtended = painted;
@@ -3172,6 +3827,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         boardAxis,
         region.lo,
         offset,
+        own: own,
       ).clamp(lead.toDouble(), trailFrom.toDouble());
     }
     if (empty) {
@@ -3182,6 +3838,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         boardAxis,
         region.hi,
         offset,
+        own: own,
       ).clamp(lead.toDouble(), trailFrom.toDouble());
     }
     final unbounded = scrolled.clamp(0.0, count.toDouble());
@@ -3209,47 +3866,80 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   /// The scrolled lattice's track coordinate at the NORMALIZED coordinate
   /// [normalized] on [axis]: the content position under it at the scroll
-  /// offset [pixels], read through the ANIMATED geometry, unclamped.
+  /// offset [pixels], read through the ANIMATED geometry, unclamped; [own]
+  /// reads the own-free lattice ([_trackCoordinateAt]).
   double _scrolledCoordinateAt(
     Axis axis,
     BoardAxis boardAxis,
     double normalized,
-    double pixels,
-  ) {
+    double pixels, {
+    bool own = false,
+  }) {
     final content = normalized + pixels;
-    final track = _animatedTrackAt(axis, boardAxis, math.max(0.0, content));
-    final trackLead = _animatedOffsetOf(axis, boardAxis, track);
-    final trackExtent = _animatedExtentOf(axis, boardAxis, track);
+    final track = own
+        ? _ownFreeTrackAt(axis, boardAxis, content, animated: true)
+        : _animatedTrackAt(axis, boardAxis, math.max(0.0, content));
+    final trackLead =
+        _animatedOffsetOf(axis, boardAxis, track) -
+        (own ? _ownDeltasBelow(track) : 0.0);
+    final trackExtent =
+        _animatedExtentOf(axis, boardAxis, track) -
+        (own ? _ownDeltaOf(track) : 0.0);
     return trackExtent <= 0.0
         ? track.toDouble()
         : track + (content - trackLead) / trackExtent;
   }
 
-  /// The settled track coordinate of the content-space [content], clamped
-  /// into `[0, trackCount]`.
-  double _settledCoordinateOf(BoardAxis axis, double content) {
+  /// The settled track coordinate of the content-space [content] on
+  /// [axisEnum], clamped into `[0, trackCount]`; [own] reads the own-free
+  /// lattice ([_trackCoordinateAt]).
+  double _settledCoordinateOf(
+    Axis axisEnum,
+    BoardAxis axis,
+    double content, {
+    bool own = false,
+  }) {
     if (content <= 0.0) {
       return 0.0;
     }
-    if (content >= axis.totalExtent) {
+    final total =
+        axis.totalExtent - (own ? _ownDeltasBelow(axis.trackCount) : 0.0);
+    if (content >= total) {
       return axis.trackCount.toDouble();
     }
-    final track = axis.trackAt(content);
-    return track + (content - axis.offsetOf(track)) / axis.extentOf(track);
+    final track = own
+        ? _ownFreeTrackAt(axisEnum, axis, content, animated: false)
+        : axis.trackAt(content);
+    final trackLead =
+        axis.offsetOf(track) - (own ? _ownDeltasBelow(track) : 0.0);
+    final trackExtent =
+        axis.extentOf(track) - (own ? _ownDeltaOf(track) : 0.0);
+    return track + (content - trackLead) / trackExtent;
   }
 
   /// The NORMALIZED interval `[lo, hi]` the scrolled tracks show through
   /// on [axis]: the viewport minus its two frozen bands, each band's
   /// extent settled as its cells are placed. Empty (`lo == hi`) when the
-  /// bands fill the viewport.
-  ({double lo, double hi}) _unfrozenNormalized(Axis axis) {
+  /// bands fill the viewport. [withoutOwnPreview] takes each band's
+  /// extent less the own deltas inside it, which a caller asks only where
+  /// the own-free mode acts.
+  ({double lo, double hi}) _unfrozenNormalized(
+    Axis axis, {
+    bool withoutOwnPreview = false,
+  }) {
     final vertical = axis == Axis.vertical;
     final config = vertical ? _controller.rows : _controller.columns;
     final viewport = vertical
         ? viewportDimension.height
         : viewportDimension.width;
-    final leading = config.leadingBandExtent;
-    final trailing = config.trailingBandExtent;
+    var leading = config.leadingBandExtent;
+    var trailing = config.trailingBandExtent;
+    if (withoutOwnPreview) {
+      leading -= _ownDeltasBelow(config.leadingBandEnd);
+      trailing -=
+          _ownDeltasBelow(config.axis.trackCount) -
+          _ownDeltasBelow(config.trailingBandStart);
+    }
     final lo = math.min(leading, viewport);
     final hi = math.max(lo, viewport - trailing);
     return (lo: lo, hi: hi);
@@ -3565,6 +4255,38 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       coordinateIn(path, sample).roundToDouble(),
       path.window,
     ).toInt();
+  }
+
+  /// [trackSampleAt] on the lattice as it would paint without the
+  /// make-room engine's own-preview scope, the mode [_trackCoordinateAt]
+  /// takes for it: the sampler [_subscribe] registers with the
+  /// controller, whose `trackSampleWithoutOwnPreview` the drag reaches it
+  /// through. Where a pixel offset is not given the axis reads its
+  /// own-free scroll offset, which the sample's `scrollPixels` records.
+  ({BoardAxisSample row, BoardAxisSample col})? _sampleWithoutOwnPreview(
+    Offset local,
+    double? verticalPixels,
+    double? horizontalPixels,
+  ) {
+    if (!hasSize) {
+      return null;
+    }
+    final row = _trackCoordinateAt(
+      Axis.vertical,
+      local.dy,
+      pixels: verticalPixels,
+      withoutOwnPreview: true,
+    );
+    final col = _trackCoordinateAt(
+      Axis.horizontal,
+      local.dx,
+      pixels: horizontalPixels,
+      withoutOwnPreview: true,
+    );
+    if (row == null || col == null) {
+      return null;
+    }
+    return (row: row.sample, col: col.sample);
   }
 
   @override

@@ -52,6 +52,17 @@ extension BoardControllerInternals<TKey, TItem>
     _lanes.debugBucketMemberReadCount = value;
   }
 
+  /// Debug-only: the render object's point-mapping calls in the own-free
+  /// mode, forwarded from the make-room engine, which keeps it beside the
+  /// own-preview scope that mode leaves out.
+  int get debugOwnFreeMappingCount {
+    return _anim.makeRoom.debugOwnFreeMappingCount;
+  }
+
+  set debugOwnFreeMappingCount(int value) {
+    _anim.makeRoom.debugOwnFreeMappingCount = value;
+  }
+
   /// Whether [id]'s span covers cell `(row, col)` by the span index's own
   /// two rules, so a per-cell listener rebuilds exactly when [itemsAt]
   /// would list the item. Internal-use, like [keyOfId].
@@ -377,6 +388,75 @@ extension BoardControllerInternals<TKey, TItem>
     _anim.makeRoom.releasePreview(duration: duration, curve: curve);
   }
 
+  /// Internal-use channel for the drag layer and for tests; not part of
+  /// the supported surface. Opens the make-room engine's OWN-PREVIEW
+  /// SCOPE and returns its epoch, replacing a scope still open: until
+  /// [endOwnMakeRoomPreview] of that epoch, every make-room write that
+  /// changes a held offset, band or vacate or a slot joins that entry to
+  /// the scope's record, and the reads named `WithoutOwn` answer each
+  /// joined entry's FOREIGN value, the share of it the scope did not
+  /// write. Emptying the record is part of opening one.
+  int beginOwnMakeRoomPreview() {
+    _assertNotDisposed();
+    return _anim.makeRoom.beginOwnPreview();
+  }
+
+  /// Ends the scope [beginOwnMakeRoomPreview] opened as [epoch], emptying
+  /// its record, while [epoch] is the open one; any other epoch changes
+  /// nothing.
+  void endOwnMakeRoomPreview(int epoch) {
+    _assertNotDisposed();
+    _anim.makeRoom.endOwnPreview(epoch);
+  }
+
+  /// The open own-preview scope's epoch, 0 while none is open.
+  int get makeRoomOwnPreviewEpoch {
+    return _anim.makeRoom.ownPreviewEpoch;
+  }
+
+  /// The ids holding an entry the open scope joined, in the record's
+  /// order, an id once per kind of entry (gap offset, band, vacate) it
+  /// holds there: [makeRoomOwnIdAt] reads them below this count.
+  int get makeRoomOwnIdCount {
+    return _anim.makeRoom.ownIdCount;
+  }
+
+  int makeRoomOwnIdAt(int index) {
+    return _anim.makeRoom.ownIdAt(index);
+  }
+
+  /// The lane-axis tracks holding a slot the open scope joined, in the
+  /// record's order, a track once per such slot: [makeRoomOwnSlotTrackAt]
+  /// reads them below this count.
+  int get makeRoomOwnSlotTrackCount {
+    return _anim.makeRoom.ownSlotTrackCount;
+  }
+
+  int makeRoomOwnSlotTrackAt(int index) {
+    return _anim.makeRoom.ownSlotTrackAt(index);
+  }
+
+  /// The make-room term delta of [id] without the open scope's own
+  /// preview: [BoardAnimationReader.makeRoomTermDeltaOf]'s component on
+  /// the lane axis, a content-space length, with each joined entry read
+  /// at its foreign value.
+  double makeRoomTermDeltaWithoutOwnOf(int id) {
+    return _anim.makeRoom.termDeltaWithoutOwnOf(id);
+  }
+
+  /// [BoardAnimationReader.makeRoomVacatedOf] of [id], a share, without
+  /// the open scope's own preview.
+  double makeRoomVacatedWithoutOwnOf(int id) {
+    return _anim.makeRoom.vacatedWithoutOwnOf(id);
+  }
+
+  /// [BoardAnimationReader.makeRoomSlotValueAt] of the slot at [index] on
+  /// lane-axis track [track], an occupancy in `[0, 1]`, without the open
+  /// scope's own preview.
+  double makeRoomSlotValueWithoutOwnAt(int track, int index) {
+    return _anim.makeRoom.slotValueWithoutOwnAt(track, index);
+  }
+
   /// Internal-use channel for the drag layer; not part of the supported
   /// surface. The drop-settle glide, riding the slide engine with its own
   /// family; [duration] and [curve] are the session's captured spec,
@@ -571,20 +651,32 @@ extension BoardControllerInternals<TKey, TItem>
     _anim.trackResize.invalidateShiftCache();
   }
 
-  /// Registers [port] as the render object driving this controller.
+  /// Registers [port] as the render object driving this controller, and
+  /// beside it [sampleWithoutOwnPreview], the render's sampler of a point
+  /// on the lattice as it would paint without the open own-preview
+  /// scope's preview, which [trackSampleWithoutOwnPreview] calls.
   ///
   /// Called from `RenderBoardViewport.attach`, and idempotent, because a
   /// `GlobalKey` move detaches and reattaches. A second registration by a
   /// DIFFERENT render object replaces the first, which is the order a
   /// `GlobalKey` move produces: the new render object attaches before the
   /// old one detaches.
-  void attachRenderPort(BoardRenderPort<TKey> port) {
+  void attachRenderPort(
+    BoardRenderPort<TKey> port, {
+    ({BoardAxisSample row, BoardAxisSample col})? Function(
+      Offset local,
+      double? verticalPixels,
+      double? horizontalPixels,
+    )?
+    sampleWithoutOwnPreview,
+  }) {
     _assertNotDisposed();
     _renderPort = port;
+    _sampleWithoutOwnPreview = sampleWithoutOwnPreview;
   }
 
-  /// Clears the registration [attachRenderPort] made, and ONLY when the
-  /// registered port IS [port].
+  /// Clears the registration [attachRenderPort] made, the port and its
+  /// sampler, and ONLY when the registered port IS [port].
   ///
   /// The identity test is what keeps a `GlobalKey` move from clearing a
   /// live binding: the new render object has already registered by the
@@ -595,7 +687,36 @@ extension BoardControllerInternals<TKey, TItem>
       // ScrollPosition that is no longer in a tree.
       _orchestrator.cancelInFlight();
       _renderPort = null;
+      _sampleWithoutOwnPreview = null;
     }
+  }
+
+  /// Internal-use channel for the drag layer; not part of the supported
+  /// surface. [port]'s `trackSampleAt` of [local], taken on the lattice as
+  /// it would paint without the open own-preview scope's preview: the
+  /// sampler the registered render object passed to [attachRenderPort]
+  /// when [port] IS that render object, and [port]'s own `trackSampleAt`
+  /// otherwise, so a port that is not this board's, a test's fake
+  /// included, samples the lattice as it paints. [verticalPixels] and
+  /// [horizontalPixels] are as `trackSampleAt` takes them; where neither
+  /// names an offset the sample is read at the scroll offset the content
+  /// axis would have without that preview, which its `scrollPixels`
+  /// records.
+  ({BoardAxisSample row, BoardAxisSample col})? trackSampleWithoutOwnPreview(
+    BoardRenderPort<TKey> port,
+    Offset local, {
+    double? verticalPixels,
+    double? horizontalPixels,
+  }) {
+    final sampler = _sampleWithoutOwnPreview;
+    if (sampler == null || !identical(port, _renderPort)) {
+      return port.trackSampleAt(
+        local,
+        verticalPixels: verticalPixels,
+        horizontalPixels: horizontalPixels,
+      );
+    }
+    return sampler(local, verticalPixels, horizontalPixels);
   }
 
   /// The narrow read interface the render layer binds to. Read off the

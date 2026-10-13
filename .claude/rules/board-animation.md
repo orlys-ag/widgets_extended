@@ -110,4 +110,24 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   resize hold, its lead, band and vacate and that id's closing extent, on
   its clock, neither folded nor removed, so a commit made inside a
   cancelled resize's close continues only what it discards while that
-  hold finishes closing in lockstep).
+  hold finishes closing in lockstep; an OWN-PREVIEW SCOPE, an epoch
+  `beginOwnPreview` opens and only `endOwnPreview` of that same epoch
+  closes, each change of the epoch emptying the per-board JOIN RECORD
+  through `_emptyOwnRecord`: while a scope is open every write that
+  changes a held offset, band or vacate or a slot (a creation, a
+  re-target that writes, a re-base that moves or creates one) JOINS it,
+  its pair, `(id, kind)` or a slot's `(track, lane)`, recorded once in
+  an open-addressed `_PairTable` over typed buffers kept across scopes,
+  with its REMAINDER beside it, the share that entry held for whoever
+  wrote it before (its value at a restart, its `from` at a re-base, zero
+  for a creation or a snap), a re-target taking the entry's new `from`
+  and a recorded pair's decayed remainder from ONE curve evaluation and
+  writing that remainder into the record in place, `_retargetOffset` and
+  `_retargetSlot` alike, and a lead or an extent never joins; each
+  removal from `_held`, `_heldBand`, `_heldVacate` or `_slots` drops its
+  pair, so the record holds only standing entries and a toggled
+  neighbour never adds a second pair; the reads named `WithoutOwn`
+  answer a recorded entry's FOREIGN value, its remainder decaying on the
+  entry's own clock, clamped as the value's is and zero when snapped,
+  and every other entry whole, and a changed clock first turns a moving
+  recorded entry's foreign value into its remainder).

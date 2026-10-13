@@ -70,7 +70,10 @@ class BoardDropTarget {
 }
 
 /// One paint-space point sampled on both axes: the non-null answer of
-/// `BoardRenderPort.trackSampleAt`.
+/// `BoardRenderPort.trackSampleAt`, or, for a resize, of the board
+/// controller's internal `trackSampleWithoutOwnPreview`, which samples
+/// the lattice as it would paint without the session's own make-room
+/// preview.
 typedef BoardPointSample = ({BoardAxisSample row, BoardAxisSample col});
 
 /// One anchor's samples at the lift, per axis. A component is null where

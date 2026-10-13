@@ -1,6 +1,9 @@
 /// The narrow contract the board's collaborators use to reach the render
 /// object: geometry, scroll positions, and the two pin operations a drag
-/// session needs.
+/// session needs. The drag's one read beside it is a resize's sample of
+/// the lattice as it would paint without that session's own make-room
+/// preview, which the render object registers as a sampler beside itself
+/// and `BoardControllerInternals.trackSampleWithoutOwnPreview` calls.
 ///
 /// `RenderBoardViewport.attach` registers itself through
 /// `BoardControllerInternals.attachRenderPort`, whose parameter type is this
@@ -138,7 +141,11 @@ abstract interface class BoardRenderPort<TKey> {
   /// it. Null exactly when [trackSpaceAt] is. A null sample leaves the
   /// drag session's target UNCHANGED and installs no gap.
   ///
-  /// This is the ONE producer of a fractional track coordinate.
+  /// This is the ONE producer of a fractional track coordinate of the
+  /// lattice as it paints. The controller's internal
+  /// `trackSampleWithoutOwnPreview` samples through the same mapping of
+  /// the board's render object the lattice as it would paint without a
+  /// resize session's own make-room preview.
   ///
   /// [verticalPixels] and [horizontalPixels] sample the point as the
   /// board would at those scroll offsets, each null for the board's own:
