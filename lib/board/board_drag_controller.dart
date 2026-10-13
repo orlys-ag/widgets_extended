@@ -217,6 +217,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // scan even when the pointer's placement has not moved.
     _lastResolvedSpan = null;
     _lastResolvedWindows = null;
+    _heldResizeSample = null;
     _scheduleResolve();
   }
 
@@ -247,6 +248,15 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// window by a grid step while the span stays the same, and a nudge
   /// chosen from the old window would otherwise stand.
   ({BoardStartWindow rows, BoardStartWindow cols})? _lastResolvedWindows;
+
+  /// A RESIZE's sample on its resized axis from the last [_resolve] that
+  /// reached the resolver, null for a move. A sample within the
+  /// tolerance of it resolves nothing ([_holdsResizeSample]): the
+  /// lattice a resize samples is computed afresh per sample, and a
+  /// pointer on a snap's tie would otherwise flip the target between two
+  /// spans on rounding alone. Cleared wherever [_lastResolvedSpan] is, so
+  /// a new config, a board change and a new session resolve again.
+  BoardAxisSample? _heldResizeSample;
 
   /// Whether a post-frame re-resolve is already scheduled for this
   /// frame, so a frame with several animation dispatches resolves once.
@@ -980,6 +990,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _currentTarget = null;
     _lastResolvedSpan = null;
     _lastResolvedWindows = null;
+    _heldResizeSample = null;
     _pointerPosition.value = null;
     _movedItem.value = null;
     notifyListeners();
@@ -991,7 +1002,9 @@ class BoardDragController<TKey> extends ChangeNotifier {
   ///
   /// Takes every sample the resolver reads, once per resolve: the
   /// pointer's, and for a move the proxy's content-leading corner's and
-  /// its centre's. A null sample leaves the target unchanged. With the
+  /// its centre's. A null sample leaves the target unchanged, and so does
+  /// a resize's sample within the tolerance of the last one it resolved
+  /// ([_heldResizeSample]). With the
   /// current samples in hand it RE-DERIVES a lift sample taken under
   /// other axis configs (a different track count or band bound on an
   /// axis): the sample the lift point gives at the lift's scroll offsets
@@ -1052,7 +1065,14 @@ class BoardDragController<TKey> extends ChangeNotifier {
       windows = (rows: answer.rows, cols: answer.cols);
     } else {
       // A resize resolves from the pointer's displacement since the
-      // lift, in track space.
+      // lift, in track space, and only once its resized axis's sample
+      // has moved past the tolerance since the last resolve.
+      final sample = _resizedAxisSampleOf(session.kind, pointer);
+      final held = _heldResizeSample;
+      if (held != null && _holdsResizeSample(held, sample)) {
+        return;
+      }
+      _heldResizeSample = sample;
       session.liftPointer = _rederived(
         port,
         session.liftPointer,
@@ -1118,6 +1138,48 @@ class BoardDragController<TKey> extends ChangeNotifier {
     );
     notifyListeners();
     _reportTarget(session);
+  }
+
+  /// The sample a resize of [kind] reads: its resized axis's.
+  static BoardAxisSample _resizedAxisSampleOf(
+    BoardDragKind kind,
+    BoardPointSample pointer,
+  ) {
+    return kind == BoardDragKind.resizeRowStart ||
+            kind == BoardDragKind.resizeRowEnd
+        ? pointer.row
+        : pointer.col;
+  }
+
+  /// Whether a resize's sample [now] resolves to what [held] did: the
+  /// same band, track count and band bounds, the same visible bounds
+  /// present, and its coordinates (track space) and scroll offset
+  /// (pixels) each within [precisionErrorTolerance] of [held]'s. Compares
+  /// fields and allocates nothing.
+  static bool _holdsResizeSample(BoardAxisSample held, BoardAxisSample now) {
+    return held.band == now.band &&
+        held.trackCount == now.trackCount &&
+        held.leadingBandEnd == now.leadingBandEnd &&
+        held.trailingBandStart == now.trailingBandStart &&
+        _within(held.painted, now.painted) &&
+        _within(held.paintedExtended, now.paintedExtended) &&
+        _within(held.scrolled, now.scrolled) &&
+        _within(held.scrollPixels, now.scrollPixels) &&
+        _withinOrAbsent(held.visibleFrom, now.visibleFrom) &&
+        _withinOrAbsent(held.visibleTo, now.visibleTo);
+  }
+
+  static bool _within(double a, double b) {
+    return (a - b).abs() <= precisionErrorTolerance;
+  }
+
+  /// [_within] for an optional bound: both absent, or both present and
+  /// within the tolerance.
+  static bool _withinOrAbsent(double? a, double? b) {
+    if (a == null || b == null) {
+      return a == null && b == null;
+    }
+    return _within(a, b);
   }
 
   /// The band [key] is pinned in on each axis, as [sample]'s bounds give
@@ -1494,6 +1556,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
   void _handleStructuralChange(Set<TKey>? affectedKeys) {
     _lastResolvedSpan = null;
     _lastResolvedWindows = null;
+    _heldResizeSample = null;
     _scheduleResolve();
   }
 

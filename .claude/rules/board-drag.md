@@ -40,7 +40,14 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   pointer rests on and a freed placement is accepted, an occupied one
   withdrawn, before the release (the re-send of an unchanged preview it
   can cause costs one layout through the engine's generation, once per
-  change). A second pointer landing on a host whose own session runs
+  change). A RESIZE resolves again only when the sample on its resized
+  axis moved past `precisionErrorTolerance` since the last one that
+  reached the resolver (`_heldResizeSample`): same band, track count,
+  band bounds and visible bounds present, coordinates and scroll offset
+  within the tolerance, so a pointer on a snap's tie cannot flip the
+  target on rounding alone; the config setter, the structural handler
+  and teardown clear it where they clear the early-out's record. Moves
+  do not hold. A second pointer landing on a host whose own session runs
   is IGNORED rather than re-arming it, so a second finger never ends the
   drag the first is making. The config's three lifecycle callbacks go
   through ONE FIFO queue on the controller (`_notifyApp`), drained in a
