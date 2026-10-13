@@ -151,9 +151,9 @@ List<int> _controllerOwnSlotTracks(BoardController<String, _Item> controller) {
   ];
 }
 
-/// Criterion 1's board, B: content-sized rows carrying 18 px lanes under
-/// a 4 px padding over seven 40 px columns, `a` laned in row 1 and `d` on
-/// rows [0, 2), unlaned; [rows] replaces the row axis, and [extra] adds
+/// Content-sized rows carrying 18 px lanes under a 4 px padding over
+/// seven 40 px columns, `a` laned in row 1 and `d` on rows [0, 2),
+/// unlaned; [rows] replaces the row axis, and [extra] adds
 /// one single-row item laned in each of rows 3, 4 and 5 at columns
 /// [5, 7). Mounted in a 280 x 300 frame of 10 px cells.
 Future<BoardController<String, _Item>> _board(

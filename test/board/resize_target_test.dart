@@ -206,8 +206,9 @@ double _endRow(BoardDragController<String> drag) {
   return drag.currentTarget!.span.endTrackOn(Axis.vertical);
 }
 
-/// Criterion 1's items on [_rowsLaned]: `a` in row 1, so row 1 is 22 px,
-/// and `d` on rows [0, 2), unlaned.
+/// Items on [_rowsLaned] that a resize of `d`'s leading edge into row 1
+/// lanes `d` among: `a` in row 1, so row 1 is 22 px, and `d` on rows
+/// [0, 2), unlaned.
 void _addJoinItems(BoardController<String, _Item> controller) {
   controller.addItem(
     const _Item("a"),
@@ -219,8 +220,9 @@ void _addJoinItems(BoardController<String, _Item> controller) {
   );
 }
 
-/// Criterion 3's items on [_rowsLaned], in [row]: `a` and `d` laned
-/// there, so the row is 40 px, `d` on lane 0.
+/// Items on [_rowsLaned] that a resize of `d`'s trailing edge out of
+/// [row] de-lanes `d` from: `a` and `d` laned in [row], so it is 40 px,
+/// `d` on lane 0.
 void _addDelaneItems(BoardController<String, _Item> controller, {int row = 0}) {
   controller.addItem(
     const _Item("a"),
@@ -233,11 +235,11 @@ void _addDelaneItems(BoardController<String, _Item> controller, {int row = 0}) {
 }
 
 /// The target a lift of `d`'s leading edge at (40, 9) moved to (40, 20)
-/// resolves on criterion 1's board.
+/// resolves among [_addJoinItems]' items.
 const BoardSpan _joinTarget = BoardSpan(rowStart: 1, colStart: 0, colSpan: 5);
 
 /// The target a lift of `d`'s trailing edge at (40, 20) moved to (40, 50)
-/// resolves on criterion 3's board.
+/// resolves among [_addDelaneItems]' items in row 0.
 const BoardSpan _delaneTarget = BoardSpan(
   rowStart: 0,
   colStart: 0,
@@ -245,7 +247,7 @@ const BoardSpan _delaneTarget = BoardSpan(
   colSpan: 5,
 );
 
-/// `d`'s stored span on criterion 1's board.
+/// `d`'s stored span among [_addJoinItems]' items.
 const BoardSpan _joinStored = BoardSpan(
   rowStart: 0,
   colStart: 0,
@@ -1372,7 +1374,8 @@ void main() {
           drag.endDrag(cancel: true);
           await tester.pumpAndSettle(_frame);
         } else {
-          // (iii) R2's session, cancelled while its slot animates.
+          // (iii) A resize that lanes `d` in row 1, cancelled while its
+          // slot animates.
           _lift(
             tester,
             drag,

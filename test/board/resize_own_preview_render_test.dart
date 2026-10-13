@@ -104,8 +104,9 @@ Future<RenderBoardViewport<String>> _mount(
       .single;
 }
 
-/// Criterion 1's items: `a` laned in row 1, so row 1 is 22 px, and `d`
-/// on rows [0, 2), unlaned.
+/// Items that a resize of `d`'s leading edge into row 1 lanes `d` among:
+/// `a` laned in row 1, so row 1 is 22 px, and `d` on rows [0, 2),
+/// unlaned.
 void _addJoinItems(BoardController<String, _Item> controller) {
   controller.addItem(
     const _Item("a"),
@@ -117,8 +118,8 @@ void _addJoinItems(BoardController<String, _Item> controller) {
   );
 }
 
-/// Criterion 3's items in [row]: `a` and `d` laned there, so the row is
-/// 40 px, `d` on lane 0.
+/// Items that a resize of `d`'s trailing edge out of [row] de-lanes `d`
+/// from: `a` and `d` laned in [row], so it is 40 px, `d` on lane 0.
 void _addDelaneItems(BoardController<String, _Item> controller, {int row = 0}) {
   controller.addItem(
     const _Item("a"),
@@ -201,7 +202,7 @@ int _opsOfSample(
   return fenwick.debugOpCount;
 }
 
-/// S2 (a)'s board and install: B40 under [_animated], criterion 3's
+/// Forty content-sized rows under [_animated] with [_addDelaneItems]'
 /// items in row 0, a scope open, `d` installed at rows [0, 3) and the
 /// rows scrolled to 45, so the vacate above the anchor pulls the pixels
 /// from 45 to 27 over 20 pumps.
@@ -219,8 +220,8 @@ _vacateAboveAnchor(WidgetTester tester) async {
   return (controller, viewport, epoch);
 }
 
-/// R11's board: B40 under motion off, criterion 3's items in row 39, at
-/// the scroll offset [pixels] after one pump.
+/// Forty content-sized rows under motion off with [_addDelaneItems]'
+/// items in row 39, at the scroll offset [pixels] after one pump.
 Future<(BoardController<String, _Item>, RenderBoardViewport<String>)>
 _vacateAtEnd(WidgetTester tester, double pixels) async {
   final controller = _rowsLaned(tester, rowCount: 40);
@@ -416,8 +417,8 @@ void main() {
 
   group("the own scroll shift resets with the own data and follows the zoom "
       "anchor", () {
-    /// S2 (a)'s board after its 20 pumps: pixels 27, the shift -18, nothing
-    /// in motion.
+    /// [_vacateAboveAnchor]'s board after its 20 pumps: pixels 27, the
+    /// shift -18, nothing in motion.
     Future<(BoardController<String, _Item>, RenderBoardViewport<String>, int)>
     settled(WidgetTester tester) async {
       final (controller, viewport, epoch) = await _vacateAboveAnchor(tester);
@@ -700,7 +701,8 @@ void main() {
 
   group("with no own preview standing the own-free sample takes no own-free "
       "mode", () {
-    testWidgets("on B", (tester) async {
+    testWidgets("before a preview, after it closes and after its scope "
+        "ends", (tester) async {
       final controller = _rowsLaned(tester);
       _addJoinItems(controller);
       final viewport = await _mount(tester, controller);
