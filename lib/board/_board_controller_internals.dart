@@ -52,6 +52,17 @@ extension BoardControllerInternals<TKey, TItem>
     _lanes.debugBucketMemberReadCount = value;
   }
 
+  /// Debug-only: the render object's point-mapping calls in the own-free
+  /// mode, forwarded from the make-room engine, which keeps it beside the
+  /// own-preview scope that mode leaves out.
+  int get debugOwnFreeMappingCount {
+    return _anim.makeRoom.debugOwnFreeMappingCount;
+  }
+
+  set debugOwnFreeMappingCount(int value) {
+    _anim.makeRoom.debugOwnFreeMappingCount = value;
+  }
+
   /// Whether [id]'s span covers cell `(row, col)` by the span index's own
   /// two rules, so a per-cell listener rebuilds exactly when [itemsAt]
   /// would list the item. Internal-use, like [keyOfId].

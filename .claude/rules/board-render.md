@@ -115,9 +115,15 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   without the scope's own preview: an offset less `D(k)`, the own deltas
   of the own tracks below it, an extent less its own delta, the total
   and each band's extent less the deltas inside it, which moves the
-  region bounds, a track lookup a segment search over the own tracks
-  then one descent, and the scroll offset `P - S + R * f` at the live
-  pixels; everywhere else it is the painted mapping. The OWN TRACKS are
+  region bounds, a track lookup on settled offsets a segment search over
+  the OWN STARTS (the own-free start of the segment after each own
+  track, kept in a typed buffer beside the own deltas and rewritten
+  wherever their prefix sums are, from the settled offsets the axis
+  then stores) then one descent, and while a trackResize is in flight
+  the painted search over the own-free offsets, and the scroll offset
+  `P - S + R * f` at the live pixels; everywhere else it is the painted
+  mapping, and each call that takes the mode counts in the engine's
+  `debugOwnFreeMappingCount`. The OWN TRACKS are
   MARKED at the layout head, after the term refresh, from the scope's
   join record (each recorded laned id's lane-axis track, each recorded
   slot's track); each pass gives each own track it sized its OWN DELTA,
@@ -131,8 +137,13 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   `_applyContentDimensions`, which attributes a clamp after a change of
   the maximum and, where the position did not enforce its boundary, its
   whole move now and a residue for the spring-back that follows outside
-  layout. A changed key resets the data and the residue at the layout
-  head, and `S` to the zoom anchor's difference where it computed the
+  layout; the CLOSING RULE, after the pass loop and the drop, sets it to
+  zero once no own track and no residue stands, so a scroll the preview
+  left is the board's own once that preview has wholly closed, and with
+  no own track, residue or `S` a layout computes none of these rules,
+  the dimension rule only recording the maximum it passed. A changed
+  key resets the data and the residue at the layout head, and `S` to
+  the zoom anchor's difference where it computed the
   own-free target and to zero elsewhere, except that a measurement reset
   of the same instance drops only the own tracks, the stored extents
   holding no own contribution and neither scroll offset moving; a sample

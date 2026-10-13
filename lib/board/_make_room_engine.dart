@@ -530,6 +530,15 @@ class MakeRoomEngine {
   /// widget-level seam observes the cost.
   int debugResizeHoldReadCount = 0;
 
+  /// Debug-only: the point-mapping calls the render object has made in
+  /// its OWN-FREE mode, the lattice without the own-preview scope's
+  /// preview, since tests last assigned it 0. Here beside the scope that
+  /// mode leaves out, and forwarded by the controller's internals, because
+  /// the mode makes the same axis reads as the painted mapping does, so
+  /// no axis counter tells the two apart, and a field on the render object
+  /// would be a member of an exported type.
+  int debugOwnFreeMappingCount = 0;
+
   /// KEYED BY LANE-AXIS TRACK, and an emptied bucket is removed, so
   /// `_slots.isEmpty` is exactly "no slot exists". The sizing walk asks
   /// for one track at a time, once per track per obtain round per

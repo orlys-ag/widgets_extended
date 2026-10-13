@@ -456,10 +456,17 @@ void main() {
 
     testWidgets("(b) at a new scope", (tester) async {
       final (controller, viewport, _) = await settled(tester);
+      // The closing re-targets of `d`'s vacate and `a`'s offset join the
+      // new scope with their whole values as remainders, so row 0 is own
+      // at a zero delta.
       controller.beginOwnMakeRoomPreview();
-      viewport.markNeedsLayout();
+      _install(
+        controller,
+        const BoardSpan(rowStart: 0, colStart: 0, colSpan: 5),
+      );
       await tester.pump();
       expectSamples(controller, viewport);
+      await tester.pumpAndSettle(_frame);
     });
 
     testWidgets("(c) at a new axis instance whose two anchors agree", (
@@ -613,6 +620,40 @@ void main() {
   );
 
   testWidgets(
+    "a sample between a measurement reset and the next layout reads the "
+    "painted lattice",
+    (tester) async {
+      final controller = _rowsLaned(tester);
+      _addJoinItems(controller);
+      final viewport = await _mount(tester, controller);
+      controller.beginOwnMakeRoomPreview();
+      _install(controller, _joinSpan);
+      await tester.pump();
+      expect(
+        _ownFree(controller, viewport, const Offset(40.0, 20.0)).painted,
+        moreOrLessEquals(1.0 + 10.0 / 22.0, epsilon: 1e-9),
+      );
+      // The same instance under another lane padding: the setter resets
+      // the instance's measurements to the 80 px estimate, and no layout
+      // has run since.
+      controller.rows = BoardAxisConfig(
+        axis: controller.rows.axis,
+        laneExtent: 18.0,
+        lanePadding: 6.0,
+      );
+      const point = Offset(40.0, 100.0);
+      expect(
+        _painted(viewport, point).painted,
+        moreOrLessEquals(1.25, epsilon: 1e-9),
+      );
+      expect(
+        _ownFree(controller, viewport, point).painted,
+        moreOrLessEquals(1.25, epsilon: 1e-9),
+      );
+    },
+  );
+
+  testWidgets(
     "a standing own preview adds one lane-term read per own track per pass",
     (tester) async {
       for (final extra in <bool>[false, true]) {
@@ -657,10 +698,9 @@ void main() {
     },
   );
 
-  testWidgets(
-    "with no own preview the own-free sample reads the content axis as the "
-    "painted one",
-    (tester) async {
+  group("with no own preview standing the own-free sample takes no own-free "
+      "mode", () {
+    testWidgets("on B", (tester) async {
       final controller = _rowsLaned(tester);
       _addJoinItems(controller);
       final viewport = await _mount(tester, controller);
@@ -672,12 +712,14 @@ void main() {
           point,
           ownFree: false,
         );
+        controller.debugOwnFreeMappingCount = 0;
         final ownFree = _opsOfSample(
           controller,
           viewport,
           point,
           ownFree: true,
         );
+        expect(controller.debugOwnFreeMappingCount, 0, reason: state);
         expect(painted, 8, reason: state);
         expect(ownFree, painted, reason: state);
       }
@@ -687,7 +729,11 @@ void main() {
       expectPaintedCost("a scope and no install");
       _install(controller, _joinSpan);
       await tester.pump();
-      expect(_opsOfSample(controller, viewport, point, ownFree: true), 9);
+      // The preview standing: the row axis's one mapping takes the mode,
+      // and its segment search reads the own starts, no axis offset.
+      controller.debugOwnFreeMappingCount = 0;
+      expect(_opsOfSample(controller, viewport, point, ownFree: true), 8);
+      expect(controller.debugOwnFreeMappingCount, 1);
       _install(controller, _joinStored);
       await tester.pump();
       expectPaintedCost("the scope open after the preview stood and closed");
@@ -695,6 +741,64 @@ void main() {
       await tester.pump();
       controller.endOwnMakeRoomPreview(epoch);
       expectPaintedCost("the preview standing after the scope's end");
+    });
+
+    testWidgets("after a scroll a closed preview left", (tester) async {
+      final (controller, viewport) = await _vacateAtEnd(tester, 130.0);
+      final position = viewport.verticalPosition!;
+      controller.beginOwnMakeRoomPreview();
+      _install(controller, _endTarget);
+      await tester.pump();
+      expect(position.pixels, 112.0);
+      _install(
+        controller,
+        const BoardSpan(rowStart: 39, colStart: 0, colSpan: 5),
+      );
+      await tester.pump();
+      expect(position.pixels, 112.0);
+      expect(controller.makeRoomOwnIdCount, 0);
+      expect(controller.makeRoomOwnSlotTrackCount, 0);
+      const point = Offset(40.0, 236.0);
+      controller.debugOwnFreeMappingCount = 0;
+      final ownFree = _ownFree(controller, viewport, point);
+      expect(controller.debugOwnFreeMappingCount, 0);
+      expect(ownFree.painted, moreOrLessEquals(34.8, epsilon: 1e-9));
+      expect(
+        _painted(viewport, point).painted,
+        moreOrLessEquals(34.8, epsilon: 1e-9),
+      );
+    });
+  });
+
+  testWidgets(
+    "with a scope open and no own preview standing a layout reads the axis "
+    "as with no scope",
+    (tester) async {
+      final ops = <bool, List<int>>{};
+      for (final scoped in <bool>[false, true]) {
+        final controller = _rowsLaned(tester);
+        _addJoinItems(controller);
+        final viewport = await _mount(tester, controller);
+        final fenwick = (controller.rows.axis as LazyContentAxis).debugFenwick;
+        Future<int> opsOverForcedLayout() async {
+          fenwick.debugOpCount = 0;
+          viewport.markNeedsLayout();
+          await tester.pump();
+          return fenwick.debugOpCount;
+        }
+
+        if (scoped) {
+          controller.beginOwnMakeRoomPreview();
+        }
+        final idle = await opsOverForcedLayout();
+        // The install a resize's first resolve makes, at its stored span.
+        _install(controller, _joinStored);
+        await tester.pump();
+        final stored = await opsOverForcedLayout();
+        ops[scoped] = <int>[idle, stored];
+        controller.releaseMakeRoomPreview();
+      }
+      expect(ops[true], ops[false]);
     },
   );
 

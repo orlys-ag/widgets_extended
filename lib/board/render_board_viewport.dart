@@ -306,11 +306,15 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// it, a content-space length: the stored extent minus the extent it
   /// would size to without that preview) and, in [_ownPrefix], the sum of
   /// the deltas below it, so `_ownPrefix[i]` is the sum over the first `i`
-  /// own tracks. Typed buffers grown by doubling and kept across scopes.
+  /// own tracks; beside them the OWN STARTS, `_ownStarts[j]` the own-free
+  /// content offset of the track after own track `j`, where the segment of
+  /// tracks up to the next own track begins (infinite past the last
+  /// track). Typed buffers grown by doubling and kept across scopes.
   Int32List? _ownTracks;
   Uint8List? _ownMarks;
   Float64List? _ownDeltas;
   Float64List? _ownPrefix;
+  Float64List? _ownStarts;
   int _ownCount = 0;
 
   /// The OWN SCROLL SHIFT, the content axis's scroll offset minus the one
@@ -320,7 +324,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// [_ownResidueFrom] to [_ownResidueTo]. Content-space lengths on the
   /// content axis, written in layout only: by the pass correction's own
   /// share, the layout head's reset ([_ownShiftAtSwap]) and its fold of
-  /// the residue, and [_applyContentDimensions].
+  /// the residue, [_applyContentDimensions], and the CLOSING RULE after
+  /// the pass loop, which zeroes the shift once no own track and no
+  /// residue stands, so it stands only while some of the preview does.
   double _ownScrollShift = 0.0;
   bool _hasOwnResidue = false;
   double _ownResidue = 0.0;
@@ -1165,6 +1171,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     }
 
     _dropUnmarkedOwnTracks();
+    // THE CLOSING RULE, after both calls of [_applyContentDimensions]: once
+    // no own track and no residue stands, the scope's preview has wholly
+    // closed, and a scroll it left is the board's own from here on.
+    if (_ownCount == 0 && !_hasOwnResidue) {
+      _ownScrollShift = 0.0;
+    }
     // A resize preview's GEOMETRY targets, re-derived after the passes,
     // whose sizing can move any track, and before the positioning sweep
     // reads them: over the lattice as it now paints, the trackResize
@@ -1960,6 +1972,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     _ownMarks = nextMarks;
     _ownDeltas = nextDeltas;
     _ownPrefix = Float64List(capacity + 1);
+    _ownStarts = Float64List(capacity);
   }
 
   /// The position of the first own track at or past [track]: a binary
@@ -1979,17 +1992,29 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     return lo;
   }
 
+  /// Rebuilds the prefix sums of the own deltas and, wherever they are
+  /// rebuilt, the own starts from the settled offsets the content axis
+  /// stores now, which only the sizing step and a measurement reset
+  /// change; the own-data key covers the reset.
   void _rebuildOwnPrefix() {
     if (_ownCount == 0) {
       return;
     }
+    final tracks = _ownTracks!;
     final deltas = _ownDeltas!;
     final prefix = _ownPrefix!;
+    final starts = _ownStarts!;
+    final axis = _contentAxisInstance!;
+    final count = axis.trackCount;
     var sum = 0.0;
     prefix[0] = 0.0;
     for (var index = 0; index < _ownCount; index++) {
       sum += deltas[index];
       prefix[index + 1] = sum;
+      final first = tracks[index] + 1;
+      starts[index] = first >= count
+          ? double.infinity
+          : axis.offsetOf(first) - sum;
     }
   }
 
@@ -2143,14 +2168,17 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   /// The own-free lattice's track at its content-space [content] on
-  /// [axisEnum], settled or [animated] as the mapping reads it: a SEGMENT
-  /// SEARCH, then one lookup of the axis's own. Over the tracks after own
-  /// track `o(j)` through `o(j + 1)` the own-free offset is the painted
-  /// one less one constant, `_ownPrefix[j]`, so the binary search compares
-  /// [content] with each segment's own-free start, and the track is the
-  /// axis's lookup at [content] plus that constant, clamped into the
-  /// segment, which an own shrink of its last track widens past where the
-  /// painted lookup ends it.
+  /// [axisEnum], settled or [animated] as the mapping reads it, in the
+  /// painted lookup's two forms. While a trackResize is in flight an
+  /// [animated] lookup is the painted binary search over the axis's
+  /// tracks, on each probe's animated offset less the own deltas below it.
+  /// On settled offsets it is a SEGMENT SEARCH, then one lookup of the
+  /// axis's own: over the tracks after own track `o(j)` through `o(j + 1)`
+  /// the own-free offset is the settled one less one constant,
+  /// `_ownPrefix[j + 1]`, so the binary search compares [content] with the
+  /// own starts, and the track is the axis's lookup at [content] plus that
+  /// constant, clamped into the segment, which an own shrink of its last
+  /// track widens past where the painted lookup ends it.
   int _ownFreeTrackAt(
     Axis axisEnum,
     BoardAxis axis,
@@ -2159,31 +2187,33 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }) {
     final tracks = _ownTracks!;
     final prefix = _ownPrefix!;
-    final count = axis.trackCount;
+    if (animated && _controller.anim.hasActiveTrackResize) {
+      var lo = 0;
+      var hi = axis.trackCount - 1;
+      while (lo < hi) {
+        final mid = (lo + hi + 1) >> 1;
+        if (_animatedOffsetOf(axisEnum, axis, mid) - prefix[_ownIndexOf(mid)] <=
+            content) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return lo;
+    }
+    final starts = _ownStarts!;
     var lo = 0;
     var hi = _ownCount;
     while (lo < hi) {
       final mid = (lo + hi + 1) >> 1;
-      final first = tracks[mid - 1] + 1;
-      if (first >= count) {
-        hi = mid - 1;
-        continue;
-      }
-      final start =
-          (animated
-              ? _animatedOffsetOf(axisEnum, axis, first)
-              : axis.offsetOf(first)) -
-          prefix[mid];
-      if (start <= content) {
+      if (starts[mid - 1] <= content) {
         lo = mid;
       } else {
         hi = mid - 1;
       }
     }
     final at = math.max(0.0, content + prefix[lo]);
-    var track = animated
-        ? _animatedTrackAt(axisEnum, axis, at)
-        : axis.trackAt(at);
+    var track = axis.trackAt(at);
     if (lo < _ownCount && track > tracks[lo]) {
       track = tracks[lo];
     }
@@ -2915,7 +2945,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final extent = viewportDimension;
     final contentAxis = _contentAxis;
     final contentOffset = _contentViewportOffset;
-    final before = contentOffset != null && contentOffset.hasPixels
+    // With no own track, residue or shift standing there is nothing to
+    // attribute, and the position is not read for it.
+    final ownStands = _ownCount > 0 || _hasOwnResidue || _ownScrollShift != 0.0;
+    final before = ownStands && contentOffset != null && contentOffset.hasPixels
         ? contentOffset.pixels
         : null;
     final verticalMax = math.max(
@@ -2939,8 +2972,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       final maxPassed = vertical ? verticalMax : horizontalMax;
       final changed = maxPassed != _lastContentMaxPassed;
       _lastContentMaxPassed = maxPassed;
-      if (before != null &&
-          (_ownCount > 0 || _hasOwnResidue || _ownScrollShift != 0.0)) {
+      if (before != null) {
         _attributeOwnScroll(
           before,
           contentOffset!.pixels,
@@ -3678,11 +3710,12 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// acts ([_ownFreeOn]): every content-axis read is own-free, an offset
   /// less `D(k)`, the own deltas below its track, an extent less its own
   /// delta, the total and each band's extent less the deltas inside it,
-  /// which moves the region bounds, a track lookup the segment search of
+  /// which moves the region bounds, a track lookup through
   /// [_ownFreeTrackAt], and the scroll offset the one given or the
   /// own-free one ([_ownFreePixelsAt]). Everywhere else every read is the
-  /// painted one. Reversal needs nothing of its own: the mode acts on
-  /// normalized coordinates.
+  /// painted one. Each call that takes the mode adds one to the
+  /// controller's `debugOwnFreeMappingCount`. Reversal needs nothing of
+  /// its own: the mode acts on normalized coordinates.
   ({BoardAxisSample sample, double? contained})? _trackCoordinateAt(
     Axis axis,
     double paint, {
@@ -3691,6 +3724,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }) {
     final vertical = axis == Axis.vertical;
     final own = withoutOwnPreview && _ownFreeOn(axis);
+    if (own) {
+      _controller.debugOwnFreeMappingCount += 1;
+    }
     final livePixels = vertical
         ? verticalOffset.pixels
         : horizontalOffset.pixels;
