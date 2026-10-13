@@ -1730,6 +1730,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// contribution, padding included, scaled by the share it has not yet
   /// vacated, so the track gives up exactly what the commit will take.
   /// Lane resolution ran at the layout head.
+  @pragma("vm:prefer-inline")
   void _laneTermOf(
     int track,
     BoardAxisConfig config,
