@@ -181,6 +181,112 @@ class _JitterPort implements BoardRenderPort<String> {
   }
 }
 
+/// The viewport behind a port whose row samples read half a track
+/// further on than the viewport's.
+class _ShiftedPort extends _JitterPort {
+  _ShiftedPort(super.inner);
+
+  @override
+  ({BoardAxisSample row, BoardAxisSample col})? trackSampleAt(
+    Offset local, {
+    double? verticalPixels,
+    double? horizontalPixels,
+  }) {
+    final sample = _inner.trackSampleAt(
+      local,
+      verticalPixels: verticalPixels,
+      horizontalPixels: horizontalPixels,
+    );
+    if (sample == null) {
+      return null;
+    }
+    final row = sample.row;
+    return (
+      row: (
+        painted: row.painted + 0.5,
+        paintedExtended: row.paintedExtended + 0.5,
+        scrolled: row.scrolled + 0.5,
+        scrollPixels: row.scrollPixels,
+        band: row.band,
+        visibleFrom: row.visibleFrom,
+        visibleTo: row.visibleTo,
+        trackCount: row.trackCount,
+        leadingBandEnd: row.leadingBandEnd,
+        trailingBandStart: row.trailingBandStart,
+      ),
+      col: sample.col,
+    );
+  }
+}
+
+/// Seven 40 px rows over seven 40 px columns with `m` at row 0, column
+/// 1, mounted in a 280 x 300 frame and unmounted before the controller's
+/// own teardown disposes it. Returns the frame's top-left too.
+Future<(BoardController<String, _Item>, RenderBoardViewport<String>, Offset)>
+_mountUniform(WidgetTester tester) async {
+  final controller = BoardController<String, _Item>(
+    vsync: tester,
+    rows: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
+    columns: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
+    keyOf: (item) {
+      return item.key;
+    },
+    animationStyle: BoardAnimationStyle.disabled,
+  );
+  addTearDown(controller.dispose);
+  controller.addItem(
+    const _Item("m"),
+    const BoardSpan(rowStart: 0, colStart: 1),
+  );
+  addTearDown(() async {
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            key: _frameKey,
+            width: 280.0,
+            height: 300.0,
+            child: Board<String, _Item>(
+              controller: controller,
+              cellBuilder: (context, view) {
+                return const SizedBox(width: 40.0, height: 40.0);
+              },
+              itemBuilder: (context, item) {
+                return const ColoredBox(color: Color(0xFF4CAF50));
+              },
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  final viewport = tester.allRenderObjects
+      .whereType<RenderBoardViewport<String>>()
+      .single;
+  return (controller, viewport, tester.getRect(find.byKey(_frameKey)).topLeft);
+}
+
+/// A resize config under [snap] with no autoscroll and every edge.
+BoardDragConfig<String> _resizeConfig(
+  BoardController<String, _Item> controller,
+  BoardSnap snap,
+) {
+  return BoardDragConfig<String>(
+    snap: snap,
+    autoScrollEdgeZone: 0.0,
+    resizeEdges: BoardResizeEdges.both,
+    primaryResizeEdges: BoardResizeEdges.both,
+    onItemMoved: (key, span) {},
+    onItemResized: (key, span) {
+      controller.resizeItem(key, span);
+    },
+  );
+}
+
 void main() {
   testWidgets(
     "a resize sample within the tolerance of the last one resolves nothing",
@@ -263,6 +369,92 @@ void main() {
         expect(drag.currentTarget?.span, target, reason: "pump $pump");
       }
       drag.endDrag(cancel: true);
+    },
+  );
+
+  testWidgets("a resize started where the last one ended resolves at once", (
+    tester,
+  ) async {
+    final (controller, viewport, frame) = await _mountUniform(tester);
+    final drag = BoardDragController<String>(
+      boardController: controller,
+      vsync: tester,
+      config: _resizeConfig(controller, const BoardSnap.track()),
+    );
+    addTearDown(drag.dispose);
+    const stored = BoardSpan(rowStart: 0, colStart: 1);
+    for (final session in <int>[1, 2]) {
+      expect(
+        drag.startDrag(
+          key: "m",
+          renderPort: viewport,
+          pointerGlobal: frame + const Offset(60.0, 20.0),
+          edge: BoardResizeEdges.trailing,
+          axis: Axis.vertical,
+        ),
+        isTrue,
+      );
+      expect(drag.currentTarget?.span, stored, reason: "session $session");
+      drag.endDrag(cancel: true);
+    }
+  });
+
+  testWidgets("a config change resolves a resize again under a still pointer", (
+    tester,
+  ) async {
+    final (controller, viewport, frame) = await _mountUniform(tester);
+    final drag = BoardDragController<String>(
+      boardController: controller,
+      vsync: tester,
+      config: _resizeConfig(controller, const BoardSnap.track()),
+    );
+    addTearDown(drag.dispose);
+    expect(
+      drag.startDrag(
+        key: "m",
+        renderPort: viewport,
+        pointerGlobal: frame + const Offset(60.0, 20.0),
+        edge: BoardResizeEdges.trailing,
+        axis: Axis.vertical,
+      ),
+      isTrue,
+    );
+    // From row 0.5 to row 1.75: the end moves from 1 to 2.25, which the
+    // track snap puts at 2 and a quarter-track snap at 2.25.
+    drag.updateDrag(frame + const Offset(60.0, 70.0));
+    expect(
+      drag.currentTarget?.span,
+      const BoardSpan(rowStart: 0, colStart: 1, rowSpan: 2),
+    );
+    drag.config = _resizeConfig(controller, const BoardSnap.fraction(0.25));
+    await tester.pump(_frame);
+    expect(
+      drag.currentTarget?.span,
+      const BoardSpan(
+        rowStart: 0,
+        colStart: 1,
+        rowSpan: 2,
+        rowSpanFraction: 0.25,
+      ),
+    );
+    drag.endDrag(cancel: true);
+  });
+
+  testWidgets(
+    "a resize through a port that is not the board's samples that port",
+    (tester) async {
+      final (controller, viewport, _) = await _mountUniform(tester);
+      final port = _ShiftedPort(viewport);
+      const point = Offset(60.0, 20.0);
+      expect(viewport.trackSampleAt(point)!.row.painted, 0.5);
+      expect(
+        controller.trackSampleWithoutOwnPreview(viewport, point)!.row.painted,
+        0.5,
+      );
+      expect(
+        controller.trackSampleWithoutOwnPreview(port, point)!.row.painted,
+        1.0,
+      );
     },
   );
 }
