@@ -8,6 +8,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// One call the fake API received, completed by the test.
@@ -496,5 +497,72 @@ void main() {
     final harness = await done.future;
     expect(errors, isEmpty);
     expect(harness.failures, isEmpty);
+  });
+
+  test("M8 the hours hold a new item and a change of an item's days or "
+      "minutes", () async {
+    const startError = <String, String>{
+      "startMinute":
+          "The start is 08:00 to 17:45, inside the calendar's hours.",
+    };
+    final harness = Harness();
+    final model = harness.model;
+    final early = task("item-1", DateTime(2026, 4, 21), 420, 540);
+    model.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<Map<String, Object?>>[early.toJson()]);
+    await settle();
+    model.hours = const DayHours(480, 1080);
+    final calls = harness.api.calls.length;
+
+    final created = errorOf(
+      model.create(
+        CalendarItem(
+          type: CalendarItemType.task,
+          title: "Late",
+          day: DateTime(2026, 4, 22),
+          startMinute: 1050,
+          endMinute: 1110,
+          fields: const <String, Object?>{"status": "toDo"},
+        ),
+      ),
+    );
+    final moved = errorOf(model.update(early.copyWith(day: weekLast)));
+    await settle();
+    expect(
+      created(),
+      isA<CalendarValidationException>().having(
+        (error) => error.fieldErrors,
+        "fieldErrors",
+        <String, String>{
+          "endMinute":
+              "The end is 08:15 to 18:00, inside the calendar's hours.",
+        },
+      ),
+    );
+    expect(
+      moved(),
+      isA<CalendarValidationException>().having(
+        (error) => error.fieldErrors,
+        "fieldErrors",
+        startError,
+      ),
+    );
+    expect(model.isLocked("item-1"), isFalse);
+
+    model.requestMove(early.copyWith(startMinute: 450, endMinute: 510));
+    expect(harness.failures, <String>[
+      const CalendarValidationException(startError).message,
+    ]);
+    expect(model.isLocked("item-1"), isFalse);
+    expect(harness.api.calls, hasLength(calls));
+
+    // A write that keeps the stored days and minutes is not held to them.
+    final renamed = model.update(early.copyWith(title: "Renamed"));
+    expect(harness.api.calls, hasLength(calls + 1));
+    harness.lastCall.succeed(early.copyWith(title: "Renamed").toJson());
+    await renamed;
+    model.requestMove(early.copyWith(startMinute: 480, endMinute: 600));
+    expect(harness.api.calls, hasLength(calls + 2));
+    expect(harness.lastCall.body!["startMinute"], 480);
   });
 }

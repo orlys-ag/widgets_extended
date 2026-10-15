@@ -1,5 +1,5 @@
-/// What the calendar's settings choose: the weekdays it shows and the
-/// hours it shows and schedules in.
+/// What the calendar's settings choose: the weekdays it shows, the hours
+/// it shows and schedules in, and the size of the timed grid's cells.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -112,5 +112,88 @@ class DayHours {
   @override
   String toString() {
     return "DayHours(${clockLabel(start)}-${clockLabel(end)})";
+  }
+}
+
+/// The field errors of an item from [start] to [end] minutes that does not
+/// lie in [hours], keyed as `validateItemJson` keys them: the start when it
+/// does not begin a slot inside them, the end when it does not end one.
+Map<String, String> hoursErrorsOf(int start, int end, DayHours hours) {
+  return <String, String>{
+    if (start < hours.start || start > hours.end - minutesPerSlot)
+      "startMinute":
+          "The start is ${clockLabel(hours.start)} to "
+          "${clockLabel(hours.end - minutesPerSlot)}, inside the calendar's "
+          "hours.",
+    if (end < hours.start + minutesPerSlot || end > hours.end)
+      "endMinute":
+          "The end is ${clockLabel(hours.start + minutesPerSlot)} to "
+          "${clockLabel(hours.end)}, inside the calendar's hours.",
+  };
+}
+
+/// The least day width the settings offer, which is the grid's default.
+const double minDayWidthLow = 44.0;
+
+/// The most day width the settings offer.
+const double minDayWidthHigh = 240.0;
+
+/// The least slot height the settings offer.
+const double minSlotHeightLow = 8.0;
+
+/// The most slot height the settings offer.
+const double minSlotHeightHigh = 48.0;
+
+/// The slot height the grid has before the settings change it.
+const double defaultMinSlotHeight = 16.0;
+
+/// What the settings sheet chooses: the [hours] the calendar shows and
+/// schedules in, and the least size of the timed grid's cells, which
+/// stretch past it to fill the grid.
+@immutable
+class CalendarSettings {
+  const CalendarSettings({
+    this.hours = DayHours.allDay,
+    this.minDayWidth = minDayWidthLow,
+    this.minSlotHeight = defaultMinSlotHeight,
+  });
+
+  final DayHours hours;
+
+  /// The least width of a day column, in logical pixels.
+  final double minDayWidth;
+
+  /// The least height of one slot, in logical pixels.
+  final double minSlotHeight;
+
+  CalendarSettings copyWith({
+    DayHours? hours,
+    double? minDayWidth,
+    double? minSlotHeight,
+  }) {
+    return CalendarSettings(
+      hours: hours ?? this.hours,
+      minDayWidth: minDayWidth ?? this.minDayWidth,
+      minSlotHeight: minSlotHeight ?? this.minSlotHeight,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is CalendarSettings &&
+        other.hours == hours &&
+        other.minDayWidth == minDayWidth &&
+        other.minSlotHeight == minSlotHeight;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(hours, minDayWidth, minSlotHeight);
+  }
+
+  @override
+  String toString() {
+    return "CalendarSettings($hours, day width $minDayWidth, slot height "
+        "$minSlotHeight)";
   }
 }

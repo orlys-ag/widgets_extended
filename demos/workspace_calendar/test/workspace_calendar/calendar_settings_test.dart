@@ -72,4 +72,79 @@ void main() {
       expect(hours(8 * 60, 18 * 60) == hours(9 * 60, 18 * 60), isFalse);
     });
   });
+
+  group("C3 hoursErrorsOf", () {
+    const office = DayHours(8 * 60, 18 * 60);
+    const startError =
+        "The start is 08:00 to 17:45, inside the calendar's "
+        "hours.";
+    const endError = "The end is 08:15 to 18:00, inside the calendar's hours.";
+
+    test("is empty for minutes inside the hours, to their edges", () {
+      expect(hoursErrorsOf(8 * 60, 18 * 60, office), isEmpty);
+      expect(hoursErrorsOf(17 * 60 + 45, 18 * 60, office), isEmpty);
+      expect(hoursErrorsOf(8 * 60, 8 * 60 + 15, office), isEmpty);
+    });
+
+    test("names a start or an end outside the hours", () {
+      expect(hoursErrorsOf(7 * 60 + 45, 9 * 60, office), <String, String>{
+        "startMinute": startError,
+      });
+      expect(hoursErrorsOf(17 * 60, 18 * 60 + 15, office), <String, String>{
+        "endMinute": endError,
+      });
+    });
+
+    test("names both for minutes wholly past either end", () {
+      expect(hoursErrorsOf(18 * 60, 18 * 60 + 15, office), <String, String>{
+        "startMinute": startError,
+        "endMinute": endError,
+      });
+      expect(hoursErrorsOf(7 * 60, 8 * 60, office), <String, String>{
+        "startMinute": startError,
+        "endMinute": endError,
+      });
+    });
+  });
+
+  group("C4 CalendarSettings", () {
+    test("starts on the whole day and the grid's own sizes", () {
+      const settings = CalendarSettings();
+      expect(settings.hours, DayHours.allDay);
+      expect(settings.minDayWidth, 44.0);
+      expect(settings.minSlotHeight, 16.0);
+    });
+
+    test("copyWith replaces what it is given and keeps the rest", () {
+      const settings = CalendarSettings();
+      const office = DayHours(8 * 60, 18 * 60);
+      final copy = settings.copyWith(hours: office);
+      expect(copy.hours, office);
+      expect(copy.minDayWidth, settings.minDayWidth);
+      expect(copy.minSlotHeight, settings.minSlotHeight);
+      expect(settings.copyWith(minDayWidth: 60.0).minDayWidth, 60.0);
+      expect(settings.copyWith(minSlotHeight: 24.0).minSlotHeight, 24.0);
+    });
+
+    test("compares by its values", () {
+      // Built at run time, as DayHours' own comparison test explains.
+      CalendarSettings settings({
+        int start = 0,
+        double width = 44.0,
+        double height = 16.0,
+      }) {
+        return CalendarSettings(
+          hours: DayHours(start, 24 * 60),
+          minDayWidth: width,
+          minSlotHeight: height,
+        );
+      }
+
+      expect(settings(), settings());
+      expect(settings().hashCode, settings().hashCode);
+      expect(settings() == settings(start: 60), isFalse);
+      expect(settings() == settings(width: 48.0), isFalse);
+      expect(settings() == settings(height: 18.0), isFalse);
+    });
+  });
 }

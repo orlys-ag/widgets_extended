@@ -20,12 +20,16 @@ import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
 const double _headerHeight = 40.0;
-const double _slotHeight = 16.0;
 const double _gutterWidth = 56.0;
-const double _minDayWidth = 44.0;
 
-/// The time the grid opens scrolled to.
+/// The time the grid opens scrolled to, where its hours hold it.
 const int _openingMinute = 8 * 60;
+
+/// The minute the grid opens scrolled to: [_openingMinute], or the nearer
+/// end of [hours] when they do not hold it.
+int _openingMinuteIn(DayHours hours) {
+  return _openingMinute.clamp(hours.start, hours.end - minutesPerSlot);
+}
 
 /// The style the grid animates its blocks with: the board's default.
 const BoardAnimationStyle timedGridAnimationStyle = BoardAnimationStyle();
@@ -38,6 +42,18 @@ ValueKey<String> dayHeaderKey(DateTime day) {
 /// The key of the block showing the item [id].
 ValueKey<String> blockKey(String id) {
   return ValueKey<String>("block-$id");
+}
+
+/// The key of the corner's count of the shown items the grid has no block
+/// for.
+const ValueKey<String> hiddenCountKey = ValueKey<String>("grid-hidden-count");
+
+/// What the corner's count of [count] items with no block says.
+String hiddenItemsLabel(int count) {
+  if (count == 1) {
+    return "1 item is outside the days or hours shown";
+  }
+  return "$count items are outside the days or hours shown";
 }
 
 /// The slots a create gesture picked: [dayCount] days from [day], each
@@ -309,21 +325,29 @@ CreateRange createRangeOver(
   );
 }
 
-/// The [dayCount] days from [firstDay] on the board, showing what [model]
-/// shows for them. A tap on a block that is not pending reports
-/// [onOpenItem]; a tap on a day header reports [onSelectDay].
+/// The [dayCount] days from [firstDay] on the board, over the hours
+/// [settings] choose, showing what [model] shows for them. A tap on a
+/// block that is not pending reports [onOpenItem]; a tap on a day header
+/// reports [onSelectDay].
 ///
 /// Items keep every board gesture: a long press moves, the bottom band
 /// drags the end time, and, on more than one day, the right band the day
-/// count. Empty body cells
-/// take a create gesture, reported through [onCreate]: a tap picks one
-/// hour from its slot, or up to 24:00; a drag picks the rectangle of
-/// slots it covers, at once for a mouse or a stylus and after a press and
-/// hold on touch, so a touch drag without one scrolls the grid.
+/// count. An item reaching past the hours shows the part inside them,
+/// with an arrow where it is cut, and takes no move or resize: its form
+/// changes it. An item wholly outside them has no block, and the corner
+/// over the gutter counts it. Empty body cells take a create gesture,
+/// reported through [onCreate]: a tap picks one hour from its slot, or up
+/// to the end of the hours; a drag picks the rectangle of slots it
+/// covers, at once for a mouse or a stylus and after a press and hold on
+/// touch, so a touch drag without one scrolls the grid.
+///
+/// The day columns and the slot rows stretch to fill the grid, never
+/// smaller than the least sizes [settings] choose; past those, it scrolls.
 class TimedGrid extends StatefulWidget {
   const TimedGrid({
     super.key,
     required this.model,
+    required this.settings,
     required this.firstDay,
     required this.dayCount,
     required this.selectedDay,
@@ -335,11 +359,13 @@ class TimedGrid extends StatefulWidget {
 
   final CalendarModel model;
 
-  /// The day of the first day column.
+  /// The hours the grid shows and the least size of its cells.
+  final CalendarSettings settings;
+
+  /// The first day of the range the grid shows.
   final DateTime firstDay;
 
-  /// How many day columns the grid shows. Fixed for the life of its
-  /// state: a grid with another count needs its own key.
+  /// How many days the range holds.
   final int dayCount;
 
   final DateTime selectedDay;
@@ -372,7 +398,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   /// One instance, so a rebuild of this state hands the board the config
   /// it already has. A single day column has no right strip: there is no
-  /// column to drag its edge onto.
+  /// column to drag its edge onto. Whether the grid has more than one
+  /// column is fixed for its life, which [didUpdateWidget] asserts.
   late final BoardDragConfig<String> _dragConfig = BoardDragConfig<String>(
     canDrag: _canDrag,
     canDropAt: _canDropAt,
@@ -392,7 +419,20 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     selectedDay: widget.selectedDay,
   ));
 
-  double _dayWidth = _minDayWidth;
+  /// The extents the axes were last given and the tracks they were given
+  /// for. [_fitAxes] replaces an axis only when one of these changes.
+  late double _dayWidth = widget.settings.minDayWidth;
+  late double _slotHeight = widget.settings.minSlotHeight;
+  late int _columnCount = _tracks.columnCount;
+  late DayHours _rowHours = _tracks.hours;
+
+  /// The size the board was last laid out at; null before the first
+  /// layout.
+  Size? _size;
+
+  /// How many of the shown items have no block: on a day with no column,
+  /// or wholly outside the hours. The corner cell listens to it.
+  final ValueNotifier<int> _hiddenCount = ValueNotifier<int>(0);
 
   final GlobalKey _boardKey = GlobalKey();
 
@@ -450,7 +490,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     _board = BoardController<String, ShownItem>(
       vsync: this,
       rows: _rowsConfig(),
-      columns: _columnsConfig(_dayWidth),
+      columns: _columnsConfig(),
       keyOf: (entry) {
         return entry.id;
       },
@@ -460,7 +500,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     _sync();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _board.jumpToCell(_tracks.rowOf(_openingMinute), 1);
+        _board.jumpToCell(_tracks.rowOf(_openingMinuteIn(_tracks.hours)), 1);
       }
     });
   }
@@ -468,11 +508,6 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   @override
   void didUpdateWidget(TimedGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    assert(
-      widget.dayCount == oldWidget.dayCount,
-      "A TimedGrid keeps its day count; give a grid with another one its "
-      "own key.",
-    );
     final modelChanged = widget.model != oldWidget.model;
     if (modelChanged) {
       oldWidget.model.removeListener(_handleModel);
@@ -480,12 +515,26 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     }
     final tracks = _tracksOf(widget);
     final tracksChanged = tracks != _tracks;
+    assert(
+      (tracks.columnCount > 1) == (_tracks.columnCount > 1),
+      "A TimedGrid keeps one day column or more than one; give a grid that "
+      "changes between them its own key.",
+    );
     _tracks = tracks;
     if (tracksChanged || widget.selectedDay != oldWidget.selectedDay) {
       _header.value = (tracks: tracks, selectedDay: widget.selectedDay);
     }
+    // The axes first, so the items the sync places fit the lattice they
+    // land on.
+    final size = _size;
+    if (size != null &&
+        (tracksChanged || widget.settings != oldWidget.settings)) {
+      _fitAxes(size);
+    }
     if (modelChanged || tracksChanged) {
-      _sync();
+      // New days are not ready yet, so they do not animate in either way;
+      // new hours move every block at once.
+      _sync(animate: !tracksChanged);
     }
   }
 
@@ -493,6 +542,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return GridTracks(
       firstDay: dayNumber(widget.firstDay),
       dayCount: widget.dayCount,
+      hours: widget.settings.hours,
     );
   }
 
@@ -513,13 +563,15 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     _range?.detach();
     widget.model.removeListener(_handleModel);
     _header.dispose();
+    _hiddenCount.dispose();
     // The board has unmounted by now, so nothing still listens to the
     // controller.
     _board.dispose();
     super.dispose();
   }
 
-  /// Row 0 is the frozen day header; rows 1 onward are one slot each.
+  /// Row 0 is the frozen day header; rows 1 onward are the slots of the
+  /// hours, [_slotHeight] each.
   BoardAxisConfig _rowsConfig() {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
@@ -535,30 +587,56 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// lane axis, so items sharing a day's time sit side by side. No two
   /// stored items do, but a failed move can return an item under another
   /// item's pending move until the API refuses that one.
-  BoardAxisConfig _columnsConfig(double dayWidth) {
+  BoardAxisConfig _columnsConfig() {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
         _gutterWidth,
-        ...List<double>.filled(_tracks.columnCount, dayWidth),
+        ...List<double>.filled(_tracks.columnCount, _dayWidth),
       ]),
       frozenStart: 1,
-      laneExtent: dayWidth,
+      laneExtent: _dayWidth,
     );
   }
 
-  /// The days across [width], never narrower than the minimum. Called
-  /// from the layout callback, so the first frame lays the board out at
-  /// its width.
-  void _fitColumns(double width) {
+  /// The day columns across [size]'s width and the slot rows down its
+  /// height, each stretched to fill it and never smaller than the least
+  /// size the settings choose. Called from the layout callback, so the
+  /// first frame lays the board out at its size, and from
+  /// [didUpdateWidget] at the last size, so new tracks reach the board in
+  /// the build that places items on them.
+  ///
+  /// An axis is replaced only when its extent or its tracks change. The
+  /// rows are replaced for new hours even at the same count, which also
+  /// rebuilds the gutter's labels: the board builds them as cells.
+  void _fitAxes(Size size) {
+    _size = size;
+    final settings = widget.settings;
     final dayWidth = math.max(
-      _minDayWidth,
-      (width - _gutterWidth) / _tracks.columnCount,
+      settings.minDayWidth,
+      _share(size.width - _gutterWidth, _tracks.columnCount),
     );
-    if (dayWidth == _dayWidth) {
-      return;
+    final slotHeight = math.max(
+      settings.minSlotHeight,
+      _share(size.height - _headerHeight, _tracks.rowCount),
+    );
+    if (dayWidth != _dayWidth || _tracks.columnCount != _columnCount) {
+      _dayWidth = dayWidth;
+      _columnCount = _tracks.columnCount;
+      _board.columns = _columnsConfig();
     }
-    _dayWidth = dayWidth;
-    _board.columns = _columnsConfig(dayWidth);
+    if (slotHeight != _slotHeight || _tracks.hours != _rowHours) {
+      _slotHeight = slotHeight;
+      _rowHours = _tracks.hours;
+      _board.rows = _rowsConfig();
+    }
+  }
+
+  /// One of [count] equal shares of [extent], or 0 when it is unbounded.
+  static double _share(double extent, int count) {
+    if (!extent.isFinite) {
+      return 0.0;
+    }
+    return extent / count;
   }
 
   void _handleModel() {
@@ -579,34 +657,39 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   /// Sets the board's items to the days' shown items when the days are
-  /// ready, and to none otherwise. A sync animates only when its days are
-  /// ready and the last sync found its own days ready; any other runs
+  /// ready, and to none otherwise, and counts the shown items with no
+  /// block. A sync animates only when [animate] holds, its days are ready
+  /// and the last sync found its own days ready; any other runs
   /// under [BoardAnimationStyle.disabled], and so does every sync until a
   /// frame callback restores [timedGridAnimationStyle]. New days reach
   /// this grid only after the model has notified that it shows them, and
   /// the sync that notification runs finds the old days not ready, so the
   /// first sync of new days does not animate.
-  void _sync() {
+  void _sync({bool animate = true}) {
     final ready = _daysReady;
     final placements = <BoardPlacement<ShownItem>>[];
+    var hidden = 0;
     if (ready) {
       final shown = widget.model.itemsBetween(widget.firstDay, _lastDay);
       for (final entry in shown) {
         final span = gridSpanOf(entry.item.shape, _tracks);
-        if (span != null) {
+        if (span == null) {
+          hidden++;
+        } else {
           placements.add(BoardPlacement<ShownItem>(entry, span));
         }
       }
     }
-    final animate = ready && _syncedReady;
-    if (!animate) {
+    final animated = animate && ready && _syncedReady;
+    if (!animated) {
       _board.animationStyle = BoardAnimationStyle.disabled;
     }
     _board.setItems(placements);
-    if (!animate) {
+    if (!animated) {
       _scheduleStyleRestore();
     }
     _syncedReady = ready;
+    _hiddenCount.value = hidden;
   }
 
   /// Puts [timedGridAnimationStyle] back in a frame callback scheduled
@@ -631,8 +714,21 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     });
   }
 
+  /// Whether the board may lift [id]: not while a write on it runs, and
+  /// not when it reaches past the hours, whose cut-off minutes a drop
+  /// would lose.
   bool _canDrag(String id) {
-    return !widget.model.isLocked(id);
+    if (widget.model.isLocked(id)) {
+      return false;
+    }
+    final entry = _board.itemOf(id);
+    return entry != null && !_reachesPastHours(entry.item);
+  }
+
+  /// Whether [item] starts before the grid's hours or ends after them.
+  bool _reachesPastHours(CalendarItem item) {
+    final hours = _tracks.hours;
+    return item.startMinute < hours.start || item.endMinute > hours.end;
   }
 
   bool _canDropAt(String id, BoardSpan span) {
@@ -679,15 +775,15 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   /// A drop the board reports, a move or a resize. Sends nothing for a
   /// locked item, which the board's semantics move action can report when
-  /// the item locked after its host last built, or when the item would
-  /// not change.
+  /// the item locked after its host last built, for one reaching past the
+  /// hours, and when the item would not change.
   void _commit(String id, BoardSpan to) {
     if (widget.model.isLocked(id)) {
       return;
     }
     final from = _board.spanOf(id);
     final stored = widget.model.storedItem(id);
-    if (from == null || stored == null) {
+    if (from == null || stored == null || _reachesPastHours(stored)) {
       return;
     }
     final requested = itemFromSpan(stored, from, to, _tracks);
@@ -854,7 +950,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   ) {
     if (cell.row == 0) {
       if (cell.col == 0) {
-        return const ColoredBox(color: HarborColors.surface);
+        return _HiddenCountCell(count: _hiddenCount);
       }
       return _DayHeaderCell(
         header: _header,
@@ -896,10 +992,13 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     BoardItemView<String, ShownItem> view,
   ) {
     final entry = view.item;
+    final hours = _tracks.hours;
     return _Block(
       key: blockKey(entry.id),
       entry: entry,
       showsSummary: view.span.rowSpan >= 3,
+      cutAtStart: entry.item.startMinute < hours.start,
+      cutAtEnd: entry.item.endMinute > hours.end,
       onOpen: entry.pending
           ? null
           : () {
@@ -936,7 +1035,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     );
     return LayoutBuilder(
       builder: (context, constraints) {
-        _fitColumns(constraints.maxWidth);
+        _fitAxes(constraints.biggest);
         return Stack(
           children: <Widget>[
             Positioned.fill(child: board),
@@ -1078,14 +1177,16 @@ class _DayHeaderCell extends StatelessWidget {
   }
 }
 
-/// One item on the grid: its type's tint with a 4 px edge, its title, and
-/// its first summary when [showsSummary]. Dimmed with a progress indicator
-/// while [ShownItem.pending].
+/// One item on the grid: its type's tint with a 4 px edge, its title, its
+/// first summary when [showsSummary], and an arrow at each end the grid's
+/// hours cut. Dimmed with a progress indicator while [ShownItem.pending].
 class _Block extends StatelessWidget {
   const _Block({
     super.key,
     required this.entry,
     required this.showsSummary,
+    required this.cutAtStart,
+    required this.cutAtEnd,
     required this.onOpen,
   });
 
@@ -1095,6 +1196,14 @@ class _Block extends StatelessWidget {
   /// from the span rather than measured, so a block laid out at a new
   /// extent on each animation frame does not rebuild for it.
   final bool showsSummary;
+
+  /// Whether the item starts before the grid's hours, which an arrow at
+  /// the block's top marks.
+  final bool cutAtStart;
+
+  /// Whether the item ends after the grid's hours, which an arrow at the
+  /// block's bottom marks.
+  final bool cutAtEnd;
 
   /// Null while the item is pending, so a tap opens nothing.
   final VoidCallback? onOpen;
@@ -1153,6 +1262,34 @@ class _Block extends StatelessWidget {
         ),
       ),
     );
+    if (cutAtStart || cutAtEnd) {
+      content = Stack(
+        fit: StackFit.passthrough,
+        children: <Widget>[
+          content,
+          if (cutAtStart)
+            const Positioned(
+              top: 0.0,
+              right: 0.0,
+              child: Icon(
+                Icons.keyboard_arrow_up,
+                size: 14.0,
+                color: HarborColors.textSecondary,
+              ),
+            ),
+          if (cutAtEnd)
+            const Positioned(
+              bottom: 0.0,
+              right: 0.0,
+              child: Icon(
+                Icons.keyboard_arrow_down,
+                size: 14.0,
+                color: HarborColors.textSecondary,
+              ),
+            ),
+        ],
+      );
+    }
     if (entry.pending) {
       content = Stack(
         fit: StackFit.passthrough,
@@ -1172,6 +1309,54 @@ class _Block extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(1.0),
       child: GestureDetector(onTap: onOpen, child: content),
+    );
+  }
+}
+
+/// The corner over the gutter: blank, or a count of the shown items the
+/// grid has no block for, whose tooltip says why.
+class _HiddenCountCell extends StatelessWidget {
+  const _HiddenCountCell({required this.count});
+
+  final ValueListenable<int> count;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: count,
+      builder: (context, value, child) {
+        return ColoredBox(
+          color: HarborColors.surface,
+          child: value == 0
+              ? null
+              : Center(
+                  child: Tooltip(
+                    message: hiddenItemsLabel(value),
+                    child: DecoratedBox(
+                      key: hiddenCountKey,
+                      decoration: BoxDecoration(
+                        color: HarborColors.primaryTint,
+                        borderRadius: BorderRadius.circular(10.0),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6.0,
+                          vertical: 2.0,
+                        ),
+                        child: Text(
+                          "+$value",
+                          style: const TextStyle(
+                            fontSize: 11.0,
+                            fontWeight: FontWeight.w600,
+                            color: HarborColors.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+        );
+      },
     );
   }
 }

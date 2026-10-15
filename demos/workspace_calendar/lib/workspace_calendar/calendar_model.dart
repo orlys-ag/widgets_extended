@@ -10,6 +10,7 @@ import 'calendar_api.dart';
 import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
+import 'calendar_settings.dart';
 
 enum CalendarLoadStatus { loading, failed, ready }
 
@@ -36,7 +37,8 @@ class _Read {
 /// the API answers; while locked, the item shows [ShownItem.pending], and
 /// a grid move or resize shows at its requested position everywhere. A
 /// write on a locked item sends nothing and reports the refusal where
-/// that write reports a failure.
+/// that write reports a failure, and so does one [hoursErrorsFor] finds
+/// outside [hours].
 class CalendarModel extends ChangeNotifier {
   CalendarModel({
     required CalendarApi api,
@@ -76,6 +78,29 @@ class CalendarModel extends ChangeNotifier {
   CalendarLoadStatus _status = CalendarLoadStatus.loading;
   String? _error;
   bool _disposed = false;
+
+  /// The hours a new item, and a write that changes an item's days or
+  /// minutes, must lie in. A write that keeps the stored days and minutes
+  /// is not held to them, so an item that lay outside them when they
+  /// changed can still be edited. Setting it notifies nothing: what shows
+  /// does not depend on it.
+  DayHours hours = DayHours.allDay;
+
+  /// The rules [item] breaks against [hours], keyed as `validateItemJson`
+  /// keys them. Empty when it keeps the days and minutes of the stored
+  /// item its id names.
+  Map<String, String> hoursErrorsFor(CalendarItem item) {
+    final id = item.id;
+    final stored = id == null ? null : _items[id];
+    if (stored != null &&
+        stored.day == item.day &&
+        stored.dayCount == item.dayCount &&
+        stored.startMinute == item.startMinute &&
+        stored.endMinute == item.endMinute) {
+      return const <String, String>{};
+    }
+    return hoursErrorsOf(item.startMinute, item.endMinute, hours);
+  }
 
   /// Whether every day of the shown range is read, or the read it waits
   /// on failed. Loading before the first [show].
@@ -330,8 +355,13 @@ class CalendarModel extends ChangeNotifier {
   }
 
   /// Stores [draft]; completes with the stored item, or fails with the
-  /// API's error. Nothing is shown before the API answers.
+  /// API's error. Nothing is shown before the API answers. A draft outside
+  /// [hours] sends nothing and fails with a [CalendarValidationException].
   Future<CalendarItem> create(CalendarItem draft) async {
+    final errors = hoursErrorsFor(draft);
+    if (errors.isNotEmpty) {
+      throw CalendarValidationException(errors);
+    }
     final json = await _api.create(draft.toJson());
     final created = CalendarItem.fromJson(json);
     if (!_disposed) {
@@ -344,10 +374,16 @@ class CalendarModel extends ChangeNotifier {
   /// Writes [item], whose id names a stored item; the item shows pending,
   /// as stored, until the API answers. Completes with the stored item, or
   /// fails with the API's error, which the caller reports: a failure does
-  /// not reach `onWriteFailed`. On a locked item it sends nothing and fails
-  /// with a [CalendarFailureException].
+  /// not reach `onWriteFailed`. It sends nothing and fails with a
+  /// [CalendarValidationException] when [hoursErrorsFor] finds the item
+  /// outside [hours], and with a [CalendarFailureException] on a locked
+  /// item.
   Future<CalendarItem> update(CalendarItem item) async {
     final id = item.id!;
+    final errors = hoursErrorsFor(item);
+    if (errors.isNotEmpty) {
+      throw CalendarValidationException(errors);
+    }
     if (!_lock(id, null)) {
       throw const CalendarFailureException(_lockedMessage);
     }
@@ -371,11 +407,17 @@ class CalendarModel extends ChangeNotifier {
   /// Writes a grid move or resize: [requested] shows, pending, until the
   /// API answers. A failure shows the stored item again and reports
   /// through `onWriteFailed`. Sends nothing and reports through
-  /// `onWriteFailed` instead for a locked item, and for one that would
-  /// share time, under [itemsConflict], with another item on a read day
-  /// it covers; a conflict on a day not read yet is left to the API.
+  /// `onWriteFailed` instead for a move [hoursErrorsFor] finds outside
+  /// [hours], for a locked item, and for one that would share time, under
+  /// [itemsConflict], with another item on a read day it covers; a
+  /// conflict on a day not read yet is left to the API.
   void requestMove(CalendarItem requested) {
     final id = requested.id!;
+    final errors = hoursErrorsFor(requested);
+    if (errors.isNotEmpty) {
+      _onWriteFailed(CalendarValidationException(errors).message);
+      return;
+    }
     if (!isLocked(id)) {
       final conflicts = _conflictsOf(requested);
       if (conflicts.isNotEmpty) {

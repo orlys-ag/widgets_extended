@@ -1,7 +1,9 @@
 /// The calendar's create flow, its item form, and the delete confirmation.
 ///
 /// The form is generated from the item type's schema and checks its input
-/// with the same validator the API runs, before it sends anything.
+/// with the same validator the API runs, before it sends anything; the
+/// model holds its days and minutes to the calendar's hours, and the time
+/// fields offer the minutes inside them.
 library;
 
 import 'package:flutter/material.dart';
@@ -318,7 +320,9 @@ class _ItemFormState extends State<_ItemForm> {
     }
   }
 
-  /// A dropdown of every slot boundary from [first] to [last] minutes.
+  /// A dropdown of every slot boundary from [first] to [last] minutes, and
+  /// of [value] where it lies outside them, so an item that lay outside the
+  /// calendar's hours when they changed shows its own time.
   Widget _minuteField({
     required String label,
     required String errorKey,
@@ -327,6 +331,10 @@ class _ItemFormState extends State<_ItemForm> {
     required int last,
     required ValueChanged<int> onChanged,
   }) {
+    final minutes = <int>{
+      for (var minute = first; minute <= last; minute += minutesPerSlot) minute,
+      value,
+    }.toList()..sort();
     return DropdownButtonFormField<int>(
       initialValue: value,
       decoration: InputDecoration(
@@ -334,7 +342,7 @@ class _ItemFormState extends State<_ItemForm> {
         errorText: _errors[errorKey],
       ),
       items: <DropdownMenuItem<int>>[
-        for (var minute = first; minute <= last; minute += minutesPerSlot)
+        for (final minute in minutes)
           DropdownMenuItem<int>(value: minute, child: Text(clockLabel(minute))),
       ],
       onChanged: _saving
@@ -422,6 +430,7 @@ class _ItemFormState extends State<_ItemForm> {
     final type = widget.item.type;
     final style = harborTypeStyleOf(type);
     final message = _message;
+    final hours = widget.model.hours;
     final fields = <Widget>[
       Row(
         children: <Widget>[
@@ -460,8 +469,8 @@ class _ItemFormState extends State<_ItemForm> {
               label: "Start",
               errorKey: "startMinute",
               value: _start,
-              first: 0,
-              last: minutesPerDay - minutesPerSlot,
+              first: hours.start,
+              last: hours.end - minutesPerSlot,
               onChanged: (minute) {
                 _start = minute;
               },
@@ -473,8 +482,8 @@ class _ItemFormState extends State<_ItemForm> {
               label: "End",
               errorKey: "endMinute",
               value: _end,
-              first: minutesPerSlot,
-              last: minutesPerDay,
+              first: hours.start + minutesPerSlot,
+              last: hours.end,
               onChanged: (minute) {
                 _end = minute;
               },

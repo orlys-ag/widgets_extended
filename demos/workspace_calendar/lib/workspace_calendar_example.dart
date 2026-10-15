@@ -14,8 +14,10 @@
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
-/// The Board and Table views are placeholders, and More only reports that
-/// it is not available.
+/// The settings sheet chooses the hours the calendar shows and schedules
+/// in and the least size of the timed grids' cells. The Board and Table
+/// views are placeholders, and More only reports that it is not
+/// available.
 library;
 
 import 'dart:ui' show lerpDouble;
@@ -26,11 +28,13 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_data.dart';
 import 'workspace_calendar/calendar_model.dart';
+import 'workspace_calendar/calendar_settings.dart';
 import 'workspace_calendar/day_cell.dart';
 import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
+import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
 
 enum _WorkspaceView {
@@ -123,6 +127,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// Whether a scroll of the day list folded the month into its week. Only
   /// meaningful in the month mode.
   bool _collapsed = false;
+
+  /// What the settings sheet last chose.
+  CalendarSettings _settings = const CalendarSettings();
 
   /// The width the column axis was last fitted to.
   double _columnsWidth = 0.0;
@@ -338,6 +345,21 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return false;
   }
 
+  void _openSettings() {
+    showCalendarSettings(
+      context,
+      settings: _settings,
+      onChanged: _applySettings,
+    );
+  }
+
+  void _applySettings(CalendarSettings settings) {
+    setState(() {
+      _settings = settings;
+    });
+    _model.hours = settings.hours;
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -413,6 +435,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               tooltip: "Add",
               onPressed: _openWeekMode,
             ),
+          IconButton(
+            icon: const Icon(Icons.tune),
+            tooltip: "Calendar settings",
+            onPressed: _openSettings,
+          ),
           IconButton(
             icon: const Icon(Icons.more_vert),
             tooltip: "More",
@@ -491,9 +518,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           ),
           Expanded(
             child: TimedGrid(
-              // A grid keeps its day count, so each mode builds its own.
+              // Each mode builds its own grid, which opens scrolled to its
+              // opening time.
               key: ValueKey<_CalendarMode>(_mode),
               model: _model,
+              settings: _settings,
               firstDay: days.first,
               dayCount: days.count,
               selectedDay: _selected,
