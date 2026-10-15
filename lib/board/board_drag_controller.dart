@@ -1332,10 +1332,12 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// meets slides onto the nearest nearby placement that holds the whole
   /// box and that the app admits; a box lying past the lattice's end is
   /// first moved onto it, into [windows], and taken there when the app
-  /// admits it. Null leaves the refusal exactly as it was, which is what
-  /// the policy's absence, a resize and a throw asking about the moved box
-  /// produce, and, unless the moved box is admitted, a policy with no
-  /// step, a closed gate and an empty search.
+  /// admits it. A refused RESIZE is [_clampRefusedResize]'s, under a
+  /// policy that clamps resizes. Null leaves the refusal exactly as it
+  /// was, which is what the policy's absence, a resize it does not clamp
+  /// and a throw asking about the moved box produce, and, unless the
+  /// moved box is admitted, a policy with no step, a closed gate and an
+  /// empty search.
   ///
   /// [windows] are the windows the resolver placed each axis in, which a
   /// candidate is clamped into on an axis the scan steps, so a refused
@@ -1348,10 +1350,13 @@ class BoardDragController<TKey> extends ChangeNotifier {
   ) {
     final policy = config.dropFit;
     final canDropAt = config.canDropAt;
-    if (policy == null ||
-        canDropAt == null ||
-        windows == null ||
-        session.kind != BoardDragKind.move) {
+    if (policy == null || canDropAt == null) {
+      return null;
+    }
+    if (session.kind != BoardDragKind.move) {
+      return policy.clampResizes ? _clampRefusedResize(session, refused) : null;
+    }
+    if (windows == null) {
       return null;
     }
     final rowAxis = boardController.rows.axis;
@@ -1455,6 +1460,45 @@ class BoardDragController<TKey> extends ChangeNotifier {
       return null;
     }
     return BoardDropTarget(span: fitted, kind: refused.kind);
+  }
+
+  /// A refused RESIZE with its dragged edge stopped at the item in its
+  /// way ([BoardDropFitter.clampedResize]), or null where nothing stops
+  /// it. The item's stored span is its span at the lift: a mutation of
+  /// the dragged item ends the session. The obstacles are gathered once,
+  /// over the whole tracks the refused span covers, which hold every
+  /// candidate: each lies between the stored span and the refused one.
+  BoardDropTarget? _clampRefusedResize(
+    _DragSession<TKey> session,
+    BoardDropTarget refused,
+  ) {
+    final lift = boardController.spanOf(session.key);
+    if (lift == null) {
+      return null;
+    }
+    final span = refused.span;
+    final rowStart = trackIndexOf(span.startTrackOn(Axis.vertical));
+    final colStart = trackIndexOf(span.startTrackOn(Axis.horizontal));
+    final region = BoardSpan(
+      rowStart: rowStart,
+      colStart: colStart,
+      rowSpan: trackEndIndexOf(span.endTrackOn(Axis.vertical)) - rowStart,
+      colSpan: trackEndIndexOf(span.endTrackOn(Axis.horizontal)) - colStart,
+    );
+    final clamped = BoardDropFitter.clampedResize(
+      lift: lift,
+      refused: span,
+      kind: session.kind,
+      snap: config.snap,
+      obstacles: _obstaclesIn(session, region),
+      accepts: (candidate) {
+        return askCanDropAt(config, session.key, candidate) == true;
+      },
+    );
+    if (clamped == null) {
+      return null;
+    }
+    return BoardDropTarget(span: clamped, kind: refused.kind);
   }
 
   /// The SEARCH REGION: on each axis, [BoardDropFitter.searchRangeOn] of

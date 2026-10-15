@@ -1,11 +1,12 @@
 /// Internal: the drop-fit search, which slides a REFUSED move onto nearby
-/// free space.
+/// free space and stops a refused resize at the item in its way.
 ///
-/// Two pure functions over spans and axes, with no key type, no
-/// controller and no render port: the caller supplies the obstacles and
-/// the predicate, so this library never learns what "occupied" means to
-/// an app. It answers how much of a box is geometrically free, and which
-/// nearby placement holds the whole box clear of everything.
+/// Pure functions over spans and axes, with no key type, no controller
+/// and no render port: the caller supplies the obstacles and the
+/// predicate, so this library never learns what "occupied" means to an
+/// app. It answers how much of a box is geometrically free, which nearby
+/// placement holds the whole box clear of everything, and where a
+/// dragged edge stops short of an item.
 ///
 /// THE BOX IS ALWAYS A SPAN'S RECTANGLE and never a painted one. A laned
 /// item paints as a slice of its lane-axis track, so two items sharing a
@@ -18,6 +19,7 @@ library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
 import '_board_axis.dart';
@@ -43,15 +45,16 @@ class _Clipped {
 class BoardDropFitter {
   BoardDropFitter._();
 
-  /// Steps the scan may take per direction on one axis, whatever radius
-  /// the policy asks for.
+  /// Steps the scan takes per direction on one axis, whatever radius the
+  /// policy asks for.
   ///
-  /// Four honours a one-track radius at the finest quantum (a quarter
-  /// track) and a four-track one under a whole-track snap, which covers
-  /// every radius a board is likely to set, and it bounds the candidate
-  /// set at `9 * 9 - 1`. Without a cap a `free` snap with a large radius
-  /// would generate an unbounded set, every member of which can reach the
-  /// app's predicate.
+  /// The steps are the placements the scan tries whether or not an item
+  /// ends there, so that a free placement the app's predicate refuses can
+  /// give way to its neighbour. Beyond them the radius is searched through
+  /// the FLUSH placements alone ([nearestFit]), which are what bounds the
+  /// candidate set by the obstacles rather than by the radius: stepping a
+  /// large radius would generate a set as long as the radius, every
+  /// member of which can reach the app's predicate.
   static const int maxStepsPerDirection = 4;
 
   /// Steps available per axis under [policy] and [snap]. Both zero means
@@ -71,8 +74,10 @@ class BoardDropFitter {
       if (radius <= 0.0 || quantum <= 0.0) {
         return 0;
       }
-      final raw = (radius / quantum).floor();
-      return raw < maxStepsPerDirection ? raw : maxStepsPerDirection;
+      // Compared before the floor, which an infinite radius would throw
+      // on.
+      final raw = radius / quantum;
+      return raw < maxStepsPerDirection ? raw.floor() : maxStepsPerDirection;
     }
 
     return (
@@ -151,10 +156,13 @@ class BoardDropFitter {
     required bool stepped,
     required int trackCount,
   }) {
+    // Each end is bounded by the lattice before it is rounded, which an
+    // infinite radius would otherwise throw on; the bound changes no
+    // finite answer, since the result is clamped to the same range.
     final low = stepped
         ? clampToWindow(start - radius, window).floor()
-        : (start - radius).floor();
-    var high = (end + radius).ceil();
+        : math.max(start - radius, 0.0).floor();
+    var high = math.min(end + radius, trackCount.toDouble()).ceil();
     if (stepped) {
       final last = (window.max + (end - start)).ceil();
       if (high > last) {
@@ -262,13 +270,28 @@ class BoardDropFitter {
   /// clear of every obstacle and that [accepts] admits, or null when
   /// nothing does.
   ///
-  /// Candidates are [box] translated by whole quanta, clamped into the
+  /// Candidates are [box] moved to one START per axis, clamped into the
   /// window of each axis it steps, [rowWindow] and [colWindow], and
   /// tested in ascending CONTENT-SPACE distance from the box's leading
-  /// corner. The order is TOTAL, distance then row step then column
-  /// step, so two candidates at equal distance cannot swap between two
-  /// resolves and flicker the preview. An axis the scan does not step
-  /// keeps the box's own fields.
+  /// corner. An axis the scan does not step offers the box's own fields
+  /// alone. An axis it steps offers the box's own start, the starts up to
+  /// [maxStepsPerDirection] quanta from it, and, within the radius, the
+  /// FLUSH starts: for each obstacle, the first start on the box's grid
+  /// at or past the obstacle's end, and the last one at which the box
+  /// ends at or before the obstacle's start.
+  ///
+  /// THE FLUSH STARTS ARE WHAT REACH THE WHOLE RADIUS. Take the nearest
+  /// placement on the box's grid that holds the box clear, and move it
+  /// one quantum toward the box's own start on one axis. That placement is
+  /// nearer, so it meets an obstacle, one the original clears: the
+  /// original's start on that axis is that obstacle's flush start. So the
+  /// nearest clear placement starts, on each axis, at the box's own start
+  /// or at a flush one, and the set grows with the obstacles rather than
+  /// with the radius.
+  ///
+  /// The order is TOTAL, distance then the signed track-space offset on
+  /// the row axis then on the column axis, so two candidates at equal
+  /// distance cannot swap between two resolves and flicker the preview.
   ///
   /// TWO COSTS, and only one is app code: every candidate pays a
   /// rectangle test against [obstacles], while only a FREE candidate
@@ -293,73 +316,69 @@ class BoardDropFitter {
     if (steps.rows == 0 && steps.cols == 0) {
       return null;
     }
-    final rowQuantum = BoardDropResolver.quantumOn(
+    final rows = _startsOn(
       Axis.vertical,
-      snap,
-      wholeTrackAxis,
+      box: box,
+      steps: steps.rows,
+      radius: policy.rowRadius,
+      quantum: BoardDropResolver.quantumOn(Axis.vertical, snap, wholeTrackAxis),
+      window: rowWindow,
+      whole: wholeTrackAxis == Axis.vertical,
+      obstacles: obstacles,
     );
-    final colQuantum = BoardDropResolver.quantumOn(
+    final cols = _startsOn(
       Axis.horizontal,
-      snap,
-      wholeTrackAxis,
+      box: box,
+      steps: steps.cols,
+      radius: policy.colRadius,
+      quantum: BoardDropResolver.quantumOn(
+        Axis.horizontal,
+        snap,
+        wholeTrackAxis,
+      ),
+      window: colWindow,
+      whole: wholeTrackAxis == Axis.horizontal,
+      obstacles: obstacles,
     );
     final rowLow = box.startTrackOn(Axis.vertical);
     final colLow = box.startTrackOn(Axis.horizontal);
     final baseRow = rowAxis.offsetOfFraction(rowLow);
     final baseCol = colAxis.offsetOfFraction(colLow);
+    final rowOffsets = <double>[
+      for (final row in rows)
+        row == null ? 0.0 : rowAxis.offsetOfFraction(row) - baseRow,
+    ];
+    final colOffsets = <double>[
+      for (final col in cols)
+        col == null ? 0.0 : colAxis.offsetOfFraction(col) - baseCol,
+    ];
 
     final candidates =
-        <({double distance, int dRow, int dCol, BoardSpan span})>[];
-    for (var dRow = -steps.rows; dRow <= steps.rows; dRow++) {
-      for (var dCol = -steps.cols; dCol <= steps.cols; dCol++) {
-        if (dRow == 0 && dCol == 0) {
+        <({double distance, double dRow, double dCol, BoardSpan span})>[];
+    for (var i = 0; i < rows.length; i++) {
+      final row = rows[i];
+      for (var j = 0; j < cols.length; j++) {
+        final col = cols[j];
+        if (row == null && col == null) {
           continue;
         }
-        // Clamped BEFORE the split, and the distance is read off the
-        // clamped value: at a window edge the clamp moves a candidate,
-        // so the step count stops describing how far it went.
-        // Each candidate start snapped to a track edge it lies within the
-        // tolerance of: `low + d * quantum` is a sum of two exact
-        // multiples, which in doubles can come to one ulp below the
-        // integer it means.
-        // An axis the scan does not step keeps the box's own fields: no
-        // clamp, no floor and no re-split, and no distance.
-        var row = rowLow;
-        var col = colLow;
-        if (dRow != 0) {
-          row = clampToWindow(
-            snapToTrackEdge(rowLow + dRow * rowQuantum),
-            rowWindow,
-          );
-          if (wholeTrackAxis == Axis.vertical) {
-            row = row.floorToDouble();
-          }
-        }
-        if (dCol != 0) {
-          col = clampToWindow(
-            snapToTrackEdge(colLow + dCol * colQuantum),
-            colWindow,
-          );
-          if (wholeTrackAxis == Axis.horizontal) {
-            col = col.floorToDouble();
-          }
-        }
         // RE-SPLIT, never an addition to the fraction field: a span
-        // asserts its leading fraction below 1.0, so a quantum carrying
-        // past a track boundary has to move the integer start.
+        // asserts its leading fraction below 1.0, so a move carrying past
+        // a track boundary has to move the integer start. An axis offering
+        // the box's own start keeps the box's own fields.
         final span = box.copyWith(
-          rowStart: dRow == 0 ? null : row.floor(),
-          rowFraction: dRow == 0 ? null : row - row.floorToDouble(),
-          colStart: dCol == 0 ? null : col.floor(),
-          colFraction: dCol == 0 ? null : col - col.floorToDouble(),
+          rowStart: row?.floor(),
+          rowFraction: row == null ? null : row - row.floorToDouble(),
+          colStart: col?.floor(),
+          colFraction: col == null ? null : col - col.floorToDouble(),
         );
-        final dy = dRow == 0 ? 0.0 : rowAxis.offsetOfFraction(row) - baseRow;
-        final dx = dCol == 0 ? 0.0 : colAxis.offsetOfFraction(col) - baseCol;
+        final dy = rowOffsets[i];
+        final dx = colOffsets[j];
         candidates.add((
           // Squared, which orders identically and avoids the root.
           distance: dx * dx + dy * dy,
-          dRow: dRow,
-          dCol: dCol,
+          dRow: row == null ? 0.0 : row - rowLow,
+          dCol: col == null ? 0.0 : col - colLow,
           span: span,
         ));
       }
@@ -386,6 +405,229 @@ class BoardDropFitter {
       return candidate.span;
     }
     return null;
+  }
+
+  /// The starts [nearestFit] offers on [axis], each distinct: null first,
+  /// for the box's own fields, and then, unless [steps] is zero, the
+  /// starts up to [steps] quanta either way and the flush starts within
+  /// [radius] (see [nearestFit]), all on the box's grid: its start plus
+  /// whole quanta, or on the [whole]-track axis its own track plus whole
+  /// tracks.
+  ///
+  /// Each is snapped to a track edge it lies within the tolerance of, as
+  /// `low + k * quantum` is a sum of two exact multiples that in doubles
+  /// can come to one ulp below the integer it means; clamped into
+  /// [window] before the caller splits it, so the distance is read off
+  /// the clamped value; and, on the [whole]-track axis, floored. A flush
+  /// start is counted in whole quanta within the tolerance, so an
+  /// obstacle edge one ulp off the grid does not push it a quantum on.
+  static List<double?> _startsOn(
+    Axis axis, {
+    required BoardSpan box,
+    required int steps,
+    required double radius,
+    required double quantum,
+    required BoardStartWindow window,
+    required bool whole,
+    required List<BoardSpan> obstacles,
+  }) {
+    final starts = <double?>[null];
+    if (steps == 0) {
+      return starts;
+    }
+    final low = box.startTrackOn(axis);
+    final seen = <double>{low};
+    void add(double start) {
+      var placed = clampToWindow(snapToTrackEdge(start), window);
+      if (whole) {
+        placed = placed.floorToDouble();
+      }
+      if (seen.add(placed)) {
+        starts.add(placed);
+      }
+    }
+
+    for (var step = 1; step <= steps; step++) {
+      add(low - step * quantum);
+      add(low + step * quantum);
+    }
+    // The grid a candidate lands on: on the whole-track axis the steps
+    // above land on whole tracks, the box's own track plus whole tracks,
+    // and a flush start is counted on the same grid. Zero quanta is the
+    // box's own start, offered as null, or on the whole-track axis its own
+    // track, which the steps never offer either.
+    final base = whole ? low.floorToDouble() : low;
+    final extent = box.endTrackOn(axis) - low;
+    for (final obstacle in obstacles) {
+      final past =
+          ((obstacle.endTrackOn(axis) - base) / quantum -
+                  precisionErrorTolerance)
+              .ceil();
+      final before =
+          ((obstacle.startTrackOn(axis) - extent - base) / quantum +
+                  precisionErrorTolerance)
+              .floor();
+      for (final quanta in <int>[past, before]) {
+        if (quanta != 0 &&
+            (quanta * quantum).abs() <= radius + precisionErrorTolerance) {
+          add(base + quanta * quantum);
+        }
+      }
+    }
+    return starts;
+  }
+
+  /// The span a RESIZE that [BoardDragConfig.canDropAt] refused at
+  /// [refused] takes when its dragged edge stops at the item in its way,
+  /// or null when nothing stops it: [kind] names the dragged edge, and
+  /// [lift] is the item's span when the drag began, which [refused] shares
+  /// but for that edge.
+  ///
+  /// An obstacle that [lift] already meets is not in the edge's way: the
+  /// item overlapped it before the drag, so it is not what the drag ran
+  /// into. With the rest, the gate's first term is the move's: [refused]
+  /// must meet one, so a refusal for a rule of the app's own stops
+  /// nothing.
+  ///
+  /// The edges tried lie between the lifted edge and the refused one, on
+  /// the snap's grid, the lifted edge included: up to
+  /// [maxStepsPerDirection] quanta back from the refused edge, the edge
+  /// flush against each obstacle in the way (at or before its start for a
+  /// trailing edge, at or after its end for a leading one), and the
+  /// lifted edge, whose span is [lift] itself. They are tried nearest the
+  /// refused edge first, so the item keeps as much of the drag as holds
+  /// it clear of those obstacles and [accepts] admits. The flush edges
+  /// make that the whole drag: the edge nearest the pointer that holds
+  /// the span clear is flush against the obstacle that stops it one
+  /// quantum further on.
+  static BoardSpan? clampedResize({
+    required BoardSpan lift,
+    required BoardSpan refused,
+    required BoardDragKind kind,
+    required BoardSnap snap,
+    required List<BoardSpan> obstacles,
+    required bool Function(BoardSpan candidate) accepts,
+  }) {
+    assert(kind != BoardDragKind.move, "clampedResize: a move has no edge.");
+    final axis =
+        kind == BoardDragKind.resizeRowStart ||
+            kind == BoardDragKind.resizeRowEnd
+        ? Axis.vertical
+        : Axis.horizontal;
+    final leading =
+        kind == BoardDragKind.resizeRowStart ||
+        kind == BoardDragKind.resizeColStart;
+    final inWay = <BoardSpan>[
+      for (final obstacle in obstacles)
+        if (!meetsAny(lift, <BoardSpan>[obstacle])) obstacle,
+    ];
+    if (!meetsAny(refused, inWay)) {
+      return null;
+    }
+    final from = leading ? lift.startTrackOn(axis) : lift.endTrackOn(axis);
+    final to = leading ? refused.startTrackOn(axis) : refused.endTrackOn(axis);
+    final held = leading
+        ? refused.endTrackOn(axis)
+        : refused.startTrackOn(axis);
+    final forward = to > from;
+    bool between(double edge) {
+      return forward
+          ? edge > from + precisionErrorTolerance &&
+                edge < to - precisionErrorTolerance
+          : edge < from - precisionErrorTolerance &&
+                edge > to + precisionErrorTolerance;
+    }
+
+    final quantum = BoardDropResolver.quantumOf(snap);
+    final edges = <double>{};
+    for (var step = 1; step <= maxStepsPerDirection; step++) {
+      final edge = snapToTrackEdge(
+        forward ? to - step * quantum : to + step * quantum,
+      );
+      if (between(edge)) {
+        edges.add(edge);
+      }
+    }
+    for (final obstacle in inWay) {
+      final edge = forward
+          ? _gridAtOrBelow(obstacle.startTrackOn(axis), snap)
+          : _gridAtOrAbove(obstacle.endTrackOn(axis), snap);
+      if (between(edge)) {
+        edges.add(edge);
+      }
+    }
+    final ordered = edges.toList()
+      ..sort((a, b) {
+        return (to - a).abs().compareTo((to - b).abs());
+      });
+    for (final edge in ordered) {
+      final candidate = _withEdge(refused, axis, leading, edge, held);
+      if (meetsAny(candidate, inWay) || !accepts(candidate)) {
+        continue;
+      }
+      return candidate;
+    }
+    // The lifted span meets nothing in the way by construction.
+    return accepts(lift) ? lift : null;
+  }
+
+  /// [span] with its [leading] or trailing edge on [axis] at [edge], the
+  /// other one at [held], re-split as the resolver writes a resize.
+  static BoardSpan _withEdge(
+    BoardSpan span,
+    Axis axis,
+    bool leading,
+    double edge,
+    double held,
+  ) {
+    final start = leading ? edge : held;
+    final extent = leading ? held - edge : edge - held;
+    final whole = extent.floor();
+    final fraction = extent - whole;
+    if (!leading) {
+      return axis == Axis.vertical
+          ? span.copyWith(rowSpan: whole, rowSpanFraction: fraction)
+          : span.copyWith(colSpan: whole, colSpanFraction: fraction);
+    }
+    final startTrack = start.floor();
+    final startFraction = start - startTrack;
+    return axis == Axis.vertical
+        ? span.copyWith(
+            rowStart: startTrack,
+            rowFraction: startFraction,
+            rowSpan: whole,
+            rowSpanFraction: fraction,
+          )
+        : span.copyWith(
+            colStart: startTrack,
+            colFraction: startFraction,
+            colSpan: whole,
+            colSpanFraction: fraction,
+          );
+  }
+
+  /// The last point of [snap]'s grid at or below [trackSpace], within the
+  /// tolerance; [trackSpace] itself under a free snap, which has no grid.
+  static double _gridAtOrBelow(double trackSpace, BoardSnap snap) {
+    if (snap.mode == BoardSnapMode.free) {
+      return trackSpace;
+    }
+    final quantum = BoardDropResolver.quantumOf(snap);
+    return snapToTrackEdge(
+      (trackSpace / quantum + precisionErrorTolerance).floor() * quantum,
+    );
+  }
+
+  /// The first point of [snap]'s grid at or above [trackSpace], within
+  /// the tolerance; [trackSpace] itself under a free snap.
+  static double _gridAtOrAbove(double trackSpace, BoardSnap snap) {
+    if (snap.mode == BoardSnapMode.free) {
+      return trackSpace;
+    }
+    final quantum = BoardDropResolver.quantumOf(snap);
+    return snapToTrackEdge(
+      (trackSpace / quantum - precisionErrorTolerance).ceil() * quantum,
+    );
   }
 
   /// Whether any obstacle intersects [span], half-open on both axes.

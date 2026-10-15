@@ -211,7 +211,13 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   obstacles, summing them double-counting the overlapping occupants a
   laned board has by the dozen. The scan steps by the snap's quantum,
   and by whole tracks on the lane axis of a laned item, capped at four
-  per direction per axis, orders candidates by content-space distance
+  per direction per axis, and past the steps, within the radius, takes
+  only the FLUSH starts, per obstacle the first start on the box's grid
+  at or past its end and the last whose box ends at or before its start
+  (on the lane axis counted from the box's own track, zero excluded):
+  the nearest clear placement has a flush or own start on each axis, so
+  any radius, `double.infinity` included, costs candidates per obstacle
+  rather than per step. It orders candidates by content-space distance
   under a TOTAL order so equidistant ones cannot swap between resolves,
   clamps a candidate into its axis's window on each axis it steps, so a
   refused span in a band is nudged within the band and a scrolled one
@@ -226,7 +232,17 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   widened on BOTH sides of each axis and clamped into the windows'
   reach rather than intersected with it, so a box hidden under a band
   further than the radius from the first start that shows still
-  gathers the occupants of the start its candidates clamp to. `BoardAutoScroller` (internal) integrates
+  gathers the occupants of the start its candidates clamp to. Under
+  `clampResizes` a refused RESIZE gets the same one chance
+  (`clampedResize`): items the stored span already meets are not in the
+  way, the gate is the first term alone over the rest, and the dragged
+  edge takes, nearest the refused edge first, the first candidate
+  between the stored edge and the refused one that holds the span clear
+  and `canDropAt` admits: up to four quanta back, flush against each
+  item in the way on the snap's grid, or the stored edge, which is the
+  stored span. The radii and `minFreeFraction` govern moves only; the
+  gather is one `itemsIn` over the refused span's whole tracks, which
+  hold every candidate. `BoardAutoScroller` (internal) integrates
   two-axis edge-zone velocities, measured from the port's
   `scrolledRegion` so a pointer over a frozen band scrolls nothing on
   that axis, converts each step to content space through
