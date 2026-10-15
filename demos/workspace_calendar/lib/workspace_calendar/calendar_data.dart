@@ -99,6 +99,12 @@ int dayNumber(DateTime date) {
   return utc.millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
 }
 
+/// The [weekdayColumn] of the [dayNumber] [day]. Day 0, 1970-01-01, was a
+/// Thursday, and `%` never answers negative here.
+int weekdayColumnOfDay(int day) {
+  return (day + 3) % 7;
+}
+
 /// The local midnight of [day], the inverse of [dayNumber].
 DateTime dateOfDayNumber(int day) {
   final utc = DateTime.fromMillisecondsSinceEpoch(

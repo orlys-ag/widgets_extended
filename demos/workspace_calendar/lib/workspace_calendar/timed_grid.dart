@@ -16,6 +16,7 @@ import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_model.dart';
 import 'calendar_schema.dart';
+import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
 const double _headerHeight = 40.0;
@@ -23,8 +24,8 @@ const double _slotHeight = 16.0;
 const double _gutterWidth = 56.0;
 const double _minDayWidth = 44.0;
 
-/// The row of 08:00, which the grid opens scrolled to.
-const int _openingRow = 1 + 8 * 60 ~/ minutesPerSlot;
+/// The time the grid opens scrolled to.
+const int _openingMinute = 8 * 60;
 
 /// The style the grid animates its blocks with: the board's default.
 const BoardAnimationStyle timedGridAnimationStyle = BoardAnimationStyle();
@@ -76,57 +77,184 @@ class CreateRange {
   }
 }
 
-/// Where [shape] sits on a grid of [dayCount] days from the [dayNumber]
-/// [firstDay], in track space: row 0 is the header and column 0 the
-/// gutter, so a slot's row and a day's column count from 1. Days outside
-/// the grid's are clipped off; null when no day of the item lies in it.
-BoardSpan? gridSpanOf(ItemShape shape, int firstDay, int dayCount) {
-  final offset = shape.firstDay - firstDay;
-  final firstColumn = math.max(0, offset);
-  final colSpan = math.min(dayCount, offset + shape.dayCount) - firstColumn;
-  if (colSpan <= 0) {
+/// Which day each column of a timed grid shows and which minute each of
+/// its rows starts at.
+///
+/// Row 0 is the day header and column 0 the hour gutter. The rows below
+/// the header are the slots of [hours], one per [minutesPerSlot]; the
+/// columns right of the gutter are the days of the [dayCount] days from
+/// [firstDay] whose weekday [weekdays] holds, in order, so a day it does
+/// not hold has no column and the days either side of it are adjacent.
+@immutable
+class GridTracks {
+  GridTracks({
+    required this.firstDay,
+    required this.dayCount,
+    this.weekdays = WeekdaySet.all,
+    this.hours = DayHours.allDay,
+  }) : assert(dayCount >= 1),
+       _days = List<int>.unmodifiable(<int>[
+         for (var day = firstDay; day < firstDay + dayCount; day++)
+           if (weekdays.containsDay(day)) day,
+       ]);
+
+  /// The [dayNumber] of the range's first day, shown or not.
+  final int firstDay;
+
+  /// The days in the range, shown or not.
+  final int dayCount;
+
+  final WeekdaySet weekdays;
+  final DayHours hours;
+
+  /// The [dayNumber]s of the shown days, ascending: column `c` shows
+  /// `_days[c - 1]`.
+  final List<int> _days;
+
+  /// The [dayNumber] of the range's last day, shown or not.
+  int get lastDay {
+    return firstDay + dayCount - 1;
+  }
+
+  /// The day columns, the gutter not counted.
+  int get columnCount {
+    return _days.length;
+  }
+
+  /// The slot rows, the header not counted.
+  int get rowCount {
+    return hours.slotCount;
+  }
+
+  /// The [dayNumber] of the day [column] shows, 1 to [columnCount].
+  int dayAt(int column) {
+    assert(column >= 1 && column <= columnCount);
+    return _days[column - 1];
+  }
+
+  /// The local midnight of the day [column] shows.
+  DateTime dateAt(int column) {
+    return dateOfDayNumber(dayAt(column));
+  }
+
+  /// The column showing the [dayNumber] [day], or null when none does.
+  int? columnOf(int day) {
+    final column = firstColumnFrom(day);
+    if (column <= columnCount && dayAt(column) == day) {
+      return column;
+    }
+    return null;
+  }
+
+  /// The first column showing [day] or a later day, or one past the last
+  /// column when none does.
+  int firstColumnFrom(int day) {
+    return 1 + _firstIndexAtLeast(day);
+  }
+
+  /// The last column showing [day] or an earlier day, or 0 when none does.
+  int lastColumnUpTo(int day) {
+    return _firstIndexAtLeast(day + 1);
+  }
+
+  /// The index of the first shown day at or after [day], by binary search
+  /// over the ascending [_days]; [columnCount] when there is none.
+  int _firstIndexAtLeast(int day) {
+    var low = 0;
+    var high = _days.length;
+    while (low < high) {
+      final middle = (low + high) >> 1;
+      if (_days[middle] < day) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low;
+  }
+
+  /// The minute the slot [row] starts at, for a row from 1 to [rowCount];
+  /// the row after the last gives the end of [hours].
+  int minuteAt(int row) {
+    return hours.start + (row - 1) * minutesPerSlot;
+  }
+
+  /// The row of the slot starting at [minute], a slot boundary in
+  /// [hours].
+  int rowOf(int minute) {
+    return 1 + (minute - hours.start) ~/ minutesPerSlot;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is GridTracks &&
+        other.firstDay == firstDay &&
+        other.dayCount == dayCount &&
+        other.weekdays == weekdays &&
+        other.hours == hours;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(firstDay, dayCount, weekdays, hours);
+  }
+}
+
+/// Where [shape] sits on the grid [tracks] lays out, in track space. The
+/// days of it the grid has no column for and its minutes outside the
+/// grid's hours are clipped off; null when no shown day or no minute of it
+/// is left.
+BoardSpan? gridSpanOf(ItemShape shape, GridTracks tracks) {
+  final firstColumn = tracks.firstColumnFrom(shape.firstDay);
+  final lastColumn = tracks.lastColumnUpTo(shape.firstDay + shape.dayCount - 1);
+  final hours = tracks.hours;
+  final start = math.max(shape.start, hours.start);
+  final end = math.min(shape.end, hours.end);
+  if (lastColumn < firstColumn || end <= start) {
     return null;
   }
   return BoardSpan(
-    rowStart: 1 + shape.start ~/ minutesPerSlot,
-    rowSpan: (shape.end - shape.start) ~/ minutesPerSlot,
-    colStart: 1 + firstColumn,
-    colSpan: colSpan,
+    rowStart: tracks.rowOf(start),
+    rowSpan: (end - start) ~/ minutesPerSlot,
+    colStart: firstColumn,
+    colSpan: lastColumn - firstColumn + 1,
   );
 }
 
 /// [shape] after a drag took its block from [from] to [to], both track
-/// space, on a grid whose first column is the [dayNumber] [firstDay]. Its
-/// times are read from [to]'s rows.
+/// space, on the grid [tracks] lays out. Its times are read from [to]'s
+/// rows, so a shape whose minutes the grid clips has no business here.
 ///
-/// A drop that keeps the column count moves the first day by the change
-/// in the columns and keeps the day count, so the days a clipped item has
-/// outside the grid keep their distance. A drop that changes the column
-/// count is a resize of the trailing column edge, the only column edge
-/// the grid resizes, which keeps the start: the item keeps its first day
-/// and ends on the day of [to]'s last column, whatever the grid clipped
-/// of it.
+/// A drop that keeps the column count moves the first day by the days
+/// between the two spans' first columns and keeps the day count, so the
+/// days a clipped item has outside the grid keep their distance. A drop
+/// that changes the column count is a resize of the trailing column edge,
+/// the only column edge the grid resizes, which keeps the start: the item
+/// keeps its first day and ends on the day of [to]'s last column, whatever
+/// the grid clipped of it.
 ItemShape shapeFromSpan(
   ItemShape shape,
   BoardSpan from,
   BoardSpan to,
-  int firstDay,
+  GridTracks tracks,
 ) {
-  final start = (to.rowStart - 1) * minutesPerSlot;
+  final start = tracks.minuteAt(to.rowStart);
   final end = start + to.rowSpan * minutesPerSlot;
   if (to.colSpan == from.colSpan) {
+    final shift = tracks.dayAt(to.colStart) - tracks.dayAt(from.colStart);
     return (
       type: shape.type,
-      firstDay: shape.firstDay + (to.colStart - from.colStart),
+      firstDay: shape.firstDay + shift,
       dayCount: shape.dayCount,
       start: start,
       end: end,
     );
   }
+  final lastDay = tracks.dayAt(to.colStart + to.colSpan - 1);
   return (
     type: shape.type,
     firstDay: shape.firstDay,
-    dayCount: firstDay + to.colStart + to.colSpan - 1 - shape.firstDay,
+    dayCount: lastDay - shape.firstDay + 1,
     start: start,
     end: end,
   );
@@ -138,14 +266,46 @@ CalendarItem itemFromSpan(
   CalendarItem item,
   BoardSpan from,
   BoardSpan to,
-  int firstDay,
+  GridTracks tracks,
 ) {
-  final shape = shapeFromSpan(item.shape, from, to, firstDay);
+  final shape = shapeFromSpan(item.shape, from, to, tracks);
   return item.copyWith(
     day: dateOfDayNumber(shape.firstDay),
     dayCount: shape.dayCount,
     startMinute: shape.start,
     endMinute: shape.end,
+  );
+}
+
+/// What a tap on the body [cell] creates: one hour from its slot, or up to
+/// the end of the grid's hours when that comes first.
+CreateRange createRangeAt(GridTracks tracks, ({int row, int col}) cell) {
+  final start = tracks.minuteAt(cell.row);
+  return CreateRange(
+    day: tracks.dateAt(cell.col),
+    startMinute: start,
+    endMinute: math.min(start + 60, tracks.hours.end),
+    dayCount: 1,
+  );
+}
+
+/// What a drag from the body cell [anchor] to [focus] creates: the slots of
+/// the rectangle between them, on every day from its left column's to its
+/// right column's, shown or not.
+CreateRange createRangeOver(
+  GridTracks tracks,
+  ({int row, int col}) anchor,
+  ({int row, int col}) focus,
+) {
+  final top = math.min(anchor.row, focus.row);
+  final bottom = math.max(anchor.row, focus.row);
+  final left = math.min(anchor.col, focus.col);
+  final right = math.max(anchor.col, focus.col);
+  return CreateRange(
+    day: tracks.dateAt(left),
+    startMinute: tracks.minuteAt(top),
+    endMinute: tracks.minuteAt(bottom + 1),
+    dayCount: tracks.dayAt(right) - tracks.dayAt(left) + 1,
   );
 }
 
@@ -196,10 +356,13 @@ class TimedGrid extends StatefulWidget {
   }
 }
 
-typedef _HeaderState = ({DateTime firstDay, DateTime selectedDay});
+typedef _HeaderState = ({GridTracks tracks, DateTime selectedDay});
 
 class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final BoardController<String, ShownItem> _board;
+
+  /// Where the widget's days and minutes sit on the board.
+  late GridTracks _tracks = _tracksOf(widget);
 
   /// Held in fields because `Board` replaces its delegate, and so rebuilds
   /// every cell and item, whenever a builder it gets is not identical to
@@ -215,7 +378,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     canDropAt: _canDropAt,
     onItemMoved: _commit,
     onItemResized: _commit,
-    resizeEdges: widget.dayCount > 1
+    resizeEdges: _tracks.columnCount > 1
         ? BoardResizeEdges.trailing
         : BoardResizeEdges.none,
     primaryResizeEdges: BoardResizeEdges.trailing,
@@ -225,7 +388,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// What the header cells show. The cell builder runs only when the board
   /// rebuilds a cell, so the header cells listen to this instead.
   late final ValueNotifier<_HeaderState> _header = ValueNotifier<_HeaderState>((
-    firstDay: widget.firstDay,
+    tracks: _tracks,
     selectedDay: widget.selectedDay,
   ));
 
@@ -297,7 +460,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     _sync();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _board.jumpToCell(_openingRow, 1);
+        _board.jumpToCell(_tracks.rowOf(_openingMinute), 1);
       }
     });
   }
@@ -315,16 +478,22 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       oldWidget.model.removeListener(_handleModel);
       widget.model.addListener(_handleModel);
     }
-    if (widget.firstDay != oldWidget.firstDay ||
-        widget.selectedDay != oldWidget.selectedDay) {
-      _header.value = (
-        firstDay: widget.firstDay,
-        selectedDay: widget.selectedDay,
-      );
+    final tracks = _tracksOf(widget);
+    final tracksChanged = tracks != _tracks;
+    _tracks = tracks;
+    if (tracksChanged || widget.selectedDay != oldWidget.selectedDay) {
+      _header.value = (tracks: tracks, selectedDay: widget.selectedDay);
     }
-    if (modelChanged || widget.firstDay != oldWidget.firstDay) {
+    if (modelChanged || tracksChanged) {
       _sync();
     }
+  }
+
+  static GridTracks _tracksOf(TimedGrid widget) {
+    return GridTracks(
+      firstDay: dayNumber(widget.firstDay),
+      dayCount: widget.dayCount,
+    );
   }
 
   @override
@@ -355,14 +524,14 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
         _headerHeight,
-        ...List<double>.filled(minutesPerDay ~/ minutesPerSlot, _slotHeight),
+        ...List<double>.filled(_tracks.rowCount, _slotHeight),
       ]),
       frozenStart: 1,
     );
   }
 
   /// Column 0 is the frozen hour gutter; columns 1 onward are the days
-  /// from [TimedGrid.firstDay]. The `laneExtent` makes the day axis the
+  /// [_tracks] shows. The `laneExtent` makes the day axis the
   /// lane axis, so items sharing a day's time sit side by side. No two
   /// stored items do, but a failed move can return an item under another
   /// item's pending move until the API refuses that one.
@@ -370,7 +539,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
         _gutterWidth,
-        ...List<double>.filled(widget.dayCount, dayWidth),
+        ...List<double>.filled(_tracks.columnCount, dayWidth),
       ]),
       frozenStart: 1,
       laneExtent: dayWidth,
@@ -383,7 +552,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   void _fitColumns(double width) {
     final dayWidth = math.max(
       _minDayWidth,
-      (width - _gutterWidth) / widget.dayCount,
+      (width - _gutterWidth) / _tracks.columnCount,
     );
     if (dayWidth == _dayWidth) {
       return;
@@ -398,7 +567,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   DateTime get _lastDay {
-    return addDays(widget.firstDay, widget.dayCount - 1);
+    return dateOfDayNumber(_tracks.lastDay);
   }
 
   /// Whether the model shows exactly this grid's days, every one of them
@@ -421,10 +590,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     final ready = _daysReady;
     final placements = <BoardPlacement<ShownItem>>[];
     if (ready) {
-      final firstDay = dayNumber(widget.firstDay);
       final shown = widget.model.itemsBetween(widget.firstDay, _lastDay);
       for (final entry in shown) {
-        final span = gridSpanOf(entry.item.shape, firstDay, widget.dayCount);
+        final span = gridSpanOf(entry.item.shape, _tracks);
         if (span != null) {
           placements.add(BoardPlacement<ShownItem>(entry, span));
         }
@@ -481,15 +649,13 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (from == span) {
       return true;
     }
-    final shape = entry.item.shape;
-    final firstDay = dayNumber(widget.firstDay);
-    final converted = shapeFromSpan(shape, from, span, firstDay);
+    final converted = shapeFromSpan(entry.item.shape, from, span, _tracks);
     if (!isAllowedDayCount(converted.dayCount)) {
       return false;
     }
     // The converted shape's own span, not the candidate's: an item clipped
     // at the grid's first day shows more days once moved right.
-    final shownSpan = gridSpanOf(converted, firstDay, widget.dayCount);
+    final shownSpan = gridSpanOf(converted, _tracks);
     if (shownSpan == null) {
       return false;
     }
@@ -524,12 +690,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (from == null || stored == null) {
       return;
     }
-    final requested = itemFromSpan(
-      stored,
-      from,
-      to,
-      dayNumber(widget.firstDay),
-    );
+    final requested = itemFromSpan(stored, from, to, _tracks);
     if (requested == stored) {
       return;
     }
@@ -638,35 +799,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (cell == null) {
       return;
     }
-    widget.onCreate(_tapRangeOf(cell));
-  }
-
-  /// One hour from [cell]'s slot, or to 24:00 when that comes first.
-  CreateRange _tapRangeOf(({int row, int col}) cell) {
-    final start = (cell.row - 1) * minutesPerSlot;
-    return CreateRange(
-      day: addDays(widget.firstDay, cell.col - 1),
-      startMinute: start,
-      endMinute: math.min(start + 60, minutesPerDay),
-      dayCount: 1,
-    );
-  }
-
-  /// The slots of the rectangle from [anchor] to [focus].
-  CreateRange _rectRangeOf(
-    ({int row, int col}) anchor,
-    ({int row, int col}) focus,
-  ) {
-    final top = math.min(anchor.row, focus.row);
-    final bottom = math.max(anchor.row, focus.row);
-    final left = math.min(anchor.col, focus.col);
-    final right = math.max(anchor.col, focus.col);
-    return CreateRange(
-      day: addDays(widget.firstDay, left - 1),
-      startMinute: (top - 1) * minutesPerSlot,
-      endMinute: bottom * minutesPerSlot,
-      dayCount: right - left + 1,
-    );
+    widget.onCreate(createRangeAt(_tracks, cell));
   }
 
   Drag? _beginRange(Offset position) {
@@ -700,8 +833,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       return;
     }
     final created = range.focus == range.anchor
-        ? _tapRangeOf(range.anchor)
-        : _rectRangeOf(range.anchor, range.focus);
+        ? createRangeAt(_tracks, range.anchor)
+        : createRangeOver(_tracks, range.anchor, range.focus);
     _clearRange(range);
     widget.onCreate(created);
   }
@@ -725,7 +858,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       }
       return _DayHeaderCell(
         header: _header,
-        column: cell.col - 1,
+        column: cell.col,
         today: widget.today,
         onSelectDay: _selectDay,
       );
@@ -733,8 +866,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (cell.col == 0) {
       // Every gutter row is opaque so nothing scrolled beneath the band
       // shows through; the label sits on the hour line.
-      final minute = (cell.row - 1) * minutesPerSlot;
-      final onHour = minute % 60 == 0 && minute > 0;
+      final minute = _tracks.minuteAt(cell.row);
+      final onHour = minute % 60 == 0 && cell.row > 1;
       return ColoredBox(
         color: HarborColors.surface,
         child: onHour
@@ -789,7 +922,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
           cellBuilder: _cellBuilder,
           itemBuilder: _itemBuilder,
           background: _TimedGridPainter(
-            firstDay: widget.firstDay,
+            tracks: _tracks,
             today: widget.today,
             rangeAnchor: range?.anchor,
             rangeFocus: range?.focus,
@@ -895,6 +1028,8 @@ class _DayHeaderCell extends StatelessWidget {
   });
 
   final ValueListenable<_HeaderState> header;
+
+  /// The board column of the cell, which [GridTracks.dateAt] reads.
   final int column;
   final DateTime today;
   final ValueChanged<DateTime> onSelectDay;
@@ -904,7 +1039,7 @@ class _DayHeaderCell extends StatelessWidget {
     return ValueListenableBuilder<_HeaderState>(
       valueListenable: header,
       builder: (context, value, child) {
-        final day = addDays(value.firstDay, column);
+        final day = value.tracks.dateAt(column);
         final isToday = day == today;
         final isSelected = day == value.selectedDay;
         return GestureDetector(
@@ -1086,7 +1221,7 @@ class _LoadOverlay extends StatelessWidget {
 /// it shows over that column too. Every paint it draws with is built once.
 class _TimedGridPainter extends BoardBackgroundPainter {
   const _TimedGridPainter({
-    required this.firstDay,
+    required this.tracks,
     required this.today,
     required this.rangeAnchor,
     required this.rangeFocus,
@@ -1104,8 +1239,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     ..style = PaintingStyle.stroke
     ..strokeWidth = 2.0;
 
-  /// The day of column 1.
-  final DateTime firstDay;
+  final GridTracks tracks;
   final DateTime today;
   final ({int row, int col})? rangeAnchor;
   final ({int row, int col})? rangeFocus;
@@ -1125,12 +1259,12 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     canvas.save();
     canvas.clipRect(region);
     canvas.drawRect(region, _surfacePaint);
-    final todayColumn = 1 + daysBetween(firstDay, today);
+    final todayColumn = tracks.columnOf(dayNumber(today));
     for (var col = firstCol; col <= lastCol; col++) {
       final Paint fill;
       if (col == todayColumn) {
         fill = _tintPaint;
-      } else if (weekdayColumn(addDays(firstDay, col - 1)) >= 5) {
+      } else if (weekdayColumnOfDay(tracks.dayAt(col)) >= 5) {
         fill = _backgroundPaint;
       } else {
         continue;
@@ -1169,7 +1303,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
 
   @override
   bool shouldRepaint(covariant _TimedGridPainter old) {
-    return old.firstDay != firstDay ||
+    return old.tracks != tracks ||
         old.today != today ||
         old.rangeAnchor != rangeAnchor ||
         old.rangeFocus != rangeFocus;
