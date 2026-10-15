@@ -1470,20 +1470,22 @@ void main() {
     expect(tester.getRect(blockFinder(uxFlowId)), uxFlow);
 
     // A single-day item cannot share another single-day item's time: the
-    // grid refuses the drop onto Wednesday 11:00, where "Review onboarding
-    // copy" sits, and sends nothing.
-    requests = api.requests.length;
-    final brainstorm = tester.getRect(blockFinder(brainstormId));
+    // drop onto Wednesday 11:00, where "Review onboarding copy" sits until
+    // 12:00, lands at 12:00, the nearest free time that day.
     await moveBlock(
       tester,
       blockFinder(brainstormId),
       cellRect(tester, rowOf(11 * 60), colOf(2)).topLeft,
     );
     expect(find.byType(SnackBar), findsNothing);
+    await tester.pump(api.latency);
     await tester.pumpAndSettle();
-    expect(tester.getRect(blockFinder(brainstormId)), brainstorm);
+    final landed = await stored(tester, api, brainstormId);
+    expect(
+      (landed.day, landed.startMinute, landed.endMinute),
+      (DateTime(2026, 4, 22), 12 * 60, 13 * 60 + 30),
+    );
     expect(tester.getSize(blockFinder(reviewId)).width, near(dayWidth));
-    expect(api.requests, hasLength(requests));
 
     // The right strip of an item that ends after the week ends it on the
     // column it is dropped on.
@@ -1822,5 +1824,43 @@ void main() {
         isTrue,
       );
     }
+  });
+
+  testWidgets("W19 a drop onto taken time lands at the nearest free time "
+      "of that day, an hour away at most", (tester) async {
+    final api = await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+
+    // Tuesday 10:30 lies inside "Design new UX flow for Michael", 10:00 to
+    // 13:00: the nearest free half hour that day is 09:30, an hour
+    // earlier, where 13:00 is two and a half hours later.
+    await moveBlock(
+      tester,
+      blockFinder(standupId),
+      cellRect(tester, rowOf(10 * 60 + 30), colOf(1)).topLeft,
+    );
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    final landed = await stored(tester, api, standupId);
+    expect(
+      (landed.day, landed.startMinute, landed.endMinute),
+      (DateTime(2026, 4, 21), 9 * 60 + 30, 10 * 60),
+    );
+
+    // Monday 13:00 lies inside "Day off", 09:00 to 17:00, which holds
+    // every start within an hour of it that day. Tuesday 13:00 is free,
+    // but a drop does not change days to find room, so the item goes
+    // back and nothing is sent.
+    final requests = api.requests.length;
+    final planning = blockTitled("Weekly planning");
+    final before = tester.getRect(planning);
+    await moveBlock(
+      tester,
+      planning,
+      cellRect(tester, rowOf(13 * 60), colOf(0)).topLeft,
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getRect(planning), before);
+    expect(api.requests, hasLength(requests));
   });
 }

@@ -332,15 +332,17 @@ CreateRange createRangeOver(
 ///
 /// Items keep every board gesture: a long press moves, the bottom band
 /// drags the end time, and, on more than one day, the right band the day
-/// count. An item reaching past the hours shows the part inside them,
-/// with an arrow where it is cut, and takes no move or resize: its form
-/// changes it. An item wholly outside them, or on no shown day, has no
-/// block, and the corner over the gutter counts it. Empty body cells take
-/// a create gesture, reported through [onCreate]: a tap picks one hour
-/// from its slot, or up to the end of the hours; a drag picks the
-/// rectangle of slots it covers, at once for a mouse or a stylus and
-/// after a press and hold on touch, so a touch drag without one scrolls
-/// the grid.
+/// count. A move dropped onto another item's time lands at the nearest
+/// free time of that day an hour away at most, and goes back where there
+/// is none; a resize onto one goes back. An item reaching past the hours
+/// shows the part inside them, with an arrow where it is cut, and takes
+/// no move or resize: its form changes it. An item wholly outside them,
+/// or on no shown day, has no block, and the corner over the gutter
+/// counts it. Empty body cells take a create gesture, reported through
+/// [onCreate]: a tap picks one hour from its slot, or up to the end of
+/// the hours; a drag picks the rectangle of slots it covers, at once for
+/// a mouse or a stylus and after a press and hold on touch, so a touch
+/// drag without one scrolls the grid.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than the least sizes [settings] choose; past those, it scrolls.
@@ -402,9 +404,19 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// it already has. A single day column has no right strip: there is no
   /// column to drag its edge onto. Whether the grid has more than one
   /// column is fixed for its life, which [didUpdateWidget] asserts.
+  ///
+  /// A move [_canDropAt] refuses for meeting another item slides to the
+  /// nearest placement on the same day that holds it clear, up to four
+  /// slots either way, the most the board's search steps, however busy the
+  /// time around it is.
   late final BoardDragConfig<String> _dragConfig = BoardDragConfig<String>(
     canDrag: _canDrag,
     canDropAt: _canDropAt,
+    dropFit: const BoardDropFit(
+      minFreeFraction: 0.0,
+      rowRadius: 4.0,
+      colRadius: 0.0,
+    ),
     onItemMoved: _commit,
     onItemResized: _commit,
     resizeEdges: _tracks.columnCount > 1

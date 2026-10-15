@@ -293,22 +293,23 @@ void main() {
     expect(moved.endMinute, 21 * 60);
   });
 
-  testWidgets("D4 a drop onto another item's time is refused", (tester) async {
+  testWidgets("D4 a drop onto another item's time lands at the nearest "
+      "free time", (tester) async {
     final api = await pumpCalendar(tester, size: tall);
     await pickMode(tester, "Day");
-    final requests = api.requests.length;
-    final before = tester.getRect(blockFinder(brainstormId));
 
-    // 12:00 to 13:00 lies inside "Design new UX flow for Michael".
+    // 12:00 to 13:00 lies inside "Design new UX flow for Michael", which
+    // ends at 13:00.
     await moveBlock(
       tester,
       blockFinder(brainstormId),
       cellRect(tester, rowOf(12 * 60), dayColumn).topLeft,
     );
     expect(find.byType(SnackBar), findsNothing);
+    await tester.pump(api.latency);
     await tester.pumpAndSettle();
-    expect(tester.getRect(blockFinder(brainstormId)), before);
-    expect(api.requests, hasLength(requests));
+    final landed = await stored(tester, api, brainstormId);
+    expect((landed.startMinute, landed.endMinute), (13 * 60, 14 * 60));
   });
 
   testWidgets("D5 Day mode reads the shown day alone", (tester) async {
