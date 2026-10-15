@@ -926,11 +926,6 @@ void main() {
       expect(api.requests, hasLength(requests), reason: id);
     }
 
-    // Into "Day off".
-    await refused(
-      brainstormId,
-      cellRect(tester, rowOf(14 * 60), colOf(0)).topLeft,
-    );
     // Onto the hour gutter, from Sunday: one column there would move the
     // Sunday-to-Tuesday Task a week earlier, onto Monday and Tuesday, so
     // the gutter test alone refuses it. Then onto the header row.
@@ -1483,7 +1478,7 @@ void main() {
     final landed = await stored(tester, api, brainstormId);
     expect(
       (landed.day, landed.startMinute, landed.endMinute),
-      (DateTime(2026, 4, 22), 12 * 60, 13 * 60 + 30),
+      (DateTime(2026, 4, 23), 11 * 60, 12 * 60 + 30),
     );
     expect(tester.getSize(blockFinder(reviewId)).width, near(dayWidth));
 
@@ -1826,14 +1821,34 @@ void main() {
     }
   });
 
-  testWidgets("W19 a drop onto taken time lands at the nearest free time "
-      "of that day, an hour away at most", (tester) async {
-    final api = await pumpCalendar(tester, size: tall);
+  testWidgets("W19 a drop onto taken time lands at the nearest free time, "
+      "on its day or the day before or after it", (tester) async {
+    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    await createBeforePump(
+      tester,
+      api,
+      taskJson("Long haul", DateTime(2026, 4, 25), 8 * 60, 18 * 60 + 30),
+    );
+    await createBeforePump(
+      tester,
+      api,
+      taskJson("Summit", DateTime(2026, 4, 25), 19 * 60, 20 * 60, dayCount: 2),
+    );
+    final longHaul = await idOn(
+      tester,
+      api,
+      DateTime(2026, 4, 25),
+      "Long haul",
+    );
+    final summit = await idOn(tester, api, DateTime(2026, 4, 25), "Summit");
+    final planning = await idOn(tester, api, monday, "Weekly planning");
+    await pumpCalendar(tester, api: api, size: tall);
     await pickMode(tester, "Week");
 
     // Tuesday 10:30 lies inside "Design new UX flow for Michael", 10:00 to
-    // 13:00: the nearest free half hour that day is 09:30, an hour
-    // earlier, where 13:00 is two and a half hours later.
+    // 13:00. The nearest free half hour that day is 09:30, an hour earlier,
+    // but on this narrow window a day's column is narrower than an hour is
+    // tall, so the item lands on Wednesday 10:30, a day later.
     await moveBlock(
       tester,
       blockFinder(standupId),
@@ -1844,23 +1859,112 @@ void main() {
     final landed = await stored(tester, api, standupId);
     expect(
       (landed.day, landed.startMinute, landed.endMinute),
-      (DateTime(2026, 4, 21), 9 * 60 + 30, 10 * 60),
+      (DateTime(2026, 4, 22), 10 * 60 + 30, 11 * 60),
     );
 
-    // Monday 13:00 lies inside "Day off", 09:00 to 17:00, which holds
-    // every start within an hour of it that day. Tuesday 13:00 is free,
-    // but a drop does not change days to find room, so the item goes
-    // back and nothing is sent.
+    // Monday holds "Weekly planning", 08:00 to 09:00, and "Day off",
+    // 09:00 to 17:00, so its longest free time is midnight to 08:00;
+    // Tuesday's is midnight to 10:00, and Monday has no day before it in
+    // the week. Ten and a half hours fit in none of them, and the item
+    // goes back with nothing sent.
     final requests = api.requests.length;
-    final planning = blockTitled("Weekly planning");
-    final before = tester.getRect(planning);
+    final before = tester.getRect(blockFinder(longHaul));
     await moveBlock(
       tester,
-      planning,
-      cellRect(tester, rowOf(13 * 60), colOf(0)).topLeft,
+      blockFinder(longHaul),
+      cellRect(tester, rowOf(10 * 60), colOf(0)).topLeft,
     );
     await tester.pumpAndSettle();
-    expect(tester.getRect(planning), before);
+    expect(tester.getRect(blockFinder(longHaul)), before);
     expect(api.requests, hasLength(requests));
+
+    // Monday and Tuesday 16:00 meet "Day off": the nearest free hour on
+    // both days is 17:00, an hour later, where Tuesday and Wednesday
+    // 16:00 are free a day later.
+    await moveBlock(
+      tester,
+      blockFinder(summit),
+      cellRect(tester, rowOf(16 * 60), colOf(0)).topLeft,
+    );
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    final spanning = await stored(tester, api, summit);
+    expect(
+      (
+        spanning.day,
+        spanning.dayCount,
+        spanning.startMinute,
+        spanning.endMinute,
+      ),
+      (DateTime(2026, 4, 21), 2, 16 * 60, 17 * 60),
+    );
+
+    // Monday 13:00 lies inside "Day off": the nearest free hour that day
+    // is 17:00, four hours later, where Tuesday 13:00, between "Design new
+    // UX flow for Michael" and "Brainstorm with the team", is a day later.
+    await moveBlock(
+      tester,
+      blockFinder(planning),
+      cellRect(tester, rowOf(13 * 60), colOf(0)).topLeft,
+    );
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    final moved = await stored(tester, api, planning);
+    expect(
+      (moved.day, moved.startMinute, moved.endMinute),
+      (DateTime(2026, 4, 21), 13 * 60, 14 * 60),
+    );
+  });
+
+  testWidgets("W20 a resize dragged onto another item stops at its edge", (
+    tester,
+  ) async {
+    final api = await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
+    final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
+
+    /// Drags a strip of a block with a mouse, which the grid's scrollable
+    /// never takes, then lets the write it causes complete.
+    Future<void> dragStrip(Offset strip, Offset delta) async {
+      final gesture = await tester.startGesture(
+        strip,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(delta);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await tester.pump(api.latency);
+      await tester.pumpAndSettle();
+    }
+
+    // The end of "Design new UX flow for Michael", 13:00 on Tuesday,
+    // dragged to 16:00, past "Brainstorm with the team", 14:00 to 15:00:
+    // it stops where the brainstorm starts.
+    final uxFlow = tester.getRect(blockFinder(uxFlowId));
+    await dragStrip(
+      Offset(uxFlow.center.dx, uxFlow.bottom - 3.0),
+      Offset(0.0, 12 * slot),
+    );
+    final resized = await stored(tester, api, uxFlowId);
+    expect(
+      (resized.day, resized.startMinute, resized.endMinute),
+      (DateTime(2026, 4, 21), 10 * 60, 14 * 60),
+    );
+
+    // The brainstorm's right edge dragged three days on, to Friday, where
+    // "Interview: product designer" holds 13:00 to 14:30: it stops at
+    // Thursday, three days in all.
+    final brainstorm = tester.getRect(blockFinder(brainstormId));
+    await dragStrip(
+      Offset(brainstorm.right - 3.0, brainstorm.center.dy),
+      Offset(3 * dayWidth, 0.0),
+    );
+    final widened = await stored(tester, api, brainstormId);
+    expect(
+      (widened.day, widened.dayCount, widened.startMinute, widened.endMinute),
+      (DateTime(2026, 4, 21), 3, 14 * 60, 15 * 60),
+    );
   });
 }
