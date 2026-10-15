@@ -3,12 +3,12 @@
 /// grid's overlay.
 library;
 
-import 'package:examples/workspace_calendar/calendar_api.dart';
-import 'package:examples/workspace_calendar/day_cell.dart';
-import 'package:examples/workspace_calendar/day_list.dart';
-import 'package:examples/workspace_calendar/item_card.dart';
-import 'package:examples/workspace_calendar/mock_calendar_api.dart';
-import 'package:examples/workspace_calendar/timed_grid.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
+import 'package:workspace_calendar/workspace_calendar/day_list.dart';
+import 'package:workspace_calendar/workspace_calendar/item_card.dart';
+import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

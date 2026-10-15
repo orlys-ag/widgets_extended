@@ -1,7 +1,7 @@
-/// Runs the workspace calendar demo on its own, on today's date and the
-/// seeded mock API:
+/// Runs the workspace calendar demo, on today's date and the seeded mock
+/// API, from this package's directory:
 ///
-///     flutter run -t lib/workspace_calendar_main.dart
+///     flutter run
 library;
 
 import 'package:flutter/material.dart';

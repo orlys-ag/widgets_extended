@@ -4,8 +4,8 @@ library;
 
 import 'dart:math' as math;
 
-import 'package:examples/workspace_calendar/calendar_schema.dart';
-import 'package:examples/workspace_calendar/harbor_theme.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

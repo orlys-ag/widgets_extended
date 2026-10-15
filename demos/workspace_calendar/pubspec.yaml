@@ -1,0 +1,21 @@
+name: workspace_calendar
+description: "Demo: a workspace calendar with month, week and day modes on the widgets_extended board and synced sliver tree."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  widgets_extended:
+    path: ../..
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

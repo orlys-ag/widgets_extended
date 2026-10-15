@@ -3,10 +3,10 @@
 /// seed. Every call is answered through the test binding's fake time.
 library;
 
-import 'package:examples/workspace_calendar/calendar_api.dart';
-import 'package:examples/workspace_calendar/calendar_data.dart';
-import 'package:examples/workspace_calendar/calendar_schema.dart';
-import 'package:examples/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const Duration latency = Duration(milliseconds: 100);

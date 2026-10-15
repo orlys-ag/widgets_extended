@@ -2,8 +2,8 @@
 /// the clock, so only what does not depend on the date is checked.
 library;
 
-import 'package:examples/workspace_calendar_example.dart';
-import 'package:examples/workspace_calendar_main.dart';
+import 'package:workspace_calendar/workspace_calendar_example.dart';
+import 'package:workspace_calendar/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

@@ -29,16 +29,7 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
-/examples/*
-!/examples/lib/
-/examples/lib/*
-!/examples/lib/workspace_calendar_example.dart
-!/examples/lib/workspace_calendar_main.dart
-!/examples/lib/workspace_calendar/
-!/examples/test/
-/examples/test/*
-!/examples/test/workspace_calendar_example_test.dart
-!/examples/test/workspace_calendar/
+examples
 
 # The agent method. Working plans stay local: workflow agents switch branches
 # mid-run, and a run's plan, snapshots, audit, acceptance and run files must

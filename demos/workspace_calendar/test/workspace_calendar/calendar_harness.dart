@@ -5,10 +5,10 @@ library;
 
 import 'dart:ui' as ui;
 
-import 'package:examples/workspace_calendar/calendar_data.dart';
-import 'package:examples/workspace_calendar/mock_calendar_api.dart';
-import 'package:examples/workspace_calendar/timed_grid.dart';
-import 'package:examples/workspace_calendar_example.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
+import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

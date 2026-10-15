@@ -12,6 +12,10 @@ A Flutter package (`widgets_extended`) providing rich utility widgets, in these 
 
 The barrel file `lib/widgets_extended.dart` re-exports each of them.
 
+`demos/workspace_calendar/` is a tracked demo app, a month, week and day
+calendar on the board and the synced sliver tree. It depends on the library by
+path and is not part of it: nothing under `lib/` imports it.
+
 ## Commands
 
 ```bash
@@ -24,15 +28,19 @@ flutter analyze lib test                                  # the package
 # holds examples/pubspec.yaml. The subshell keeps the shell at the root.
 (cd examples && flutter test)
 (cd examples && flutter analyze)
+
+# demos/workspace_calendar/: the tracked demo app, on the library by path.
+(cd demos/workspace_calendar && flutter test)
+(cd demos/workspace_calendar && flutter analyze)
 ```
 
-- After a behaviour change under `lib/`, also run the examples' tests and
-  analyzer when `examples/pubspec.yaml` exists: they can fail where `test/`
-  passes.
-- `flutter analyze lib test` reports no issues; keep it that way. A plain
-  `flutter analyze` also analyzes `examples/`, where neither command reports
-  zero problems, so there compare what each reports before and after your
-  change.
+- After a behaviour change under `lib/`, also run the demo's tests and
+  analyzer, and the examples' when `examples/pubspec.yaml` exists: they can
+  fail where `test/` passes.
+- `flutter analyze lib test` and the demo's `flutter analyze` report no issues;
+  keep it that way. A plain `flutter analyze` at the root also analyzes
+  `examples/`, where neither command reports zero problems, so there compare
+  what each reports before and after your change.
 
 ## Code Quality
 

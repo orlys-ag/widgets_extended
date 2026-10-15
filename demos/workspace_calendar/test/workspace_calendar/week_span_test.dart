@@ -2,10 +2,10 @@
 /// back from the span a drop reports.
 library;
 
-import 'package:examples/workspace_calendar/calendar_data.dart';
-import 'package:examples/workspace_calendar/calendar_item.dart';
-import 'package:examples/workspace_calendar/calendar_schema.dart';
-import 'package:examples/workspace_calendar/timed_grid.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
