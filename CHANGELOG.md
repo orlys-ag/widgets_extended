@@ -156,6 +156,15 @@ it.
 cancelled after `canDropAt` refused its last hover releases it, restarted its
 close from where it painted, over a whole duration. A gap or a resize preview
 already closing now keeps the schedule its first release started.
+- Fix: a drag resize's edge trailed the pointer, easing to each new size on
+the `makeRoom` clock. The dragged edge now follows the pointer: the item is
+painted and laid out at the size the drop would commit on the frame after the
+pointer crosses each grid line, on both axes and both edges, and a drop needs
+no glide on the dragged edge. What the resize causes still animates on the
+`makeRoom` clock:
+the neighbours it displaces, and the item's own share of a lane it starts or
+stops sharing. A cancel, or a target `canDropAt` refuses, still closes the
+preview on that clock from where it paints.
 - Fix: `removeItem`, or a `setItems` dropping the key, on an item whose enter
 was still in flight after a restyle turned `itemEnterExit` off kept the key on
 the board until the next frame, against `removeItem`'s synchronous removal
