@@ -326,12 +326,12 @@ void main() {
 
   // T14 (C5, P2). E is prospectively UNLANED, two lane-axis tracks wide,
   // so `next` is the two-column extent 80 and `now` is the width E
-  // PAINTS, `lanedExtent(4, 3) = 27`, giving a held target of 53.
+  // PAINTS, `lanedExtent(4, 3) = 27`, giving a held target of 53, which
+  // the preview holds at once on the dragged axis.
   // Falsification: red against the scratch variant that lands C4 but
   // leaves C5's `now` span-free, where `now` is one slice of 9, the held
-  // target is 71, the 100ms reading is 62.5 and the settled preview
-  // reads 98, which is 18 past the width the item must reach and 18 it
-  // would step down by at the commit.
+  // target is 71 and the preview reads 98, which is 18 past the width the
+  // item must reach and 18 it would step down by at the commit.
   testWidgets("a resize that de-lanes an expanded item previews from the "
       "width it paints", (tester) async {
     final controller = _fixedLane(tester);
@@ -371,11 +371,8 @@ void main() {
     expect(drag.currentTarget!.span.colSpan, 2);
     expect(controller.spanOf("e")!.colSpan, 1);
 
-    // TARGET: the preview runs from the 27 E paints to the 80 two whole
+    // TARGET: the preview adds 53 to the 27 E paints, the 80 two whole
     // columns give it.
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(_width(tester, "e"), closeTo(53.5, 0.5));
-    await tester.pump(const Duration(milliseconds: 100));
     expect(_width(tester, "e"), closeTo(80.0, 0.01));
     expect(
       controller.anim.extentDeltaOf(controller.idOfKey("e")).dx,

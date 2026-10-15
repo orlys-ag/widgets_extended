@@ -240,6 +240,7 @@ void main() {
         const Rect.fromLTRB(40.0, 50.0, 80.0, 200.0),
       );
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox.shrink());
 
       // Columns: `m` in column 1 of row 1, its right strip dragged two
@@ -269,6 +270,7 @@ void main() {
         const Rect.fromLTRB(40.0, 50.0, 160.0, 100.0),
       );
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle();
     },
   );
 
@@ -300,6 +302,7 @@ void main() {
       const Rect.fromLTRB(40.0, 50.0, 80.0, 200.0),
     );
     drag.endDrag(cancel: true);
+    await tester.pumpAndSettle();
   });
 
   testWidgets(
@@ -370,6 +373,7 @@ void main() {
         const Rect.fromLTRB(100.0, 150.0, 120.0, 250.0),
       );
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle();
     },
   );
 
@@ -426,6 +430,7 @@ void main() {
       const Rect.fromLTRB(95.0, 150.0, 120.0, 250.0),
     );
     drag.endDrag(cancel: true);
+    await tester.pumpAndSettle();
   });
 
   testWidgets("a step back to the stored edge lands at once", (tester) async {
@@ -460,6 +465,7 @@ void main() {
       const Rect.fromLTRB(40.0, 50.0, 80.0, 100.0),
     );
     drag.endDrag(cancel: true);
+    await tester.pumpAndSettle();
   });
 
   testWidgets(
@@ -491,6 +497,11 @@ void main() {
         const Rect.fromLTRB(40.0, 50.0, 80.0, 200.0),
       );
       await tester.pump(const Duration(milliseconds: 50));
+      _expectRect(
+        _rectOf(tester, "m"),
+        const Rect.fromLTRB(40.0, 50.0, 80.0, 200.0),
+      );
+      await tester.pumpAndSettle();
       _expectRect(
         _rectOf(tester, "m"),
         const Rect.fromLTRB(40.0, 50.0, 80.0, 200.0),
@@ -556,6 +567,7 @@ void main() {
       );
       if (refuse) {
         drag.endDrag(cancel: true);
+        await tester.pumpAndSettle();
       }
       await tester.pumpWidget(const SizedBox.shrink());
     }

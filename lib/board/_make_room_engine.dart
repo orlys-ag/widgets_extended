@@ -15,7 +15,10 @@
 /// A RESIZE session's own item holds no offset. It holds a LEAD and an
 /// EXTENT, deltas over the geometry the render gives its STORED span, so
 /// its dragged edge moves and its far edge holds while the model stays
-/// unwritten, and on a content-sized lane axis a BAND, the term its lane
+/// unwritten; on the axis of the edge it drags both are DIRECT, at their
+/// targets from the install on, while on the other axis, where only its
+/// lanes move it, they ride the clock with its neighbours' entries. On a
+/// content-sized lane axis it also holds a BAND, the term its lane
 /// band adds while it stays laned in its track, or a VACATE, the share of
 /// its term it gives up while it leaves that track. The controller
 /// computes their targets through the item-geometry rule, and the layout
@@ -497,6 +500,11 @@ class MakeRoomEngine {
   int? _sessionId;
   BoardSpan? _resizeSpan;
   ({int lane, int laneCount, int laneSpan})? _resizeAssignment;
+
+  /// The axis of the edge a resize session drags, on which its own lead
+  /// and extent are DIRECT (see [_installOwnAxes]); null for a lifted
+  /// session and for a resize that names none.
+  Axis? _resizeAxis;
 
   /// The OWN-PREVIEW SCOPE's epoch, 0 while no scope is open, and the
   /// count the next one is taken from. While a scope is open every write
@@ -1240,6 +1248,75 @@ class MakeRoomEngine {
     return minT;
   }
 
+  /// A resize session's install of its own item's entry in [map]. On the
+  /// session's dragged axis, [_resizeAxis], the entry is DIRECT: its
+  /// `from` is written equal to its target there, so it paints the target
+  /// at once whatever its clock reads, and [_rebaseAxes] and
+  /// [_adoptClock] keep the two equal. The other axis changes only with
+  /// the item's lanes, which its neighbours make room for on the clock,
+  /// so it follows [_retargetAxes]'s rule: re-targeted from where it
+  /// paints when its own target changed, and otherwise left on the clock
+  /// it runs on, so a step of the dragged edge alone keeps it in step with
+  /// those neighbours. An entry left with nothing to move is at rest, and
+  /// one at rest at zero is removed, as [_rebaseAxes] removes one. Without
+  /// a dragged axis, or on a snapped install, [_installAxes] installs it.
+  /// Returns the fold, which a direct write never adds to.
+  double? _installOwnAxes(
+    Map<int, _HeldAxes> map,
+    int id,
+    Offset target,
+    bool snap,
+    double? minT,
+  ) {
+    final axis = _resizeAxis;
+    if (axis == null || snap) {
+      return _installAxes(map, id, target, snap, minT);
+    }
+    final vertical = axis == Axis.vertical;
+    var entry = map[id];
+    if (entry == null) {
+      if (target == Offset.zero) {
+        return minT;
+      }
+      entry = _HeldAxes(
+        target: target,
+        from: vertical ? Offset(0.0, target.dy) : Offset(target.dx, 0.0),
+        snapped: false,
+      );
+      map[id] = entry;
+    } else {
+      final held = entry.target;
+      if (vertical ? held.dx != target.dx : held.dy != target.dy) {
+        final current = _axesValueOf(entry);
+        entry
+          ..from = vertical
+              ? Offset(current.dx, target.dy)
+              : Offset(target.dx, current.dy)
+          ..snapped = false
+          ..t = 0.0;
+      } else {
+        final from = entry.from;
+        entry.from = vertical
+            ? Offset(from.dx, target.dy)
+            : Offset(target.dx, from.dy);
+      }
+      entry.target = target;
+    }
+    final atRest = entry.snapped || entry.from == entry.target;
+    if (atRest && entry.target == Offset.zero) {
+      map.remove(id);
+    } else if (atRest && !entry.snapped) {
+      entry.t = 1.0;
+    }
+    return minT;
+  }
+
+  /// [id]'s current value in [map], zero for no entry.
+  Offset _axesOf(Map<int, _HeldAxes> map, int id) {
+    final entry = map[id];
+    return entry == null ? Offset.zero : _axesValueOf(entry);
+  }
+
   /// An install's close of every entry in [map] but [keep]'s, each
   /// re-targeted to zero by [_retargetAxes]'s rule. Returns the fold.
   double? _closeAxesBeside(
@@ -1449,11 +1526,12 @@ class MakeRoomEngine {
       ..target = Offset(dx, dy);
   }
 
-  /// Ends the session: its id and its source.
+  /// Ends the session: its id, its source and its dragged axis.
   void _clearSession() {
     _sessionId = null;
     _resizeSpan = null;
     _resizeAssignment = null;
+    _resizeAxis = null;
   }
 
   /// Opens (or re-targets) the gap for a drag of [draggedId] resolving to
@@ -1463,14 +1541,19 @@ class MakeRoomEngine {
   /// the gap. The snap flag is the kill switch, resolved here through
   /// [BoardAnimationTiming.isOff], at one of the family's two declaring
   /// sites; [duration] and [curve] are a session's captured values and
-  /// an off family dominates them.
+  /// an off family dominates them. [resizeAxis] is, for a resize, the
+  /// axis of the edge it drags, on which its own item's lead and extent
+  /// are direct rather than on the clock; null holds both axes on the
+  /// clock, and a lifted session names none.
   void previewGap({
     required int draggedId,
     required BoardSpan prospective,
     bool lifted = false,
+    Axis? resizeAxis,
     Duration? duration,
     Curve? curve,
   }) {
+    assert(!lifted || resizeAxis == null, "A lifted session drags no edge.");
     final laneAxis = _laneAxisOf();
     final style = _styleOf();
     final spec = style.effectiveMakeRoom;
@@ -1491,6 +1574,7 @@ class MakeRoomEngine {
     _sessionId = draggedId;
     _resizeSpan = lifted ? null : prospective;
     _resizeAssignment = lifted ? null : assignment;
+    _resizeAxis = lifted ? null : resizeAxis;
     MakeRoomResizeTargets? resize;
     if (!lifted) {
       resize = _resizeTargets ??= MakeRoomResizeTargets();
@@ -1512,12 +1596,24 @@ class MakeRoomEngine {
     // and left alone for an unchanged target, the two rules the offsets
     // use and for the same reasons. BEFORE the lane-axis gate: an extent
     // needs no lane geometry, and on a board with none it is the whole
-    // of the drag's in-place feedback. The resized item's LEAD and TERM
-    // entries follow the same rules.
-    final extentTargets = <int, Offset>{};
+    // of the drag's in-place feedback. The resized item's TERM entries
+    // follow the same rules, and so do its LEAD and EXTENT but on the axis
+    // of the edge it drags, where [_installOwnAxes] makes them direct.
+    // What that item paints before its own entries install, so the live
+    // tails can tell a direct write, which changes it with nothing left
+    // moving, from one the clock will show.
+    final leadBefore = _axesOf(_heldLead, draggedId);
+    final extentBefore = _axesOf(_heldExtent, draggedId);
     if (resize != null) {
-      extentTargets[draggedId] = Offset(resize.extentDx, resize.extentDy);
+      minT = _installOwnAxes(
+        _heldExtent,
+        draggedId,
+        Offset(resize.extentDx, resize.extentDy),
+        snap,
+        minT,
+      );
     }
+    final extentTargets = <int, Offset>{};
     dry.forEach((id, assignment) {
       if (id == draggedId) {
         return;
@@ -1525,9 +1621,11 @@ class MakeRoomEngine {
       extentTargets[id] = _neighbourExtentOf(id, assignment);
     });
     for (final id in _heldExtent.keys) {
-      extentTargets.putIfAbsent(id, () {
-        return Offset.zero;
-      });
+      if (resize == null || id != draggedId) {
+        extentTargets.putIfAbsent(id, () {
+          return Offset.zero;
+        });
+      }
     }
     extentTargets.forEach((id, extent) {
       minT = _installAxes(_heldExtent, id, extent, snap, minT);
@@ -1540,7 +1638,7 @@ class MakeRoomEngine {
     minT = _closeOffsetsBeside(_bandKind, keep, snap, minT);
     minT = _closeOffsetsBeside(_vacateKind, keep, snap, minT);
     if (resize != null) {
-      minT = _installAxes(
+      minT = _installOwnAxes(
         _heldLead,
         draggedId,
         Offset(resize.leadDx, resize.leadDy),
@@ -1556,6 +1654,10 @@ class MakeRoomEngine {
         minT,
       );
     }
+    final direct =
+        resize != null &&
+        (_axesOf(_heldLead, draggedId) != leadBefore ||
+            _axesOf(_heldExtent, draggedId) != extentBefore);
     if (laneAxis == null) {
       // No lane geometry exists to open a gap in; the extent and lead
       // preview above is the whole of the in-place feedback on such a
@@ -1570,6 +1672,7 @@ class MakeRoomEngine {
         _notifyNow();
       } else {
         _ensureTicking();
+        _notifyDirect(direct);
       }
       return;
     }
@@ -1666,6 +1769,19 @@ class MakeRoomEngine {
       _publishSnap(minT);
     }
     _ensureTicking();
+    _notifyDirect(direct);
+  }
+
+  /// The live install's dispatch for a DIRECT write: one that changed what
+  /// the resized item paints at once, which no tick may follow, the write
+  /// leaving nothing in motion. Without it nothing lays the board out to
+  /// show the write, as the snap arm's [_notifyNow] exists to; an install
+  /// that wrote nothing direct dispatches nothing, so an idempotent
+  /// re-install costs no dispatch.
+  void _notifyDirect(bool direct) {
+    if (direct) {
+      _notifyNow();
+    }
   }
 
   /// The install's snap tail for every held entry: one a snap re-targeted

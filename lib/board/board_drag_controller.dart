@@ -1160,6 +1160,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       draggedKey: session.key,
       prospective: target.span,
       lifted: session.kind == BoardDragKind.move,
+      resizeAxis: _resizedAxisOf(session.kind),
       duration: session.makeRoomDuration,
       curve: session.makeRoomCurve,
     );
@@ -1167,15 +1168,26 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _reportTarget(session);
   }
 
+  /// The axis whose edge a drag of [kind] moves; null for a move.
+  static Axis? _resizedAxisOf(BoardDragKind kind) {
+    switch (kind) {
+      case BoardDragKind.move:
+        return null;
+      case BoardDragKind.resizeRowStart:
+      case BoardDragKind.resizeRowEnd:
+        return Axis.vertical;
+      case BoardDragKind.resizeColStart:
+      case BoardDragKind.resizeColEnd:
+        return Axis.horizontal;
+    }
+  }
+
   /// The sample a resize of [kind] reads: its resized axis's.
   static BoardAxisSample _resizedAxisSampleOf(
     BoardDragKind kind,
     BoardPointSample pointer,
   ) {
-    return kind == BoardDragKind.resizeRowStart ||
-            kind == BoardDragKind.resizeRowEnd
-        ? pointer.row
-        : pointer.col;
+    return _resizedAxisOf(kind) == Axis.vertical ? pointer.row : pointer.col;
   }
 
   /// Whether a resize's sample [now] resolves to what [held] did: the

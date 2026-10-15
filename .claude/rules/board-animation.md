@@ -69,7 +69,17 @@ The contract of `BoardAnimationCoordinator` and its animation sources. The conve
   gives its STORED span, and on a content-sized lane axis a BAND, the
   change of its lane band while it stays laned in its stored track, or
   a VACATE, the share of that track's term it gives up while it leaves
-  it; the controller computes their targets through the item-geometry
+  it; on the axis of the edge the session drags, which the drag layer
+  passes to the install from the session's kind, the LEAD and the EXTENT
+  are DIRECT, their `from` written equal to their target so they paint
+  it from the install frame on (re-basing and a clock change keep the
+  two equal), while on the other axis, which only the item's lanes move,
+  they follow the re-target rule and a step of the dragged edge alone
+  leaves that axis on the clock it runs on, in step with the neighbours
+  it re-lanes; a live install that changed what the item paints with
+  nothing left moving dispatches at once, as the snap arm does, and a
+  release closes both axes on the clock from where they paint;
+  the controller computes their targets through the item-geometry
   rule from the session's SOURCE, its prospective span and the dry run's
   assignment, and the layout re-derives them every frame, the term's
   right after the lane flush and the geometry's after the pass loop,
