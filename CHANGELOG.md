@@ -292,6 +292,15 @@ used to round it into the footer. On every board, with frozen bands or none,
 where the lattice's end and a whole-track snap would pull a moved item back
 against the drag, the item keeps its place: an item filling the lower half of
 the last row, dragged down half a row, used to move up to the row's upper half.
+- A `BoardDropFit` slide reaches its whole radius. Past four steps of the snap's
+grid it tries the placements flush against another item, so it lands on the
+nearest placement that holds the item clear wherever it lies within the radius;
+it used to stop after four steps whatever the radius asked for.
+`double.infinity` is a radius that reaches every placement the drop could take
+on its axis.
+- Added `BoardDropFit.clampResizes`, off by default: a resize `canDropAt`
+refuses for running into another item stops its dragged edge at that item,
+nearest the pointer, instead of going back.
 - Added `BoardRenderPort.trackSampleAt`, which maps a point on each axis in both
 lattices the axis can paint, the frozen band's and the scrolled tracks', with the
 band geometry a drop reads; `trackSpaceAt` is its painted coordinate.
