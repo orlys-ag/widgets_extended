@@ -4,6 +4,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
@@ -103,6 +104,37 @@ List<int?> offeredMinutes(WidgetTester tester, String label) {
 
 Finder arrowIn(String id, IconData icon) {
   return find.descendant(of: blockFinder(id), matching: find.byIcon(icon));
+}
+
+/// Opens the sheet, flips the weekends switch with a tap and closes it.
+Future<void> toggleWeekends(WidgetTester tester) async {
+  await openSettings(tester);
+  await tester.tap(find.byKey(weekendsSwitchKey));
+  await tester.pumpAndSettle();
+  await closeSettings(tester);
+}
+
+Finder dayFinder(int year, int month, int day) {
+  return find.byKey(dayCellKey(DateTime(year, month, day)));
+}
+
+Finder headerFinder(DateTime day) {
+  return find.byKey(dayHeaderKey(day));
+}
+
+Finder monthGridFinder() {
+  return find.byKey(const ValueKey<String>("calendar-grid"));
+}
+
+/// The letters of the month's weekday header, left to right.
+List<String> weekdayHeaderLetters(WidgetTester tester) {
+  final texts = tester.widgetList<Text>(
+    find.descendant(
+      of: find.byKey(const ValueKey<String>("weekday-header")),
+      matching: find.byType(Text),
+    ),
+  );
+  return <String>[for (final text in texts) text.data!];
 }
 
 void main() {
@@ -362,5 +394,110 @@ void main() {
     expect(grid.rectOfCell(41, 1), isNull);
     expect(find.text("18:00"), findsOneWidget);
     expect(find.text("09:00"), findsNothing);
+  });
+
+  testWidgets("W1 hiding the weekends leaves the week's five weekdays", (
+    tester,
+  ) async {
+    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    final saturday = DateTime(2026, 4, 25);
+    final weekendId = await store(
+      tester,
+      api,
+      taskJson("Weekend", saturday, 10 * 60, 11 * 60),
+    );
+    await pumpCalendar(tester, api: api);
+    await pickMode(tester, "Week");
+    expect(blockFinder(weekendId), findsOneWidget);
+
+    await toggleWeekends(tester);
+    final grid = gridViewport(tester);
+    expect(headerFinder(DateTime(2026, 4, 24)), findsOneWidget);
+    expect(headerFinder(saturday), findsNothing);
+    expect(grid.rectOfCell(0, 5), isNotNull);
+    expect(grid.rectOfCell(0, 6), isNull);
+    expect(
+      cellRect(tester, rowOf(9 * 60), 5).width,
+      near((grid.size.width - 56.0) / 5),
+    );
+    expect(blockFinder(weekendId), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(hiddenCountKey),
+        matching: find.text("+1"),
+      ),
+      findsOneWidget,
+    );
+
+    await toggleWeekends(tester);
+    expect(headerFinder(saturday), findsOneWidget);
+    expect(blockFinder(weekendId), findsOneWidget);
+    expect(find.byKey(hiddenCountKey), findsNothing);
+  });
+
+  testWidgets("W2 hiding the weekends leaves the month's weekdays and the "
+      "weeks holding them", (tester) async {
+    await pumpCalendar(tester);
+    await toggleWeekends(tester);
+
+    expect(weekdayHeaderLetters(tester), <String>["M", "T", "W", "T", "F"]);
+    expect(dayFinder(2026, 4, 25), findsNothing);
+    final grid = tester.getRect(monthGridFinder());
+    final friday = tester.getRect(dayFinder(2026, 4, 24));
+    expect(friday.width, near(grid.width / 5));
+    expect(friday.right, near(grid.right));
+
+    // August 2026 starts on a Saturday, so its first week holds no
+    // weekday of the month.
+    for (var i = 0; i < 4; i++) {
+      await tester.tap(find.byTooltip("Next month"));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text("August 2026"), findsOneWidget);
+    expect(dayFinder(2026, 7, 31), findsNothing);
+    expect(dayFinder(2026, 8, 3), findsOneWidget);
+    expect(tester.getRect(monthGridFinder()).height, near(5 * 48.0));
+  });
+
+  testWidgets("W3 hiding the weekends moves a selected Saturday to Monday", (
+    tester,
+  ) async {
+    await pumpCalendar(tester);
+    await tester.tap(dayFinder(2026, 4, 25));
+    await tester.pumpAndSettle();
+    expect(find.text("Saturday, April 25"), findsOneWidget);
+
+    await toggleWeekends(tester);
+    expect(find.text("Monday, April 27"), findsOneWidget);
+    expect(tester.widget<DayCell>(dayFinder(2026, 4, 27)).isSelected, isTrue);
+  });
+
+  testWidgets("W4 Day mode steps over the hidden weekend", (tester) async {
+    await pumpCalendar(tester);
+    await tester.tap(dayFinder(2026, 4, 24));
+    await tester.pumpAndSettle();
+    await toggleWeekends(tester);
+    await pickMode(tester, "Day");
+    expect(headerFinder(DateTime(2026, 4, 24)), findsOneWidget);
+
+    await tester.tap(find.byTooltip("Next day"));
+    await tester.pumpAndSettle();
+    expect(headerFinder(DateTime(2026, 4, 27)), findsOneWidget);
+    await tester.tap(find.byTooltip("Previous day"));
+    await tester.pumpAndSettle();
+    expect(headerFinder(DateTime(2026, 4, 24)), findsOneWidget);
+  });
+
+  testWidgets("W5 a month step onto a hidden day takes the nearest shown "
+      "day of that month", (tester) async {
+    await pumpCalendar(tester);
+    await toggleWeekends(tester);
+    await tester.tap(dayFinder(2026, 4, 30));
+    await tester.pumpAndSettle();
+
+    // May 30 2026 is a Saturday, and June 1 is in the next month.
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pumpAndSettle();
+    expect(find.text("Friday, May 29"), findsOneWidget);
   });
 }

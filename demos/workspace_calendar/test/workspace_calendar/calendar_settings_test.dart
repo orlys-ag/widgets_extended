@@ -147,4 +147,21 @@ void main() {
       expect(settings() == settings(height: 18.0), isFalse);
     });
   });
+
+  group("C5 CalendarSettings weekdays", () {
+    test("start on every weekday and take part in copyWith and ==", () {
+      const settings = CalendarSettings();
+      expect(settings.weekdays, WeekdaySet.all);
+      final workweek = settings.copyWith(weekdays: WeekdaySet.workweek);
+      expect(workweek.weekdays, WeekdaySet.workweek);
+      expect(
+        workweek.copyWith(minSlotHeight: 20.0).weekdays,
+        WeekdaySet.workweek,
+      );
+      expect(workweek == settings, isFalse);
+      final again = settings.copyWith(weekdays: WeekdaySet.workweek);
+      expect(workweek == again, isTrue);
+      expect(workweek.hashCode == settings.hashCode, isFalse);
+    });
+  });
 }

@@ -14,8 +14,9 @@
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
-/// The settings sheet chooses the hours the calendar shows and schedules
-/// in and the least size of the timed grids' cells. The Board and Table
+/// The settings sheet chooses whether the weekends show, the hours the
+/// calendar shows and schedules in, and the least size of the timed grids'
+/// cells. A selected day is always on a shown weekday. The Board and Table
 /// views are placeholders, and More only reports that it is not
 /// available.
 library;
@@ -117,7 +118,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   late DateTime _selected = _today;
 
   /// The month of [_selected], which is the lattice the board shows.
-  late MonthGrid _grid = MonthGrid.of(_selected);
+  late MonthGrid _grid = MonthGrid.of(_selected, weekdays: _settings.weekdays);
 
   _WorkspaceView _view = _WorkspaceView.calendar;
 
@@ -163,7 +164,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       vsync: this,
       rows: _rowsFor(_grid),
       // Replaced by the first layout, which knows the width.
-      columns: BoardAxisConfig(axis: UniformAxis(7, _rowHeight)),
+      columns: BoardAxisConfig(
+        axis: UniformAxis(_grid.columnCount, _rowHeight),
+      ),
       keyOf: (item) {
         return item;
       },
@@ -215,15 +218,16 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  /// Seven equal columns across [width]. Called from the grid's layout
-  /// callback, so the first frame already lays the board out at its
-  /// width.
+  /// The month grid's columns, equal, across [width]. Called from the
+  /// grid's layout callback, so the first frame already lays the board out
+  /// at its width, and when the shown weekdays change.
   void _fitColumns(double width) {
-    if (width == _columnsWidth) {
+    final count = _grid.columnCount;
+    if (width == _columnsWidth && count == _board.columns.axis.trackCount) {
       return;
     }
     _columnsWidth = width;
-    _board.columns = BoardAxisConfig(axis: UniformAxis(7, width / 7));
+    _board.columns = BoardAxisConfig(axis: UniformAxis(count, width / count));
   }
 
   void _select(DateTime day) {
@@ -234,7 +238,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     setState(() {
       _selected = day;
       if (monthChanged) {
-        _grid = MonthGrid.of(day);
+        _grid = MonthGrid.of(day, weekdays: _settings.weekdays);
       }
     });
     if (monthChanged) {
@@ -269,16 +273,19 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  /// Steps by [_stepUnit]; a month step keeps the day of the month where it
-  /// can.
+  /// Steps by [_stepUnit] over the shown weekdays: a day step skips the
+  /// hidden ones, and a month step keeps the day of the month where it can
+  /// and takes the nearest shown day of that month where it lands on a
+  /// hidden one.
   void _step(int direction) {
+    final weekdays = _settings.weekdays;
     switch (_stepUnit) {
       case _StepUnit.day:
-        _select(addDays(_selected, direction));
+        _select(nextShownDay(_selected, direction, weekdays));
       case _StepUnit.week:
         _select(addDays(_selected, 7 * direction));
       case _StepUnit.month:
-        _select(addMonths(_selected, direction));
+        _select(shownDayNear(addMonths(_selected, direction), weekdays));
     }
   }
 
@@ -353,11 +360,24 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
+  /// New weekdays move a selected day they hide to the nearest shown one
+  /// and rebuild the month board's lattice, whose cells they change.
   void _applySettings(CalendarSettings settings) {
+    final weekdaysChanged = settings.weekdays != _settings.weekdays;
     setState(() {
       _settings = settings;
+      if (weekdaysChanged) {
+        _selected = shownDayNear(_selected, settings.weekdays);
+        _grid = MonthGrid.of(_selected, weekdays: settings.weekdays);
+      }
     });
     _model.hours = settings.hours;
+    if (weekdaysChanged) {
+      _board.rows = _rowsFor(_grid);
+      _fitColumns(_columnsWidth);
+      _board.setSelection(_selectionOf(_selected));
+      _showRange();
+    }
   }
 
   void _showMessage(String message) {
@@ -381,6 +401,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   Widget _buildDay(BuildContext context, BoardCellView<Object, Object> cell) {
+    // A new grid reaches the board in the build that moves the selection,
+    // so the cell of a row or column the grid no longer has rebuilds once
+    // for it before the board's next layout drops that cell.
+    if (cell.row >= _grid.weekCount || cell.col >= _grid.columnCount) {
+      return const SizedBox.shrink();
+    }
     final day = _grid.dateAt(cell.row, cell.col);
     final inMonth = _grid.contains(day);
     final isSelected = cell.isSelected;
@@ -654,7 +680,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           child: Align(
             alignment: Alignment.topCenter,
             heightFactor: 1.0 - t,
-            child: Opacity(opacity: 1.0 - t, child: const _WeekdayHeader()),
+            child: Opacity(
+              opacity: 1.0 - t,
+              child: _WeekdayHeader(weekdays: _settings.weekdays),
+            ),
           ),
         ),
         LayoutBuilder(
@@ -839,10 +868,12 @@ class _CalendarHeader extends StatelessWidget {
   }
 }
 
-/// The weekday letters over the month grid, one per board column: both
-/// divide the same width into seven equal parts.
+/// The letters of the shown weekdays over the month grid, one per board
+/// column: both divide the same width into equal parts.
 class _WeekdayHeader extends StatelessWidget {
-  const _WeekdayHeader();
+  const _WeekdayHeader({required this.weekdays});
+
+  final WeekdaySet weekdays;
 
   @override
   Widget build(BuildContext context) {
@@ -851,19 +882,20 @@ class _WeekdayHeader extends StatelessWidget {
       height: 32.0,
       child: Row(
         children: <Widget>[
-          for (final letter in weekdayLetters)
-            Expanded(
-              child: Center(
-                child: Text(
-                  letter,
-                  style: const TextStyle(
-                    fontSize: 15.0,
-                    fontWeight: FontWeight.w600,
-                    color: HarborColors.text,
+          for (var column = 0; column < weekdayLetters.length; column++)
+            if (weekdays.containsColumn(column))
+              Expanded(
+                child: Center(
+                  child: Text(
+                    weekdayLetters[column],
+                    style: const TextStyle(
+                      fontSize: 15.0,
+                      fontWeight: FontWeight.w600,
+                      color: HarborColors.text,
+                    ),
                   ),
                 ),
               ),
-            ),
         ],
       ),
     );

@@ -1,5 +1,6 @@
-/// The calendar's settings sheet: the hours the calendar shows and
-/// schedules in, and the least size of the timed grid's cells.
+/// The calendar's settings sheet: whether the weekends show, the hours the
+/// calendar shows and schedules in, and the least size of the timed grid's
+/// cells.
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,11 @@ import 'calendar_data.dart';
 import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
+
+/// The key of the sheet's weekends switch.
+const ValueKey<String> weekendsSwitchKey = ValueKey<String>(
+  "settings-weekends",
+);
 
 /// The key of the sheet's hours slider.
 const ValueKey<String> hoursSliderKey = ValueKey<String>("settings-hours");
@@ -47,8 +53,9 @@ Future<void> showCalendarSettings(
   );
 }
 
-/// The sheet [showCalendarSettings] opens: a range slider for the hours,
-/// in whole hours at least one apart, and a slider for each least size.
+/// The sheet [showCalendarSettings] opens: a switch for the weekends, a
+/// range slider for the hours, in whole hours at least one apart, and a
+/// slider for each least size.
 class CalendarSettingsSheet extends StatefulWidget {
   const CalendarSettingsSheet({
     super.key,
@@ -110,7 +117,21 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
                 color: HarborColors.text,
               ),
             ),
-            const SizedBox(height: 16.0),
+            const SizedBox(height: 8.0),
+            SwitchListTile(
+              key: weekendsSwitchKey,
+              contentPadding: EdgeInsets.zero,
+              title: const Text("Show weekends"),
+              value: _settings.weekdays != WeekdaySet.workweek,
+              onChanged: (show) {
+                _set(
+                  _settings.copyWith(
+                    weekdays: show ? WeekdaySet.all : WeekdaySet.workweek,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8.0),
             _Heading(label: "Hours", value: hoursLabel(hours)),
             RangeSlider(
               key: hoursSliderKey,

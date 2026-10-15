@@ -7,73 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'calendar_data.dart';
 import 'calendar_schema.dart';
 
-/// A set of weekdays, each named by its [weekdayColumn]: Monday is 0 and
-/// Sunday 6.
-@immutable
-class WeekdaySet {
-  const WeekdaySet._(this._bits);
-
-  /// The weekdays [columns] names, each 0 to 6.
-  factory WeekdaySet.of(Iterable<int> columns) {
-    var bits = 0;
-    for (final column in columns) {
-      assert(
-        column >= 0 && column < DateTime.daysPerWeek,
-        "A weekday column is 0 to 6, not $column.",
-      );
-      bits |= 1 << column;
-    }
-    return WeekdaySet._(bits);
-  }
-
-  /// Every day of the week.
-  static const WeekdaySet all = WeekdaySet._(0x7F);
-
-  /// Monday to Friday.
-  static const WeekdaySet workweek = WeekdaySet._(0x1F);
-
-  /// Bit `n` is set when the set holds the column `n`.
-  final int _bits;
-
-  bool get isEmpty {
-    return _bits == 0;
-  }
-
-  /// Whether the set holds the weekday column [column].
-  bool containsColumn(int column) {
-    return _bits & (1 << column) != 0;
-  }
-
-  /// Whether the set holds the weekday of the [dayNumber] [day].
-  bool containsDay(int day) {
-    return containsColumn(weekdayColumnOfDay(day));
-  }
-
-  /// Whether the set holds the weekday of [date].
-  bool containsDate(DateTime date) {
-    return containsColumn(weekdayColumn(date));
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is WeekdaySet && other._bits == _bits;
-  }
-
-  @override
-  int get hashCode {
-    return _bits.hashCode;
-  }
-
-  @override
-  String toString() {
-    final names = <String>[
-      for (var column = 0; column < DateTime.daysPerWeek; column++)
-        if (containsColumn(column)) weekdayShortNames[column],
-    ];
-    return "WeekdaySet(${names.join(", ")})";
-  }
-}
-
 /// The part of each day the calendar shows and schedules in: from [start]
 /// to [end] minutes after midnight, in whole slots.
 @immutable
@@ -147,16 +80,21 @@ const double minSlotHeightHigh = 48.0;
 /// The slot height the grid has before the settings change it.
 const double defaultMinSlotHeight = 16.0;
 
-/// What the settings sheet chooses: the [hours] the calendar shows and
-/// schedules in, and the least size of the timed grid's cells, which
-/// stretch past it to fill the grid.
+/// What the settings sheet chooses: the [weekdays] the calendar shows, the
+/// [hours] it shows and schedules in, and the least size of the timed
+/// grid's cells, which stretch past it to fill the grid.
 @immutable
 class CalendarSettings {
   const CalendarSettings({
+    this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
   });
+
+  /// The weekdays the calendar shows: at least one, which the month grid
+  /// and the timed grid assert.
+  final WeekdaySet weekdays;
 
   final DayHours hours;
 
@@ -167,11 +105,13 @@ class CalendarSettings {
   final double minSlotHeight;
 
   CalendarSettings copyWith({
+    WeekdaySet? weekdays,
     DayHours? hours,
     double? minDayWidth,
     double? minSlotHeight,
   }) {
     return CalendarSettings(
+      weekdays: weekdays ?? this.weekdays,
       hours: hours ?? this.hours,
       minDayWidth: minDayWidth ?? this.minDayWidth,
       minSlotHeight: minSlotHeight ?? this.minSlotHeight,
@@ -181,6 +121,7 @@ class CalendarSettings {
   @override
   bool operator ==(Object other) {
     return other is CalendarSettings &&
+        other.weekdays == weekdays &&
         other.hours == hours &&
         other.minDayWidth == minDayWidth &&
         other.minSlotHeight == minSlotHeight;
@@ -188,12 +129,12 @@ class CalendarSettings {
 
   @override
   int get hashCode {
-    return Object.hash(hours, minDayWidth, minSlotHeight);
+    return Object.hash(weekdays, hours, minDayWidth, minSlotHeight);
   }
 
   @override
   String toString() {
-    return "CalendarSettings($hours, day width $minDayWidth, slot height "
-        "$minSlotHeight)";
+    return "CalendarSettings($weekdays, $hours, day width $minDayWidth, "
+        "slot height $minSlotHeight)";
   }
 }

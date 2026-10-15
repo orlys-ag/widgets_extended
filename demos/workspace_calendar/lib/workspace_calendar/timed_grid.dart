@@ -325,21 +325,22 @@ CreateRange createRangeOver(
   );
 }
 
-/// The [dayCount] days from [firstDay] on the board, over the hours
-/// [settings] choose, showing what [model] shows for them. A tap on a
-/// block that is not pending reports [onOpenItem]; a tap on a day header
-/// reports [onSelectDay].
+/// The days of the [dayCount] from [firstDay] whose weekday [settings]
+/// show, on the board, over the hours they choose, showing what [model]
+/// shows for them. A tap on a block that is not pending reports
+/// [onOpenItem]; a tap on a day header reports [onSelectDay].
 ///
 /// Items keep every board gesture: a long press moves, the bottom band
 /// drags the end time, and, on more than one day, the right band the day
 /// count. An item reaching past the hours shows the part inside them,
 /// with an arrow where it is cut, and takes no move or resize: its form
-/// changes it. An item wholly outside them has no block, and the corner
-/// over the gutter counts it. Empty body cells take a create gesture,
-/// reported through [onCreate]: a tap picks one hour from its slot, or up
-/// to the end of the hours; a drag picks the rectangle of slots it
-/// covers, at once for a mouse or a stylus and after a press and hold on
-/// touch, so a touch drag without one scrolls the grid.
+/// changes it. An item wholly outside them, or on no shown day, has no
+/// block, and the corner over the gutter counts it. Empty body cells take
+/// a create gesture, reported through [onCreate]: a tap picks one hour
+/// from its slot, or up to the end of the hours; a drag picks the
+/// rectangle of slots it covers, at once for a mouse or a stylus and
+/// after a press and hold on touch, so a touch drag without one scrolls
+/// the grid.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than the least sizes [settings] choose; past those, it scrolls.
@@ -359,7 +360,8 @@ class TimedGrid extends StatefulWidget {
 
   final CalendarModel model;
 
-  /// The hours the grid shows and the least size of its cells.
+  /// The weekdays and the hours the grid shows and the least size of its
+  /// cells. At least one day of the range must fall on a shown weekday.
   final CalendarSettings settings;
 
   /// The first day of the range the grid shows.
@@ -539,11 +541,17 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   static GridTracks _tracksOf(TimedGrid widget) {
-    return GridTracks(
+    final tracks = GridTracks(
       firstDay: dayNumber(widget.firstDay),
       dayCount: widget.dayCount,
+      weekdays: widget.settings.weekdays,
       hours: widget.settings.hours,
     );
+    assert(
+      tracks.columnCount > 0,
+      "No day of the range is on a shown weekday.",
+    );
+    return tracks;
   }
 
   @override
@@ -1138,6 +1146,12 @@ class _DayHeaderCell extends StatelessWidget {
     return ValueListenableBuilder<_HeaderState>(
       valueListenable: header,
       builder: (context, value, child) {
+        // New tracks reach the header in the build that replaces the
+        // columns, so the cell of a column they no longer have rebuilds
+        // once before the board's next layout drops it.
+        if (column > value.tracks.columnCount) {
+          return const SizedBox.shrink();
+        }
         final day = value.tracks.dateAt(column);
         final isToday = day == today;
         final isSelected = day == value.selectedDay;
