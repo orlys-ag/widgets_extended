@@ -1,0 +1,1177 @@
+/// The calendar's timed grid: consecutive days on the board, with a frozen
+/// day header and hour gutter, one row per 15-minute slot, and the days'
+/// items as blocks that move and resize.
+library;
+
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:widgets_extended/widgets_extended.dart';
+
+import 'calendar_data.dart';
+import 'calendar_item.dart';
+import 'calendar_model.dart';
+import 'calendar_schema.dart';
+import 'harbor_theme.dart';
+
+const double _headerHeight = 40.0;
+const double _slotHeight = 16.0;
+const double _gutterWidth = 56.0;
+const double _minDayWidth = 44.0;
+
+/// The row of 08:00, which the grid opens scrolled to.
+const int _openingRow = 1 + 8 * 60 ~/ minutesPerSlot;
+
+/// The style the grid animates its blocks with: the board's default.
+const BoardAnimationStyle timedGridAnimationStyle = BoardAnimationStyle();
+
+/// The key of the day header cell showing [day].
+ValueKey<String> dayHeaderKey(DateTime day) {
+  return ValueKey<String>("grid-day-${isoDate(day)}");
+}
+
+/// The key of the block showing the item [id].
+ValueKey<String> blockKey(String id) {
+  return ValueKey<String>("block-$id");
+}
+
+/// The slots a create gesture picked: [dayCount] days from [day], each
+/// from [startMinute] to [endMinute].
+@immutable
+class CreateRange {
+  const CreateRange({
+    required this.day,
+    required this.startMinute,
+    required this.endMinute,
+    required this.dayCount,
+  });
+
+  final DateTime day;
+  final int startMinute;
+  final int endMinute;
+  final int dayCount;
+
+  @override
+  bool operator ==(Object other) {
+    return other is CreateRange &&
+        other.day == day &&
+        other.startMinute == startMinute &&
+        other.endMinute == endMinute &&
+        other.dayCount == dayCount;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(day, startMinute, endMinute, dayCount);
+  }
+
+  @override
+  String toString() {
+    return "CreateRange(${isoDate(day)}, ${clockLabel(startMinute)}-"
+        "${clockLabel(endMinute)}, $dayCount days)";
+  }
+}
+
+/// Where [shape] sits on a grid of [dayCount] days from the [dayNumber]
+/// [firstDay], in track space: row 0 is the header and column 0 the
+/// gutter, so a slot's row and a day's column count from 1. Days outside
+/// the grid's are clipped off; null when no day of the item lies in it.
+BoardSpan? gridSpanOf(ItemShape shape, int firstDay, int dayCount) {
+  final offset = shape.firstDay - firstDay;
+  final firstColumn = math.max(0, offset);
+  final colSpan = math.min(dayCount, offset + shape.dayCount) - firstColumn;
+  if (colSpan <= 0) {
+    return null;
+  }
+  return BoardSpan(
+    rowStart: 1 + shape.start ~/ minutesPerSlot,
+    rowSpan: (shape.end - shape.start) ~/ minutesPerSlot,
+    colStart: 1 + firstColumn,
+    colSpan: colSpan,
+  );
+}
+
+/// [shape] after a drag took its block from [from] to [to], both track
+/// space, on a grid whose first column is the [dayNumber] [firstDay]. Its
+/// times are read from [to]'s rows.
+///
+/// A drop that keeps the column count moves the first day by the change
+/// in the columns and keeps the day count, so the days a clipped item has
+/// outside the grid keep their distance. A drop that changes the column
+/// count is a resize of the trailing column edge, the only column edge
+/// the grid resizes, which keeps the start: the item keeps its first day
+/// and ends on the day of [to]'s last column, whatever the grid clipped
+/// of it.
+ItemShape shapeFromSpan(
+  ItemShape shape,
+  BoardSpan from,
+  BoardSpan to,
+  int firstDay,
+) {
+  final start = (to.rowStart - 1) * minutesPerSlot;
+  final end = start + to.rowSpan * minutesPerSlot;
+  if (to.colSpan == from.colSpan) {
+    return (
+      type: shape.type,
+      firstDay: shape.firstDay + (to.colStart - from.colStart),
+      dayCount: shape.dayCount,
+      start: start,
+      end: end,
+    );
+  }
+  return (
+    type: shape.type,
+    firstDay: shape.firstDay,
+    dayCount: firstDay + to.colStart + to.colSpan - 1 - shape.firstDay,
+    start: start,
+    end: end,
+  );
+}
+
+/// [item] with the day, minutes and day count [shapeFromSpan] gives for
+/// its shape.
+CalendarItem itemFromSpan(
+  CalendarItem item,
+  BoardSpan from,
+  BoardSpan to,
+  int firstDay,
+) {
+  final shape = shapeFromSpan(item.shape, from, to, firstDay);
+  return item.copyWith(
+    day: dateOfDayNumber(shape.firstDay),
+    dayCount: shape.dayCount,
+    startMinute: shape.start,
+    endMinute: shape.end,
+  );
+}
+
+/// The [dayCount] days from [firstDay] on the board, showing what [model]
+/// shows for them. A tap on a block that is not pending reports
+/// [onOpenItem]; a tap on a day header reports [onSelectDay].
+///
+/// Items keep every board gesture: a long press moves, the bottom band
+/// drags the end time, and, on more than one day, the right band the day
+/// count. Empty body cells
+/// take a create gesture, reported through [onCreate]: a tap picks one
+/// hour from its slot, or up to 24:00; a drag picks the rectangle of
+/// slots it covers, at once for a mouse or a stylus and after a press and
+/// hold on touch, so a touch drag without one scrolls the grid.
+class TimedGrid extends StatefulWidget {
+  const TimedGrid({
+    super.key,
+    required this.model,
+    required this.firstDay,
+    required this.dayCount,
+    required this.selectedDay,
+    required this.today,
+    required this.onSelectDay,
+    required this.onOpenItem,
+    required this.onCreate,
+  }) : assert(dayCount >= 1);
+
+  final CalendarModel model;
+
+  /// The day of the first day column.
+  final DateTime firstDay;
+
+  /// How many day columns the grid shows. Fixed for the life of its
+  /// state: a grid with another count needs its own key.
+  final int dayCount;
+
+  final DateTime selectedDay;
+  final DateTime today;
+  final ValueChanged<DateTime> onSelectDay;
+  final ValueChanged<String> onOpenItem;
+
+  /// Reports the slots a create gesture on empty cells picked.
+  final ValueChanged<CreateRange> onCreate;
+
+  @override
+  State<TimedGrid> createState() {
+    return _TimedGridState();
+  }
+}
+
+typedef _HeaderState = ({DateTime firstDay, DateTime selectedDay});
+
+class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
+  late final BoardController<String, ShownItem> _board;
+
+  /// Held in fields because `Board` replaces its delegate, and so rebuilds
+  /// every cell and item, whenever a builder it gets is not identical to
+  /// the previous one.
+  late final BoardCellBuilder<String, ShownItem> _cellBuilder = _buildCell;
+  late final BoardItemBuilder<String, ShownItem> _itemBuilder = _buildItem;
+
+  /// One instance, so a rebuild of this state hands the board the config
+  /// it already has. A single day column has no right strip: there is no
+  /// column to drag its edge onto.
+  late final BoardDragConfig<String> _dragConfig = BoardDragConfig<String>(
+    canDrag: _canDrag,
+    canDropAt: _canDropAt,
+    onItemMoved: _commit,
+    onItemResized: _commit,
+    resizeEdges: widget.dayCount > 1
+        ? BoardResizeEdges.trailing
+        : BoardResizeEdges.none,
+    primaryResizeEdges: BoardResizeEdges.trailing,
+    draggedItemOpacity: harborDraggedItemOpacity,
+  );
+
+  /// What the header cells show. The cell builder runs only when the board
+  /// rebuilds a cell, so the header cells listen to this instead.
+  late final ValueNotifier<_HeaderState> _header = ValueNotifier<_HeaderState>((
+    firstDay: widget.firstDay,
+    selectedDay: widget.selectedDay,
+  ));
+
+  double _dayWidth = _minDayWidth;
+
+  final GlobalKey _boardKey = GlobalKey();
+
+  /// The board's viewport, found under [_boardKey] and kept while it is
+  /// attached.
+  RenderBoardViewport<String>? _viewport;
+
+  /// The create gestures. They live here rather than in the board, and are
+  /// armed only for a press on an empty body cell, so a press on an item
+  /// leaves the arena to the item's own move and resize gestures.
+  late final TapGestureRecognizer _tap;
+  late final ImmediateMultiDragGestureRecognizer _immediateRange;
+  late final DelayedMultiDragGestureRecognizer _delayedRange;
+
+  /// The range being dragged, which the background paints.
+  _RangeDrag? _range;
+
+  /// Set when the grid's scroll ends and cleared by the next microtask. A
+  /// touch down on a flinging grid ends the fling before the listener
+  /// above the board sees that down, in the same dispatch, so the press
+  /// that stopped the grid finds this set.
+  bool _scrollJustStopped = false;
+
+  /// Whether the last [_sync] found its days ready.
+  bool _syncedReady = false;
+
+  /// Whether a frame callback will put [timedGridAnimationStyle] back.
+  bool _restoreScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tap = TapGestureRecognizer(debugOwner: this)..onTapUp = _handleTapUp;
+    // Each pointer kind goes to one range recognizer. A precise pointer
+    // starts a range once it passes its hit slop, before the scrollable's
+    // pan reaches its own, and the pan never takes a mouse. Touch starts
+    // one only after a hold: the delayed recognizer rejects a pointer that
+    // moves first, leaving the drag to the scrollable.
+    _immediateRange = ImmediateMultiDragGestureRecognizer(
+      debugOwner: this,
+      supportedDevices: const <PointerDeviceKind>{
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.invertedStylus,
+        PointerDeviceKind.trackpad,
+      },
+    )..onStart = _beginRange;
+    _delayedRange = DelayedMultiDragGestureRecognizer(
+      debugOwner: this,
+      supportedDevices: const <PointerDeviceKind>{
+        PointerDeviceKind.touch,
+        PointerDeviceKind.unknown,
+      },
+    )..onStart = _beginRange;
+    _board = BoardController<String, ShownItem>(
+      vsync: this,
+      rows: _rowsConfig(),
+      columns: _columnsConfig(_dayWidth),
+      keyOf: (entry) {
+        return entry.id;
+      },
+      animationStyle: timedGridAnimationStyle,
+    );
+    widget.model.addListener(_handleModel);
+    _sync();
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _board.jumpToCell(_openingRow, 1);
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(TimedGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    assert(
+      widget.dayCount == oldWidget.dayCount,
+      "A TimedGrid keeps its day count; give a grid with another one its "
+      "own key.",
+    );
+    final modelChanged = widget.model != oldWidget.model;
+    if (modelChanged) {
+      oldWidget.model.removeListener(_handleModel);
+      widget.model.addListener(_handleModel);
+    }
+    if (widget.firstDay != oldWidget.firstDay ||
+        widget.selectedDay != oldWidget.selectedDay) {
+      _header.value = (
+        firstDay: widget.firstDay,
+        selectedDay: widget.selectedDay,
+      );
+    }
+    if (modelChanged || widget.firstDay != oldWidget.firstDay) {
+      _sync();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final settings = MediaQuery.maybeGestureSettingsOf(context);
+    _tap.gestureSettings = settings;
+    _immediateRange.gestureSettings = settings;
+    _delayedRange.gestureSettings = settings;
+  }
+
+  @override
+  void dispose() {
+    _tap.dispose();
+    _immediateRange.dispose();
+    _delayedRange.dispose();
+    _range?.detach();
+    widget.model.removeListener(_handleModel);
+    _header.dispose();
+    // The board has unmounted by now, so nothing still listens to the
+    // controller.
+    _board.dispose();
+    super.dispose();
+  }
+
+  /// Row 0 is the frozen day header; rows 1 onward are one slot each.
+  BoardAxisConfig _rowsConfig() {
+    return BoardAxisConfig(
+      axis: ExplicitAxis(<double>[
+        _headerHeight,
+        ...List<double>.filled(minutesPerDay ~/ minutesPerSlot, _slotHeight),
+      ]),
+      frozenStart: 1,
+    );
+  }
+
+  /// Column 0 is the frozen hour gutter; columns 1 onward are the days
+  /// from [TimedGrid.firstDay]. The `laneExtent` makes the day axis the
+  /// lane axis, so items sharing a day's time sit side by side. No two
+  /// stored items do, but a failed move can return an item under another
+  /// item's pending move until the API refuses that one.
+  BoardAxisConfig _columnsConfig(double dayWidth) {
+    return BoardAxisConfig(
+      axis: ExplicitAxis(<double>[
+        _gutterWidth,
+        ...List<double>.filled(widget.dayCount, dayWidth),
+      ]),
+      frozenStart: 1,
+      laneExtent: dayWidth,
+    );
+  }
+
+  /// The days across [width], never narrower than the minimum. Called
+  /// from the layout callback, so the first frame lays the board out at
+  /// its width.
+  void _fitColumns(double width) {
+    final dayWidth = math.max(
+      _minDayWidth,
+      (width - _gutterWidth) / widget.dayCount,
+    );
+    if (dayWidth == _dayWidth) {
+      return;
+    }
+    _dayWidth = dayWidth;
+    _board.columns = _columnsConfig(dayWidth);
+  }
+
+  void _handleModel() {
+    _sync();
+    setState(() {});
+  }
+
+  DateTime get _lastDay {
+    return addDays(widget.firstDay, widget.dayCount - 1);
+  }
+
+  /// Whether the model shows exactly this grid's days, every one of them
+  /// read. False for a sync that runs between the model taking new days
+  /// and this grid getting them.
+  bool get _daysReady {
+    return widget.model.status == CalendarLoadStatus.ready &&
+        widget.model.isShown(widget.firstDay, _lastDay);
+  }
+
+  /// Sets the board's items to the days' shown items when the days are
+  /// ready, and to none otherwise. A sync animates only when its days are
+  /// ready and the last sync found its own days ready; any other runs
+  /// under [BoardAnimationStyle.disabled], and so does every sync until a
+  /// frame callback restores [timedGridAnimationStyle]. New days reach
+  /// this grid only after the model has notified that it shows them, and
+  /// the sync that notification runs finds the old days not ready, so the
+  /// first sync of new days does not animate.
+  void _sync() {
+    final ready = _daysReady;
+    final placements = <BoardPlacement<ShownItem>>[];
+    if (ready) {
+      final firstDay = dayNumber(widget.firstDay);
+      final shown = widget.model.itemsBetween(widget.firstDay, _lastDay);
+      for (final entry in shown) {
+        final span = gridSpanOf(entry.item.shape, firstDay, widget.dayCount);
+        if (span != null) {
+          placements.add(BoardPlacement<ShownItem>(entry, span));
+        }
+      }
+    }
+    final animate = ready && _syncedReady;
+    if (!animate) {
+      _board.animationStyle = BoardAnimationStyle.disabled;
+    }
+    _board.setItems(placements);
+    if (!animate) {
+      _scheduleStyleRestore();
+    }
+    _syncedReady = ready;
+  }
+
+  /// Puts [timedGridAnimationStyle] back in a frame callback scheduled
+  /// after the diff of the sync that first disabled it. The style setter
+  /// stops slides at once but leaves an enter or exit in flight to its
+  /// next tick, which reads the style then, and transient callbacks run in
+  /// the order they were scheduled. A ticker running before that sync
+  /// scheduled its tick already, and one its diff stopped and started
+  /// again, which removing an item mid-enter does, scheduled its tick
+  /// inside the diff, so each of those ticks runs before the restore and
+  /// settles its enters and exits under the disabled style.
+  void _scheduleStyleRestore() {
+    if (_restoreScheduled) {
+      return;
+    }
+    _restoreScheduled = true;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      _restoreScheduled = false;
+      if (mounted) {
+        _board.animationStyle = timedGridAnimationStyle;
+      }
+    });
+  }
+
+  bool _canDrag(String id) {
+    return !widget.model.isLocked(id);
+  }
+
+  bool _canDropAt(String id, BoardSpan span) {
+    if (span.rowStart < 1 || span.colStart < 1) {
+      return false;
+    }
+    final from = _board.spanOf(id);
+    final entry = _board.itemOf(id);
+    if (from == null || entry == null) {
+      return false;
+    }
+    // The span the drag started from: an unchanged drop is admitted even
+    // where the item already shares its time.
+    if (from == span) {
+      return true;
+    }
+    final shape = entry.item.shape;
+    final firstDay = dayNumber(widget.firstDay);
+    final converted = shapeFromSpan(shape, from, span, firstDay);
+    if (!isAllowedDayCount(converted.dayCount)) {
+      return false;
+    }
+    // The converted shape's own span, not the candidate's: an item clipped
+    // at the grid's first day shows more days once moved right.
+    final shownSpan = gridSpanOf(converted, firstDay, widget.dayCount);
+    if (shownSpan == null) {
+      return false;
+    }
+    final others = _board.itemsIn(
+      shownSpan.rowStart,
+      shownSpan.rowStart + shownSpan.rowSpan,
+      shownSpan.colStart,
+      shownSpan.colStart + shownSpan.colSpan,
+    );
+    for (final other in others) {
+      if (other == id) {
+        continue;
+      }
+      final occupant = _board.itemOf(other);
+      if (occupant != null && itemsConflict(converted, occupant.item.shape)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// A drop the board reports, a move or a resize. Sends nothing for a
+  /// locked item, which the board's semantics move action can report when
+  /// the item locked after its host last built, or when the item would
+  /// not change.
+  void _commit(String id, BoardSpan to) {
+    if (widget.model.isLocked(id)) {
+      return;
+    }
+    final from = _board.spanOf(id);
+    final stored = widget.model.storedItem(id);
+    if (from == null || stored == null) {
+      return;
+    }
+    final requested = itemFromSpan(
+      stored,
+      from,
+      to,
+      dayNumber(widget.firstDay),
+    );
+    if (requested == stored) {
+      return;
+    }
+    widget.model.requestMove(requested);
+  }
+
+  void _selectDay(DateTime day) {
+    widget.onSelectDay(day);
+  }
+
+  RenderBoardViewport<String>? _findViewport() {
+    final cached = _viewport;
+    if (cached != null && cached.attached) {
+      return cached;
+    }
+    _viewport = null;
+    final root = _boardKey.currentContext?.findRenderObject();
+    if (root == null) {
+      return null;
+    }
+    RenderBoardViewport<String>? found;
+    void visit(RenderObject node) {
+      if (found != null) {
+        return;
+      }
+      if (node is RenderBoardViewport<String>) {
+        found = node;
+        return;
+      }
+      node.visitChildren(visit);
+    }
+
+    visit(root);
+    _viewport = found;
+    return found;
+  }
+
+  /// The body cell painting under [local], a point in the viewport's paint
+  /// space, or null over the header, the gutter or past the lattice.
+  ({int row, int col})? _bodyCellAtLocal(
+    RenderBoardViewport<String> viewport,
+    Offset local,
+  ) {
+    final cell = viewport.cellAt(local);
+    if (cell == null || cell.row < 1 || cell.col < 1) {
+      return null;
+    }
+    return cell;
+  }
+
+  /// [_bodyCellAtLocal] for a global point.
+  ({int row, int col})? _bodyCellAt(Offset global) {
+    final viewport = _findViewport();
+    if (viewport == null) {
+      return null;
+    }
+    return _bodyCellAtLocal(viewport, viewport.globalToLocal(global));
+  }
+
+  /// Whether a press at [global] may create: no range runs, it lies over a
+  /// body cell, no item paints under it, and the grid is neither scrolling
+  /// nor just stopped by this press.
+  bool _admits(Offset global) {
+    final viewport = _findViewport();
+    if (viewport == null || _scrollJustStopped || _range != null) {
+      return false;
+    }
+    final vertical = viewport.verticalPosition;
+    final horizontal = viewport.horizontalPosition;
+    if ((vertical?.isScrollingNotifier.value ?? false) ||
+        (horizontal?.isScrollingNotifier.value ?? false)) {
+      return false;
+    }
+    final local = viewport.globalToLocal(global);
+    if (_bodyCellAtLocal(viewport, local) == null) {
+      return false;
+    }
+    return viewport.itemAt(local) == null;
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification is ScrollEndNotification) {
+      _scrollJustStopped = true;
+      scheduleMicrotask(() {
+        _scrollJustStopped = false;
+      });
+    }
+    return false;
+  }
+
+  /// Arms the create gestures for an admitted press. A listener's pointer
+  /// down runs before the arena closes, so they join it beside the
+  /// scrollable's pan; each recognizer ignores the pointer kinds it does
+  /// not support.
+  void _handlePointerDown(PointerDownEvent event) {
+    if (!_admits(event.position)) {
+      return;
+    }
+    _tap.addPointer(event);
+    _immediateRange.addPointer(event);
+    _delayedRange.addPointer(event);
+  }
+
+  void _handleTapUp(TapUpDetails details) {
+    final cell = _bodyCellAt(details.globalPosition);
+    if (cell == null) {
+      return;
+    }
+    widget.onCreate(_tapRangeOf(cell));
+  }
+
+  /// One hour from [cell]'s slot, or to 24:00 when that comes first.
+  CreateRange _tapRangeOf(({int row, int col}) cell) {
+    final start = (cell.row - 1) * minutesPerSlot;
+    return CreateRange(
+      day: addDays(widget.firstDay, cell.col - 1),
+      startMinute: start,
+      endMinute: math.min(start + 60, minutesPerDay),
+      dayCount: 1,
+    );
+  }
+
+  /// The slots of the rectangle from [anchor] to [focus].
+  CreateRange _rectRangeOf(
+    ({int row, int col}) anchor,
+    ({int row, int col}) focus,
+  ) {
+    final top = math.min(anchor.row, focus.row);
+    final bottom = math.max(anchor.row, focus.row);
+    final left = math.min(anchor.col, focus.col);
+    final right = math.max(anchor.col, focus.col);
+    return CreateRange(
+      day: addDays(widget.firstDay, left - 1),
+      startMinute: (top - 1) * minutesPerSlot,
+      endMinute: bottom * minutesPerSlot,
+      dayCount: right - left + 1,
+    );
+  }
+
+  Drag? _beginRange(Offset position) {
+    final viewport = _findViewport();
+    if (viewport == null || _range != null) {
+      return null;
+    }
+    final point = viewport.globalToLocal(position);
+    final anchor = _bodyCellAtLocal(viewport, point);
+    if (anchor == null) {
+      return null;
+    }
+    final range = _RangeDrag(this, viewport, anchor, point);
+    setState(() {
+      _range = range;
+    });
+    return range;
+  }
+
+  void _moveRange(_RangeDrag range, ({int row, int col}) focus) {
+    if (!mounted || !identical(_range, range)) {
+      return;
+    }
+    setState(() {
+      range.focus = focus;
+    });
+  }
+
+  void _endRange(_RangeDrag range) {
+    if (!mounted || !identical(_range, range)) {
+      return;
+    }
+    final created = range.focus == range.anchor
+        ? _tapRangeOf(range.anchor)
+        : _rectRangeOf(range.anchor, range.focus);
+    _clearRange(range);
+    widget.onCreate(created);
+  }
+
+  void _clearRange(_RangeDrag range) {
+    if (!mounted || !identical(_range, range)) {
+      return;
+    }
+    setState(() {
+      _range = null;
+    });
+  }
+
+  Widget? _buildCell(
+    BuildContext context,
+    BoardCellView<String, ShownItem> cell,
+  ) {
+    if (cell.row == 0) {
+      if (cell.col == 0) {
+        return const ColoredBox(color: HarborColors.surface);
+      }
+      return _DayHeaderCell(
+        header: _header,
+        column: cell.col - 1,
+        today: widget.today,
+        onSelectDay: _selectDay,
+      );
+    }
+    if (cell.col == 0) {
+      // Every gutter row is opaque so nothing scrolled beneath the band
+      // shows through; the label sits on the hour line.
+      final minute = (cell.row - 1) * minutesPerSlot;
+      final onHour = minute % 60 == 0 && minute > 0;
+      return ColoredBox(
+        color: HarborColors.surface,
+        child: onHour
+            ? Align(
+                alignment: Alignment.topRight,
+                child: Transform.translate(
+                  offset: const Offset(-6.0, -7.0),
+                  child: Text(
+                    clockLabel(minute),
+                    style: const TextStyle(
+                      fontSize: 11.0,
+                      color: HarborColors.textSecondary,
+                    ),
+                  ),
+                ),
+              )
+            : null,
+      );
+    }
+    // Body cells build nothing: the background painter draws the grid.
+    return null;
+  }
+
+  Widget _buildItem(
+    BuildContext context,
+    BoardItemView<String, ShownItem> view,
+  ) {
+    final entry = view.item;
+    return _Block(
+      key: blockKey(entry.id),
+      entry: entry,
+      showsSummary: view.span.rowSpan >= 3,
+      onOpen: entry.pending
+          ? null
+          : () {
+              widget.onOpenItem(entry.id);
+            },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final model = widget.model;
+    final range = _range;
+    final board = Listener(
+      onPointerDown: _handlePointerDown,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _handleScrollNotification,
+        child: Board<String, ShownItem>(
+          key: _boardKey,
+          controller: _board,
+          cellBuilder: _cellBuilder,
+          itemBuilder: _itemBuilder,
+          background: _TimedGridPainter(
+            firstDay: widget.firstDay,
+            today: widget.today,
+            rangeAnchor: range?.anchor,
+            rangeFocus: range?.focus,
+          ),
+          drag: _dragConfig,
+          // The grid scrolls on its own, not with the screen's primary
+          // scroll controller.
+          primary: false,
+        ),
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _fitColumns(constraints.maxWidth);
+        return Stack(
+          children: <Widget>[
+            Positioned.fill(child: board),
+            if (!_daysReady)
+              Positioned.fill(
+                child: _LoadOverlay(
+                  error: model.status == CalendarLoadStatus.failed
+                      ? model.error
+                      : null,
+                  onRetry: model.retry,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A create range from the press at [anchor] to the body cell under the
+/// pointer.
+///
+/// The pointer is tracked in the viewport's paint space, as the press
+/// converted plus the sum of every update's delta: a multi-drag recognizer
+/// reports the move that accepted it as a delta from the press, with the
+/// press's own position. The range listens to both scroll positions for
+/// its length, so the focus stays the cell under the pointer while content
+/// scrolls beneath it.
+class _RangeDrag extends Drag {
+  _RangeDrag(this._grid, this._viewport, this.anchor, this._point)
+    : focus = anchor,
+      _vertical = _viewport.verticalPosition,
+      _horizontal = _viewport.horizontalPosition {
+    _vertical?.addListener(_refocus);
+    _horizontal?.addListener(_refocus);
+  }
+
+  final _TimedGridState _grid;
+  final RenderBoardViewport<String> _viewport;
+  final ScrollPosition? _vertical;
+  final ScrollPosition? _horizontal;
+  final ({int row, int col}) anchor;
+
+  /// The body cell last under the pointer: unchanged while the pointer is
+  /// over the header, the gutter or past the lattice.
+  ({int row, int col}) focus;
+
+  Offset _point;
+
+  @override
+  void update(DragUpdateDetails details) {
+    _point += details.delta;
+    _refocus();
+  }
+
+  void _refocus() {
+    final cell = _grid._bodyCellAtLocal(_viewport, _point);
+    if (cell == null || cell == focus) {
+      return;
+    }
+    _grid._moveRange(this, cell);
+  }
+
+  @override
+  void end(DragEndDetails details) {
+    detach();
+    _grid._endRange(this);
+  }
+
+  @override
+  void cancel() {
+    detach();
+    _grid._clearRange(this);
+  }
+
+  /// Stops listening to the scroll positions.
+  void detach() {
+    _vertical?.removeListener(_refocus);
+    _horizontal?.removeListener(_refocus);
+  }
+}
+
+class _DayHeaderCell extends StatelessWidget {
+  const _DayHeaderCell({
+    required this.header,
+    required this.column,
+    required this.today,
+    required this.onSelectDay,
+  });
+
+  final ValueListenable<_HeaderState> header;
+  final int column;
+  final DateTime today;
+  final ValueChanged<DateTime> onSelectDay;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<_HeaderState>(
+      valueListenable: header,
+      builder: (context, value, child) {
+        final day = addDays(value.firstDay, column);
+        final isToday = day == today;
+        final isSelected = day == value.selectedDay;
+        return GestureDetector(
+          key: dayHeaderKey(day),
+          onTap: () {
+            onSelectDay(day);
+          },
+          child: ColoredBox(
+            color: isSelected ? HarborColors.primaryTint : HarborColors.surface,
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    weekdayShortNames[weekdayColumn(day)],
+                    style: const TextStyle(
+                      fontSize: 11.0,
+                      color: HarborColors.textSecondary,
+                    ),
+                  ),
+                  Text(
+                    "${day.day}",
+                    style: TextStyle(
+                      fontSize: 14.0,
+                      fontWeight: FontWeight.w700,
+                      color: isToday ? HarborColors.primary : HarborColors.text,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// One item on the grid: its type's tint with a 4 px edge, its title, and
+/// its first summary when [showsSummary]. Dimmed with a progress indicator
+/// while [ShownItem.pending].
+class _Block extends StatelessWidget {
+  const _Block({
+    super.key,
+    required this.entry,
+    required this.showsSummary,
+    required this.onOpen,
+  });
+
+  final ShownItem entry;
+
+  /// Whether the block's span covers enough rows for a second line. Read
+  /// from the span rather than measured, so a block laid out at a new
+  /// extent on each animation frame does not rebuild for it.
+  final bool showsSummary;
+
+  /// Null while the item is pending, so a tap opens nothing.
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = entry.item;
+    final style = harborTypeStyleOf(item.type);
+    final schema = schemaOf(item.type);
+    String? summary;
+    if (showsSummary && schema.summaryKeys.isNotEmpty) {
+      final key = schema.summaryKeys.first;
+      summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
+    }
+    Widget content = DecoratedBox(
+      decoration: BoxDecoration(
+        color: style.tint,
+        border: Border(left: BorderSide(color: style.edge, width: 4.0)),
+      ),
+      // Laid out at its natural height and clipped to the block, so a
+      // block shorter than its text does not overflow.
+      child: ClipRect(
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          minHeight: 0.0,
+          maxHeight: double.infinity,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(4.0, 2.0, 4.0, 2.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11.0,
+                    fontWeight: FontWeight.w600,
+                    color: HarborColors.text,
+                  ),
+                ),
+                if (summary != null)
+                  Text(
+                    summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10.0,
+                      color: HarborColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (entry.pending) {
+      content = Stack(
+        fit: StackFit.passthrough,
+        children: <Widget>[
+          Opacity(opacity: 0.5, child: content),
+          const Positioned(
+            top: 2.0,
+            right: 2.0,
+            child: SizedBox.square(
+              dimension: 12.0,
+              child: CircularProgressIndicator(strokeWidth: 2.0),
+            ),
+          ),
+        ],
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(1.0),
+      child: GestureDetector(onTap: onOpen, child: content),
+    );
+  }
+}
+
+/// Covers the grid while its days are not ready, taking every press: a
+/// progress indicator while it loads, the error and Retry when the read
+/// failed.
+class _LoadOverlay extends StatelessWidget {
+  const _LoadOverlay({required this.error, required this.onRetry});
+
+  final String? error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final message = error;
+    // A ColoredBox hit-tests as opaque, so no press reaches the board.
+    return ColoredBox(
+      color: HarborColors.background.withValues(alpha: 0.85),
+      child: Center(
+        child: message == null
+            ? const CircularProgressIndicator()
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: Text(
+                      message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: HarborColors.error),
+                    ),
+                  ),
+                  const SizedBox(height: 12.0),
+                  TextButton(onPressed: onRetry, child: const Text("Retry")),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// The grid behind the cells, drawn for the visible body tracks alone:
+/// the body, the weekend and today's columns, a line at the top of each
+/// slot row and at the left of each day column, and the create range being
+/// dragged, filled like today's column and edged in the primary colour so
+/// it shows over that column too. Every paint it draws with is built once.
+class _TimedGridPainter extends BoardBackgroundPainter {
+  const _TimedGridPainter({
+    required this.firstDay,
+    required this.today,
+    required this.rangeAnchor,
+    required this.rangeFocus,
+  });
+
+  static final Paint _surfacePaint = Paint()..color = HarborColors.surface;
+  static final Paint _backgroundPaint = Paint()
+    ..color = HarborColors.background;
+  static final Paint _tintPaint = Paint()..color = HarborColors.primaryTint;
+  static final Paint _linePaint = Paint()
+    ..color = HarborColors.outline
+    ..strokeWidth = 1.0;
+  static final Paint _rangeEdgePaint = Paint()
+    ..color = HarborColors.primary
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.0;
+
+  /// The day of column 1.
+  final DateTime firstDay;
+  final DateTime today;
+  final ({int row, int col})? rangeAnchor;
+  final ({int row, int col})? rangeFocus;
+
+  @override
+  void paint(Canvas canvas, BoardGeometryView geometry) {
+    final firstRow = geometry.firstVisibleRow;
+    final lastRow = geometry.lastVisibleRow;
+    final firstCol = geometry.firstVisibleCol;
+    final lastCol = geometry.lastVisibleCol;
+    if (firstRow > lastRow || firstCol > lastCol) {
+      return;
+    }
+    final region = geometry.scrolledRegion;
+    final first = geometry.visibleCellRect(firstRow, firstCol);
+    final last = geometry.visibleCellRect(lastRow, lastCol);
+    canvas.save();
+    canvas.clipRect(region);
+    canvas.drawRect(region, _surfacePaint);
+    final todayColumn = 1 + daysBetween(firstDay, today);
+    for (var col = firstCol; col <= lastCol; col++) {
+      final Paint fill;
+      if (col == todayColumn) {
+        fill = _tintPaint;
+      } else if (weekdayColumn(addDays(firstDay, col - 1)) >= 5) {
+        fill = _backgroundPaint;
+      } else {
+        continue;
+      }
+      final rect = geometry.visibleCellRect(firstRow, col);
+      canvas.drawRect(
+        Rect.fromLTRB(rect.left, first.top, rect.right, last.bottom),
+        fill,
+      );
+    }
+    final anchor = rangeAnchor;
+    final focus = rangeFocus;
+    if (anchor != null && focus != null) {
+      final top = math.max(math.min(anchor.row, focus.row), firstRow);
+      final bottom = math.min(math.max(anchor.row, focus.row), lastRow);
+      final left = math.max(math.min(anchor.col, focus.col), firstCol);
+      final right = math.min(math.max(anchor.col, focus.col), lastCol);
+      if (top <= bottom && left <= right) {
+        final rect = geometry
+            .visibleCellRect(top, left)
+            .expandToInclude(geometry.visibleCellRect(bottom, right));
+        canvas.drawRect(rect, _tintPaint);
+        canvas.drawRect(rect.deflate(1.0), _rangeEdgePaint);
+      }
+    }
+    for (var row = firstRow; row <= lastRow; row++) {
+      final y = geometry.visibleCellRect(row, firstCol).top;
+      canvas.drawLine(Offset(first.left, y), Offset(last.right, y), _linePaint);
+    }
+    for (var col = firstCol; col <= lastCol; col++) {
+      final x = geometry.visibleCellRect(firstRow, col).left;
+      canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), _linePaint);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _TimedGridPainter old) {
+    return old.firstDay != firstDay ||
+        old.today != today ||
+        old.rangeAnchor != rangeAnchor ||
+        old.rangeFocus != rangeFocus;
+  }
+}
