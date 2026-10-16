@@ -325,6 +325,44 @@ class CalendarModel extends ChangeNotifier {
     return false;
   }
 
+  /// The first free hour of [day] inside [hours]: for each start from the
+  /// hours' start on the [minutesPerSlot] grid, the range from it to an
+  /// hour later or the hours' end, whichever comes first, the first one
+  /// that shares no time, under [itemsConflict], with an item [itemsOn]
+  /// lists for [day], pending ones where they show. With none free, the
+  /// hours' first hour, which a create the API then refuses for its
+  /// overlap. The new item's type plays no part: [itemsConflict] ignores
+  /// it.
+  ({int start, int end}) firstFreeRange(DateTime day) {
+    final number = dayNumber(day);
+    final shown = itemsOn(day);
+    for (
+      var start = hours.start;
+      start <= hours.end - minutesPerSlot;
+      start += minutesPerSlot
+    ) {
+      final end = math.min(start + 60, hours.end);
+      final ItemShape shape = (
+        type: CalendarItemType.task,
+        firstDay: number,
+        dayCount: 1,
+        start: start,
+        end: end,
+      );
+      var free = true;
+      for (final entry in shown) {
+        if (itemsConflict(shape, entry.item.shape)) {
+          free = false;
+          break;
+        }
+      }
+      if (free) {
+        return (start: start, end: end);
+      }
+    }
+    return (start: hours.start, end: math.min(hours.start + 60, hours.end));
+  }
+
   /// Whether a write on [id] runs.
   bool isLocked(String id) {
     return _pending.containsKey(id);

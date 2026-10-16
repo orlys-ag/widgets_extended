@@ -565,4 +565,62 @@ void main() {
     expect(harness.api.calls, hasLength(calls + 2));
     expect(harness.lastCall.body!["startMinute"], 480);
   });
+
+  group("first free", () {
+    final day = DateTime(2026, 4, 22);
+
+    /// Shows [day] and completes its read with [items].
+    Future<CalendarModel> readDay(
+      Harness harness,
+      List<CalendarItem> items,
+    ) async {
+      final model = harness.model;
+      model.show(day, day);
+      harness.lastCall.succeed(<Map<String, Object?>>[
+        for (final item in items) item.toJson(),
+      ]);
+      await settle();
+      expect(model.status, CalendarLoadStatus.ready);
+      return model;
+    }
+
+    test(
+      "FF1 the first free range is the earliest hour that meets no shown item",
+      () async {
+        final model = await readDay(Harness(), <CalendarItem>[
+          task("item-1", day, 0, 60),
+        ]);
+        expect(model.firstFreeRange(day), (start: 60, end: 120));
+      },
+    );
+
+    test("FF2 a range is cut at the hours' end", () async {
+      final model = await readDay(Harness(), <CalendarItem>[
+        task("item-1", day, 540, 690),
+      ]);
+      model.hours = const DayHours(540, 720);
+      expect(model.firstFreeRange(day), (start: 690, end: 720));
+    });
+
+    test("FF3 with no free start the range is the hours' first hour", () async {
+      final model = await readDay(Harness(), <CalendarItem>[
+        task("item-1", day, 0, 1440),
+      ]);
+      expect(model.firstFreeRange(day), (start: 0, end: 60));
+    });
+
+    test("FF4 a pending move counts where it shows", () async {
+      final harness = Harness();
+      final item = task("item-1", day, 60, 120);
+      final model = await readDay(harness, <CalendarItem>[item]);
+      // Sanity: the stored item leaves the first hour free.
+      expect(model.firstFreeRange(day), (start: 0, end: 60));
+
+      final calls = harness.api.calls.length;
+      model.requestMove(item.copyWith(startMinute: 0, endMinute: 60));
+      expect(harness.api.calls, hasLength(calls + 1));
+      expect(model.isLocked("item-1"), isTrue);
+      expect(model.firstFreeRange(day), (start: 60, end: 120));
+    });
+  });
 }
