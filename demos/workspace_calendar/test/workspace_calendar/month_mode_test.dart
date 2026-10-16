@@ -267,7 +267,6 @@ void main() {
         expect(tops[i], greaterThan(tops[i - 1]));
       }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -302,7 +301,6 @@ void main() {
       }
       expect(find.byType(DayList), findsNothing);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -326,7 +324,6 @@ void main() {
         near(0.0),
       );
     },
-    skip: true,
   );
 
   testWidgets(
@@ -351,7 +348,6 @@ void main() {
         greaterThan(0.0),
       );
     },
-    skip: true,
   );
 
   testWidgets(
@@ -400,7 +396,6 @@ void main() {
       expectOn(xSecond, april(27), april(28));
       expect(chipFinder(w, april(20)), findsNothing);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -431,7 +426,6 @@ void main() {
       expect(m, lessThan(early));
       expect(early, lessThan(t));
     },
-    skip: true,
   );
 
   testWidgets("M6b a bar continuing from the week before stacks above a chip "
@@ -449,7 +443,7 @@ void main() {
     expect(p.left, near(q.left));
     expect(p.right, near(q.right));
     expect(p.top, lessThan(q.top));
-  }, skip: true);
+  });
 
   testWidgets(
     "M7 a widened chip paints one lane, and a tap below it creates on its "
@@ -481,7 +475,6 @@ void main() {
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets(
@@ -551,7 +544,6 @@ void main() {
       await tester.pump(latency);
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets("M9 a tap on a chip opens its edit form", (tester) async {
@@ -562,7 +554,7 @@ void main() {
     expect(fieldText(tester, "Title"), "Design new UX flow for Michael");
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
-  }, skip: true);
+  });
 
   testWidgets(
     "M10 a tap on a day's number strip selects it and shows Day mode",
@@ -573,7 +565,6 @@ void main() {
       expect(find.text("Day"), findsOneWidget);
       expect(find.byKey(dayHeaderKey(april(22))), findsOneWidget);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -593,7 +584,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(22)]);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -613,7 +603,6 @@ void main() {
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets(
@@ -630,7 +619,6 @@ void main() {
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets(
@@ -646,7 +634,6 @@ void main() {
       expect(find.text("April 2026"), findsOneWidget);
       expect(pilledDays(tester), <DateTime>[april(21)]);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -667,7 +654,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text("Week"), findsOneWidget);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -704,7 +690,6 @@ void main() {
       expect(dayFinder(may(31)), findsOneWidget);
       expect(dayFinder(DateTime(2026, 3, 30)), findsNothing);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -726,7 +711,6 @@ void main() {
       expect(pilledDays(tester), <DateTime>[april(1)]);
       expect(tester.takeException(), isNull);
     },
-    skip: true,
   );
 
   testWidgets("M14c two keys before a frame each move the selected day", (
@@ -752,7 +736,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(pilledDays(tester), <DateTime>[april(30)]);
     expect(find.text("April 2026"), findsOneWidget);
-  }, skip: true);
+  });
 
   testWidgets(
     "M15 Month shows the load overlay while it loads, and the error and a "
@@ -787,7 +771,6 @@ void main() {
       expect(underBoard(find.byType(CircularProgressIndicator)), findsNothing);
       expect(underBoard(find.text("Retry")), findsNothing);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -842,7 +825,6 @@ void main() {
       );
       expect(tester.getRect(x).top, greaterThan(xTop + 0.5));
     },
-    skip: true,
   );
 
   testWidgets("M17 a month change and a weekday change each sync once with no "
@@ -887,7 +869,7 @@ void main() {
 
     controller.removeStructuralListener(onStructural);
     controller.removeAnimationListener(onTick);
-  }, skip: true);
+  });
 
   testWidgets(
     "M17b an exit in flight at a month change installs no animation and "
@@ -951,7 +933,6 @@ void main() {
       controller.removeAnimationListener(onTick);
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1013,7 +994,6 @@ void main() {
       await tester.tapAt(const Offset(195.0, 20.0));
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1082,7 +1062,6 @@ void main() {
       controller.removeAnimationListener(onTick);
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets("M19 a tap on a day's empty part gives the board the keys", (
@@ -1094,7 +1073,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(pilledDays(tester), <DateTime>[april(23)]);
-  }, skip: true);
+  });
 
   testWidgets(
     "M19b Tab gives the board the keys, which move from the selected day",
@@ -1117,7 +1096,6 @@ void main() {
       expect(pilledDays(tester), <DateTime>[april(22)]);
       expect(find.text("April 2026"), findsOneWidget);
     },
-    skip: true,
   );
 
   testWidgets("M20a after a month change by a chevron the selected day shows", (
@@ -1147,7 +1125,7 @@ void main() {
       greaterThan(0.0),
     );
     expect(whollyInsideBoard(tester, may(30)), isTrue);
-  }, skip: true);
+  });
 
   testWidgets("M20b after a month change by a key the selected day shows", (
     tester,
@@ -1174,7 +1152,7 @@ void main() {
     expect(find.text("April 2026"), findsOneWidget);
     expect(pilledDays(tester), <DateTime>[april(30)]);
     expect(whollyInsideBoard(tester, april(30)), isTrue);
-  }, skip: true);
+  });
 
   testWidgets("M21 a confirmed create grows its chip in", (tester) async {
     await pumpMonth(tester);
@@ -1191,7 +1169,7 @@ void main() {
     expect(growing, lessThan(lane));
     await tester.pumpAndSettle();
     expect(tester.getSize(chip).height, near(lane));
-  }, skip: true);
+  });
 
   testWidgets("M22 a form's keyboard leaves Month's weeks as they are", (
     tester,
@@ -1211,10 +1189,24 @@ void main() {
     await tester.pump();
     expect(structural, 0);
     expect(tester.getRect(monthBoardFinder()), board);
+    // Sanity: the form's dialog moves above the keyboard once its inset
+    // padding has animated; its surface is the Material it builds.
+    await tester.pumpAndSettle();
+    expect(structural, 0);
+    expect(tester.getRect(monthBoardFinder()), board);
     expect(
-      tester.getRect(find.byType(Dialog)).bottom,
+      tester
+          .getRect(
+            find
+                .descendant(
+                  of: find.byType(Dialog),
+                  matching: find.byType(Material),
+                )
+                .first,
+          )
+          .bottom,
       lessThanOrEqualTo(844.0 - 300.0),
     );
     controller.removeStructuralListener(onStructural);
-  }, skip: true);
+  });
 }

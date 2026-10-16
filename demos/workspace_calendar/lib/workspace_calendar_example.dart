@@ -1,16 +1,24 @@
-/// A workspace calendar on the board module, over a calendar API: a month
-/// grid that folds into the selected day's week while the day list is
-/// scrolled, the selected day's items under it, and timed grids of the
-/// selected day's week and of that day alone, where items are created,
-/// moved, resized, edited and deleted.
+/// A workspace calendar on the board module, over a calendar API, in four
+/// views: Agenda, a month grid that folds into the selected day's week
+/// while the day list under it, the selected day's items, is scrolled;
+/// Month, the month's weeks with each item as a chip on the days it
+/// covers; and Week and Day, timed grids of the selected day's week and of
+/// that day alone, where items are created, moved, resized, edited and
+/// deleted.
 ///
-/// The month grid is a [Board] with no items. Each day is a cell, a tap
-/// selects it through the board's cell selection, and the arrow keys move
-/// that selection once the board has focus. The board always holds the
-/// whole month of the selected day; the folded strip is that board clipped
-/// to one row and shifted so the selected week shows. Selecting a day in
-/// another month, by a tap on a muted day, the chevrons or a key, switches
-/// the board to that month.
+/// Agenda's month grid is a [Board] with no items. Each day is a cell, a
+/// tap selects it through the board's cell selection, and the arrow keys
+/// move that selection once the board has focus. The board always holds
+/// the whole month of the selected day; the folded strip is that board
+/// clipped to one row and shifted so the selected week shows. Selecting a
+/// day in another month, by a tap on a muted day, the chevrons or a key,
+/// switches the board to that month.
+///
+/// Month's grid is a [MonthBoard], whose weeks fill the screen and grow
+/// with their chips. A tap on a chip edits its item, on a day's number
+/// opens that day in Day, and on the rest of a day creates an item there
+/// at the day's first free hour, selecting the day when it is in the
+/// month. Its keys and chevrons move the selected day as Agenda's do.
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
@@ -35,11 +43,13 @@ import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
+import 'workspace_calendar/month_board.dart';
 import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
 
 enum _CalendarMode {
   agenda("Agenda"),
+  month("Month"),
   week("Week"),
   day("Day");
 
@@ -259,10 +269,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The days the timed grid shows: the selected day's Monday-to-Sunday
   /// week in the week mode, the selected day alone in the day mode, and
-  /// null in Agenda. [_showRange] and the grid both read it.
+  /// null in Agenda and Month. [_showRange] and the grid both read it.
   ({DateTime first, int count})? get _timedDays {
     switch (_mode) {
       case _CalendarMode.agenda:
+      case _CalendarMode.month:
         return null;
       case _CalendarMode.week:
         return (first: weekStartOf(_selected), count: 7);
@@ -271,7 +282,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  /// Shows the month grid's days in Agenda and [_timedDays]
+  /// Shows the month grid's days in Agenda and Month and [_timedDays]
   /// otherwise, which reads whatever of them is not read yet.
   void _showRange() {
     final days = _timedDays;
@@ -330,6 +341,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     switch (_mode) {
       case _CalendarMode.agenda:
         return _collapsed ? _StepUnit.week : _StepUnit.month;
+      case _CalendarMode.month:
+        return _StepUnit.month;
       case _CalendarMode.week:
         return _StepUnit.week;
       case _CalendarMode.day:
@@ -365,6 +378,32 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// The week mode, on the selected day's week.
   void _openWeekMode() {
     _setMode(_CalendarMode.week);
+  }
+
+  /// The day mode, on [day].
+  void _openDayMode(DateTime day) {
+    _select(day);
+    _setMode(_CalendarMode.day);
+  }
+
+  /// The create flow for [day] at its first free hour, selecting [day]
+  /// first when it is a day of the shown month; a day of another month
+  /// leaves the selection and the month as they are.
+  void _createOn(DateTime day) {
+    if (_grid.contains(day)) {
+      _select(day);
+    }
+    final free = _model.firstFreeRange(day);
+    showCreateFlow(
+      context,
+      model: _model,
+      range: CreateRange(
+        day: day,
+        startMinute: free.start,
+        endMinute: free.end,
+        dayCount: 1,
+      ),
+    );
   }
 
   void _setCollapsed(bool collapsed) {
@@ -495,8 +534,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   @override
   Widget build(BuildContext context) {
-    final showsTimedGrid = _mode != _CalendarMode.agenda;
+    final agenda = _mode == _CalendarMode.agenda;
+    final month = _mode == _CalendarMode.month;
     return Scaffold(
+      // A form's keyboard leaves the month board's height, and so its
+      // weeks, as they are; the form's dialog pads itself by the keyboard.
+      resizeToAvoidBottomInset: !month,
       appBar: AppBar(
         scrolledUnderElevation: 0.0,
         titleSpacing: 0.0,
@@ -512,11 +555,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
-          if (!showsTimedGrid)
+          if (agenda || month)
             IconButton(
               icon: const Icon(Icons.add_circle_outline),
               tooltip: "Add",
-              onPressed: _openWeekMode,
+              onPressed: month
+                  ? () {
+                      _createOn(_selected);
+                    }
+                  : _openWeekMode,
             ),
           IconButton(
             icon: const Icon(Icons.tune),
@@ -532,7 +579,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           ),
         ],
       ),
-      floatingActionButton: showsTimedGrid
+      floatingActionButton: !agenda
           ? null
           : FloatingActionButton(
               tooltip: "Add item",
@@ -561,9 +608,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// The month grid and the day list in Agenda; a timed grid of
-  /// [_timedDays], across the body's full width, otherwise.
+  /// The month grid and the day list in Agenda; the month board in Month;
+  /// a timed grid of [_timedDays], across the body's full width, otherwise.
   Widget _buildCalendarView() {
+    if (_mode == _CalendarMode.month) {
+      return _buildMonthView();
+    }
     final days = _timedDays;
     if (days != null) {
       return Column(
@@ -655,6 +705,46 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           ),
         ),
       ],
+    );
+  }
+
+  /// The header card filling the body: the header, the weekday letters
+  /// and the month board under them.
+  Widget _buildMonthView() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 0.0),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: HarborColors.surface,
+          borderRadius: BorderRadius.circular(16.0),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _buildCalendarHeader(),
+              const SizedBox(height: 4.0),
+              _WeekdayHeader(weekdays: _settings.weekdays),
+              Expanded(
+                child: MonthBoard(
+                  key: const ValueKey<String>("month-board"),
+                  model: _model,
+                  grid: _grid,
+                  selectedDay: _selected,
+                  today: _today,
+                  onSelectDay: _select,
+                  onOpenDay: _openDayMode,
+                  onCreateOnDay: _createOn,
+                  onOpenItem: (id) {
+                    showEditForm(context, model: _model, id: id);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
