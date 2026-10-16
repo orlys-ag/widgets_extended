@@ -94,8 +94,10 @@ typedef _CapturedRect<TKey> = ({
 ///   drops.
 /// - [addItemDataListener] fires for a payload-only write. [updateItem] is
 ///   the only mutator that fires it, because it is the only one that
-///   writes the payload without writing a span. Structural SUBSUMES data:
-///   no single mutation fires both for one key.
+///   writes the payload without writing a span; under a [laneOrder], an
+///   [updateItem] whose re-sort moves a lane fires a structural
+///   notification instead. Structural SUBSUMES data: no single mutation
+///   fires both for one key.
 /// - [addAnimationListener] ticks while animations run. Its producer is
 ///   the animation coordinator, which coalesces to one dispatch per
 ///   frame inside the transient-callbacks phase, with an uncoalesced
@@ -115,16 +117,20 @@ class BoardController<TKey, TItem> {
   /// against. It is FORWARDED to the coordinator and never stored here:
   /// each source creates its own ticker from it, and this class holds no
   /// vsync field.
+  ///
+  /// [laneOrder] is the initial [laneOrder], null for none.
   BoardController({
     required TickerProvider vsync,
     required BoardAxisConfig rows,
     required BoardAxisConfig columns,
     required TKey Function(TItem) keyOf,
     BoardAnimationStyle animationStyle = const BoardAnimationStyle(),
+    Comparator<TItem>? laneOrder,
   }) : _rows = rows,
        _columns = columns,
        _keyOf = keyOf,
-       _animationStyle = animationStyle {
+       _animationStyle = animationStyle,
+       _laneOrder = laneOrder {
     assert(_debugValidateConfigs(rows, columns));
     assert(animationStyle.debugValidate());
     _spanIndex = SpanIndex(
@@ -136,6 +142,9 @@ class BoardController<TKey, TItem> {
       store: _store,
       laneAxis: _deriveLaneAxis(rows, columns),
     );
+    if (laneOrder != null) {
+      _lanes.idOrder = _compareByLaneOrder;
+    }
     _spanIndex.laneAxis = _lanes.laneAxis;
     _anim = BoardAnimationCoordinator<TKey>(
       vsync: vsync,
@@ -221,6 +230,14 @@ class BoardController<TKey, TItem> {
   Set<TKey> _batchAffected = <TKey>{};
 
   final Set<TKey> _batchDataKeys = <TKey>{};
+
+  /// The keys an [updateItem] under a [laneOrder] wrote inside the batch,
+  /// whose data notification the batch's structural one subsumes when it
+  /// names them. Filled by [updateItem] and cleared by
+  /// [_flushBatchNotifications], as [_batchDataKeys] is.
+  final Set<TKey> _batchOrderedKeys = <TKey>{};
+
+  Comparator<TItem>? _laneOrder;
 
   /// The render object driving this controller, or null when no board is
   /// mounted on it or its render object is detached. Written only by
@@ -326,6 +343,70 @@ class BoardController<TKey, TItem> {
       // key.
       _notifyStructural(<TKey>{});
     }
+  }
+
+  /// The order of the lanes of items whose sweep-axis intervals in one
+  /// lane-axis track are identical, or null for none.
+  ///
+  /// It applies after the sweep-axis start and the descending end, and the
+  /// item's internal id breaks its ties, so two resolves over unchanged
+  /// state assign the same lanes; with none, lanes are ordered by id among
+  /// identical intervals. It acts as a [Comparator] does for `List.sort`, a
+  /// total ordering, and must be a function of the two payloads. It is
+  /// called in three places only: the sort of a lane bucket whose members,
+  /// spans or payloads changed, the sort of every occupied bucket after a
+  /// replacement, and a drag's make-room preview's sort of the buckets it
+  /// touches. A throw from it is reported through
+  /// `FlutterError.reportError` and that sort orders by id.
+  ///
+  /// Reading it through a reference typed with a wider `TItem`, such as
+  /// the `BoardController<TKey, Object?>` the render object and the drag
+  /// layer hold, throws a `TypeError` while an order is set: the getter's
+  /// type takes `TItem` as a parameter. [hasLaneOrder] answers through any
+  /// reference.
+  Comparator<TItem>? get laneOrder {
+    _assertNotDisposed();
+    return _laneOrder;
+  }
+
+  /// Replaces the lane order. Assigning the identical order does nothing,
+  /// so an app whose order answers differently for unchanged payloads
+  /// assigns a new comparator.
+  ///
+  /// Any other assignment re-sorts every occupied lane bucket at the next
+  /// layout or lane read, slides the items it re-lanes under a live
+  /// itemSlide, and fires one structural notification naming the keys
+  /// whose lane changed, an empty set when none did, so a live drag
+  /// re-runs its make-room preview under the new order. A drag's preview
+  /// takes an [updateItem] that moves no committed lane at its next change
+  /// of target, since that write fires the item-data channel alone.
+  set laneOrder(Comparator<TItem>? value) {
+    _assertNotDisposed();
+    if (identical(value, _laneOrder)) {
+      return;
+    }
+    final neighbours = _installsSlide(null)
+        ? _captureLaneBuckets(List<int>.of(_lanes.occupiedTracks))
+        : null;
+    _laneOrder = value;
+    _lanes.idOrder = value == null ? null : _compareByLaneOrder;
+    _lanes.invalidateAllBuckets();
+    if (neighbours != null) {
+      _installRelanes(neighbours);
+    }
+    _notifyStructural(<TKey>{});
+  }
+
+  /// Whether a [laneOrder] is set. Carries no `TItem`, so it answers
+  /// through a reference typed with a wider one.
+  bool get hasLaneOrder {
+    _assertNotDisposed();
+    return _laneOrder != null;
+  }
+
+  /// The resolver's id order: [laneOrder] over the two ids' payloads.
+  int _compareByLaneOrder(int a, int b) {
+    return _laneOrder!(_store.dataOf(a) as TItem, _store.dataOf(b) as TItem);
   }
 
   /// The axis items are laned ON: the one whose config carries a non-null
@@ -519,7 +600,10 @@ class BoardController<TKey, TItem> {
   /// A key in both keeps its id, and its payload is overwritten and its
   /// key named only when the incoming payload DIFFERS by the caller's
   /// `TItem` equality; its span likewise takes the new value only when it
-  /// differs, through the same path [moveItem] and [resizeItem] use. A key only in [placements] enters and a key only in
+  /// differs, through the same path [moveItem] and [resizeItem] use. Under
+  /// a [laneOrder], a kept key's changed payload re-sorts its lane bucket,
+  /// and the keys the re-sort re-lanes are named too and slide under a
+  /// live itemSlide. A key only in [placements] enters and a key only in
   /// the live set exits, through the same paths [addItem] and [removeItem]
   /// take: this is not a separate door into the enter and exit machinery.
   /// An entering key whose exit is still running therefore comes back as
@@ -609,15 +693,22 @@ class BoardController<TKey, TItem> {
             // item whose span may change.
             id = ghost;
           }
-          // AN UNCHANGED SPAN DISTURBS NOTHING, so it names no track and
-          // nothing walks its bucket. Lanes are a function of the spans
-          // in a bucket, and the only write this call makes to such a
-          // key is its payload, which the resolver never reads; a
-          // neighbour that IS disturbed is reached through the track of
-          // whichever key disturbed it. Without this the commonest
-          // `setItems` there is, a re-sync of an unchanged list, walked
-          // every laned bucket and read every member's geometry twice.
+          // AN UNCHANGED SPAN DISTURBS NOTHING but under a lane order,
+          // so it names no track and nothing walks its bucket. With no
+          // order, lanes are a function of the spans in a bucket, and the
+          // only write this call makes to such a key is its payload,
+          // which the resolver then never reads; a neighbour that IS
+          // disturbed is reached through the track of whichever key
+          // disturbed it. Without this the commonest `setItems` there is,
+          // a re-sync of an unchanged list, walked every laned bucket and
+          // read every member's geometry twice. Under an order a CHANGED
+          // payload re-sorts the key's bucket, so its track is named and
+          // the key and the neighbours it re-lanes slide.
           if (_spanEquals(id, entry.value.span)) {
+            if (_laneOrder != null &&
+                _store.dataOf(id) != entry.value.item) {
+              tracks.add(_laneStartTrackOf(id));
+            }
             continue;
           }
           // The two buckets a changed span disturbs: the one it leaves
@@ -669,6 +760,9 @@ class BoardController<TKey, TItem> {
         }
         if (_store.dataOf(existing) != placement.item) {
           _store.setData(existing, placement.item);
+          if (_laneOrder != null) {
+            _lanes.invalidateOrderOf(existing);
+          }
           affected.add(key);
         }
         if (!_spanEquals(existing, placement.span)) {
@@ -842,11 +936,29 @@ class BoardController<TKey, TItem> {
   /// its span-index entry and its lane record whole, so it needs no
   /// registration. [bulk] is [setItems]', which captured the item with
   /// its other re-spans. The caller notifies.
+  ///
+  /// Under a [laneOrder] the payload re-sorts the item's lane bucket: a
+  /// changed span's re-span dirties both buckets, and an unchanged one
+  /// dirties the bucket it holds, sliding the members it re-lanes under a
+  /// live itemSlide; a [bulk] caller captured them already.
   void _resurrect(int id, TItem item, BoardSpan span, {bool bulk = false}) {
     _anim.reverseExit(id);
-    _store.setData(id, item);
     if (!_spanEquals(id, span)) {
+      _store.setData(id, item);
       _reSpan(id, span, bulk: bulk);
+      return;
+    }
+    if (_laneOrder == null || !_lanes.isLaned(id)) {
+      _store.setData(id, item);
+      return;
+    }
+    final neighbours = !bulk && _installsSlide(null)
+        ? _captureLaneBuckets(<int?>[_laneStartTrackOf(id)])
+        : null;
+    _store.setData(id, item);
+    _lanes.invalidateOrderOf(id);
+    if (neighbours != null) {
+      _installRelanes(neighbours);
     }
   }
 
@@ -858,6 +970,14 @@ class BoardController<TKey, TItem> {
   /// unconditionally rather than on a difference, because the caller
   /// asking for it is the signal; [setItems] compares instead, because it
   /// is a diff.
+  ///
+  /// Under a [laneOrder] the write of a laned item re-sorts its lane
+  /// bucket, sliding the items it re-lanes under a live itemSlide. When
+  /// that moves no lane the call fires the item-data notification as
+  /// above; when it does, it fires one structural notification naming
+  /// [key] and every key it re-laned instead, and no item-data
+  /// notification, structural subsuming data. Inside [runBatch] both are
+  /// deferred to the exit; see there.
   void updateItem(TKey key, TItem item) {
     _assertNotDisposed();
     final id = _liveIdOrThrow(key, "updateItem");
@@ -875,8 +995,31 @@ class BoardController<TKey, TItem> {
       }());
       throw StateError(message);
     }
+    if (_laneOrder == null || !_lanes.isLaned(id)) {
+      _store.setData(id, item);
+      _notifyItemData(key);
+      return;
+    }
+    final neighbours = _installsSlide(null)
+        ? _captureLaneBuckets(<int?>[_laneStartTrackOf(id)])
+        : null;
     _store.setData(id, item);
-    _notifyItemData(key);
+    _lanes.invalidateOrderOf(id);
+    if (neighbours != null) {
+      _installRelanes(neighbours);
+    }
+    if (_batchDepth > 0) {
+      _batchDataKeys.add(key);
+      _batchOrderedKeys.add(key);
+      return;
+    }
+    _ensureLanesResolved();
+    final relaned = _drainLaneChangedKeys();
+    if (relaned.isEmpty) {
+      _fireItemData(key);
+      return;
+    }
+    _fireStructural(relaned..add(key));
   }
 
   /// Moves [key] to [span]. A span [addItem] would refuse throws an
@@ -920,13 +1063,18 @@ class BoardController<TKey, TItem> {
   /// - STRUCTURAL: deferred. Fires once on exit with the union of affected
   ///   keys. One in-batch `null` is a POISON PILL: it forces the exit
   ///   notification to `null` even if every other in-batch call carried a
-  ///   set.
+  ///   set. Under a [laneOrder], an [updateItem] whose re-sort moves a
+  ///   lane makes it fire, naming the keys re-laned, even when no other
+  ///   call in the batch was structural.
   /// - ITEM DATA: deferred, deduplicated by key, and fired after the
   ///   structural one, and only for a key still on the board, live or
   ///   animating out, when its turn comes. A key that was both
   ///   structurally and data-mutated gets both, because the
   ///   structural-subsumes-data rule is about ONE mutation and a batch is
-  ///   many.
+  ///   many; except that a key an [updateItem] under a [laneOrder] wrote
+  ///   gets no item-data notification when the structural one names it,
+  ///   a null set naming every key, since that one [updateItem] may have
+  ///   re-laned it.
   /// - ANIMATION: NOT deferred. Ticks fire on their own vsync schedule and
   ///   a batch body is synchronous, so nothing about batching reaches
   ///   them; deferring them would also defer the uncoalesced settle
@@ -1099,7 +1247,9 @@ class BoardController<TKey, TItem> {
     _structuralListeners.remove(l);
   }
 
-  /// Subscribes to payload-only writes.
+  /// Subscribes to payload-only writes, which [updateItem] makes. Under a
+  /// [laneOrder] it hears no [updateItem] that the structural channel
+  /// names, as [updateItem] and [runBatch] describe.
   void addItemDataListener(void Function(TKey key) l) {
     _assertNotDisposed();
     _itemDataListeners.add(l);
@@ -1872,13 +2022,18 @@ class BoardController<TKey, TItem> {
   /// dispatch, and each data key just before its own, which therefore
   /// also drops a key a listener this flush has already run retired.
   void _flushBatchNotifications() {
-    final structural = _batchStructural;
+    var structural = _batchStructural;
     final unknown = _batchStructuralUnknown;
+    final ordered = _batchOrderedKeys.isEmpty
+        ? const <Never>{}
+        : Set<TKey>.of(_batchOrderedKeys);
     Set<TKey>? affected;
-    if (structural) {
+    if (structural || ordered.isNotEmpty) {
       _ensureLanesResolved();
       final drained = _drainLaneChangedKeys();
-      if (!unknown) {
+      // An ordered `updateItem` that re-laned is structural on its own.
+      structural = structural || drained.isNotEmpty;
+      if (structural && !unknown) {
         affected = _batchAffected
           ..addAll(drained)
           ..removeWhere(_isUnregistered);
@@ -1891,6 +2046,7 @@ class BoardController<TKey, TItem> {
     // the listeners.
     _batchAffected = <TKey>{};
     _batchDataKeys.clear();
+    _batchOrderedKeys.clear();
     if (structural) {
       _fireStructural(affected);
     }
@@ -1898,6 +2054,13 @@ class BoardController<TKey, TItem> {
       // A structural listener above, or a data listener before this key,
       // may have retired it.
       if (_isUnregistered(key)) {
+        continue;
+      }
+      // The structural notification subsumes the data key of a key an
+      // ordered `updateItem` wrote whenever it names that key.
+      if (structural &&
+          ordered.contains(key) &&
+          (affected == null || affected.contains(key))) {
         continue;
       }
       _fireItemData(key);

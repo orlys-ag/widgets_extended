@@ -43,11 +43,13 @@ import 'board_render_port.dart';
 
 /// The render object behind `Board`.
 ///
-/// ONE type parameter: layout never reads an item's payload, so the
+/// ONE type parameter: this object reads no item's payload, so the
 /// controller is held key-only as `BoardController<TKey, Object?>`, which
 /// is the shape `tree_reorder_controller.dart:92` uses for the same
-/// reason. The typed `TItem` view stays in the delegate, which `Board`'s
-/// `State` owns.
+/// reason. The lane flush it runs can call the controller's
+/// [BoardController.laneOrder], which reads payloads, through the
+/// controller. The typed `TItem` view stays in the delegate, which
+/// `Board`'s `State` owns.
 class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     implements BoardRenderPort<TKey>, BoardGeometryView {
   /// Creates a board viewport driven by [controller].

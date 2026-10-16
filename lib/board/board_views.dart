@@ -209,7 +209,10 @@ class BoardItemView<TKey, TItem> {
   /// The controller the three mutations below run against.
   final BoardController<TKey, TItem> controller;
 
-  /// Writes a new payload, which fires the item-data channel only.
+  /// Writes a new payload through [BoardController.updateItem], and fires
+  /// what that fires: the item-data channel, or under a
+  /// [BoardController.laneOrder] a structural notification when the
+  /// write re-lanes.
   void update(TItem item) {
     controller.updateItem(key, item);
   }

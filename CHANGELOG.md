@@ -415,6 +415,20 @@ and `onDragEnd` are how an app follows a drag. `BoardDragKind` and
 - `BoardController.animateTrackResize`, an internal-use channel, no longer
 takes a target extent: it reads the one the axis stores. The internal-use
 `BoardController.finalizeTrackResize` is removed.
+- Added `BoardController.laneOrder`, a constructor parameter and a settable
+property: a `Comparator` over items that orders the lanes of items whose
+intervals along the sweep axis are identical in one lane-axis track, after
+their start and their descending end and before the internal id that breaks
+its ties. `hasLaneOrder` says whether one is set, through any reference. With
+none, lanes resolve as before. Assigning another order re-sorts every occupied
+lane bucket and fires one structural notification naming the keys whose lane
+changed, an empty set when none did. Under an order, a payload write of a
+laned item through `updateItem`, through `setItems` for a kept key, or by
+re-adding a key while it exits re-sorts that item's bucket, and the items it
+re-lanes slide. An `updateItem` whose re-sort moves a lane fires one
+structural notification naming the keys it re-laned and no item-data
+notification, in a `runBatch` or outside one. An order that throws is
+reported through `FlutterError.reportError`, and that sort orders by id.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin with no clip, so it was drawn over whatever sat above the scroll
 view: a tree short enough to fit its viewport declares no visual overflow, so

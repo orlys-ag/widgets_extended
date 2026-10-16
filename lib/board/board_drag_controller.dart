@@ -1,7 +1,8 @@
 /// The board's drag layer: the session controller, and the autoscroll
 /// behaviour a session owns.
 ///
-/// Key-only: layout and commit reporting never read an item's payload.
+/// Key-only: this layer reads no item's payload. The make-room preview's
+/// dry run can call the board controller's lane order, which does.
 /// The controller talks to the render layer through two routes only:
 /// `BoardRenderPort`, and for a resize's samples the sampler the render
 /// object registers beside it, which the board controller's internal

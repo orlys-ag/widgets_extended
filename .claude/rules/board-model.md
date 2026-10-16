@@ -70,15 +70,26 @@ The contract of `Fenwick`, the axes, spans and the start rule, `SpanIndex`, `Ove
   the drag pin absorb by re-deriving vicinities per layout.
 - **`OverlapLaneResolver`** (`_overlap_lanes.dart`): one sweep core shared
   by the committed resolve and `resolveDryRun` (the make-room preview's
-  prospective assignment). Lanes are resolved before track sizing every
-  layout. Each member also gets a LANE SPAN at cluster close, inside that
-  same sweep so the two arms cannot disagree: THE RULE is the number of
-  consecutive lanes from its own upward that no sweep-axis-overlapping
-  cluster member occupies, capped at the cluster's lane count, and lane
-  ASSIGNMENT is untouched by it, the expansion only READING what the
-  sweep assigned. An exiting item holds its lane RECORD, assignment and
-  span alike, whole until settle, while its track-extent contribution
-  scales its whole BAND down with its ramp rather than one slice.
+  prospective assignment). Both arms also sort through ONE comparator,
+  `_compareMembers`, of four terms: sweep-axis start ascending, end
+  descending, the controller's `laneOrder` over the two payloads where
+  one is set and answers non-zero, then id ascending, so two resolves
+  over unchanged state agree. Under an order, every payload write of a
+  laned item that keeps its bucket (`setItems` for a kept key whose
+  payload changed, the re-add of an exiting key, `updateItem`) dirties
+  that bucket through `invalidateOrderOf`, and a replaced order dirties
+  every bucket. An ordered sort first backs its members up into a kept
+  `Int32List` grown by doubling; a throw from it restores them, is
+  reported, and that bucket sorts by id. Lanes are resolved before track
+  sizing every layout. Each member also gets a LANE SPAN at cluster
+  close, inside that same sweep so the two arms cannot disagree: THE
+  RULE is the number of consecutive lanes from its own upward that no
+  sweep-axis-overlapping cluster member occupies, capped at the
+  cluster's lane count, and lane ASSIGNMENT is untouched by it, the
+  expansion only READING what the sweep assigned. An exiting item holds
+  its lane RECORD, assignment and span alike, whole until settle, while
+  its track-extent contribution scales its whole BAND down with its ramp
+  rather than one slice.
 - **`BoardController`** (`board_controller.dart`): store + index + lanes +
   coordinator + orchestrator. `itemCount` is O(1): the store keeps an
   exiting count, moved by `setFlag`, the one writer of the flag bits, and
