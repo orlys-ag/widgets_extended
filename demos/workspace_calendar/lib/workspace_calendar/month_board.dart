@@ -214,15 +214,16 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// dimmed and takes no tap. Lines part the weeks and the days, and each
 /// day of another month lies on the background colour.
 ///
-/// A tap on a chip reports [onOpenItem], on a day's number strip
-/// [onOpenDay], and on the rest of a day [onCreateOnDay]; the last two
-/// give the board the keyboard, whose arrow keys move the selected day and
-/// report it through [onSelectDay]. While the days load, a progress
-/// indicator covers the board, and after a failed read the error and a
-/// Retry that reads again. A change of the model animates; a new month or
-/// a new set of weekdays does not, and settles at once whatever chip was
-/// still growing in or shrinking out. A new size alone refits the weeks
-/// at once and leaves the chips' motion running.
+/// A tap on a chip reports [onOpenItem], a tap anywhere else on a day
+/// [onOpenDay], and a long press on a day outside its chips
+/// [onCreateOnDay]; the last two give the board the keyboard, whose arrow
+/// keys move the selected day and report it through [onSelectDay]. While
+/// the days load, a progress indicator covers the board, and after a
+/// failed read the error and a Retry that reads again. A change of the
+/// model animates; a new month or a new set of weekdays does not, and
+/// settles at once whatever chip was still growing in or shrinking out. A
+/// new size alone refits the weeks at once and leaves the chips' motion
+/// running.
 class MonthBoard extends StatefulWidget {
   const MonthBoard({
     super.key,
@@ -250,10 +251,10 @@ class MonthBoard extends StatefulWidget {
   /// A key moved the selection onto this day.
   final ValueChanged<DateTime> onSelectDay;
 
-  /// This day's number strip was tapped.
+  /// This day was tapped outside its chips.
   final ValueChanged<DateTime> onOpenDay;
 
-  /// This day's empty part was tapped.
+  /// This day was long-pressed outside its chips.
   final ValueChanged<DateTime> onCreateOnDay;
 
   /// The chip of this item, which is not pending, was tapped.
@@ -284,8 +285,8 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// The vertical scroll, which [_revealSelected] reads.
   final ScrollController _scroll = ScrollController();
 
-  /// The board's focus, which a tap on a day's strip or empty part asks
-  /// for, so the arrow keys reach the board.
+  /// The board's focus, which a tap or a long press on a day asks for, so
+  /// the arrow keys reach the board.
   final FocusNode _focusNode = FocusNode(debugLabel: "MonthBoard");
 
   /// Held in fields because `Board` replaces its delegate, and so rebuilds
@@ -875,8 +876,9 @@ String _chipLabel(ShownItem entry) {
   return entry.pending ? "$label, pending" : label;
 }
 
-/// One day of the month board: its empty part, where a tap creates, and
-/// over it the number strip across the top, where a tap opens the day.
+/// One day of the month board: a tap anywhere on it outside its chips
+/// opens the day and a long press creates on it. Its number sits in the
+/// strip across its top.
 class _MonthDayCell extends StatelessWidget {
   const _MonthDayCell({
     super.key,
@@ -901,56 +903,48 @@ class _MonthDayCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = weekdayNames[weekdayColumn(day)];
-    final date = "${monthNames[day.month - 1]} ${day.day}";
-    void create() {
-      onCreate(day);
-    }
-
+    final label = _dayLabel(day);
     void open() {
       onOpen(day);
     }
 
-    return Stack(
-      children: <Widget>[
-        Positioned.fill(
-          child: Semantics(
-            button: true,
-            label: "New item on $name, $date",
-            onTap: create,
-            excludeSemantics: true,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: create,
-            ),
-          ),
-        ),
-        // Not positioned, so a cell measures the strip's height and a week
-        // with no chips rests at its fitted extent.
-        SizedBox(
-          key: monthStripKey(day),
-          height: monthStripHeight,
-          child: ValueListenableBuilder<DateTime>(
-            valueListenable: today,
-            builder: (context, today, child) {
-              final isToday = day == today;
-              return Semantics(
-                button: true,
-                selected: isSelected,
-                label: isToday ? "$name, $date, today" : "$name, $date",
-                hint: "Opens the day",
-                onTap: open,
-                excludeSemantics: true,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: open,
+    void create() {
+      onCreate(day);
+    }
+
+    return ValueListenableBuilder<DateTime>(
+      valueListenable: today,
+      builder: (context, today, child) {
+        final isToday = day == today;
+        return Semantics(
+          container: true,
+          button: true,
+          selected: isSelected,
+          label: isToday ? "$label, today" : label,
+          hint: "Opens the day",
+          onTap: open,
+          onLongPress: create,
+          onLongPressHint: "create an item",
+          excludeSemantics: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: open,
+            onLongPress: create,
+            // A stack of the strip alone, so a cell measures the strip's
+            // height and a week with no chips rests at its fitted extent,
+            // while a cell laid out at its extent takes the whole cell.
+            child: Stack(
+              children: <Widget>[
+                SizedBox(
+                  key: monthStripKey(day),
+                  height: monthStripHeight,
                   child: Center(child: _buildNumber(isToday)),
                 ),
-              );
-            },
+              ],
+            ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 

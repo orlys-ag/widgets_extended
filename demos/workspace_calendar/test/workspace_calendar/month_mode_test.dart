@@ -4,6 +4,7 @@
 library;
 
 import 'dart:math' as math;
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -89,13 +90,24 @@ Future<MockCalendarApi> pumpSeededMonth(WidgetTester tester) async {
   return api;
 }
 
-/// Taps [day]'s empty part: its cell's centre column, 4 px above the
+/// A point in [day]'s empty part: its cell's centre column, 4 px above the
 /// upper of its cell's bottom edge and the month board's.
-Future<void> tapEmptyPart(WidgetTester tester, DateTime day) async {
+Offset emptyPartOf(WidgetTester tester, DateTime day) {
   final cell = tester.getRect(dayFinder(day));
   final board = tester.getRect(monthBoardFinder());
   final bottom = math.min(cell.bottom, board.bottom);
-  await tester.tapAt(Offset(cell.center.dx, bottom - 4.0));
+  return Offset(cell.center.dx, bottom - 4.0);
+}
+
+/// Taps [day]'s empty part.
+Future<void> tapEmptyPart(WidgetTester tester, DateTime day) async {
+  await tester.tapAt(emptyPartOf(tester, day));
+  await tester.pumpAndSettle();
+}
+
+/// Long-presses [day]'s empty part.
+Future<void> longPressDay(WidgetTester tester, DateTime day) async {
+  await tester.longPressAt(emptyPartOf(tester, day));
   await tester.pumpAndSettle();
 }
 
@@ -459,7 +471,7 @@ void main() {
           taskJson("M", april(21), 18 * 60, 19 * 60, dayCount: 2),
         ],
       );
-      await tapEmptyPart(tester, april(21));
+      await longPressDay(tester, april(21));
       await pickTask(tester);
       await chooseOption(tester, "Start", "08:00");
       await chooseOption(tester, "End", "09:00");
@@ -496,8 +508,8 @@ void main() {
   });
 
   testWidgets(
-    "M7 a widened chip paints one lane, and a tap below it creates on its "
-    "day",
+    "M7 a widened chip paints one lane, and a long press below it creates "
+    "on its day",
     (tester) async {
       await pumpMonth(
         tester,
@@ -518,7 +530,7 @@ void main() {
       final below = Offset(box.center.dx, box.bottom + 9.0);
       expect(band.contains(below), isTrue);
 
-      await tester.tapAt(below);
+      await tester.longPressAt(below);
       await tester.pumpAndSettle();
       await pickTask(tester);
       expect(find.text("2026-04-22"), findsOneWidget);
@@ -618,14 +630,38 @@ void main() {
   );
 
   testWidgets(
-    "M11a a tap on a day's empty part selects it and creates at the first "
-    "free hour",
+    "M10b a tap on a day's empty part opens it in Day mode and creates "
+    "nothing",
+    (tester) async {
+      await pumpSeededMonth(tester);
+      await tapEmptyPart(tester, april(22));
+      expect(find.text("New item"), findsNothing);
+      expect(find.text("Day"), findsOneWidget);
+      expect(find.byKey(dayHeaderKey(april(22))), findsOneWidget);
+    },
+  );
+
+  testWidgets("M10c a tap on a muted day opens it in Day mode in its month", (
+    tester,
+  ) async {
+    await pumpMonth(tester);
+    await tapEmptyPart(tester, may(1));
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    expect(find.text("New item"), findsNothing);
+    expect(find.text("Day"), findsOneWidget);
+    expect(find.byKey(dayHeaderKey(may(1))), findsOneWidget);
+  });
+
+  testWidgets(
+    "M11a a long press on a day selects it and creates at the first free "
+    "hour",
     (tester) async {
       await pumpMonth(
         tester,
         seed: <Map<String, Object?>>[taskAt("Night", april(22), 0, 1)],
       );
-      await tapEmptyPart(tester, april(22));
+      await longPressDay(tester, april(22));
       await pickTask(tester);
       expect(find.text("2026-04-22"), findsOneWidget);
       expect(dropdownShows("Start", "01:00"), findsOneWidget);
@@ -646,7 +682,7 @@ void main() {
           taskJson("Long", april(22), 0, 23 * 60 + 30),
         ],
       );
-      await tapEmptyPart(tester, april(22));
+      await longPressDay(tester, april(22));
       await pickTask(tester);
       expect(dropdownShows("Start", "23:30"), findsOneWidget);
       expect(dropdownShows("End", "24:00"), findsOneWidget);
@@ -662,7 +698,7 @@ void main() {
         tester,
         seed: <Map<String, Object?>>[taskAt("All day", april(22), 0, 24)],
       );
-      await tapEmptyPart(tester, april(22));
+      await longPressDay(tester, april(22));
       await pickTask(tester);
       expect(dropdownShows("Start", "00:00"), findsOneWidget);
       expect(dropdownShows("End", "01:00"), findsOneWidget);
@@ -672,11 +708,11 @@ void main() {
   );
 
   testWidgets(
-    "M12 a tap on a muted day's empty part creates there and keeps the "
-    "selection and the month",
+    "M12 a long press on a muted day creates there and keeps the selection "
+    "and the month",
     (tester) async {
       await pumpMonth(tester);
-      await tapEmptyPart(tester, DateTime(2026, 3, 31));
+      await longPressDay(tester, DateTime(2026, 3, 31));
       await pickTask(tester);
       expect(find.text("2026-03-31"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
@@ -726,7 +762,7 @@ void main() {
       expect(find.text("April 2026"), findsOneWidget);
       expect(pilledDays(tester), <DateTime>[april(21)]);
 
-      await tapEmptyPart(tester, april(30));
+      await longPressDay(tester, april(30));
       await dismissPicker(tester);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
@@ -751,7 +787,7 @@ void main() {
       await tester.pump();
       await tester.pump(harnessLatency);
       await tester.pumpAndSettle();
-      await tapEmptyPart(tester, DateTime(2026, 3, 31));
+      await longPressDay(tester, DateTime(2026, 3, 31));
       await dismissPicker(tester);
       expect(monthViewport(tester).controller.rows.axis.trackCount, 6);
 
@@ -767,7 +803,7 @@ void main() {
     tester,
   ) async {
     await pumpMonth(tester);
-    await tapEmptyPart(tester, april(21));
+    await longPressDay(tester, april(21));
     await dismissPicker(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
@@ -777,7 +813,7 @@ void main() {
     expect(pilledDays(tester), <DateTime>[april(21)]);
     expect(find.text("April 2026"), findsOneWidget);
 
-    await tapEmptyPart(tester, april(30));
+    await longPressDay(tester, april(30));
     await dismissPicker(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
@@ -1118,7 +1154,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip("Previous month"));
       await tester.pumpAndSettle();
-      await tapEmptyPart(tester, april(21));
+      await longPressDay(tester, april(21));
       await dismissPicker(tester);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
@@ -1225,11 +1261,11 @@ void main() {
     },
   );
 
-  testWidgets("M19 a tap on a day's empty part gives the board the keys", (
+  testWidgets("M19 a long press on a day gives the board the keys", (
     tester,
   ) async {
     await pumpMonth(tester);
-    await tapEmptyPart(tester, april(22));
+    await longPressDay(tester, april(22));
     await dismissPicker(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
@@ -1271,7 +1307,7 @@ void main() {
         ...hourlyTasks(may(20), 9, 8),
       ],
     );
-    await tapEmptyPart(tester, april(30));
+    await longPressDay(tester, april(30));
     await dismissPicker(tester);
     final vertical = monthViewport(tester).verticalPosition!;
     expect(vertical.maxScrollExtent, greaterThan(0.0));
@@ -1303,7 +1339,7 @@ void main() {
     await tester.pump();
     await tester.pump(harnessLatency);
     await tester.pumpAndSettle();
-    await tapEmptyPart(tester, may(1));
+    await longPressDay(tester, may(1));
     await dismissPicker(tester);
     expect(monthViewport(tester).verticalPosition!.pixels, 0.0);
 
@@ -1317,7 +1353,7 @@ void main() {
 
   testWidgets("M21 a confirmed create grows its chip in", (tester) async {
     await pumpMonth(tester);
-    await tapEmptyPart(tester, april(22));
+    await longPressDay(tester, april(22));
     await pickTask(tester);
     await tester.enterText(fieldFinder("Title"), "New");
     await tester.tap(saveFinder());
@@ -1337,7 +1373,7 @@ void main() {
   ) async {
     await pumpMonth(tester);
     final board = tester.getRect(monthBoardFinder());
-    await tapEmptyPart(tester, april(22));
+    await longPressDay(tester, april(22));
     await pickTask(tester);
     final controller = monthViewport(tester).controller;
     var structural = 0;
@@ -1375,7 +1411,7 @@ void main() {
     "M23 a new size alone leaves a confirmed create's enter running",
     (tester) async {
       await pumpMonth(tester);
-      await tapEmptyPart(tester, april(22));
+      await longPressDay(tester, april(22));
       await pickTask(tester);
       await tester.enterText(fieldFinder("Title"), "New");
       await tester.tap(saveFinder());
@@ -1541,6 +1577,38 @@ void main() {
 
       await tester.pump(latency);
       await tester.pumpAndSettle();
+      semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    "M27 a day is one node for a screen reader, which opens the day on a "
+    "tap and creates on a long press",
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpMonth(tester);
+      final selected = tester.getSemantics(dayFinder(april(21)));
+      expect(selected.label, "Tuesday, April 21, today");
+      expect(selected.flagsCollection.isSelected, Tristate.isTrue);
+      final day = tester.getSemantics(dayFinder(april(22)));
+      expect(day.label, "Wednesday, April 22");
+      expect(day.hint, "Opens the day");
+      expect(day.hintOverrides?.onLongPressHint, "create an item");
+      expect(day.flagsCollection.isButton, isTrue);
+      expect(day.flagsCollection.isSelected, Tristate.isFalse);
+      expect(find.bySemanticsLabel(RegExp("New item")), findsNothing);
+
+      tester.semantics.longPress(find.semantics.byLabel("Wednesday, April 22"));
+      await tester.pumpAndSettle();
+      await pickTask(tester);
+      expect(find.text("2026-04-22"), findsOneWidget);
+      await tester.tap(formButton("Cancel"));
+      await tester.pumpAndSettle();
+
+      tester.semantics.tap(find.semantics.byLabel("Wednesday, April 22"));
+      await tester.pumpAndSettle();
+      expect(find.text("Day"), findsOneWidget);
+      expect(find.byKey(dayHeaderKey(april(22))), findsOneWidget);
       semantics.dispose();
     },
   );

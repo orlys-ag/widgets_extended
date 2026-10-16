@@ -15,10 +15,11 @@
 /// switches the board to that month.
 ///
 /// Month's grid is a [MonthBoard], whose weeks fill the screen and grow
-/// with their chips. A tap on a chip edits its item, on a day's number
-/// opens that day in Day, and on the rest of a day creates an item there
-/// at the day's first free hour, selecting the day when it is in the
-/// month. Its keys and chevrons move the selected day as Agenda's do.
+/// with their chips. A tap on a chip edits its item, and a tap anywhere
+/// else on a day opens that day in Day. A long press on a day creates an
+/// item there at the day's first free hour, selecting the day when it is
+/// in the month. Its keys and chevrons move the selected day as Agenda's
+/// do.
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
