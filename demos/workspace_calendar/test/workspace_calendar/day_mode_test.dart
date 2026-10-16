@@ -244,7 +244,7 @@ void main() {
       find.byType(Board<String, ShownItem>),
     );
     expect(board.drag!.resizeEdges, BoardResizeEdges.none);
-    expect(board.drag!.primaryResizeEdges, BoardResizeEdges.trailing);
+    expect(board.drag!.primaryResizeEdges, BoardResizeEdges.both);
 
     // A long press moves the block four rows down.
     await moveBlock(

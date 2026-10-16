@@ -101,11 +101,13 @@ Map<String, Object?> taskJson(
 
 /// Pumps the calendar on [today] over [api], by default a mock seeded
 /// around [today] at [harnessLatency] with no failure policy, at [size],
-/// and lets its first read complete. Returns the mock.
+/// reading the time from [clock], by default the real clock, and lets its
+/// first read complete. Returns the mock.
 Future<MockCalendarApi> pumpCalendar(
   WidgetTester tester, {
   MockCalendarApi? api,
   Size size = const Size(390.0, 844.0),
+  DateTime Function()? clock,
 }) async {
   final mock = api ?? MockCalendarApi.seeded(today, latency: harnessLatency);
   tester.view.devicePixelRatio = 1.0;
@@ -115,7 +117,7 @@ Future<MockCalendarApi> pumpCalendar(
     MaterialApp(
       // The M3 ink sparkle shader cannot load under the test binding.
       theme: ThemeData(splashFactory: NoSplash.splashFactory),
-      home: WorkspaceCalendarExample(today: today, api: mock),
+      home: WorkspaceCalendarExample(today: today, api: mock, clock: clock),
     ),
   );
   await tester.pump(mock.latency);

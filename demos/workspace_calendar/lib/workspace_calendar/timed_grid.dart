@@ -22,13 +22,19 @@ import 'harbor_theme.dart';
 const double _headerHeight = 40.0;
 const double _gutterWidth = 56.0;
 
-/// The time the grid opens scrolled to, where its hours hold it.
+/// The time the grid opens scrolled to when it does not show the clock's
+/// day, where its hours hold it.
 const int _openingMinute = 8 * 60;
 
-/// The minute the grid opens scrolled to: [_openingMinute], or the nearer
-/// end of [hours] when they do not hold it.
-int _openingMinuteIn(DayHours hours) {
-  return _openingMinute.clamp(hours.start, hours.end - minutesPerSlot);
+/// The minute the grid [tracks] lays out opens scrolled to: the hour
+/// before [now]'s hour when it shows [now]'s day, [_openingMinute]
+/// otherwise, or the nearer end of its hours when they do not hold that.
+int _openingMinuteOf(GridTracks tracks, DateTime now) {
+  final minute = tracks.columnOf(dayNumber(now)) == null
+      ? _openingMinute
+      : math.max(0, (now.hour - 1) * 60);
+  final hours = tracks.hours;
+  return minute.clamp(hours.start, hours.end - minutesPerSlot);
 }
 
 /// The style the grid animates its blocks with: the board's default.
@@ -54,6 +60,24 @@ String hiddenItemsLabel(int count) {
     return "1 item is outside the days or hours shown";
   }
   return "$count items are outside the days or hours shown";
+}
+
+/// The key of the label naming where a drag lands.
+const ValueKey<String> landingLabelKey = ValueKey<String>("grid-landing-label");
+
+/// What the landing label says while a move has nowhere to land.
+const String noLandingLabel = "No free time near here";
+
+/// What the landing label says for a drag that would give an item
+/// [shape]: its first day, as [dayTitle] names it against [today], its
+/// times, and its day count when it covers more than one day.
+String landingLabel(ItemShape shape, DateTime today) {
+  final day = dayTitle(dateOfDayNumber(shape.firstDay), today);
+  final times = "${clockLabel(shape.start)}-${clockLabel(shape.end)}";
+  if (shape.dayCount == 1) {
+    return "$day, $times";
+  }
+  return "$day, $times, ${shape.dayCount} days";
 }
 
 /// The slots a create gesture picked: [dayCount] days from [day], each
@@ -330,19 +354,25 @@ CreateRange createRangeOver(
 /// shows for them. A tap on a block that is not pending reports
 /// [onOpenItem]; a tap on a day header reports [onSelectDay].
 ///
-/// Items keep every board gesture: a long press moves, the bottom band
-/// drags the end time, and, on more than one day, the right band the day
-/// count. A move dropped onto another item's time lands at the nearest
-/// free time that shows, on that day or the day before or after it, and
-/// goes back where there is none; a resize dragged onto one stops at its
-/// edge. An item reaching past the hours shows the part inside them, with
-/// an arrow where it is cut, and takes no move or resize: its form changes
-/// it. An item wholly outside them, or on no shown day, has no block, and
-/// the corner over the gutter counts it. Empty body cells take a create
-/// gesture, reported through [onCreate]: a tap picks one hour from its
-/// slot, or up to the end of the hours; a drag picks the rectangle of
-/// slots it covers, at once for a mouse or a stylus and after a press and
-/// hold on touch, so a touch drag without one scrolls the grid.
+/// Items keep every board gesture: a long press moves, the top band drags
+/// the start time, the bottom band the end time, and, on more than one
+/// day, the right band the day count. A move dropped onto another item's
+/// time lands at the nearest free time that shows, on that day or the day
+/// before or after it, and goes back where there is none; a resize
+/// dragged onto one stops at its edge. While a drag runs, a label over the
+/// grid names the day and times a release would give, or that a move has
+/// nowhere to land, and a move outlines the slots it would land on. A line
+/// marks the time [clock] reads in its day's column, and the grid opens
+/// scrolled to the hour before it when it shows that day, at 08:00
+/// otherwise. An item reaching past the hours shows the part inside them,
+/// with an arrow where it is cut, and takes no move or resize: its form
+/// changes it. An item wholly outside them, or on no shown day, has no
+/// block, and the corner over the gutter counts it. Empty body cells take
+/// a create gesture, reported through [onCreate]: a tap picks one hour
+/// from its slot, or up to the end of the hours; a drag picks the
+/// rectangle of slots it covers, at once for a mouse or a stylus and after
+/// a press and hold on touch, so a touch drag without one scrolls the
+/// grid.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than the least sizes [settings] choose; past those, it scrolls.
@@ -355,6 +385,7 @@ class TimedGrid extends StatefulWidget {
     required this.dayCount,
     required this.selectedDay,
     required this.today,
+    required this.clock,
     required this.onSelectDay,
     required this.onOpenItem,
     required this.onCreate,
@@ -374,6 +405,11 @@ class TimedGrid extends StatefulWidget {
 
   final DateTime selectedDay;
   final DateTime today;
+
+  /// Reads the current time. The grid reads it again at the start of each
+  /// minute.
+  final DateTime Function() clock;
+
   final ValueChanged<DateTime> onSelectDay;
   final ValueChanged<String> onOpenItem;
 
@@ -387,6 +423,20 @@ class TimedGrid extends StatefulWidget {
 }
 
 typedef _HeaderState = ({GridTracks tracks, DateTime selectedDay});
+
+/// The drag the board runs: its item, whether it moves or resizes which
+/// edge, whether the board has reported a target yet, and the placement a
+/// release would report, null where none is admitted.
+typedef _GridDrag = ({
+  String id,
+  BoardDragKind kind,
+  bool resolved,
+  BoardSpan? target,
+});
+
+/// Where the line marking the current time sits: the column of its day
+/// and its minute after midnight.
+typedef _NowMark = ({int column, int minute});
 
 class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final BoardController<String, ShownItem> _board;
@@ -409,7 +459,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// placement nearest on screen that holds it clear, at any time that
   /// shows of the day it was dropped on or of the day before or after it,
   /// however busy the time around it is. A resize it refuses for meeting
-  /// another item stops its dragged edge at that item.
+  /// another item stops its dragged edge at that item. The drag reports
+  /// keep [_drag], which the landing label and outline show.
   late final BoardDragConfig<String> _dragConfig = BoardDragConfig<String>(
     canDrag: _canDrag,
     canDropAt: _canDropAt,
@@ -424,9 +475,22 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     resizeEdges: _tracks.columnCount > 1
         ? BoardResizeEdges.trailing
         : BoardResizeEdges.none,
-    primaryResizeEdges: BoardResizeEdges.trailing,
+    primaryResizeEdges: BoardResizeEdges.both,
     draggedItemOpacity: harborDraggedItemOpacity,
+    onDragStart: _handleDragStart,
+    onDragTargetChanged: _handleDragTarget,
+    onDragEnd: _handleDragEnd,
   );
+
+  /// The drag the board runs, or null.
+  _GridDrag? _drag;
+
+  /// Where the line marking the clock's time sits, or null where the grid
+  /// does not show it.
+  late _NowMark? _nowMark = _nowMarkOf(widget.clock());
+
+  /// Fires at the start of the next minute, to read the clock again.
+  Timer? _minuteTimer;
 
   /// What the header cells show. The cell builder runs only when the board
   /// rebuilds a cell, so the header cells listen to this instead.
@@ -514,9 +578,13 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     );
     widget.model.addListener(_handleModel);
     _sync();
+    _scheduleMinute();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _board.jumpToCell(_tracks.rowOf(_openingMinuteIn(_tracks.hours)), 1);
+        _board.jumpToCell(
+          _tracks.rowOf(_openingMinuteOf(_tracks, widget.clock())),
+          1,
+        );
       }
     });
   }
@@ -537,6 +605,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       "changes between them its own key.",
     );
     _tracks = tracks;
+    if (tracksChanged || widget.clock != oldWidget.clock) {
+      _nowMark = _nowMarkOf(widget.clock());
+    }
     if (tracksChanged || widget.selectedDay != oldWidget.selectedDay) {
       _header.value = (tracks: tracks, selectedDay: widget.selectedDay);
     }
@@ -579,6 +650,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _minuteTimer?.cancel();
     _tap.dispose();
     _immediateRange.dispose();
     _delayedRange.dispose();
@@ -815,6 +887,92 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     widget.model.requestMove(requested);
   }
 
+  void _handleDragStart(String id, BoardDragKind kind) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _drag = (id: id, kind: kind, resolved: false, target: null);
+    });
+  }
+
+  void _handleDragTarget(String id, BoardDropTarget? target) {
+    final drag = _drag;
+    if (!mounted || drag == null || drag.id != id) {
+      return;
+    }
+    setState(() {
+      _drag = (id: id, kind: drag.kind, resolved: true, target: target?.span);
+    });
+  }
+
+  /// Delivered after the drop's report, and possibly after the board has
+  /// left the tree.
+  void _handleDragEnd(String id, bool committed) {
+    if (!mounted || _drag == null) {
+      return;
+    }
+    setState(() {
+      _drag = null;
+    });
+  }
+
+  /// What the landing label says for [_drag]: the day and times a release
+  /// would give, or [noLandingLabel] for a move with no target. Null with
+  /// no drag, before its first target, and for a resize with no target.
+  String? _landingText() {
+    final drag = _drag;
+    if (drag == null || !drag.resolved) {
+      return null;
+    }
+    final target = drag.target;
+    if (target == null) {
+      return drag.kind == BoardDragKind.move ? noLandingLabel : null;
+    }
+    final from = _board.spanOf(drag.id);
+    final entry = _board.itemOf(drag.id);
+    if (from == null || entry == null) {
+      return null;
+    }
+    return landingLabel(
+      shapeFromSpan(entry.item.shape, from, target, _tracks),
+      widget.today,
+    );
+  }
+
+  /// Where the line marking [now] sits: null when no column shows its day
+  /// or the hours do not hold its minute.
+  _NowMark? _nowMarkOf(DateTime now) {
+    final column = _tracks.columnOf(dayNumber(now));
+    final minute = now.hour * 60 + now.minute;
+    final hours = _tracks.hours;
+    if (column == null || minute < hours.start || minute > hours.end) {
+      return null;
+    }
+    return (column: column, minute: minute);
+  }
+
+  /// Reads the clock again at the start of the next minute, and from then
+  /// on at the start of each, rebuilding only when the line moves, shows
+  /// or goes.
+  void _scheduleMinute() {
+    final now = widget.clock();
+    final intoMinute = Duration(
+      seconds: now.second,
+      milliseconds: now.millisecond,
+      microseconds: now.microsecond,
+    );
+    _minuteTimer = Timer(const Duration(minutes: 1) - intoMinute, () {
+      final mark = _nowMarkOf(widget.clock());
+      if (mark != _nowMark) {
+        setState(() {
+          _nowMark = mark;
+        });
+      }
+      _scheduleMinute();
+    });
+  }
+
   void _selectDay(DateTime day) {
     widget.onSelectDay(day);
   }
@@ -1033,6 +1191,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final model = widget.model;
     final range = _range;
+    final drag = _drag;
+    final landingText = _landingText();
     final board = Listener(
       onPointerDown: _handlePointerDown,
       child: NotificationListener<ScrollNotification>(
@@ -1047,6 +1207,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
             today: widget.today,
             rangeAnchor: range?.anchor,
             rangeFocus: range?.focus,
+            landing: drag != null && drag.kind == BoardDragKind.move
+                ? drag.target
+                : null,
+            now: _nowMark,
           ),
           drag: _dragConfig,
           // The grid scrolls on its own, not with the screen's primary
@@ -1061,6 +1225,13 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         return Stack(
           children: <Widget>[
             Positioned.fill(child: board),
+            if (landingText != null)
+              Positioned(
+                top: _headerHeight + 8.0,
+                left: _gutterWidth + 8.0,
+                right: 8.0,
+                child: _LandingLabel(text: landingText),
+              ),
             if (!_daysReady)
               Positioned.fill(
                 child: _LoadOverlay(
@@ -1389,6 +1560,44 @@ class _HiddenCountCell extends StatelessWidget {
   }
 }
 
+/// The pill over the grid naming where a drag lands. It takes no press, so
+/// the pointer under it keeps driving the drag.
+class _LandingLabel extends StatelessWidget {
+  const _LandingLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Center(
+        child: DecoratedBox(
+          key: landingLabelKey,
+          decoration: BoxDecoration(
+            color: HarborColors.primary,
+            borderRadius: BorderRadius.circular(16.0),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 6.0,
+            ),
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13.0,
+                fontWeight: FontWeight.w600,
+                color: HarborColors.onPrimary,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Covers the grid while its days are not ready, taking every press: a
 /// progress indicator while it loads, the error and Retry when the read
 /// failed.
@@ -1428,16 +1637,20 @@ class _LoadOverlay extends StatelessWidget {
 }
 
 /// The grid behind the cells, drawn for the visible body tracks alone:
-/// the body, the weekend and today's columns, a line at the top of each
-/// slot row and at the left of each day column, and the create range being
-/// dragged, filled like today's column and edged in the primary colour so
-/// it shows over that column too. Every paint it draws with is built once.
+/// the body, the weekend and today's columns; the create range being
+/// dragged and the slots a move would land on, each filled like today's
+/// column and edged in the primary colour so it shows over that column
+/// too; a line at the top of each slot row and at the left of each day
+/// column; and, over those, the line marking the current time. Every
+/// paint it draws with is built once.
 class _TimedGridPainter extends BoardBackgroundPainter {
   const _TimedGridPainter({
     required this.tracks,
     required this.today,
     required this.rangeAnchor,
     required this.rangeFocus,
+    required this.landing,
+    required this.now,
   });
 
   static final Paint _surfacePaint = Paint()..color = HarborColors.surface;
@@ -1447,15 +1660,24 @@ class _TimedGridPainter extends BoardBackgroundPainter {
   static final Paint _linePaint = Paint()
     ..color = HarborColors.outline
     ..strokeWidth = 1.0;
-  static final Paint _rangeEdgePaint = Paint()
+  static final Paint _markEdgePaint = Paint()
     ..color = HarborColors.primary
     ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.0;
+  static final Paint _nowPaint = Paint()
+    ..color = HarborColors.error
     ..strokeWidth = 2.0;
 
   final GridTracks tracks;
   final DateTime today;
   final ({int row, int col})? rangeAnchor;
   final ({int row, int col})? rangeFocus;
+
+  /// The span a move would land on, or null.
+  final BoardSpan? landing;
+
+  /// Where the line marking the current time sits, or null.
+  final _NowMark? now;
 
   @override
   void paint(Canvas canvas, BoardGeometryView geometry) {
@@ -1491,17 +1713,25 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     final anchor = rangeAnchor;
     final focus = rangeFocus;
     if (anchor != null && focus != null) {
-      final top = math.max(math.min(anchor.row, focus.row), firstRow);
-      final bottom = math.min(math.max(anchor.row, focus.row), lastRow);
-      final left = math.max(math.min(anchor.col, focus.col), firstCol);
-      final right = math.min(math.max(anchor.col, focus.col), lastCol);
-      if (top <= bottom && left <= right) {
-        final rect = geometry
-            .visibleCellRect(top, left)
-            .expandToInclude(geometry.visibleCellRect(bottom, right));
-        canvas.drawRect(rect, _tintPaint);
-        canvas.drawRect(rect.deflate(1.0), _rangeEdgePaint);
-      }
+      _paintMarked(
+        canvas,
+        geometry,
+        top: math.min(anchor.row, focus.row),
+        bottom: math.max(anchor.row, focus.row),
+        left: math.min(anchor.col, focus.col),
+        right: math.max(anchor.col, focus.col),
+      );
+    }
+    final landing = this.landing;
+    if (landing != null) {
+      _paintMarked(
+        canvas,
+        geometry,
+        top: landing.rowStart,
+        bottom: landing.rowStart + landing.rowSpan - 1,
+        left: landing.colStart,
+        right: landing.colStart + landing.colSpan - 1,
+      );
     }
     for (var row = firstRow; row <= lastRow; row++) {
       final y = geometry.visibleCellRect(row, firstCol).top;
@@ -1511,7 +1741,59 @@ class _TimedGridPainter extends BoardBackgroundPainter {
       final x = geometry.visibleCellRect(firstRow, col).left;
       canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), _linePaint);
     }
+    final now = this.now;
+    if (now != null) {
+      _paintNow(canvas, geometry, now);
+    }
     canvas.restore();
+  }
+
+  /// Fills the cells that show of the body rows [top] to [bottom] and
+  /// columns [left] to [right], and edges them.
+  void _paintMarked(
+    Canvas canvas,
+    BoardGeometryView geometry, {
+    required int top,
+    required int bottom,
+    required int left,
+    required int right,
+  }) {
+    final firstRow = math.max(top, geometry.firstVisibleRow);
+    final lastRow = math.min(bottom, geometry.lastVisibleRow);
+    final firstCol = math.max(left, geometry.firstVisibleCol);
+    final lastCol = math.min(right, geometry.lastVisibleCol);
+    if (firstRow > lastRow || firstCol > lastCol) {
+      return;
+    }
+    final rect = geometry
+        .visibleCellRect(firstRow, firstCol)
+        .expandToInclude(geometry.visibleCellRect(lastRow, lastCol));
+    canvas.drawRect(rect, _tintPaint);
+    canvas.drawRect(rect.deflate(1.0), _markEdgePaint);
+  }
+
+  /// A line across [now]'s column at its minute, with a dot at its left
+  /// end, where that column and the row holding the minute show. The end
+  /// of the hours lies on the last row's bottom edge.
+  void _paintNow(Canvas canvas, BoardGeometryView geometry, _NowMark now) {
+    final col = now.column;
+    if (col < geometry.firstVisibleCol || col > geometry.lastVisibleCol) {
+      return;
+    }
+    final intoHours = now.minute - tracks.hours.start;
+    var row = 1 + intoHours ~/ minutesPerSlot;
+    var fraction = (intoHours % minutesPerSlot) / minutesPerSlot;
+    if (row > tracks.rowCount) {
+      row = tracks.rowCount;
+      fraction = 1.0;
+    }
+    if (row < geometry.firstVisibleRow || row > geometry.lastVisibleRow) {
+      return;
+    }
+    final rect = geometry.visibleCellRect(row, col);
+    final y = rect.top + fraction * rect.height;
+    canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), _nowPaint);
+    canvas.drawCircle(Offset(rect.left, y), 4.0, _nowPaint);
   }
 
   @override
@@ -1519,6 +1801,8 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     return old.tracks != tracks ||
         old.today != today ||
         old.rangeAnchor != rangeAnchor ||
-        old.rangeFocus != rangeFocus;
+        old.rangeFocus != rangeFocus ||
+        old.landing != landing ||
+        old.now != now;
   }
 }

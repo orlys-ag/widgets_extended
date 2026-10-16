@@ -71,16 +71,20 @@ enum _StepUnit {
 
 /// The calendar under its own Harbor theme, whatever the host's theme.
 class WorkspaceCalendarExample extends StatelessWidget {
-  const WorkspaceCalendarExample({super.key, this.today, this.api});
+  const WorkspaceCalendarExample({super.key, this.today, this.api, this.clock});
 
-  /// The day the calendar opens on and marks as today. Null reads the
-  /// clock.
+  /// The day the calendar opens on and marks as today. Null reads
+  /// [clock].
   final DateTime? today;
 
   /// The store the calendar reads and writes, read once when the calendar
   /// is first built. Null uses a [MockCalendarApi] seeded around [today],
   /// at [defaultCalendarLatency] and with no failures.
   final CalendarApi? api;
+
+  /// Reads the current time, which the timed grids mark with a line. Null
+  /// reads [DateTime.now].
+  final DateTime Function()? clock;
 
   static final ThemeData _theme = buildHarborTheme();
 
@@ -90,16 +94,25 @@ class WorkspaceCalendarExample extends StatelessWidget {
     // its own context captures this theme.
     return Theme(
       data: _theme,
-      child: _WorkspaceCalendar(today: today, api: api),
+      child: _WorkspaceCalendar(
+        today: today,
+        api: api,
+        clock: clock ?? DateTime.now,
+      ),
     );
   }
 }
 
 class _WorkspaceCalendar extends StatefulWidget {
-  const _WorkspaceCalendar({required this.today, required this.api});
+  const _WorkspaceCalendar({
+    required this.today,
+    required this.api,
+    required this.clock,
+  });
 
   final DateTime? today;
   final CalendarApi? api;
+  final DateTime Function() clock;
 
   @override
   State<_WorkspaceCalendar> createState() {
@@ -111,7 +124,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     with TickerProviderStateMixin {
   static const double _rowHeight = 48.0;
 
-  late final DateTime _today = dateOnly(widget.today ?? DateTime.now());
+  late final DateTime _today = dateOnly(widget.today ?? widget.clock());
 
   late final CalendarModel _model;
 
@@ -553,6 +566,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               dayCount: days.count,
               selectedDay: _selected,
               today: _today,
+              clock: widget.clock,
               onSelectDay: _select,
               onOpenItem: (id) {
                 showEditForm(context, model: _model, id: id);

@@ -1420,7 +1420,7 @@ void main() {
       find.byType(Board<String, ShownItem>),
     );
     expect(board.drag!.resizeEdges, BoardResizeEdges.trailing);
-    expect(board.drag!.primaryResizeEdges, BoardResizeEdges.trailing);
+    expect(board.drag!.primaryResizeEdges, BoardResizeEdges.both);
     final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
     final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
 
@@ -1965,6 +1965,217 @@ void main() {
     expect(
       (widened.day, widened.dayCount, widened.startMinute, widened.endMinute),
       (DateTime(2026, 4, 21), 3, 14 * 60, 15 * 60),
+    );
+  });
+
+  testWidgets("W21 a drag names where it lands, and a move outlines it", (
+    tester,
+  ) async {
+    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    await createBeforePump(
+      tester,
+      api,
+      taskJson("Long haul", DateTime(2026, 4, 25), 8 * 60, 18 * 60 + 30),
+    );
+    final longHaul = await idOn(
+      tester,
+      api,
+      DateTime(2026, 4, 25),
+      "Long haul",
+    );
+    await pumpCalendar(tester, api: api, size: tall);
+    await pickMode(tester, "Week");
+    final viewport = gridViewport(tester);
+    final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
+    final label = find.byKey(landingLabelKey);
+
+    String labelText() {
+      return tester
+          .widget<Text>(find.descendant(of: label, matching: find.byType(Text)))
+          .data!;
+    }
+
+    /// The edge the outline of the slots from [start] to [end] minutes in
+    /// the column [col] is drawn on.
+    Rect edgeOf(int start, int end, int col) {
+      return viewport
+          .visibleCellRect(rowOf(start), col)
+          .expandToInclude(viewport.visibleCellRect(rowOf(end) - 1, col))
+          .deflate(1.0);
+    }
+
+    /// The rects the background edges in the primary colour.
+    List<Rect> outlines() {
+      return <Rect>[
+        for (final record in paintGridBackground(tester).records)
+          if (!record.isLine &&
+              !record.isFill &&
+              record.isIn(HarborColors.primary))
+            record.rect!,
+      ];
+    }
+
+    expect(label, findsNothing);
+
+    // Monday's longest free time is midnight to 08:00 and Tuesday's
+    // midnight to 10:00, so ten and a half hours fit nowhere near Monday
+    // 10:00: the label says so, and nothing is outlined.
+    final haul = tester.getRect(blockFinder(longHaul));
+    final refused = await tester.startGesture(haul.center);
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await refused.moveBy(
+      cellRect(tester, rowOf(10 * 60), colOf(0)).topLeft - haul.topLeft,
+    );
+    await tester.pump();
+    expect(labelText(), noLandingLabel);
+    expect(outlines(), isEmpty);
+    await refused.up();
+    await tester.pumpAndSettle();
+    expect(label, findsNothing);
+
+    // Lifted, the brainstorm names its own time and outlines its own slots.
+    final brainstorm = tester.getRect(blockFinder(brainstormId));
+    final move = await tester.startGesture(brainstorm.center);
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await tester.pump();
+    expect(labelText(), "Today, April 21, 14:00-15:00");
+    expect(outlines(), hasLength(1));
+    expect(
+      outlines().single,
+      rectMoreOrLessEquals(edgeOf(14 * 60, 15 * 60, colOf(1)), epsilon: 0.5),
+    );
+
+    // Over Tuesday 11:00, inside "Design new UX flow for Michael", it
+    // lands on Wednesday 10:00, between "Daily standup" and "Review
+    // onboarding copy": the label names it and the outline marks it.
+    await move.moveBy(
+      cellRect(tester, rowOf(11 * 60), colOf(1)).topLeft - brainstorm.topLeft,
+    );
+    await tester.pump();
+    expect(labelText(), "Tomorrow, April 22, 10:00-11:00");
+    expect(outlines(), hasLength(1));
+    expect(
+      outlines().single,
+      rectMoreOrLessEquals(edgeOf(10 * 60, 11 * 60, colOf(2)), epsilon: 0.5),
+    );
+    await move.up();
+    await tester.pump();
+    expect(label, findsNothing);
+    expect(outlines(), isEmpty);
+    await tester.pumpAndSettle();
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    final landed = await stored(tester, api, brainstormId);
+    expect(
+      (landed.day, landed.startMinute, landed.endMinute),
+      (DateTime(2026, 4, 22), 10 * 60, 11 * 60),
+    );
+
+    // A resize names the times it would give, and outlines nothing: the
+    // block itself shows them.
+    final review = tester.getRect(blockFinder(reviewId));
+    final resize = await tester.startGesture(
+      Offset(review.center.dx, review.bottom - 3.0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await resize.moveBy(Offset(0.0, 2 * slot));
+    await tester.pump();
+    expect(labelText(), "Tomorrow, April 22, 11:00-12:30");
+    expect(outlines(), isEmpty);
+    await resize.up();
+    await tester.pumpAndSettle();
+    expect(label, findsNothing);
+  });
+
+  testWidgets("W22 a line marks the time in today's column, and the grid "
+      "opens an hour before it", (tester) async {
+    var now = DateTime(2026, 4, 21, 13, 7);
+    await pumpCalendar(
+      tester,
+      clock: () {
+        return now;
+      },
+    );
+    await pickMode(tester, "Week");
+    final viewport = gridViewport(tester);
+    expect(
+      viewport.rectOfCell(rowOf(12 * 60), colOf(1))!.top,
+      near(viewport.scrolledRegion.top),
+    );
+
+    List<CanvasRecord> nowLines() {
+      return paintGridBackground(tester).lines.where((line) {
+        return line.isIn(HarborColors.error);
+      }).toList();
+    }
+
+    var slot = viewport.visibleCellRect(rowOf(13 * 60), colOf(1));
+    expect(nowLines(), hasLength(1));
+    expect(nowLines().single.from!.dy, near(slot.top + 7 / 15 * slot.height));
+    expect(nowLines().single.to!.dy, near(slot.top + 7 / 15 * slot.height));
+    expect(nowLines().single.from!.dx, near(slot.left));
+    expect(nowLines().single.to!.dx, near(slot.right));
+
+    // The line follows the clock from the next whole minute.
+    now = DateTime(2026, 4, 21, 14, 7);
+    await tester.pump(const Duration(minutes: 1));
+    slot = viewport.visibleCellRect(rowOf(14 * 60), colOf(1));
+    expect(nowLines(), hasLength(1));
+    expect(nowLines().single.from!.dy, near(slot.top + 7 / 15 * slot.height));
+
+    // A week without today has no line.
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    expect(nowLines(), isEmpty);
+  });
+
+  testWidgets("W23 the top strip drags the start, and stops at an item", (
+    tester,
+  ) async {
+    final api = await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
+
+    /// Drags a strip of a block with a mouse, which the grid's scrollable
+    /// never takes, then lets the write it causes complete.
+    Future<void> dragStrip(Offset strip, Offset delta) async {
+      final gesture = await tester.startGesture(
+        strip,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(delta);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await tester.pump(api.latency);
+      await tester.pumpAndSettle();
+    }
+
+    // The start of "Daily standup", 09:30 on Wednesday, dragged half an
+    // hour up.
+    final standup = tester.getRect(blockFinder(standupId));
+    await dragStrip(
+      Offset(standup.center.dx, standup.top + 3.0),
+      Offset(0.0, -2 * slot),
+    );
+    final earlier = await stored(tester, api, standupId);
+    expect(
+      (earlier.day, earlier.startMinute, earlier.endMinute),
+      (DateTime(2026, 4, 22), 9 * 60, 10 * 60),
+    );
+
+    // The start of "Brainstorm with the team", 14:00 on Tuesday, dragged
+    // to 11:00, into "Design new UX flow for Michael": it stops where that
+    // ends, at 13:00.
+    final brainstorm = tester.getRect(blockFinder(brainstormId));
+    await dragStrip(
+      Offset(brainstorm.center.dx, brainstorm.top + 3.0),
+      Offset(0.0, -12 * slot),
+    );
+    final stopped = await stored(tester, api, brainstormId);
+    expect(
+      (stopped.day, stopped.startMinute, stopped.endMinute),
+      (DateTime(2026, 4, 21), 13 * 60, 15 * 60),
     );
   });
 }
