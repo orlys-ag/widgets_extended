@@ -914,13 +914,21 @@ void main() {
       expect(exiting, greaterThan(0.0));
       expect(exiting, lessThan(lane));
 
+      final controller = monthViewport(tester).controller;
+      var structural = 0;
+      void onStructural(Set<String>? keys) {
+        structural++;
+      }
+
+      controller.addStructuralListener(onStructural);
       // May's grid holds May 20 in the week row G's exit held, on G's
       // column.
       await tester.tap(find.byTooltip("Next month"));
       await tester.pump();
+      expect(structural, 1);
+      controller.removeStructuralListener(onStructural);
       expect(g, findsNothing);
       expect(tester.getSize(dayFinder(may(20))).height, near(strip + 8 * lane));
-      final controller = monthViewport(tester).controller;
       var ticks = 0;
       void onTick() {
         ticks++;
@@ -938,7 +946,6 @@ void main() {
       controller.removeAnimationListener(onTick);
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets(
@@ -967,14 +974,22 @@ void main() {
       expect(exiting, greaterThan(0.0));
       expect(exiting, lessThan(lane));
 
+      final controller = monthViewport(tester).controller;
+      var structural = 0;
+      void onStructural(Set<String>? keys) {
+        structural++;
+      }
+
+      controller.addStructuralListener(onStructural);
       await tester.tap(find.byKey(weekendsSwitchKey));
       await tester.pump();
+      expect(structural, 1);
+      controller.removeStructuralListener(onStructural);
       expect(first, findsNothing);
       expect(
         tester.getSize(dayFinder(april(21))).height,
         near(strip + 7 * lane),
       );
-      final controller = monthViewport(tester).controller;
       var ticks = 0;
       void onTick() {
         ticks++;
@@ -992,7 +1007,6 @@ void main() {
       controller.removeAnimationListener(onTick);
       await closeSettings(tester);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1032,14 +1046,22 @@ void main() {
       expect(entering, greaterThan(0.0));
       expect(entering, lessThan(lane));
 
+      final controller = monthViewport(tester).controller;
+      var structural = 0;
+      void onStructural(Set<String>? keys) {
+        structural++;
+      }
+
+      controller.addStructuralListener(onStructural);
       await tester.tap(find.byTooltip("Next month"));
       await tester.pump();
+      expect(structural, 1);
+      controller.removeStructuralListener(onStructural);
       expect(tester.getSize(created).height, near(lane));
       expect(
         tester.getSize(dayFinder(april(28))).height,
         near(strip + 9 * lane),
       );
-      final controller = monthViewport(tester).controller;
       var ticks = 0;
       void onTick() {
         ticks++;
@@ -1057,7 +1079,6 @@ void main() {
       controller.removeAnimationListener(onTick);
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1109,7 +1130,6 @@ void main() {
       expect(leaving, lessThan(lane));
       await tester.pumpAndSettle();
     },
-    skip: true,
   );
 
   testWidgets("M19 a tap on a day's empty part gives the board the keys", (
@@ -1257,4 +1277,35 @@ void main() {
     );
     controller.removeStructuralListener(onStructural);
   });
+
+  testWidgets(
+    "M23 a new size alone leaves a confirmed create's enter running",
+    (tester) async {
+      await pumpMonth(tester);
+      await tapEmptyPart(tester, april(22));
+      await pickTask(tester);
+      await tester.enterText(fieldFinder("Title"), "New");
+      await tester.tap(saveFinder());
+      await tester.pump(harnessLatency);
+      await tester.pump(oneFrame);
+      await tester.pump(oneFrame);
+      final chip = chipFinder("item-1", april(20));
+      final growing = tester.getSize(chip).height;
+      expect(growing, greaterThan(0.0));
+      expect(growing, lessThan(lane));
+      final board = tester.getRect(monthBoardFinder());
+
+      tester.view.physicalSize = const Size(390.0, 800.0);
+      await tester.pump();
+      // Sanity: the weeks were refitted to the shorter board.
+      final refitted = tester.getRect(monthBoardFinder()).height;
+      expect(refitted, lessThan(board.height - 0.5));
+      expect(tester.getSize(dayFinder(april(6))).height, near(refitted / 5));
+      // The enter's tick in this frame ran before the refit's layout; the
+      // next one reads the style the refit left.
+      await tester.pump(oneFrame);
+      expect(tester.getSize(chip).height, lessThan(lane));
+      await tester.pumpAndSettle();
+    },
+  );
 }

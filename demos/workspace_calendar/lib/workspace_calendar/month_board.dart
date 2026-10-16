@@ -218,8 +218,10 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// give the board the keyboard, whose arrow keys move the selected day and
 /// report it through [onSelectDay]. While the days load, a progress
 /// indicator covers the board, and after a failed read the error and a
-/// Retry that reads again. A change of the model animates; a new month, a
-/// new set of weekdays and a new size do not.
+/// Retry that reads again. A change of the model animates; a new month or
+/// a new set of weekdays does not, and settles at once whatever chip was
+/// still growing in or shrinking out. A new size alone refits the weeks
+/// at once and leaves the chips' motion running.
 class MonthBoard extends StatefulWidget {
   const MonthBoard({
     super.key,
@@ -335,8 +337,18 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// grid.
   late List<_KeptDay?> _days = _emptyDays(widget.grid);
 
-  /// The chip keys the latest sync placed.
-  Set<String> _placedKeys = <String>{};
+  /// The latest sync's placements, by chip key.
+  Map<String, BoardPlacement<MonthChip>> _placed =
+      <String, BoardPlacement<MonthChip>>{};
+
+  /// Over the animated syncs since the last sync that did not animate: the
+  /// placements they stopped placing, by chip key, and the chip keys they
+  /// started placing. Every exit and enter in flight is among them, since
+  /// only an animated sync starts one; the controller's key reads cannot
+  /// tell an exiting key from a retired one.
+  final Map<String, BoardPlacement<MonthChip>> _dropped =
+      <String, BoardPlacement<MonthChip>>{};
+  final Set<String> _added = <String>{};
 
   @override
   void initState() {
@@ -490,8 +502,13 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// lays the board out at its size.
   ///
   /// A sync animates only when it follows the model alone, its days are
-  /// ready and the last sync's were. Any other change runs under
-  /// [BoardAnimationStyle.disabled], which [_scheduleStyleRestore] lifts.
+  /// ready and the last sync's were. Any other sync runs under
+  /// [BoardAnimationStyle.disabled], which [_scheduleStyleRestore] lifts,
+  /// and settles in its batch every enter and exit in flight
+  /// ([_setItemsSettled]). A refit alone leaves the style as it is, so the
+  /// motion in flight runs on: the replaced axis lands its own track
+  /// resizes, and a new row axis takes each week's first measurement
+  /// without animating it.
   void _layoutBoard(Size size) {
     final grid = widget.grid;
     final fitted = fittedWeekExtent(size.height, grid.weekCount);
@@ -510,7 +527,6 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       return;
     }
     final ready = _daysReady;
-    final animated = !rowsChanged && !columnsChanged && ready && _syncedReady;
     final placements = !sync
         ? null
         : ready
@@ -519,8 +535,14 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
             grid,
           )
         : const <BoardPlacement<MonthChip>>[];
+    final next = <String, BoardPlacement<MonthChip>>{
+      if (placements != null)
+        for (final placement in placements) placement.item.key: placement,
+    };
+    final animated = !rowsChanged && !columnsChanged && ready && _syncedReady;
+    final settles = placements != null && !animated;
     _board.runBatch(() {
-      if (!animated) {
+      if (settles) {
         _board.animationStyle = BoardAnimationStyle.disabled;
       }
       if (rowsChanged) {
@@ -533,11 +555,16 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
           axis: UniformAxis(grid.columnCount, width),
         );
       }
-      if (placements != null) {
+      if (placements == null) {
+        return;
+      }
+      if (settles) {
+        _setItemsSettled(placements, next);
+      } else {
         _board.setItems(placements);
       }
     });
-    if (!animated) {
+    if (settles) {
       _scheduleStyleRestore();
     }
     _fittedGrid = grid;
@@ -548,13 +575,14 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     if (placements == null) {
       return;
     }
+    if (animated) {
+      _recordMotion(next);
+    }
     _syncPending = false;
     _syncedReady = ready;
-    _placedKeys = <String>{
-      for (final placement in placements) placement.item.key,
-    };
+    _placed = next;
     _chips.removeWhere((key, kept) {
-      return !_placedKeys.contains(key);
+      return !next.containsKey(key);
     });
     if (_revealPending) {
       SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -566,24 +594,77 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     }
   }
 
-  /// Puts [monthBoardAnimationStyle] back after the layout of the frame
-  /// after the sync that disabled it: a frame callback adds a post-frame
-  /// callback. Through that frame's transient callbacks every enter and
-  /// exit in flight ticks under the disabled style, which settles it, and
-  /// through its layout each week those settles change takes its new
-  /// extent with the track resize refused, so nothing animates.
+  /// Records what the animated sync placing [next] starts: each key
+  /// [_placed] holds and [next] lacks exits, each key [next] holds and
+  /// [_placed] lacks enters.
+  void _recordMotion(Map<String, BoardPlacement<MonthChip>> next) {
+    for (final entry in _placed.entries) {
+      if (!next.containsKey(entry.key)) {
+        _dropped[entry.key] = entry.value;
+        _added.remove(entry.key);
+      }
+    }
+    for (final key in next.keys) {
+      if (!_placed.containsKey(key)) {
+        _added.add(key);
+        _dropped.remove(key);
+      }
+    }
+  }
+
+  /// Sets [placements], whose placements by key are [next], under the
+  /// disabled style, so that no enter or exit is in flight afterwards.
+  ///
+  /// With the item enter and exit family off, `setItems` brings back whole
+  /// a key whose exit runs, adds whole a key the board holds no item for,
+  /// and retires at once a key it leaves out, an entering one included.
+  /// So the first call carries every dropped key [next] lacks, bringing
+  /// back an exiting one, and leaves out every added key [next] holds,
+  /// retiring an entering one; the second retires the carried keys and
+  /// adds the left-out ones whole, under new ids. Inside the sync's batch
+  /// the two calls make one notification.
+  void _setItemsSettled(
+    List<BoardPlacement<MonthChip>> placements,
+    Map<String, BoardPlacement<MonthChip>> next,
+  ) {
+    final carry = <BoardPlacement<MonthChip>>[
+      for (final entry in _dropped.entries)
+        if (!next.containsKey(entry.key)) entry.value,
+    ];
+    final renew = <String>{
+      for (final key in _added)
+        if (next.containsKey(key)) key,
+    };
+    _dropped.clear();
+    _added.clear();
+    if (carry.isEmpty && renew.isEmpty) {
+      _board.setItems(placements);
+      return;
+    }
+    _board.setItems(<BoardPlacement<MonthChip>>[
+      for (final placement in placements)
+        if (!renew.contains(placement.item.key)) placement,
+      ...carry,
+    ]);
+    _board.setItems(placements);
+  }
+
+  /// Puts [monthBoardAnimationStyle] back in a frame callback scheduled
+  /// after the batch of the sync that disabled it, so it runs at the next
+  /// frame's start, before that frame's layout and after the sync's own
+  /// layout has measured the weeks under the disabled style. That sync
+  /// left nothing in flight ([_setItemsSettled]), so a sync the next frame
+  /// lays out animates.
   void _scheduleStyleRestore() {
     if (_restoreScheduled) {
       return;
     }
     _restoreScheduled = true;
     SchedulerBinding.instance.scheduleFrameCallback((_) {
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        _restoreScheduled = false;
-        if (mounted) {
-          _board.animationStyle = monthBoardAnimationStyle;
-        }
-      });
+      _restoreScheduled = false;
+      if (mounted) {
+        _board.animationStyle = monthBoardAnimationStyle;
+      }
     });
   }
 
@@ -643,12 +724,6 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     BoardItemView<String, MonthChip> view,
   ) {
     final chip = view.item;
-    // An exit in flight at a sync that does not animate settles on the
-    // next frame's tick; until the style returns it paints nothing, since
-    // it may sit in another week of the new grid.
-    if (_restoreScheduled && !_placedKeys.contains(chip.key)) {
-      return const SizedBox.shrink();
-    }
     final kept = _chips[chip.key];
     if (kept != null && kept.chip == chip) {
       return kept.widget;
