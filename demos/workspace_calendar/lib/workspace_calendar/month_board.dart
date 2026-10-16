@@ -211,7 +211,8 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// the primary pill. Each item shows as one bar per calendar week it
 /// covers, a chip one lane tall in its type's colours, square where it
 /// continues into the week before or after; a pending item's chip is
-/// dimmed and takes no tap.
+/// dimmed and takes no tap. Lines part the weeks and the days, and each
+/// day of another month lies on the background colour.
 ///
 /// A tap on a chip reports [onOpenItem], on a day's number strip
 /// [onOpenDay], and on the rest of a day [onCreateOnDay]; the last two
@@ -338,6 +339,10 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// grid.
   late List<_KeptDay?> _days = _emptyDays(widget.grid);
 
+  /// The board's background for [MonthBoard.grid], made once per grid, so
+  /// a build that keeps the grid hands the board the same painter.
+  late _MonthGridPainter _background = _MonthGridPainter(widget.grid);
+
   /// The latest sync's placements, by chip key.
   Map<String, BoardPlacement<MonthChip>> _placed =
       <String, BoardPlacement<MonthChip>>{};
@@ -393,6 +398,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       _syncPending = true;
       _revealPending = true;
       _days = _emptyDays(widget.grid);
+      _background = _MonthGridPainter(widget.grid);
     }
     if (gridChanged || widget.selectedDay != oldWidget.selectedDay) {
       // Reaches the cells through the board's post-frame relay, since this
@@ -757,6 +763,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
                 controller: _board,
                 cellBuilder: _cellBuilder,
                 itemBuilder: _itemBuilder,
+                background: _background,
                 selection: _selectionConfig,
                 focusNode: _focusNode,
                 // The board scrolls on its own, not with the screen's
@@ -784,6 +791,63 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
         );
       },
     );
+  }
+}
+
+/// The month board's background: each day of another month on the
+/// background colour, and a line in the outline colour between every two
+/// weeks and every two shown weekdays, none around the board's edge.
+class _MonthGridPainter extends BoardBackgroundPainter {
+  _MonthGridPainter(this.grid)
+    : _outside = <bool>[
+        for (var row = 0; row < grid.weekCount; row++)
+          for (var col = 0; col < grid.columnCount; col++)
+            !grid.contains(grid.dateAt(row, col)),
+      ];
+
+  static final Paint _outsidePaint = Paint()..color = HarborColors.background;
+  static final Paint _linePaint = Paint()
+    ..color = HarborColors.outline
+    ..strokeWidth = 1.0;
+
+  final MonthGrid grid;
+
+  /// Whether each cell of [grid], at `row * columnCount + col`, shows a day
+  /// of another month.
+  final List<bool> _outside;
+
+  @override
+  void paint(Canvas canvas, BoardGeometryView geometry) {
+    final firstRow = geometry.firstVisibleRow;
+    final lastRow = geometry.lastVisibleRow;
+    final firstCol = geometry.firstVisibleCol;
+    final lastCol = geometry.lastVisibleCol;
+    if (firstRow > lastRow || firstCol > lastCol) {
+      return;
+    }
+    final columns = grid.columnCount;
+    for (var row = firstRow; row <= lastRow; row++) {
+      for (var col = firstCol; col <= lastCol; col++) {
+        if (_outside[row * columns + col]) {
+          canvas.drawRect(geometry.visibleCellRect(row, col), _outsidePaint);
+        }
+      }
+    }
+    final first = geometry.visibleCellRect(firstRow, firstCol);
+    final last = geometry.visibleCellRect(lastRow, lastCol);
+    for (var row = math.max(firstRow, 1); row <= lastRow; row++) {
+      final y = geometry.visibleCellRect(row, firstCol).top;
+      canvas.drawLine(Offset(first.left, y), Offset(last.right, y), _linePaint);
+    }
+    for (var col = math.max(firstCol, 1); col <= lastCol; col++) {
+      final x = geometry.visibleCellRect(firstRow, col).left;
+      canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), _linePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MonthGridPainter old) {
+    return !_MonthBoardState._sameGrid(old.grid, grid);
   }
 }
 

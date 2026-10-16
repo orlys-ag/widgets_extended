@@ -251,6 +251,46 @@ bool whollyInsideBoard(WidgetTester tester, DateTime day) {
   return cell.top >= board.top - 0.5 && cell.bottom <= board.bottom + 0.5;
 }
 
+/// Paints the month board's background onto a new [RecordingCanvas].
+RecordingCanvas paintMonthBackground(WidgetTester tester) {
+  return paintGridBackground(tester);
+}
+
+/// [day]'s cell in the month board's paint space, where its background
+/// paints.
+Rect monthCellRect(WidgetTester tester, DateTime day) {
+  final origin = monthViewport(tester).localToGlobal(Offset.zero);
+  return tester.getRect(dayFinder(day)).shift(-origin);
+}
+
+bool nearRect(Rect a, Rect b) {
+  return (a.topLeft - b.topLeft).distance <= 0.5 &&
+      (a.bottomRight - b.bottomRight).distance <= 0.5;
+}
+
+/// The days of [grid] whose whole cell the month board's background fills
+/// in the background colour.
+List<DateTime> filledDays(WidgetTester tester, MonthGrid grid) {
+  final fills = paintMonthBackground(
+    tester,
+  ).fillsOf(HarborColors.background).toList();
+  return <DateTime>[
+    for (var row = 0; row < grid.weekCount; row++)
+      for (var col = 0; col < grid.columnCount; col++)
+        if (fills.any((fill) {
+          return nearRect(fill, monthCellRect(tester, grid.dateAt(row, col)));
+        }))
+          grid.dateAt(row, col),
+  ];
+}
+
+/// How many rects the month board's background fills, in any colour.
+int fillCount(WidgetTester tester) {
+  return paintMonthBackground(tester).records.where((record) {
+    return !record.isLine;
+  }).length;
+}
+
 void main() {
   testWidgets(
     "M1 the menu lists Agenda, Month, Week and Day and the calendar opens "
@@ -1359,6 +1399,102 @@ void main() {
       await tester.pump(oneFrame);
       expect(tester.getSize(chip).height, lessThan(lane));
       await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    "M24 lines part the weeks and the days, and each day of another month "
+    "lies on the background colour",
+    (tester) async {
+      await pumpMonth(tester);
+      // April 2026 runs from Monday, March 30 to Sunday, May 3.
+      expect(filledDays(tester, MonthGrid(2026, 4)), <DateTime>[
+        DateTime(2026, 3, 30),
+        DateTime(2026, 3, 31),
+        may(1),
+        may(2),
+        may(3),
+      ]);
+      expect(fillCount(tester), 5);
+
+      final mondays = <DateTime>[
+        for (var row = 0; row < 5; row++)
+          addDays(DateTime(2026, 3, 30), 7 * row),
+      ];
+      final first = monthCellRect(tester, mondays.first);
+      final last = monthCellRect(tester, may(3));
+      final expected = <(Offset, Offset)>[
+        for (final monday in mondays.skip(1))
+          (
+            Offset(first.left, monthCellRect(tester, monday).top),
+            Offset(last.right, monthCellRect(tester, monday).top),
+          ),
+        for (var col = 1; col < 7; col++)
+          (
+            Offset(
+              monthCellRect(tester, addDays(mondays.first, col)).left,
+              first.top,
+            ),
+            Offset(
+              monthCellRect(tester, addDays(mondays.first, col)).left,
+              last.bottom,
+            ),
+          ),
+      ];
+      final lines = paintMonthBackground(tester).lines.toList();
+      expect(lines, hasLength(expected.length));
+      for (final (from, to) in expected) {
+        final matching = lines.where((line) {
+          return (line.from! - from).distance <= 0.5 &&
+              (line.to! - to).distance <= 0.5;
+        });
+        expect(matching, hasLength(1), reason: "$from to $to");
+        expect(matching.single.isIn(HarborColors.outline), isTrue);
+      }
+    },
+  );
+
+  testWidgets(
+    "M25 the days on the background colour follow the month and the shown "
+    "weekdays",
+    (tester) async {
+      await pumpMonth(tester);
+      final aprilPainter = monthViewport(tester).background!;
+
+      await tester.tap(find.byTooltip("Previous month"));
+      await tester.pump();
+      await tester.pump(harnessLatency);
+      await tester.pumpAndSettle();
+      expect(find.text("March 2026"), findsOneWidget);
+      // March 2026 runs from Sunday, March 1 to Tuesday, March 31.
+      expect(filledDays(tester, MonthGrid(2026, 3)), <DateTime>[
+        for (var day = 23; day <= 28; day++) DateTime(2026, 2, day),
+        for (var day = 1; day <= 5; day++) april(day),
+      ]);
+      expect(fillCount(tester), 11);
+      final marchPainter = monthViewport(tester).background!;
+      expect(marchPainter.shouldRepaint(aprilPainter), isTrue);
+
+      await toggleWeekends(tester);
+      // Sanity: the board shows Monday to Friday.
+      expect(monthViewport(tester).controller.columns.axis.trackCount, 5);
+      // The week of March 1 shows no day of March, so the grid opens on
+      // Monday, March 2.
+      expect(
+        filledDays(tester, MonthGrid(2026, 3, weekdays: WeekdaySet.workweek)),
+        <DateTime>[april(1), april(2), april(3)],
+      );
+      expect(fillCount(tester), 3);
+      expect(
+        monthViewport(tester).background!.shouldRepaint(marchPainter),
+        isTrue,
+      );
+
+      await toggleWeekends(tester);
+      final again = monthViewport(tester).background!;
+      // Sanity: the board was handed a painter made for the grid again.
+      expect(identical(again, marchPainter), isFalse);
+      expect(again.shouldRepaint(marchPainter), isFalse);
     },
   );
 }
