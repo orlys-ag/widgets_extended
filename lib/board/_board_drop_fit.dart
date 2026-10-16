@@ -272,8 +272,12 @@ class BoardDropFitter {
   ///
   /// Candidates are [box] moved to one START per axis, clamped into the
   /// window of each axis it steps, [rowWindow] and [colWindow], and
-  /// tested in ascending CONTENT-SPACE distance from the box's leading
-  /// corner. An axis the scan does not step offers the box's own fields
+  /// tested in ascending CONTENT-SPACE distance from [reference], the
+  /// track-space start the dragged item shows at on each axis, held inside
+  /// the lattice, or from the box's leading corner where it is null. A
+  /// reference off the box's start is what breaks a tie between two
+  /// placements equally far from the box toward the one the item leans
+  /// toward. An axis the scan does not step offers the box's own fields
   /// alone. An axis it steps offers the box's own start, the starts up to
   /// [maxStepsPerDirection] quanta from it, and, within the radius, the
   /// FLUSH starts: for each obstacle, the first start on the box's grid
@@ -307,6 +311,7 @@ class BoardDropFitter {
     required BoardStartWindow rowWindow,
     required BoardStartWindow colWindow,
     Axis? wholeTrackAxis,
+    ({double row, double col})? reference,
   }) {
     final steps = stepsOf(
       policy: policy,
@@ -342,15 +347,19 @@ class BoardDropFitter {
     );
     final rowLow = box.startTrackOn(Axis.vertical);
     final colLow = box.startTrackOn(Axis.horizontal);
-    final baseRow = rowAxis.offsetOfFraction(rowLow);
-    final baseCol = colAxis.offsetOfFraction(colLow);
+    // Held inside the lattice, the domain of offsetOfFraction: an item
+    // dragged past an end shows past it.
+    final baseRow = rowAxis.offsetOfFraction(
+      (reference?.row ?? rowLow).clamp(0.0, rowAxis.trackCount.toDouble()),
+    );
+    final baseCol = colAxis.offsetOfFraction(
+      (reference?.col ?? colLow).clamp(0.0, colAxis.trackCount.toDouble()),
+    );
     final rowOffsets = <double>[
-      for (final row in rows)
-        row == null ? 0.0 : rowAxis.offsetOfFraction(row) - baseRow,
+      for (final row in rows) rowAxis.offsetOfFraction(row ?? rowLow) - baseRow,
     ];
     final colOffsets = <double>[
-      for (final col in cols)
-        col == null ? 0.0 : colAxis.offsetOfFraction(col) - baseCol,
+      for (final col in cols) colAxis.offsetOfFraction(col ?? colLow) - baseCol,
     ];
 
     final candidates =

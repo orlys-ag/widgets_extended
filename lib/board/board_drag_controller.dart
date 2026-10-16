@@ -256,6 +256,17 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// chosen from the old window would otherwise stand.
   ({BoardStartWindow rows, BoardStartWindow cols})? _lastResolvedWindows;
 
+  /// The lean the resolver returned beside [_lastResolvedSpan], null for
+  /// a resize. The early-out compares it only after a refusal, the one
+  /// answer the lean can change: the drop fit measures from it, and a
+  /// finger moving inside a refused placement moves the lean.
+  ({double row, double col})? _lastResolvedLean;
+
+  /// The drop gate's answer for [_lastResolvedSpan]: true admitted, false
+  /// refused, null a throw. Read only while [_lastResolvedSpan] matches,
+  /// so the sites that clear that record clear this one's use too.
+  bool? _lastDropAnswer;
+
   /// A RESIZE's sample on its resized axis from the last [_resolve] that
   /// reached the resolver, null for a move. A sample within the
   /// tolerance of it resolves nothing ([_holdsResizeSample]): the
@@ -1045,6 +1056,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final draggedSpan = boardController.spanOf(session.key)!;
     final BoardDropTarget resolved;
     ({BoardStartWindow rows, BoardStartWindow cols})? windows;
+    ({double row, double col})? lean;
     if (move) {
       // A move resolves from the proxy's content-LEADING corner, the
       // point its span starts at, which is the proxy's painted top-left
@@ -1089,6 +1101,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       );
       resolved = answer.target;
       windows = (rows: answer.rows, cols: answer.cols);
+      lean = answer.lean;
     } else {
       // A resize resolves from the pointer's displacement since the
       // lift, in track space, and only once its resized axis's sample
@@ -1115,8 +1128,13 @@ class BoardDragController<TKey> extends ChangeNotifier {
         pinned: _pinsAt(session.key, pointer),
       );
     }
-    if (resolved.span == _lastResolvedSpan &&
-        windows == _lastResolvedWindows) {
+    // Over the same placement, only a new lean after a refusal resolves
+    // again: an admitted placement is the target whatever the lean, and a
+    // throw gets no nudge to measure from it.
+    final samePlacement =
+        resolved.span == _lastResolvedSpan && windows == _lastResolvedWindows;
+    if (samePlacement &&
+        (_lastDropAnswer != false || lean == _lastResolvedLean)) {
       return;
     }
     // Recorded for every resolver answer, before the refusal branch and
@@ -1126,6 +1144,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // scan for each of them.
     _lastResolvedSpan = resolved.span;
     _lastResolvedWindows = windows;
+    _lastResolvedLean = lean;
     var target = resolved;
     // A canDropAt refusal at RESOLUTION, not just at commit: a refused
     // target leaves currentTarget null and releases the gap, so nothing
@@ -1133,13 +1152,18 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // as re-validation against a predicate that changed its answer.
     //
     // A refusal is also where the NUDGE gets its one chance; a null
-    // answer from it leaves the arm exactly as it was.
-    final answer = askCanDropAt(config, session.key, target.span);
+    // answer from it leaves the arm exactly as it was. The same placement
+    // keeps the refusal it had: the predicate is asked again only after
+    // a change that clears the record, as it is for any placement.
+    final answer = samePlacement
+        ? false
+        : askCanDropAt(config, session.key, target.span);
+    _lastDropAnswer = answer;
     if (answer != true) {
       // A throw, answered null, is a refusal with no nudge: the nudge is
       // for overlaps, and a throw says nothing about one.
       final fitted = answer == false
-          ? _fitRefusal(session, target, windows)
+          ? _fitRefusal(session, target, windows, lean)
           : null;
       if (fitted == null) {
         if (_currentTarget != null) {
@@ -1151,6 +1175,11 @@ class BoardDragController<TKey> extends ChangeNotifier {
           notifyListeners();
           _reportTarget(session);
         }
+        return;
+      }
+      // A new lean that lands where the last one did changes nothing, so
+      // it notifies nothing.
+      if (samePlacement && fitted == _currentTarget) {
         return;
       }
       target = fitted;
@@ -1342,11 +1371,14 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// [windows] are the windows the resolver placed each axis in, which a
   /// candidate is clamped into on an axis the scan steps, so a refused
   /// span in a band is nudged within the band and a scrolled one only to
-  /// starts that show; null for a resize.
+  /// starts that show; null for a resize. [lean] is the lean the resolver
+  /// returned beside [refused], null for a resize: the scan measures its
+  /// candidates from the refused start plus it, where the item shows.
   BoardDropTarget? _fitRefusal(
     _DragSession<TKey> session,
     BoardDropTarget refused,
     ({BoardStartWindow rows, BoardStartWindow cols})? windows,
+    ({double row, double col})? lean,
   ) {
     final policy = config.dropFit;
     final canDropAt = config.canDropAt;
@@ -1374,6 +1406,14 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // resolver anchors to the pointer, exactly as the resolver moves it.
     final wholeTrackAxis = _pointerAnchoredAxis(session);
     var box = refused.span;
+    // Read off the refused span before the move onto the lattice below,
+    // since the item shows where the drag put it, not where that moves it.
+    final reference = lean == null
+        ? null
+        : (
+            row: box.startTrackOn(Axis.vertical) + lean.row,
+            col: box.startTrackOn(Axis.horizontal) + lean.col,
+          );
     final onto = BoardDropFitter.ontoLattice(
       box,
       rowCount: rowAxis.trackCount,
@@ -1455,6 +1495,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       rowWindow: windows.rows,
       colWindow: windows.cols,
       wholeTrackAxis: wholeTrackAxis,
+      reference: reference,
     );
     if (fitted == null) {
       return null;

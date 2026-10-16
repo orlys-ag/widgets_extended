@@ -175,10 +175,20 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   dragged edge where the span shows, and the GUARD keeps an edge that
   rule would carry back past where it began. Track space, because a
   laned item's painted edge on its lane axis is its band's, not its
-  span's. `resolveMove` returns the window of each axis beside its
-  target, a kept axis's being the lattice its stored span lies in;
-  `_resolve` records them beside the span for its early-out and hands
-  them to the drop fit. The windows and the paths live in
+  span's. `resolveMove` returns the window and the LEAN of each axis
+  beside its target, a kept axis's window being the lattice its stored
+  span lies in. The lean is how far the dragged item shows past the
+  target's start, which the snap discarded: on the lane axis of a laned
+  item the finger's place across its cell less its place across the cell
+  it grabbed, elsewhere the corner's coordinate less the start, and on a
+  kept axis the corner's displacement since the lift, each rounded to an
+  eighth of the axis's grid so jitter and a sample's rounding on a grid
+  line do not change it. `_resolve` records both beside the span for its
+  early-out, comparing the lean only after a refusal, the one answer it
+  can change, and hands them to the drop fit: over the same refused
+  placement a new lean re-runs the fit without asking the gate again,
+  and a fit landing on the current target notifies nothing. The windows
+  and the paths live in
   `_board_span.dart` beside the start rule, and `quantumOn` is
   non-private because the drop-fit search steps by the grid the windows
   are on.
@@ -218,7 +228,10 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   the nearest clear placement has a flush or own start on each axis, so
   any radius, `double.infinity` included, costs candidates per obstacle
   rather than per step. It orders candidates by content-space distance
-  under a TOTAL order so equidistant ones cannot swap between resolves,
+  from where the item shows, the refused start plus the lean, read before
+  the move onto the lattice and held inside it, so of two placements
+  equally far from the snapped start it takes the one the item leans
+  toward, under a TOTAL order so equidistant ones cannot swap between resolves,
   clamps a candidate into its axis's window on each axis it steps, so a
   refused span in a band is nudged within the band and a scrolled one
   only to starts that show, and translates by re-splitting the exact

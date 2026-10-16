@@ -2655,10 +2655,14 @@ void main() {
   // and the current target are different spans by construction, so
   // without the field every later move would re-run the gate, the scan
   // and a notification for a pointer that has not left its placement.
-  // The seam is the controller's own ChangeNotifier.
+  // The nudge measures from where the item shows, so a move that leans
+  // it a different eighth of a column runs the scan again, without the
+  // gate for the refused placement, and one landing on the standing
+  // target notifies nothing. The seams are the controller's own
+  // ChangeNotifier and the predicate's calls.
   testWidgets(
-    "a pointer that has not left its resolved placement re-resolves "
-    "nothing",
+    "a pointer inside its resolved placement asks nothing until the item "
+    "leans anew, and a new lean on the same target notifies nothing",
     (tester) async {
       final controller = _plainController(tester);
       controller.addItem(
@@ -2670,12 +2674,14 @@ void main() {
         const BoardSpan(rowStart: 2, colStart: 3),
       );
       await tester.pumpWidget(_board(controller));
+      var asks = 0;
       final drag = _drag(
         tester,
         controller,
         BoardDragConfig<String>(
           onItemMoved: (key, span) {},
           canDropAt: (key, span) {
+            asks += 1;
             for (final other in controller.itemsIn(
               span.rowStart,
               span.rowStart + span.rowSpan,
@@ -2712,10 +2718,22 @@ void main() {
       }
 
       drag.addListener(count);
-      // Three moves that all round to the same column and row.
-      for (final dx in <double>[5.0, 10.0, 15.0]) {
+      // Each move rounds to the same column and row. Two pixels on, the
+      // item leans as it did, and nothing is asked.
+      var before = asks;
+      drag.updateDrag(_global(tester, const Offset(122.0, 125.0)));
+      await tester.pump();
+      expect(asks, before);
+      // Five pixels on and three back, it leans an eighth of a column
+      // right, then left: the scan runs again and lands on column 1
+      // again, 45 and 35 px from where the item shows, against more than
+      // 50 px to a row either way.
+      for (final dx in <double>[5.0, -3.0]) {
+        before = asks;
         drag.updateDrag(_global(tester, Offset(120.0 + dx, 125.0)));
         await tester.pump();
+        expect(asks, greaterThan(before));
+        expect(drag.currentTarget!.span.colStart, 1);
       }
       drag.removeListener(count);
       expect(notifications, 0);
