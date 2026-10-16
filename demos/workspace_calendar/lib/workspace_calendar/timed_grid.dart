@@ -386,7 +386,7 @@ CreateRange createRangeOver(
 /// dragged onto one stops at its edge. While a drag runs, a label over the
 /// grid names the day and times a release would give, or that a move has
 /// nowhere to land, and a move outlines the slots it would land on. A line
-/// marks the time [clock] reads in its day's column, and the grid opens
+/// marks the time [now] holds in its day's column, and the grid opens
 /// scrolled to the hour before it when it shows that day, at 08:00
 /// otherwise. An item reaching past the hours shows the part inside them,
 /// with an arrow where it is cut, and takes no move or resize: its form
@@ -409,7 +409,7 @@ class TimedGrid extends StatefulWidget {
     required this.dayCount,
     required this.selectedDay,
     required this.today,
-    required this.clock,
+    required this.now,
     required this.onSelectDay,
     required this.onOpenItem,
     required this.onCreate,
@@ -428,11 +428,13 @@ class TimedGrid extends StatefulWidget {
   final int dayCount;
 
   final DateTime selectedDay;
+
+  /// The day whose column and header the grid marks as today.
   final DateTime today;
 
-  /// Reads the current time. The grid reads it again at the start of each
-  /// minute.
-  final DateTime Function() clock;
+  /// The current time, which its owner sets again at the start of each
+  /// minute. The grid follows it without a rebuild from above.
+  final ValueListenable<DateTime> now;
 
   final ValueChanged<DateTime> onSelectDay;
   final ValueChanged<String> onOpenItem;
@@ -446,7 +448,11 @@ class TimedGrid extends StatefulWidget {
   }
 }
 
-typedef _HeaderState = ({GridTracks tracks, DateTime selectedDay});
+typedef _HeaderState = ({
+  GridTracks tracks,
+  DateTime selectedDay,
+  DateTime today,
+});
 
 /// The drag the board runs: its item, whether it moves or resizes which
 /// edge, whether the board has reported a target yet, and the placement a
@@ -512,18 +518,16 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// The drag the board runs, or null.
   _GridDrag? _drag;
 
-  /// Where the line marking the clock's time sits, or null where the grid
+  /// Where the line marking [TimedGrid.now] sits, or null where the grid
   /// does not show it.
-  late _NowMark? _nowMark = _nowMarkOf(widget.clock());
-
-  /// Fires at the start of the next minute, to read the clock again.
-  Timer? _minuteTimer;
+  late _NowMark? _nowMark = _nowMarkOf(widget.now.value);
 
   /// What the header cells show. The cell builder runs only when the board
   /// rebuilds a cell, so the header cells listen to this instead.
   late final ValueNotifier<_HeaderState> _header = ValueNotifier<_HeaderState>((
     tracks: _tracks,
     selectedDay: widget.selectedDay,
+    today: widget.today,
   ));
 
   /// The extents the axes were last given and the tracks they were given
@@ -604,12 +608,12 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       animationStyle: timedGridAnimationStyle,
     );
     widget.model.addListener(_handleModel);
+    widget.now.addListener(_handleNow);
     _sync();
-    _scheduleMinute();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _board.jumpToCell(
-          _tracks.rowOf(_openingMinuteOf(_tracks, widget.clock())),
+          _tracks.rowOf(_openingMinuteOf(_tracks, widget.now.value)),
           1,
         );
       }
@@ -624,6 +628,11 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       oldWidget.model.removeListener(_handleModel);
       widget.model.addListener(_handleModel);
     }
+    final nowChanged = widget.now != oldWidget.now;
+    if (nowChanged) {
+      oldWidget.now.removeListener(_handleNow);
+      widget.now.addListener(_handleNow);
+    }
     final tracks = _tracksOf(widget);
     final tracksChanged = tracks != _tracks;
     assert(
@@ -632,11 +641,17 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       "changes between them its own key.",
     );
     _tracks = tracks;
-    if (tracksChanged || widget.clock != oldWidget.clock) {
-      _nowMark = _nowMarkOf(widget.clock());
+    if (tracksChanged || nowChanged) {
+      _nowMark = _nowMarkOf(widget.now.value);
     }
-    if (tracksChanged || widget.selectedDay != oldWidget.selectedDay) {
-      _header.value = (tracks: tracks, selectedDay: widget.selectedDay);
+    if (tracksChanged ||
+        widget.selectedDay != oldWidget.selectedDay ||
+        widget.today != oldWidget.today) {
+      _header.value = (
+        tracks: tracks,
+        selectedDay: widget.selectedDay,
+        today: widget.today,
+      );
     }
     // The axes first, so the items the sync places fit the lattice they
     // land on.
@@ -677,7 +692,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _minuteTimer?.cancel();
+    widget.now.removeListener(_handleNow);
     _tap.dispose();
     _immediateRange.dispose();
     _delayedRange.dispose();
@@ -1006,25 +1021,15 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return (column: column, minute: minute);
   }
 
-  /// Reads the clock again at the start of the next minute, and from then
-  /// on at the start of each, rebuilding only when the line moves, shows
+  /// Follows [TimedGrid.now], rebuilding only when the line moves, shows
   /// or goes.
-  void _scheduleMinute() {
-    final now = widget.clock();
-    final intoMinute = Duration(
-      seconds: now.second,
-      milliseconds: now.millisecond,
-      microseconds: now.microsecond,
-    );
-    _minuteTimer = Timer(const Duration(minutes: 1) - intoMinute, () {
-      final mark = _nowMarkOf(widget.clock());
-      if (mark != _nowMark) {
-        setState(() {
-          _nowMark = mark;
-        });
-      }
-      _scheduleMinute();
-    });
+  void _handleNow() {
+    final mark = _nowMarkOf(widget.now.value);
+    if (mark != _nowMark) {
+      setState(() {
+        _nowMark = mark;
+      });
+    }
   }
 
   void _selectDay(DateTime day) {
@@ -1189,7 +1194,6 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       return _DayHeaderCell(
         header: _header,
         column: cell.col,
-        today: widget.today,
         onSelectDay: _selectDay,
       );
     }
@@ -1369,7 +1373,6 @@ class _DayHeaderCell extends StatelessWidget {
   const _DayHeaderCell({
     required this.header,
     required this.column,
-    required this.today,
     required this.onSelectDay,
   });
 
@@ -1377,7 +1380,6 @@ class _DayHeaderCell extends StatelessWidget {
 
   /// The board column of the cell, which [GridTracks.dateAt] reads.
   final int column;
-  final DateTime today;
   final ValueChanged<DateTime> onSelectDay;
 
   @override
@@ -1392,7 +1394,7 @@ class _DayHeaderCell extends StatelessWidget {
           return const SizedBox.shrink();
         }
         final day = value.tracks.dateAt(column);
-        final isToday = day == today;
+        final isToday = day == value.today;
         final isSelected = day == value.selectedDay;
         return GestureDetector(
           key: dayHeaderKey(day),

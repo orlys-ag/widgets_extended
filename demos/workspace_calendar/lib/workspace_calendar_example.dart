@@ -20,6 +20,7 @@
 /// that it is not available.
 library;
 
+import 'dart:async';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -62,8 +63,9 @@ enum _StepUnit {
 class WorkspaceCalendarExample extends StatelessWidget {
   const WorkspaceCalendarExample({super.key, this.today, this.api, this.clock});
 
-  /// The day the calendar opens on and marks as today. Null reads
-  /// [clock].
+  /// The day the calendar opens on and marks as today. Null opens on the
+  /// day [clock] reads and marks the day it reads from then on, so the
+  /// mark moves at midnight.
   final DateTime? today;
 
   /// The store the calendar reads and writes, read once when the calendar
@@ -71,8 +73,9 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// at [defaultCalendarLatency] and with no failures.
   final CalendarApi? api;
 
-  /// Reads the current time, which the timed grids mark with a line. Null
-  /// reads [DateTime.now].
+  /// Reads the current time, which the timed grids mark with a line. The
+  /// calendar reads it when first built and again at the start of each
+  /// minute. Null reads [DateTime.now].
   final DateTime Function()? clock;
 
   static final ThemeData _theme = buildHarborTheme();
@@ -113,11 +116,24 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     with TickerProviderStateMixin {
   static const double _rowHeight = 48.0;
 
-  late final DateTime _today = dateOnly(widget.today ?? widget.clock());
+  /// The clock's time, read again at the start of each minute.
+  late final ValueNotifier<DateTime> _now = ValueNotifier<DateTime>(
+    widget.clock(),
+  );
+
+  /// The day marked as today. The month board's cells listen to it,
+  /// because its cell builder re-runs only when an axis or a cell's
+  /// selection changes.
+  late final ValueNotifier<DateTime> _today = ValueNotifier<DateTime>(
+    _todayAt(_now.value),
+  );
+
+  /// Fires at the start of the next minute, to read the clock again.
+  Timer? _minuteTimer;
 
   late final CalendarModel _model;
 
-  late DateTime _selected = _today;
+  late DateTime _selected = _today.value;
 
   /// The month of [_selected], which is the lattice the board shows.
   late MonthGrid _grid = MonthGrid.of(_selected, weekdays: _settings.weekdays);
@@ -155,7 +171,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   void initState() {
     super.initState();
     _model = CalendarModel(
-      api: widget.api ?? MockCalendarApi.seeded(_today),
+      api: widget.api ?? MockCalendarApi.seeded(_today.value),
       onWriteFailed: _handleWriteFailed,
     );
     // The month board holds no items, so its key and payload types are
@@ -173,15 +189,63 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
     _board.setSelection(_selectionOf(_selected));
     _showRange();
+    _scheduleMinute(_now.value);
+  }
+
+  @override
+  void didUpdateWidget(_WorkspaceCalendar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final clockChanged = widget.clock != oldWidget.clock;
+    if (clockChanged) {
+      _minuteTimer?.cancel();
+      _now.value = widget.clock();
+      _scheduleMinute(_now.value);
+    }
+    if (clockChanged || widget.today != oldWidget.today) {
+      // The build that follows shows it.
+      _today.value = _todayAt(_now.value);
+    }
   }
 
   @override
   void dispose() {
+    _minuteTimer?.cancel();
     _model.dispose();
     _board.dispose();
     _collapse.dispose();
     _collapseController.dispose();
+    // The cells and the timed grid listening to these have unmounted by
+    // now: an element's children unmount before it does.
+    _today.dispose();
+    _now.dispose();
     super.dispose();
+  }
+
+  /// The day marked as today when the clock reads [now].
+  DateTime _todayAt(DateTime now) {
+    return dateOnly(widget.today ?? now);
+  }
+
+  /// Reads the clock again at the start of the minute after [now], and
+  /// from then on at the start of each. A new day rebuilds this state for
+  /// the day title and the timed grid.
+  void _scheduleMinute(DateTime now) {
+    final intoMinute = Duration(
+      seconds: now.second,
+      milliseconds: now.millisecond,
+      microseconds: now.microsecond,
+    );
+    _minuteTimer = Timer(const Duration(minutes: 1) - intoMinute, () {
+      final next = widget.clock();
+      _now.value = next;
+      final today = _todayAt(next);
+      if (today != _today.value) {
+        setState(() {
+          _today.value = today;
+        });
+      }
+      _scheduleMinute(next);
+    });
   }
 
   BoardAxisConfig _rowsFor(MonthGrid grid) {
@@ -411,14 +475,19 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       model: _model,
       day: day,
       builder: (context, hasItems) {
-        return DayCell(
-          key: dayCellKey(day),
-          day: day,
-          inMonth: inMonth,
-          isSelected: isSelected,
-          isToday: day == _today,
-          hasItems: hasItems,
-          collapse: _collapse,
+        return ValueListenableBuilder<DateTime>(
+          valueListenable: _today,
+          builder: (context, today, child) {
+            return DayCell(
+              key: dayCellKey(day),
+              day: day,
+              inMonth: inMonth,
+              isSelected: isSelected,
+              isToday: day == today,
+              hasItems: hasItems,
+              collapse: _collapse,
+            );
+          },
         );
       },
     );
@@ -523,8 +592,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               firstDay: days.first,
               dayCount: days.count,
               selectedDay: _selected,
-              today: _today,
-              clock: widget.clock,
+              today: _today.value,
+              now: _now,
               onSelectDay: _select,
               onOpenItem: (id) {
                 showEditForm(context, model: _model, id: id);
@@ -558,7 +627,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16.0, 20.0, 16.0, 12.0),
                     child: _DayHeader(
-                      title: dayTitle(_selected, _today),
+                      title: dayTitle(_selected, _today.value),
                       count: ready ? entries.length : null,
                     ),
                   ),

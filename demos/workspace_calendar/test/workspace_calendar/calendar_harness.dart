@@ -99,26 +99,39 @@ Map<String, Object?> taskJson(
   };
 }
 
+/// The app [pumpCalendar] pumps: the calendar over [api], given [today]
+/// and [clock].
+Widget calendarApp({
+  required MockCalendarApi api,
+  DateTime? today,
+  DateTime Function()? clock,
+}) {
+  return MaterialApp(
+    // The M3 ink sparkle shader cannot load under the test binding.
+    theme: ThemeData(splashFactory: NoSplash.splashFactory),
+    home: WorkspaceCalendarExample(today: today, api: api, clock: clock),
+  );
+}
+
 /// Pumps the calendar on [today] over [api], by default a mock seeded
 /// around [today] at [harnessLatency] with no failure policy, at [size],
 /// reading the time from [clock], by default the real clock, and lets its
-/// first read complete. Returns the mock.
+/// first read complete. Returns the mock. With [pinsToday] false the
+/// calendar is given no day, so it opens on the day [clock] reads and
+/// marks that day as today.
 Future<MockCalendarApi> pumpCalendar(
   WidgetTester tester, {
   MockCalendarApi? api,
   Size size = const Size(390.0, 844.0),
   DateTime Function()? clock,
+  bool pinsToday = true,
 }) async {
   final mock = api ?? MockCalendarApi.seeded(today, latency: harnessLatency);
   tester.view.devicePixelRatio = 1.0;
   tester.view.physicalSize = size;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
-    MaterialApp(
-      // The M3 ink sparkle shader cannot load under the test binding.
-      theme: ThemeData(splashFactory: NoSplash.splashFactory),
-      home: WorkspaceCalendarExample(today: today, api: mock, clock: clock),
-    ),
+    calendarApp(api: mock, today: pinsToday ? today : null, clock: clock),
   );
   await tester.pump(mock.latency);
   await tester.pumpAndSettle();
