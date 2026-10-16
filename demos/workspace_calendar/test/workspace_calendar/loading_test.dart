@@ -118,7 +118,7 @@ void main() {
     expect(find.text("May 2026"), findsOneWidget);
     await tester.tap(find.byTooltip("Previous month"));
     await tester.pumpAndSettle();
-    expect(find.text("April 2026"), findsOneWidget);
+    expect(find.text("Apr 2026"), findsOneWidget);
     await tester.tap(dayFinder(today));
     await tester.pumpAndSettle();
     await pickMode(tester, "Week");

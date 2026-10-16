@@ -453,7 +453,7 @@ void main() {
       await tester.tap(find.byTooltip("Next month"));
       await tester.pumpAndSettle();
     }
-    expect(find.text("August 2026"), findsOneWidget);
+    expect(find.text("Aug 2026"), findsOneWidget);
     expect(dayFinder(2026, 7, 31), findsNothing);
     expect(dayFinder(2026, 8, 3), findsOneWidget);
     expect(tester.getRect(monthGridFinder()).height, near(5 * 48.0));

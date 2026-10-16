@@ -75,7 +75,7 @@ void main() {
   testWidgets("E1 opens on today's month with today's items", (tester) async {
     await pumpCalendar(tester);
 
-    expect(find.text("April 2026"), findsOneWidget);
+    expect(find.text("Apr 2026"), findsOneWidget);
     expect(find.text("Agenda"), findsOneWidget);
     expect(find.text("Today, April 21"), findsOneWidget);
     expect(find.text("2 items"), findsOneWidget);
@@ -143,7 +143,7 @@ void main() {
     await pumpCalendar(tester);
 
     await tapAndSettle(tester, dayFinder(2026, 3, 31));
-    expect(find.text("March 2026"), findsOneWidget);
+    expect(find.text("Mar 2026"), findsOneWidget);
     expect(find.text("Tuesday, March 31"), findsOneWidget);
     // March 2026 starts on a Sunday and has 31 days: February 23 to
     // April 5, six weeks.
@@ -177,7 +177,7 @@ void main() {
     for (var i = 0; i < 3; i++) {
       await tapAndSettle(tester, find.byTooltip("Previous month"));
     }
-    expect(find.text("February 2026"), findsOneWidget);
+    expect(find.text("Feb 2026"), findsOneWidget);
     expect(find.text("Saturday, February 21"), findsOneWidget);
     // February 2026 starts on a Sunday and has 28 days: January 26 to
     // March 1, five weeks.
@@ -337,7 +337,7 @@ void main() {
     for (var i = 0; i < 5; i++) {
       await tapAndSettle(tester, find.byTooltip("Next month"));
     }
-    expect(find.text("September 2026"), findsOneWidget);
+    expect(find.text("Sep 2026"), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

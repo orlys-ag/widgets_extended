@@ -23,6 +23,22 @@ const List<String> monthNames = <String>[
   "December",
 ];
 
+/// The first three letters of each of [monthNames].
+const List<String> monthShortNames = <String>[
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 /// Indexed by [weekdayColumn], so Monday first.
 const List<String> weekdayNames = <String>[
   "Monday",

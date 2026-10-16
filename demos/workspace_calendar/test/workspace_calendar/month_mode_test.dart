@@ -717,7 +717,7 @@ void main() {
       expect(find.text("2026-03-31"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
-      expect(find.text("April 2026"), findsOneWidget);
+      expect(find.text("Apr 2026"), findsOneWidget);
       expect(pilledDays(tester), <DateTime>[april(21)]);
     },
   );
@@ -759,7 +759,7 @@ void main() {
 
       await tester.tap(find.byTooltip("Previous month"));
       await tester.pumpAndSettle();
-      expect(find.text("April 2026"), findsOneWidget);
+      expect(find.text("Apr 2026"), findsOneWidget);
       expect(pilledDays(tester), <DateTime>[april(21)]);
 
       await longPressDay(tester, april(30));
@@ -767,7 +767,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(30)]);
-      expect(find.text("April 2026"), findsOneWidget);
+      expect(find.text("Apr 2026"), findsOneWidget);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
@@ -793,7 +793,7 @@ void main() {
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
-      expect(find.text("April 2026"), findsOneWidget);
+      expect(find.text("Apr 2026"), findsOneWidget);
       expect(pilledDays(tester), <DateTime>[april(1)]);
       expect(tester.takeException(), isNull);
     },
@@ -811,7 +811,7 @@ void main() {
     await tester.pump(harnessLatency);
     await tester.pumpAndSettle();
     expect(pilledDays(tester), <DateTime>[april(21)]);
-    expect(find.text("April 2026"), findsOneWidget);
+    expect(find.text("Apr 2026"), findsOneWidget);
 
     await longPressDay(tester, april(30));
     await dismissPicker(tester);
@@ -821,7 +821,7 @@ void main() {
     await tester.pump(harnessLatency);
     await tester.pumpAndSettle();
     expect(pilledDays(tester), <DateTime>[april(30)]);
-    expect(find.text("April 2026"), findsOneWidget);
+    expect(find.text("Apr 2026"), findsOneWidget);
   });
 
   testWidgets(
@@ -1291,7 +1291,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(22)]);
-      expect(find.text("April 2026"), findsOneWidget);
+      expect(find.text("Apr 2026"), findsOneWidget);
     },
   );
 
@@ -1346,7 +1346,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pumpAndSettle();
     expect(monthViewport(tester).verticalPosition!.pixels, greaterThan(0.0));
-    expect(find.text("April 2026"), findsOneWidget);
+    expect(find.text("Apr 2026"), findsOneWidget);
     expect(pilledDays(tester), <DateTime>[april(30)]);
     expect(whollyInsideBoard(tester, april(30)), isTrue);
   });
@@ -1501,7 +1501,7 @@ void main() {
       await tester.pump();
       await tester.pump(harnessLatency);
       await tester.pumpAndSettle();
-      expect(find.text("March 2026"), findsOneWidget);
+      expect(find.text("Mar 2026"), findsOneWidget);
       // March 2026 runs from Sunday, March 1 to Tuesday, March 31.
       expect(filledDays(tester, MonthGrid(2026, 3)), <DateTime>[
         for (var day = 23; day <= 28; day++) DateTime(2026, 2, day),

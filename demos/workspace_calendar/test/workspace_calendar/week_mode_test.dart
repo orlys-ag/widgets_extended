@@ -339,14 +339,14 @@ void main() {
     }
     expect(headerFinder(DateTime(2026, 3, 30)), findsOneWidget);
     expect(headerFinder(DateTime(2026, 4, 5)), findsOneWidget);
-    expect(find.text("March 2026"), findsOneWidget);
+    expect(find.text("Mar 2026"), findsOneWidget);
     expect(api.requests, hasLength(requests));
 
     await tester.tap(headerFinder(DateTime(2026, 4, 2)));
     await tester.pumpAndSettle();
     await pickMode(tester, "Agenda");
     expect(find.text("Thursday, April 2"), findsOneWidget);
-    expect(find.text("April 2026"), findsOneWidget);
+    expect(find.text("Apr 2026"), findsOneWidget);
   });
 
   testWidgets("W2 a tap on an empty slot creates a Meeting", (tester) async {

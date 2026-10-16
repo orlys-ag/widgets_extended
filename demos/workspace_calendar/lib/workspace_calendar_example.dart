@@ -596,7 +596,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   _CalendarHeader _buildCalendarHeader() {
     return _CalendarHeader(
-      title: "${monthNames[_selected.month - 1]} ${_selected.year}",
+      day: _selected,
       mode: _mode,
       stepUnit: _stepUnit,
       onPrevious: () {
@@ -849,7 +849,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
 class _CalendarHeader extends StatelessWidget {
   const _CalendarHeader({
-    required this.title,
+    required this.day,
     required this.mode,
     required this.stepUnit,
     required this.onPrevious,
@@ -857,7 +857,9 @@ class _CalendarHeader extends StatelessWidget {
     required this.onModeSelected,
   });
 
-  final String title;
+  /// The selected day, whose month, in three letters, and year the title
+  /// names.
+  final DateTime day;
 
   /// The mode picked from the menu, which the label names.
   final _CalendarMode mode;
@@ -874,6 +876,33 @@ class _CalendarHeader extends StatelessWidget {
     color: HarborColors.text,
   );
 
+  /// The width of the widest of [year]'s titles as the title's [Text] lays
+  /// it out: its style merged over the default one, bold where the
+  /// platform asks for bold text, at the platform's text scale. The title
+  /// takes that width whatever the month, so the next chevron after it
+  /// stays put.
+  static double _titleWidth(BuildContext context, int year) {
+    var style = DefaultTextStyle.of(context).style.merge(_titleStyle);
+    if (MediaQuery.boldTextOf(context)) {
+      style = style.merge(const TextStyle(fontWeight: FontWeight.bold));
+    }
+    final painter = TextPainter(
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    );
+    var widest = 0.0;
+    for (final name in monthShortNames) {
+      painter.text = TextSpan(text: "$name $year", style: style);
+      painter.layout();
+      if (painter.width > widest) {
+        widest = painter.width;
+      }
+    }
+    painter.dispose();
+    return widest.ceilToDouble();
+  }
+
   @override
   Widget build(BuildContext context) {
     final unit = stepUnit.label;
@@ -889,11 +918,18 @@ class _CalendarHeader extends StatelessWidget {
                 visualDensity: VisualDensity.compact,
                 onPressed: onPrevious,
               ),
+              // Shrinks, and the title in it, only where the row is too
+              // narrow for it.
               Flexible(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(title, style: _titleStyle),
+                child: SizedBox(
+                  width: _titleWidth(context, day.year),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      "${monthShortNames[day.month - 1]} ${day.year}",
+                      style: _titleStyle,
+                    ),
+                  ),
                 ),
               ),
               IconButton(
