@@ -1692,6 +1692,9 @@ void main() {
         autoScrollEdgeZone: 48.0,
       );
       _lift(tester, s, const Offset(60.0, 60.0));
+      // The lift is inside the top zone, which holds it: 5 px toward the
+      // edge releases it, and the finger then rests.
+      _update(tester, s, const Offset(60.0, 55.0));
       var frames = 0;
       while (s.viewport.verticalPosition!.pixels > 975.0 && frames < 600) {
         await tester.pump(const Duration(milliseconds: 16));

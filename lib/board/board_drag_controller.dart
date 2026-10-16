@@ -13,6 +13,7 @@ library;
 
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
@@ -192,7 +193,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// cancelled exactly as `endDrag(cancel: true)` cancels one.
   /// [BoardDragConfig.canDrag] is not asked again: it decides whether a
   /// drag may START. A session that passes adopts the new autoscroll
-  /// zone and velocity at once and re-resolves its target after the
+  /// zone, velocity and ramp at once and re-resolves its target after the
   /// frame, so a new snap or `canDropAt` answers for the pointer where
   /// it already is.
   BoardDragConfig<TKey> get config {
@@ -214,7 +215,8 @@ class BoardDragController<TKey> extends ChangeNotifier {
     }
     session.autoScroller
       ..edgeZone = value.autoScrollEdgeZone
-      ..maxVelocity = value.autoScrollMaxVelocity;
+      ..maxVelocity = value.autoScrollMaxVelocity
+      ..rampDuration = value.autoScrollRampDuration;
     final pointer = _pointerPosition.value;
     if (pointer != null) {
       session.autoScroller.evaluate(pointer);
@@ -555,6 +557,8 @@ class BoardDragController<TKey> extends ChangeNotifier {
         port: renderPort,
         edgeZone: config.autoScrollEdgeZone,
         maxVelocity: config.autoScrollMaxVelocity,
+        rampDuration: config.autoScrollRampDuration,
+        holdsLiftZones: true,
         // The tick re-points the scroll subscriptions BEFORE its jumpTo:
         // a position swapped mid-hold leaves the listener on the dead
         // one, and with no pointer event coming, nothing else can move
@@ -602,9 +606,8 @@ class BoardDragController<TKey> extends ChangeNotifier {
     if (!identical(_session, session)) {
       return true;
     }
-    // Evaluated at start too, not only per move: a finger that lifts an
-    // item already inside an edge zone autoscrolls with no move event
-    // ever arriving.
+    // Evaluated at start too, not only per move: the first evaluation is
+    // the lift's, which holds each edge whose zone the finger lifts in.
     session.autoScroller.evaluate(local);
     notifyListeners();
     return true;
@@ -1748,14 +1751,56 @@ class BoardDragController<TKey> extends ChangeNotifier {
   }
 }
 
+/// How far, in logical pixels, a pointer moves toward a held edge, from
+/// the farthest it has been from that edge, to release the hold.
+const double _holdReleaseSlop = 4.0;
+
+/// One edge's hold: whether the edge is held, and the farthest the
+/// pointer has been from it since the hold began.
+///
+/// Distances are a paint-space coordinate that grows away from the
+/// edge, so only their differences mean anything: a hold compares the
+/// pointer with its own farthest, never with the edge.
+class _EdgeHold {
+  bool held = false;
+  double _farthest = 0.0;
+
+  void begin(double distance) {
+    held = true;
+    _farthest = distance;
+  }
+
+  /// Follows the pointer at [distance]: the farthest grows with it, and
+  /// a pointer nearer the edge than the farthest by more than
+  /// [_holdReleaseSlop] releases the hold for good.
+  void track(double distance) {
+    if (!held) {
+      return;
+    }
+    if (distance > _farthest) {
+      _farthest = distance;
+    } else if (_farthest - distance > _holdReleaseSlop) {
+      held = false;
+    }
+  }
+}
+
 /// Two-axis edge autoscroll: one per-session ticker integrating a
 /// velocity ramp into both positions.
+///
+/// Where the pointer is in a zone sets each axis's TARGET velocity; the
+/// tick drives each axis at a SPEED that follows its target, rising by at
+/// most [maxVelocity] per [rampDuration] and taking a slower target, a
+/// reversal or a stop at once, so content never jumps from rest to a
+/// fast scroll.
 class BoardAutoScroller {
   BoardAutoScroller({
     required TickerProvider vsync,
     required BoardRenderPort<Object?> port,
     required this.edgeZone,
     required this.maxVelocity,
+    this.rampDuration = Duration.zero,
+    this.holdsLiftZones = false,
     this.onTick,
   }) : _port = port {
     _ticker = vsync.createTicker(_tick);
@@ -1764,18 +1809,42 @@ class BoardAutoScroller {
   /// Runs at the head of every tick, before the positions are driven.
   final VoidCallback? onTick;
 
+  /// Whether the first [evaluate], the lift's, holds each edge whose zone
+  /// its position lies in: see [evaluate].
+  final bool holdsLiftZones;
+
   final BoardRenderPort<Object?> _port;
 
   /// Mutable because the drag controller's config is: a new config
-  /// updates a live session's zone and velocity in place.
+  /// updates a live session's zone, velocity and ramp in place.
   double edgeZone;
   double maxVelocity;
+
+  /// How long the speed takes to rise from rest to [maxVelocity]; one
+  /// that is not positive lets the speed take its target at once.
+  Duration rampDuration;
 
   late final Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
 
+  /// The paint-space velocities the pointer's place asks for, set by
+  /// [evaluate].
   double _verticalVelocity = 0.0;
   double _horizontalVelocity = 0.0;
+
+  /// The paint-space velocities the tick drives, following the targets
+  /// under the ramp; zero whenever the ticker is stopped.
+  double _verticalSpeed = 0.0;
+  double _horizontalSpeed = 0.0;
+
+  /// Whether [evaluate] has run: its first run is the lift's.
+  bool _evaluated = false;
+
+  /// The four paint-space edges' holds.
+  final _EdgeHold _topHold = _EdgeHold();
+  final _EdgeHold _bottomHold = _EdgeHold();
+  final _EdgeHold _leftHold = _EdgeHold();
+  final _EdgeHold _rightHold = _EdgeHold();
 
   /// The velocity for a finger [distanceIntoZone] pixels into an edge
   /// zone of [zone], ramping linearly to [max] at the edge itself.
@@ -1797,17 +1866,51 @@ class BoardAutoScroller {
   /// itself is choosing one of its frozen tracks and scrolls nothing on
   /// that axis. Past the viewport's own edge the finger drives at full
   /// speed, band or not.
+  ///
+  /// Under [holdsLiftZones], the first call holds each edge whose zone
+  /// [local] lies in, and a held edge drives nothing until the finger has
+  /// moved toward it by more than [_holdReleaseSlop] from the farthest it
+  /// has been from it since; a release lasts for the rest of the session.
   void evaluate(Offset local) {
     final vertical = _port.verticalPosition;
     final horizontal = _port.horizontalPosition;
     final region = _port.scrolledRegion;
     final size = _port.viewportDimension;
-    _verticalVelocity = vertical == null
+    var verticalVelocity = vertical == null
         ? 0.0
         : _axisVelocity(local.dy, region.top, region.bottom, size.height);
-    _horizontalVelocity = horizontal == null
+    var horizontalVelocity = horizontal == null
         ? 0.0
         : _axisVelocity(local.dx, region.left, region.right, size.width);
+    if (holdsLiftZones) {
+      if (!_evaluated) {
+        if (verticalVelocity < 0.0) {
+          _topHold.begin(local.dy);
+        } else if (verticalVelocity > 0.0) {
+          _bottomHold.begin(-local.dy);
+        }
+        if (horizontalVelocity < 0.0) {
+          _leftHold.begin(local.dx);
+        } else if (horizontalVelocity > 0.0) {
+          _rightHold.begin(-local.dx);
+        }
+      }
+      _topHold.track(local.dy);
+      _bottomHold.track(-local.dy);
+      _leftHold.track(local.dx);
+      _rightHold.track(-local.dx);
+      if ((verticalVelocity < 0.0 && _topHold.held) ||
+          (verticalVelocity > 0.0 && _bottomHold.held)) {
+        verticalVelocity = 0.0;
+      }
+      if ((horizontalVelocity < 0.0 && _leftHold.held) ||
+          (horizontalVelocity > 0.0 && _rightHold.held)) {
+        horizontalVelocity = 0.0;
+      }
+    }
+    _evaluated = true;
+    _verticalVelocity = verticalVelocity;
+    _horizontalVelocity = horizontalVelocity;
     // A zone whose scroll is already at its end in the direction it
     // drives starts nothing: the tick would clamp every step to where the
     // position is.
@@ -1816,10 +1919,37 @@ class BoardAutoScroller {
       _lastElapsed = Duration.zero;
       _ticker.start();
     } else if (!active && _ticker.isActive) {
-      // Reset the time base on every stop, so a later start does not
-      // integrate the gap.
-      _ticker.stop();
+      _stop();
     }
+  }
+
+  /// Stops the ticker and brings both speeds to rest, so a later start
+  /// rises from zero. [_lastElapsed] is reset at the start, so a later
+  /// start does not integrate the gap either.
+  void _stop() {
+    _ticker.stop();
+    _verticalSpeed = 0.0;
+    _horizontalSpeed = 0.0;
+  }
+
+  /// [speed] moved toward [target] by at most [maxGain] in magnitude: a
+  /// target no faster than [speed] in the same direction is taken at
+  /// once, and one in the other direction is approached from rest.
+  static double _rampedSpeed(double speed, double target, double maxGain) {
+    final from = speed * target > 0.0 ? speed : 0.0;
+    if (target.abs() <= from.abs()) {
+      return target;
+    }
+    return from + math.min(target.abs() - from.abs(), maxGain) * target.sign;
+  }
+
+  /// The most the speed may gain over [dt] seconds.
+  double _maxGainOver(double dt) {
+    final ramp = rampDuration.inMicroseconds / Duration.microsecondsPerSecond;
+    if (ramp <= 0.0) {
+      return double.infinity;
+    }
+    return maxVelocity * dt / ramp;
   }
 
   /// The paint-space velocity for a finger at [position] on an axis
@@ -1849,13 +1979,20 @@ class BoardAutoScroller {
     onTick?.call();
     final dt = (elapsed - _lastElapsed).inMicroseconds / 1e6;
     _lastElapsed = elapsed;
+    final maxGain = _maxGainOver(dt);
+    _verticalSpeed = _rampedSpeed(_verticalSpeed, _verticalVelocity, maxGain);
+    _horizontalSpeed = _rampedSpeed(
+      _horizontalSpeed,
+      _horizontalVelocity,
+      maxGain,
+    );
     // The velocities are PAINT-space: negative drives toward the painted
     // top or left edge. The scroll offset is content-space, so the step
     // passes through the one delta conversion, which negates it on a
     // reversed axis, where the content beyond the painted top edge lies at
     // GREATER offsets.
     final step = _port.contentDeltaFromPaint(
-      Offset(_horizontalVelocity * dt, _verticalVelocity * dt),
+      Offset(_horizontalSpeed * dt, _verticalSpeed * dt),
     );
     // A null position mid-drag is a defunct scrollable: stop that axis
     // and keep the session; cancellation is the backstop's job.
@@ -1863,6 +2000,7 @@ class BoardAutoScroller {
     if (_verticalVelocity != 0.0) {
       if (vertical == null) {
         _verticalVelocity = 0.0;
+        _verticalSpeed = 0.0;
       } else {
         vertical.jumpTo(
           (vertical.pixels + step.dy).clamp(
@@ -1876,6 +2014,7 @@ class BoardAutoScroller {
     if (_horizontalVelocity != 0.0) {
       if (horizontal == null) {
         _horizontalVelocity = 0.0;
+        _horizontalSpeed = 0.0;
       } else {
         horizontal.jumpTo(
           (horizontal.pixels + step.dx).clamp(
@@ -1887,11 +2026,13 @@ class BoardAutoScroller {
     }
     // Stopped once no axis can move, a zero velocity or a position at its
     // end alike, rather than ticking a clamped step every frame. The
-    // velocities stay: [evaluate], at start and on every pointer move,
-    // is the restart door, as the pointer update is for Flutter's own
-    // edge autoscroller (`widgets/scrollable_helpers.dart:282-303`).
+    // target velocities stay, and the speeds come to rest: [evaluate], at
+    // start and on every pointer move, is the restart door, as the pointer
+    // update is for Flutter's own edge autoscroller
+    // (`widgets/scrollable_helpers.dart:282-303`), and a restart rises
+    // from zero.
     if (!_canAdvance()) {
-      _ticker.stop();
+      _stop();
     }
   }
 

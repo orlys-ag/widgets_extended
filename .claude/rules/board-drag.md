@@ -262,4 +262,14 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   `contentDeltaFromPaint`, and is evaluated at `startDrag` and per
   move; it runs only while some axis has room in the content direction
   its velocity drives, stopping its ticker at the extent and restarting
-  from the next evaluation, as Flutter's own edge autoscroller does.
+  from the next evaluation, as Flutter's own edge autoscroller does. A
+  session's scroller is built with `holdsLiftZones`, a range's without:
+  its first evaluation, the lift's, HOLDS each edge whose zone the
+  pointer lies in, and a held edge drives nothing until the pointer has
+  moved toward it by more than 4 px from the farthest it has been from
+  that edge, a release lasting the session. The pointer's place sets
+  each axis's target velocity; the tick drives a SPEED that follows it,
+  rising by at most `maxVelocity` per `rampDuration`
+  (`autoScrollRampDuration`, assigned to a live session with the zone
+  and velocity) and taking a slower target, a reversal or a stop at
+  once, and every stop brings both speeds to rest.

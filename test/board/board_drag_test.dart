@@ -1126,58 +1126,6 @@ void main() {
     },
   );
 
-  // DERIVED name. The autoscroll EVALUATION at startDrag: a drag that
-  // begins with the finger already inside an edge zone must scroll
-  // without waiting for the first move event.
-  // Asserts: the vertical offset advances across pumped frames with no
-  // updateDrag issued.
-  testWidgets(
-    "a drag started inside the edge zone autoscrolls before any move",
-    (tester) async {
-      final controller = BoardController<String, _Item>(
-        vsync: tester,
-        rows: BoardAxisConfig(axis: UniformAxis(20, 50.0)),
-        columns: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
-        keyOf: (item) {
-          return item.key;
-        },
-        animationStyle: BoardAnimationStyle.disabled,
-      );
-      addTearDown(controller.dispose);
-      controller.addItem(
-        const _Item("m"),
-        const BoardSpan(rowStart: 2, colStart: 1),
-      );
-      final vertical = ScrollController();
-      addTearDown(vertical.dispose);
-      await tester.pumpWidget(_board(controller, vertical: vertical));
-      final drag = _drag(
-        tester,
-        controller,
-        BoardDragConfig<String>(onItemMoved: (key, span) {}),
-      );
-      final viewport = _viewport(tester);
-
-      // The finger starts 10 px above the bottom edge, deep inside the
-      // 48 px zone.
-      expect(
-        drag.startDrag(
-          key: "m",
-          renderPort: viewport,
-          pointerGlobal: _global(tester, const Offset(60.0, 290.0)),
-        ),
-        isTrue,
-      );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(vertical.offset, greaterThan(0.0));
-
-      drag.endDrag(cancel: true);
-      await tester.pumpAndSettle();
-    },
-  );
-
   // DERIVED name. The COMMIT handoff: the make-room preview already
   // holds displaced neighbours at their post-drop positions, and the
   // commit's mutation reassigns their structure by the same amounts, so

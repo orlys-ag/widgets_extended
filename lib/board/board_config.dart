@@ -273,6 +273,7 @@ class BoardDragConfig<TKey> {
     this.hapticsOnDrag = false,
     this.autoScrollEdgeZone = 48.0,
     this.autoScrollMaxVelocity = 1200.0,
+    this.autoScrollRampDuration = const Duration(milliseconds: 300),
     this.dragStartDelay = kLongPressTimeout,
     this.resizeHandleExtent = 12.0,
     this.onDragStart,
@@ -401,11 +402,26 @@ class BoardDragConfig<TKey> {
   /// scrolled region where a drag's pointer scrolls the board toward
   /// that edge. Measured from the region's edges, so it sits just inside
   /// a frozen band; zero turns autoscroll off.
+  ///
+  /// A drag that starts inside a zone scrolls nothing toward that edge
+  /// until the pointer moves toward it by more than 4 px from the
+  /// farthest it has been from that edge since the lift, so an item
+  /// lifted near an edge can be carried away from it without the board
+  /// moving under it. A zone the lift was not in scrolls as soon as the
+  /// pointer enters it.
   final double autoScrollEdgeZone;
 
   /// Scroll speed, in logical pixels per second, with the pointer at the
   /// edge itself; it ramps linearly from zero at the zone's inner edge.
   final double autoScrollMaxVelocity;
+
+  /// How long autoscroll takes to reach [autoScrollMaxVelocity] from
+  /// rest. The speed the pointer's place in a zone asks for is reached no
+  /// faster than that rate: it rises by at most [autoScrollMaxVelocity]
+  /// per this duration, from zero each time autoscroll starts, while a
+  /// slower speed, or a stop, is taken at once. One that is not positive
+  /// applies no limit, so the scroll starts at the speed asked for.
+  final Duration autoScrollRampDuration;
 
   /// How long a press on an item must rest before its default handle
   /// lifts it; a move past the touch slop within it gives the pointer to

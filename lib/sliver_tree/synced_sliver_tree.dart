@@ -508,6 +508,7 @@ class _SyncedSliverTreeState<TKey, TItem>
           autoExpandDelay: initialReorder.autoExpandDelay,
           autoScrollEdgeZone: initialReorder.autoScrollEdgeZone,
           autoScrollMaxVelocity: initialReorder.autoScrollMaxVelocity,
+          autoScrollRampDuration: initialReorder.autoScrollRampDuration,
         ),
         initialConfig: initialReorder,
       );
@@ -756,7 +757,8 @@ class _SyncedSliverTreeState<TKey, TItem>
       runtime.controller
         ..autoExpandDelay = reorderConfig.autoExpandDelay
         ..autoScrollEdgeZone = reorderConfig.autoScrollEdgeZone
-        ..autoScrollMaxVelocity = reorderConfig.autoScrollMaxVelocity;
+        ..autoScrollMaxVelocity = reorderConfig.autoScrollMaxVelocity
+        ..autoScrollRampDuration = reorderConfig.autoScrollRampDuration;
     }
 
     // ONE decision point. `needsSync` folds together the three reasons a
