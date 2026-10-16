@@ -1497,4 +1497,51 @@ void main() {
       expect(again.shouldRepaint(marchPainter), isFalse);
     },
   );
+
+  testWidgets(
+    "M26 a chip tells a screen reader its title, type, days and times, and "
+    "that it is pending",
+    (tester) async {
+      const latency = Duration(seconds: 1);
+      final semantics = tester.ensureSemantics();
+      await pumpMonth(
+        tester,
+        seed: <Map<String, Object?>>[
+          taskAt("Review", april(22), 10, 11),
+          taskJson("Offsite", april(18), 9 * 60, 17 * 60, dayCount: 3),
+        ],
+        latency: latency,
+      );
+      const review = "Review, Task, Wednesday, April 22, 10:00 to 11:00";
+      expect(
+        tester.getSemantics(chipFinder("item-1", april(20))).label,
+        review,
+      );
+      const offsite =
+          "Offsite, Task, Saturday, April 18 to Monday, April 20, 09:00 to "
+          "17:00 each day";
+      for (final monday in <DateTime>[april(13), april(20)]) {
+        expect(
+          tester.getSemantics(chipFinder("item-2", monday)).label,
+          offsite,
+          reason: "$monday",
+        );
+      }
+
+      await tester.tap(chipFinder("item-1", april(20)));
+      await tester.pumpAndSettle();
+      await tester.tap(formButton("Delete"));
+      await tester.pumpAndSettle();
+      await tester.tap(formButton("Delete").last);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSemantics(chipFinder("item-1", april(20))).label,
+        "$review, pending",
+      );
+
+      await tester.pump(latency);
+      await tester.pumpAndSettle();
+      semantics.dispose();
+    },
+  );
 }

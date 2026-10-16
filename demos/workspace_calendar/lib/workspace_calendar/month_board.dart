@@ -851,6 +851,30 @@ class _MonthGridPainter extends BoardBackgroundPainter {
   }
 }
 
+/// "Tuesday, April 21": [day] as the month board names it to a screen
+/// reader.
+String _dayLabel(DateTime day) {
+  return "${weekdayNames[weekdayColumn(day)]}, "
+      "${monthNames[day.month - 1]} ${day.day}";
+}
+
+/// What a screen reader says for [entry]'s chip: its title, type, days
+/// and times, and that it is pending while it is.
+String _chipLabel(ShownItem entry) {
+  final item = entry.item;
+  final times =
+      "${clockLabel(item.startMinute)} to ${clockLabel(item.endMinute)}";
+  final String when;
+  if (item.dayCount == 1) {
+    when = "${_dayLabel(item.day)}, $times";
+  } else {
+    final last = addDays(item.day, item.dayCount - 1);
+    when = "${_dayLabel(item.day)} to ${_dayLabel(last)}, $times each day";
+  }
+  final label = "${item.title}, ${item.type.label}, $when";
+  return entry.pending ? "$label, pending" : label;
+}
+
 /// One day of the month board: its empty part, where a tap creates, and
 /// over it the number strip across the top, where a tap opens the day.
 class _MonthDayCell extends StatelessWidget {
@@ -1024,16 +1048,15 @@ class _MonthChipBox extends StatelessWidget {
     if (pending) {
       bar = Opacity(opacity: 0.5, child: bar);
     }
-    return SizedBox(
-      width: double.infinity,
-      height: monthLaneExtent,
-      child: Semantics(
-        button: !pending,
-        label: pending
-            ? "${item.title}, ${item.type.label}, pending"
-            : "${item.title}, ${item.type.label}",
-        onTap: pending ? null : open,
-        excludeSemantics: true,
+    return Semantics(
+      container: true,
+      button: !pending,
+      label: _chipLabel(entry),
+      onTap: pending ? null : open,
+      excludeSemantics: true,
+      child: SizedBox(
+        width: double.infinity,
+        height: monthLaneExtent,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           // Takes a tap while pending too, doing nothing, so neither the
