@@ -2178,4 +2178,44 @@ void main() {
       (DateTime(2026, 4, 21), 13 * 60, 15 * 60),
     );
   });
+
+  testWidgets("W24 a drop as near a day either way takes the side the "
+      "item leans toward", (tester) async {
+    final api = await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+
+    /// Drops the brainstorm by its centre so its top-left corner lands on
+    /// Friday 13:00 moved [lean] of a day sideways, and returns where it
+    /// was stored.
+    Future<CalendarItem> dropLeaning(double lean) async {
+      final friday = cellRect(tester, rowOf(13 * 60), colOf(4));
+      final rect = tester.getRect(blockFinder(brainstormId));
+      final gesture = await tester.startGesture(rect.center);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await gesture.moveBy(
+        friday.topLeft - rect.topLeft + Offset(lean * friday.width, 0.0),
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await tester.pump(api.latency);
+      await tester.pumpAndSettle();
+      return stored(tester, api, brainstormId);
+    }
+
+    // Friday 13:00 lies inside "Interview: product designer", 13:00 to
+    // 14:30. An hour fits at 13:00 on Thursday and on Saturday, a day
+    // either way, nearer on this narrow window than any free hour on
+    // Friday.
+    final right = await dropLeaning(0.3);
+    expect(
+      (right.day, right.startMinute, right.endMinute),
+      (DateTime(2026, 4, 25), 13 * 60, 14 * 60),
+    );
+    final left = await dropLeaning(-0.3);
+    expect(
+      (left.day, left.startMinute, left.endMinute),
+      (DateTime(2026, 4, 23), 13 * 60, 14 * 60),
+    );
+  });
 }
