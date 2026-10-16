@@ -295,21 +295,12 @@ void main() {
     expect(tester.widget<DayCell>(dayFinder(2026, 4, 29)).isSelected, isTrue);
   });
 
-  testWidgets("E8 the Board and Table views are placeholders", (tester) async {
+  testWidgets("E8 the calendar has no Board or Table tabs", (tester) async {
     await pumpCalendar(tester);
-    await tapAndSettle(tester, dayFinder(2026, 4, 27));
 
-    await tapAndSettle(tester, find.text("Board"));
-    expect(find.text("Board view is not available yet."), findsOneWidget);
-    expect(find.byType(DayCell), findsNothing);
-    expect(find.byTooltip("Add item"), findsNothing);
-
-    await tapAndSettle(tester, find.text("Table"));
-    expect(find.text("Table view is not available yet."), findsOneWidget);
-
-    await tapAndSettle(tester, find.text("Calendar"));
-    expect(find.text("Monday, April 27"), findsOneWidget);
-    expect(tester.widget<DayCell>(dayFinder(2026, 4, 27)).isSelected, isTrue);
+    expect(find.text("Calendar"), findsNothing);
+    expect(find.text("Board"), findsNothing);
+    expect(find.text("Table"), findsNothing);
   });
 
   testWidgets("E9 the columns fit the width, before and after it changes", (
@@ -355,5 +346,46 @@ void main() {
 
     await tapAndSettle(tester, find.byTooltip("More"));
     expect(find.text("More options are not available yet."), findsOneWidget);
+  });
+
+  testWidgets("E12 the month folds and unfolds over 300 ms on "
+      "fastOutSlowIn", (tester) async {
+    await pumpCalendar(tester);
+    final row = rowHeight(tester);
+    final month = gridHeight(tester);
+
+    /// The grid's height [elapsed] into a fold.
+    double foldedAt(Duration elapsed) {
+      final t = Curves.fastOutSlowIn.transform(elapsed.inMicroseconds / 300000);
+      return month + (row - month) * t;
+    }
+
+    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    // The fold's clock starts on the first frame.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      gridHeight(tester),
+      moreOrLessEquals(foldedAt(const Duration(milliseconds: 100))),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      gridHeight(tester),
+      moreOrLessEquals(foldedAt(const Duration(milliseconds: 200))),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(gridHeight(tester), row);
+
+    // Once the fold settles, the unfold runs the same curve back.
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(DayList), const Offset(0.0, 120.0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      gridHeight(tester),
+      moreOrLessEquals(foldedAt(const Duration(milliseconds: 200))),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(gridHeight(tester), month);
   });
 }

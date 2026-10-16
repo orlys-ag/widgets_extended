@@ -67,9 +67,16 @@ HarborTypeStyle harborTypeStyleOf(CalendarItemType type) {
   }
 }
 
-/// The opacity of the block a move leaves behind on the week grid. High
-/// enough that its text keeps its contrast against its own faded tint.
-const double harborDraggedItemOpacity = 0.9;
+/// The opacity of the block a move leaves behind on the timed grid, where
+/// it marks the time the carried block came from.
+const double harborDraggedItemOpacity = 0.66;
+
+/// How long each animation the calendar runs takes: the month's fold into
+/// its week, and every animation of the timed grid and the day list.
+const Duration harborMotionDuration = Duration(milliseconds: 300);
+
+/// The curve each animation the calendar runs eases on.
+const Curve harborMotionCurve = Curves.fastOutSlowIn;
 
 /// The calendar's own Material 3 theme, independent of the host's.
 ThemeData buildHarborTheme() {

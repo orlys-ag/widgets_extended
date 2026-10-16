@@ -37,8 +37,11 @@ int _openingMinuteOf(GridTracks tracks, DateTime now) {
   return minute.clamp(hours.start, hours.end - minutesPerSlot);
 }
 
-/// The style the grid animates its blocks with: the board's default.
-const BoardAnimationStyle timedGridAnimationStyle = BoardAnimationStyle();
+/// The style the grid animates its blocks with: every family over
+/// [harborMotionDuration] on [harborMotionCurve].
+const BoardAnimationStyle timedGridAnimationStyle = BoardAnimationStyle.uniform(
+  BoardAnimationSpec(duration: harborMotionDuration, curve: harborMotionCurve),
+);
 
 /// The key of the day header cell showing [day].
 ValueKey<String> dayHeaderKey(DateTime day) {
@@ -79,6 +82,27 @@ String landingLabel(ItemShape shape, DateTime today) {
   }
   return "$day, $times, ${shape.dayCount} days";
 }
+
+/// The key of the shadow under the block a move carries.
+const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
+
+/// The shadow under the block a move carries once it has lifted. Spread
+/// in by the 1 px margin round each block, so it falls from the block's
+/// painted edge.
+const List<BoxShadow> liftedBlockShadows = <BoxShadow>[
+  BoxShadow(
+    color: Color(0x33000000),
+    offset: Offset(0.0, 4.0),
+    blurRadius: 8.0,
+    spreadRadius: -1.0,
+  ),
+  BoxShadow(
+    color: Color(0x1F000000),
+    offset: Offset(0.0, 1.0),
+    blurRadius: 3.0,
+    spreadRadius: -1.0,
+  ),
+];
 
 /// The slots a create gesture picked: [dayCount] days from [day], each
 /// from [startMinute] to [endMinute].
@@ -460,7 +484,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// shows of the day it was dropped on or of the day before or after it,
   /// however busy the time around it is. A resize it refuses for meeting
   /// another item stops its dragged edge at that item. The drag reports
-  /// keep [_drag], which the landing label and outline show.
+  /// keep [_drag], which the landing label and outline show. A drag's
+  /// start plays a haptic, and the block a move carries casts a shadow.
   late final BoardDragConfig<String> _dragConfig = BoardDragConfig<String>(
     canDrag: _canDrag,
     canDropAt: _canDropAt,
@@ -477,6 +502,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         : BoardResizeEdges.none,
     primaryResizeEdges: BoardResizeEdges.both,
     draggedItemOpacity: harborDraggedItemOpacity,
+    dragProxyBuilder: _buildLiftedBlock,
+    hapticsOnDrag: true,
     onDragStart: _handleDragStart,
     onDragTargetChanged: _handleDragTarget,
     onDragEnd: _handleDragEnd,
@@ -915,6 +942,33 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     setState(() {
       _drag = null;
     });
+  }
+
+  /// The block a move carries, [proxy], over [liftedBlockShadows], which
+  /// ease in from none over the lift. The board calls this on every
+  /// pointer move with a tree of the same shape, so the lift runs once a
+  /// drag, from the frame the block lifts.
+  Widget _buildLiftedBlock(BuildContext context, String id, Widget proxy) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.0, end: 1.0),
+      duration: harborMotionDuration,
+      curve: harborMotionCurve,
+      child: proxy,
+      builder: (context, lift, child) {
+        return DecoratedBox(
+          key: liftedBlockKey,
+          decoration: BoxDecoration(
+            boxShadow: <BoxShadow>[
+              for (final shadow in liftedBlockShadows)
+                shadow.copyWith(
+                  color: shadow.color.withValues(alpha: shadow.color.a * lift),
+                ),
+            ],
+          ),
+          child: child,
+        );
+      },
+    );
   }
 
   /// What the landing label says for [_drag]: the day and times a release

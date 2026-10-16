@@ -80,13 +80,6 @@ void main() {
           .first,
     );
     expect(scaffoldMaterial.color, HarborColors.background);
-    final segment = tester.widget<Material>(
-      find
-          .ancestor(of: find.text("Calendar"), matching: find.byType(Material))
-          .first,
-    );
-    expect(segment.color, HarborColors.primaryTint);
-    expect(textColorOf(tester, find.text("Calendar")), HarborColors.primary);
 
     // Today is selected: its pill is primary with a white number.
     final todayCell = dayFinder(today);

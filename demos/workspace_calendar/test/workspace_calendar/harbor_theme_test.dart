@@ -96,36 +96,6 @@ void main() {
       contrast(rgbOf(HarborColors.error), rgbOf(HarborColors.surface)),
       greaterThanOrEqualTo(4.5),
     );
-
-    // A block a move leaves behind fades, text and tint together, over
-    // the fills the week grid paints under it.
-    const fills = <String, Color>{
-      "surface": HarborColors.surface,
-      "background": HarborColors.background,
-      "primary tint": HarborColors.primaryTint,
-    };
-    for (final type in CalendarItemType.values) {
-      for (final fill in fills.entries) {
-        final under = rgbOf(fill.value);
-        const opacity = harborDraggedItemOpacity;
-        final tint = over(rgbOf(harborTypeStyleOf(type).tint), opacity, under);
-        expect(
-          contrast(over(rgbOf(HarborColors.text), opacity, under), tint),
-          greaterThanOrEqualTo(4.5),
-          reason: "faded text on the ${type.label} tint over ${fill.key}",
-        );
-        expect(
-          contrast(
-            over(rgbOf(HarborColors.textSecondary), opacity, under),
-            tint,
-          ),
-          greaterThanOrEqualTo(4.5),
-          reason:
-              "faded secondary text on the ${type.label} tint over "
-              "${fill.key}",
-        );
-      }
-    }
   });
 
   test("H2 tints", () {

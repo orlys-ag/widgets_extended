@@ -16,9 +16,8 @@
 /// caches the days it has read and writes one change per item at a time.
 /// The settings sheet chooses whether the weekends show, the hours the
 /// calendar shows and schedules in, and the least size of the timed grids'
-/// cells. A selected day is always on a shown weekday. The Board and Table
-/// views are placeholders, and More only reports that it is not
-/// available.
+/// cells. A selected day is always on a shown weekday. More only reports
+/// that it is not available.
 library;
 
 import 'dart:ui' show lerpDouble;
@@ -37,16 +36,6 @@ import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
-
-enum _WorkspaceView {
-  calendar("Calendar"),
-  board("Board"),
-  table("Table");
-
-  const _WorkspaceView(this.label);
-
-  final String label;
-}
 
 enum _CalendarMode {
   month("Month"),
@@ -133,8 +122,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// The month of [_selected], which is the lattice the board shows.
   late MonthGrid _grid = MonthGrid.of(_selected, weekdays: _settings.weekdays);
 
-  _WorkspaceView _view = _WorkspaceView.calendar;
-
   /// The view picked from the menu.
   _CalendarMode _mode = _CalendarMode.month;
 
@@ -150,11 +137,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   late final AnimationController _collapseController = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 250),
+    duration: harborMotionDuration,
   );
   late final CurvedAnimation _collapse = CurvedAnimation(
     parent: _collapseController,
-    curve: Curves.easeInOut,
+    curve: harborMotionCurve,
   );
 
   late final BoardController<Object, Object> _board;
@@ -311,11 +298,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _showRange();
   }
 
-  /// The calendar tab's week mode, on the selected day's week.
+  /// The week mode, on the selected day's week.
   void _openWeekMode() {
-    setState(() {
-      _view = _WorkspaceView.calendar;
-    });
     _setMode(_CalendarMode.week);
   }
 
@@ -442,16 +426,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   @override
   Widget build(BuildContext context) {
-    final Widget body;
-    switch (_view) {
-      case _WorkspaceView.calendar:
-        body = _buildCalendarView();
-      case _WorkspaceView.board:
-      case _WorkspaceView.table:
-        body = _PlaceholderView(name: _view.label);
-    }
-    final showsTimedGrid =
-        _view == _WorkspaceView.calendar && _mode != _CalendarMode.month;
+    final showsTimedGrid = _mode != _CalendarMode.month;
     return Scaffold(
       appBar: AppBar(
         scrolledUnderElevation: 0.0,
@@ -488,34 +463,17 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           ),
         ],
       ),
-      floatingActionButton:
-          _view == _WorkspaceView.calendar && _mode == _CalendarMode.month
-          ? FloatingActionButton(
+      floatingActionButton: showsTimedGrid
+          ? null
+          : FloatingActionButton(
               tooltip: "Add item",
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12.0),
               ),
               onPressed: _openWeekMode,
               child: const Icon(Icons.add),
-            )
-          : null,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 0.0),
-            child: _ViewSwitcher(
-              selected: _view,
-              onSelected: (view) {
-                setState(() {
-                  _view = view;
-                });
-              },
             ),
-          ),
-          Expanded(child: body),
-        ],
-      ),
+      body: _buildCalendarView(),
     );
   }
 
@@ -725,73 +683,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 }
 
-class _ViewSwitcher extends StatelessWidget {
-  const _ViewSwitcher({required this.selected, required this.onSelected});
-
-  final _WorkspaceView selected;
-  final ValueChanged<_WorkspaceView> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final segments = <Widget>[];
-    for (final view in _WorkspaceView.values) {
-      if (segments.isNotEmpty) {
-        segments.add(
-          const VerticalDivider(
-            width: 1.0,
-            thickness: 1.0,
-            color: HarborColors.outline,
-          ),
-        );
-      }
-      final isSelected = view == selected;
-      segments.add(
-        Expanded(
-          child: Semantics(
-            selected: isSelected,
-            child: Material(
-              color: isSelected
-                  ? HarborColors.primaryTint
-                  : HarborColors.surface,
-              child: InkWell(
-                onTap: () {
-                  onSelected(view);
-                },
-                child: Center(
-                  child: Text(
-                    view.label,
-                    style: TextStyle(
-                      fontSize: 14.0,
-                      fontWeight: FontWeight.w600,
-                      color: isSelected
-                          ? HarborColors.primary
-                          : HarborColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    return Container(
-      height: 40.0,
-      decoration: BoxDecoration(
-        border: Border.all(color: HarborColors.outline),
-        borderRadius: BorderRadius.circular(10.0),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(9.0),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: segments,
-        ),
-      ),
-    );
-  }
-}
-
 class _CalendarHeader extends StatelessWidget {
   const _CalendarHeader({
     required this.title,
@@ -951,25 +842,6 @@ class _DayHeader extends StatelessWidget {
             ),
           ),
       ],
-    );
-  }
-}
-
-class _PlaceholderView extends StatelessWidget {
-  const _PlaceholderView({required this.name});
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        "$name view is not available yet.",
-        style: const TextStyle(
-          fontSize: 15.0,
-          color: HarborColors.textSecondary,
-        ),
-      ),
     );
   }
 }

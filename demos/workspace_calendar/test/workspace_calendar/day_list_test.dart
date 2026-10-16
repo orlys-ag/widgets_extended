@@ -216,4 +216,22 @@ void main() {
     expect(fadeOf(tester, cardFinder(brainstormId)), 1.0);
     expect(find.text("Deleting failed."), findsOneWidget);
   });
+
+  testWidgets("L5 the list animates every family over 300 ms on "
+      "fastOutSlowIn", (tester) async {
+    await pumpCalendar(tester);
+
+    final list = tester.widget<SyncedSliverTree<String, ShownItem>>(
+      find.byType(SyncedSliverTree<String, ShownItem>),
+    );
+    for (final family in TreeAnimationFamily.values) {
+      final spec = list.animationStyle.specFor(family);
+      expect(
+        spec.duration,
+        const Duration(milliseconds: 300),
+        reason: "$family",
+      );
+      expect(spec.curve, Curves.fastOutSlowIn, reason: "$family");
+    }
+  });
 }

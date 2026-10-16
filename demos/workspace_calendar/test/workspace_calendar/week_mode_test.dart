@@ -17,6 +17,7 @@ import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -1052,21 +1053,6 @@ void main() {
 
     await pickMode(tester, "Month");
     await tester.tap(find.byTooltip("Add item"));
-    await tester.pumpAndSettle();
-    expect(blockFinder(designCritiqueId), findsOneWidget);
-
-    // From the Board tab, whatever the calendar's mode.
-    await tester.tap(find.text("Board"));
-    await tester.pumpAndSettle();
-    expect(find.byTooltip("Add"), findsOneWidget);
-    await tester.tap(find.byTooltip("Add"));
-    await tester.pumpAndSettle();
-    expect(blockFinder(designCritiqueId), findsOneWidget);
-
-    await pickMode(tester, "Month");
-    await tester.tap(find.text("Board"));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip("Add"));
     await tester.pumpAndSettle();
     expect(blockFinder(designCritiqueId), findsOneWidget);
   });
@@ -2217,5 +2203,137 @@ void main() {
       (left.day, left.startMinute, left.endMinute),
       (DateTime(2026, 4, 23), 13 * 60, 14 * 60),
     );
+  });
+
+  testWidgets("W25 the grid animates every family over 300 ms on "
+      "fastOutSlowIn", (tester) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+
+    final board = tester.widget<Board<String, ShownItem>>(
+      find.byType(Board<String, ShownItem>),
+    );
+    for (final family in BoardAnimationFamily.values) {
+      final spec = board.controller.animationStyle.specFor(family);
+      expect(
+        spec.duration,
+        const Duration(milliseconds: 300),
+        reason: "$family",
+      );
+      expect(spec.curve, Curves.fastOutSlowIn, reason: "$family");
+    }
+  });
+
+  testWidgets("W26 a move and a resize start with a medium haptic", (
+    tester,
+  ) async {
+    final haptics = <Object?>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == "HapticFeedback.vibrate") {
+        haptics.add(call.arguments);
+      }
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+    final api = await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    expect(haptics, isEmpty);
+
+    // A long press lifts the brainstorm.
+    final lifted = tester.getRect(blockFinder(brainstormId));
+    final move = await tester.startGesture(lifted.center);
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    expect(haptics, <Object?>["HapticFeedbackType.mediumImpact"]);
+    await move.up();
+    await tester.pumpAndSettle();
+
+    // A drag on its bottom strip resizes it.
+    final resized = tester.getRect(blockFinder(brainstormId));
+    final resize = await tester.startGesture(
+      Offset(resized.center.dx, resized.bottom - 3.0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await resize.moveBy(const Offset(0.0, 20.0));
+    await tester.pump();
+    expect(haptics, <Object?>[
+      "HapticFeedbackType.mediumImpact",
+      "HapticFeedbackType.mediumImpact",
+    ]);
+    await resize.up();
+    await tester.pumpAndSettle();
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("W27 a lifted block casts a shadow that eases in over 300 ms "
+      "on fastOutSlowIn", (tester) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+
+    /// [liftedBlockShadows] at the share of the lift [elapsed] reaches.
+    List<BoxShadow> liftedAt(Duration elapsed) {
+      final lift = Curves.fastOutSlowIn.transform(
+        elapsed.inMicroseconds / 300000,
+      );
+      return <BoxShadow>[
+        for (final shadow in liftedBlockShadows)
+          shadow.copyWith(
+            color: shadow.color.withValues(alpha: shadow.color.a * lift),
+          ),
+      ];
+    }
+
+    List<BoxShadow>? shadows() {
+      final box = tester.widget<DecoratedBox>(find.byKey(liftedBlockKey));
+      return (box.decoration as BoxDecoration).boxShadow;
+    }
+
+    final rect = tester.getRect(blockFinder(brainstormId));
+    final gesture = await tester.startGesture(rect.center);
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    expect(
+      find.descendant(
+        of: find.byKey(liftedBlockKey),
+        matching: blockFinder(brainstormId),
+      ),
+      findsOneWidget,
+    );
+    expect(shadows(), liftedAt(Duration.zero));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(shadows(), liftedAt(const Duration(milliseconds: 150)));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(shadows(), liftedBlockShadows);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.byKey(liftedBlockKey), findsNothing);
+  });
+
+  testWidgets("W28 a move leaves its block behind at 0.66 opacity", (
+    tester,
+  ) async {
+    final api = await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+
+    final rect = tester.getRect(blockFinder(brainstormId));
+    final gesture = await tester.startGesture(rect.center);
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await gesture.moveBy(Offset(0.0, 2 * rect.height));
+    await tester.pump();
+    // The one fade on screen is the block left behind: the carried one
+    // paints at full strength.
+    final fades = <int>[
+      for (final layer in tester.layers.whereType<OpacityLayer>())
+        if ((layer.alpha ?? 255) < 255) layer.alpha!,
+    ];
+    expect(fades, <int>[Color.getAlphaFromOpacity(0.66)]);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
   });
 }

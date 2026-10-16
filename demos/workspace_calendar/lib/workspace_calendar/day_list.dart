@@ -10,6 +10,18 @@ import 'calendar_model.dart';
 import 'harbor_theme.dart';
 import 'item_card.dart';
 
+/// The style the day list animates its cards with: every family over
+/// [harborMotionDuration] on [harborMotionCurve].
+const TreeAnimationStyle dayListAnimationStyle = TreeAnimationStyle(
+  expandCollapse: _dayListAnimationSpec,
+  reorderSlide: _dayListAnimationSpec,
+);
+
+const TreeAnimationSpec _dayListAnimationSpec = TreeAnimationSpec(
+  duration: harborMotionDuration,
+  curve: harborMotionCurve,
+);
+
 /// The cards of [entries] on a flat [SyncedSliverTree], which removes a
 /// card through an exit animation and slides the cards a reorder moves.
 /// While [status] is not ready, a progress indicator, or [error] and a
@@ -91,6 +103,7 @@ class DayList extends StatelessWidget {
             // A flat list has no expansion to run or remember.
             initiallyExpanded: false,
             expansionMemory: 0,
+            animationStyle: dayListAnimationStyle,
             itemBuilder: (context, node) {
               final entry = node.item;
               return Padding(
