@@ -1612,4 +1612,27 @@ void main() {
       semantics.dispose();
     },
   );
+
+  testWidgets(
+    "M28 Month's weekday letters and board run the body's full width and "
+    "down to its bottom, under the header card Week shows",
+    (tester) async {
+      await pumpCalendar(tester);
+      await pickMode(tester, "Week");
+      final week = tester.getRect(find.byType(TimedGrid));
+
+      await pickMode(tester, "Month");
+      final letters = tester.getRect(
+        find.byKey(const ValueKey<String>("weekday-header")),
+      );
+      final board = tester.getRect(monthBoardFinder());
+      expect(letters.top, near(week.top));
+      expect(letters.left, near(0.0));
+      expect(letters.right, near(390.0));
+      expect(board.top, near(letters.bottom));
+      expect(board.left, near(0.0));
+      expect(board.right, near(390.0));
+      expect(board.bottom, near(week.bottom));
+    },
+  );
 }

@@ -609,6 +609,24 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
+  /// The header on a card of its own, above the grids of Month, Week and
+  /// Day.
+  Widget _buildHeaderCard() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 8.0),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: HarborColors.surface,
+          borderRadius: BorderRadius.circular(16.0),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: _buildCalendarHeader(),
+        ),
+      ),
+    );
+  }
+
   /// The month grid and the day list in Agenda; the month board in Month;
   /// a timed grid of [_timedDays], across the body's full width, otherwise.
   Widget _buildCalendarView() {
@@ -620,19 +638,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 8.0),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: HarborColors.surface,
-                borderRadius: BorderRadius.circular(16.0),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: _buildCalendarHeader(),
-              ),
-            ),
-          ),
+          _buildHeaderCard(),
           Expanded(
             child: TimedGrid(
               // Each mode builds its own grid, which opens scrolled to its
@@ -709,43 +715,41 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// The header card filling the body: the header, the weekday letters
-  /// and the month board under them.
+  /// The header card, and under it, on the surface colour across the
+  /// body's full width and down to its bottom as the timed grids are, the
+  /// weekday letters and the month board.
   Widget _buildMonthView() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 0.0),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: HarborColors.surface,
-          borderRadius: BorderRadius.circular(16.0),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 12.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              _buildCalendarHeader(),
-              const SizedBox(height: 4.0),
-              _WeekdayHeader(weekdays: _settings.weekdays),
-              Expanded(
-                child: MonthBoard(
-                  key: const ValueKey<String>("month-board"),
-                  model: _model,
-                  grid: _grid,
-                  selectedDay: _selected,
-                  today: _today,
-                  onSelectDay: _select,
-                  onOpenDay: _openDayMode,
-                  onCreateOnDay: _createOn,
-                  onOpenItem: (id) {
-                    showEditForm(context, model: _model, id: id);
-                  },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _buildHeaderCard(),
+        Expanded(
+          child: ColoredBox(
+            color: HarborColors.surface,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                _WeekdayHeader(weekdays: _settings.weekdays),
+                Expanded(
+                  child: MonthBoard(
+                    key: const ValueKey<String>("month-board"),
+                    model: _model,
+                    grid: _grid,
+                    selectedDay: _selected,
+                    today: _today,
+                    onSelectDay: _select,
+                    onOpenDay: _openDayMode,
+                    onCreateOnDay: _createOn,
+                    onOpenItem: (id) {
+                      showEditForm(context, model: _model, id: id);
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 
