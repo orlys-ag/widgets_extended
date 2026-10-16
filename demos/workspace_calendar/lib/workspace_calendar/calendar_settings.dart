@@ -1,5 +1,6 @@
 /// What the calendar's settings choose: the weekdays it shows, the hours
-/// it shows and schedules in, and the size of the timed grid's cells.
+/// it shows and schedules in, how Month fits its weeks, and the size of
+/// the timed grid's cells.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -80,14 +81,31 @@ const double minSlotHeightHigh = 48.0;
 /// The slot height the grid has before the settings change it.
 const double defaultMinSlotHeight = 16.0;
 
+/// How Month lays out a week whose chips need more lanes than its share
+/// of the board's height holds.
+enum MonthLayout {
+  /// The week grows to hold every chip, and the month scrolls.
+  showAll("Show all items"),
+
+  /// Every week keeps its share of the board's height, so the month fits
+  /// on the screen; a day shows the chips that fit and how many it hides.
+  fitScreen("Fit to screen");
+
+  const MonthLayout(this.label);
+
+  /// The layout's name in the settings sheet.
+  final String label;
+}
+
 /// What the settings sheet chooses: the [weekdays] the calendar shows, the
-/// [hours] it shows and schedules in, and the least size of the timed
-/// grid's cells, which stretch past it to fill the grid.
+/// [hours] it shows and schedules in, Month's [monthLayout], and the least
+/// size of the timed grid's cells, which stretch past it to fill the grid.
 @immutable
 class CalendarSettings {
   const CalendarSettings({
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
+    this.monthLayout = MonthLayout.showAll,
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
   });
@@ -98,6 +116,8 @@ class CalendarSettings {
 
   final DayHours hours;
 
+  final MonthLayout monthLayout;
+
   /// The least width of a day column, in logical pixels.
   final double minDayWidth;
 
@@ -107,12 +127,14 @@ class CalendarSettings {
   CalendarSettings copyWith({
     WeekdaySet? weekdays,
     DayHours? hours,
+    MonthLayout? monthLayout,
     double? minDayWidth,
     double? minSlotHeight,
   }) {
     return CalendarSettings(
       weekdays: weekdays ?? this.weekdays,
       hours: hours ?? this.hours,
+      monthLayout: monthLayout ?? this.monthLayout,
       minDayWidth: minDayWidth ?? this.minDayWidth,
       minSlotHeight: minSlotHeight ?? this.minSlotHeight,
     );
@@ -123,18 +145,25 @@ class CalendarSettings {
     return other is CalendarSettings &&
         other.weekdays == weekdays &&
         other.hours == hours &&
+        other.monthLayout == monthLayout &&
         other.minDayWidth == minDayWidth &&
         other.minSlotHeight == minSlotHeight;
   }
 
   @override
   int get hashCode {
-    return Object.hash(weekdays, hours, minDayWidth, minSlotHeight);
+    return Object.hash(
+      weekdays,
+      hours,
+      monthLayout,
+      minDayWidth,
+      minSlotHeight,
+    );
   }
 
   @override
   String toString() {
-    return "CalendarSettings($weekdays, $hours, day width $minDayWidth, "
-        "slot height $minSlotHeight)";
+    return "CalendarSettings($weekdays, $hours, ${monthLayout.name}, "
+        "day width $minDayWidth, slot height $minSlotHeight)";
   }
 }

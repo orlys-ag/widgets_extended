@@ -164,4 +164,26 @@ void main() {
       expect(workweek.hashCode == settings.hashCode, isFalse);
     });
   });
+
+  group("C6 CalendarSettings month layout", () {
+    test("starts on Show all items and takes part in copyWith and ==", () {
+      const settings = CalendarSettings();
+      expect(settings.monthLayout, MonthLayout.showAll);
+      final fit = settings.copyWith(monthLayout: MonthLayout.fitScreen);
+      expect(fit.monthLayout, MonthLayout.fitScreen);
+      expect(
+        fit.copyWith(minSlotHeight: 20.0).monthLayout,
+        MonthLayout.fitScreen,
+      );
+      expect(fit == settings, isFalse);
+      final again = settings.copyWith(monthLayout: MonthLayout.fitScreen);
+      expect(fit == again, isTrue);
+      expect(fit.hashCode == settings.hashCode, isFalse);
+    });
+
+    test("names each layout", () {
+      expect(MonthLayout.showAll.label, "Show all items");
+      expect(MonthLayout.fitScreen.label, "Fit to screen");
+    });
+  });
 }

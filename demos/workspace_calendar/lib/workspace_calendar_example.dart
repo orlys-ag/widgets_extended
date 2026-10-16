@@ -14,18 +14,20 @@
 /// day in another month, by a tap on a muted day, the chevrons or a key,
 /// switches the board to that month.
 ///
-/// Month's grid is a [MonthBoard], whose weeks fill the screen and grow
-/// with their chips. A tap on a chip edits its item, and a tap anywhere
-/// else on a day opens that day in Day. A long press on a day creates an
+/// Month's grid is a [MonthBoard], whose weeks fill the screen. Under the
+/// settings' Show all items they grow with their chips; under Fit to
+/// screen they keep their share, and a busy day shows the chips that fit
+/// and "+N more". A tap on a chip edits its item, and a tap anywhere else
+/// on a day opens that day in Day. A long press on a day creates an
 /// item there at the day's first free hour, selecting the day when it is
 /// in the month. Its keys and chevrons move the selected day as Agenda's
 /// do.
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
-/// The settings sheet chooses whether the weekends show, the hours the
-/// calendar shows and schedules in, and the least size of the timed grids'
-/// cells. A selected day is always on a shown weekday. More only reports
+/// The settings sheet chooses whether the weekends show, how Month fits
+/// its weeks, the hours the calendar shows and schedules in, and the least
+/// size of the timed grids' cells. A selected day is always on a shown weekday. More only reports
 /// that it is not available.
 library;
 
@@ -735,6 +737,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                     key: const ValueKey<String>("month-board"),
                     model: _model,
                     grid: _grid,
+                    layout: _settings.monthLayout,
                     selectedDay: _selected,
                     today: _today,
                     onSelectDay: _select,

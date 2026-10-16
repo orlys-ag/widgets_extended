@@ -13,6 +13,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_model.dart';
+import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
@@ -33,6 +34,14 @@ double fittedWeekExtent(double height, int weekCount) {
   }
   final share = (height / weekCount * 64.0).floorToDouble() / 64.0;
   return math.max(share, least);
+}
+
+/// The lanes a week resting at [extent] holds below its number strip: the
+/// whole lanes that fit, and at least one.
+int monthLanesThatFit(double extent) {
+  assert(extent.isFinite);
+  final lanes = ((extent - monthStripHeight) / monthLaneExtent).floor();
+  return math.max(lanes, 1);
 }
 
 /// The style the month board animates with: every family over
@@ -202,13 +211,123 @@ int compareMonthChips(MonthChip a, MonthChip b) {
   return a.entry.id.compareTo(b.entry.id);
 }
 
+/// What a month board of [grid] shows of [placements] when each week holds
+/// at most [lanes] lanes: the placements it keeps, in their order, and how
+/// many chips each cell hides, at `row * columnCount + col`.
+///
+/// The lanes are the board's own: in each week, the chips ordered by their
+/// first column, then by their last, later first, then by
+/// [compareMonthChips], each in the lowest lane that no earlier chip holds
+/// on its first column. A week whose chips need no more than [lanes] lanes
+/// keeps them all. In any other, a day under a chip past the last lane
+/// hides that chip and the chip in its last lane, which leaves the last
+/// lane free there to say how many chips the day hides, and a chip hidden
+/// on one of its days hides on all of them. A kept chip keeps its lane on
+/// the board, since the chips that push it there hold the lanes below the
+/// last, and those always show.
+({List<BoardPlacement<MonthChip>> shown, Int32List hidden}) fitMonthPlacements(
+  List<BoardPlacement<MonthChip>> placements,
+  MonthGrid grid,
+  int lanes,
+) {
+  assert(lanes >= 1);
+  final columns = grid.columnCount;
+  final hidden = Int32List(grid.weekCount * columns);
+  final weeks = <List<int>>[
+    for (var row = 0; row < grid.weekCount; row++) <int>[],
+  ];
+  for (var i = 0; i < placements.length; i++) {
+    weeks[placements[i].span.rowStart].add(i);
+  }
+  final laneOfChip = Int32List(placements.length);
+  final hides = List<bool>.filled(placements.length, false);
+  var hidesAny = false;
+  for (var row = 0; row < weeks.length; row++) {
+    final week = weeks[row];
+    week.sort((a, b) {
+      final x = placements[a].span;
+      final y = placements[b].span;
+      final byFirst = x.colStart.compareTo(y.colStart);
+      if (byFirst != 0) {
+        return byFirst;
+      }
+      final byLast = (y.colStart + y.colSpan).compareTo(x.colStart + x.colSpan);
+      if (byLast != 0) {
+        return byLast;
+      }
+      return compareMonthChips(placements[a].item, placements[b].item);
+    });
+    // The column after the last chip in each lane so far.
+    final laneEnds = <int>[];
+    for (final i in week) {
+      final span = placements[i].span;
+      var lane = 0;
+      while (lane < laneEnds.length && laneEnds[lane] > span.colStart) {
+        lane++;
+      }
+      if (lane == laneEnds.length) {
+        laneEnds.add(0);
+      }
+      laneEnds[lane] = span.colStart + span.colSpan;
+      laneOfChip[i] = lane;
+    }
+    if (laneEnds.length <= lanes) {
+      continue;
+    }
+    final overflowing = List<bool>.filled(columns, false);
+    for (final i in week) {
+      if (laneOfChip[i] >= lanes) {
+        final span = placements[i].span;
+        for (
+          var col = span.colStart;
+          col < span.colStart + span.colSpan;
+          col++
+        ) {
+          overflowing[col] = true;
+        }
+      }
+    }
+    for (final i in week) {
+      final span = placements[i].span;
+      final end = span.colStart + span.colSpan;
+      var hide = laneOfChip[i] >= lanes;
+      if (!hide && laneOfChip[i] == lanes - 1) {
+        for (var col = span.colStart; col < end && !hide; col++) {
+          hide = overflowing[col];
+        }
+      }
+      if (!hide) {
+        continue;
+      }
+      hides[i] = true;
+      hidesAny = true;
+      for (var col = span.colStart; col < end; col++) {
+        hidden[row * columns + col]++;
+      }
+    }
+  }
+  if (!hidesAny) {
+    return (shown: placements, hidden: hidden);
+  }
+  return (
+    shown: <BoardPlacement<MonthChip>>[
+      for (var i = 0; i < placements.length; i++)
+        if (!hides[i]) placements[i],
+    ],
+    hidden: hidden,
+  );
+}
+
 /// The month of [grid] on the board, showing what [model] shows for its
 /// days.
 ///
-/// The weeks fill the board's height and grow, past that, to hold their
-/// chips; the board then scrolls. Each day shows its number in a strip
-/// across its top, today's in the primary colour and the selected day's on
-/// the primary pill. Each item shows as one bar per calendar week it
+/// The weeks fill the board's height. Under [MonthLayout.showAll] they
+/// grow, past that, to hold their chips, and the board then scrolls; under
+/// [MonthLayout.fitScreen] each holds the lanes that fit
+/// ([monthLanesThatFit]), [fitMonthPlacements] chooses the chips it shows,
+/// and a day that hides some says "+N more" in its last lane. Each day
+/// shows its number in a strip across its top, today's in the primary
+/// colour and the selected day's on the primary pill. Each item shows as one bar per calendar week it
 /// covers, a chip one lane tall in its type's colours, square where it
 /// continues into the week before or after; a pending item's chip is
 /// dimmed and takes no tap. Lines part the weeks and the days, and each
@@ -223,12 +342,14 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// model animates; a new month or a new set of weekdays does not, and
 /// settles at once whatever chip was still growing in or shrinking out. A
 /// new size alone refits the weeks at once and leaves the chips' motion
-/// running.
+/// running, unless under [MonthLayout.fitScreen] it changes the lanes a
+/// week holds, which settles them as a new month does.
 class MonthBoard extends StatefulWidget {
   const MonthBoard({
     super.key,
     required this.model,
     required this.grid,
+    this.layout = MonthLayout.showAll,
     required this.selectedDay,
     required this.today,
     required this.onSelectDay,
@@ -241,6 +362,10 @@ class MonthBoard extends StatefulWidget {
 
   /// The month the board shows.
   final MonthGrid grid;
+
+  /// Whether a week grows to hold its chips or keeps its share of the
+  /// height and hides the chips that do not fit.
+  final MonthLayout layout;
 
   /// A shown day of [grid]'s month.
   final DateTime selectedDay;
@@ -273,12 +398,20 @@ typedef _KeptChip = ({MonthChip chip, Widget widget});
 /// it for.
 typedef _KeptDay = ({DateTime day, bool selected, Widget widget});
 
+/// How many chips a day hides, and the lane its "+N more" takes.
+typedef _Hidden = ({int count, int lane});
+
+const _Hidden _noneHidden = (count: 0, lane: 0);
+
 class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// The columns' width before the first layout, which replaces it.
   static const double _placeholderColumnWidth = 48.0;
 
   /// What the cell builder answers for a cell outside [MonthBoard.grid].
   static const Widget _outsideGrid = SizedBox.shrink();
+
+  /// The most cells a month grid has: six weeks of seven days.
+  static const int _mostCells = 6 * DateTime.daysPerWeek;
 
   late final BoardController<String, MonthChip> _board;
 
@@ -305,11 +438,25 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     widget.today.value,
   );
 
-  /// The grid, the week extent and the column width the axes were last
-  /// given; null and zero before the first layout.
+  /// What each cell of [MonthBoard.grid] hides, at
+  /// `row * columnCount + col`, which the kept day cells listen to, since
+  /// the cell builder re-runs only when an axis or a cell's selection
+  /// changes. Every sync writes them.
+  final List<ValueNotifier<_Hidden>> _hidden = <ValueNotifier<_Hidden>>[
+    for (var i = 0; i < _mostCells; i++) ValueNotifier<_Hidden>(_noneHidden),
+  ];
+
+  /// The grid, the layout, the week extent and the column width the axes
+  /// were last given; null and zero before the first layout.
   MonthGrid? _fittedGrid;
+  MonthLayout? _fittedLayout;
   double _fitted = 0.0;
   double _columnWidth = 0.0;
+
+  /// The lanes a week held at the last sync, under
+  /// [MonthLayout.fitScreen]; null under [MonthLayout.showAll], where the
+  /// weeks grow.
+  int? _syncedLanes;
 
   /// Whether the next layout sets the board's items: set at the start, by
   /// the model and by a new grid.
@@ -418,6 +565,9 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _focusNode.dispose();
     _board.dispose();
     _today.dispose();
+    for (final hidden in _hidden) {
+      hidden.dispose();
+    }
     super.dispose();
   }
 
@@ -503,11 +653,13 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     widget.onOpenItem(id);
   }
 
-  /// Gives the board the axes [size] and the grid ask for and, when a sync
-  /// is pending, the items the model shows on the grid's days, none while
-  /// they are not ready, all in one batch and so one structural
-  /// notification. Called from the layout callback, so the first frame
-  /// lays the board out at its size.
+  /// Gives the board the axes [size], the grid and the layout ask for and,
+  /// when a sync is pending or the lanes a week holds under
+  /// [MonthLayout.fitScreen] changed, the chips of the items the model
+  /// shows on the grid's days, none while they are not ready, all in one
+  /// batch and so one structural notification; the sync also tells each
+  /// day what it hides ([_writeHidden]). Called from the layout callback,
+  /// so the first frame lays the board out at its size.
   ///
   /// A sync animates only when it follows the model alone, its days are
   /// ready and the last sync's were. Any other sync runs under
@@ -519,30 +671,46 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// without animating it.
   void _layoutBoard(Size size) {
     final grid = widget.grid;
+    final layout = widget.layout;
     final fitted = fittedWeekExtent(size.height, grid.weekCount);
+    final lanes = layout == MonthLayout.fitScreen
+        ? monthLanesThatFit(fitted)
+        : null;
     final width = size.width.isFinite && size.width > 0.0
         ? size.width / grid.columnCount
         : _columnWidth;
     final fittedGrid = _fittedGrid;
     final rowsChanged =
-        fittedGrid == null || !_sameGrid(grid, fittedGrid) || fitted != _fitted;
+        fittedGrid == null ||
+        !_sameGrid(grid, fittedGrid) ||
+        layout != _fittedLayout ||
+        fitted != _fitted;
     final columnsChanged =
         width > 0.0 &&
         (width != _columnWidth ||
             _board.columns.axis.trackCount != grid.columnCount);
-    final sync = _syncPending;
+    final sync = _syncPending || lanes != _syncedLanes;
     if (!rowsChanged && !columnsChanged && !sync) {
       return;
     }
     final ready = _daysReady;
-    final placements = !sync
-        ? null
-        : ready
-        ? monthPlacementsOf(
-            widget.model.itemsBetween(grid.firstDay, grid.lastDay),
-            grid,
-          )
-        : const <BoardPlacement<MonthChip>>[];
+    List<BoardPlacement<MonthChip>>? placements;
+    Int32List? hidden;
+    if (sync && !ready) {
+      placements = const <BoardPlacement<MonthChip>>[];
+    } else if (sync) {
+      final all = monthPlacementsOf(
+        widget.model.itemsBetween(grid.firstDay, grid.lastDay),
+        grid,
+      );
+      if (lanes == null) {
+        placements = all;
+      } else {
+        final fit = fitMonthPlacements(all, grid, lanes);
+        placements = fit.shown;
+        hidden = fit.hidden;
+      }
+    }
     final next = <String, BoardPlacement<MonthChip>>{
       if (placements != null)
         for (final placement in placements) placement.item.key: placement,
@@ -576,6 +744,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       _scheduleStyleRestore();
     }
     _fittedGrid = grid;
+    _fittedLayout = layout;
     _fitted = fitted;
     if (columnsChanged) {
       _columnWidth = width;
@@ -588,7 +757,9 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     }
     _syncPending = false;
     _syncedReady = ready;
+    _syncedLanes = lanes;
     _placed = next;
+    _writeHidden(grid, hidden, lanes);
     // A key in `_dropped` may still be exiting: the board keeps its child
     // and calls the item builder for it on every delegate rebuild, which
     // must hand back the kept instance.
@@ -602,6 +773,20 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       if (ready) {
         _revealPending = false;
       }
+    }
+  }
+
+  /// Tells each cell of [grid] how many chips it hides by [hidden], and
+  /// that its "+N more" takes the last of [lanes]; every cell hides none
+  /// when [hidden] is null. Runs in the layout callback's build scope, so
+  /// the cells that listen rebuild in it.
+  void _writeHidden(MonthGrid grid, Int32List? hidden, int? lanes) {
+    final cells = grid.weekCount * grid.columnCount;
+    for (var i = 0; i < _hidden.length; i++) {
+      final count = hidden != null && i < cells ? hidden[i] : 0;
+      _hidden[i].value = count == 0
+          ? _noneHidden
+          : (count: count, lane: lanes! - 1);
     }
   }
 
@@ -723,6 +908,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       inMonth: grid.contains(day),
       isSelected: selected,
       today: _today,
+      hidden: _hidden[index],
       onOpen: _openDay,
       onCreate: _createOnDay,
     );
@@ -876,9 +1062,14 @@ String _chipLabel(ShownItem entry) {
   return entry.pending ? "$label, pending" : label;
 }
 
+/// "1 more item" or "N more items", for a screen reader.
+String _hiddenLabel(int count) {
+  return count == 1 ? "1 more item" : "$count more items";
+}
+
 /// One day of the month board: a tap anywhere on it outside its chips
 /// opens the day and a long press creates on it. Its number sits in the
-/// strip across its top.
+/// strip across its top, and while it hides chips, "+N more" in its lane.
 class _MonthDayCell extends StatelessWidget {
   const _MonthDayCell({
     super.key,
@@ -886,6 +1077,7 @@ class _MonthDayCell extends StatelessWidget {
     required this.inMonth,
     required this.isSelected,
     required this.today,
+    required this.hidden,
     required this.onOpen,
     required this.onCreate,
   });
@@ -898,6 +1090,7 @@ class _MonthDayCell extends StatelessWidget {
 
   final bool isSelected;
   final ValueListenable<DateTime> today;
+  final ValueListenable<_Hidden> hidden;
   final ValueChanged<DateTime> onOpen;
   final ValueChanged<DateTime> onCreate;
 
@@ -912,15 +1105,20 @@ class _MonthDayCell extends StatelessWidget {
       onCreate(day);
     }
 
-    return ValueListenableBuilder<DateTime>(
-      valueListenable: today,
-      builder: (context, today, child) {
-        final isToday = day == today;
+    return ListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[today, hidden]),
+      builder: (context, child) {
+        final isToday = day == today.value;
+        final hides = hidden.value;
         return Semantics(
           container: true,
           button: true,
           selected: isSelected,
-          label: isToday ? "$label, today" : label,
+          label: <String>[
+            label,
+            if (isToday) "today",
+            if (hides.count > 0) _hiddenLabel(hides.count),
+          ].join(", "),
           hint: "Opens the day",
           onTap: open,
           onLongPress: create,
@@ -930,9 +1128,10 @@ class _MonthDayCell extends StatelessWidget {
             behavior: HitTestBehavior.opaque,
             onTap: open,
             onLongPress: create,
-            // A stack of the strip alone, so a cell measures the strip's
-            // height and a week with no chips rests at its fitted extent,
-            // while a cell laid out at its extent takes the whole cell.
+            // A stack sized by the strip alone, as the "+N more" is
+            // positioned, so a cell measures the strip's height and a week
+            // with no chips rests at its fitted extent, while a cell laid
+            // out at its extent takes the whole cell.
             child: Stack(
               children: <Widget>[
                 SizedBox(
@@ -940,11 +1139,39 @@ class _MonthDayCell extends StatelessWidget {
                   height: monthStripHeight,
                   child: Center(child: _buildNumber(isToday)),
                 ),
+                if (hides.count > 0)
+                  Positioned(
+                    left: 0.0,
+                    right: 0.0,
+                    top: monthStripHeight + hides.lane * monthLaneExtent,
+                    height: monthLaneExtent,
+                    child: _buildMore(hides.count),
+                  ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildMore(int count) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+      // Scaled down, rather than cut off, in a day too narrow for it.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(
+          "+$count more",
+          maxLines: 1,
+          style: const TextStyle(
+            fontSize: 11.0,
+            fontWeight: FontWeight.w600,
+            color: HarborColors.textSecondary,
+          ),
+        ),
+      ),
     );
   }
 

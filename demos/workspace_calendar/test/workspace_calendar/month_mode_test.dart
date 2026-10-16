@@ -240,6 +240,25 @@ Future<void> toggleWeekends(WidgetTester tester) async {
   await closeSettings(tester);
 }
 
+/// Opens the calendar settings, picks the month layout [label] and closes
+/// them.
+Future<void> pickMonthLayout(WidgetTester tester, String label) async {
+  await openSettings(tester);
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
+  await closeSettings(tester);
+}
+
+/// The lanes [day]'s week holds below its strip at its height.
+int lanesOf(WidgetTester tester, DateTime day) {
+  return ((tester.getSize(dayFinder(day)).height - strip) / lane).floor();
+}
+
+/// Any day's "+N more".
+Finder moreFinder() {
+  return find.textContaining(RegExp(r"^\+\d+ more$"));
+}
+
 /// Whether [context] lies inside the month board.
 bool insideMonthBoard(BuildContext? context) {
   if (context == null) {
@@ -1635,4 +1654,116 @@ void main() {
       expect(board.bottom, near(week.bottom));
     },
   );
+
+  testWidgets(
+    "M29 under Fit to screen a busy week keeps its share of the board, and "
+    "a busy day shows the chips that fit and how many it hides in its last "
+    "lane",
+    (tester) async {
+      await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
+      await pickMonthLayout(tester, "Fit to screen");
+      final board = tester.getRect(monthBoardFinder());
+      final cell = tester.getRect(dayFinder(april(22)));
+      expect(cell.height, near(board.height / 5));
+      expect(
+        monthViewport(tester).verticalPosition!.maxScrollExtent,
+        near(0.0),
+      );
+      final lanes = lanesOf(tester, april(22));
+      // Sanity: the seven tasks need more lanes than the week holds.
+      expect(lanes, inInclusiveRange(2, 6));
+      for (var i = 1; i <= 7; i++) {
+        expect(
+          chipFinder("item-$i", april(20)),
+          i < lanes ? findsOneWidget : findsNothing,
+          reason: "item-$i",
+        );
+      }
+      final more = find.text("+${8 - lanes} more");
+      expect(more, findsOneWidget);
+      final label = tester.getRect(more);
+      final lastLane = cell.top + strip + (lanes - 1) * lane;
+      expect(label.left, greaterThanOrEqualTo(cell.left - 0.5));
+      expect(label.right, lessThanOrEqualTo(cell.right + 0.5));
+      expect(label.top, greaterThanOrEqualTo(lastLane - 0.5));
+      expect(label.bottom, lessThanOrEqualTo(lastLane + lane + 0.5));
+    },
+  );
+
+  testWidgets("M30 under Fit to screen a tap on a day's +N more opens it in "
+      "Day mode", (tester) async {
+    await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
+    await pickMonthLayout(tester, "Fit to screen");
+    await tester.tap(moreFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("New item"), findsNothing);
+    expect(find.text("Day"), findsOneWidget);
+    expect(find.byKey(dayHeaderKey(april(22))), findsOneWidget);
+  });
+
+  testWidgets("M31 under Fit to screen a bar hides on each day it covers, "
+      "and a day tells a screen reader how many items it hides", (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await pumpMonth(
+      tester,
+      seed: <Map<String, Object?>>[
+        taskJson("Bar", april(21), 9 * 60, 10 * 60, dayCount: 2),
+        taskAt("Wednesday", april(22), 11, 12),
+      ],
+    );
+    await pickMonthLayout(tester, "Fit to screen");
+    tester.view.physicalSize = const Size(390.0, 420.0);
+    await tester.pumpAndSettle();
+    // Sanity: the weeks hold one lane.
+    expect(lanesOf(tester, april(22)), 1);
+    expect(chipFinder("item-1", april(20)), findsNothing);
+    expect(chipFinder("item-2", april(20)), findsNothing);
+    expect(find.text("+1 more"), findsOneWidget);
+    expect(find.text("+2 more"), findsOneWidget);
+    expect(
+      tester.getSemantics(dayFinder(april(21))).label,
+      "Tuesday, April 21, today, 1 more item",
+    );
+    expect(
+      tester.getSemantics(dayFinder(april(22))).label,
+      "Wednesday, April 22, 2 more items",
+    );
+    expect(
+      tester.getSemantics(dayFinder(april(23))).label,
+      "Thursday, April 23",
+    );
+    semantics.dispose();
+  });
+
+  testWidgets("M32 Show all items, the layout the calendar starts on, grows "
+      "a busy week again and drops +N more", (tester) async {
+    await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
+    expect(tester.getSize(dayFinder(april(22))).height, near(strip + 7 * lane));
+    await pickMonthLayout(tester, "Fit to screen");
+    // Sanity: Fit to screen hides some of the tasks.
+    expect(moreFinder(), findsOneWidget);
+
+    await pickMonthLayout(tester, "Show all items");
+    expect(tester.getSize(dayFinder(april(22))).height, near(strip + 7 * lane));
+    expect(moreFinder(), findsNothing);
+  });
+
+  testWidgets("M33 under Fit to screen a resize to fewer lanes hides more "
+      "chips", (tester) async {
+    await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
+    await pickMonthLayout(tester, "Fit to screen");
+    final before = lanesOf(tester, april(22));
+    expect(find.text("+${8 - before} more"), findsOneWidget);
+
+    tester.view.physicalSize = const Size(390.0, 600.0);
+    await tester.pumpAndSettle();
+    final after = lanesOf(tester, april(22));
+    // Sanity: the shorter board holds fewer lanes, at least two.
+    expect(after, inInclusiveRange(2, before - 1));
+    expect(find.text("+${8 - after} more"), findsOneWidget);
+    expect(chipFinder("item-${after - 1}", april(20)), findsOneWidget);
+    expect(chipFinder("item-$after", april(20)), findsNothing);
+  });
 }

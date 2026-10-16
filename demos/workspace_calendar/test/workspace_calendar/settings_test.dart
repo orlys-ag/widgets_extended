@@ -4,6 +4,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
@@ -154,6 +155,27 @@ void main() {
     expect(find.text("Calendar settings"), findsNothing);
     await openSettings(tester);
     expect(find.text("08:00 - 18:00"), findsOneWidget);
+  });
+
+  testWidgets("L1 the sheet offers the month layouts and opens on the one "
+      "in force", (tester) async {
+    await pumpCalendar(tester);
+    await openSettings(tester);
+    Set<MonthLayout> chosen() {
+      return tester
+          .widget<SegmentedButton<MonthLayout>>(find.byKey(monthLayoutKey))
+          .selected;
+    }
+
+    expect(chosen(), <MonthLayout>{MonthLayout.showAll});
+    expect(find.text("Show all items"), findsOneWidget);
+    expect(find.text("Fit to screen"), findsOneWidget);
+    await tester.tap(find.text("Fit to screen"));
+    await tester.pumpAndSettle();
+    expect(chosen(), <MonthLayout>{MonthLayout.fitScreen});
+    await closeSettings(tester);
+    await openSettings(tester);
+    expect(chosen(), <MonthLayout>{MonthLayout.fitScreen});
   });
 
   testWidgets("H2 the hours trim the week grid to their slots", (tester) async {

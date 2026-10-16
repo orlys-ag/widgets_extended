@@ -1,6 +1,6 @@
-/// The calendar's settings sheet: whether the weekends show, the hours the
-/// calendar shows and schedules in, and the least size of the timed grid's
-/// cells.
+/// The calendar's settings sheet: whether the weekends show, how Month
+/// fits its weeks, the hours the calendar shows and schedules in, and the
+/// least size of the timed grid's cells.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,6 +13,11 @@ import 'harbor_theme.dart';
 /// The key of the sheet's weekends switch.
 const ValueKey<String> weekendsSwitchKey = ValueKey<String>(
   "settings-weekends",
+);
+
+/// The key of the sheet's month layout buttons.
+const ValueKey<String> monthLayoutKey = ValueKey<String>(
+  "settings-month-layout",
 );
 
 /// The key of the sheet's hours slider.
@@ -54,8 +59,8 @@ Future<void> showCalendarSettings(
 }
 
 /// The sheet [showCalendarSettings] opens: a switch for the weekends, a
-/// range slider for the hours, in whole hours at least one apart, and a
-/// slider for each least size.
+/// segmented button for Month's layout, a range slider for the hours, in
+/// whole hours at least one apart, and a slider for each least size.
 class CalendarSettingsSheet extends StatefulWidget {
   const CalendarSettingsSheet({
     super.key,
@@ -132,6 +137,30 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               },
             ),
             const SizedBox(height: 8.0),
+            const _Heading(label: "Month layout"),
+            const SizedBox(height: 8.0),
+            SegmentedButton<MonthLayout>(
+              key: monthLayoutKey,
+              expandedInsets: EdgeInsets.zero,
+              showSelectedIcon: false,
+              segments: <ButtonSegment<MonthLayout>>[
+                for (final layout in MonthLayout.values)
+                  ButtonSegment<MonthLayout>(
+                    value: layout,
+                    label: Text(layout.label),
+                  ),
+              ],
+              selected: <MonthLayout>{_settings.monthLayout},
+              onSelectionChanged: (selected) {
+                _set(_settings.copyWith(monthLayout: selected.single));
+              },
+            ),
+            const SizedBox(height: 4.0),
+            const _Note(
+              "Fit to screen keeps the month on the screen; a busy day "
+              "shows +N more.",
+            ),
+            const SizedBox(height: 16.0),
             _Heading(label: "Hours", value: hoursLabel(hours)),
             RangeSlider(
               key: hoursSliderKey,
@@ -190,14 +219,17 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
   }
 }
 
+/// A section's [label], and its [value] at the end of the row when it has
+/// one.
 class _Heading extends StatelessWidget {
-  const _Heading({required this.label, required this.value});
+  const _Heading({required this.label, this.value});
 
   final String label;
-  final String value;
+  final String? value;
 
   @override
   Widget build(BuildContext context) {
+    final value = this.value;
     // The value takes the width the label leaves and wraps in it, so a
     // narrow sheet does not overflow.
     return Row(
@@ -211,17 +243,19 @@ class _Heading extends StatelessWidget {
             color: HarborColors.text,
           ),
         ),
-        const SizedBox(width: 12.0),
-        Expanded(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: const TextStyle(
-              fontSize: 14.0,
-              color: HarborColors.textSecondary,
+        if (value != null) ...<Widget>[
+          const SizedBox(width: 12.0),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: const TextStyle(
+                fontSize: 14.0,
+                color: HarborColors.textSecondary,
+              ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }
