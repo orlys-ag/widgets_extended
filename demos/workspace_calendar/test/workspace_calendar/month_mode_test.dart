@@ -20,6 +20,7 @@ import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 
@@ -833,6 +834,58 @@ void main() {
         isEmpty,
       );
       expect(tester.getRect(x).top, greaterThan(xTop + 0.5));
+    },
+  );
+
+  testWidgets(
+    "M16b a model change while another item's chip shrinks out builds the "
+    "changed item's chips only",
+    (tester) async {
+      await pumpMonth(
+        tester,
+        seed: <Map<String, Object?>>[
+          taskAt("A", april(21), 10, 11),
+          taskAt("B", april(23), 10, 11),
+        ],
+      );
+      final monday = april(20);
+      final a = chipFinder("item-1", monday);
+      final bKey = "month-chip-item-2@${isoDate(monday)}";
+      final model = tester.widget<MonthBoard>(find.byType(MonthBoard)).model;
+
+      model.requestDelete("item-1");
+      await tester.pump(harnessLatency);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(a, findsOneWidget);
+      expect(tester.getSize(a).height, lessThan(lane));
+
+      final reported = <String>{};
+      addTearDown(() {
+        debugOnRebuildDirtyWidget = null;
+      });
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        final key = element.widget.key;
+        if (key is ValueKey<String> &&
+            (key.value.startsWith("month-chip-") ||
+                key.value.startsWith("month-day-"))) {
+          reported.add(key.value);
+        }
+      };
+      final b = model.storedItem("item-2")!;
+      model.requestMove(b.copyWith(startMinute: 8 * 60, endMinute: 9 * 60));
+      await tester.pump();
+      // A's exit still runs at the sync of B's pending move and at the sync
+      // of its answer.
+      expect(a, findsOneWidget);
+      await tester.pump(harnessLatency);
+      expect(a, findsOneWidget);
+      expect(model.isLocked("item-2"), isFalse);
+      await tester.pumpAndSettle();
+      debugOnRebuildDirtyWidget = null;
+
+      expect(reported, contains(bKey));
+      expect(reported, <String>{bKey});
     },
   );
 

@@ -330,6 +330,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
 
   /// The chips the item builder returned, by chip key, kept so a payload
   /// that did not change returns the same instance and builds nothing.
+  /// Holds no key but those the latest sync placed and those in [_dropped].
   final Map<String, _KeptChip> _chips = <String, _KeptChip>{};
 
   /// The day cells the cell builder returned, one entry per cell of the
@@ -581,8 +582,11 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _syncPending = false;
     _syncedReady = ready;
     _placed = next;
+    // A key in `_dropped` may still be exiting: the board keeps its child
+    // and calls the item builder for it on every delegate rebuild, which
+    // must hand back the kept instance.
     _chips.removeWhere((key, kept) {
-      return !next.containsKey(key);
+      return !next.containsKey(key) && !_dropped.containsKey(key);
     });
     if (_revealPending) {
       SchedulerBinding.instance.addPostFrameCallback((_) {
