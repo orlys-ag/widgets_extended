@@ -314,6 +314,19 @@ ignored.
 - Fix: dragging into an edge zone with the board already scrolled to its end kept
 requesting a frame every vsync. Autoscroll now stops at the end and resumes when
 the pointer moves.
+- A board drag or a tree reorder that starts inside an autoscroll edge zone no
+longer scrolls at once: that edge stays still until the pointer moves toward it
+by more than 4 px from the farthest it has been from it, so an item lifted near
+an edge can be carried away from it without the content moving under it. It
+used to scroll from the lift, even while the item was dragged away from the
+edge. A zone the lift was not in scrolls as soon as the pointer enters it, and
+the board's range selection is unchanged.
+- Added `autoScrollRampDuration`, 300 ms by default, to `BoardDragConfig`,
+`TreeReorderController`, `TreeReorderConfig` and `SectionedReorderConfig`.
+Autoscroll's speed rises by at most its maximum velocity per that duration,
+from rest each time it starts, instead of jumping to the speed the pointer's
+place in the zone asks for; slowing down and stopping stay immediate. One that
+is not positive restores the immediate start.
 - Fix: a drop target that `canDropAt` refused stayed refused while the pointer
 rested on it, even after the board changed to allow it, and one it accepted stayed
 accepted after the board changed to refuse it. A board change during a drag now
