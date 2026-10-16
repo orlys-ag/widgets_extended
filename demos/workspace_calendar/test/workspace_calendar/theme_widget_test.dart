@@ -166,7 +166,7 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, "Cancel"));
     await tester.pumpAndSettle();
 
-    await pickMode(tester, "Month");
+    await pickMode(tester, "Agenda");
     await tester.tap(dayFinder(DateTime(2026, 4, 25)));
     await tester.pumpAndSettle();
     expect(

@@ -109,7 +109,7 @@ void main() {
     expect(cardFinder(brainstormId), findsNothing);
     await pickMode(tester, "Week");
     expect(blockFinder(brainstormId), findsNothing);
-    await pickMode(tester, "Month");
+    await pickMode(tester, "Agenda");
 
     // The last item of a day takes its marker with it, and the change
     // rebuilds no other cell and lays the month board out again nowhere.

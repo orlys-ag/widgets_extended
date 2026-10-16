@@ -372,7 +372,7 @@ void main() {
       isNull,
     );
 
-    await pickMode(tester, "Month");
+    await pickMode(tester, "Agenda");
     expect(find.text("Thursday, April 23"), findsOneWidget);
   });
 }

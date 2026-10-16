@@ -1,4 +1,4 @@
-/// The calendar's month mode: the Monday-first grid, the selection, the
+/// The calendar's Agenda mode: the Monday-first grid, the selection, the
 /// chevrons, the fold into the selected week, the placeholders and the
 /// day list's counts, over the seeded mock.
 library;
@@ -76,7 +76,7 @@ void main() {
     await pumpCalendar(tester);
 
     expect(find.text("April 2026"), findsOneWidget);
-    expect(find.text("Month"), findsOneWidget);
+    expect(find.text("Agenda"), findsOneWidget);
     expect(find.text("Today, April 21"), findsOneWidget);
     expect(find.text("2 items"), findsOneWidget);
     expect(find.text("Design new UX flow for Michael"), findsOneWidget);
@@ -203,7 +203,7 @@ void main() {
     await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
     await tester.pumpAndSettle();
     expect(gridHeight(tester), row);
-    expect(find.text("Month"), findsOneWidget);
+    expect(find.text("Agenda"), findsOneWidget);
     expect(find.text("Week"), findsNothing);
     final grid = tester.getRect(gridFinder());
     // The row shows April 20 to 26.
@@ -235,7 +235,7 @@ void main() {
     await tester.drag(find.byType(DayList), const Offset(0.0, 120.0));
     await tester.pumpAndSettle();
     expect(gridHeight(tester), 5 * row);
-    expect(find.text("Month"), findsOneWidget);
+    expect(find.text("Agenda"), findsOneWidget);
     // The weekday header is back above the grid, so its top moved down.
     expect(
       tester.getRect(dayFinder(2026, 3, 30)).topLeft,

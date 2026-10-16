@@ -344,7 +344,7 @@ void main() {
 
     await tester.tap(headerFinder(DateTime(2026, 4, 2)));
     await tester.pumpAndSettle();
-    await pickMode(tester, "Month");
+    await pickMode(tester, "Agenda");
     expect(find.text("Thursday, April 2"), findsOneWidget);
     expect(find.text("April 2026"), findsOneWidget);
   });
@@ -1007,7 +1007,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    await pickMode(tester, "Month");
+    await pickMode(tester, "Agenda");
     await tester.tap(find.byKey(dayCellKey(DateTime(2026, 4, 23))));
     await tester.pumpAndSettle();
     expect(
@@ -1051,13 +1051,13 @@ void main() {
     expect(find.byTooltip("Add"), findsNothing);
     expect(find.byTooltip("Add item"), findsNothing);
 
-    await pickMode(tester, "Month");
+    await pickMode(tester, "Agenda");
     await tester.tap(find.byTooltip("Add item"));
     await tester.pumpAndSettle();
     expect(blockFinder(designCritiqueId), findsOneWidget);
   });
 
-  testWidgets("W9 a pending move shows in Month mode", (tester) async {
+  testWidgets("W9 a pending move shows in Agenda mode", (tester) async {
     const latency = Duration(seconds: 2);
     final api = await pumpCalendar(
       tester,
@@ -1076,7 +1076,7 @@ void main() {
     await tester.tap(find.byTooltip("Calendar view"));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text("Month").last);
+    await tester.tap(find.text("Agenda").last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.byKey(dayCellKey(DateTime(2026, 4, 23))));

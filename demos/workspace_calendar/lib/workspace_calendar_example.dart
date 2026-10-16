@@ -39,7 +39,7 @@ import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
 
 enum _CalendarMode {
-  month("Month"),
+  agenda("Agenda"),
   week("Week"),
   day("Day");
 
@@ -139,10 +139,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   late MonthGrid _grid = MonthGrid.of(_selected, weekdays: _settings.weekdays);
 
   /// The view picked from the menu.
-  _CalendarMode _mode = _CalendarMode.month;
+  _CalendarMode _mode = _CalendarMode.agenda;
 
   /// Whether a scroll of the day list folded the month into its week. Only
-  /// meaningful in the month mode.
+  /// meaningful in Agenda.
   bool _collapsed = false;
 
   /// What the settings sheet last chose.
@@ -259,10 +259,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The days the timed grid shows: the selected day's Monday-to-Sunday
   /// week in the week mode, the selected day alone in the day mode, and
-  /// null in the month mode. [_showRange] and the grid both read it.
+  /// null in Agenda. [_showRange] and the grid both read it.
   ({DateTime first, int count})? get _timedDays {
     switch (_mode) {
-      case _CalendarMode.month:
+      case _CalendarMode.agenda:
         return null;
       case _CalendarMode.week:
         return (first: weekStartOf(_selected), count: 7);
@@ -271,7 +271,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  /// Shows the month grid's days in the month mode and [_timedDays]
+  /// Shows the month grid's days in Agenda and [_timedDays]
   /// otherwise, which reads whatever of them is not read yet.
   void _showRange() {
     final days = _timedDays;
@@ -328,7 +328,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// a month otherwise.
   _StepUnit get _stepUnit {
     switch (_mode) {
-      case _CalendarMode.month:
+      case _CalendarMode.agenda:
         return _collapsed ? _StepUnit.week : _StepUnit.month;
       case _CalendarMode.week:
         return _StepUnit.week;
@@ -368,7 +368,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   void _setCollapsed(bool collapsed) {
-    if (collapsed == _collapsed || _mode != _CalendarMode.month) {
+    if (collapsed == _collapsed || _mode != _CalendarMode.agenda) {
       return;
     }
     setState(() {
@@ -495,7 +495,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   @override
   Widget build(BuildContext context) {
-    final showsTimedGrid = _mode != _CalendarMode.month;
+    final showsTimedGrid = _mode != _CalendarMode.agenda;
     return Scaffold(
       appBar: AppBar(
         scrolledUnderElevation: 0.0,
@@ -561,7 +561,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// The month grid and the day list in the month mode; a timed grid of
+  /// The month grid and the day list in Agenda; a timed grid of
   /// [_timedDays], across the body's full width, otherwise.
   Widget _buildCalendarView() {
     final days = _timedDays;

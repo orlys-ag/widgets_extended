@@ -1,6 +1,6 @@
 # workspace_calendar
 
-Demo code: a workspace calendar with month, week and day modes, built on the
+Demo code: a workspace calendar with agenda, week and day modes, built on the
 `widgets_extended` board (the week and day grids) and synced sliver tree (the
 day list), over a seeded mock calendar API. It is not part of the
 `widgets_extended` library.
