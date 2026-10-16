@@ -298,6 +298,11 @@ nearest placement that holds the item clear wherever it lies within the radius;
 it used to stop after four steps whatever the radius asked for.
 `double.infinity` is a radius that reaches every placement the drop could take
 on its axis.
+- A `BoardDropFit` slide measures from where the dragged item shows, not from
+the cell the snap put it in, so of two free placements equally near that cell it
+takes the one on the side the item leans toward. It used to take the earlier row
+and the leftmost column whatever side the item was on. The slide follows the
+finger across a refused cell.
 - Added `BoardDropFit.clampResizes`, off by default: a resize `canDropAt`
 refuses for running into another item stops its dragged edge at that item,
 nearest the pointer, instead of going back.
