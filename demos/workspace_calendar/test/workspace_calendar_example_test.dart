@@ -8,6 +8,7 @@ import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
+import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -87,7 +88,13 @@ void main() {
     expect(find.text("Apr 2026"), findsOneWidget);
     expect(find.text("Agenda"), findsOneWidget);
     expect(find.text("Today, April 21"), findsOneWidget);
-    expect(find.text("2 items"), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(dayListHeaderKey(today)),
+        matching: find.text("2 items"),
+      ),
+      findsOneWidget,
+    );
     expect(find.text("Design new UX flow for Michael"), findsOneWidget);
     expect(find.text("Brainstorm with the team"), findsOneWidget);
 
@@ -387,15 +394,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(gridHeight(tester), row);
 
-    // Once the fold settles, the unfold runs the same curve back.
+    // Once the fold settles, the unfold eases out on the same curve.
     await tester.pumpAndSettle();
     await tester.drag(find.byType(WeekStrip), const Offset(0.0, 120.0));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(
-      gridHeight(tester),
-      moreOrLessEquals(foldedAt(const Duration(milliseconds: 200))),
-    );
+    final t = Curves.fastOutSlowIn.transform(1.0 / 3.0);
+    expect(gridHeight(tester), moreOrLessEquals(row + (month - row) * t));
     await tester.pump(const Duration(milliseconds: 200));
     expect(gridHeight(tester), month);
   });
@@ -417,5 +422,50 @@ void main() {
 
     expect(fillOf(4, 22), HarborColors.background);
     expect(fillOf(3, 30)?.a, 0.0);
+  });
+
+  testWidgets("E14 the pull tab folds the month as far as a drag moves it; "
+      "a slow release settles on whichever is nearer and a fast one the "
+      "way it moves, and a tap switches", (tester) async {
+    await pumpCalendar(tester);
+    final row = rowHeight(tester);
+    final month = gridHeight(tester);
+    final tab = find.byKey(calendarPullTabKey);
+
+    final gesture = await tester.startGesture(tester.getCenter(tab));
+    await gesture.moveBy(const Offset(0.0, -20.0));
+    await gesture.moveBy(const Offset(0.0, -60.0));
+    await tester.pump();
+    expect(gridHeight(tester), inExclusiveRange(row, month));
+    await gesture.cancel();
+    await tester.pumpAndSettle();
+
+    // A quarter of the way, slowly: back to the month.
+    await tester.timedDrag(
+      tab,
+      const Offset(0.0, -60.0),
+      const Duration(seconds: 1),
+    );
+    await tester.pumpAndSettle();
+    expect(gridHeight(tester), month);
+    // Two thirds of the way, slowly: on to the week.
+    await tester.timedDrag(
+      tab,
+      const Offset(0.0, -150.0),
+      const Duration(seconds: 1),
+    );
+    await tester.pumpAndSettle();
+    expect(gridHeight(tester), row);
+    // A quarter of the way back, fast: the month.
+    await tester.fling(tab, const Offset(0.0, 60.0), 1000.0);
+    await tester.pumpAndSettle();
+    expect(gridHeight(tester), month);
+
+    await tester.tap(tab);
+    await tester.pumpAndSettle();
+    expect(gridHeight(tester), row);
+    await tester.tap(tab);
+    await tester.pumpAndSettle();
+    expect(gridHeight(tester), month);
   });
 }

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
-import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
 /// The key of the card showing the item [id].
@@ -16,15 +15,13 @@ ValueKey<String> itemCardKey(String id) {
 enum _CardAction { edit, delete }
 
 /// An item's card: a rounded box in its type's tint holding the type's
-/// icon and the title, a menu with Edit and Delete beside them, the
-/// schema's summaries under them, and the time range, in [format], at the
-/// bottom right. While [ShownItem.pending] the card is dimmed with a
-/// progress indicator and its menu is disabled.
+/// icon and the title, a menu with Edit and Delete beside them, and the
+/// schema's summaries under them. While [ShownItem.pending] the card is
+/// dimmed with a progress indicator and its menu is disabled.
 class ItemCard extends StatelessWidget {
   const ItemCard({
     super.key,
     required this.entry,
-    required this.format,
     required this.onEdit,
     required this.onDelete,
   });
@@ -44,9 +41,6 @@ class ItemCard extends StatelessWidget {
     }
     return summaries;
   }
-
-  /// How the time range names its times, as [hourLabel] writes them.
-  final HourLabelFormat format;
 
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -129,18 +123,6 @@ class ItemCard extends StatelessWidget {
                   ),
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(_iconIndent, 6.0, 10.0, 0.0),
-              child: Text(
-                "${hourLabel(item.startMinute, format)} - "
-                "${hourLabel(item.endMinute, format)}",
-                textAlign: TextAlign.end,
-                style: const TextStyle(
-                  fontSize: 13.0,
-                  color: HarborColors.textSecondary,
-                ),
-              ),
-            ),
           ],
         ),
       ),

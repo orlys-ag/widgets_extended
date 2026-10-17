@@ -364,34 +364,41 @@ void main() {
     );
   });
 
-  testWidgets("L7 a card sits right of its start time over its length, and "
-      "an hour between the items that none covers is a dashed row, all in "
-      "the hour label format", (tester) async {
+  testWidgets("L7 a card sits right of its start time, \"to\" and its end "
+      "time over a chip of its length, and shows no time itself, and an "
+      "hour between the items that none covers is a dashed row, all in the "
+      "hour label format", (tester) async {
     await pumpCalendar(tester);
     await tester.tap(dayFinder(DateTime(2026, 4, 22)));
     await tester.pumpAndSettle();
     final time = find.byKey(dayListTimeKey(standupId));
     final card = cardFinder(standupId);
+    final chip = find.byKey(dayListDurationKey(standupId));
     final hour = find.byKey(dayListHourKey(DateTime(2026, 4, 22), 10 * 60));
     Finder inside(Finder of, String text) {
       return find.descendant(of: of, matching: find.text(text));
     }
 
-    expect(inside(time, "09:30"), findsOneWidget);
-    expect(inside(time, "30m"), findsOneWidget);
-    expect(
-      tester.getRect(inside(time, "30m")).top,
-      greaterThanOrEqualTo(tester.getRect(inside(time, "09:30")).bottom),
-    );
+    final start = tester.getRect(inside(time, "09:30"));
+    final to = tester.getRect(inside(time, "to"));
+    final end = tester.getRect(inside(time, "10:00"));
+    expect(to.top, greaterThanOrEqualTo(start.bottom));
+    expect(end.top, greaterThanOrEqualTo(to.bottom));
+    expect(tester.getRect(chip).top, greaterThan(end.bottom));
+    expect(inside(chip, "30m"), findsOneWidget);
     expect(
       tester.getRect(time).right,
       lessThanOrEqualTo(tester.getRect(card).left),
     );
-    expect(inside(card, "09:30 - 10:00"), findsOneWidget);
+    expect(
+      find.descendant(of: card, matching: find.textContaining(":")),
+      findsNothing,
+    );
     expect(inside(hour, "10:00"), findsOneWidget);
+    // The dashed line, before the add button's paint.
     expect(
       tester.renderObject(
-        find.descendant(of: hour, matching: find.byType(CustomPaint)),
+        find.descendant(of: hour, matching: find.byType(CustomPaint)).first,
       ),
       paints
         ..line(color: HarborColors.outline)
@@ -405,7 +412,7 @@ void main() {
     await tester.tapAt(const Offset(195.0, 20.0));
     await tester.pumpAndSettle();
     expect(inside(time, "9:30 AM"), findsOneWidget);
-    expect(inside(card, "9:30 AM - 10 AM"), findsOneWidget);
+    expect(inside(time, "10 AM"), findsOneWidget);
     expect(inside(hour, "10 AM"), findsOneWidget);
   });
 
@@ -503,5 +510,54 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(headerTop(tester, today), 0.0);
+  });
+
+  testWidgets("L13 a gap's add button opens the create flow from its hour "
+      "to the next item's start, and an empty day's at its first free "
+      "hour", (tester) async {
+    final day = DateTime(2026, 4, 22);
+    final api = MockCalendarApi(
+      seed: <Map<String, Object?>>[
+        taskJson("First", day, 9 * 60, 10 * 60),
+        taskJson("Second", day, 10 * 60 + 30, 11 * 60),
+      ],
+      latency: harnessLatency,
+    );
+    await pumpCalendar(tester, api: api);
+    await tester.tap(dayFinder(day));
+    await tester.pumpAndSettle();
+    Finder shows(String label, String text) {
+      return find.descendant(
+        of: find.ancestor(
+          of: find.text(label),
+          matching: find.byWidgetPredicate((widget) {
+            return widget is DropdownButtonFormField;
+          }),
+        ),
+        matching: find.text(text),
+      );
+    }
+
+    Future<void> addFrom(Finder row) async {
+      await tester.tap(
+        find.descendant(of: row, matching: find.byIcon(Icons.add)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text("New item"), findsOneWidget);
+      await tester.tap(find.text("Task").last);
+      await tester.pumpAndSettle();
+    }
+
+    await addFrom(find.byKey(dayListHourKey(day, 10 * 60)));
+    expect(find.text("2026-04-22"), findsOneWidget);
+    expect(shows("Start", "10:00"), findsOneWidget);
+    expect(shows("End", "10:30"), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, "Cancel"));
+    await tester.pumpAndSettle();
+
+    await addFrom(find.byKey(dayListEmptyKey(DateTime(2026, 4, 23))));
+    expect(find.text("2026-04-23"), findsOneWidget);
+    expect(shows("Start", "00:00"), findsOneWidget);
+    expect(shows("End", "01:00"), findsOneWidget);
   });
 }

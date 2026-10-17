@@ -10,6 +10,8 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
+import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
+import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -1120,5 +1122,25 @@ void main() {
     vertical.jumpTo(vertical.maxScrollExtent);
     await tester.pump();
     expect(clips().last.bottom, near(region.bottom + half));
+  });
+
+  testWidgets("D19 Day opens with its days folded into the strip; the pull "
+      "tab unfolds the month, where a tap shows that day, and a drag up "
+      "the board folds it again", (tester) async {
+    await pumpCalendar(tester);
+    await pickMode(tester, "Day");
+    expect(find.byType(WeekStrip), findsOneWidget);
+
+    await tester.drag(find.byKey(calendarPullTabKey), const Offset(0.0, 300.0));
+    await tester.pumpAndSettle();
+    expect(find.byType(WeekStrip), findsNothing);
+    final thursday = DateTime(2026, 4, 23);
+    await tester.tap(find.byKey(dayCellKey(thursday)));
+    await tester.pumpAndSettle();
+    expect(gridDay(tester), thursday);
+
+    await tester.drag(find.byType(TimedGrid), const Offset(0.0, -200.0));
+    await tester.pumpAndSettle();
+    expect(find.byType(WeekStrip), findsOneWidget);
   });
 }

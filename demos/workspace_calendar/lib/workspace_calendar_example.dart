@@ -1,20 +1,21 @@
 /// A workspace calendar on the board module, over a calendar API, in four
 /// views: Agenda, a month grid over a list of the days, one after another,
-/// each day's items beside their start times and lengths, the month
-/// folding into the selected day's week as the list is scrolled;
+/// each day's items beside their times and lengths, the month folding into
+/// the selected day's week as the list is scrolled;
 /// Month, the month's weeks with each item as a chip on the days it
 /// covers; and Week and Day, timed grids of the selected day's week and of
 /// that day alone, where items are created, moved, resized, edited and
 /// deleted.
 ///
-/// Day's header card holds a strip of a week's worth of days, opening on
-/// the selected day's week, whose days a tap selects and which a drag
-/// slides day by day, across weeks and months, without selecting, the
-/// header naming the month of the day at its middle; the calendar reads a
-/// selected day's whole week, and the strip the weeks of the days it
-/// shows, so a step within the week, or a tap on a day the strip shows,
-/// reads nothing. Day's grid has no day header, the strip naming its day,
-/// and its blocks show their times and summaries.
+/// Day shows Agenda's calendar card folded: a strip of a week's worth of
+/// days, opening on the selected day's week, whose days a tap selects and
+/// which a drag slides day by day, across weeks and months, without
+/// selecting, the header naming the month of the day at its middle; the
+/// calendar reads a selected day's whole week, and the strip the weeks of
+/// the days it shows, so a step within the week, or a tap on a day the
+/// strip shows, reads nothing. The card's pull tab unfolds the month, and
+/// a drag up Day's grid folds it again. Day's grid has no day header, the
+/// strip naming its day, and its blocks show their times and summaries.
 ///
 /// Agenda's month grid is a [Board] with no items, under the weekdays'
 /// three-letter names. Each day is a cell, its number on a circle as the strip
@@ -23,11 +24,15 @@
 /// board has focus. The list under it ([DayList]) runs both ways from the
 /// selected day: a selected day scrolls to its top, animating, and a drag
 /// or a fling of the list selects each day it brings to the top. Each
-/// day's header sticks at the top while its items scroll under it; the
-/// list marks each whole hour between a day's items that no item covers
-/// with a dashed row, and a day without items with one reading "No items".
-/// A drag of the list folds the month, and a downward drag on the folded
-/// strip unfolds it. The board always holds
+/// day's header sticks at the top while its items scroll under it. Each
+/// item's card sits right of its start time, "to" and its end time, over
+/// a chip of its length; the list marks each whole hour between a day's
+/// items that no item covers with a dashed row, and a day without items
+/// with one reading "No items", each with a button that creates an item
+/// there. A drag of the list folds the month, and the pull tab under the
+/// card folds or unfolds it as far as a drag on it moves, a tap on it
+/// switching; a downward drag on the folded strip unfolds it too. The
+/// board always holds
 /// the whole month of the selected day; while it folds, it is clipped to
 /// a shrinking window shifted so the selected week shows, and once folded,
 /// Day's strip takes the window's place, opening on that week. Selecting a
@@ -187,8 +192,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// The view picked from the menu.
   _CalendarMode _mode = _CalendarMode.agenda;
 
-  /// Whether a scroll of the day list folded the month into its week. Only
-  /// meaningful in Agenda.
+  /// Whether the calendar card shows the selected day's week rather than
+  /// its month. Only meaningful in Agenda and Day, which start unfolded
+  /// and folded.
   bool _collapsed = false;
 
   /// What the settings sheet last chose.
@@ -197,13 +203,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// The width the column axis was last fitted to.
   double _columnsWidth = 0.0;
 
+  /// How far the calendar card has folded, 0 for the month and 1 for its
+  /// week: linear, so a drag on the pull tab moves it with the finger, and
+  /// animated on [harborMotionCurve] by [_animateCollapse].
   late final AnimationController _collapseController = AnimationController(
     vsync: this,
     duration: harborMotionDuration,
-  );
-  late final CurvedAnimation _collapse = CurvedAnimation(
-    parent: _collapseController,
-    curve: harborMotionCurve,
   );
 
   late final BoardController<Object, Object> _board;
@@ -258,7 +263,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _minuteTimer?.cancel();
     _model.dispose();
     _board.dispose();
-    _collapse.dispose();
     _collapseController.dispose();
     // The cells and the timed grid listening to these have unmounted by
     // now: an element's children unmount before it does.
@@ -410,13 +414,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
+  /// Switches to [mode], whose calendar card, in Agenda and Day, opens
+  /// at once on the month and on the selected day's week.
   void _setMode(_CalendarMode mode) {
     setState(() {
       _mode = mode;
-      _collapsed = false;
+      _collapsed = mode == _CalendarMode.day;
       _stripDay = null;
     });
-    _animateCollapse();
+    _collapseController.value = _collapsed ? 1.0 : 0.0;
     _showRange();
   }
 
@@ -438,6 +444,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     if (_grid.contains(day)) {
       _select(day);
     }
+    _openCreateFlow(day, from: from);
+  }
+
+  /// The create flow on [day] at its first free hour from [from].
+  void _openCreateFlow(DateTime day, {int? from}) {
     final free = _model.firstFreeRange(day, from: from);
     showCreateFlow(
       context,
@@ -465,22 +476,74 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// Folds or unfolds Agenda's month. The month that unfolds is the
   /// selected day's, so the header names it again.
   void _setCollapsed(bool collapsed) {
-    if (collapsed == _collapsed || _mode != _CalendarMode.agenda) {
+    if (collapsed == _collapsed || !_showsCalendarCard) {
       return;
     }
-    setState(() {
-      _collapsed = collapsed;
-      _stripDay = null;
-    });
+    _settleCollapse(collapsed);
+  }
+
+  /// Whether the mode shows the calendar card that folds: Agenda and Day.
+  bool get _showsCalendarCard {
+    return _mode == _CalendarMode.agenda || _mode == _CalendarMode.day;
+  }
+
+  /// Folds or unfolds the calendar card from however far it has folded,
+  /// a drag on the pull tab having moved it, and names the selected day's
+  /// month again once it changes.
+  void _settleCollapse(bool collapsed) {
+    if (collapsed != _collapsed) {
+      setState(() {
+        _collapsed = collapsed;
+        _stripDay = null;
+      });
+    }
     _animateCollapse();
   }
 
   void _animateCollapse() {
-    if (_collapsed) {
-      _collapseController.forward();
-    } else {
-      _collapseController.reverse();
+    _collapseController.animateTo(
+      _collapsed ? 1.0 : 0.0,
+      curve: harborMotionCurve,
+    );
+  }
+
+  /// The height the calendar card loses as the month folds into its week:
+  /// every week but the selected one, and the weekday header.
+  double get _foldDistance {
+    return (_grid.weekCount - 1) * _rowHeight + weekdayHeaderHeight;
+  }
+
+  /// The speed, in logical pixels per second, past which a release of the
+  /// pull tab folds or unfolds the way it moves, wherever it is.
+  static const double _foldFlingVelocity = 365.0;
+
+  /// A drag on the pull tab folds the card as far as the finger moves.
+  void _dragFold(DragUpdateDetails details) {
+    _collapseController.value -= details.primaryDelta! / _foldDistance;
+  }
+
+  /// A release of the pull tab folds or unfolds the card the way a fast
+  /// one moves, and otherwise to whichever it is nearer.
+  void _endFoldDrag(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0.0;
+    _settleCollapse(
+      velocity.abs() >= _foldFlingVelocity
+          ? velocity < 0.0
+          : _collapseController.value >= 0.5,
+    );
+  }
+
+  /// In Day, a drag that scrolls the board's content up folds the month
+  /// into its week, as a scroll of Agenda's list does.
+  bool _handleBoardScroll(ScrollNotification notification) {
+    if (_mode == _CalendarMode.day &&
+        notification.metrics.axis == Axis.vertical &&
+        notification is ScrollUpdateNotification &&
+        notification.dragDetails != null &&
+        (notification.scrollDelta ?? 0.0) > 0.0) {
+      _setCollapsed(true);
     }
+    return false;
   }
 
   /// A drag that moves the list's content up folds the month into its
@@ -588,7 +651,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               isSelected: isSelected,
               isToday: day == today,
               hasItems: hasItems,
-              collapse: _collapse,
+              collapse: _collapseController,
             );
           },
         );
@@ -707,34 +770,41 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _buildHeaderCard(
-            below: _mode != _CalendarMode.day ? null : _buildStrip(),
-          ),
+          if (_mode == _CalendarMode.day)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 8.0),
+              child: _buildCalendarCard(),
+            )
+          else
+            _buildHeaderCard(),
           Expanded(
-            child: TimedGrid(
-              // Each mode builds its own grid, which opens scrolled to its
-              // opening time, and so does a week of one shown weekday, as a
-              // grid keeps one day column or more than one.
-              key: ValueKey<(_CalendarMode, bool)>((
-                _mode,
-                days.count > 1 && _settings.weekdays.columns.length > 1,
-              )),
-              model: _model,
-              settings: _settings,
-              firstDay: days.first,
-              dayCount: days.count,
-              selectedDay: _selected,
-              today: _today.value,
-              now: _now,
-              onSelectDay: _select,
-              onOpenItem: (id) {
-                showEditForm(context, model: _model, id: id);
-              },
-              onCreate: (range) {
-                showCreateFlow(context, model: _model, range: range);
-              },
-              // The week strip names Day's one day.
-              showsDayHeader: _mode != _CalendarMode.day,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: _handleBoardScroll,
+              child: TimedGrid(
+                // Each mode builds its own grid, which opens scrolled to its
+                // opening time, and so does a week of one shown weekday, as a
+                // grid keeps one day column or more than one.
+                key: ValueKey<(_CalendarMode, bool)>((
+                  _mode,
+                  days.count > 1 && _settings.weekdays.columns.length > 1,
+                )),
+                model: _model,
+                settings: _settings,
+                firstDay: days.first,
+                dayCount: days.count,
+                selectedDay: _selected,
+                today: _today.value,
+                now: _now,
+                onSelectDay: _select,
+                onOpenItem: (id) {
+                  showEditForm(context, model: _model, id: id);
+                },
+                onCreate: (range) {
+                  showCreateFlow(context, model: _model, range: range);
+                },
+                // The week strip names Day's one day.
+                showsDayHeader: _mode != _CalendarMode.day,
+              ),
             ),
           ),
         ],
@@ -760,6 +830,19 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               selectedDay: _selected,
               today: _today.value,
               onTopDay: _select,
+              onCreateIn: (day, startMinute, endMinute) {
+                showCreateFlow(
+                  context,
+                  model: _model,
+                  range: CreateRange(
+                    day: day,
+                    startMinute: startMinute,
+                    endMinute: endMinute,
+                    dayCount: 1,
+                  ),
+                );
+              },
+              onCreateOn: _openCreateFlow,
               onEdit: (id) {
                 showEditForm(context, model: _model, id: id);
               },
@@ -831,7 +914,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         borderRadius: BorderRadius.circular(16.0),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 12.0),
+        padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 0.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -839,10 +922,21 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
             _buildCalendarHeader(),
             const SizedBox(height: 4.0),
             AnimatedBuilder(
-              animation: _collapse,
+              animation: _collapseController,
               child: board,
               builder: (context, child) {
-                return _buildGrid(_collapse.value, child!);
+                return _buildGrid(_collapseController.value, child!);
+              },
+            ),
+            _PullTab(
+              folded: _collapsed,
+              onDragStart: (details) {
+                _collapseController.stop();
+              },
+              onDragUpdate: _dragFold,
+              onDragEnd: _endFoldDrag,
+              onTap: () {
+                _settleCollapse(!_collapsed);
               },
             ),
           ],
@@ -851,8 +945,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// The strip of days Day's header card holds and Agenda's folded month
-  /// becomes. Its weekdays are fixed for its life, so new ones build a new
+  /// The strip of days the calendar card's folded month becomes, in Agenda
+  /// and Day. Its weekdays are fixed for its life, so new ones build a new
   /// strip.
   Widget _buildStrip() {
     return WeekStrip(
@@ -1058,6 +1152,62 @@ class _CalendarHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The key of the calendar card's pull tab.
+const ValueKey<String> calendarPullTabKey = ValueKey<String>(
+  "calendar-pull-tab",
+);
+
+/// A short bar under the calendar card's days that a vertical drag moves
+/// with the finger, folding the month into its week or unfolding it, and
+/// a tap switches.
+class _PullTab extends StatelessWidget {
+  const _PullTab({
+    required this.folded,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+    required this.onTap,
+  });
+
+  /// Whether the card shows the week, which names what a tap shows.
+  final bool folded;
+
+  final GestureDragStartCallback onDragStart;
+  final GestureDragUpdateCallback onDragUpdate;
+  final GestureDragEndCallback onDragEnd;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: folded ? "Show the month" : "Show the week",
+      onTap: onTap,
+      excludeSemantics: true,
+      child: GestureDetector(
+        key: calendarPullTabKey,
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        onVerticalDragStart: onDragStart,
+        onVerticalDragUpdate: onDragUpdate,
+        onVerticalDragEnd: onDragEnd,
+        child: SizedBox(
+          height: 20.0,
+          child: Center(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: HarborColors.outline,
+                borderRadius: BorderRadius.circular(2.0),
+              ),
+              child: const SizedBox(width: 36.0, height: 4.0),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

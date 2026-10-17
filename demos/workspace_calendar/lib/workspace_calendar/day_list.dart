@@ -1,7 +1,8 @@
 /// Agenda's list: the shown days one after another, each a header that
 /// sticks at the list's top while its block scrolls under it: the day's
-/// items beside their start times and lengths, with a dashed row for each
-/// hour between them that no item covers, or "No items" on a dashed row.
+/// items beside their times and lengths, with a dashed row for each hour
+/// between them that no item covers, or "No items" on a dashed row, each
+/// dashed row with a button that adds an item there.
 library;
 
 import 'dart:async';
@@ -58,6 +59,12 @@ ValueKey<String> dayListHeaderKey(DateTime day) {
 /// midnight.
 ValueKey<String> dayListHourKey(DateTime day, int minute) {
   return ValueKey<String>("day-list-hour-$minute@${isoDate(day)}");
+}
+
+/// The key of the chip naming the length of the item [id], under its
+/// times.
+ValueKey<String> dayListDurationKey(String id) {
+  return ValueKey<String>("day-list-duration-$id");
 }
 
 /// The key of the row saying [day] has no items.
@@ -181,11 +188,15 @@ final class DayListItem extends DayListRow {
   }
 }
 
-/// [day]'s dashed row of the whole hour [minute] minutes after midnight.
+/// [day]'s dashed row of the whole hour [minute] minutes after midnight,
+/// which no item covers, in a gap that lasts to [until].
 final class DayListHour extends DayListRow {
-  const DayListHour(super.day, this.minute);
+  const DayListHour(super.day, this.minute, {required this.until});
 
   final int minute;
+
+  /// The minute the item after the gap starts.
+  final int until;
 
   @override
   String get key {
@@ -194,12 +205,15 @@ final class DayListHour extends DayListRow {
 
   @override
   bool operator ==(Object other) {
-    return other is DayListHour && other.day == day && other.minute == minute;
+    return other is DayListHour &&
+        other.day == day &&
+        other.minute == minute &&
+        other.until == until;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, minute);
+    return Object.hash(day, minute, until);
   }
 
   @override
@@ -288,7 +302,7 @@ List<DayListRow> dayListRowsOf(DateTime day, List<ShownItem> entries) {
         hour < item.startMinute;
         hour += 60
       ) {
-        rows.add(DayListHour(day, hour));
+        rows.add(DayListHour(day, hour, until: item.startMinute));
       }
     }
     rows.add(DayListItem(day, entry));
@@ -303,13 +317,15 @@ List<DayListRow> dayListRowsOf(DateTime day, List<ShownItem> entries) {
 /// [selectedDay] to as many after, on a [SyncedSliverTree] whose roots are
 /// the days' headers, which stick at the list's top, each over one block
 /// ([DayListBody]) holding the day's rows ([dayListRowsOf]), each card
-/// right of its start time and its length; "No items" on a dashed row for
-/// a day without items; a progress indicator while the day is unread; and
-/// after a failed read, the failure and a Retry that reads the shown days
-/// again. Times read in [format]. A row that comes or goes in a block
-/// grows in and fades in, or fades out and shrinks away, so the block
-/// grows or shrinks smoothly; a block above the list's top that changes
-/// height moves nothing the list shows.
+/// right of its start time, "to" and its end time, over a chip of its
+/// length, and each dashed hour row with a button that reports
+/// [onCreateIn]; "No items" on a dashed row for a day without items, with
+/// a button that reports [onCreateOn]; a progress indicator while the day
+/// is unread; and after a failed read, the failure and a Retry that reads
+/// the shown days again. Times read in [format]. A row that comes or goes
+/// in a block grows in and fades in, or fades out and shrinks away, so the
+/// block grows or shrinks smoothly; a block above the list's top that
+/// changes height moves nothing the list shows.
 ///
 /// The list opens with [selectedDay]'s header at its top, and a new
 /// [selectedDay] scrolls there, animating, unless it is the day a scroll
@@ -331,6 +347,8 @@ class DayList extends StatefulWidget {
     required this.selectedDay,
     required this.today,
     required this.onTopDay,
+    required this.onCreateIn,
+    required this.onCreateOn,
     required this.onEdit,
     required this.onDelete,
   });
@@ -352,6 +370,14 @@ class DayList extends StatefulWidget {
 
   /// A drag or a fling brought a new day under the list's top.
   final ValueChanged<DateTime> onTopDay;
+
+  /// The add button of a gap between a day's items was pressed: an item
+  /// from the gap's hour to an hour later, or the next item's start where
+  /// that comes first.
+  final void Function(DateTime day, int startMinute, int endMinute) onCreateIn;
+
+  /// The add button of a day without items was pressed.
+  final ValueChanged<DateTime> onCreateOn;
 
   final void Function(String id) onEdit;
   final void Function(String id) onDelete;
@@ -443,10 +469,9 @@ class _DayListState extends State<DayList> {
     }
     final day = widget.selectedDay;
     if (day != oldWidget.selectedDay && day != _topDay) {
-      // At the next frame's start, when the tree has laid out whatever
-      // this build gives it ([_scheduleLanding] says why not after this
-      // one).
-      SchedulerBinding.instance.scheduleFrameCallback((_) {
+      // After the frame, once the tree has laid out what this build gives
+      // it.
+      SchedulerBinding.instance.addPostFrameCallback((_) {
         if (mounted && widget.selectedDay == day) {
           _reveal(day);
         }
@@ -493,26 +518,20 @@ class _DayListState extends State<DayList> {
     _scheduleLanding();
   }
 
-  /// Lands on [_topDay] once a frame has laid the list out: after the
-  /// next frame, at the start of the one after it. A callback scheduled
-  /// for the next frame's start alone can run before any layout, as the
-  /// first frame's does, which runs the callbacks the first build
-  /// scheduled before it lays anything out. Not after that frame: [_land]
-  /// sets state, and the tree evicts stale rows in a post-frame callback
-  /// that builds in a scope rooted at the tree, which a dirty ancestor
-  /// fails.
+  /// Lands on [_topDay] after the next frame, which lays the list out. Not
+  /// at that frame's start: a callback scheduled for it can run before any
+  /// layout, as the first frame's does, which runs the callbacks the first
+  /// build scheduled before it lays anything out. A post-frame callback
+  /// schedules no frame, so this asks for one, which [_land]'s wait for a
+  /// layout needs.
   void _scheduleLanding() {
     final generation = _generation;
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || generation != _generation) {
-        return;
+      if (mounted && generation == _generation) {
+        _land(generation);
       }
-      SchedulerBinding.instance.scheduleFrameCallback((_) {
-        if (mounted && generation == _generation) {
-          _land(generation);
-        }
-      });
     });
+    SchedulerBinding.instance.ensureVisualUpdate();
   }
 
   /// Jumps [_topDay]'s header to the list's top, by the tree's own measure
@@ -683,15 +702,18 @@ class _DayListState extends State<DayList> {
   static const double _headerExtent = 16.0 + 19.0 + 12.0;
 
   /// The predicted height of [row] in a day's block, its padding included:
-  /// a card's top and bottom padding, the row of its title and menu
-  /// button, a line of summaries where it has some, and the line of its
-  /// times; or a dashed or loading row; or a failed row's button.
+  /// for an item, the taller of its card (its top and bottom padding, the
+  /// row of its title and menu button and a line of summaries where it has
+  /// some) and its time column (three lines and the duration chip); or a
+  /// dashed or loading row; or a failed row's button.
   static double _blockRowExtent(DayListRow row) {
     const padding = 12.0;
     switch (row) {
       case DayListItem(:final entry):
         final summaries = ItemCard.summariesOf(entry.item).isEmpty ? 0.0 : 17.0;
-        return 6.0 + 48.0 + summaries + 6.0 + 16.0 + 12.0 + padding;
+        final card = 6.0 + 48.0 + summaries + 12.0;
+        const times = 16.0 + 15.0 + 16.0 + 6.0 + 17.0;
+        return math.max(card, times) + padding;
       case DayListFailed():
         return 48.0 + padding;
       default:
@@ -727,10 +749,7 @@ class _DayListState extends State<DayList> {
 
   /// Looks for a new top day after the frame that lays the rows out at
   /// the scroll's new offset, unless a reveal starts first, and reports
-  /// one it finds once that frame's post-frame callbacks are done: the
-  /// report sets state, and the tree evicts stale rows in a post-frame
-  /// callback that builds in a scope rooted at the tree, which a dirty
-  /// ancestor fails.
+  /// one it finds.
   void _scheduleTopDayCheck() {
     if (_topDayCheckScheduled) {
       return;
@@ -747,11 +766,7 @@ class _DayListState extends State<DayList> {
         return;
       }
       _topDay = day;
-      scheduleMicrotask(() {
-        if (mounted && reveals == _reveals) {
-          _reportTopDay(day);
-        }
-      });
+      _reportTopDay(day);
     });
     SchedulerBinding.instance.ensureVisualUpdate();
   }
@@ -903,16 +918,28 @@ class _DayListState extends State<DayList> {
         throw ArgumentError.value(row, "row", "not a row of a block");
       case DayListItem(:final entry):
         return _padded(_buildItem(entry));
-      case DayListHour(:final day, :final minute):
+      case DayListHour(:final day, :final minute, :final until):
+        final label = hourLabel(minute, widget.format);
         return _padded(
           _buildDashed(
             key: dayListHourKey(day, minute),
-            label: hourLabel(minute, widget.format),
+            label: label,
+            addTooltip: "Add an item at $label",
+            onAdd: () {
+              widget.onCreateIn(day, minute, math.min(minute + 60, until));
+            },
           ),
         );
       case DayListEmpty(:final day):
         return _padded(
-          _buildDashed(key: dayListEmptyKey(day), label: "No items"),
+          _buildDashed(
+            key: dayListEmptyKey(day),
+            label: "No items",
+            addTooltip: "Add an item on ${dayTitle(day, widget.today)}",
+            onAdd: () {
+              widget.onCreateOn(day);
+            },
+          ),
         );
       case DayListLoading(:final day):
         return _padded(
@@ -988,7 +1015,8 @@ class _DayListState extends State<DayList> {
     );
   }
 
-  /// The item's start time over its length, and its card.
+  /// The item's start time, "to" and its end time, its length on a chip
+  /// under them, and its card.
   Widget _buildItem(ShownItem entry) {
     final item = entry.item;
     return Row(
@@ -1003,12 +1031,31 @@ class _DayListState extends State<DayList> {
                 hourLabel(item.startMinute, widget.format),
                 style: _timeStyle,
               ),
-              const SizedBox(height: 2.0),
-              Text(
-                durationLabel(item.endMinute - item.startMinute),
-                style: const TextStyle(
-                  fontSize: 12.0,
-                  color: HarborColors.textMuted,
+              const Text(
+                "to",
+                style: TextStyle(fontSize: 12.0, color: HarborColors.textMuted),
+              ),
+              Text(hourLabel(item.endMinute, widget.format), style: _timeStyle),
+              const SizedBox(height: 6.0),
+              DecoratedBox(
+                key: dayListDurationKey(entry.id),
+                decoration: BoxDecoration(
+                  color: HarborColors.primaryTint,
+                  borderRadius: BorderRadius.circular(10.0),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7.0,
+                    vertical: 2.0,
+                  ),
+                  child: Text(
+                    durationLabel(item.endMinute - item.startMinute),
+                    style: const TextStyle(
+                      fontSize: 11.0,
+                      fontWeight: FontWeight.w600,
+                      color: HarborColors.primary,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -1018,7 +1065,6 @@ class _DayListState extends State<DayList> {
           child: ItemCard(
             key: itemCardKey(entry.id),
             entry: entry,
-            format: widget.format,
             onEdit: () {
               widget.onEdit(entry.id);
             },
@@ -1031,8 +1077,14 @@ class _DayListState extends State<DayList> {
     );
   }
 
-  /// [label] in the time column and a dashed line across the cards' width.
-  Widget _buildDashed({required Key key, required String label}) {
+  /// [label] in the time column, a dashed line across the cards' width,
+  /// and at its end a button that adds an item there through [onAdd].
+  Widget _buildDashed({
+    required Key key,
+    required String label,
+    required String addTooltip,
+    required VoidCallback onAdd,
+  }) {
     return SizedBox(
       key: key,
       height: 24.0,
@@ -1053,6 +1105,8 @@ class _DayListState extends State<DayList> {
               child: SizedBox.expand(),
             ),
           ),
+          const SizedBox(width: 8.0),
+          _AddButton(tooltip: addTooltip, onPressed: onAdd),
         ],
       ),
     );
@@ -1241,6 +1295,34 @@ class _AnimatedRowsState extends State<_AnimatedRows>
             ),
           ),
       ],
+    );
+  }
+}
+
+/// A small round button with a plus in the primary colour on the primary
+/// tint, which [tooltip] names.
+class _AddButton extends StatelessWidget {
+  const _AddButton({required this.tooltip, required this.onPressed});
+
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: HarborColors.primaryTint,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: const SizedBox.square(
+            dimension: 24.0,
+            child: Icon(Icons.add, size: 16.0, color: HarborColors.primary),
+          ),
+        ),
+      ),
     );
   }
 }
