@@ -52,6 +52,9 @@ duration is a kill switch.
 - Added `BoardGridPainter` and `BoardBackgroundPainter`, which paint behind the
 lattice from its live track geometry (`BoardGeometryView`), frozen bands
 included.
+- Added `Board.foreground` and `BoardForegroundPainter`, which paint over every
+cell and item from the same geometry, frozen bands included. A painter that
+draws for scrolled tracks clips itself to `BoardGeometryView.scrolledRegion`.
 - Fix: a new `BoardDragConfig` instance, which an inline config in a parent's
 `build` is on every rebuild of that parent, cancelled a live drag and rebuilt
 every cell and item. `Board` now assigns it to the drag controller it has
