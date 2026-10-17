@@ -2445,25 +2445,29 @@ void main() {
     );
   });
 
-  testWidgets("W32 out of edit mode a long press still moves a block", (
-    tester,
-  ) async {
-    await pumpCalendar(tester, size: tall);
+  testWidgets("W32 edit mode turned off clears the selection, and out of it "
+      "a long press neither moves nor selects a block", (tester) async {
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
+    await selectBlock(tester, brainstormId);
+    // Setup sanity: the block is selected.
+    expect(find.byKey(blockHandlesKey(brainstormId)), findsOneWidget);
+    await toggleEditMode(tester);
+    expect(find.byKey(blockHandlesKey(brainstormId)), findsNothing);
+
+    final before = tester.getRect(blockFinder(brainstormId));
     final saturday = cellRect(tester, rowOf(14 * 60), colOf(5));
     await moveBlock(tester, blockFinder(brainstormId), saturday.topLeft);
-    // Past the mock's answer, which a failed write would undo.
+    // Past the mock's answer, which a write would wait for.
     await tester.pumpAndSettle();
-    expect(
-      tester.getRect(blockFinder(brainstormId)).topLeft,
-      nearOffset(saturday.topLeft),
-    );
+    expect(tester.getRect(blockFinder(brainstormId)), before);
+    expect(find.byKey(blockHandlesKey(brainstormId)), findsNothing);
   });
 
-  testWidgets("W33 a long press selects a block, out of edit mode too, "
-      "whose handles then resize it, and a tap on it keeps the selection "
-      "while a tap elsewhere clears it", (tester) async {
-    final api = await pumpCalendar(tester, size: tall);
+  testWidgets("W33 in edit mode a long press selects a block, whose "
+      "handles then resize it, and a tap on it keeps the selection while a "
+      "tap elsewhere clears it", (tester) async {
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     final handles = find.byKey(blockHandlesKey(brainstormId));
     final block = blockFinder(brainstormId);
@@ -2517,7 +2521,7 @@ void main() {
 
     await tester.tap(block);
     await tester.pumpAndSettle();
-    await tester.tap(formButton("Close"));
+    await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
     expect(handles, findsOneWidget);
     await tapCell(tester, rowOf(20 * 60), colOf(6));
@@ -2603,38 +2607,25 @@ void main() {
   });
 
   testWidgets("W36 out of edit mode a press and hold on an empty slot, "
-      "dragged or not, still creates", (tester) async {
+      "then a drag, creates nothing", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
-    final from = rowOf(14 * 60);
-    final saturday = colOf(5);
-
-    var gesture = await tester.startGesture(centerOf(tester, from, saturday));
+    final gesture = await tester.startGesture(
+      centerOf(tester, rowOf(14 * 60), colOf(5)),
+    );
     await tester.pump(const Duration(milliseconds: 600));
     await gesture.moveTo(centerOf(tester, rowOf(14 * 60 + 45), colOf(6)));
     await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
-    expect(find.text("New item"), findsOneWidget);
-    await tester.tap(find.text("Task").last);
-    await tester.pumpAndSettle();
-    // The drag's rectangle, Saturday and Sunday.
-    expect(fieldText(tester, "Days"), "2");
-    await tester.tap(formButton("Cancel"));
-    await tester.pumpAndSettle();
-
-    gesture = await tester.startGesture(centerOf(tester, from, saturday));
-    await tester.pump(const Duration(milliseconds: 600));
-    await gesture.up();
-    await tester.pumpAndSettle();
-    expect(find.text("New item"), findsOneWidget);
+    expect(find.text("New item"), findsNothing);
   });
 
   testWidgets("W37 a long press on another block moves the selection to "
       "it, and a week step that takes the block off the grid clears it", (
     tester,
   ) async {
-    await pumpCalendar(tester, size: tall);
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     await selectBlock(tester, brainstormId);
     await selectBlock(tester, standupId);
@@ -2655,7 +2646,7 @@ void main() {
       "primary colour, each centred on its top, bottom or right edge", (
     tester,
   ) async {
-    await pumpCalendar(tester, size: tall);
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     await selectBlock(tester, brainstormId);
     final block = tester.getRect(blockFinder(brainstormId));
@@ -2703,7 +2694,7 @@ void main() {
       "there keeps the selection, and a press further out scrolls", (
     tester,
   ) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     await selectBlock(tester, brainstormId);
     final block = blockFinder(brainstormId);
@@ -2780,7 +2771,7 @@ void main() {
 
   testWidgets("W40 once the selection moves to another block, a press just "
       "outside that block resizes it", (tester) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     await selectBlock(tester, brainstormId);
     await selectBlock(tester, standupId);

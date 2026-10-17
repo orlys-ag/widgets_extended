@@ -263,7 +263,7 @@ class _WeekStripState extends State<WeekStrip> {
             child: CustomScrollView(
               scrollDirection: Axis.horizontal,
               controller: _scroll,
-              physics: _DaySnapPhysics(dayCount: _count),
+              physics: StripSnapPhysics(cellCount: _count),
               scrollBehavior: ScrollConfiguration.of(
                 context,
               ).copyWith(scrollbars: false),
@@ -316,18 +316,22 @@ class _WeekStripState extends State<WeekStrip> {
 }
 
 /// Scroll physics that bring a release, a fling or a wheel's scroll to
-/// rest on a whole day: the one nearest to where the parent's physics
-/// would bring it to rest, a day being the viewport's width over
-/// [dayCount]. Read from the metrics, so a new width needs no new physics,
-/// which a scroll view only takes up for a new type of physics.
-class _DaySnapPhysics extends ScrollPhysics {
-  const _DaySnapPhysics({required this.dayCount, super.parent});
+/// rest on a whole cell, a day of the week strip or a month of the month
+/// strip: the one nearest to where the parent's physics would bring it to
+/// rest, a cell being the viewport's width over [cellCount]. Read from the
+/// metrics, so a new width needs no new physics, which a scroll view only
+/// takes up for a new type of physics.
+class StripSnapPhysics extends ScrollPhysics {
+  const StripSnapPhysics({required this.cellCount, super.parent});
 
-  final int dayCount;
+  final int cellCount;
 
   @override
-  _DaySnapPhysics applyTo(ScrollPhysics? ancestor) {
-    return _DaySnapPhysics(dayCount: dayCount, parent: buildParent(ancestor));
+  StripSnapPhysics applyTo(ScrollPhysics? ancestor) {
+    return StripSnapPhysics(
+      cellCount: cellCount,
+      parent: buildParent(ancestor),
+    );
   }
 
   @override
@@ -335,7 +339,7 @@ class _DaySnapPhysics extends ScrollPhysics {
     ScrollMetrics position,
     double velocity,
   ) {
-    final extent = position.viewportDimension / dayCount;
+    final extent = position.viewportDimension / cellCount;
     final free = super.createBallisticSimulation(position, velocity);
     final rest = free?.x(double.infinity) ?? position.pixels;
     final target = (rest / extent).roundToDouble() * extent;

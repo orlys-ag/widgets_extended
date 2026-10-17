@@ -13,6 +13,7 @@ import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -450,6 +451,8 @@ void main() {
     );
 
     await openSettings(tester);
+    await tester.ensureVisible(find.byKey(hourLabelFormatKey));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(hourLabelFormatKey));
     await tester.pumpAndSettle();
     await tester.tapAt(const Offset(195.0, 20.0));
@@ -699,5 +702,45 @@ void main() {
           .right,
       moreOrLessEquals(line.left - dayListTimeGap),
     );
+  });
+
+  testWidgets("L17 a day without items names itself and its No items in "
+      "smaller, muted type, in a header as tall as a busy day's", (
+    tester,
+  ) async {
+    final busy = DateTime(2026, 4, 22);
+    final empty = DateTime(2026, 4, 25);
+    await pumpCalendar(tester);
+
+    /// The header of [day], and the styles of its title and its count.
+    ({double height, TextStyle title, TextStyle count}) header(DateTime day) {
+      final finder = find.byKey(dayListHeaderKey(day));
+      final texts = find
+          .descendant(of: finder, matching: find.byType(RichText))
+          .evaluate()
+          .map((element) {
+            return (element.renderObject! as RenderParagraph).text.style!;
+          })
+          .toList();
+      return (
+        height: tester.getSize(finder).height,
+        title: texts.first,
+        count: texts.last,
+      );
+    }
+
+    await tester.tap(dayFinder(busy));
+    await tester.pumpAndSettle();
+    final full = header(busy);
+    expect(full.title.fontSize, 16.0);
+
+    await tester.tap(dayFinder(empty));
+    await tester.pumpAndSettle();
+    final bare = header(empty);
+    expect(bare.title.fontSize, 13.0);
+    expect(bare.title.color, HarborColors.textMuted);
+    expect(bare.count.fontSize, 12.0);
+    expect(bare.count.color, HarborColors.textMuted);
+    expect(bare.height, full.height);
   });
 }

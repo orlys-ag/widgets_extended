@@ -1,4 +1,5 @@
-/// The calendar's settings sheet: edit mode, the weekday a week starts on
+/// The calendar's settings sheet: edit mode, the history lock, the weekday
+/// a week starts on
 /// and the weekdays the calendar shows, how Month fits its weeks, the
 /// hours the calendar shows and schedules in, how the timed grid labels
 /// them, the least width of a day in Week, Day and Month, and the least
@@ -14,6 +15,15 @@ import 'harbor_theme.dart';
 
 /// The key of the sheet's edit mode switch.
 const ValueKey<String> editModeKey = ValueKey<String>("settings-edit-mode");
+
+/// The key of the sheet's switch of the history lock of past days.
+const ValueKey<String> lockPastKey = ValueKey<String>("settings-lock-past");
+
+/// The key of the sheet's switch that extends the history lock to earlier
+/// today.
+const ValueKey<String> lockEarlierTodayKey = ValueKey<String>(
+  "settings-lock-earlier-today",
+);
 
 /// The key of the sheet's menu of the weekday a week starts on.
 const ValueKey<String> weekStartKey = ValueKey<String>("settings-week-start");
@@ -73,7 +83,9 @@ Future<void> showCalendarSettings(
   );
 }
 
-/// The sheet [showCalendarSettings] opens: a switch for edit mode, a menu
+/// The sheet [showCalendarSettings] opens: a switch for edit mode, one for
+/// the history lock of past days and, under it, one that extends the lock
+/// to earlier today, which takes input only while the first is on, a menu
 /// of the weekday a week starts on, a button for each weekday, in the
 /// week's order, that shows or hides it, never hiding the last one shown,
 /// a segmented button for Month's layout, a range slider for the hours, in
@@ -151,9 +163,36 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               },
             ),
             const _Note(
-              "Off, items open read-only. In Week and Day a long press "
-              "still moves an item, whose handles then resize it, or on an "
-              "empty slot adds one.",
+              "Off, the calendar is read-only: items open read-only, and "
+              "nothing is moved, resized or added.",
+            ),
+            SwitchListTile(
+              key: lockPastKey,
+              contentPadding: EdgeInsets.zero,
+              title: const Text("Lock past days"),
+              value: _settings.lockPast,
+              onChanged: (lockPast) {
+                _set(_settings.copyWith(lockPast: lockPast));
+              },
+            ),
+            SwitchListTile(
+              key: lockEarlierTodayKey,
+              contentPadding: const EdgeInsets.only(left: 16.0),
+              title: const Text("Lock earlier today too"),
+              value: _settings.lockEarlierToday,
+              onChanged: _settings.lockPast
+                  ? (lockEarlierToday) {
+                      _set(
+                        _settings.copyWith(lockEarlierToday: lockEarlierToday),
+                      );
+                    }
+                  : null,
+            ),
+            const _Note(
+              "In edit mode, past items are not moved, resized, edited or "
+              "deleted, and nothing is added in the past: before today, or "
+              "with the second switch before now. An item in progress can "
+              "still change its end.",
             ),
             const SizedBox(height: 8.0),
             Row(

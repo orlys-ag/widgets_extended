@@ -2,7 +2,8 @@
 /// read-only, and the delete confirmation.
 ///
 /// The form is generated from the item type's schema and checks its input
-/// with the same validator the API runs, before it sends anything; the
+/// with the same validator the API runs, and against the history lock,
+/// before it sends anything; the
 /// model holds its days and minutes to the calendar's hours, and the time
 /// fields offer the minutes inside them.
 library;
@@ -15,15 +16,18 @@ import 'calendar_item.dart';
 import 'calendar_model.dart';
 import 'calendar_schema.dart';
 import 'harbor_theme.dart';
+import 'history_lock.dart';
 import 'timed_grid.dart';
 
 /// Asks for a type, then opens the form for a new item of it over the
-/// slots [range] picked. Completes when the flow closes, whether or not
-/// an item was created.
+/// slots [range] picked, whose Save the history [lock] that holds then
+/// checks. Completes when the flow closes, whether or not an item was
+/// created.
 Future<void> showCreateFlow(
   BuildContext context, {
   required CalendarModel model,
   required CreateRange range,
+  required ValueGetter<HistoryLock> lock,
 }) async {
   final type = await showDialog<CalendarItemType>(
     context: context,
@@ -63,21 +67,24 @@ Future<void> showCreateFlow(
     dayCount: range.dayCount,
     fields: withFieldDefaults(type, const <String, Object?>{}),
   );
-  await _showForm(context, model: model, item: draft);
+  await _showForm(context, model: model, item: draft, lock: lock);
 }
 
-/// Opens the form for the stored item [id]. Does nothing when the model
-/// does not hold it.
+/// Opens the form for the stored item [id], whose Save the history [lock]
+/// that holds then checks; of an item the lock has [ItemHold.started] the
+/// day and the start take no input, and it has no Delete. Does nothing
+/// when the model does not hold it.
 Future<void> showEditForm(
   BuildContext context, {
   required CalendarModel model,
   required String id,
+  required ValueGetter<HistoryLock> lock,
 }) async {
   final item = model.storedItem(id);
   if (item == null) {
     return;
   }
-  await _showForm(context, model: model, item: item);
+  await _showForm(context, model: model, item: item, lock: lock);
 }
 
 /// Opens the form for the stored item [id] read-only: it shows the item's
@@ -127,14 +134,24 @@ Future<void> _showForm(
   required CalendarModel model,
   required CalendarItem item,
   bool readOnly = false,
+  ValueGetter<HistoryLock>? lock,
 }) {
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (context) {
-      return _ItemForm(model: model, item: item, readOnly: readOnly);
+      return _ItemForm(
+        model: model,
+        item: item,
+        readOnly: readOnly,
+        lock: lock ?? _noLock,
+      );
     },
   );
+}
+
+HistoryLock _noLock() {
+  return HistoryLock.none;
 }
 
 /// The form for [item]: a draft when its id is null, which Save creates,
@@ -145,6 +162,7 @@ class _ItemForm extends StatefulWidget {
     required this.model,
     required this.item,
     required this.readOnly,
+    required this.lock,
   });
 
   final CalendarModel model;
@@ -152,6 +170,10 @@ class _ItemForm extends StatefulWidget {
 
   /// Whether every control is disabled and Close is the one action.
   final bool readOnly;
+
+  /// The history lock at the moment it is read: when the form opens, for
+  /// what it takes input in, and at Save, which it refuses to break.
+  final ValueGetter<HistoryLock> lock;
 
   @override
   State<_ItemForm> createState() {
@@ -169,6 +191,12 @@ class _ItemFormState extends State<_ItemForm> {
   late DateTime _day = widget.item.day;
   late int _start = widget.item.startMinute;
   late int _end = widget.item.endMinute;
+
+  /// How the history lock held the stored item when the form opened, free
+  /// for a draft. Of a started one the day and the start take no input.
+  late final ItemHold _hold = widget.item.id == null
+      ? ItemHold.free
+      : widget.lock().holdOf(widget.item.shape);
 
   /// The text controllers of the schema's text, URL, long-text and text
   /// list fields, by key.
@@ -277,15 +305,21 @@ class _ItemFormState extends State<_ItemForm> {
     };
   }
 
-  /// Validates and sends. Nothing is sent while a field breaks a rule; the
-  /// form stays open, with every control disabled, until the API answers,
-  /// and closes on success.
+  /// Validates and sends. Nothing is sent while a field breaks a rule, or
+  /// the item breaks the history lock; the form stays open, with every
+  /// control disabled, until the API answers, and closes on success.
   Future<void> _save() async {
     if (_saving) {
       return;
     }
     final json = _envelope();
-    final errors = validateItemJson(json);
+    var errors = validateItemJson(json);
+    if (errors.isEmpty) {
+      errors = widget.lock().errorsOf(
+        _isDraft ? null : widget.item.shape,
+        CalendarItem.fromJson(json).shape,
+      );
+    }
     if (errors.isNotEmpty) {
       setState(() {
         _errors = errors;
@@ -353,7 +387,8 @@ class _ItemFormState extends State<_ItemForm> {
 
   /// A dropdown of every slot boundary from [first] to [last] minutes, and
   /// of [value] where it lies outside them, so an item that lay outside the
-  /// calendar's hours when they changed shows its own time.
+  /// calendar's hours when they changed shows its own time. A [fixed] one
+  /// takes no input.
   Widget _minuteField({
     required String label,
     required String errorKey,
@@ -361,6 +396,7 @@ class _ItemFormState extends State<_ItemForm> {
     required int first,
     required int last,
     required ValueChanged<int> onChanged,
+    bool fixed = false,
   }) {
     final minutes = <int>{
       for (var minute = first; minute <= last; minute += minutesPerSlot) minute,
@@ -376,7 +412,7 @@ class _ItemFormState extends State<_ItemForm> {
         for (final minute in minutes)
           DropdownMenuItem<int>(value: minute, child: Text(clockLabel(minute))),
       ],
-      onChanged: _locked
+      onChanged: _locked || fixed
           ? null
           : (minute) {
               if (minute != null) {
@@ -462,6 +498,7 @@ class _ItemFormState extends State<_ItemForm> {
     final style = harborTypeStyleOf(type);
     final message = _message;
     final hours = widget.model.hours;
+    final started = _hold == ItemHold.started;
     final fields = <Widget>[
       Row(
         children: <Widget>[
@@ -482,7 +519,7 @@ class _ItemFormState extends State<_ItemForm> {
         ),
       ),
       InkWell(
-        onTap: _locked ? null : _pickDay,
+        onTap: _locked || started ? null : _pickDay,
         child: InputDecorator(
           decoration: InputDecoration(
             labelText: "Day",
@@ -505,6 +542,7 @@ class _ItemFormState extends State<_ItemForm> {
               onChanged: (minute) {
                 _start = minute;
               },
+              fixed: started,
             ),
           ),
           const SizedBox(width: 12.0),
@@ -591,7 +629,7 @@ class _ItemFormState extends State<_ItemForm> {
                         },
                         child: const Text("Close"),
                       ),
-                    if (!_isDraft && !widget.readOnly)
+                    if (!_isDraft && !widget.readOnly && _hold == ItemHold.free)
                       TextButton(
                         onPressed: _saving ? null : _delete,
                         child: const Text("Delete"),

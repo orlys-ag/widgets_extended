@@ -2080,7 +2080,7 @@ void main() {
 
   testWidgets(
     "M42 with today's weekday hidden, Today selects the shown day nearest "
-    "it, and the date picker offers the shown weekdays alone",
+    "it",
     (tester) async {
       await pumpSeededMonth(tester);
       await openSettings(tester);
@@ -2096,13 +2096,6 @@ void main() {
       await tester.tap(find.byTooltip("Today"));
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(22)]);
-
-      await tester.tap(find.byTooltip("Go to a day"));
-      await tester.pumpAndSettle();
-      final shown = tester
-          .widget<DatePickerDialog>(find.byType(DatePickerDialog))
-          .selectableDayPredicate!;
-      expect(<bool>[shown(april(21)), shown(april(22))], <bool>[false, true]);
     },
   );
 }

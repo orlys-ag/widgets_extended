@@ -1,5 +1,6 @@
-/// What the calendar's settings choose: whether it is in edit mode, the
-/// weekdays it shows and the one its weeks start on, the hours it shows
+/// What the calendar's settings choose: whether it is in edit mode, how far
+/// the history lock keeps the past as it is, the weekdays it shows and the
+/// one its weeks start on, the hours it shows
 /// and schedules in, how the timed grid labels its hours, how Month fits
 /// its weeks, the least width of a day in Week, Day and Month, and the
 /// least height of the timed grid's slots, which also scales the height
@@ -131,7 +132,9 @@ String hourLabel(int minute, HourLabelFormat format) {
 }
 
 /// What the settings sheet chooses: whether the calendar is in [editing]
-/// mode, the [weekdays] it shows and the one its weeks start on, the
+/// mode, whether the history lock holds past days, [lockPast], and earlier
+/// today too, [lockEarlierToday], the [weekdays] it shows and the one its
+/// weeks start on, the
 /// [hours] it shows and schedules in, the [hourLabelFormat] the timed grid
 /// labels them in, Month's [monthLayout], the least width of a day in
 /// Week, Day and Month, and the least height of the timed grid's slots,
@@ -141,6 +144,8 @@ String hourLabel(int minute, HourLabelFormat format) {
 class CalendarSettings {
   const CalendarSettings({
     this.editing = false,
+    this.lockPast = false,
+    this.lockEarlierToday = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
@@ -149,11 +154,22 @@ class CalendarSettings {
     this.minSlotHeight = defaultMinSlotHeight,
   });
 
-  /// Whether the calendar's items can be edited and deleted, and created by
-  /// every gesture. Out of edit mode, in Week and Day, a long press still
-  /// moves an item and selects it, whose handles then resize it, and a long
-  /// press on an empty slot, dragged or not, still creates one.
+  /// Whether the calendar's items can be moved, resized, created, edited
+  /// and deleted. Out of edit mode the calendar is read-only, and a tap on
+  /// an item opens its form read-only.
   final bool editing;
+
+  /// Whether the items before today, and the time before it, are kept as
+  /// they are: no item there is moved, resized, edited or deleted, nor
+  /// does one move there or start there; an item reaching from before
+  /// today into it changes only its end, to a time after the start of
+  /// today.
+  final bool lockPast;
+
+  /// Whether, under [lockPast], the lock holds today up to the current
+  /// minute too, and so an item in progress changes only its end, to a
+  /// time after now. Without [lockPast] it holds nothing.
+  final bool lockEarlierToday;
 
   /// The weekdays the calendar shows, at least one, which the month grid
   /// and the timed grid assert, and the weekday its weeks start on, which
@@ -181,6 +197,8 @@ class CalendarSettings {
 
   CalendarSettings copyWith({
     bool? editing,
+    bool? lockPast,
+    bool? lockEarlierToday,
     WeekdaySet? weekdays,
     DayHours? hours,
     HourLabelFormat? hourLabelFormat,
@@ -190,6 +208,8 @@ class CalendarSettings {
   }) {
     return CalendarSettings(
       editing: editing ?? this.editing,
+      lockPast: lockPast ?? this.lockPast,
+      lockEarlierToday: lockEarlierToday ?? this.lockEarlierToday,
       weekdays: weekdays ?? this.weekdays,
       hours: hours ?? this.hours,
       hourLabelFormat: hourLabelFormat ?? this.hourLabelFormat,
@@ -203,6 +223,8 @@ class CalendarSettings {
   bool operator ==(Object other) {
     return other is CalendarSettings &&
         other.editing == editing &&
+        other.lockPast == lockPast &&
+        other.lockEarlierToday == lockEarlierToday &&
         other.weekdays == weekdays &&
         other.hours == hours &&
         other.hourLabelFormat == hourLabelFormat &&
@@ -215,6 +237,8 @@ class CalendarSettings {
   int get hashCode {
     return Object.hash(
       editing,
+      lockPast,
+      lockEarlierToday,
       weekdays,
       hours,
       hourLabelFormat,
@@ -227,6 +251,7 @@ class CalendarSettings {
   @override
   String toString() {
     return "CalendarSettings(${editing ? "editing" : "viewing"}, "
+        "${lockPast ? "past locked${lockEarlierToday ? " to now" : ""}, " : ""}"
         "$weekdays, $hours, ${hourLabelFormat.name}, "
         "${monthLayout.name}, day width $minDayWidth, "
         "slot height $minSlotHeight)";

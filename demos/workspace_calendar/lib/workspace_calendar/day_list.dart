@@ -18,8 +18,10 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_model.dart';
+import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
+import 'history_lock.dart';
 import 'item_card.dart';
 
 /// The style the day list animates its rows with: every family over
@@ -330,7 +332,11 @@ List<DayListRow> dayListRowsOf(
 /// is unread; and after a failed read, the failure and a Retry that reads
 /// the shown days again. Times read in [format]. Unless [editable], the
 /// list has no dashed rows and the cards no menu, so a day without items
-/// shows its header alone. A row that comes or goes
+/// shows its header alone. Under the history [lock] a card has Edit only
+/// while its item is not [ItemHold.locked], and Delete only while it is
+/// [ItemHold.free], and a dashed row's button adds from the first time the
+/// lock leaves free in its gap, or on its day, and is gone where the lock
+/// leaves none. A row that comes or goes
 /// in a block grows in and fades in, or fades out and shrinks away, so the
 /// block grows or shrinks smoothly; a block above the list's top that
 /// changes height moves nothing the list shows.
@@ -354,6 +360,7 @@ class DayList extends StatefulWidget {
     required this.format,
     required this.hours,
     required this.editable,
+    required this.lock,
     required this.selectedDay,
     required this.today,
     required this.onTopDay,
@@ -378,6 +385,8 @@ class DayList extends StatefulWidget {
   /// Whether the calendar is in edit mode, where the list has its dashed
   /// rows and each card its menu of Edit and Delete.
   final bool editable;
+
+  final HistoryLock lock;
 
   /// The day the list brings to its top; a shown day.
   final DateTime selectedDay;
@@ -939,26 +948,31 @@ class _DayListState extends State<DayList> {
       case DayListItem(:final entry):
         return _padded(_buildItem(entry));
       case DayListGap(:final day, :final start, :final end):
-        final label = hourLabel(start, widget.format);
+        final from = math.max(start, widget.lock.earliestStartOn(day));
         return _padded(
           _buildDashed(
             key: dayListGapKey(day, start),
-            label: label,
-            addTooltip: "Add an item at $label",
-            onAdd: () {
-              widget.onCreateIn(day, start, math.min(start + 60, end));
-            },
+            label: hourLabel(start, widget.format),
+            addTooltip: "Add an item at ${hourLabel(from, widget.format)}",
+            onAdd: from < end
+                ? () {
+                    widget.onCreateIn(day, from, math.min(from + 60, end));
+                  }
+                : null,
           ),
         );
       case DayListEmpty(:final day):
+        final earliest = widget.lock.earliestStartOn(day);
         return _padded(
           _buildDashed(
             key: dayListEmptyKey(day),
             label: "No items",
             addTooltip: "Add an item on ${dayTitle(day, widget.today)}",
-            onAdd: () {
-              widget.onCreateOn(day);
-            },
+            onAdd: earliest <= widget.hours.end - minutesPerSlot
+                ? () {
+                    widget.onCreateOn(day);
+                  }
+                : null,
           ),
         );
       case DayListLoading(:final day):
@@ -997,10 +1011,25 @@ class _DayListState extends State<DayList> {
     return Padding(padding: const EdgeInsets.only(bottom: 12.0), child: child);
   }
 
+  static const TextStyle _titleStyle = TextStyle(
+    fontSize: 16.0,
+    fontWeight: FontWeight.w700,
+    color: HarborColors.text,
+  );
+
+  static const TextStyle _countStyle = TextStyle(
+    fontSize: 15.0,
+    fontWeight: FontWeight.w600,
+    color: HarborColors.textSecondary,
+  );
+
   /// The day's title and how many items it shows, on the background
-  /// colour, so the rows scrolling under it while it sticks stay hidden.
+  /// colour, so the rows scrolling under it while it sticks stay hidden. A
+  /// day read to hold no items has both 3 px smaller and muted, on a line
+  /// as tall as a busy day's title takes, so its header is as tall.
   Widget _buildHeader(DayListHeader row) {
     final count = row.count;
+    final empty = count == 0;
     return ColoredBox(
       key: dayListHeaderKey(row.day),
       color: HarborColors.background,
@@ -1013,21 +1042,29 @@ class _DayListState extends State<DayList> {
                 dayTitle(row.day, widget.today),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16.0,
-                  fontWeight: FontWeight.w700,
-                  color: HarborColors.text,
-                ),
+                strutStyle: empty
+                    ? StrutStyle.fromTextStyle(
+                        DefaultTextStyle.of(context).style.merge(_titleStyle),
+                        forceStrutHeight: true,
+                      )
+                    : null,
+                style: empty
+                    ? _titleStyle.copyWith(
+                        fontSize: 13.0,
+                        color: HarborColors.textMuted,
+                      )
+                    : _titleStyle,
               ),
             ),
             if (count != null)
               Text(
                 itemCountLabel(count),
-                style: const TextStyle(
-                  fontSize: 15.0,
-                  fontWeight: FontWeight.w600,
-                  color: HarborColors.textSecondary,
-                ),
+                style: empty
+                    ? _countStyle.copyWith(
+                        fontSize: 12.0,
+                        color: HarborColors.textMuted,
+                      )
+                    : _countStyle,
               ),
           ],
         ),
@@ -1038,6 +1075,7 @@ class _DayListState extends State<DayList> {
   /// The item's start time, its length on a chip under it, and its card.
   Widget _buildItem(ShownItem entry) {
     final item = entry.item;
+    final hold = widget.lock.holdOf(item.shape);
     return Row(
       children: <Widget>[
         Container(
@@ -1080,13 +1118,16 @@ class _DayListState extends State<DayList> {
           child: ItemCard(
             key: itemCardKey(entry.id),
             entry: entry,
-            editable: widget.editable,
-            onEdit: () {
-              widget.onEdit(entry.id);
-            },
-            onDelete: () {
-              widget.onDelete(entry.id);
-            },
+            onEdit: widget.editable && hold != ItemHold.locked
+                ? () {
+                    widget.onEdit(entry.id);
+                  }
+                : null,
+            onDelete: widget.editable && hold == ItemHold.free
+                ? () {
+                    widget.onDelete(entry.id);
+                  }
+                : null,
           ),
         ),
       ],
@@ -1095,12 +1136,12 @@ class _DayListState extends State<DayList> {
 
   /// [label] at the end of the time column, a dashed line across the
   /// cards' width, and at its end a button that adds an item there through
-  /// [onAdd].
+  /// [onAdd], or the button's room where [onAdd] is null.
   Widget _buildDashed({
     required Key key,
     required String label,
     required String addTooltip,
-    required VoidCallback onAdd,
+    required VoidCallback? onAdd,
   }) {
     return SizedBox(
       key: key,
@@ -1125,7 +1166,10 @@ class _DayListState extends State<DayList> {
             ),
           ),
           const SizedBox(width: 8.0),
-          _AddButton(tooltip: addTooltip, onPressed: onAdd),
+          if (onAdd == null)
+            const SizedBox(width: _AddButton.size)
+          else
+            _AddButton(tooltip: addTooltip, onPressed: onAdd),
         ],
       ),
     );
@@ -1323,6 +1367,9 @@ class _AnimatedRowsState extends State<_AnimatedRows>
 class _AddButton extends StatelessWidget {
   const _AddButton({required this.tooltip, required this.onPressed});
 
+  /// The button's width and height.
+  static const double size = 24.0;
+
   final String tooltip;
   final VoidCallback onPressed;
 
@@ -1337,7 +1384,7 @@ class _AddButton extends StatelessWidget {
           customBorder: const CircleBorder(),
           onTap: onPressed,
           child: const SizedBox.square(
-            dimension: 24.0,
+            dimension: size,
             child: Icon(Icons.add, size: 16.0, color: HarborColors.primary),
           ),
         ),

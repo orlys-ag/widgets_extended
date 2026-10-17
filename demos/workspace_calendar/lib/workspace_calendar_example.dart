@@ -4,8 +4,8 @@
 /// the selected day's week as the list is scrolled;
 /// Month, the month's weeks with each item as a chip on the days it
 /// covers; and Week and Day, timed grids of the selected day's week and of
-/// that day alone, where items are moved, resized and created, and in edit
-/// mode also edited and deleted.
+/// that day alone, where in edit mode items are moved, resized and
+/// created.
 ///
 /// Day shows Agenda's calendar card folded: a strip of a week's worth of
 /// days, opening on the selected day's week, whose days a tap selects and
@@ -55,10 +55,9 @@
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
 /// The settings sheet chooses edit mode, which the calendar opens out of
-/// unless it is given it: out of it a long press in Week and Day still
-/// moves an item, whose handles then resize it, or on an empty slot
-/// creates one, but a tap on an item opens its form read-only, and the app
-/// bar has no Add. The
+/// unless it is given it: out of it the calendar is read-only, so nothing
+/// is moved, resized or created, a tap on an item opens its form
+/// read-only, and the app bar has no Add. The
 /// sheet also chooses the weekday a week starts on, which every
 /// view's weeks and columns follow, and which weekdays show, how Month fits
 /// its weeks, the hours the calendar shows and schedules in, whether Week
@@ -68,14 +67,26 @@
 /// selected day is always on a shown weekday. Every view rings today's
 /// number in a lighter blue than the primary.
 ///
+/// The sheet also chooses the history lock, which in edit mode keeps the
+/// past as it is: no item before today, or with its second switch before
+/// now, is moved, resized, edited or deleted, nor does an item move,
+/// resize or get created there, and an item in progress changes only its
+/// end. A create with no time left after the lock on its day says so.
+///
 /// Today, in the app bar, selects today, or the shown day nearest it, in
-/// every view, and slides a strip a drag moved away back to it; a tap on
-/// the header's month opens a date picker of the shown weekdays, whose
-/// pick is selected the same way. The settings sheet opens from the app
+/// every view, and slides a strip a drag moved away back to it. A tap on
+/// the header's month opens the month picker, a [MonthStrip], until a
+/// month is picked or the title is tapped again: Agenda's and Day's card
+/// folds to show it in the strip's place, and Week and Month show it under
+/// the header. While it shows, the title names the year of the month at
+/// its middle and the chevrons step a year; a month picked selects its day
+/// of the selected day's day of the month, as a month step does, and
+/// unfolds the card on that month. The settings sheet opens from the app
 /// bar's More menu.
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -84,13 +95,16 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_data.dart';
 import 'workspace_calendar/calendar_model.dart';
+import 'workspace_calendar/calendar_schema.dart';
 import 'workspace_calendar/calendar_settings.dart';
 import 'workspace_calendar/day_cell.dart';
 import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
+import 'workspace_calendar/history_lock.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/month_board.dart';
+import 'workspace_calendar/month_strip.dart';
 import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
 import 'workspace_calendar/week_strip.dart';
@@ -113,7 +127,8 @@ enum _MoreAction { settings }
 enum _StepUnit {
   day("day"),
   week("week"),
-  month("month");
+  month("month"),
+  year("year");
 
   const _StepUnit(this.label);
 
@@ -205,6 +220,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// Fires at the start of the next minute, to read the clock again.
   Timer? _minuteTimer;
 
+  /// The history lock the settings choose, at the minute [_now] holds.
+  late HistoryLock _lock = _lockAt(_now.value);
+
   late final CalendarModel _model;
 
   late DateTime _selected = _today.value;
@@ -228,6 +246,17 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// Counts the calls that bring the strip back to the selected day, which
   /// [WeekStrip.recalls] passes on.
   int _stripRecalls = 0;
+
+  /// Whether the month picker shows.
+  bool _picksMonth = false;
+
+  /// The first day of the month at the month picker's middle, whose year
+  /// the title names while it shows.
+  DateTime _pickerMonth = DateTime(0);
+
+  /// Whether Agenda's or Day's card was folded when the month picker
+  /// opened, as it is again when the picker closes with no pick.
+  bool _foldedBeforePicker = false;
 
   /// What the settings sheet last chose, and before it chooses, the
   /// defaults with the edit mode the calendar was given.
@@ -288,6 +317,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     if (clockChanged || widget.today != oldWidget.today) {
       // The build that follows shows it.
       _today.value = _todayAt(_now.value);
+      _lock = _lockAt(_now.value);
     }
   }
 
@@ -309,9 +339,20 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return dateOnly(widget.today ?? now);
   }
 
+  /// The history lock the settings choose when the clock reads [now].
+  HistoryLock _lockAt(DateTime now) {
+    return HistoryLock.of(_settings, today: _todayAt(now), now: now);
+  }
+
+  /// The history lock as it holds when called, which a form reads at Save.
+  HistoryLock _currentLock() {
+    return _lock;
+  }
+
   /// Reads the clock again at the start of the minute after [now], and
   /// from then on at the start of each. A new day rebuilds this state for
-  /// the day title and the timed grid.
+  /// the day title and the timed grid, and so does a new history lock,
+  /// which a lock to now has each minute.
   void _scheduleMinute(DateTime now) {
     final intoMinute = Duration(
       seconds: now.second,
@@ -322,9 +363,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       final next = widget.clock();
       _now.value = next;
       final today = _todayAt(next);
-      if (today != _today.value) {
+      final lock = _lockAt(next);
+      if (today != _today.value || lock != _lock) {
         setState(() {
           _today.value = today;
+          _lock = lock;
         });
       }
       _scheduleMinute(next);
@@ -416,9 +459,13 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _select(_grid.dateAt(focus.row, focus.col));
   }
 
-  /// A day in the day mode, a week in the week mode and the folded month,
-  /// a month otherwise.
+  /// A year while the month picker shows; otherwise a day in the day
+  /// mode, a week in the week mode and the folded month, a month
+  /// otherwise.
   _StepUnit get _stepUnit {
+    if (_picksMonth) {
+      return _StepUnit.year;
+    }
     switch (_mode) {
       case _CalendarMode.agenda:
         return _collapsed ? _StepUnit.week : _StepUnit.month;
@@ -434,10 +481,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// Steps by [_stepUnit] over the shown weekdays: a day step skips the
   /// hidden ones, and a month step keeps the day of the month where it can
   /// and takes the nearest shown day of that month where it lands on a
-  /// hidden one.
+  /// hidden one. A year step moves the month picker alone.
   void _step(int direction) {
     final weekdays = _settings.weekdays;
     switch (_stepUnit) {
+      case _StepUnit.year:
+        setState(() {
+          _pickerMonth = addMonths(_pickerMonth, 12 * direction);
+        });
       case _StepUnit.day:
         _select(nextShownDay(_selected, direction, weekdays));
       case _StepUnit.week:
@@ -454,6 +505,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       _mode = mode;
       _collapsed = mode == _CalendarMode.day;
       _stripDay = null;
+      _picksMonth = false;
     });
     _collapseController.value = _collapsed ? 1.0 : 0.0;
     _showRange();
@@ -480,18 +532,32 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _openCreateFlow(day, from: from);
   }
 
-  /// The create flow on [day] at its first free hour from [from].
+  /// The create flow on [day] at its first free hour from [from], and from
+  /// the first time the history lock leaves free on [day], or an hour from
+  /// that time where none after it is free; where the lock leaves no time
+  /// in the hours, a message instead.
   void _openCreateFlow(DateTime day, {int? from}) {
-    final free = _model.firstFreeRange(day, from: from);
+    final hours = _settings.hours;
+    final earliest = _lock.earliestStartOn(day);
+    if (earliest > hours.end - minutesPerSlot) {
+      _showMessage("Past times are locked.");
+      return;
+    }
+    final lower = math.max(from ?? 0, earliest);
+    final free = _model.firstFreeRange(day, from: lower == 0 ? from : lower);
+    final start = math.max(free.start, earliest);
     showCreateFlow(
       context,
       model: _model,
       range: CreateRange(
         day: day,
-        startMinute: free.start,
-        endMinute: free.end,
+        startMinute: start,
+        endMinute: start == free.start
+            ? free.end
+            : math.min(start + 60, hours.end),
         dayCount: 1,
       ),
+      lock: _currentLock,
     );
   }
 
@@ -522,12 +588,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// Folds or unfolds the calendar card from however far it has folded,
   /// a drag on the pull tab having moved it, and names the selected day's
-  /// month again once it changes.
+  /// month again once it changes. Unfolding closes the month picker.
   void _settleCollapse(bool collapsed) {
-    if (collapsed != _collapsed) {
+    if (collapsed != _collapsed || (!collapsed && _picksMonth)) {
       setState(() {
         _collapsed = collapsed;
         _stripDay = null;
+        if (!collapsed) {
+          _picksMonth = false;
+        }
       });
     }
     _animateCollapse();
@@ -627,26 +696,68 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _select(day);
   }
 
+  /// Closes the month picker, then selects today, or the shown day nearest
+  /// it.
   void _goToToday() {
+    if (_picksMonth) {
+      _closeMonthPicker();
+    }
     _goTo(shownDayNear(_today.value, _settings.weekdays));
   }
 
-  /// A date picker of the shown weekdays, opening on the selected day, five
-  /// years either side of its year.
-  Future<void> _pickDay() async {
-    final weekdays = _settings.weekdays;
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selected,
-      firstDate: DateTime(_selected.year - 5),
-      lastDate: DateTime(_selected.year + 5, 12, 31),
-      selectableDayPredicate: (day) {
-        return weekdays.containsDay(dayNumber(day));
+  /// Opens the month picker on the selected day's month, folding
+  /// Agenda's or Day's card to show it.
+  void _openMonthPicker() {
+    setState(() {
+      _picksMonth = true;
+      _pickerMonth = DateTime(_selected.year, _selected.month);
+      _foldedBeforePicker = _collapsed;
+    });
+    if (_showsCalendarCard) {
+      _settleCollapse(true);
+    }
+  }
+
+  /// Closes the month picker with no pick, folding Agenda's or Day's card
+  /// back as it was.
+  void _closeMonthPicker() {
+    setState(() {
+      _picksMonth = false;
+    });
+    if (_showsCalendarCard) {
+      _settleCollapse(_foldedBeforePicker);
+    }
+  }
+
+  /// Selects the day of [month] a month step from the selected day would,
+  /// closes the month picker, and unfolds Agenda's or Day's card on it.
+  void _pickMonth(DateTime month) {
+    final months =
+        (month.year - _selected.year) * 12 + month.month - _selected.month;
+    _select(shownDayNear(addMonths(_selected, months), _settings.weekdays));
+    setState(() {
+      _picksMonth = false;
+    });
+    if (_showsCalendarCard) {
+      _settleCollapse(false);
+    }
+  }
+
+  /// The month picker, on [_pickerMonth], filling the selected day's month
+  /// and ringing today's.
+  Widget _buildMonthPicker() {
+    return MonthStrip(
+      key: const ValueKey<String>("month-picker"),
+      middleMonth: _pickerMonth,
+      selectedMonth: DateTime(_selected.year, _selected.month),
+      currentMonth: DateTime(_today.value.year, _today.value.month),
+      onSelectMonth: _pickMonth,
+      onBrowse: (month) {
+        setState(() {
+          _pickerMonth = month;
+        });
       },
     );
-    if (picked != null && mounted) {
-      _goTo(dateOnly(picked));
-    }
   }
 
   void _openSettings() {
@@ -664,6 +775,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     final weekdaysChanged = settings.weekdays != _settings.weekdays;
     setState(() {
       _settings = settings;
+      _lock = _lockAt(_now.value);
       if (weekdaysChanged) {
         _selected = shownDayNear(_selected, settings.weekdays);
         _grid = MonthGrid.of(_selected, weekdays: settings.weekdays);
@@ -691,10 +803,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  /// The form of the item [id]: editable in edit mode, read-only out of it.
+  /// The form of the item [id]: editable in edit mode, unless the history
+  /// lock holds the item [ItemHold.locked], and read-only otherwise.
   void _openItem(String id) {
-    if (_settings.editing) {
-      showEditForm(context, model: _model, id: id);
+    final item = _model.storedItem(id);
+    if (_settings.editing &&
+        item != null &&
+        _lock.holdOf(item.shape) != ItemHold.locked) {
+      showEditForm(context, model: _model, id: id, lock: _currentLock);
     } else {
       showItemDetails(context, model: _model, id: id);
     }
@@ -816,7 +932,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         _step(1);
       },
       onModeSelected: _setMode,
-      onPickDay: _pickDay,
+      year: _picksMonth ? _pickerMonth.year : null,
+      onTitle: _picksMonth ? _closeMonthPicker : _openMonthPicker,
     );
   }
 
@@ -866,7 +983,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               child: _buildCalendarCard(),
             )
           else
-            _buildHeaderCard(),
+            _buildHeaderCard(below: _picksMonth ? _buildMonthPicker() : null),
           Expanded(
             child: NotificationListener<ScrollNotification>(
               onNotification: _handleBoardScroll,
@@ -888,7 +1005,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 onSelectDay: _select,
                 onOpenItem: _openItem,
                 onCreate: (range) {
-                  showCreateFlow(context, model: _model, range: range);
+                  showCreateFlow(
+                    context,
+                    model: _model,
+                    range: range,
+                    lock: _currentLock,
+                  );
                 },
                 // The week strip names Day's one day.
                 showsDayHeader: _mode != _CalendarMode.day,
@@ -917,6 +1039,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               format: _settings.hourLabelFormat,
               hours: _settings.hours,
               editable: _settings.editing,
+              lock: _lock,
               selectedDay: _selected,
               today: _today.value,
               onTopDay: _select,
@@ -930,11 +1053,17 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                     endMinute: endMinute,
                     dayCount: 1,
                   ),
+                  lock: _currentLock,
                 );
               },
               onCreateOn: _openCreateFlow,
               onEdit: (id) {
-                showEditForm(context, model: _model, id: id);
+                showEditForm(
+                  context,
+                  model: _model,
+                  id: id,
+                  lock: _currentLock,
+                );
               },
               onDelete: _deleteFromCard,
             ),
@@ -951,7 +1080,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _buildHeaderCard(),
+        _buildHeaderCard(below: _picksMonth ? _buildMonthPicker() : null),
         Expanded(
           child: ColoredBox(
             color: HarborColors.surface,
@@ -1058,7 +1187,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// month to one row while the board moves up by the rows above the
   /// selected week, so that week slides to the top of the window. Once
   /// folded, at a [t] of 1, Day's strip takes the window's place, opening
-  /// on the selected week as the window shows it.
+  /// on the selected week as the window shows it, or the month picker
+  /// while it shows.
   Widget _buildGrid(double t, Widget board) {
     final weeks = _grid.weekCount;
     final monthHeight = weeks * _rowHeight;
@@ -1097,7 +1227,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                           _setCollapsed(false);
                         }
                       },
-                      child: _buildStrip(),
+                      child: _picksMonth ? _buildMonthPicker() : _buildStrip(),
                     )
                   : ClipRect(
                       child: OverflowBox(
@@ -1126,7 +1256,8 @@ class _CalendarHeader extends StatelessWidget {
     required this.onPrevious,
     required this.onNext,
     required this.onModeSelected,
-    required this.onPickDay,
+    required this.year,
+    required this.onTitle,
   });
 
   /// The day whose month, in three letters, and year the title names: the
@@ -1143,8 +1274,13 @@ class _CalendarHeader extends StatelessWidget {
   final VoidCallback onNext;
   final ValueChanged<_CalendarMode> onModeSelected;
 
-  /// The title was tapped.
-  final VoidCallback onPickDay;
+  /// The year the title names alone while the month picker shows; null
+  /// while it does not.
+  final int? year;
+
+  /// The title was tapped, which opens the month picker, or closes it
+  /// while [year] is given.
+  final VoidCallback onTitle;
 
   static const TextStyle _titleStyle = TextStyle(
     fontSize: 16.0,
@@ -1198,16 +1334,18 @@ class _CalendarHeader extends StatelessWidget {
               // narrow for it.
               Flexible(
                 child: Tooltip(
-                  message: "Go to a day",
+                  message: year == null ? "Pick a month" : "Close the months",
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8.0),
-                    onTap: onPickDay,
+                    onTap: onTitle,
                     child: SizedBox(
-                      width: _titleWidth(context, day.year),
+                      width: _titleWidth(context, year ?? day.year),
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
-                          "${monthShortNames[day.month - 1]} ${day.year}",
+                          year == null
+                              ? "${monthShortNames[day.month - 1]} ${day.year}"
+                              : "$year",
                           style: _titleStyle,
                         ),
                       ),

@@ -495,23 +495,6 @@ void main() {
     expect(find.byKey(dayHeaderKey(today)), findsOneWidget);
   });
 
-  testWidgets("E16 a tap on the header's month opens a date picker on the "
-      "selected day, whose pick is selected", (tester) async {
-    await pumpCalendar(tester);
-    await pickMode(tester, "Week");
-    await tapAndSettle(tester, find.byTooltip("Go to a day"));
-    final picker = find.byType(DatePickerDialog);
-    expect(tester.widget<DatePickerDialog>(picker).initialDate, today);
-    await tapAndSettle(
-      tester,
-      find.descendant(of: picker, matching: find.text("28")),
-    );
-    await tapAndSettle(tester, find.text("OK"));
-    await tester.pump(harnessLatency);
-    await tester.pumpAndSettle();
-    expect(find.byKey(dayHeaderKey(DateTime(2026, 4, 28))), findsOneWidget);
-  });
-
   testWidgets("E17 the header names the month and the view in 16 px type", (
     tester,
   ) async {
