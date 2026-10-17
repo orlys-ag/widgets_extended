@@ -416,7 +416,12 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
         ? deadNodes
         : deadNodes.sublist(0, maxPerPass);
 
-    owner!.buildScope(this, () {
+    // lockState, not buildScope: removing a row only deactivates its
+    // element, and a buildScope would then build every dirty element of
+    // this element's build scope, which from a post-frame callback can hold
+    // widgets outside this tree that an earlier callback marked dirty.
+    // lockState still refuses a setState from a deactivating row.
+    owner!.lockState(() {
       for (final nodeId in evictNow) {
         final element = _children.remove(nodeId);
         _dirtyKeys.remove(nodeId);
@@ -532,7 +537,8 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
           ? staleNodes
           : staleNodes.sublist(0, maxPerPass);
 
-      owner!.buildScope(this, () {
+      // lockState, not buildScope, for the reason [_collectGarbage] gives.
+      owner!.lockState(() {
         for (final nodeId in evictNow) {
           final element = _children.remove(nodeId);
           _dirtyKeys.remove(nodeId);
