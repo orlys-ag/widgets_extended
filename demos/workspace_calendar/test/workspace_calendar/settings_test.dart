@@ -347,7 +347,7 @@ void main() {
 
   testWidgets("H5 a tap on the last slot creates up to the end of the "
       "hours", (tester) async {
-    await pumpCalendar(tester, size: tall);
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
 
@@ -379,7 +379,7 @@ void main() {
       api,
       taskJson("Early", today, 7 * 60, 9 * 60),
     );
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
     await tester.tap(blockFinder(early));
@@ -779,5 +779,28 @@ void main() {
       tester.widget<SegmentedButton<int>>(find.byKey(shownDaysKey)).selected,
       const <int>{0},
     );
+  });
+
+  testWidgets("E1 the calendar opens out of edit mode, and the sheet's "
+      "switch turns it on and off, the app bar showing Add only in it", (
+    tester,
+  ) async {
+    await pumpCalendar(tester);
+    expect(find.byTooltip("Add"), findsNothing);
+
+    await openSettings(tester);
+    SwitchListTile editSwitch() {
+      return tester.widget<SwitchListTile>(find.byKey(editModeKey));
+    }
+
+    expect(editSwitch().value, isFalse);
+    await tester.tap(find.byKey(editModeKey));
+    await tester.pumpAndSettle();
+    expect(editSwitch().value, isTrue);
+    await closeSettings(tester);
+    expect(find.byTooltip("Add"), findsOneWidget);
+
+    await toggleEditMode(tester);
+    expect(find.byTooltip("Add"), findsNothing);
   });
 }

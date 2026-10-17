@@ -221,7 +221,7 @@ void main() {
   ) async {
     // The default phone size, which scrolls far enough to show 08:00 at
     // the top.
-    final api = await pumpCalendar(tester);
+    final api = await pumpCalendar(tester, editing: true);
     final requests = api.requests.length;
     await pickMode(tester, "Day");
 
@@ -273,7 +273,7 @@ void main() {
   testWidgets("D2 a tap and a range drag create on the shown day", (
     tester,
   ) async {
-    await pumpCalendar(tester, size: tall);
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Day");
 
     await tester.tapAt(centerOf(tester, dayRowOf(16 * 60)));
@@ -321,7 +321,7 @@ void main() {
               today,
             )).singleWhere((item) => item["title"] == "Retreat")["id"]!
             as String;
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Day");
 
     // The three-day item shows its one day here.
@@ -385,7 +385,7 @@ void main() {
 
   testWidgets("D4 a drop onto another item's time lands at the nearest "
       "free time", (tester) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Day");
 
     // 12:00 to 13:00 lies inside "Design new UX flow for Michael", which
@@ -521,6 +521,7 @@ void main() {
   ) async {
     final api = await pumpCalendar(
       tester,
+      editing: true,
       size: tall,
       clock: () {
         return DateTime(2026, 4, 21, 10, 30);
@@ -951,6 +952,7 @@ void main() {
     );
     await pumpCalendar(
       tester,
+      editing: true,
       api: api,
       clock: () {
         return DateTime(2026, 4, 21, 14, 20);

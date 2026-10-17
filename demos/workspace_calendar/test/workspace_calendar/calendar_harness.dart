@@ -1,6 +1,7 @@
 /// Helpers the calendar's widget tests share: the fixed day, the host the
-/// calendar is pumped in, the timed grid's viewport, a block move, a read
-/// of the mock, and a canvas that records what a painter draws.
+/// calendar is pumped in, a switch of its edit mode, the timed grid's
+/// viewport, a block move, a read of the mock, and a canvas that records
+/// what a painter draws.
 library;
 
 import 'dart:ui' as ui;
@@ -127,16 +128,26 @@ Map<String, Object?> taskJson(
 }
 
 /// The app [pumpCalendar] pumps: the calendar over [api], given [today]
-/// and [clock].
+/// and [clock], opening in edit mode when [editing].
 Widget calendarApp({
   required MockCalendarApi api,
   DateTime? today,
   DateTime Function()? clock,
+  bool editing = false,
 }) {
   return MaterialApp(
     // The M3 ink sparkle shader cannot load under the test binding.
     theme: ThemeData(splashFactory: NoSplash.splashFactory),
-    home: WorkspaceCalendarExample(today: today, api: api, clock: clock),
+    // Out of edit mode the calendar is given no edit mode, so it opens on
+    // its own default.
+    home: editing
+        ? WorkspaceCalendarExample(
+            today: today,
+            api: api,
+            clock: clock,
+            editing: true,
+          )
+        : WorkspaceCalendarExample(today: today, api: api, clock: clock),
   );
 }
 
@@ -145,24 +156,41 @@ Widget calendarApp({
 /// reading the time from [clock], by default the real clock, and lets its
 /// first read complete. Returns the mock. With [pinsToday] false the
 /// calendar is given no day, so it opens on the day [clock] reads and
-/// marks that day as today.
+/// marks that day as today. With [editing] it opens in edit mode.
 Future<MockCalendarApi> pumpCalendar(
   WidgetTester tester, {
   MockCalendarApi? api,
   Size size = const Size(390.0, 844.0),
   DateTime Function()? clock,
   bool pinsToday = true,
+  bool editing = false,
 }) async {
   final mock = api ?? MockCalendarApi.seeded(today, latency: harnessLatency);
   tester.view.devicePixelRatio = 1.0;
   tester.view.physicalSize = size;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
-    calendarApp(api: mock, today: pinsToday ? today : null, clock: clock),
+    calendarApp(
+      api: mock,
+      today: pinsToday ? today : null,
+      clock: clock,
+      editing: editing,
+    ),
   );
   await tester.pump(mock.latency);
   await tester.pumpAndSettle();
   return mock;
+}
+
+/// Opens the settings sheet, flips its edit mode switch and closes the
+/// sheet with a tap on the barrier above it.
+Future<void> toggleEditMode(WidgetTester tester) async {
+  await tester.tap(find.byTooltip("Calendar settings"));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(editModeKey));
+  await tester.pumpAndSettle();
+  await tester.tapAt(const Offset(195.0, 20.0));
+  await tester.pumpAndSettle();
 }
 
 /// The timed grid's viewport: the one board keyed by item id strings.

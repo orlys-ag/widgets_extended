@@ -373,7 +373,8 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 ///
 /// A tap on a chip reports [onOpenItem], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
-/// [onCreateOnDay]; the last two give the board the keyboard, whose arrow
+/// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
+/// last two give the board the keyboard, whose arrow
 /// keys move the selected day and report it through [onSelectDay]. While
 /// the days load, a progress indicator covers the board, and after a
 /// failed read the error and a Retry that reads again. A change of the
@@ -427,8 +428,10 @@ class MonthBoard extends StatefulWidget {
   /// This day was tapped outside its chips.
   final ValueChanged<DateTime> onOpenDay;
 
-  /// This day was long-pressed outside its chips.
-  final ValueChanged<DateTime> onCreateOnDay;
+  /// This day was long-pressed outside its chips. Null where a long press
+  /// creates nothing, as out of edit mode, and opens the day as a tap
+  /// does.
+  final ValueChanged<DateTime>? onCreateOnDay;
 
   /// The chip of this item, which is not pending, was tapped.
   final ValueChanged<String> onOpenItem;
@@ -491,6 +494,12 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// listenable reaches the cells this state keeps.
   late final ValueNotifier<DateTime> _today = ValueNotifier<DateTime>(
     widget.today.value,
+  );
+
+  /// Whether [MonthBoard.onCreateOnDay] is given, which the kept day cells
+  /// listen to, so a long press on them creates only while it is.
+  late final ValueNotifier<bool> _creates = ValueNotifier<bool>(
+    widget.onCreateOnDay != null,
   );
 
   /// What each cell of [MonthBoard.grid] hides, at
@@ -606,6 +615,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       widget.today.addListener(_handleToday);
       _today.value = widget.today.value;
     }
+    _creates.value = widget.onCreateOnDay != null;
     final gridChanged = !_sameGrid(widget.grid, oldWidget.grid);
     if (gridChanged) {
       _syncPending = true;
@@ -636,6 +646,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _focusNode.dispose();
     _board.dispose();
     _today.dispose();
+    _creates.dispose();
     for (final hidden in _hidden) {
       hidden.dispose();
     }
@@ -720,8 +731,12 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   }
 
   void _createOnDay(DateTime day) {
+    final create = widget.onCreateOnDay;
+    if (create == null) {
+      return;
+    }
     _focusNode.requestFocus();
-    widget.onCreateOnDay(day);
+    create(day);
   }
 
   void _openItem(String id) {
@@ -1007,6 +1022,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       isSelected: selected,
       today: _today,
       hidden: _hidden[index],
+      creates: _creates,
       onOpen: _openDay,
       onCreate: _createOnDay,
     );
@@ -1193,7 +1209,8 @@ String _hiddenLabel(int count) {
 }
 
 /// One day of the month board: a tap anywhere on it outside its chips
-/// opens the day and a long press creates on it. Its number sits in the
+/// opens the day, and a long press creates on it while [creates] holds and
+/// otherwise opens it as a tap does. Its number sits in the
 /// strip across its top, and while it hides chips, "+N more" on a soft
 /// yellow banner in its lane.
 class _MonthDayCell extends StatelessWidget {
@@ -1204,6 +1221,7 @@ class _MonthDayCell extends StatelessWidget {
     required this.isSelected,
     required this.today,
     required this.hidden,
+    required this.creates,
     required this.onOpen,
     required this.onCreate,
   });
@@ -1217,6 +1235,7 @@ class _MonthDayCell extends StatelessWidget {
   final bool isSelected;
   final ValueListenable<DateTime> today;
   final ValueListenable<_Hidden> hidden;
+  final ValueListenable<bool> creates;
   final ValueChanged<DateTime> onOpen;
   final ValueChanged<DateTime> onCreate;
 
@@ -1227,15 +1246,16 @@ class _MonthDayCell extends StatelessWidget {
       onOpen(day);
     }
 
-    void create() {
+    void createOn() {
       onCreate(day);
     }
 
     return ListenableBuilder(
-      listenable: Listenable.merge(<Listenable>[today, hidden]),
+      listenable: Listenable.merge(<Listenable>[today, hidden, creates]),
       builder: (context, child) {
         final isToday = day == today.value;
         final hides = hidden.value;
+        final create = creates.value ? createOn : null;
         return Semantics(
           container: true,
           button: true,
@@ -1248,7 +1268,7 @@ class _MonthDayCell extends StatelessWidget {
           hint: "Opens the day",
           onTap: open,
           onLongPress: create,
-          onLongPressHint: "create an item",
+          onLongPressHint: create == null ? null : "create an item",
           excludeSemantics: true,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,

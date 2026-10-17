@@ -144,6 +144,7 @@ void main() {
     const latency = Duration(seconds: 1);
     final api = await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
     );
     final requests = api.requests.length;
@@ -203,7 +204,7 @@ void main() {
                 "its card out where it was and in where it goes"
           : "L2 a confirmed delete animates the card out",
       (tester) async {
-        final api = await pumpCalendar(tester);
+        final api = await pumpCalendar(tester, editing: true);
         await tester.tap(dayFinder(DateTime(2026, 4, 22)));
         await tester.pumpAndSettle();
         final standupTop = tester.getRect(cardFinder(standupId)).top;
@@ -303,7 +304,7 @@ void main() {
   });
 
   testWidgets("L4 a failed delete returns the card", (tester) async {
-    final api = await pumpCalendar(tester);
+    final api = await pumpCalendar(tester, editing: true);
     api.failurePolicy = (request) {
       return request.method == CalendarMethod.delete
           ? "Deleting failed."
@@ -412,7 +413,7 @@ void main() {
   testWidgets("L7 a card sits right of its start time over a chip of its "
       "length, and shows no time itself, and a gap between the items is a "
       "dashed row at its start, all in the hour label format", (tester) async {
-    await pumpCalendar(tester);
+    await pumpCalendar(tester, editing: true);
     await tester.tap(dayFinder(DateTime(2026, 4, 22)));
     await tester.pumpAndSettle();
     final time = find.byKey(dayListTimeKey(standupId));
@@ -565,7 +566,7 @@ void main() {
       ],
       latency: harnessLatency,
     );
-    await pumpCalendar(tester, api: api);
+    await pumpCalendar(tester, editing: true, api: api);
     await tester.tap(dayFinder(day));
     await tester.pumpAndSettle();
     Finder shows(String label, String text) {
@@ -613,7 +614,7 @@ void main() {
   testWidgets("L14 the gap rows follow the calendar's hours as the "
       "settings change them", (tester) async {
     final day = DateTime(2026, 4, 22);
-    await pumpCalendar(tester);
+    await pumpCalendar(tester, editing: true);
     await tester.tap(dayFinder(day));
     await tester.pumpAndSettle();
     expect(find.byKey(dayListGapKey(day, 0)), findsOneWidget);
@@ -629,5 +630,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(dayListGapKey(day, 0)), findsNothing);
     expect(find.byKey(dayListGapKey(day, 8 * 60)), findsOneWidget);
+  });
+
+  testWidgets("L15 out of edit mode the list has no dashed rows and the "
+      "cards no menu, so a day without items shows its header alone, and "
+      "edit mode turned on adds them, the cards keeping their height", (
+    tester,
+  ) async {
+    final day = DateTime(2026, 4, 22);
+    final empty = DateTime(2026, 4, 25);
+    await pumpCalendar(tester);
+    await tester.tap(dayFinder(day));
+    await tester.pumpAndSettle();
+    final card = cardFinder(standupId);
+    final menu = find.descendant(
+      of: card,
+      matching: find.byTooltip("Item actions"),
+    );
+    final height = tester.getSize(card).height;
+    expect(find.byKey(dayListGapKey(day, 10 * 60)), findsNothing);
+    expect(menu, findsNothing);
+
+    await tester.tap(dayFinder(empty));
+    await tester.pumpAndSettle();
+    // Setup sanity: the day shows.
+    expect(find.byKey(dayListHeaderKey(empty)), findsOneWidget);
+    expect(find.byKey(dayListEmptyKey(empty)), findsNothing);
+
+    await toggleEditMode(tester);
+    expect(find.byKey(dayListEmptyKey(empty)), findsOneWidget);
+    await tester.tap(dayFinder(day));
+    await tester.pumpAndSettle();
+    expect(menu, findsOneWidget);
+    expect(tester.getSize(card).height, height);
   });
 }

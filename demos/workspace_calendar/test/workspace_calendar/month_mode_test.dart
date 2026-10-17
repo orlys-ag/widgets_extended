@@ -75,17 +75,18 @@ RenderBoardViewport<String> monthViewport(WidgetTester tester) {
   return gridViewport(tester);
 }
 
-/// Pumps the calendar over a mock holding [seed] at [latency] and picks
-/// Month, and with [showAll] the Show all items layout in place of the
-/// Fit to screen it starts on.
+/// Pumps the calendar over a mock holding [seed] at [latency], in edit
+/// mode when [editing], and picks Month, and with [showAll] the Show all
+/// items layout in place of the Fit to screen it starts on.
 Future<MockCalendarApi> pumpMonth(
   WidgetTester tester, {
   List<Map<String, Object?>> seed = const <Map<String, Object?>>[],
   Duration latency = harnessLatency,
   bool showAll = false,
+  bool editing = false,
 }) async {
   final api = MockCalendarApi(seed: seed, latency: latency);
-  await pumpCalendar(tester, api: api);
+  await pumpCalendar(tester, api: api, editing: editing);
   await pickMode(tester, "Month");
   if (showAll) {
     await pickMonthLayout(tester, "Show all items");
@@ -93,13 +94,14 @@ Future<MockCalendarApi> pumpMonth(
   return api;
 }
 
-/// Pumps the calendar over the default seed and picks Month, and with
-/// [showAll] the Show all items layout.
+/// Pumps the calendar over the default seed, in edit mode when [editing],
+/// and picks Month, and with [showAll] the Show all items layout.
 Future<MockCalendarApi> pumpSeededMonth(
   WidgetTester tester, {
   bool showAll = false,
+  bool editing = false,
 }) async {
-  final api = await pumpCalendar(tester);
+  final api = await pumpCalendar(tester, editing: editing);
   await pickMode(tester, "Month");
   if (showAll) {
     await pickMonthLayout(tester, "Show all items");
@@ -521,6 +523,7 @@ void main() {
     (tester) async {
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[
           taskAt("T", april(21), 14, 15),
           taskJson("M", april(21), 18 * 60, 19 * 60, dayCount: 2),
@@ -568,6 +571,7 @@ void main() {
     (tester) async {
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[
           taskJson("A", april(20), 9 * 60, 10 * 60, dayCount: 3),
           taskAt("B", april(20), 10, 11),
@@ -601,6 +605,7 @@ void main() {
       const latency = Duration(seconds: 1);
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[taskAt("Plan sprint", april(23), 10, 11)],
         latency: latency,
       );
@@ -664,7 +669,7 @@ void main() {
   );
 
   testWidgets("M9 a tap on a chip opens its edit form", (tester) async {
-    await pumpSeededMonth(tester);
+    await pumpSeededMonth(tester, editing: true);
     await tester.tap(chipFinder(uxFlowId, april(20)));
     await tester.pumpAndSettle();
     expect(find.text("Edit Task"), findsOneWidget);
@@ -714,6 +719,7 @@ void main() {
     (tester) async {
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[taskAt("Night", april(22), 0, 1)],
       );
       await longPressDay(tester, april(22));
@@ -733,6 +739,7 @@ void main() {
     (tester) async {
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[
           taskJson("Long", april(22), 0, 23 * 60 + 30),
         ],
@@ -751,6 +758,7 @@ void main() {
     (tester) async {
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[taskAt("All day", april(22), 0, 24)],
       );
       await longPressDay(tester, april(22));
@@ -766,7 +774,7 @@ void main() {
     "M12 a long press on a muted day creates there and keeps the selection "
     "and the month",
     (tester) async {
-      await pumpMonth(tester);
+      await pumpMonth(tester, editing: true);
       await longPressDay(tester, DateTime(2026, 3, 31));
       await pickTask(tester);
       expect(find.text("2026-03-31"), findsOneWidget);
@@ -781,7 +789,7 @@ void main() {
     "M13 Month's Add creates on the selected day with no floating button; "
     "Agenda's opens Week",
     (tester) async {
-      await pumpSeededMonth(tester);
+      await pumpSeededMonth(tester, editing: true);
       await tester.tap(find.byTooltip("Add"));
       await tester.pumpAndSettle();
       await pickTask(tester);
@@ -801,7 +809,7 @@ void main() {
     "M14 the chevrons step a month and a key onto next month's muted day "
     "re-dates the grid",
     (tester) async {
-      await pumpMonth(tester);
+      await pumpMonth(tester, editing: true);
       expect(find.byTooltip("Previous month"), findsOneWidget);
       expect(find.byTooltip("Next month"), findsOneWidget);
 
@@ -837,7 +845,7 @@ void main() {
     "M14b a key from a six-week month into a five-week month re-dates the "
     "grid",
     (tester) async {
-      await pumpMonth(tester);
+      await pumpMonth(tester, editing: true);
       await tester.tap(find.byTooltip("Previous month"));
       await tester.pump();
       await tester.pump(harnessLatency);
@@ -857,7 +865,7 @@ void main() {
   testWidgets("M14c two keys before a frame each move the selected day", (
     tester,
   ) async {
-    await pumpMonth(tester);
+    await pumpMonth(tester, editing: true);
     await longPressDay(tester, april(21));
     await dismissPicker(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -923,6 +931,7 @@ void main() {
     (tester) async {
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[
           taskAt("X", april(21), 14, 15),
           taskAt("Y", april(21), 15, 16),
@@ -1075,6 +1084,7 @@ void main() {
       const latency = Duration(seconds: 1);
       await pumpMonth(
         tester,
+        editing: true,
         showAll: true,
         seed: <Map<String, Object?>>[
           taskAt("G", april(22), 10, 11),
@@ -1144,6 +1154,7 @@ void main() {
       const latency = Duration(seconds: 1);
       await pumpMonth(
         tester,
+        editing: true,
         showAll: true,
         seed: hourlyTasks(april(21), 8, 8),
         latency: latency,
@@ -1205,6 +1216,7 @@ void main() {
       const latency = Duration(seconds: 1);
       await pumpMonth(
         tester,
+        editing: true,
         showAll: true,
         seed: hourlyTasks(april(28), 8, 8),
         latency: latency,
@@ -1279,6 +1291,7 @@ void main() {
       const latency = Duration(seconds: 1);
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[taskAt("T", april(28), 10, 11)],
         latency: latency,
       );
@@ -1326,7 +1339,7 @@ void main() {
   testWidgets("M19 a long press on a day gives the board the keys", (
     tester,
   ) async {
-    await pumpMonth(tester);
+    await pumpMonth(tester, editing: true);
     await longPressDay(tester, april(22));
     await dismissPicker(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -1362,6 +1375,7 @@ void main() {
   ) async {
     await pumpMonth(
       tester,
+      editing: true,
       showAll: true,
       seed: <Map<String, Object?>>[
         ...hourlyTasks(april(23), 9, 8),
@@ -1392,6 +1406,7 @@ void main() {
   ) async {
     await pumpMonth(
       tester,
+      editing: true,
       showAll: true,
       seed: <Map<String, Object?>>[
         ...hourlyTasks(april(6), 9, 8),
@@ -1416,7 +1431,7 @@ void main() {
   });
 
   testWidgets("M21 a confirmed create grows its chip in", (tester) async {
-    await pumpMonth(tester);
+    await pumpMonth(tester, editing: true);
     await longPressDay(tester, april(22));
     await pickTask(tester);
     await tester.enterText(fieldFinder("Title"), "New");
@@ -1435,7 +1450,7 @@ void main() {
   testWidgets("M22 a form's keyboard leaves Month's weeks as they are", (
     tester,
   ) async {
-    await pumpMonth(tester);
+    await pumpMonth(tester, editing: true);
     final board = tester.getRect(monthBoardFinder());
     await longPressDay(tester, april(22));
     await pickTask(tester);
@@ -1474,7 +1489,7 @@ void main() {
   testWidgets(
     "M23 a new size alone leaves a confirmed create's enter running",
     (tester) async {
-      await pumpMonth(tester);
+      await pumpMonth(tester, editing: true);
       await longPressDay(tester, april(22));
       await pickTask(tester);
       await tester.enterText(fieldFinder("Title"), "New");
@@ -1606,6 +1621,7 @@ void main() {
       final semantics = tester.ensureSemantics();
       await pumpMonth(
         tester,
+        editing: true,
         seed: <Map<String, Object?>>[
           taskAt("Review", april(22), 10, 11),
           taskJson("Offsite", april(18), 9 * 60, 17 * 60, dayCount: 3),
@@ -1650,7 +1666,7 @@ void main() {
     "tap and creates on a long press",
     (tester) async {
       final semantics = tester.ensureSemantics();
-      await pumpMonth(tester);
+      await pumpMonth(tester, editing: true);
       final selected = tester.getSemantics(dayFinder(april(21)));
       expect(selected.label, "Tuesday, April 21, today");
       expect(selected.flagsCollection.isSelected, Tristate.isTrue);
@@ -2026,4 +2042,36 @@ void main() {
     expect(more.top, near(day.top + strip + 2 * monthCardExtent + 1.0));
     expect(more.height, near(monthCardExtent - 2.0));
   });
+
+  testWidgets(
+    "M41 out of edit mode a screen reader hears no long press on a day, a "
+    "long press opens the day as a tap does, a chip opens its item "
+    "read-only, and edit mode turned on lets the long press create",
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpSeededMonth(tester);
+      final day = tester.getSemantics(dayFinder(april(22)));
+      expect(day.hintOverrides?.onLongPressHint, isNull);
+      expect(
+        day.getSemanticsData().hasAction(SemanticsAction.longPress),
+        isFalse,
+      );
+
+      await longPressDay(tester, april(22));
+      expect(find.text("New item"), findsNothing);
+      expect(gridDay(tester), april(22));
+      await pickMode(tester, "Month");
+
+      await tester.tap(chipFinder(uxFlowId, april(20)));
+      await tester.pumpAndSettle();
+      expect(find.text("Edit Task"), findsNothing);
+      await tester.tap(formButton("Close"));
+      await tester.pumpAndSettle();
+
+      await toggleEditMode(tester);
+      await longPressDay(tester, april(22));
+      expect(find.text("New item"), findsOneWidget);
+      semantics.dispose();
+    },
+  );
 }

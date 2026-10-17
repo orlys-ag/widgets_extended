@@ -4,8 +4,8 @@
 /// the selected day's week as the list is scrolled;
 /// Month, the month's weeks with each item as a chip on the days it
 /// covers; and Week and Day, timed grids of the selected day's week and of
-/// that day alone, where items are created, moved, resized, edited and
-/// deleted.
+/// that day alone, where items are moved, and in edit mode created,
+/// resized, edited and deleted.
 ///
 /// Day shows Agenda's calendar card folded: a strip of a week's worth of
 /// days, opening on the selected day's week, whose days a tap selects and
@@ -25,10 +25,12 @@
 /// selected day: a selected day scrolls to its top, animating, and a drag
 /// or a fling of the list selects each day it brings to the top. Each
 /// day's header sticks at the top while its items scroll under it. Each
-/// item's card sits right of its start time, over a chip of its length;
-/// the list marks each gap in the calendar's hours that no item covers
-/// with a dashed row, and a day without items with one reading "No items",
-/// each with a button that creates an item there. A drag of the list folds
+/// item's card sits right of its start time, over a chip of its length. In
+/// edit mode the list marks each gap in the calendar's hours that no item
+/// covers with a dashed row, and a day without items with one reading "No
+/// items", each with a button that creates an item there, and each card
+/// has a menu of Edit and Delete; out of it a day without items shows its
+/// header alone. A drag of the list folds
 /// the month, and the pull tab under the card folds or unfolds it as far
 /// as a drag on it moves, a tap on it switching; a downward drag on the
 /// folded strip unfolds it too. The board always holds
@@ -43,15 +45,20 @@
 /// their share, and a busy day shows the chips that fit and "+N more" on a
 /// soft yellow banner; under Show all items they grow with their chips.
 /// Days at least 100 px wide in weeks at least 136 px tall show cards,
-/// which add an item's times to its title. A tap on a chip edits its item,
-/// and a tap anywhere else on a day opens that day in Day. A long press on
-/// a day creates an item there at the day's first free hour, selecting the
-/// day when it is in the month. Its keys and chevrons move the selected
+/// which add an item's times to its title. A tap on a chip opens its item,
+/// and a tap anywhere else on a day opens that day in Day. In edit mode a
+/// long press on a day creates an item there at the day's first free hour,
+/// selecting the day when it is in the month; out of it a long press opens
+/// the day as a tap does. Its keys and chevrons move the selected
 /// day as Agenda's do.
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
-/// The settings sheet chooses the weekday a week starts on, which every
+/// The settings sheet chooses edit mode, which the calendar opens out of
+/// unless it is given it: out of it the calendar's items only move, by a
+/// long press in Week and Day, a tap on one opening its form read-only,
+/// and the app bar has no Add. The
+/// sheet also chooses the weekday a week starts on, which every
 /// view's weeks and columns follow, and which weekdays show, how Month fits
 /// its weeks, the hours the calendar shows and schedules in, whether Week
 /// and Day label them AM/PM, the least width of a day in Week, Day and
@@ -106,7 +113,13 @@ enum _StepUnit {
 
 /// The calendar under its own Harbor theme, whatever the host's theme.
 class WorkspaceCalendarExample extends StatelessWidget {
-  const WorkspaceCalendarExample({super.key, this.today, this.api, this.clock});
+  const WorkspaceCalendarExample({
+    super.key,
+    this.today,
+    this.api,
+    this.clock,
+    this.editing = false,
+  });
 
   /// The day the calendar opens on and marks as today. Null opens on the
   /// day [clock] reads and marks the day it reads from then on, so the
@@ -123,6 +136,10 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// minute. Null reads [DateTime.now].
   final DateTime Function()? clock;
 
+  /// Whether the calendar opens in edit mode, which its settings sheet
+  /// then switches.
+  final bool editing;
+
   static final ThemeData _theme = buildHarborTheme();
 
   @override
@@ -135,6 +152,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
         today: today,
         api: api,
         clock: clock ?? DateTime.now,
+        editing: editing,
       ),
     );
   }
@@ -145,11 +163,13 @@ class _WorkspaceCalendar extends StatefulWidget {
     required this.today,
     required this.api,
     required this.clock,
+    required this.editing,
   });
 
   final DateTime? today;
   final CalendarApi? api;
   final DateTime Function() clock;
+  final bool editing;
 
   @override
   State<_WorkspaceCalendar> createState() {
@@ -196,8 +216,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// and folded.
   bool _collapsed = false;
 
-  /// What the settings sheet last chose.
-  CalendarSettings _settings = const CalendarSettings();
+  /// What the settings sheet last chose, and before it chooses, the
+  /// defaults with the edit mode the calendar was given.
+  late CalendarSettings _settings = CalendarSettings(editing: widget.editing);
 
   /// The width the column axis was last fitted to.
   double _columnsWidth = 0.0;
@@ -619,6 +640,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
+  /// The form of the item [id]: editable in edit mode, read-only out of it.
+  void _openItem(String id) {
+    if (_settings.editing) {
+      showEditForm(context, model: _model, id: id);
+    } else {
+      showItemDetails(context, model: _model, id: id);
+    }
+  }
+
   Future<void> _deleteFromCard(String id) async {
     final confirmed = await confirmDelete(context);
     if (confirmed && mounted) {
@@ -681,11 +711,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: "Add",
-            onPressed: agenda ? _openWeekMode : _add,
-          ),
+          if (_settings.editing)
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: "Add",
+              onPressed: agenda ? _openWeekMode : _add,
+            ),
           IconButton(
             icon: const Icon(Icons.tune),
             tooltip: "Calendar settings",
@@ -700,16 +731,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           ),
         ],
       ),
-      floatingActionButton: !agenda
-          ? null
-          : FloatingActionButton(
-              tooltip: "Add item",
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12.0),
-              ),
-              onPressed: _openWeekMode,
-              child: const Icon(Icons.add),
-            ),
       body: _buildCalendarView(),
     );
   }
@@ -795,9 +816,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 today: _today.value,
                 now: _now,
                 onSelectDay: _select,
-                onOpenItem: (id) {
-                  showEditForm(context, model: _model, id: id);
-                },
+                onOpenItem: _openItem,
                 onCreate: (range) {
                   showCreateFlow(context, model: _model, range: range);
                 },
@@ -827,6 +846,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               weekdays: _settings.weekdays,
               format: _settings.hourLabelFormat,
               hours: _settings.hours,
+              editable: _settings.editing,
               selectedDay: _selected,
               today: _today.value,
               onTopDay: _select,
@@ -876,10 +896,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               today: _today,
               onSelectDay: _select,
               onOpenDay: _openDayMode,
-              onCreateOnDay: _createOn,
-              onOpenItem: (id) {
-                showEditForm(context, model: _model, id: id);
-              },
+              onCreateOnDay: _settings.editing ? _createOn : null,
+              onOpenItem: _openItem,
             ),
           ),
         ),

@@ -1,8 +1,9 @@
 /// Agenda's list: the shown days one after another, each a header that
 /// sticks at the list's top while its block scrolls under it: the day's
-/// items beside their start times and lengths, with a dashed row for each
-/// gap in the calendar's hours that no item covers, or "No items" on a
-/// dashed row, each dashed row with a button that adds an item there.
+/// items beside their start times and lengths, and in edit mode a dashed
+/// row for each gap in the calendar's hours that no item covers, or "No
+/// items" on a dashed row, each dashed row with a button that adds an item
+/// there.
 library;
 
 import 'dart:async';
@@ -135,7 +136,8 @@ final class DayListBody extends DayListRow {
   const DayListBody(super.day, {required this.rows});
 
   /// The day's rows: [dayListRowsOf] its items, or one [DayListEmpty],
-  /// [DayListLoading] or [DayListFailed].
+  /// [DayListLoading] or [DayListFailed]; out of edit mode, its items
+  /// alone, which a day without items has none of.
   final List<DayListRow> rows;
 
   @override
@@ -321,7 +323,9 @@ List<DayListRow> dayListRowsOf(
 /// [onCreateIn]; "No items" on a dashed row for a day without items, with
 /// a button that reports [onCreateOn]; a progress indicator while the day
 /// is unread; and after a failed read, the failure and a Retry that reads
-/// the shown days again. Times read in [format]. A row that comes or goes
+/// the shown days again. Times read in [format]. Unless [editable], the
+/// list has no dashed rows and the cards no menu, so a day without items
+/// shows its header alone. A row that comes or goes
 /// in a block grows in and fades in, or fades out and shrinks away, so the
 /// block grows or shrinks smoothly; a block above the list's top that
 /// changes height moves nothing the list shows.
@@ -344,6 +348,7 @@ class DayList extends StatefulWidget {
     required this.weekdays,
     required this.format,
     required this.hours,
+    required this.editable,
     required this.selectedDay,
     required this.today,
     required this.onTopDay,
@@ -364,6 +369,10 @@ class DayList extends StatefulWidget {
 
   /// The part of each day the gap rows cover, the calendar's hours.
   final DayHours hours;
+
+  /// Whether the calendar is in edit mode, where the list has its dashed
+  /// rows and each card its menu of Edit and Delete.
+  final bool editable;
 
   /// The day the list brings to its top; a shown day.
   final DateTime selectedDay;
@@ -466,7 +475,9 @@ class _DayListState extends State<DayList> {
       _rebuildOn(widget.selectedDay);
       return;
     }
-    if (widget.model != oldWidget.model || widget.hours != oldWidget.hours) {
+    if (widget.model != oldWidget.model ||
+        widget.hours != oldWidget.hours ||
+        widget.editable != oldWidget.editable) {
       _rows = _rowsOf();
     }
     final day = widget.selectedDay;
@@ -607,7 +618,11 @@ class _DayListState extends State<DayList> {
       rows.add(
         DayListBody(
           day,
-          rows: entries.isEmpty
+          rows: !widget.editable
+              ? <DayListRow>[
+                  for (final entry in entries) DayListItem(day, entry),
+                ]
+              : entries.isEmpty
               ? <DayListRow>[DayListEmpty(day)]
               : dayListRowsOf(day, entries, widget.hours),
         ),
@@ -893,8 +908,6 @@ class _DayListState extends State<DayList> {
               },
             ),
           ),
-          // Room under the last row for the floating action button.
-          const SliverToBoxAdapter(child: SizedBox(height: 88.0)),
         ],
       ),
     );
@@ -1061,6 +1074,7 @@ class _DayListState extends State<DayList> {
           child: ItemCard(
             key: itemCardKey(entry.id),
             entry: entry,
+            editable: widget.editable,
             onEdit: () {
               widget.onEdit(entry.id);
             },

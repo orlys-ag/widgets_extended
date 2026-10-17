@@ -1,4 +1,5 @@
-/// The calendar's create flow, its item form, and the delete confirmation.
+/// The calendar's create flow, its item form, which also shows an item
+/// read-only, and the delete confirmation.
 ///
 /// The form is generated from the item type's schema and checks its input
 /// with the same validator the API runs, before it sends anything; the
@@ -79,6 +80,21 @@ Future<void> showEditForm(
   await _showForm(context, model: model, item: item);
 }
 
+/// Opens the form for the stored item [id] read-only: it shows the item's
+/// fields, takes no input and has Close for its one action. Does nothing
+/// when the model does not hold it.
+Future<void> showItemDetails(
+  BuildContext context, {
+  required CalendarModel model,
+  required String id,
+}) async {
+  final item = model.storedItem(id);
+  if (item == null) {
+    return;
+  }
+  await _showForm(context, model: model, item: item, readOnly: true);
+}
+
 /// Asks whether to delete an item. True when Delete was pressed.
 Future<bool> confirmDelete(BuildContext context) async {
   final confirmed = await showDialog<bool>(
@@ -110,23 +126,32 @@ Future<void> _showForm(
   BuildContext context, {
   required CalendarModel model,
   required CalendarItem item,
+  bool readOnly = false,
 }) {
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (context) {
-      return _ItemForm(model: model, item: item);
+      return _ItemForm(model: model, item: item, readOnly: readOnly);
     },
   );
 }
 
 /// The form for [item]: a draft when its id is null, which Save creates,
-/// and a stored item otherwise, which Save updates and Delete deletes.
+/// and a stored item otherwise, which Save updates and Delete deletes, or
+/// which it only shows when [readOnly].
 class _ItemForm extends StatefulWidget {
-  const _ItemForm({required this.model, required this.item});
+  const _ItemForm({
+    required this.model,
+    required this.item,
+    required this.readOnly,
+  });
 
   final CalendarModel model;
   final CalendarItem item;
+
+  /// Whether every control is disabled and Close is the one action.
+  final bool readOnly;
 
   @override
   State<_ItemForm> createState() {
@@ -160,6 +185,12 @@ class _ItemFormState extends State<_ItemForm> {
   String? _message;
 
   bool _saving = false;
+
+  /// Whether the controls take no input: while the form saves, and always
+  /// when it is read-only.
+  bool get _locked {
+    return _saving || widget.readOnly;
+  }
 
   bool get _isDraft {
     return widget.item.id == null;
@@ -345,7 +376,7 @@ class _ItemFormState extends State<_ItemForm> {
         for (final minute in minutes)
           DropdownMenuItem<int>(value: minute, child: Text(clockLabel(minute))),
       ],
-      onChanged: _saving
+      onChanged: _locked
           ? null
           : (minute) {
               if (minute != null) {
@@ -373,7 +404,7 @@ class _ItemFormState extends State<_ItemForm> {
                 child: Text(choice.label),
               ),
           ],
-          onChanged: _saving
+          onChanged: _locked
               ? null
               : (choice) {
                   setState(() {
@@ -386,7 +417,7 @@ class _ItemFormState extends State<_ItemForm> {
       case FieldKind.textList:
         return TextField(
           controller: _texts[field.key],
-          enabled: !_saving,
+          enabled: !_locked,
           maxLines: 1,
           keyboardType: field.kind == FieldKind.url ? TextInputType.url : null,
           decoration: InputDecoration(
@@ -400,7 +431,7 @@ class _ItemFormState extends State<_ItemForm> {
       case FieldKind.longText:
         return TextField(
           controller: _texts[field.key],
-          enabled: !_saving,
+          enabled: !_locked,
           minLines: 2,
           maxLines: 4,
           decoration: InputDecoration(labelText: field.label, errorText: error),
@@ -414,7 +445,7 @@ class _ItemFormState extends State<_ItemForm> {
               ? null
               : Text(error, style: const TextStyle(color: HarborColors.error)),
           value: value == true,
-          onChanged: _saving
+          onChanged: _locked
               ? null
               : (on) {
                   setState(() {
@@ -444,14 +475,14 @@ class _ItemFormState extends State<_ItemForm> {
       ),
       TextField(
         controller: _title,
-        enabled: !_saving,
+        enabled: !_locked,
         decoration: InputDecoration(
           labelText: "Title",
           errorText: _errors["title"],
         ),
       ),
       InkWell(
-        onTap: _saving ? null : _pickDay,
+        onTap: _locked ? null : _pickDay,
         child: InputDecorator(
           decoration: InputDecoration(
             labelText: "Day",
@@ -493,7 +524,7 @@ class _ItemFormState extends State<_ItemForm> {
       ),
       TextField(
         controller: _days,
-        enabled: !_saving,
+        enabled: !_locked,
         keyboardType: TextInputType.number,
         decoration: InputDecoration(
           labelText: "Days",
@@ -514,7 +545,9 @@ class _ItemFormState extends State<_ItemForm> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  "${_isDraft ? "New" : "Edit"} ${type.label}",
+                  widget.readOnly
+                      ? type.label
+                      : "${_isDraft ? "New" : "Edit"} ${type.label}",
                   style: const TextStyle(
                     fontSize: 20.0,
                     fontWeight: FontWeight.w600,
@@ -551,30 +584,39 @@ class _ItemFormState extends State<_ItemForm> {
                   spacing: 8.0,
                   overflowAlignment: OverflowBarAlignment.end,
                   children: <Widget>[
-                    if (!_isDraft)
+                    if (widget.readOnly)
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                        child: const Text("Close"),
+                      ),
+                    if (!_isDraft && !widget.readOnly)
                       TextButton(
                         onPressed: _saving ? null : _delete,
                         child: const Text("Delete"),
                       ),
-                    TextButton(
-                      onPressed: _saving
-                          ? null
-                          : () {
-                              Navigator.of(context).pop();
-                            },
-                      child: const Text("Cancel"),
-                    ),
-                    FilledButton(
-                      onPressed: _saving ? null : _save,
-                      child: _saving
-                          ? const SizedBox.square(
-                              dimension: 16.0,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.0,
-                              ),
-                            )
-                          : const Text("Save"),
-                    ),
+                    if (!widget.readOnly) ...<Widget>[
+                      TextButton(
+                        onPressed: _saving
+                            ? null
+                            : () {
+                                Navigator.of(context).pop();
+                              },
+                        child: const Text("Cancel"),
+                      ),
+                      FilledButton(
+                        onPressed: _saving ? null : _save,
+                        child: _saving
+                            ? const SizedBox.square(
+                                dimension: 16.0,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.0,
+                                ),
+                              )
+                            : const Text("Save"),
+                      ),
+                    ],
                   ],
                 ),
               ],

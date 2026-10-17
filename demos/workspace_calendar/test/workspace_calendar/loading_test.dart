@@ -63,6 +63,7 @@ void main() {
   testWidgets("F1 reads cover the visible range", (tester) async {
     final api = await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
     );
 
@@ -151,6 +152,7 @@ void main() {
   testWidgets("F2 markers while the shown range loads", (tester) async {
     await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
     );
 

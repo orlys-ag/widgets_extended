@@ -60,7 +60,7 @@ void main() {
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         ),
-        home: WorkspaceCalendarExample(today: today, api: api),
+        home: WorkspaceCalendarExample(editing: true, today: today, api: api),
       ),
     );
     await tester.pump(api.latency);

@@ -1,8 +1,9 @@
-/// What the calendar's settings choose: the weekdays it shows and the one
-/// its weeks start on, the hours it shows and schedules in, how the timed
-/// grid labels its hours, how Month fits its weeks, the least width of a
-/// day in Week, Day and Month, and the least height of the timed grid's
-/// slots, which also scales the height of Month's weeks.
+/// What the calendar's settings choose: whether it is in edit mode, the
+/// weekdays it shows and the one its weeks start on, the hours it shows
+/// and schedules in, how the timed grid labels its hours, how Month fits
+/// its weeks, the least width of a day in Week, Day and Month, and the
+/// least height of the timed grid's slots, which also scales the height
+/// of Month's weeks.
 library;
 
 import 'dart:math' as math;
@@ -129,15 +130,17 @@ String hourLabel(int minute, HourLabelFormat format) {
   return "$shown:${minutes.toString().padLeft(2, "0")} $half";
 }
 
-/// What the settings sheet chooses: the [weekdays] the calendar shows and
-/// the one its weeks start on, the [hours] it shows and schedules in, the
-/// [hourLabelFormat] the timed grid labels them in, Month's [monthLayout],
-/// the least width of a day in Week, Day and Month, and the least height
-/// of the timed grid's slots, which stretch past them to fill the screen,
-/// and through it the height of Month's weeks.
+/// What the settings sheet chooses: whether the calendar is in [editing]
+/// mode, the [weekdays] it shows and the one its weeks start on, the
+/// [hours] it shows and schedules in, the [hourLabelFormat] the timed grid
+/// labels them in, Month's [monthLayout], the least width of a day in
+/// Week, Day and Month, and the least height of the timed grid's slots,
+/// which stretch past them to fill the screen, and through it the height
+/// of Month's weeks.
 @immutable
 class CalendarSettings {
   const CalendarSettings({
+    this.editing = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
@@ -145,6 +148,11 @@ class CalendarSettings {
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
   });
+
+  /// Whether the calendar's items can be created, resized, edited and
+  /// deleted. Out of edit mode a long press still moves one in Week and
+  /// Day.
+  final bool editing;
 
   /// The weekdays the calendar shows, at least one, which the month grid
   /// and the timed grid assert, and the weekday its weeks start on, which
@@ -171,6 +179,7 @@ class CalendarSettings {
   }
 
   CalendarSettings copyWith({
+    bool? editing,
     WeekdaySet? weekdays,
     DayHours? hours,
     HourLabelFormat? hourLabelFormat,
@@ -179,6 +188,7 @@ class CalendarSettings {
     double? minSlotHeight,
   }) {
     return CalendarSettings(
+      editing: editing ?? this.editing,
       weekdays: weekdays ?? this.weekdays,
       hours: hours ?? this.hours,
       hourLabelFormat: hourLabelFormat ?? this.hourLabelFormat,
@@ -191,6 +201,7 @@ class CalendarSettings {
   @override
   bool operator ==(Object other) {
     return other is CalendarSettings &&
+        other.editing == editing &&
         other.weekdays == weekdays &&
         other.hours == hours &&
         other.hourLabelFormat == hourLabelFormat &&
@@ -202,6 +213,7 @@ class CalendarSettings {
   @override
   int get hashCode {
     return Object.hash(
+      editing,
       weekdays,
       hours,
       hourLabelFormat,
@@ -213,7 +225,8 @@ class CalendarSettings {
 
   @override
   String toString() {
-    return "CalendarSettings($weekdays, $hours, ${hourLabelFormat.name}, "
+    return "CalendarSettings(${editing ? "editing" : "viewing"}, "
+        "$weekdays, $hours, ${hourLabelFormat.name}, "
         "${monthLayout.name}, day width $minDayWidth, "
         "slot height $minSlotHeight)";
   }

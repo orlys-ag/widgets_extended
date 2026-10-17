@@ -15,18 +15,24 @@ ValueKey<String> itemCardKey(String id) {
 enum _CardAction { edit, delete }
 
 /// An item's card: a rounded box in its type's tint holding the type's
-/// icon and the title, a menu with Edit and Delete beside them, and the
-/// schema's summaries under them. While [ShownItem.pending] the card is
-/// dimmed with a progress indicator and its menu is disabled.
+/// icon and the title, a menu with Edit and Delete beside them while it is
+/// [editable], and the schema's summaries under them. While
+/// [ShownItem.pending] the card is dimmed with a progress indicator and its
+/// menu is disabled.
 class ItemCard extends StatelessWidget {
   const ItemCard({
     super.key,
     required this.entry,
+    required this.editable,
     required this.onEdit,
     required this.onDelete,
   });
 
   final ShownItem entry;
+
+  /// Whether the card has its menu. Without it the title's row keeps the
+  /// menu button's height, so the card's height stays the same.
+  final bool editable;
 
   /// The summaries [item]'s schema gives it, in the schema's order, which
   /// the card shows under its title.
@@ -81,35 +87,38 @@ class ItemCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                PopupMenuButton<_CardAction>(
-                  tooltip: "Item actions",
-                  enabled: !pending,
-                  icon: const Icon(
-                    Icons.more_horiz,
-                    color: HarborColors.textMuted,
+                if (!editable)
+                  const SizedBox(height: kMinInteractiveDimension)
+                else
+                  PopupMenuButton<_CardAction>(
+                    tooltip: "Item actions",
+                    enabled: !pending,
+                    icon: const Icon(
+                      Icons.more_horiz,
+                      color: HarborColors.textMuted,
+                    ),
+                    color: HarborColors.surface,
+                    onSelected: (action) {
+                      switch (action) {
+                        case _CardAction.edit:
+                          onEdit();
+                        case _CardAction.delete:
+                          onDelete();
+                      }
+                    },
+                    itemBuilder: (context) {
+                      return const <PopupMenuEntry<_CardAction>>[
+                        PopupMenuItem<_CardAction>(
+                          value: _CardAction.edit,
+                          child: Text("Edit"),
+                        ),
+                        PopupMenuItem<_CardAction>(
+                          value: _CardAction.delete,
+                          child: Text("Delete"),
+                        ),
+                      ];
+                    },
                   ),
-                  color: HarborColors.surface,
-                  onSelected: (action) {
-                    switch (action) {
-                      case _CardAction.edit:
-                        onEdit();
-                      case _CardAction.delete:
-                        onDelete();
-                    }
-                  },
-                  itemBuilder: (context) {
-                    return const <PopupMenuEntry<_CardAction>>[
-                      PopupMenuItem<_CardAction>(
-                        value: _CardAction.edit,
-                        child: Text("Edit"),
-                      ),
-                      PopupMenuItem<_CardAction>(
-                        value: _CardAction.delete,
-                        child: Text("Delete"),
-                      ),
-                    ];
-                  },
-                ),
               ],
             ),
             if (summaries.isNotEmpty)

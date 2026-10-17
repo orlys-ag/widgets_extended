@@ -354,6 +354,7 @@ void main() {
     const latency = Duration(seconds: 1);
     final api = await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
     );
     await pickMode(tester, "Week");
@@ -452,7 +453,7 @@ void main() {
   testWidgets("W3 a range across empty cells creates its rectangle", (
     tester,
   ) async {
-    final api = await pumpCalendar(tester);
+    final api = await pumpCalendar(tester, editing: true);
     await pickMode(tester, "Week");
     final saturday = colOf(5);
     final sunday = colOf(6);
@@ -660,7 +661,7 @@ void main() {
 
   testWidgets("W3 a second press while a range runs starts nothing of its "
       "own", (tester) async {
-    final api = await pumpCalendar(tester);
+    final api = await pumpCalendar(tester, editing: true);
     await pickMode(tester, "Week");
     final saturday = colOf(5);
     final sunday = colOf(6);
@@ -715,7 +716,7 @@ void main() {
   });
 
   testWidgets("W4 the form validates before sending", (tester) async {
-    final api = await pumpCalendar(tester);
+    final api = await pumpCalendar(tester, editing: true);
     await pickMode(tester, "Week");
     final requests = api.requests.length;
 
@@ -770,6 +771,7 @@ void main() {
     const latency = Duration(seconds: 2);
     final api = await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
     );
     await pickMode(tester, "Week");
@@ -910,7 +912,7 @@ void main() {
       DateTime(2026, 4, 26),
       "Late shift",
     );
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Week");
     final requests = api.requests.length;
 
@@ -957,6 +959,7 @@ void main() {
     const latency = Duration(seconds: 1);
     final api = await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
     );
     await pickMode(tester, "Week");
@@ -1043,25 +1046,23 @@ void main() {
     expect(api.requests.last.method, CalendarMethod.delete);
   });
 
-  testWidgets("W8 Add and the FAB open Week mode", (tester) async {
-    await pumpCalendar(tester);
+  testWidgets("W8 Agenda's Add opens Week mode, and no view has a floating "
+      "add button", (tester) async {
+    await pumpCalendar(tester, editing: true);
+    expect(find.byType(FloatingActionButton), findsNothing);
 
     await tester.tap(find.byTooltip("Add"));
     await tester.pumpAndSettle();
     expect(blockFinder(designCritiqueId), findsOneWidget);
     expect(find.byTooltip("Add"), findsOneWidget);
-    expect(find.byTooltip("Add item"), findsNothing);
-
-    await pickMode(tester, "Agenda");
-    await tester.tap(find.byTooltip("Add item"));
-    await tester.pumpAndSettle();
-    expect(blockFinder(designCritiqueId), findsOneWidget);
+    expect(find.byType(FloatingActionButton), findsNothing);
   });
 
   testWidgets("W9 a pending move shows in Agenda mode", (tester) async {
     const latency = Duration(seconds: 2);
     final api = await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
     );
     await pickMode(tester, "Week");
@@ -1194,7 +1195,7 @@ void main() {
   });
 
   testWidgets("W11 a new week does not animate", (tester) async {
-    final api = await pumpCalendar(tester);
+    final api = await pumpCalendar(tester, editing: true);
     await pickMode(tester, "Week");
     final enterExit = timedGridAnimationStyle.effectiveItemEnterExit.duration;
 
@@ -1291,6 +1292,7 @@ void main() {
       "item", (tester) async {
     final api = await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi.seeded(today, latency: const Duration(seconds: 1)),
     );
     await pickMode(tester, "Week");
@@ -1338,7 +1340,7 @@ void main() {
   });
 
   testWidgets("W13 API errors show in the form", (tester) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
 
     await createAt(tester, rowOf(18 * 60), colOf(0), "Task");
@@ -1414,7 +1416,7 @@ void main() {
       DateTime(2026, 4, 20),
       "Year plan",
     );
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Week");
 
     final board = tester.widget<Board<String, ShownItem>>(
@@ -1512,7 +1514,7 @@ void main() {
   });
 
   testWidgets("W15 a range drag lays nothing out", (tester) async {
-    await pumpCalendar(tester, size: tall);
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     final viewport = gridViewport(tester);
     final row = rowOf(18 * 60);
@@ -1645,7 +1647,7 @@ void main() {
   });
 
   testWidgets("W17 the form maps each field kind", (tester) async {
-    final api = await pumpCalendar(tester);
+    final api = await pumpCalendar(tester, editing: true);
     await pickMode(tester, "Week");
     final wednesday = DateTime(2026, 4, 22);
 
@@ -1845,7 +1847,7 @@ void main() {
     );
     final summit = await idOn(tester, api, DateTime(2026, 4, 25), "Summit");
     final planning = await idOn(tester, api, monday, "Weekly planning");
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Week");
 
     // Tuesday 10:30 lies inside "Design new UX flow for Michael", 10:00 to
@@ -1922,7 +1924,7 @@ void main() {
   testWidgets("W20 a resize dragged onto another item stops at its edge", (
     tester,
   ) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
     final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
@@ -1986,7 +1988,7 @@ void main() {
       DateTime(2026, 4, 25),
       "Long haul",
     );
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Week");
     final viewport = gridViewport(tester);
     final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
@@ -2135,7 +2137,7 @@ void main() {
   testWidgets("W23 the top strip drags the start, and stops at an item", (
     tester,
   ) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
 
@@ -2184,7 +2186,7 @@ void main() {
 
   testWidgets("W24 a drop as near a day either way takes the side the "
       "item leans toward", (tester) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
 
     /// Drops the brainstorm by its centre so its top-left corner lands on
@@ -2255,7 +2257,7 @@ void main() {
     addTearDown(() {
       messenger.setMockMethodCallHandler(SystemChannels.platform, null);
     });
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     expect(haptics, isEmpty);
 
@@ -2287,7 +2289,7 @@ void main() {
 
   testWidgets("W27 a lifted block casts a shadow that eases in over 300 ms "
       "on fastOutSlowIn", (tester) async {
-    await pumpCalendar(tester, size: tall);
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
 
     /// [liftedBlockShadows] at the share of the lift [elapsed] reaches.
@@ -2332,7 +2334,7 @@ void main() {
   testWidgets("W28 a move leaves its block behind at 0.66 opacity", (
     tester,
   ) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
 
     final rect = tester.getRect(blockFinder(brainstormId));
@@ -2357,6 +2359,7 @@ void main() {
   testWidgets("W29 Week's Add creates on the selected day", (tester) async {
     await pumpCalendar(
       tester,
+      editing: true,
       api: MockCalendarApi(latency: harnessLatency),
       clock: () {
         return DateTime(2026, 4, 21, 14, 20);
@@ -2379,5 +2382,167 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  /// Drags the bottom strip of [id]'s block down by two slots with a
+  /// mouse, which the grid's scrollable never takes, and lets the drop
+  /// settle.
+  Future<void> dragBottomStrip(WidgetTester tester, String id) async {
+    final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
+    final rect = tester.getRect(blockFinder(id));
+    final gesture = await tester.startGesture(
+      Offset(rect.center.dx, rect.bottom - 3.0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(Offset(0.0, 2 * slot));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets("W30 out of edit mode a block's strips resize nothing", (
+    tester,
+  ) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    final before = tester.getRect(blockFinder(brainstormId));
+    await dragBottomStrip(tester, brainstormId);
+    expect(tester.getRect(blockFinder(brainstormId)), before);
+
+    // The right strip, a day to the right, with a mouse.
+    final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
+    final gesture = await tester.startGesture(
+      Offset(before.right - 3.0, before.center.dy),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(Offset(dayWidth, 0.0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(tester.getRect(blockFinder(brainstormId)), before);
+  });
+
+  testWidgets("W31 out of edit mode a touch drag from a block's strip "
+      "scrolls the grid", (tester) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    final before = tester.getRect(blockFinder(brainstormId));
+    await tester.dragFrom(
+      Offset(before.center.dx, before.bottom - 3.0),
+      const Offset(0.0, 120.0),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(blockFinder(brainstormId)).top,
+      greaterThan(before.top),
+    );
+  });
+
+  testWidgets("W32 out of edit mode a long press still moves a block", (
+    tester,
+  ) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    final saturday = cellRect(tester, rowOf(14 * 60), colOf(5));
+    await moveBlock(tester, blockFinder(brainstormId), saturday.topLeft);
+    // Past the mock's answer, which a failed write would undo.
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(blockFinder(brainstormId)).topLeft,
+      nearOffset(saturday.topLeft),
+    );
+  });
+
+  testWidgets("W33 edit mode turned on in the settings lets a strip resize", (
+    tester,
+  ) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    await toggleEditMode(tester);
+    final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
+    final before = tester.getRect(blockFinder(brainstormId));
+    await dragBottomStrip(tester, brainstormId);
+    expect(
+      tester.getRect(blockFinder(brainstormId)).height,
+      moreOrLessEquals(before.height + 2 * slot, epsilon: 0.5),
+    );
+  });
+
+  testWidgets("W34 out of edit mode a tap or a range drag on an empty slot "
+      "creates nothing", (tester) async {
+    await pumpCalendar(tester);
+    await pickMode(tester, "Week");
+    await tapCell(tester, rowOf(14 * 60), colOf(5));
+    expect(find.text("New item"), findsNothing);
+
+    final gesture = await tester.startGesture(
+      centerOf(tester, rowOf(14 * 60), colOf(5)),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveTo(centerOf(tester, rowOf(14 * 60 + 45), colOf(6)));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text("New item"), findsNothing);
+  });
+
+  testWidgets("W35 out of edit mode a tap on a block opens its form "
+      "read-only, with Close its one action", (tester) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    await tester.tap(blockFinder(brainstormId));
+    await tester.pumpAndSettle();
+    final dialog = find.byType(Dialog);
+    Finder inDialog(Finder finder) {
+      return find.descendant(of: dialog, matching: finder);
+    }
+
+    expect(find.text("Edit Task"), findsNothing);
+    // The title, and the type beside its icon.
+    expect(inDialog(find.text("Task")), findsNWidgets(2));
+    // Title, Days, Assignee and Notes.
+    expect(
+      tester.widgetList<TextField>(inDialog(find.byType(TextField))).map((
+        field,
+      ) {
+        return field.enabled;
+      }),
+      <bool>[false, false, false, false],
+    );
+    // Start, End, Status and Priority.
+    expect(
+      tester
+          .widgetList<DropdownButtonFormField<Object>>(
+            inDialog(
+              find.byWidgetPredicate((widget) {
+                return widget is DropdownButtonFormField;
+              }),
+            ),
+          )
+          .map((dropdown) {
+            return dropdown.onChanged == null;
+          }),
+      <bool>[true, true, true, true],
+    );
+    await tester.tap(inDialog(find.widgetWithText(InputDecorator, "Day")));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsNothing);
+    expect(saveFinder(), findsNothing);
+    expect(formButton("Cancel"), findsNothing);
+    expect(formButton("Delete"), findsNothing);
+    await tester.tap(formButton("Close"));
+    await tester.pumpAndSettle();
+    expect(dialog, findsNothing);
+
+    await tester.tap(blockTitled("Roadmap draft due"));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<SwitchListTile>(find.widgetWithText(SwitchListTile, "Met"))
+          .onChanged,
+      isNull,
+    );
+    await tester.tap(formButton("Close"));
+    await tester.pumpAndSettle();
   });
 }

@@ -249,4 +249,17 @@ void main() {
       );
     });
   });
+
+  group("C10 CalendarSettings edit mode", () {
+    test("starts out of edit mode and takes part in copyWith and ==", () {
+      const settings = CalendarSettings();
+      expect(settings.editing, isFalse);
+      final editing = settings.copyWith(editing: true);
+      expect(editing.editing, isTrue);
+      expect(editing.copyWith(minSlotHeight: 20.0).editing, isTrue);
+      expect(editing == settings, isFalse);
+      expect(editing == settings.copyWith(editing: true), isTrue);
+      expect(editing.hashCode == settings.hashCode, isFalse);
+    });
+  });
 }

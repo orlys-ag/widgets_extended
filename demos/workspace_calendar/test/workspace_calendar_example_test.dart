@@ -132,7 +132,7 @@ void main() {
   testWidgets("E2 tapping a day selects it and lists its items", (
     tester,
   ) async {
-    await pumpCalendar(tester);
+    await pumpCalendar(tester, editing: true);
 
     await tapAndSettle(tester, dayFinder(2026, 4, 27));
     expect(find.text("Monday, April 27"), findsOneWidget);

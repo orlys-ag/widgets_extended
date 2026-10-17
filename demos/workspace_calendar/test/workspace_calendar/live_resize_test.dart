@@ -74,7 +74,7 @@ void main() {
   testWidgets("L1 the week grid's bottom strip sets the end as it drags", (
     tester,
   ) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
     final before = tester.getRect(blockFinder(brainstormId));
@@ -112,7 +112,7 @@ void main() {
               DateTime(2026, 4, 22),
             )).singleWhere((item) => item["title"] == "Focus")["id"]!
             as String;
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Week");
     final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
     final before = tester.getRect(blockFinder(focus));
@@ -138,7 +138,7 @@ void main() {
   testWidgets("L3 the day grid's bottom strip sets the end as it drags", (
     tester,
   ) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Day");
     final slot = cellRect(tester, dayRowOf(9 * 60), 1).height;
     final before = tester.getRect(blockFinder(brainstormId));

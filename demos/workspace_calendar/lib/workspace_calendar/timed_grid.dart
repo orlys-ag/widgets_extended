@@ -1,6 +1,7 @@
 /// The calendar's timed grid: consecutive days on the board, with a frozen
 /// hour gutter and, where it shows one, a frozen day header, one row per
-/// 15-minute slot, and the days' items as blocks that move and resize.
+/// 15-minute slot, and the days' items as blocks that move, and in edit
+/// mode resize.
 library;
 
 import 'dart:async';
@@ -504,11 +505,14 @@ CreateRange createRangeOver(
 /// day header reports [onSelectDay]. On a grid of one day column each
 /// block uses the width to show its times and its summaries.
 ///
-/// Items keep every board gesture: a long press moves, the top band drags the
-/// start time, the bottom band the end time, and, on more than one day, the
-/// right band the day count. A move dropped onto another item's time lands at
-/// the nearest free time that shows, on that day or the day before or after it,
-/// and goes back where there is none; a resize dragged onto one stops at its
+/// A long press on an item moves it. In edit mode, which [settings] choose,
+/// the top band drags its start time, the bottom band its end time, and, on
+/// more than one day, the right band its day count. Out of it a block has no
+/// bands, so a touch drag from its edge scrolls the grid as one anywhere
+/// else does, and no gesture on an empty cell creates.
+/// A move dropped onto another item's time lands at the nearest free time
+/// that shows, on that day or the day before or after it, and goes back
+/// where there is none; a resize dragged onto one stops at its
 /// edge. While a drag runs, a label over the grid names the day and times a
 /// release would give, or that a move has nowhere to land, and a move outlines
 /// the slots it would land on. A line over the blocks marks the time [now]
@@ -525,7 +529,7 @@ CreateRange createRangeOver(
 /// more" in the column of each day with N of them, and while some are after
 /// them, a row frozen against the last slot does; the hour gutter runs on
 /// beside both. An item on no shown day has no block either,
-/// and a pill in the day header's corner counts it. Empty body
+/// and a pill in the day header's corner counts it. In edit mode empty body
 /// cells take a create gesture, reported through [onCreate]: a tap picks one
 /// hour from its slot, or up to the end of the hours; a drag picks the
 /// rectangle of slots it covers, at once for a mouse or a stylus and after a
@@ -556,9 +560,9 @@ class TimedGrid extends StatefulWidget {
   /// day. Fixed for the grid's life.
   final bool showsDayHeader;
 
-  /// The weekdays and the hours the grid shows, the format of its hour
-  /// labels and the least size of its cells. At least one day of the range
-  /// must fall on a shown weekday.
+  /// Whether the grid is in edit mode, the weekdays and the hours it shows,
+  /// the format of its hour labels and the least size of its cells. At
+  /// least one day of the range must fall on a shown weekday.
   final CalendarSettings settings;
 
   /// The first day of the range the grid shows.
@@ -624,10 +628,19 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final BoardCellBuilder<String, ShownItem> _cellBuilder = _buildCell;
   late final BoardItemBuilder<String, ShownItem> _itemBuilder = _buildItem;
 
-  /// One instance, so a rebuild of this state hands the board the config
-  /// it already has. A single day column has no right strip: there is no
-  /// column to drag its edge onto. Whether the grid has more than one
-  /// column is fixed for its life, which [didUpdateWidget] asserts.
+  /// The board's drag config in edit mode and out of it, one instance of
+  /// each, so a rebuild of this state hands the board the config it
+  /// already has, and a switch between them keeps every block's `State`.
+  /// Out of edit mode the config admits no resize edge, so a press anywhere
+  /// on a block starts a move after a long press.
+  late final BoardDragConfig<String> _editConfig = _dragConfigOf(resizes: true);
+  late final BoardDragConfig<String> _viewConfig = _dragConfigOf(
+    resizes: false,
+  );
+
+  /// A single day column has no right strip: there is no column to drag
+  /// its edge onto. Whether the grid has more than one column is fixed for
+  /// its life, which [didUpdateWidget] asserts.
   ///
   /// A move [_canDropAt] refuses for meeting another item slides to the
   /// placement nearest on screen that holds it clear, at any time that
@@ -636,28 +649,32 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// another item stops its dragged edge at that item. The drag reports
   /// keep [_drag], which the landing label and outline show. A drag's
   /// start plays a haptic, and the block a move carries casts a shadow.
-  late final BoardDragConfig<String> _dragConfig = BoardDragConfig<String>(
-    canDrag: _canDrag,
-    canDropAt: _canDropAt,
-    dropFit: const BoardDropFit(
-      minFreeFraction: 0.0,
-      rowRadius: double.infinity,
-      colRadius: 1.0,
-      clampResizes: true,
-    ),
-    onItemMoved: _commit,
-    onItemResized: _commit,
-    resizeEdges: _tracks.columnCount > 1
-        ? BoardResizeEdges.trailing
-        : BoardResizeEdges.none,
-    primaryResizeEdges: BoardResizeEdges.both,
-    draggedItemOpacity: harborDraggedItemOpacity,
-    dragProxyBuilder: _buildLiftedBlock,
-    hapticsOnDrag: true,
-    onDragStart: _handleDragStart,
-    onDragTargetChanged: _handleDragTarget,
-    onDragEnd: _handleDragEnd,
-  );
+  BoardDragConfig<String> _dragConfigOf({required bool resizes}) {
+    return BoardDragConfig<String>(
+      canDrag: _canDrag,
+      canDropAt: _canDropAt,
+      dropFit: const BoardDropFit(
+        minFreeFraction: 0.0,
+        rowRadius: double.infinity,
+        colRadius: 1.0,
+        clampResizes: true,
+      ),
+      onItemMoved: _commit,
+      onItemResized: _commit,
+      resizeEdges: resizes && _tracks.columnCount > 1
+          ? BoardResizeEdges.trailing
+          : BoardResizeEdges.none,
+      primaryResizeEdges: resizes
+          ? BoardResizeEdges.both
+          : BoardResizeEdges.none,
+      draggedItemOpacity: harborDraggedItemOpacity,
+      dragProxyBuilder: _buildLiftedBlock,
+      hapticsOnDrag: true,
+      onDragStart: _handleDragStart,
+      onDragTargetChanged: _handleDragTarget,
+      onDragEnd: _handleDragEnd,
+    );
+  }
 
   /// The drag the board runs, or null.
   _GridDrag? _drag;
@@ -1386,10 +1403,13 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return _bodyCellAtLocal(viewport, viewport.globalToLocal(global));
   }
 
-  /// Whether a press at [global] may create: no range runs, it lies over a
-  /// body cell, no item paints under it, and the grid is neither scrolling
-  /// nor just stopped by this press.
+  /// Whether a press at [global] may create: the grid is in edit mode, no
+  /// range runs, it lies over a body cell, no item paints under it, and the
+  /// grid is neither scrolling nor just stopped by this press.
   bool _admits(Offset global) {
+    if (!widget.settings.editing) {
+      return false;
+    }
     final viewport = _findViewport();
     if (viewport == null || _scrollJustStopped || _range != null) {
       return false;
@@ -1608,7 +1628,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
             reachAbove: _notices.above ? _noticeHeight : 0.0,
             reachBelow: _notices.below ? _noticeHeight : 0.0,
           ),
-          drag: _dragConfig,
+          drag: widget.settings.editing ? _editConfig : _viewConfig,
           // The grid scrolls on its own, not with the screen's primary
           // scroll controller.
           primary: false,
