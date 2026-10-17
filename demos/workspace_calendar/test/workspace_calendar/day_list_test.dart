@@ -5,6 +5,7 @@ library;
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -39,15 +40,18 @@ ShownItem entryAt(String id, int start, int end) {
   );
 }
 
-/// [dayListRowsOf] of [entries] on April 22, each item as its id and each
-/// hour as its minute.
-List<Object> rowsOf(List<ShownItem> entries) {
+/// [dayListRowsOf] of [entries] on April 22 in [hours], each item as its
+/// id and each gap as its start and end.
+List<Object> rowsOf(
+  List<ShownItem> entries, {
+  DayHours hours = DayHours.allDay,
+}) {
   return <Object>[
-    for (final row in dayListRowsOf(DateTime(2026, 4, 22), entries))
+    for (final row in dayListRowsOf(DateTime(2026, 4, 22), entries, hours))
       switch (row) {
         DayListItem(:final entry) => entry.id,
-        DayListHour(:final minute) => minute,
-        _ => throw StateError("$row is not an item or an hour."),
+        DayListGap(:final start, :final end) => (start, end),
+        _ => throw StateError("$row is not an item or a gap."),
       },
   ];
 }
@@ -333,58 +337,97 @@ void main() {
     }
   });
 
-  test("L6 the rows put an hour before an item for each whole hour from "
-      "the earlier items' latest end to the item's start", () {
+  test("L6 the rows put one gap row for each run of the calendar's hours "
+      "that no item covers, before the item that ends it or last", () {
     expect(
       rowsOf(<ShownItem>[
         entryAt("a", 8 * 60, 9 * 60),
         entryAt("b", 10 * 60, 11 * 60),
         entryAt("c", 13 * 60, 14 * 60),
       ]),
-      <Object>["a", 9 * 60, "b", 11 * 60, 12 * 60, "c"],
+      <Object>[
+        (0, 8 * 60),
+        "a",
+        (9 * 60, 10 * 60),
+        "b",
+        (11 * 60, 13 * 60),
+        "c",
+        (14 * 60, 24 * 60),
+      ],
     );
-    // An hour an item covers has no row.
+    // Minutes an item covers have no row, though a later item ends first.
     expect(
       rowsOf(<ShownItem>[
         entryAt("a", 8 * 60, 11 * 60),
         entryAt("b", 9 * 60, 10 * 60),
         entryAt("c", 12 * 60, 13 * 60),
       ]),
-      <Object>["a", "b", 11 * 60, "c"],
+      <Object>[
+        (0, 8 * 60),
+        "a",
+        "b",
+        (11 * 60, 12 * 60),
+        "c",
+        (13 * 60, 24 * 60),
+      ],
     );
-    // An end between whole hours starts the hours at the next one, and
-    // items that start together have none between them.
+    // A gap starts where an item ends, between whole hours too, and items
+    // that touch or start together have none between them.
     expect(
       rowsOf(<ShownItem>[
         entryAt("a", 8 * 60, 9 * 60 + 15),
         entryAt("b", 11 * 60, 12 * 60),
         entryAt("c", 11 * 60, 11 * 60 + 30),
+        entryAt("d", 12 * 60, 13 * 60),
       ]),
-      <Object>["a", 10 * 60, "b", "c"],
+      <Object>[
+        (0, 8 * 60),
+        "a",
+        (9 * 60 + 15, 11 * 60),
+        "b",
+        "c",
+        "d",
+        (13 * 60, 24 * 60),
+      ],
+    );
+    // Only the calendar's hours have gaps, so an item before or after them
+    // makes none.
+    const office = DayHours(8 * 60, 18 * 60);
+    expect(
+      rowsOf(<ShownItem>[
+        entryAt("a", 7 * 60, 9 * 60),
+        entryAt("b", 17 * 60, 19 * 60),
+      ], hours: office),
+      <Object>["a", (9 * 60, 17 * 60), "b"],
+    );
+    expect(
+      rowsOf(<ShownItem>[
+        entryAt("a", 6 * 60, 7 * 60),
+        entryAt("b", 19 * 60, 20 * 60),
+      ], hours: office),
+      <Object>["a", (8 * 60, 18 * 60), "b"],
     );
   });
 
-  testWidgets("L7 a card sits right of its start time, \"to\" and its end "
-      "time over a chip of its length, and shows no time itself, and an "
-      "hour between the items that none covers is a dashed row, all in the "
-      "hour label format", (tester) async {
+  testWidgets("L7 a card sits right of its start time over a chip of its "
+      "length, and shows no time itself, and a gap between the items is a "
+      "dashed row at its start, all in the hour label format", (tester) async {
     await pumpCalendar(tester);
     await tester.tap(dayFinder(DateTime(2026, 4, 22)));
     await tester.pumpAndSettle();
     final time = find.byKey(dayListTimeKey(standupId));
     final card = cardFinder(standupId);
     final chip = find.byKey(dayListDurationKey(standupId));
-    final hour = find.byKey(dayListHourKey(DateTime(2026, 4, 22), 10 * 60));
+    final gap = find.byKey(dayListGapKey(DateTime(2026, 4, 22), 10 * 60));
     Finder inside(Finder of, String text) {
       return find.descendant(of: of, matching: find.text(text));
     }
 
     final start = tester.getRect(inside(time, "09:30"));
-    final to = tester.getRect(inside(time, "to"));
-    final end = tester.getRect(inside(time, "10:00"));
-    expect(to.top, greaterThanOrEqualTo(start.bottom));
-    expect(end.top, greaterThanOrEqualTo(to.bottom));
-    expect(tester.getRect(chip).top, greaterThan(end.bottom));
+    // No end time, and no "to" before one.
+    expect(inside(time, "to"), findsNothing);
+    expect(inside(time, "10:00"), findsNothing);
+    expect(tester.getRect(chip).top, greaterThan(start.bottom));
     expect(inside(chip, "30m"), findsOneWidget);
     expect(
       tester.getRect(time).right,
@@ -394,11 +437,11 @@ void main() {
       find.descendant(of: card, matching: find.textContaining(":")),
       findsNothing,
     );
-    expect(inside(hour, "10:00"), findsOneWidget);
+    expect(inside(gap, "10:00"), findsOneWidget);
     // The dashed line, before the add button's paint.
     expect(
       tester.renderObject(
-        find.descendant(of: hour, matching: find.byType(CustomPaint)).first,
+        find.descendant(of: gap, matching: find.byType(CustomPaint)).first,
       ),
       paints
         ..line(color: HarborColors.outline)
@@ -412,8 +455,7 @@ void main() {
     await tester.tapAt(const Offset(195.0, 20.0));
     await tester.pumpAndSettle();
     expect(inside(time, "9:30 AM"), findsOneWidget);
-    expect(inside(time, "10 AM"), findsOneWidget);
-    expect(inside(hour, "10 AM"), findsOneWidget);
+    expect(inside(gap, "10 AM"), findsOneWidget);
   });
 
   testWidgets("L8 the header of the day at the list's top sticks there while "
@@ -512,14 +554,14 @@ void main() {
     expect(headerTop(tester, today), 0.0);
   });
 
-  testWidgets("L13 a gap's add button opens the create flow from its hour "
-      "to the next item's start, and an empty day's at its first free "
-      "hour", (tester) async {
+  testWidgets("L13 a gap's add button opens the create flow from its start "
+      "to an hour later or its end, whichever is first, and an empty day's "
+      "at its first free hour", (tester) async {
     final day = DateTime(2026, 4, 22);
     final api = MockCalendarApi(
       seed: <Map<String, Object?>>[
         taskJson("First", day, 9 * 60, 10 * 60),
-        taskJson("Second", day, 10 * 60 + 30, 11 * 60),
+        taskJson("Second", day, 10 * 60 + 30, 11 * 60 + 15),
       ],
       latency: harnessLatency,
     );
@@ -548,10 +590,17 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    await addFrom(find.byKey(dayListHourKey(day, 10 * 60)));
+    await addFrom(find.byKey(dayListGapKey(day, 10 * 60)));
     expect(find.text("2026-04-22"), findsOneWidget);
     expect(shows("Start", "10:00"), findsOneWidget);
     expect(shows("End", "10:30"), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, "Cancel"));
+    await tester.pumpAndSettle();
+
+    // The gap after the last item, to the end of the day.
+    await addFrom(find.byKey(dayListGapKey(day, 11 * 60 + 15)));
+    expect(shows("Start", "11:15"), findsOneWidget);
+    expect(shows("End", "12:15"), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, "Cancel"));
     await tester.pumpAndSettle();
 
@@ -559,5 +608,26 @@ void main() {
     expect(find.text("2026-04-23"), findsOneWidget);
     expect(shows("Start", "00:00"), findsOneWidget);
     expect(shows("End", "01:00"), findsOneWidget);
+  });
+
+  testWidgets("L14 the gap rows follow the calendar's hours as the "
+      "settings change them", (tester) async {
+    final day = DateTime(2026, 4, 22);
+    await pumpCalendar(tester);
+    await tester.tap(dayFinder(day));
+    await tester.pumpAndSettle();
+    expect(find.byKey(dayListGapKey(day, 0)), findsOneWidget);
+    expect(find.byKey(dayListGapKey(day, 8 * 60)), findsNothing);
+
+    await tester.tap(find.byTooltip("Calendar settings"));
+    await tester.pumpAndSettle();
+    tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
+      const RangeValues(8.0, 18.0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(195.0, 20.0));
+    await tester.pumpAndSettle();
+    expect(find.byKey(dayListGapKey(day, 0)), findsNothing);
+    expect(find.byKey(dayListGapKey(day, 8 * 60)), findsOneWidget);
   });
 }

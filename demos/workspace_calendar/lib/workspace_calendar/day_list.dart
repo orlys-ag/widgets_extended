@@ -1,8 +1,8 @@
 /// Agenda's list: the shown days one after another, each a header that
 /// sticks at the list's top while its block scrolls under it: the day's
-/// items beside their times and lengths, with a dashed row for each hour
-/// between them that no item covers, or "No items" on a dashed row, each
-/// dashed row with a button that adds an item there.
+/// items beside their start times and lengths, with a dashed row for each
+/// gap in the calendar's hours that no item covers, or "No items" on a
+/// dashed row, each dashed row with a button that adds an item there.
 library;
 
 import 'dart:async';
@@ -55,14 +55,14 @@ ValueKey<String> dayListHeaderKey(DateTime day) {
   return ValueKey<String>("day-list-header-${isoDate(day)}");
 }
 
-/// The key of [day]'s dashed row of the hour [minute] minutes after
-/// midnight.
-ValueKey<String> dayListHourKey(DateTime day, int minute) {
-  return ValueKey<String>("day-list-hour-$minute@${isoDate(day)}");
+/// The key of [day]'s dashed row of the gap that starts [start] minutes
+/// after midnight.
+ValueKey<String> dayListGapKey(DateTime day, int start) {
+  return ValueKey<String>("day-list-gap-$start@${isoDate(day)}");
 }
 
 /// The key of the chip naming the length of the item [id], under its
-/// times.
+/// start time.
 ValueKey<String> dayListDurationKey(String id) {
   return ValueKey<String>("day-list-duration-$id");
 }
@@ -188,37 +188,38 @@ final class DayListItem extends DayListRow {
   }
 }
 
-/// [day]'s dashed row of the whole hour [minute] minutes after midnight,
-/// which no item covers, in a gap that lasts to [until].
-final class DayListHour extends DayListRow {
-  const DayListHour(super.day, this.minute, {required this.until});
+/// [day]'s dashed row of a gap: the minutes from [start] to [end], inside
+/// the calendar's hours, that no item covers.
+final class DayListGap extends DayListRow {
+  const DayListGap(super.day, this.start, this.end);
 
-  final int minute;
+  final int start;
 
-  /// The minute the item after the gap starts.
-  final int until;
+  /// The minute the gap ends: the next item's start, or the hours' end.
+  final int end;
 
   @override
   String get key {
-    return "hour-$minute@${isoDate(day)}";
+    return "gap-$start@${isoDate(day)}";
   }
 
   @override
   bool operator ==(Object other) {
-    return other is DayListHour &&
+    return other is DayListGap &&
         other.day == day &&
-        other.minute == minute &&
-        other.until == until;
+        other.start == start &&
+        other.end == end;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, minute, until);
+    return Object.hash(day, start, end);
   }
 
   @override
   String toString() {
-    return "DayListHour(${isoDate(day)}, ${clockLabel(minute)})";
+    return "DayListGap(${isoDate(day)}, ${clockLabel(start)}-"
+        "${clockLabel(end)})";
   }
 }
 
@@ -283,32 +284,30 @@ final class DayListFailed extends DayListRow {
 }
 
 /// The rows of [day]'s block for [entries], the day's items sorted by
-/// start as [CalendarModel.itemsOn] sorts them: each item, and before it an
-/// hour row for each whole hour from the latest end among the earlier
-/// items to before the item's start. So each whole hour after the first
-/// item's start and before the last item's that no item covers, an item
-/// covering the minutes from its start to before its end, has a row, and
-/// no hour before the first item or after the last has one.
-List<DayListRow> dayListRowsOf(DateTime day, List<ShownItem> entries) {
+/// start as [CalendarModel.itemsOn] sorts them: each item, and one gap row
+/// for each run of minutes in [hours] that no item covers, an item
+/// covering the minutes from its start to before its end, before the item
+/// that ends the run or after the last item. So items that touch have no
+/// gap between them, and an item outside [hours] makes none.
+List<DayListRow> dayListRowsOf(
+  DateTime day,
+  List<ShownItem> entries,
+  DayHours hours,
+) {
   final rows = <DayListRow>[];
-  // The latest end among the items so far.
-  int? covered;
+  // The latest end among the items so far, or the hours' start.
+  var covered = hours.start;
   for (final entry in entries) {
     final item = entry.item;
-    final from = covered;
-    if (from != null) {
-      for (
-        var hour = (from + 59) ~/ 60 * 60;
-        hour < item.startMinute;
-        hour += 60
-      ) {
-        rows.add(DayListHour(day, hour, until: item.startMinute));
-      }
+    final end = math.min(item.startMinute, hours.end);
+    if (end > covered) {
+      rows.add(DayListGap(day, covered, end));
     }
     rows.add(DayListItem(day, entry));
-    if (from == null || item.endMinute > from) {
-      covered = item.endMinute;
-    }
+    covered = math.max(covered, item.endMinute);
+  }
+  if (hours.end > covered) {
+    rows.add(DayListGap(day, covered, hours.end));
   }
   return rows;
 }
@@ -317,8 +316,8 @@ List<DayListRow> dayListRowsOf(DateTime day, List<ShownItem> entries) {
 /// [selectedDay] to as many after, on a [SyncedSliverTree] whose roots are
 /// the days' headers, which stick at the list's top, each over one block
 /// ([DayListBody]) holding the day's rows ([dayListRowsOf]), each card
-/// right of its start time, "to" and its end time, over a chip of its
-/// length, and each dashed hour row with a button that reports
+/// right of its start time over a chip of its length, and a dashed row for
+/// each gap in [hours] that no item covers, with a button that reports
 /// [onCreateIn]; "No items" on a dashed row for a day without items, with
 /// a button that reports [onCreateOn]; a progress indicator while the day
 /// is unread; and after a failed read, the failure and a Retry that reads
@@ -344,6 +343,7 @@ class DayList extends StatefulWidget {
     required this.model,
     required this.weekdays,
     required this.format,
+    required this.hours,
     required this.selectedDay,
     required this.today,
     required this.onTopDay,
@@ -358,9 +358,12 @@ class DayList extends StatefulWidget {
   /// The days the list shows.
   final WeekdaySet weekdays;
 
-  /// How the times beside the cards, on the hour rows and on the cards
-  /// read, as [hourLabel] writes them.
+  /// How the times beside the cards and on the gap rows read, as
+  /// [hourLabel] writes them.
   final HourLabelFormat format;
+
+  /// The part of each day the gap rows cover, the calendar's hours.
+  final DayHours hours;
 
   /// The day the list brings to its top; a shown day.
   final DateTime selectedDay;
@@ -371,9 +374,8 @@ class DayList extends StatefulWidget {
   /// A drag or a fling brought a new day under the list's top.
   final ValueChanged<DateTime> onTopDay;
 
-  /// The add button of a gap between a day's items was pressed: an item
-  /// from the gap's hour to an hour later, or the next item's start where
-  /// that comes first.
+  /// The add button of a gap was pressed: an item from the gap's start to
+  /// an hour later, or the gap's end where that comes first.
   final void Function(DateTime day, int startMinute, int endMinute) onCreateIn;
 
   /// The add button of a day without items was pressed.
@@ -464,7 +466,7 @@ class _DayListState extends State<DayList> {
       _rebuildOn(widget.selectedDay);
       return;
     }
-    if (widget.model != oldWidget.model) {
+    if (widget.model != oldWidget.model || widget.hours != oldWidget.hours) {
       _rows = _rowsOf();
     }
     final day = widget.selectedDay;
@@ -607,7 +609,7 @@ class _DayListState extends State<DayList> {
           day,
           rows: entries.isEmpty
               ? <DayListRow>[DayListEmpty(day)]
-              : dayListRowsOf(day, entries),
+              : dayListRowsOf(day, entries, widget.hours),
         ),
       );
     }
@@ -704,15 +706,15 @@ class _DayListState extends State<DayList> {
   /// The predicted height of [row] in a day's block, its padding included:
   /// for an item, the taller of its card (its top and bottom padding, the
   /// row of its title and menu button and a line of summaries where it has
-  /// some) and its time column (three lines and the duration chip); or a
-  /// dashed or loading row; or a failed row's button.
+  /// some) and its time column (a line and the duration chip); or a dashed
+  /// or loading row; or a failed row's button.
   static double _blockRowExtent(DayListRow row) {
     const padding = 12.0;
     switch (row) {
       case DayListItem(:final entry):
         final summaries = ItemCard.summariesOf(entry.item).isEmpty ? 0.0 : 17.0;
         final card = 6.0 + 48.0 + summaries + 12.0;
-        const times = 16.0 + 15.0 + 16.0 + 6.0 + 17.0;
+        const times = 16.0 + 6.0 + 17.0;
         return math.max(card, times) + padding;
       case DayListFailed():
         return 48.0 + padding;
@@ -918,15 +920,15 @@ class _DayListState extends State<DayList> {
         throw ArgumentError.value(row, "row", "not a row of a block");
       case DayListItem(:final entry):
         return _padded(_buildItem(entry));
-      case DayListHour(:final day, :final minute, :final until):
-        final label = hourLabel(minute, widget.format);
+      case DayListGap(:final day, :final start, :final end):
+        final label = hourLabel(start, widget.format);
         return _padded(
           _buildDashed(
-            key: dayListHourKey(day, minute),
+            key: dayListGapKey(day, start),
             label: label,
             addTooltip: "Add an item at $label",
             onAdd: () {
-              widget.onCreateIn(day, minute, math.min(minute + 60, until));
+              widget.onCreateIn(day, start, math.min(start + 60, end));
             },
           ),
         );
@@ -1015,8 +1017,7 @@ class _DayListState extends State<DayList> {
     );
   }
 
-  /// The item's start time, "to" and its end time, its length on a chip
-  /// under them, and its card.
+  /// The item's start time, its length on a chip under it, and its card.
   Widget _buildItem(ShownItem entry) {
     final item = entry.item;
     return Row(
@@ -1031,11 +1032,6 @@ class _DayListState extends State<DayList> {
                 hourLabel(item.startMinute, widget.format),
                 style: _timeStyle,
               ),
-              const Text(
-                "to",
-                style: TextStyle(fontSize: 12.0, color: HarborColors.textMuted),
-              ),
-              Text(hourLabel(item.endMinute, widget.format), style: _timeStyle),
               const SizedBox(height: 6.0),
               DecoratedBox(
                 key: dayListDurationKey(entry.id),

@@ -25,14 +25,13 @@
 /// selected day: a selected day scrolls to its top, animating, and a drag
 /// or a fling of the list selects each day it brings to the top. Each
 /// day's header sticks at the top while its items scroll under it. Each
-/// item's card sits right of its start time, "to" and its end time, over
-/// a chip of its length; the list marks each whole hour between a day's
-/// items that no item covers with a dashed row, and a day without items
-/// with one reading "No items", each with a button that creates an item
-/// there. A drag of the list folds the month, and the pull tab under the
-/// card folds or unfolds it as far as a drag on it moves, a tap on it
-/// switching; a downward drag on the folded strip unfolds it too. The
-/// board always holds
+/// item's card sits right of its start time, over a chip of its length;
+/// the list marks each gap in the calendar's hours that no item covers
+/// with a dashed row, and a day without items with one reading "No items",
+/// each with a button that creates an item there. A drag of the list folds
+/// the month, and the pull tab under the card folds or unfolds it as far
+/// as a drag on it moves, a tap on it switching; a downward drag on the
+/// folded strip unfolds it too. The board always holds
 /// the whole month of the selected day; while it folds, it is clipped to
 /// a shrinking window shifted so the selected week shows, and once folded,
 /// Day's strip takes the window's place, opening on that week. Selecting a
@@ -827,6 +826,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               model: _model,
               weekdays: _settings.weekdays,
               format: _settings.hourLabelFormat,
+              hours: _settings.hours,
               selectedDay: _selected,
               today: _today.value,
               onTopDay: _select,
