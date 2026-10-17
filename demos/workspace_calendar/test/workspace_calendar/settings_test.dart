@@ -22,9 +22,10 @@ Matcher near(double value) {
   return moreOrLessEquals(value, epsilon: 0.5);
 }
 
-/// The grid's row of [minute] under hours that start at 08:00.
+/// Week's grid row of [minute] under hours that start at 08:00: row 0 is
+/// the day header and row 1 the room above the first slot.
 int officeRow(int minute) {
-  return 1 + (minute - 8 * 60) ~/ 15;
+  return 2 + (minute - 8 * 60) ~/ 15;
 }
 
 /// Stores [item] through [api] before the calendar is pumped and returns
@@ -127,7 +128,7 @@ Finder monthGridFinder() {
   return find.byKey(const ValueKey<String>("calendar-grid"));
 }
 
-/// The letters of the month's weekday header, left to right.
+/// The labels of the month's weekday header, left to right.
 List<String> weekdayHeaderLetters(WidgetTester tester) {
   final texts = tester.widgetList<Text>(
     find.descendant(
@@ -167,30 +168,36 @@ void main() {
           .selected;
     }
 
-    expect(chosen(), <MonthLayout>{MonthLayout.showAll});
+    expect(chosen(), <MonthLayout>{MonthLayout.fitScreen});
     expect(find.text("Show all items"), findsOneWidget);
     expect(find.text("Fit to screen"), findsOneWidget);
-    await tester.tap(find.text("Fit to screen"));
+    await tester.tap(find.text("Show all items"));
     await tester.pumpAndSettle();
-    expect(chosen(), <MonthLayout>{MonthLayout.fitScreen});
+    expect(chosen(), <MonthLayout>{MonthLayout.showAll});
     await closeSettings(tester);
     await openSettings(tester);
-    expect(chosen(), <MonthLayout>{MonthLayout.fitScreen});
+    expect(chosen(), <MonthLayout>{MonthLayout.showAll});
   });
 
   testWidgets("H2 the hours trim the week grid to their slots", (tester) async {
+    final semantics = tester.ensureSemantics();
     await pumpCalendar(tester, size: tall);
     await pickMode(tester, "Week");
     final grid = gridViewport(tester);
     expect(grid.rectOfCell(96, 1), isNotNull);
 
     await pickHours(tester, 8, 18);
-    expect(grid.rectOfCell(40, 1), isNotNull);
-    expect(grid.rectOfCell(41, 1), isNull);
-    expect(find.text("09:00"), findsOneWidget);
-    expect(find.text("17:00"), findsOneWidget);
-    expect(find.text("07:00"), findsNothing);
-    expect(find.text("18:00"), findsNothing);
+    // 40 slots, then the room below them.
+    expect(grid.rectOfCell(officeRow(18 * 60), 1), isNotNull);
+    expect(grid.rectOfCell(officeRow(18 * 60) + 1, 1), isNull);
+    // The start and the end of the hours are labelled, and the hours
+    // between them.
+    expect(gutterLabelFinder("08:00"), findsOneWidget);
+    expect(gutterLabelFinder("09:00"), findsOneWidget);
+    expect(gutterLabelFinder("17:00"), findsOneWidget);
+    expect(gutterLabelFinder("18:00"), findsOneWidget);
+    expect(gutterLabelFinder("07:00"), findsNothing);
+    expect(gutterLabelFinder("19:00"), findsNothing);
     final block = tester.getRect(blockFinder(uxFlowId));
     final col = colOf(1);
     expect(block.top, near(cellRect(tester, officeRow(10 * 60), col).top));
@@ -198,6 +205,7 @@ void main() {
       block.bottom,
       near(cellRect(tester, officeRow(13 * 60) - 1, col).bottom),
     );
+    semantics.dispose();
   });
 
   testWidgets("H3 an item reaching past the hours shows cut off, marked, "
@@ -219,11 +227,14 @@ void main() {
 
     final col = colOf(1);
     final block = tester.getRect(blockFinder(early));
-    expect(block.top, near(cellRect(tester, 1, col).top));
-    expect(block.bottom, near(cellRect(tester, 4, col).bottom));
+    expect(block.top, near(cellRect(tester, officeRow(8 * 60), col).top));
+    expect(
+      block.bottom,
+      near(cellRect(tester, officeRow(8 * 60 + 45), col).bottom),
+    );
     expect(
       tester.getRect(blockFinder(evening)).bottom,
-      near(cellRect(tester, 40, col).bottom),
+      near(cellRect(tester, officeRow(17 * 60 + 45), col).bottom),
     );
     expect(arrowIn(early, Icons.keyboard_arrow_up), findsOneWidget);
     expect(arrowIn(early, Icons.keyboard_arrow_down), findsNothing);
@@ -233,38 +244,95 @@ void main() {
 
     // Onto Wednesday's free 10:00 to 11:00, a drop the grid would admit.
     final updates = updateCount(api);
-    await moveBlock(tester, blockFinder(early), cellRect(tester, 9, 3).topLeft);
+    await moveBlock(
+      tester,
+      blockFinder(early),
+      cellRect(tester, officeRow(10 * 60), 3).topLeft,
+    );
     await tester.pumpAndSettle();
     expect(tester.getRect(blockFinder(early)), block);
     expect(updateCount(api), updates);
   });
 
-  testWidgets("H4 an item wholly outside the hours has no block and the "
-      "corner counts it", (tester) async {
+  testWidgets("H4 an item wholly outside the hours has no block, and "
+      "yellow rows frozen above and below the slots count each day's in its "
+      "column", (tester) async {
+    final semantics = tester.ensureSemantics();
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    final wednesday = DateTime(2026, 4, 22);
+    final thursday = DateTime(2026, 4, 23);
     final lateId = await store(
       tester,
       api,
       taskJson("Late", today, 19 * 60, 20 * 60),
     );
-    await pumpCalendar(tester, api: api, size: tall);
+    await store(tester, api, taskJson("Run", thursday, 6 * 60, 7 * 60));
+    // 05:00 to 06:00 on Wednesday and Thursday.
+    await store(
+      tester,
+      api,
+      taskJson("Trip", wednesday, 5 * 60, 6 * 60, dayCount: 2),
+    );
+    await pumpCalendar(tester, api: api);
     await pickMode(tester, "Week");
     expect(blockFinder(lateId), findsOneWidget);
-    expect(find.byKey(hiddenCountKey), findsNothing);
+    expect(find.byKey(hiddenAboveKey(thursday)), findsNothing);
+    expect(find.byKey(hiddenBelowKey(today)), findsNothing);
 
     await pickHours(tester, 8, 18);
     expect(blockFinder(lateId), findsNothing);
+    // A week's column is too narrow for "+N more", so it says "+N".
+    List<String> textsIn(Finder cell) {
+      return <String>[
+        for (final text in tester.widgetList<Text>(
+          find.descendant(of: cell, matching: find.byType(Text)),
+        ))
+          text.data!,
+      ];
+    }
+
+    expect(textsIn(find.byKey(hiddenAboveKey(today))), isEmpty);
+    expect(textsIn(find.byKey(hiddenAboveKey(wednesday))), <String>["+1"]);
+    expect(textsIn(find.byKey(hiddenAboveKey(thursday))), <String>["+2"]);
+    expect(textsIn(find.byKey(hiddenBelowKey(today))), <String>["+1"]);
+    expect(textsIn(find.byKey(hiddenBelowKey(wednesday))), isEmpty);
     expect(
-      find.descendant(
-        of: find.byKey(hiddenCountKey),
-        matching: find.text("+1"),
+      find.bySemanticsLabel("Thursday, April 23, 2 more items before 08:00"),
+      findsOneWidget,
+    );
+    expect(find.byKey(hiddenCountKey), findsNothing);
+
+    // The rows lie in the days' columns, under the header and on the
+    // grid's bottom edge.
+    final grid = gridViewport(tester);
+    final box = grid.localToGlobal(Offset.zero) & grid.size;
+    final header = tester.getRect(headerFinder(wednesday));
+    final top = tester.getRect(find.byKey(hiddenAboveKey(wednesday)));
+    final bottom = tester.getRect(find.byKey(hiddenBelowKey(wednesday)));
+    expect(top.top, near(header.bottom));
+    expect(top.left, near(header.left));
+    expect(top.width, near(header.width));
+    expect(bottom.bottom, near(box.bottom));
+    expect(bottom.left, near(header.left));
+
+    // Slots too tall to fit scroll beneath the rows, which stay put.
+    await openSettings(tester);
+    await setSlider(tester, slotHeightSliderKey, 32.0);
+    await closeSettings(tester);
+    final block = tester.getRect(blockFinder(uxFlowId));
+    // From the middle of Saturday's column, which holds no item.
+    await tester.dragFrom(
+      Offset(
+        tester.getCenter(headerFinder(DateTime(2026, 4, 25))).dx,
+        box.center.dy,
       ),
-      findsOneWidget,
+      const Offset(0.0, -200.0),
     );
-    expect(
-      find.byTooltip("1 item is outside the days or hours shown"),
-      findsOneWidget,
-    );
+    await tester.pumpAndSettle();
+    expect(tester.getRect(blockFinder(uxFlowId)).top, lessThan(block.top));
+    expect(tester.getRect(find.byKey(hiddenAboveKey(wednesday))), top);
+    expect(tester.getRect(find.byKey(hiddenBelowKey(wednesday))), bottom);
+    semantics.dispose();
   });
 
   testWidgets("H5 a tap on the last slot creates up to the end of the "
@@ -273,7 +341,9 @@ void main() {
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
 
-    await tester.tapAt(cellRect(tester, 40, colOf(3)).center);
+    await tester.tapAt(
+      cellRect(tester, officeRow(17 * 60 + 45), colOf(3)).center,
+    );
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsOneWidget);
     await tester.tap(find.text("Task").last);
@@ -364,9 +434,16 @@ void main() {
     await pickHours(tester, 8, 18);
 
     final grid = gridViewport(tester);
+    final room = labelRoom(tester);
     final bottom = grid.localToGlobal(Offset(0.0, grid.size.height)).dy;
-    expect(cellRect(tester, 1, 1).height, near((grid.size.height - 40.0) / 40));
-    expect(cellRect(tester, 40, 1).bottom, near(bottom));
+    expect(
+      cellRect(tester, officeRow(8 * 60), 1).height,
+      near((grid.size.height - 40.0 - 2 * room) / 40),
+    );
+    expect(
+      cellRect(tester, officeRow(17 * 60 + 45), 1).bottom,
+      near(bottom - room),
+    );
   });
 
   testWidgets("Z3 a new slot height keeps the time at the top in place", (
@@ -375,13 +452,20 @@ void main() {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
     final header = cellRect(tester, 0, 1).bottom;
-    expect(cellRect(tester, rowOf(8 * 60), 1).top, near(header));
+    final room = labelRoom(tester);
+    final slot = cellRect(tester, rowOf(8 * 60), 1).height;
+    expect(cellRect(tester, rowOf(8 * 60), 1).top, near(header + room));
 
+    // The time at the top edge, the room's share of a slot before 08:00,
+    // stays there, so the room above 08:00's line grows with the slots.
     await openSettings(tester);
     await setSlider(tester, slotHeightSliderKey, 32.0);
     await closeSettings(tester);
     expect(cellRect(tester, rowOf(8 * 60), 1).height, near(32.0));
-    expect(cellRect(tester, rowOf(8 * 60), 1).top, near(header));
+    expect(
+      cellRect(tester, rowOf(8 * 60), 1).top,
+      near(header + room * 32.0 / slot),
+    );
   });
 
   testWidgets("Z4 a grid opens at the hours' start when they begin after "
@@ -393,9 +477,11 @@ void main() {
     await closeSettings(tester);
     await pickMode(tester, "Week");
 
+    // The seed's items before 12:00 put the 24 px row counting them in
+    // the place of the room above the first slot.
     final header = cellRect(tester, 0, 1).bottom;
-    expect(cellRect(tester, 1, 1).height, near(32.0));
-    expect(cellRect(tester, 1, 1).top, near(header));
+    expect(cellRect(tester, 2, 1).height, near(32.0));
+    expect(cellRect(tester, 2, 1).top, near(header + 24.0));
   });
 
   testWidgets("H7 hours as long as the last relabel the gutter of a week "
@@ -406,16 +492,78 @@ void main() {
       api: MockCalendarApi(latency: harnessLatency),
       size: tall,
     );
+    final semantics = tester.ensureSemantics();
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
-    expect(find.text("09:00"), findsOneWidget);
+    expect(gutterLabelFinder("08:00"), findsOneWidget);
 
     await pickHours(tester, 9, 19);
     final grid = gridViewport(tester);
-    expect(grid.rectOfCell(40, 1), isNotNull);
-    expect(grid.rectOfCell(41, 1), isNull);
-    expect(find.text("18:00"), findsOneWidget);
-    expect(find.text("09:00"), findsNothing);
+    expect(grid.rectOfCell(42, 1), isNotNull);
+    expect(grid.rectOfCell(43, 1), isNull);
+    expect(gutterLabelFinder("19:00"), findsOneWidget);
+    expect(gutterLabelFinder("08:00"), findsNothing);
+    semantics.dispose();
+  });
+
+  testWidgets("H8 the AM/PM switch relabels the hours of a week with no "
+      "items, painted and to a screen reader, and the sheet opens on it", (
+    tester,
+  ) async {
+    // No item moves, so no item change rebuilds the board's cells.
+    await pumpCalendar(
+      tester,
+      api: MockCalendarApi(latency: harnessLatency),
+      size: tall,
+    );
+    final semantics = tester.ensureSemantics();
+    await pickMode(tester, "Week");
+    await pickHours(tester, 8, 18);
+    expect(gutterLabelFinder("13:00"), findsOneWidget);
+    // The test font gives every character one width, which "08:00" holds
+    // five of.
+    List<double> widths() {
+      return <double>[
+        for (final label in paintGridForeground(tester).paragraphs)
+          label.paragraph.longestLine,
+      ];
+    }
+
+    final character = widths().first / 5;
+
+    await openSettings(tester);
+    Finder twelveHour() {
+      return find.byKey(hourLabelFormatKey);
+    }
+
+    expect(tester.widget<SwitchListTile>(twelveHour()).value, isFalse);
+    await tester.tap(twelveHour());
+    await tester.pumpAndSettle();
+    await closeSettings(tester);
+    expect(gutterLabelFinder("8 AM"), findsOneWidget);
+    expect(gutterLabelFinder("12 PM"), findsOneWidget);
+    expect(gutterLabelFinder("1 PM"), findsOneWidget);
+    expect(gutterLabelFinder("6 PM"), findsOneWidget);
+    const labels = <String>[
+      "8 AM",
+      "9 AM",
+      "10 AM",
+      "11 AM",
+      "12 PM",
+      "1 PM",
+      "2 PM",
+      "3 PM",
+      "4 PM",
+      "5 PM",
+      "6 PM",
+    ];
+    expect(widths(), <double>[
+      for (final label in labels) label.length * character,
+    ]);
+
+    await openSettings(tester);
+    expect(tester.widget<SwitchListTile>(twelveHour()).value, isTrue);
+    semantics.dispose();
   });
 
   testWidgets("W1 hiding the weekends leaves the week's five weekdays", (
@@ -450,6 +598,11 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(find.byTooltip("1 item is on a day not shown"), findsOneWidget);
+    expect(
+      tester.getRect(find.byKey(hiddenCountKey)).center.dy,
+      near(grid.localToGlobal(Offset.zero).dy + 20.0),
+    );
 
     await toggleWeekends(tester);
     expect(headerFinder(saturday), findsOneWidget);
@@ -462,7 +615,13 @@ void main() {
     await pumpCalendar(tester);
     await toggleWeekends(tester);
 
-    expect(weekdayHeaderLetters(tester), <String>["M", "T", "W", "T", "F"]);
+    expect(weekdayHeaderLetters(tester), <String>[
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+    ]);
     expect(dayFinder(2026, 4, 25), findsNothing);
     final grid = tester.getRect(monthGridFinder());
     final friday = tester.getRect(dayFinder(2026, 4, 24));
@@ -500,14 +659,14 @@ void main() {
     await tester.pumpAndSettle();
     await toggleWeekends(tester);
     await pickMode(tester, "Day");
-    expect(headerFinder(DateTime(2026, 4, 24)), findsOneWidget);
+    expect(gridDay(tester), DateTime(2026, 4, 24));
 
     await tester.tap(find.byTooltip("Next day"));
     await tester.pumpAndSettle();
-    expect(headerFinder(DateTime(2026, 4, 27)), findsOneWidget);
+    expect(gridDay(tester), DateTime(2026, 4, 27));
     await tester.tap(find.byTooltip("Previous day"));
     await tester.pumpAndSettle();
-    expect(headerFinder(DateTime(2026, 4, 24)), findsOneWidget);
+    expect(gridDay(tester), DateTime(2026, 4, 24));
   });
 
   testWidgets("W5 a month step onto a hidden day takes the nearest shown "

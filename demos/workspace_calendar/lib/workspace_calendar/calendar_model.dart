@@ -146,6 +146,17 @@ class CalendarModel extends ChangeNotifier {
     return _shownFirst == dayNumber(first) && _shownLast == dayNumber(last);
   }
 
+  /// Whether the shown range holds every day from [first] to [last]. False
+  /// before the first [show].
+  bool isWithinShown(DateTime first, DateTime last) {
+    final shownFirst = _shownFirst;
+    final shownLast = _shownLast;
+    return shownFirst != null &&
+        shownLast != null &&
+        shownFirst <= dayNumber(first) &&
+        dayNumber(last) <= shownLast;
+  }
+
   /// Sends a new read for the shown range's unread days; with none unread
   /// it sends nothing and the range is ready.
   void retry() {
@@ -164,12 +175,32 @@ class CalendarModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Reads the unread days from [first] to [last], both inclusive, without
+  /// showing them, so the markers of days about to show appear once read,
+  /// as the week strip's other weeks do. Sends nothing when every day is
+  /// read or a read in flight covers the unread ones. Changes neither the
+  /// shown range nor [status], and a failed read leaves its days unread.
+  void prefetch(DateTime first, DateTime last) {
+    final unread = _unreadSpanOf(dayNumber(first), dayNumber(last));
+    if (unread == null ||
+        _inFlightCovering(unread.first, unread.last) != null) {
+      return;
+    }
+    _send(unread.first, unread.last);
+  }
+
   /// The first to the last unread day of the shown range, or null when
   /// every day of it is read.
   ({int first, int last})? _unreadSpan() {
+    return _unreadSpanOf(_shownFirst!, _shownLast!);
+  }
+
+  /// The first to the last unread day from [firstDay] to [lastDay], or
+  /// null when every day of them is read.
+  ({int first, int last})? _unreadSpanOf(int firstDay, int lastDay) {
     int? first;
     int? last;
-    for (var day = _shownFirst!; day <= _shownLast!; day++) {
+    for (var day = firstDay; day <= lastDay; day++) {
       if (!_readDays.containsKey(day)) {
         first ??= day;
         last = day;
@@ -208,7 +239,8 @@ class CalendarModel extends ChangeNotifier {
   }
 
   /// A read's answer. A read the shown range does not wait on changes no
-  /// shown state, so it notifies nothing.
+  /// load state, so it notifies only when it marked days read, whose
+  /// markers [dayHasShownItems] may now show.
   void _finishRead(
     _Read read, {
     List<Map<String, Object?>>? items,
@@ -218,10 +250,11 @@ class CalendarModel extends ChangeNotifier {
       return;
     }
     _reads.remove(read);
-    if (items != null) {
-      _applyRead(read, items);
-    }
+    final marked = items != null && _applyRead(read, items);
     if (!identical(_awaited, read)) {
+      if (marked) {
+        notifyListeners();
+      }
       return;
     }
     _awaited = null;
@@ -241,8 +274,8 @@ class CalendarModel extends ChangeNotifier {
   /// read, and indexes every cached item under those of them its cached
   /// shape covers, so a known item lies where the cache holds it whether
   /// or not the answer returned it there. A day already read keeps what it
-  /// holds.
-  void _applyRead(_Read read, List<Map<String, Object?>> items) {
+  /// holds. Returns whether it marked any day read.
+  bool _applyRead(_Read read, List<Map<String, Object?>> items) {
     final fresh = <int>{};
     for (var day = read.first; day <= read.last; day++) {
       if (!_readDays.containsKey(day)) {
@@ -258,7 +291,7 @@ class CalendarModel extends ChangeNotifier {
       });
     }
     if (fresh.isEmpty) {
-      return;
+      return false;
     }
     for (final item in _items.values) {
       final first = math.max(dayNumber(item.day), read.first);
@@ -269,6 +302,7 @@ class CalendarModel extends ChangeNotifier {
         }
       }
     }
+    return true;
   }
 
   /// The items shown on [day], sorted by start, end, title and id.
@@ -329,15 +363,39 @@ class CalendarModel extends ChangeNotifier {
   /// hours' start on the [minutesPerSlot] grid, the range from it to an
   /// hour later or the hours' end, whichever comes first, the first one
   /// that shares no time, under [itemsConflict], with an item [itemsOn]
-  /// lists for [day], pending ones where they show. With none free, the
-  /// hours' first hour, which a create the API then refuses for its
-  /// overlap. The new item's type plays no part: [itemsConflict] ignores
-  /// it.
-  ({int start, int end}) firstFreeRange(DateTime day) {
-    final number = dayNumber(day);
+  /// lists for [day], pending ones where they show. With [from], the
+  /// starts begin at the later of it, rounded up to the grid, and the
+  /// hours' start, and only with none free from there at the hours' start.
+  /// With none free, the hours' first hour, which a create the API then
+  /// refuses for its overlap. The new item's type plays no part:
+  /// [itemsConflict] ignores it.
+  ({int start, int end}) firstFreeRange(DateTime day, {int? from}) {
     final shown = itemsOn(day);
+    if (from != null) {
+      final slot = (from + minutesPerSlot - 1) ~/ minutesPerSlot;
+      final later = _firstFreeFrom(
+        math.max(hours.start, slot * minutesPerSlot),
+        day,
+        shown,
+      );
+      if (later != null) {
+        return later;
+      }
+    }
+    return _firstFreeFrom(hours.start, day, shown) ??
+        (start: hours.start, end: math.min(hours.start + 60, hours.end));
+  }
+
+  /// The first free range of [firstFreeRange]'s search on [day], starting
+  /// at [first], or null when none from there is free.
+  ({int start, int end})? _firstFreeFrom(
+    int first,
+    DateTime day,
+    List<ShownItem> shown,
+  ) {
+    final number = dayNumber(day);
     for (
-      var start = hours.start;
+      var start = first;
       start <= hours.end - minutesPerSlot;
       start += minutesPerSlot
     ) {
@@ -360,7 +418,7 @@ class CalendarModel extends ChangeNotifier {
         return (start: start, end: end);
       }
     }
-    return (start: hours.start, end: math.min(hours.start + 60, hours.end));
+    return null;
   }
 
   /// Whether a write on [id] runs.

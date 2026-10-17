@@ -1,6 +1,6 @@
 /// The calendar's timed grid: consecutive days on the board, with a frozen
-/// day header and hour gutter, one row per 15-minute slot, and the days'
-/// items as blocks that move and resize.
+/// hour gutter and, where it shows one, a frozen day header, one row per
+/// 15-minute slot, and the days' items as blocks that move and resize.
 library;
 
 import 'dart:async';
@@ -22,6 +22,10 @@ import 'harbor_theme.dart';
 const double _headerHeight = 40.0;
 const double _gutterWidth = 56.0;
 
+/// The height of the rows above and below the slots that count the items
+/// outside the hours.
+const double _noticeHeight = 24.0;
+
 /// The time the grid opens scrolled to when it does not show the clock's
 /// day, where its hours hold it.
 const int _openingMinute = 8 * 60;
@@ -35,6 +39,17 @@ int _openingMinuteOf(GridTracks tracks, DateTime now) {
       : math.max(0, (now.hour - 1) * 60);
   final hours = tracks.hours;
   return minute.clamp(hours.start, hours.end - minutesPerSlot);
+}
+
+/// The minute the Add of a grid looks for a free hour on [day] from: on
+/// [now]'s day the next whole hour, [now] itself when it is one, and
+/// [_openingMinute] on any other day, where the grid opens.
+int addFromMinute(DateTime day, DateTime now) {
+  if (dayNumber(day) != dayNumber(now)) {
+    return _openingMinute;
+  }
+  final minute = now.hour * 60 + now.minute;
+  return (minute + 59) ~/ 60 * 60;
 }
 
 /// The style the grid animates its blocks with: every family over
@@ -53,17 +68,113 @@ ValueKey<String> blockKey(String id) {
   return ValueKey<String>("block-$id");
 }
 
-/// The key of the corner's count of the shown items the grid has no block
-/// for.
+/// The key of the pill counting the shown items on no day the grid has a
+/// column for.
 const ValueKey<String> hiddenCountKey = ValueKey<String>("grid-hidden-count");
 
-/// What the corner's count of [count] items with no block says.
+/// What the tooltip of the pill counting [count] items on no day the grid
+/// has a column for says.
 String hiddenItemsLabel(int count) {
   if (count == 1) {
-    return "1 item is outside the days or hours shown";
+    return "1 item is on a day not shown";
   }
-  return "$count items are outside the days or hours shown";
+  return "$count items are on days not shown";
 }
+
+/// The key of [day]'s cell in the row above the slots that counts the
+/// shown items before the hours.
+ValueKey<String> hiddenAboveKey(DateTime day) {
+  return ValueKey<String>("grid-hidden-above-${isoDate(day)}");
+}
+
+/// The key of [day]'s cell in the row below the slots that counts the
+/// shown items after the hours.
+ValueKey<String> hiddenBelowKey(DateTime day) {
+  return ValueKey<String>("grid-hidden-below-${isoDate(day)}");
+}
+
+/// What a screen reader says for [day]'s cell counting [count] items
+/// before [minute], or after it when [above] is false, naming the minute
+/// in [format].
+String hiddenRowLabel(
+  DateTime day,
+  int count,
+  int minute, {
+  required bool above,
+  required HourLabelFormat format,
+}) {
+  final date =
+      "${weekdayNames[weekdayColumn(day)]}, "
+      "${monthNames[day.month - 1]} ${day.day}";
+  final items = count == 1 ? "1 more item" : "$count more items";
+  final side = above ? "before" : "after";
+  return "$date, $items $side ${hourLabel(minute, format)}";
+}
+
+/// The shown items a grid has no block for, as the grid [tracks] lays out
+/// counts them: on each day column, those wholly before its hours and
+/// those wholly after them, and those on no day it has a column for.
+@immutable
+class _Hidden {
+  _Hidden(this.tracks, this.above, this.below, this.offDays)
+    : rowAbove = above.any(_isCounted),
+      rowBelow = below.any(_isCounted);
+
+  /// No item on any of [tracks]' columns.
+  _Hidden.none(GridTracks tracks)
+    : this(
+        tracks,
+        List<int>.filled(tracks.columnCount, 0),
+        List<int>.filled(tracks.columnCount, 0),
+        0,
+      );
+
+  /// The tracks the counts were made on, whose days and hours the cells
+  /// counting them name.
+  final GridTracks tracks;
+
+  /// The items before the hours: column `c` counts `above[c - 1]`.
+  final List<int> above;
+
+  /// The items after the hours, by column as [above].
+  final List<int> below;
+
+  final int offDays;
+
+  /// Whether a column counts items before the hours, which the grid then
+  /// shows in a row above its slots.
+  final bool rowAbove;
+
+  /// Whether a column counts items after the hours, which the grid then
+  /// shows in a row below its slots.
+  final bool rowBelow;
+
+  static bool _isCounted(int count) {
+    return count > 0;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is _Hidden &&
+        other.tracks == tracks &&
+        listEquals(other.above, above) &&
+        listEquals(other.below, below) &&
+        other.offDays == offDays;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(
+      tracks,
+      Object.hashAll(above),
+      Object.hashAll(below),
+      offDays,
+    );
+  }
+}
+
+/// Whether a grid lays out a row above its slots and one below them.
+typedef _Notices = ({bool above, bool below});
 
 /// The key of the label naming where a drag lands.
 const ValueKey<String> landingLabelKey = ValueKey<String>("grid-landing-label");
@@ -144,8 +255,10 @@ class CreateRange {
 /// Which day each column of a timed grid shows and which minute each of
 /// its rows starts at.
 ///
-/// Row 0 is the day header and column 0 the hour gutter. The rows below
-/// the header are the slots of [hours], one per [minutesPerSlot]; the
+/// Column 0 is the hour gutter, and the rows from [firstSlotRow] are the
+/// slots of [hours], one per [minutesPerSlot]; the rows before it are
+/// whatever the grid lays out above its slots, such as a day header or a
+/// row counting the items before the hours. The
 /// columns right of the gutter are the days of the [dayCount] days from
 /// [firstDay] whose weekday [weekdays] holds, in order, so a day it does
 /// not hold has no column and the days either side of it are adjacent.
@@ -156,7 +269,9 @@ class GridTracks {
     required this.dayCount,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
+    this.firstSlotRow = 1,
   }) : assert(dayCount >= 1),
+       assert(firstSlotRow >= 0),
        _days = List<int>.unmodifiable(<int>[
          for (var day = firstDay; day < firstDay + dayCount; day++)
            if (weekdays.containsDay(day)) day,
@@ -170,6 +285,9 @@ class GridTracks {
 
   final WeekdaySet weekdays;
   final DayHours hours;
+
+  /// The row of the first slot.
+  final int firstSlotRow;
 
   /// The [dayNumber]s of the shown days, ascending: column `c` shows
   /// `_days[c - 1]`.
@@ -188,6 +306,11 @@ class GridTracks {
   /// The slot rows, the header not counted.
   int get rowCount {
     return hours.slotCount;
+  }
+
+  /// The row of the last slot.
+  int get lastSlotRow {
+    return firstSlotRow + rowCount - 1;
   }
 
   /// The [dayNumber] of the day [column] shows, 1 to [columnCount].
@@ -237,16 +360,16 @@ class GridTracks {
     return low;
   }
 
-  /// The minute the slot [row] starts at, for a row from 1 to [rowCount];
-  /// the row after the last gives the end of [hours].
+  /// The minute the slot [row] starts at, for a row from [firstSlotRow] to
+  /// [lastSlotRow]; the row after the last gives the end of [hours].
   int minuteAt(int row) {
-    return hours.start + (row - 1) * minutesPerSlot;
+    return hours.start + (row - firstSlotRow) * minutesPerSlot;
   }
 
   /// The row of the slot starting at [minute], a slot boundary in
   /// [hours].
   int rowOf(int minute) {
-    return 1 + (minute - hours.start) ~/ minutesPerSlot;
+    return firstSlotRow + (minute - hours.start) ~/ minutesPerSlot;
   }
 
   @override
@@ -255,12 +378,13 @@ class GridTracks {
         other.firstDay == firstDay &&
         other.dayCount == dayCount &&
         other.weekdays == weekdays &&
-        other.hours == hours;
+        other.hours == hours &&
+        other.firstSlotRow == firstSlotRow;
   }
 
   @override
   int get hashCode {
-    return Object.hash(firstDay, dayCount, weekdays, hours);
+    return Object.hash(firstDay, dayCount, weekdays, hours, firstSlotRow);
   }
 }
 
@@ -375,28 +499,37 @@ CreateRange createRangeOver(
 
 /// The days of the [dayCount] from [firstDay] whose weekday [settings]
 /// show, on the board, over the hours they choose, showing what [model]
-/// shows for them. A tap on a block that is not pending reports
-/// [onOpenItem]; a tap on a day header reports [onSelectDay].
+/// shows for them once the model's shown range holds them all, read. A
+/// tap on a block that is not pending reports [onOpenItem]; a tap on a
+/// day header reports [onSelectDay]. On a grid of one day column each
+/// block uses the width to show its times and its summaries.
 ///
-/// Items keep every board gesture: a long press moves, the top band drags
-/// the start time, the bottom band the end time, and, on more than one
-/// day, the right band the day count. A move dropped onto another item's
-/// time lands at the nearest free time that shows, on that day or the day
-/// before or after it, and goes back where there is none; a resize
-/// dragged onto one stops at its edge. While a drag runs, a label over the
-/// grid names the day and times a release would give, or that a move has
-/// nowhere to land, and a move outlines the slots it would land on. A line
-/// marks the time [now] holds in its day's column, and the grid opens
-/// scrolled to the hour before it when it shows that day, at 08:00
-/// otherwise. An item reaching past the hours shows the part inside them,
-/// with an arrow where it is cut, and takes no move or resize: its form
-/// changes it. An item wholly outside them, or on no shown day, has no
-/// block, and the corner over the gutter counts it. Empty body cells take
-/// a create gesture, reported through [onCreate]: a tap picks one hour
-/// from its slot, or up to the end of the hours; a drag picks the
-/// rectangle of slots it covers, at once for a mouse or a stylus and after
-/// a press and hold on touch, so a touch drag without one scrolls the
-/// grid.
+/// Items keep every board gesture: a long press moves, the top band drags the
+/// start time, the bottom band the end time, and, on more than one day, the
+/// right band the day count. A move dropped onto another item's time lands at
+/// the nearest free time that shows, on that day or the day before or after it,
+/// and goes back where there is none; a resize dragged onto one stops at its
+/// edge. While a drag runs, a label over the grid names the day and times a
+/// release would give, or that a move has nowhere to land, and a move outlines
+/// the slots it would land on. A line over the blocks marks the time [now]
+/// holds in its day's column, and the grid opens scrolled to the hour before it
+/// when it shows that day, at 08:00 otherwise, with that hour's label whole
+/// below the top edge. Each whole hour, and the start and the end of the hours,
+/// has a label centred on its line in the hour gutter, in the format [settings]
+/// choose, which a room above the first slot and below the last, or the gutter
+/// beside a row counting items outside the hours, keeps whole. An
+/// item reaching past the hours shows the part inside them, with an arrow where
+/// it is cut, and takes no move or resize: its form changes it. An item wholly
+/// outside them has no block. While some are before the hours, a yellow row
+/// frozen against the first slot, in place of the room above it, says "+N
+/// more" in the column of each day with N of them, and while some are after
+/// them, a row frozen against the last slot does; the hour gutter runs on
+/// beside both. An item on no shown day has no block either,
+/// and a pill in the day header's corner counts it. Empty body
+/// cells take a create gesture, reported through [onCreate]: a tap picks one
+/// hour from its slot, or up to the end of the hours; a drag picks the
+/// rectangle of slots it covers, at once for a mouse or a stylus and after a
+/// press and hold on touch, so a touch drag without one scrolls the grid.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than the least sizes [settings] choose; past those, it scrolls.
@@ -413,12 +546,19 @@ class TimedGrid extends StatefulWidget {
     required this.onSelectDay,
     required this.onOpenItem,
     required this.onCreate,
+    this.showsDayHeader = true,
   }) : assert(dayCount >= 1);
 
   final CalendarModel model;
 
-  /// The weekdays and the hours the grid shows and the least size of its
-  /// cells. At least one day of the range must fall on a shown weekday.
+  /// Whether row 0 is a frozen header naming each column's day, whose
+  /// corner over the gutter holds the pill counting the items on no shown
+  /// day. Fixed for the grid's life.
+  final bool showsDayHeader;
+
+  /// The weekdays and the hours the grid shows, the format of its hour
+  /// labels and the least size of its cells. At least one day of the range
+  /// must fall on a shown weekday.
   final CalendarSettings settings;
 
   /// The first day of the range the grid shows.
@@ -470,6 +610,10 @@ typedef _NowMark = ({int column, int minute});
 
 class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final BoardController<String, ShownItem> _board;
+
+  /// The rows counting the items outside the hours that the grid lays out
+  /// above and below its slots.
+  _Notices _notices = (above: false, below: false);
 
   /// Where the widget's days and minutes sit on the board.
   late GridTracks _tracks = _tracksOf(widget);
@@ -536,14 +680,41 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late double _slotHeight = widget.settings.minSlotHeight;
   late int _columnCount = _tracks.columnCount;
   late DayHours _rowHours = _tracks.hours;
+  double _rowRoom = _initialLabelRoom;
+  late _Notices _rowNotices = _notices;
+  late HourLabelFormat _rowFormat = widget.settings.hourLabelFormat;
+
+  /// The room above the first slot and below the last: half an hour label
+  /// and the gap beside it, so the labels centred on the first and the
+  /// last line show whole. Each build sets it from the labels' height.
+  double _labelRoom = _initialLabelRoom;
+
+  /// [_labelRoom] before the first build measures the labels, which the
+  /// rows [initState] makes are laid out with.
+  static const double _initialLabelRoom = 8.0;
 
   /// The size the board was last laid out at; null before the first
   /// layout.
   Size? _size;
 
-  /// How many of the shown items have no block: on a day with no column,
-  /// or wholly outside the hours. The corner cell listens to it.
-  final ValueNotifier<int> _hiddenCount = ValueNotifier<int>(0);
+  /// The shown items with no block, as the last [_sync] counted them. The
+  /// pill counting those on no shown day and the cells of the rows
+  /// counting those outside the hours listen to it, as the cell builder
+  /// runs only when the board rebuilds a cell.
+  late final ValueNotifier<_Hidden> _hiddenCount = ValueNotifier<_Hidden>(
+    _Hidden.none(_tracks),
+  );
+
+  /// The hour labels the foreground paints, laid out for the style and
+  /// text scale the last build found.
+  final _HourLabels _hourLabels = _HourLabels();
+
+  /// The hour labels' own style, over the inherited text style.
+  static const TextStyle _hourLabelStyle = TextStyle(
+    fontSize: 11.0,
+    height: 1.0,
+    color: HarborColors.textSecondary,
+  );
 
   final GlobalKey _boardKey = GlobalKey();
 
@@ -611,10 +782,19 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     widget.now.addListener(_handleNow);
     _sync();
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _board.jumpToCell(
-          _tracks.rowOf(_openingMinuteOf(_tracks, widget.now.value)),
-          1,
+      if (!mounted) {
+        return;
+      }
+      _board.jumpToCell(
+        _tracks.rowOf(_openingMinuteOf(_tracks, widget.now.value)),
+        1,
+      );
+      // The jump put the opening line on the top edge; the label centred
+      // on it needs the room above it that the first line has.
+      final vertical = _findViewport()?.verticalPosition;
+      if (vertical != null) {
+        vertical.jumpTo(
+          math.max(vertical.minScrollExtent, vertical.pixels - _labelRoom),
         );
       }
     });
@@ -639,6 +819,11 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       (tracks.columnCount > 1) == (_tracks.columnCount > 1),
       "A TimedGrid keeps one day column or more than one; give a grid that "
       "changes between them its own key.",
+    );
+    assert(
+      widget.showsDayHeader == oldWidget.showsDayHeader,
+      "A TimedGrid keeps its day header or its lack of one; give a grid "
+      "that changes it its own key.",
     );
     _tracks = tracks;
     if (tracksChanged || nowChanged) {
@@ -673,6 +858,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       dayCount: widget.dayCount,
       weekdays: widget.settings.weekdays,
       hours: widget.settings.hours,
+      // The day header, then the room above the first slot or the row
+      // counting the items before the hours.
+      firstSlotRow: (widget.showsDayHeader ? 1 : 0) + 1,
     );
     assert(
       tracks.columnCount > 0,
@@ -700,22 +888,71 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     widget.model.removeListener(_handleModel);
     _header.dispose();
     _hiddenCount.dispose();
+    _hourLabels.dispose();
     // The board has unmounted by now, so nothing still listens to the
     // controller.
     _board.dispose();
     super.dispose();
   }
 
-  /// Row 0 is the frozen day header; rows 1 onward are the slots of the
-  /// hours, [_slotHeight] each.
+  /// The slots of the hours, [_slotHeight] each, under the frozen day
+  /// header where the grid shows one. Above the slots a row of
+  /// [_labelRoom], or the frozen row counting the items before the hours
+  /// where [_notices] has one, and below them a row of [_labelRoom] or the
+  /// frozen row counting those after.
   BoardAxisConfig _rowsConfig() {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
-        _headerHeight,
+        if (widget.showsDayHeader) _headerHeight,
+        _edgeAbove,
         ...List<double>.filled(_tracks.rowCount, _slotHeight),
+        _edgeBelow,
       ]),
-      frozenStart: 1,
+      frozenStart: (widget.showsDayHeader ? 1 : 0) + (_notices.above ? 1 : 0),
+      frozenEnd: _notices.below ? 1 : 0,
     );
+  }
+
+  /// The height of the row above the slots.
+  double get _edgeAbove {
+    return _notices.above ? _noticeHeight : _labelRoom;
+  }
+
+  /// The height of the row below the slots.
+  double get _edgeBelow {
+    return _notices.below ? _noticeHeight : _labelRoom;
+  }
+
+  /// Gives the board the rows [_rowsConfig] makes, and notes what they
+  /// were made for.
+  void _replaceRows() {
+    _rowHours = _tracks.hours;
+    _rowRoom = _labelRoom;
+    _rowNotices = _notices;
+    _rowFormat = widget.settings.hourLabelFormat;
+    _board.rows = _rowsConfig();
+  }
+
+  /// The day header's height, or 0 where the grid shows none.
+  double get _headerExtent {
+    return widget.showsDayHeader ? _headerHeight : 0.0;
+  }
+
+  /// The height of the frozen rows above the slots.
+  double get _leadingExtent {
+    return _headerExtent + (_notices.above ? _noticeHeight : 0.0);
+  }
+
+  /// The row counting the items before the hours, or null where [_notices]
+  /// has none.
+  int? get _rowAbove {
+    return _notices.above ? _tracks.firstSlotRow - 1 : null;
+  }
+
+  /// The row counting the items after the hours, or null where [_notices]
+  /// has none.
+  int? get _rowBelow {
+    return _notices.below ? _tracks.lastSlotRow + 1 : null;
   }
 
   /// Column 0 is the frozen hour gutter; columns 1 onward are the days
@@ -742,8 +979,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// the build that places items on them.
   ///
   /// An axis is replaced only when its extent or its tracks change. The
-  /// rows are replaced for new hours even at the same count, which also
-  /// rebuilds the gutter's labels: the board builds them as cells.
+  /// rows are replaced for new hours even at the same count, for new
+  /// [_notices], and for a new [_labelRoom] or hour format, which also
+  /// rebuilds the gutter cells and so what they tell a screen reader.
   void _fitAxes(Size size) {
     _size = size;
     final settings = widget.settings;
@@ -753,17 +991,23 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     );
     final slotHeight = math.max(
       settings.minSlotHeight,
-      _share(size.height - _headerHeight, _tracks.rowCount),
+      _share(
+        size.height - _headerExtent - _edgeAbove - _edgeBelow,
+        _tracks.rowCount,
+      ),
     );
     if (dayWidth != _dayWidth || _tracks.columnCount != _columnCount) {
       _dayWidth = dayWidth;
       _columnCount = _tracks.columnCount;
       _board.columns = _columnsConfig();
     }
-    if (slotHeight != _slotHeight || _tracks.hours != _rowHours) {
+    if (slotHeight != _slotHeight ||
+        _tracks.hours != _rowHours ||
+        _labelRoom != _rowRoom ||
+        _notices != _rowNotices ||
+        settings.hourLabelFormat != _rowFormat) {
       _slotHeight = slotHeight;
-      _rowHours = _tracks.hours;
-      _board.rows = _rowsConfig();
+      _replaceRows();
     }
   }
 
@@ -784,39 +1028,45 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return dateOfDayNumber(_tracks.lastDay);
   }
 
-  /// Whether the model shows exactly this grid's days, every one of them
-  /// read. False for a sync that runs between the model taking new days
-  /// and this grid getting them.
+  /// Whether the model's shown range holds every one of this grid's days,
+  /// all of them read. The range may be wider than the grid, as a range
+  /// holding the grid's whole week is. False for a sync that runs between
+  /// the model taking a range without this grid's days and this grid
+  /// getting new ones.
   bool get _daysReady {
     return widget.model.status == CalendarLoadStatus.ready &&
-        widget.model.isShown(widget.firstDay, _lastDay);
+        widget.model.isWithinShown(widget.firstDay, _lastDay);
   }
 
   /// Sets the board's items to the days' shown items when the days are
-  /// ready, and to none otherwise, and counts the shown items with no
-  /// block. A sync animates only when [animate] holds, its days are ready
-  /// and the last sync found its own days ready; any other runs
-  /// under [BoardAnimationStyle.disabled], and so does every sync until a
-  /// frame callback restores [timedGridAnimationStyle]. New days reach
-  /// this grid only after the model has notified that it shows them, and
-  /// the sync that notification runs finds the old days not ready, so the
-  /// first sync of new days does not animate.
+  /// ready, and to none otherwise, counts the shown items with no block,
+  /// and lays out the rows counting those outside the hours, before the
+  /// items, so they fit the lattice they land on. A sync animates
+  /// only when [animate] holds, its days are ready, the last sync found its
+  /// own days ready and the rows stay as they were; any other runs under
+  /// [BoardAnimationStyle.disabled], and so does every sync until a frame
+  /// callback restores [timedGridAnimationStyle]. New days reach this grid
+  /// through [didUpdateWidget], whose sync does not animate, and a sync
+  /// that finds them not read yet leaves [_syncedReady] false, so the sync
+  /// the read's completion runs does not animate either.
   void _sync({bool animate = true}) {
     final ready = _daysReady;
+    final shown = ready
+        ? widget.model.itemsBetween(widget.firstDay, _lastDay)
+        : const <ShownItem>[];
+    final hidden = _hiddenOf(shown);
+    final relaid = _layOutNotices((
+      above: hidden.rowAbove,
+      below: hidden.rowBelow,
+    ));
     final placements = <BoardPlacement<ShownItem>>[];
-    var hidden = 0;
-    if (ready) {
-      final shown = widget.model.itemsBetween(widget.firstDay, _lastDay);
-      for (final entry in shown) {
-        final span = gridSpanOf(entry.item.shape, _tracks);
-        if (span == null) {
-          hidden++;
-        } else {
-          placements.add(BoardPlacement<ShownItem>(entry, span));
-        }
+    for (final entry in shown) {
+      final span = gridSpanOf(entry.item.shape, _tracks);
+      if (span != null) {
+        placements.add(BoardPlacement<ShownItem>(entry, span));
       }
     }
-    final animated = animate && ready && _syncedReady;
+    final animated = animate && ready && _syncedReady && !relaid;
     if (!animated) {
       _board.animationStyle = BoardAnimationStyle.disabled;
     }
@@ -826,6 +1076,52 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     }
     _syncedReady = ready;
     _hiddenCount.value = hidden;
+  }
+
+  /// The items of [shown] that [_tracks] has no block for, counted.
+  _Hidden _hiddenOf(List<ShownItem> shown) {
+    final above = List<int>.filled(_tracks.columnCount, 0);
+    final below = List<int>.filled(_tracks.columnCount, 0);
+    var offDays = 0;
+    for (final entry in shown) {
+      final shape = entry.item.shape;
+      if (gridSpanOf(shape, _tracks) != null) {
+        continue;
+      }
+      final first = _tracks.firstColumnFrom(shape.firstDay);
+      final last = _tracks.lastColumnUpTo(shape.firstDay + shape.dayCount - 1);
+      if (last < first) {
+        offDays++;
+        continue;
+      }
+      // On a shown day, so wholly outside the hours, on each of its days
+      // alike: an item's minutes are the same on each, as itemsConflict
+      // reads them.
+      final counts = shape.start < _tracks.hours.start ? above : below;
+      for (var column = first; column <= last; column++) {
+        counts[column - 1]++;
+      }
+    }
+    return _Hidden(_tracks, above, below, offDays);
+  }
+
+  /// Lays out the rows [notices] asks for, above and below the slots, in
+  /// place of the ones the grid has, and returns whether they differ. Each
+  /// takes the place of the room on its side, so no slot changes row, and
+  /// the axes are fitted again at the last size, or replaced before the
+  /// first layout.
+  bool _layOutNotices(_Notices notices) {
+    if (notices == _notices) {
+      return false;
+    }
+    _notices = notices;
+    final size = _size;
+    if (size != null) {
+      _fitAxes(size);
+    } else {
+      _replaceRows();
+    }
+    return true;
   }
 
   /// Puts [timedGridAnimationStyle] back in a frame callback scheduled
@@ -868,7 +1164,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   bool _canDropAt(String id, BoardSpan span) {
-    if (span.rowStart < 1 || span.colStart < 1) {
+    if (span.rowStart < _tracks.firstSlotRow ||
+        span.rowStart + span.rowSpan > _tracks.lastSlotRow + 1 ||
+        span.colStart < 1) {
       return false;
     }
     final from = _board.spanOf(id);
@@ -1070,7 +1368,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     Offset local,
   ) {
     final cell = viewport.cellAt(local);
-    if (cell == null || cell.row < 1 || cell.col < 1) {
+    if (cell == null ||
+        cell.row < _tracks.firstSlotRow ||
+        cell.row > _tracks.lastSlotRow ||
+        cell.col < 1) {
       return null;
     }
     return cell;
@@ -1187,9 +1488,12 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     BuildContext context,
     BoardCellView<String, ShownItem> cell,
   ) {
-    if (cell.row == 0) {
+    if (widget.showsDayHeader && cell.row == 0) {
       if (cell.col == 0) {
-        return _HiddenCountCell(count: _hiddenCount);
+        return ColoredBox(
+          color: HarborColors.surface,
+          child: Center(child: _HiddenCount(count: _hiddenCount)),
+        );
       }
       return _DayHeaderCell(
         header: _header,
@@ -1197,32 +1501,46 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         onSelectDay: _selectDay,
       );
     }
+    final above = cell.row == _rowAbove;
+    if (above || cell.row == _rowBelow) {
+      // The gutter runs on beside the rows, with no label.
+      if (cell.col == 0) {
+        return const ColoredBox(color: HarborColors.surface);
+      }
+      return _NoticeCell(
+        hidden: _hiddenCount,
+        column: cell.col,
+        above: above,
+        format: widget.settings.hourLabelFormat,
+      );
+    }
     if (cell.col == 0) {
       // Every gutter row is opaque so nothing scrolled beneath the band
-      // shows through; the label sits on the hour line.
-      final minute = _tracks.minuteAt(cell.row);
-      final onHour = minute % 60 == 0 && cell.row > 1;
-      return ColoredBox(
-        color: HarborColors.surface,
-        child: onHour
-            ? Align(
-                alignment: Alignment.topRight,
-                child: Transform.translate(
-                  offset: const Offset(-6.0, -7.0),
-                  child: Text(
-                    clockLabel(minute),
-                    style: const TextStyle(
-                      fontSize: 11.0,
-                      color: HarborColors.textSecondary,
-                    ),
-                  ),
-                ),
-              )
-            : null,
-      );
+      // shows through. The foreground paints the hour labels over it; a
+      // row whose top or bottom line is labelled names it to a screen
+      // reader.
+      const gutter = ColoredBox(color: HarborColors.surface);
+      final label = _gutterLabelOf(cell.row);
+      if (label == null) {
+        return gutter;
+      }
+      return Semantics(container: true, label: label, child: gutter);
     }
     // Body cells build nothing: the background painter draws the grid.
     return null;
+  }
+
+  /// What a screen reader hears for the gutter cell of [row]: the labels
+  /// the foreground paints on its top and bottom lines, or null where it
+  /// paints none.
+  String? _gutterLabelOf(int row) {
+    final format = widget.settings.hourLabelFormat;
+    final labels = <String>[
+      if (_GridForegroundPainter.labelsRow(_tracks, row))
+        hourLabel(_tracks.minuteAt(row), format),
+      if (row == _tracks.lastSlotRow) hourLabel(_tracks.hours.end, format),
+    ];
+    return labels.isEmpty ? null : labels.join(", ");
   }
 
   Widget _buildItem(
@@ -1234,6 +1552,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return _Block(
       key: blockKey(entry.id),
       entry: entry,
+      detailed: _tracks.columnCount == 1,
       showsSummary: view.span.rowSpan >= 3,
       cutAtStart: entry.item.startMinute < hours.start,
       cutAtEnd: entry.item.endMinute > hours.end,
@@ -1250,6 +1569,18 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     final model = widget.model;
     final range = _range;
     final drag = _drag;
+    var labelStyle = DefaultTextStyle.of(context).style.merge(_hourLabelStyle);
+    if (MediaQuery.boldTextOf(context)) {
+      labelStyle = labelStyle.merge(
+        const TextStyle(fontWeight: FontWeight.bold),
+      );
+    }
+    _hourLabels.update(
+      labelStyle,
+      MediaQuery.textScalerOf(context),
+      widget.settings.hourLabelFormat,
+    );
+    _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
     final landingText = _landingText();
     final board = Listener(
       onPointerDown: _handlePointerDown,
@@ -1268,7 +1599,14 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
             landing: drag != null && drag.kind == BoardDragKind.move
                 ? drag.target
                 : null,
+          ),
+          foreground: _GridForegroundPainter(
+            tracks: _tracks,
+            labels: _hourLabels,
+            labelsVersion: _hourLabels.version,
             now: _nowMark,
+            reachAbove: _notices.above ? _noticeHeight : 0.0,
+            reachBelow: _notices.below ? _noticeHeight : 0.0,
           ),
           drag: _dragConfig,
           // The grid scrolls on its own, not with the screen's primary
@@ -1285,7 +1623,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
             Positioned.fill(child: board),
             if (landingText != null)
               Positioned(
-                top: _headerHeight + 8.0,
+                top: _leadingExtent + 8.0,
                 left: _gutterWidth + 8.0,
                 right: 8.0,
                 child: _LandingLabel(text: landingText),
@@ -1414,12 +1752,22 @@ class _DayHeaderCell extends StatelessWidget {
                       color: HarborColors.textSecondary,
                     ),
                   ),
-                  Text(
-                    "${day.day}",
-                    style: TextStyle(
-                      fontSize: 14.0,
-                      fontWeight: FontWeight.w700,
-                      color: isToday ? HarborColors.primary : HarborColors.text,
+                  Container(
+                    width: 30.0,
+                    height: 20.0,
+                    alignment: Alignment.center,
+                    foregroundDecoration: isToday
+                        ? harborTodayRing(10.0)
+                        : null,
+                    child: Text(
+                      "${day.day}",
+                      style: TextStyle(
+                        fontSize: 14.0,
+                        fontWeight: FontWeight.w700,
+                        color: isToday
+                            ? HarborColors.primary
+                            : HarborColors.text,
+                      ),
                     ),
                   ),
                 ],
@@ -1432,13 +1780,20 @@ class _DayHeaderCell extends StatelessWidget {
   }
 }
 
-/// One item on the grid: its type's tint with a 4 px edge, its title, its
-/// first summary when [showsSummary], and an arrow at each end the grid's
-/// hours cut. Dimmed with a progress indicator while [ShownItem.pending].
+/// One item on the grid: its type's tint with a 4 px edge, its text, and
+/// an arrow at each end the grid's hours cut. Dimmed with a progress
+/// indicator while [ShownItem.pending].
+///
+/// A [detailed] block, which a grid of one day column shows, has its title
+/// and its times on its first line, the times wrapping under a title too
+/// long for both, and a line for each of its type's summaries under them;
+/// it shows the lines that fit whole below the first. Any other block
+/// shows its title, and its first summary when [showsSummary].
 class _Block extends StatelessWidget {
   const _Block({
     super.key,
     required this.entry,
+    required this.detailed,
     required this.showsSummary,
     required this.cutAtStart,
     required this.cutAtEnd,
@@ -1447,9 +1802,12 @@ class _Block extends StatelessWidget {
 
   final ShownItem entry;
 
-  /// Whether the block's span covers enough rows for a second line. Read
-  /// from the span rather than measured, so a block laid out at a new
-  /// extent on each animation frame does not rebuild for it.
+  final bool detailed;
+
+  /// Whether the block's span covers enough rows for a second line, on a
+  /// block that is not [detailed]. Read from the span rather than
+  /// measured, so a block laid out at a new extent on each animation frame
+  /// does not rebuild for it.
   final bool showsSummary;
 
   /// Whether the item starts before the grid's hours, which an arrow at
@@ -1463,59 +1821,21 @@ class _Block extends StatelessWidget {
   /// Null while the item is pending, so a tap opens nothing.
   final VoidCallback? onOpen;
 
+  static const TextStyle _detailStyle = TextStyle(
+    fontSize: 12.0,
+    color: HarborColors.textSecondary,
+  );
+
   @override
   Widget build(BuildContext context) {
     final item = entry.item;
     final style = harborTypeStyleOf(item.type);
-    final schema = schemaOf(item.type);
-    String? summary;
-    if (showsSummary && schema.summaryKeys.isNotEmpty) {
-      final key = schema.summaryKeys.first;
-      summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
-    }
     Widget content = DecoratedBox(
       decoration: BoxDecoration(
         color: style.tint,
         border: Border(left: BorderSide(color: style.edge, width: 4.0)),
       ),
-      // Laid out at its natural height and clipped to the block, so a
-      // block shorter than its text does not overflow.
-      child: ClipRect(
-        child: OverflowBox(
-          alignment: Alignment.topLeft,
-          minHeight: 0.0,
-          maxHeight: double.infinity,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(4.0, 2.0, 4.0, 2.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11.0,
-                    fontWeight: FontWeight.w600,
-                    color: HarborColors.text,
-                  ),
-                ),
-                if (summary != null)
-                  Text(
-                    summary,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 10.0,
-                      color: HarborColors.textSecondary,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
+      child: detailed ? _buildLines(item) : _buildCompact(item),
     );
     if (cutAtStart || cutAtEnd) {
       content = Stack(
@@ -1566,52 +1886,306 @@ class _Block extends StatelessWidget {
       child: GestureDetector(onTap: onOpen, child: content),
     );
   }
+
+  /// The title and, when [showsSummary], the first summary, laid out at
+  /// their natural height and clipped to the block, so a block shorter
+  /// than its text does not overflow.
+  Widget _buildCompact(CalendarItem item) {
+    final schema = schemaOf(item.type);
+    String? summary;
+    if (showsSummary && schema.summaryKeys.isNotEmpty) {
+      final key = schema.summaryKeys.first;
+      summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
+    }
+    return ClipRect(
+      child: OverflowBox(
+        alignment: Alignment.topLeft,
+        minHeight: 0.0,
+        maxHeight: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4.0, 2.0, 4.0, 2.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11.0,
+                  fontWeight: FontWeight.w600,
+                  color: HarborColors.text,
+                ),
+              ),
+              if (summary != null)
+                Text(
+                  summary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10.0,
+                    color: HarborColors.textSecondary,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The title and the times, then each summary the item has, one per
+  /// line, as [_BlockLinesDelegate] paints them.
+  Widget _buildLines(CalendarItem item) {
+    final schema = schemaOf(item.type);
+    final summaries = <String>[];
+    for (final key in schema.summaryKeys) {
+      final summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
+      if (summary != null) {
+        summaries.add(summary);
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6.0, 3.0, 6.0, 3.0),
+      child: Flow(
+        delegate: const _BlockLinesDelegate(),
+        children: <Widget>[
+          Wrap(
+            spacing: 8.0,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              Text(
+                item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13.0,
+                  fontWeight: FontWeight.w600,
+                  color: HarborColors.text,
+                ),
+              ),
+              Text(
+                "${clockLabel(item.startMinute)}-${clockLabel(item.endMinute)}",
+                maxLines: 1,
+                style: _detailStyle,
+              ),
+            ],
+          ),
+          for (final summary in summaries)
+            Text(
+              summary,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _detailStyle,
+            ),
+        ],
+      ),
+    );
+  }
 }
 
-/// The corner over the gutter: blank, or a count of the shown items the
-/// grid has no block for, whose tooltip says why.
-class _HiddenCountCell extends StatelessWidget {
-  const _HiddenCountCell({required this.count});
+/// Lays a detailed block's lines out down its width, each at its natural
+/// height, and paints the first line, clipped to the block when it is
+/// taller, and each line after it while the lines down to its bottom fit,
+/// so no line shows cut in half. The lines are laid out with the block,
+/// so a block resized on each animation frame keeps the lines that fit
+/// without a rebuild.
+class _BlockLinesDelegate extends FlowDelegate {
+  const _BlockLinesDelegate();
 
-  final ValueListenable<int> count;
+  @override
+  BoxConstraints getConstraintsForChild(int i, BoxConstraints constraints) {
+    return BoxConstraints(maxWidth: constraints.maxWidth);
+  }
+
+  @override
+  void paintChildren(FlowPaintingContext context) {
+    var top = 0.0;
+    for (var i = 0; i < context.childCount; i++) {
+      final height = context.getChildSize(i)!.height;
+      if (i > 0 && top + height > context.size.height) {
+        return;
+      }
+      context.paintChild(
+        i,
+        transform: Matrix4.translationValues(0.0, top, 0.0),
+      );
+      top += height;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BlockLinesDelegate oldDelegate) {
+    return false;
+  }
+}
+
+/// Nothing, or a pill counting the shown items on no day the grid has a
+/// column for, whose tooltip says why.
+class _HiddenCount extends StatelessWidget {
+  const _HiddenCount({required this.count});
+
+  final ValueListenable<_Hidden> count;
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<int>(
+    return ValueListenableBuilder<_Hidden>(
       valueListenable: count,
-      builder: (context, value, child) {
-        return ColoredBox(
-          color: HarborColors.surface,
-          child: value == 0
-              ? null
-              : Center(
-                  child: Tooltip(
-                    message: hiddenItemsLabel(value),
-                    child: DecoratedBox(
-                      key: hiddenCountKey,
-                      decoration: BoxDecoration(
-                        color: HarborColors.primaryTint,
-                        borderRadius: BorderRadius.circular(10.0),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6.0,
-                          vertical: 2.0,
-                        ),
-                        child: Text(
-                          "+$value",
-                          style: const TextStyle(
-                            fontSize: 11.0,
-                            fontWeight: FontWeight.w600,
-                            color: HarborColors.primary,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+      builder: (context, hidden, child) {
+        final value = hidden.offDays;
+        if (value == 0) {
+          return const SizedBox.shrink();
+        }
+        return Tooltip(
+          message: hiddenItemsLabel(value),
+          child: DecoratedBox(
+            key: hiddenCountKey,
+            decoration: BoxDecoration(
+              color: HarborColors.primaryTint,
+              borderRadius: BorderRadius.circular(10.0),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6.0,
+                vertical: 2.0,
+              ),
+              child: Text(
+                "+$value",
+                style: const TextStyle(
+                  fontSize: 11.0,
+                  fontWeight: FontWeight.w600,
+                  color: HarborColors.primary,
                 ),
+              ),
+            ),
+          ),
         );
       },
+    );
+  }
+}
+
+/// A day column's cell in a row counting the shown items with no block:
+/// those before the hours in the row above the slots, or those after them
+/// in the row below when [above] is false. A soft yellow, with a rule on
+/// the side facing the slots and one between days, and while the day has
+/// some, an arrow pointing their way and "+N more", or "+N" in a column too
+/// narrow for that.
+class _NoticeCell extends StatelessWidget {
+  const _NoticeCell({
+    required this.hidden,
+    required this.column,
+    required this.above,
+    required this.format,
+  });
+
+  final ValueListenable<_Hidden> hidden;
+
+  /// The board column of the cell, which [GridTracks.dateAt] reads.
+  final int column;
+
+  final bool above;
+
+  /// The format the cell names the hours in to a screen reader.
+  final HourLabelFormat format;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<_Hidden>(
+      valueListenable: hidden,
+      builder: (context, value, child) {
+        // New tracks reach the counts in the sync that places items on
+        // them, so the cell of a column they no longer have rebuilds once
+        // before the board's next layout drops it.
+        final tracks = value.tracks;
+        if (column > tracks.columnCount) {
+          return const SizedBox.shrink();
+        }
+        final day = tracks.dateAt(column);
+        final count = (above ? value.above : value.below)[column - 1];
+        const edge = BorderSide(color: HarborColors.noticeEdge);
+        final cell = DecoratedBox(
+          key: above ? hiddenAboveKey(day) : hiddenBelowKey(day),
+          decoration: BoxDecoration(
+            color: HarborColors.notice,
+            border: Border(
+              left: column > 1 ? edge : BorderSide.none,
+              top: above ? BorderSide.none : edge,
+              bottom: above ? edge : BorderSide.none,
+            ),
+          ),
+          child: count == 0 ? const SizedBox.expand() : _buildMore(count),
+        );
+        if (count == 0) {
+          return cell;
+        }
+        final hours = tracks.hours;
+        return Semantics(
+          container: true,
+          label: hiddenRowLabel(
+            day,
+            count,
+            above ? hours.start : hours.end,
+            above: above,
+            format: format,
+          ),
+          excludeSemantics: true,
+          child: cell,
+        );
+      },
+    );
+  }
+
+  static const TextStyle _moreStyle = TextStyle(
+    fontSize: 12.0,
+    fontWeight: FontWeight.w600,
+    color: HarborColors.onNotice,
+  );
+
+  static const double _arrowSize = 16.0;
+  static const double _arrowGap = 2.0;
+
+  /// The arrow and "+N more", or "+N" in a cell too narrow for "+N more"
+  /// at its own size, scaled down in one too narrow for that.
+  Widget _buildMore(int count) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6.0),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final more = "+$count more";
+          final painter = TextPainter(
+            text: TextSpan(
+              text: more,
+              style: DefaultTextStyle.of(context).style.merge(_moreStyle),
+            ),
+            textDirection: Directionality.of(context),
+            textScaler: MediaQuery.textScalerOf(context),
+            maxLines: 1,
+          )..layout();
+          final fits =
+              _arrowSize + _arrowGap + painter.width <= constraints.maxWidth;
+          painter.dispose();
+          return Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(
+                    above ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    size: _arrowSize,
+                    color: HarborColors.onNotice,
+                  ),
+                  const SizedBox(width: _arrowGap),
+                  Text(fits ? more : "+$count", maxLines: 1, style: _moreStyle),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -1692,13 +2266,13 @@ class _LoadOverlay extends StatelessWidget {
   }
 }
 
-/// The grid behind the cells, drawn for the visible body tracks alone:
-/// the body, the weekend and today's columns; the create range being
-/// dragged and the slots a move would land on, each filled like today's
-/// column and edged in the primary colour so it shows over that column
-/// too; a line at the top of each slot row and at the left of each day
-/// column; and, over those, the line marking the current time. Every
-/// paint it draws with is built once.
+/// The grid behind the cells, drawn for the visible body tracks alone: the
+/// body, and across the slots the weekend and today's columns; the create range
+/// being dragged and the slots a move would land on, each filled like today's
+/// column and edged in the primary colour so it shows over that column too; and
+/// a line at the top of each slot row, under the last one and at the left of
+/// each day column, across the slots. The room above and below the slots shows
+/// the body alone. Every paint it draws with is built once.
 class _TimedGridPainter extends BoardBackgroundPainter {
   const _TimedGridPainter({
     required this.tracks,
@@ -1706,7 +2280,6 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     required this.rangeAnchor,
     required this.rangeFocus,
     required this.landing,
-    required this.now,
   });
 
   static final Paint _surfacePaint = Paint()..color = HarborColors.surface;
@@ -1720,10 +2293,6 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     ..color = HarborColors.primary
     ..style = PaintingStyle.stroke
     ..strokeWidth = 2.0;
-  static final Paint _nowPaint = Paint()
-    ..color = HarborColors.error
-    ..strokeWidth = 2.0;
-
   final GridTracks tracks;
   final DateTime today;
   final ({int row, int col})? rangeAnchor;
@@ -1731,9 +2300,6 @@ class _TimedGridPainter extends BoardBackgroundPainter {
 
   /// The span a move would land on, or null.
   final BoardSpan? landing;
-
-  /// Where the line marking the current time sits, or null.
-  final _NowMark? now;
 
   @override
   void paint(Canvas canvas, BoardGeometryView geometry) {
@@ -1745,11 +2311,17 @@ class _TimedGridPainter extends BoardBackgroundPainter {
       return;
     }
     final region = geometry.scrolledRegion;
-    final first = geometry.visibleCellRect(firstRow, firstCol);
-    final last = geometry.visibleCellRect(lastRow, lastCol);
     canvas.save();
     canvas.clipRect(region);
     canvas.drawRect(region, _surfacePaint);
+    final slotFirst = math.max(firstRow, tracks.firstSlotRow);
+    final slotLast = math.min(lastRow, tracks.lastSlotRow);
+    if (slotFirst > slotLast) {
+      canvas.restore();
+      return;
+    }
+    final first = geometry.visibleCellRect(slotFirst, firstCol);
+    final last = geometry.visibleCellRect(slotLast, lastCol);
     final todayColumn = tracks.columnOf(dayNumber(today));
     for (var col = firstCol; col <= lastCol; col++) {
       final Paint fill;
@@ -1760,7 +2332,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
       } else {
         continue;
       }
-      final rect = geometry.visibleCellRect(firstRow, col);
+      final rect = geometry.visibleCellRect(slotFirst, col);
       canvas.drawRect(
         Rect.fromLTRB(rect.left, first.top, rect.right, last.bottom),
         fill,
@@ -1789,17 +2361,15 @@ class _TimedGridPainter extends BoardBackgroundPainter {
         right: landing.colStart + landing.colSpan - 1,
       );
     }
-    for (var row = firstRow; row <= lastRow; row++) {
+    // The top line of each slot that shows, and the bottom line of the
+    // last slot where the room below it shows.
+    for (var row = slotFirst; row <= math.min(lastRow, slotLast + 1); row++) {
       final y = geometry.visibleCellRect(row, firstCol).top;
       canvas.drawLine(Offset(first.left, y), Offset(last.right, y), _linePaint);
     }
     for (var col = firstCol; col <= lastCol; col++) {
-      final x = geometry.visibleCellRect(firstRow, col).left;
+      final x = geometry.visibleCellRect(slotFirst, col).left;
       canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), _linePaint);
-    }
-    final now = this.now;
-    if (now != null) {
-      _paintNow(canvas, geometry, now);
     }
     canvas.restore();
   }
@@ -1828,19 +2398,164 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     canvas.drawRect(rect.deflate(1.0), _markEdgePaint);
   }
 
-  /// A line across [now]'s column at its minute, with a dot at its left
-  /// end, where that column and the row holding the minute show. The end
-  /// of the hours lies on the last row's bottom edge.
+  @override
+  bool shouldRepaint(covariant _TimedGridPainter old) {
+    return old.tracks != tracks ||
+        old.today != today ||
+        old.rangeAnchor != rangeAnchor ||
+        old.rangeFocus != rangeFocus ||
+        old.landing != landing;
+  }
+}
+
+/// What the grid paints over its cells and blocks: the hour labels in the
+/// gutter, and the line marking the current time.
+///
+/// A label names the start of the hours, each whole hour after it, and
+/// the end of the hours, centred on its line and right-aligned in the
+/// gutter. The grid's room above its first slot and below its last holds
+/// the halves of the first and the last label past those lines, or where
+/// a frozen row counting items outside the hours takes a room's place, the
+/// gutter beside that row, which [reachAbove] and [reachBelow] measure: a
+/// label shows whole there while its line shows, and sinks into the row's
+/// edge as its line scrolls beneath the row. The labels are clipped to the
+/// gutter below the day header, and a label taller than a slot still shows
+/// whole, because no gutter cell paints over the foreground. The line
+/// runs across [now]'s column at its minute, with a dot at its left end,
+/// where that column and the row holding the minute show; the end of the
+/// hours lies on the last row's bottom edge. It is clipped to the scrolled
+/// region, so the frozen header and gutter cover it as they cover the
+/// blocks.
+class _GridForegroundPainter extends BoardForegroundPainter {
+  const _GridForegroundPainter({
+    required this.tracks,
+    required this.labels,
+    required this.labelsVersion,
+    required this.now,
+    required this.reachAbove,
+    required this.reachBelow,
+  });
+
+  /// The space between a label and the gutter's right edge.
+  static const double _labelEnd = 6.0;
+
+  static final Paint _nowPaint = Paint()
+    ..color = HarborColors.error
+    ..strokeWidth = 2.0;
+
+  /// Whether a label names the top line of the slot [row]: the first slot,
+  /// and every slot starting a whole hour. False for a row that is no
+  /// slot.
+  static bool labelsRow(GridTracks tracks, int row) {
+    if (row < tracks.firstSlotRow || row > tracks.lastSlotRow) {
+      return false;
+    }
+    return row == tracks.firstSlotRow || tracks.minuteAt(row) % 60 == 0;
+  }
+
+  final GridTracks tracks;
+  final _HourLabels labels;
+
+  /// [_HourLabels.version] when this painter was made, so a new style or
+  /// text scale repaints.
+  final int labelsVersion;
+
+  /// Where the line marking the current time sits, or null.
+  final _NowMark? now;
+
+  /// How far above the scrolled region the labels may paint: the height
+  /// of the frozen row there, beside which the gutter is free, or 0.
+  final double reachAbove;
+
+  /// How far below the scrolled region the labels may paint, as
+  /// [reachAbove].
+  final double reachBelow;
+
+  @override
+  void paint(Canvas canvas, BoardGeometryView geometry) {
+    _paintLabels(canvas, geometry);
+    final now = this.now;
+    if (now != null) {
+      _paintNow(canvas, geometry, now);
+    }
+  }
+
+  void _paintLabels(Canvas canvas, BoardGeometryView geometry) {
+    final firstRow = math.max(geometry.firstVisibleRow, tracks.firstSlotRow);
+    final lastRow = math.min(geometry.lastVisibleRow, tracks.lastSlotRow);
+    if (firstRow > lastRow) {
+      return;
+    }
+    final region = geometry.scrolledRegion;
+    final first = geometry.visibleCellRect(firstRow, 0);
+    // Every slot has the first visible one's height, so a line past the
+    // visible slots sits a whole number of those from it.
+    final slot = first.height;
+    double lineOf(int row) {
+      return first.top + (row - firstRow) * slot;
+    }
+
+    final half = labels.height / 2;
+    // A label is clipped to the gutter of the scrolled region, and past
+    // its top edge by half a label less how far its line lies above that
+    // edge, up to [reachAbove], and past its bottom edge likewise. So it
+    // shows whole beside a frozen row while its line shows, and sinks into
+    // the row's edge as its line scrolls beneath the row.
+    void paintOn(int minute, double line) {
+      final above = (half - math.max(0.0, region.top - line)).clamp(
+        0.0,
+        reachAbove,
+      );
+      final below = (half - math.max(0.0, line - region.bottom)).clamp(
+        0.0,
+        reachBelow,
+      );
+      canvas.save();
+      canvas.clipRect(
+        Rect.fromLTRB(
+          first.left,
+          region.top - above,
+          first.right,
+          region.bottom + below,
+        ),
+      );
+      _paintLabel(canvas, minute, first.right, line - half);
+      canvas.restore();
+    }
+
+    // A line just past the visible slots still shows the half of its
+    // label on this side of it.
+    final reach = slot > 0.0 ? (half / slot).ceil() : 0;
+    final from = math.max(tracks.firstSlotRow, firstRow - reach);
+    final to = math.min(tracks.lastSlotRow, lastRow + reach);
+    for (var row = from; row <= to; row++) {
+      if (labelsRow(tracks, row)) {
+        paintOn(tracks.minuteAt(row), lineOf(row));
+      }
+    }
+    final end = lineOf(tracks.lastSlotRow + 1);
+    if (end - half < region.bottom && end + half > region.top) {
+      paintOn(tracks.hours.end, end);
+    }
+  }
+
+  /// Paints the label of [minute] with its top at [top] and its right
+  /// edge [_labelEnd] inside [right].
+  void _paintLabel(Canvas canvas, int minute, double right, double top) {
+    final label = labels.of(minute);
+    label.paint(canvas, Offset(right - _labelEnd - label.width, top));
+  }
+
   void _paintNow(Canvas canvas, BoardGeometryView geometry, _NowMark now) {
     final col = now.column;
     if (col < geometry.firstVisibleCol || col > geometry.lastVisibleCol) {
       return;
     }
     final intoHours = now.minute - tracks.hours.start;
-    var row = 1 + intoHours ~/ minutesPerSlot;
+    var row = tracks.firstSlotRow + intoHours ~/ minutesPerSlot;
     var fraction = (intoHours % minutesPerSlot) / minutesPerSlot;
-    if (row > tracks.rowCount) {
-      row = tracks.rowCount;
+    if (row > tracks.lastSlotRow) {
+      row = tracks.lastSlotRow;
       fraction = 1.0;
     }
     if (row < geometry.firstVisibleRow || row > geometry.lastVisibleRow) {
@@ -1848,17 +2563,77 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     }
     final rect = geometry.visibleCellRect(row, col);
     final y = rect.top + fraction * rect.height;
+    canvas.save();
+    canvas.clipRect(geometry.scrolledRegion);
     canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), _nowPaint);
     canvas.drawCircle(Offset(rect.left, y), 4.0, _nowPaint);
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant _TimedGridPainter old) {
+  bool shouldRepaint(covariant _GridForegroundPainter old) {
     return old.tracks != tracks ||
-        old.today != today ||
-        old.rangeAnchor != rangeAnchor ||
-        old.rangeFocus != rangeFocus ||
-        old.landing != landing ||
-        old.now != now;
+        old.now != now ||
+        !identical(old.labels, labels) ||
+        old.labelsVersion != labelsVersion ||
+        old.reachAbove != reachAbove ||
+        old.reachBelow != reachBelow;
+  }
+}
+
+/// The hour labels a [_GridForegroundPainter] paints, each laid out once
+/// for one style, text scale and [HourLabelFormat].
+class _HourLabels {
+  /// The space between a label's half and the end of the grid's room for
+  /// it.
+  static const double gap = 2.0;
+
+  TextStyle _style = const TextStyle();
+  TextScaler _scaler = TextScaler.noScaling;
+  HourLabelFormat _format = HourLabelFormat.twentyFourHour;
+  final Map<int, TextPainter> _labels = <int, TextPainter>{};
+
+  /// Moves on each time [update] drops the laid-out labels.
+  int version = 0;
+
+  /// Lays the labels out anew from here on when [style], [scaler] or
+  /// [format] differs from the last.
+  void update(TextStyle style, TextScaler scaler, HourLabelFormat format) {
+    if (style == _style && scaler == _scaler && format == _format) {
+      return;
+    }
+    _style = style;
+    _scaler = scaler;
+    _format = format;
+    _clear();
+    version++;
+  }
+
+  /// The label naming [minute], laid out.
+  TextPainter of(int minute) {
+    return _labels.putIfAbsent(minute, () {
+      return TextPainter(
+        text: TextSpan(text: hourLabel(minute, _format), style: _style),
+        textDirection: TextDirection.ltr,
+        textScaler: _scaler,
+        maxLines: 1,
+      )..layout();
+    });
+  }
+
+  /// The height every label lays out at.
+  double get height {
+    return of(0).height;
+  }
+
+  void dispose() {
+    _clear();
+  }
+
+  void _clear() {
+    for (final label in _labels.values) {
+      label.dispose();
+    }
+    _labels.clear();
   }
 }

@@ -298,10 +298,11 @@ void main() {
       find.descendant(of: blockFinder(standupId), matching: find.text("To do")),
       findsNothing,
     );
+    // 08:00's line sits the room for its label below the header.
     final grid = gridViewport(tester);
     expect(
       grid.rectOfCell(rowOf(8 * 60), 1)!.top,
-      near(grid.scrolledRegion.top),
+      near(grid.scrolledRegion.top + labelRoom(tester)),
     );
 
     await tester.tap(find.byTooltip("Next week"));
@@ -1048,7 +1049,7 @@ void main() {
     await tester.tap(find.byTooltip("Add"));
     await tester.pumpAndSettle();
     expect(blockFinder(designCritiqueId), findsOneWidget);
-    expect(find.byTooltip("Add"), findsNothing);
+    expect(find.byTooltip("Add"), findsOneWidget);
     expect(find.byTooltip("Add item"), findsNothing);
 
     await pickMode(tester, "Agenda");
@@ -1576,12 +1577,13 @@ void main() {
   });
 
   testWidgets("W16 the frozen bands and the fit", (tester) async {
+    final semantics = tester.ensureSemantics();
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
     final mondayHeader = headerFinder(monday);
     final boardTop = tester.getRect(find.byType(Board<String, ShownItem>)).top;
     expect(tester.getRect(mondayHeader).top, boardTop);
-    final noonLabel = find.text("12:00");
+    final noonLabel = gutterLabelFinder("12:00");
     final noonTop = tester.getRect(noonLabel).top;
     await tester.dragFrom(
       centerOf(tester, rowOf(12 * 60), colOf(5)),
@@ -1597,7 +1599,7 @@ void main() {
     final slot = cellRect(tester, rowOf(8 * 60), colOf(0)).height;
     gridViewport(tester).verticalPosition!.jumpTo(slot * (rowOf(8 * 60) - 1));
     await tester.pumpAndSettle();
-    final eightLabel = find.text("08:00");
+    final eightLabel = gutterLabelFinder("08:00");
     final eightLeft = tester.getRect(eightLabel).left;
     final headerLeft = tester.getRect(mondayHeader).left;
     final horizontal = gridViewport(tester).horizontalPosition!;
@@ -1625,6 +1627,7 @@ void main() {
       ),
       isTrue,
     );
+    semantics.dispose();
   });
 
   testWidgets("W17 the form maps each field kind", (tester) async {
@@ -2086,11 +2089,11 @@ void main() {
     final viewport = gridViewport(tester);
     expect(
       viewport.rectOfCell(rowOf(12 * 60), colOf(1))!.top,
-      near(viewport.scrolledRegion.top),
+      near(viewport.scrolledRegion.top + labelRoom(tester)),
     );
 
     List<CanvasRecord> nowLines() {
-      return paintGridBackground(tester).lines.where((line) {
+      return paintGridForeground(tester).lines.where((line) {
         return line.isIn(HarborColors.error);
       }).toList();
     }
@@ -2335,5 +2338,32 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
+  });
+
+  testWidgets("W29 Week's Add creates on the selected day", (tester) async {
+    await pumpCalendar(
+      tester,
+      api: MockCalendarApi(latency: harnessLatency),
+      clock: () {
+        return DateTime(2026, 4, 21, 14, 20);
+      },
+    );
+    await pickMode(tester, "Week");
+    await tester.tap(headerFinder(DateTime(2026, 4, 23)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip("Add"));
+    await tester.pumpAndSettle();
+    expect(find.text("New item"), findsOneWidget);
+    await tester.tap(find.text("Task").last);
+    await tester.pumpAndSettle();
+    expect(find.text("2026-04-23"), findsOneWidget);
+    expect(
+      find.descendant(
+        of: dropdownFinder("Start"),
+        matching: find.text("08:00"),
+      ),
+      findsOneWidget,
+    );
   });
 }

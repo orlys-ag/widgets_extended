@@ -17,6 +17,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -46,9 +47,13 @@ DateTime may(int day) {
   return DateTime(2026, 5, day);
 }
 
-/// The month board, as the calendar keys it.
+/// The board of the [MonthBoard] the calendar keys "month-board", under
+/// its weekday letters.
 Finder monthBoardFinder() {
-  return find.byKey(const ValueKey<String>("month-board"));
+  return find.descendant(
+    of: find.byKey(const ValueKey<String>("month-board")),
+    matching: find.byType(Board<String, MonthChip>),
+  );
 }
 
 /// The chip of the item [id] in the calendar week starting on [monday].
@@ -71,22 +76,34 @@ RenderBoardViewport<String> monthViewport(WidgetTester tester) {
 }
 
 /// Pumps the calendar over a mock holding [seed] at [latency] and picks
-/// Month.
+/// Month, and with [showAll] the Show all items layout in place of the
+/// Fit to screen it starts on.
 Future<MockCalendarApi> pumpMonth(
   WidgetTester tester, {
   List<Map<String, Object?>> seed = const <Map<String, Object?>>[],
   Duration latency = harnessLatency,
+  bool showAll = false,
 }) async {
   final api = MockCalendarApi(seed: seed, latency: latency);
   await pumpCalendar(tester, api: api);
   await pickMode(tester, "Month");
+  if (showAll) {
+    await pickMonthLayout(tester, "Show all items");
+  }
   return api;
 }
 
-/// Pumps the calendar over the default seed and picks Month.
-Future<MockCalendarApi> pumpSeededMonth(WidgetTester tester) async {
+/// Pumps the calendar over the default seed and picks Month, and with
+/// [showAll] the Show all items layout.
+Future<MockCalendarApi> pumpSeededMonth(
+  WidgetTester tester, {
+  bool showAll = false,
+}) async {
   final api = await pumpCalendar(tester);
   await pickMode(tester, "Month");
+  if (showAll) {
+    await pickMonthLayout(tester, "Show all items");
+  }
   return api;
 }
 
@@ -232,6 +249,20 @@ Future<void> closeSettings(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// Moves the open settings sheet's day width slider to [width] through
+/// its own callback.
+Future<void> setDayWidth(WidgetTester tester, double width) async {
+  tester.widget<Slider>(find.byKey(dayWidthSliderKey)).onChanged!(width);
+  await tester.pumpAndSettle();
+}
+
+/// Moves the open settings sheet's slot height slider to [height] through
+/// its own callback.
+Future<void> setSlotHeight(WidgetTester tester, double height) async {
+  tester.widget<Slider>(find.byKey(slotHeightSliderKey)).onChanged!(height);
+  await tester.pumpAndSettle();
+}
+
 /// Opens the calendar settings, flips the weekends switch and closes them.
 Future<void> toggleWeekends(WidgetTester tester) async {
   await openSettings(tester);
@@ -354,7 +385,7 @@ void main() {
     "M2 every item of the month has a chip in each week and on each shown "
     "day it covers",
     (tester) async {
-      final api = await pumpSeededMonth(tester);
+      final api = await pumpSeededMonth(tester, showAll: true);
       final grid = MonthGrid.of(today);
       final listed = await listAll(tester, api, grid.firstDay, grid.lastDay);
       // Sanity: the seed holds items across the month.
@@ -410,7 +441,11 @@ void main() {
   testWidgets(
     "M4 a week needing more lanes grows to the strip plus its lanes",
     (tester) async {
-      await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
+      await pumpMonth(
+        tester,
+        seed: hourlyTasks(april(22), 7, 8),
+        showAll: true,
+      );
       final board = tester.getRect(monthBoardFinder());
       final fitted = board.height / 5;
       final grown = tester.getSize(dayFinder(april(22))).height;
@@ -644,7 +679,7 @@ void main() {
       await tester.tap(stripFinder(april(22)));
       await tester.pumpAndSettle();
       expect(find.text("Day"), findsOneWidget);
-      expect(find.byKey(dayHeaderKey(april(22))), findsOneWidget);
+      expect(gridDay(tester), april(22));
     },
   );
 
@@ -656,7 +691,7 @@ void main() {
       await tapEmptyPart(tester, april(22));
       expect(find.text("New item"), findsNothing);
       expect(find.text("Day"), findsOneWidget);
-      expect(find.byKey(dayHeaderKey(april(22))), findsOneWidget);
+      expect(gridDay(tester), april(22));
     },
   );
 
@@ -669,7 +704,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
     expect(find.text("Day"), findsOneWidget);
-    expect(find.byKey(dayHeaderKey(may(1))), findsOneWidget);
+    expect(gridDay(tester), may(1));
   });
 
   testWidgets(
@@ -851,8 +886,12 @@ void main() {
       api.failurePolicy = (request) {
         return request.method == CalendarMethod.list ? "Reading failed." : null;
       };
+      // The overlay lies over the board, inside the MonthBoard.
       Finder underBoard(Finder finder) {
-        return find.descendant(of: monthBoardFinder(), matching: finder);
+        return find.descendant(
+          of: find.byKey(const ValueKey<String>("month-board")),
+          matching: finder,
+        );
       }
 
       await tester.tap(find.byTooltip("Next month"));
@@ -1035,6 +1074,7 @@ void main() {
       const latency = Duration(seconds: 1);
       await pumpMonth(
         tester,
+        showAll: true,
         seed: <Map<String, Object?>>[
           taskAt("G", april(22), 10, 11),
           ...hourlyTasks(may(20), 8, 8),
@@ -1103,6 +1143,7 @@ void main() {
       const latency = Duration(seconds: 1);
       await pumpMonth(
         tester,
+        showAll: true,
         seed: hourlyTasks(april(21), 8, 8),
         latency: latency,
       );
@@ -1163,6 +1204,7 @@ void main() {
       const latency = Duration(seconds: 1);
       await pumpMonth(
         tester,
+        showAll: true,
         seed: hourlyTasks(april(28), 8, 8),
         latency: latency,
       );
@@ -1319,6 +1361,7 @@ void main() {
   ) async {
     await pumpMonth(
       tester,
+      showAll: true,
       seed: <Map<String, Object?>>[
         ...hourlyTasks(april(23), 9, 8),
         ...hourlyTasks(may(6), 9, 8),
@@ -1348,6 +1391,7 @@ void main() {
   ) async {
     await pumpMonth(
       tester,
+      showAll: true,
       seed: <Map<String, Object?>>[
         ...hourlyTasks(april(6), 9, 8),
         ...hourlyTasks(april(13), 9, 8),
@@ -1627,7 +1671,7 @@ void main() {
       tester.semantics.tap(find.semantics.byLabel("Wednesday, April 22"));
       await tester.pumpAndSettle();
       expect(find.text("Day"), findsOneWidget);
-      expect(find.byKey(dayHeaderKey(april(22))), findsOneWidget);
+      expect(gridDay(tester), april(22));
       semantics.dispose();
     },
   );
@@ -1698,7 +1742,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
     expect(find.text("Day"), findsOneWidget);
-    expect(find.byKey(dayHeaderKey(april(22))), findsOneWidget);
+    expect(gridDay(tester), april(22));
   });
 
   testWidgets("M31 under Fit to screen a bar hides on each day it covers, "
@@ -1737,12 +1781,11 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets("M32 Show all items, the layout the calendar starts on, grows "
-      "a busy week again and drops +N more", (tester) async {
+  testWidgets("M32 Fit to screen, the layout the calendar starts on, shows "
+      "a busy day's +N more; Show all items grows the week and drops it", (
+    tester,
+  ) async {
     await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
-    expect(tester.getSize(dayFinder(april(22))).height, near(strip + 7 * lane));
-    await pickMonthLayout(tester, "Fit to screen");
-    // Sanity: Fit to screen hides some of the tasks.
     expect(moreFinder(), findsOneWidget);
 
     await pickMonthLayout(tester, "Show all items");
@@ -1765,5 +1808,221 @@ void main() {
     expect(find.text("+${8 - after} more"), findsOneWidget);
     expect(chipFinder("item-${after - 1}", april(20)), findsOneWidget);
     expect(chipFinder("item-$after", april(20)), findsNothing);
+  });
+
+  testWidgets("M34 under Fit to screen a busy day's +N more is a soft "
+      "yellow banner in its lane, inset as a chip is", (tester) async {
+    await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
+    // The banner takes the last of the day's lanes, and the seven tasks
+    // the lanes above it.
+    final lanes = lanesOf(tester, april(22));
+    final banner = find.byKey(monthMoreKey(april(22)));
+    expect(
+      find.descendant(
+        of: banner,
+        matching: find.text("+${7 - (lanes - 1)} more"),
+      ),
+      findsOneWidget,
+    );
+    final fill = tester.widget<DecoratedBox>(banner).decoration;
+    expect((fill as BoxDecoration).color, HarborColors.notice);
+    // A chip's bar is inset 1 px in its lane, so two chips keep 2 px
+    // apart, and the banner keeps as far from the chip above it.
+    final cell = tester.getRect(dayFinder(april(22)));
+    final rect = tester.getRect(banner);
+    expect(rect.top, near(cell.top + strip + (lanes - 1) * lane + 1.0));
+    expect(rect.height, near(lane - 2.0));
+    expect(rect.left, near(cell.left + 1.0));
+    expect(rect.right, near(cell.right - 1.0));
+  });
+
+  testWidgets("M35 a day width past the board's width widens Month's days, "
+      "and the weekday letters scroll across with them; under Show all "
+      "items the board scrolls both ways, and Agenda's month stays fitted", (
+    tester,
+  ) async {
+    await pumpMonth(tester, seed: hourlyTasks(april(22), 8, 8), showAll: true);
+    final viewport = monthViewport(tester);
+    expect(viewport.horizontalPosition!.maxScrollExtent, 0.0);
+
+    await openSettings(tester);
+    await setDayWidth(tester, 100.0);
+    await closeSettings(tester);
+    expect(tester.getSize(dayFinder(april(22))).width, near(100.0));
+
+    // Each letter stays over its column as the board scrolls across.
+    void expectOver(String letter, DateTime day) {
+      final header = find.byKey(const ValueKey<String>("weekday-header"));
+      expect(
+        tester
+            .getCenter(find.descendant(of: header, matching: find.text(letter)))
+            .dx,
+        near(tester.getCenter(dayFinder(day)).dx),
+      );
+    }
+
+    expectOver("W", april(22));
+    await tester.drag(monthBoardFinder(), const Offset(-150.0, 0.0));
+    await tester.pumpAndSettle();
+    expect(viewport.horizontalPosition!.pixels, greaterThan(0.0));
+    expectOver("W", april(22));
+
+    // The busy week grew past the board's height, so it scrolls down too.
+    await tester.drag(monthBoardFinder(), const Offset(0.0, -150.0));
+    await tester.pumpAndSettle();
+    expect(viewport.verticalPosition!.pixels, greaterThan(0.0));
+
+    // Agenda's month keeps its days in equal shares of its width.
+    await pickMode(tester, "Agenda");
+    final grid = tester.getRect(
+      find.byKey(const ValueKey<String>("calendar-grid")),
+    );
+    expect(
+      tester.getSize(find.byKey(dayCellKey(april(22)))).width,
+      near(grid.width / 7),
+    );
+  });
+
+  testWidgets("M36 under Fit to screen a wide day scrolls the board across "
+      "alone, the weeks keeping their share of its height", (tester) async {
+    await pumpMonth(tester, seed: hourlyTasks(april(22), 8, 8));
+    await openSettings(tester);
+    await setDayWidth(tester, 100.0);
+    await closeSettings(tester);
+
+    final viewport = monthViewport(tester);
+    final board = tester.getRect(monthBoardFinder());
+    expect(viewport.horizontalPosition!.maxScrollExtent, greaterThan(0.0));
+    expect(viewport.verticalPosition!.maxScrollExtent, 0.0);
+    expect(tester.getSize(dayFinder(april(22))).height, near(board.height / 5));
+  });
+
+  testWidgets("M37 Month opens scrolled to show the selected day, and a new "
+      "day width scrolls to it again", (tester) async {
+    await pumpCalendar(tester);
+    // April 26, a Sunday, the last column.
+    await pickMode(tester, "Week");
+    await tester.tap(find.byKey(dayHeaderKey(april(26))));
+    await tester.pumpAndSettle();
+    await openSettings(tester);
+    await setDayWidth(tester, 100.0);
+    await closeSettings(tester);
+
+    await pickMode(tester, "Month");
+    final board = tester.getRect(monthBoardFinder());
+    bool shows(DateTime day) {
+      final cell = tester.getRect(dayFinder(day));
+      return cell.left >= board.left - 0.5 && cell.right <= board.right + 0.5;
+    }
+
+    expect(shows(april(26)), isTrue);
+
+    await openSettings(tester);
+    await setDayWidth(tester, 120.0);
+    await closeSettings(tester);
+    expect(shows(april(26)), isTrue);
+  });
+
+  testWidgets("M38 a slot height over its default scales Month's weeks past "
+      "their share of the board, under either layout, and the board "
+      "scrolls down to the selected day", (tester) async {
+    await pumpMonth(tester);
+    final viewport = monthViewport(tester);
+    final board = tester.getRect(monthBoardFinder());
+    final share = board.height / 5;
+    // April 21, today and selected, and April 22, in the fourth week, read
+    // from the axes, as the board builds no week it scrolls far from.
+    Rect selected() {
+      return viewport.rectOfCell(3, 1)!;
+    }
+
+    double height() {
+      return viewport.rectOfCell(3, 2)!.height;
+    }
+
+    await openSettings(tester);
+    await setSlotHeight(tester, minSlotHeightLow);
+    await closeSettings(tester);
+    expect(height(), near(share));
+    expect(viewport.verticalPosition!.maxScrollExtent, 0.0);
+
+    await openSettings(tester);
+    await setSlotHeight(tester, minSlotHeightHigh);
+    await closeSettings(tester);
+    expect(height(), near(3 * share));
+    // The fourth week lies below the board's height at the new scale, and
+    // above it at the end of the scroll.
+    expect(selected().top, greaterThanOrEqualTo(-0.5));
+    expect(selected().bottom, lessThanOrEqualTo(board.height + 0.5));
+
+    await pickMonthLayout(tester, "Show all items");
+    expect(height(), near(3 * share));
+  });
+
+  testWidgets("M39 days at least 100 px wide in weeks at least 136 px tall "
+      "show cards two chips tall, with the type's icon and the times under "
+      "the title, a week of them growing by card lanes; a smaller day shows "
+      "chips", (tester) async {
+    await pumpMonth(
+      tester,
+      seed: <Map<String, Object?>>[
+        taskAt("Standup", april(22), 9, 10),
+        ...hourlyTasks(april(23), 4, 11),
+      ],
+      showAll: true,
+    );
+    final bar = chipFinder("item-1", april(20));
+    Finder inBar(Finder finder) {
+      return find.descendant(of: bar, matching: finder);
+    }
+
+    expect(tester.getSize(bar).height, lane);
+    expect(inBar(find.text("09:00-10:00")), findsNothing);
+
+    await openSettings(tester);
+    await setDayWidth(tester, 100.0);
+    await closeSettings(tester);
+    // Sanity: the weeks rest short of a card week; the fifth, which holds
+    // no item, rests at its share.
+    expect(
+      monthViewport(tester).rectOfCell(4, 2)!.height,
+      lessThan(monthCardMinHeight),
+    );
+    expect(tester.getSize(bar).height, lane);
+
+    await openSettings(tester);
+    await setSlotHeight(tester, 18.0);
+    await closeSettings(tester);
+    expect(tester.getSize(bar).height, monthCardExtent);
+    expect(inBar(find.text("Standup")), findsOneWidget);
+    expect(inBar(find.text("09:00-10:00")), findsOneWidget);
+    expect(inBar(find.byIcon(Icons.task_alt)), findsOneWidget);
+    expect(
+      tester.getSize(dayFinder(april(23))).height,
+      near(strip + 4 * monthCardExtent),
+    );
+
+    await openSettings(tester);
+    await setDayWidth(tester, 96.0);
+    await closeSettings(tester);
+    expect(inBar(find.text("09:00-10:00")), findsNothing);
+  });
+
+  testWidgets("M40 under Fit to screen a day of cards holds the card lanes "
+      "that fit, and its +N more takes the last, inset as a card is", (
+    tester,
+  ) async {
+    await pumpMonth(tester, seed: hourlyTasks(april(22), 8, 8));
+    await openSettings(tester);
+    await setDayWidth(tester, 100.0);
+    await setSlotHeight(tester, 18.0);
+    await closeSettings(tester);
+    // A 1.125 scale of 135 px weeks rests at 151.875 px, which holds three
+    // card lanes: two cards and the banner.
+    expect(find.text("+6 more"), findsOneWidget);
+    final day = tester.getRect(dayFinder(april(22)));
+    final more = tester.getRect(find.byKey(monthMoreKey(april(22))));
+    expect(more.top, near(day.top + strip + 2 * monthCardExtent + 1.0));
+    expect(more.height, near(monthCardExtent - 2.0));
   });
 }

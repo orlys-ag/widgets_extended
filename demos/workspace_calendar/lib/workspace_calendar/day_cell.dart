@@ -1,7 +1,6 @@
-/// One day of the workspace calendar grid.
+/// One day of the workspace calendar grid, and the letters or the
+/// three-letter names of the weekdays over the grid.
 library;
-
-import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 
@@ -81,14 +80,26 @@ class _DayMarkerListenerState extends State<DayMarkerListener> {
   }
 }
 
-/// A day number with its item marker, on a pill when selected.
+/// The diameter of a [DayCell]'s circle.
+const double dayCircleSize = 32.0;
+
+/// The key of the badge on the circle of a [DayCell] for [day] that has
+/// items.
+ValueKey<String> dayBadgeKey(DateTime day) {
+  return ValueKey<String>("day-badge-${day.year}-${day.month}-${day.day}");
+}
+
+/// A day number on a circle: the background grey, the primary colour when
+/// selected, ringed ([harborTodayRing]) when today, and with a small badge
+/// on its top right corner when the day has items.
 ///
 /// [collapse] runs from 0, the month grid, to 1, the week strip. At 0 a
-/// day outside the shown month is muted and the weekday name is left to
-/// the header above the grid; at 1 every day reads at full strength and
-/// carries its own weekday name under the number, and the pill turns from
-/// a wide lozenge into a tall tab. The cell listens to [collapse] itself,
-/// so the transition rebuilds the cells and not the board.
+/// day outside the shown month is muted on no circle and the weekday name
+/// is left to the header above the grid; at 1 every day reads at full
+/// strength on its circle and carries its weekday's three-letter name
+/// above it. The
+/// cell listens to [collapse] itself, so the transition rebuilds the cells
+/// and not the board.
 class DayCell extends StatelessWidget {
   const DayCell({
     super.key,
@@ -139,84 +150,175 @@ class DayCell extends StatelessWidget {
     final numberWeight = isSelected || isToday
         ? FontWeight.w600
         : FontWeight.lerp(FontWeight.w400, FontWeight.w600, t)!;
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Text(
-          "${day.day}",
-          style: TextStyle(
-            fontSize: 16.0,
-            height: 1.25,
-            fontWeight: numberWeight,
-            color: numberColor,
-          ),
+    final Color fill;
+    if (isSelected) {
+      fill = HarborColors.primary;
+    } else if (inMonth) {
+      fill = HarborColors.background;
+    } else {
+      fill = HarborColors.background.withValues(alpha: t);
+    }
+    Widget circle = Container(
+      width: dayCircleSize,
+      height: dayCircleSize,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
+      foregroundDecoration: isToday
+          ? harborTodayRing(dayCircleSize / 2.0)
+          : null,
+      child: Text(
+        "${day.day}",
+        style: TextStyle(
+          fontSize: 15.0,
+          fontWeight: numberWeight,
+          color: numberColor,
         ),
-        ClipRect(
-          child: Align(
-            alignment: Alignment.topCenter,
-            heightFactor: t,
-            child: Opacity(
-              opacity: t,
-              child: Text(
-                weekdayShortNames[weekdayColumn(day)],
-                style: TextStyle(
-                  fontSize: 12.0,
-                  height: 1.25,
-                  color: isSelected
-                      ? HarborColors.onPrimary
-                      : HarborColors.textMuted,
+      ),
+    );
+    if (hasItems) {
+      circle = Stack(
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          circle,
+          // Centred near the circle's edge at 45 degrees, which lies
+          // 0.29 of the radius in from the box's corner on each axis.
+          Positioned(
+            top: 0.0,
+            right: 0.0,
+            child: DecoratedBox(
+              key: dayBadgeKey(day),
+              decoration: BoxDecoration(
+                color: HarborColors.primary,
+                shape: BoxShape.circle,
+                border: Border.all(color: HarborColors.surface, width: 1.5),
+              ),
+              child: const SizedBox(width: 9.0, height: 9.0),
+            ),
+          ),
+        ],
+      );
+    }
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          ClipRect(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              heightFactor: t,
+              child: Opacity(
+                opacity: t,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 2.0),
+                  child: Text(
+                    weekdayAbbreviations[weekdayColumn(day)],
+                    style: const TextStyle(
+                      fontSize: 12.0,
+                      height: 1.2,
+                      color: HarborColors.textMuted,
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 3.0),
-        _buildMarker(),
-      ],
+          circle,
+        ],
+      ),
     );
-    return Center(
-      child: Container(
-        width: lerpDouble(44.0, 36.0, t),
-        height: lerpDouble(38.0, 46.0, t),
-        alignment: Alignment.center,
-        decoration: isSelected
-            ? BoxDecoration(
-                color: HarborColors.primary,
-                borderRadius: BorderRadius.circular(lerpDouble(19.0, 6.0, t)!),
-              )
-            : null,
-        child: content,
+  }
+}
+
+/// The height of a [WeekdayHeader].
+const double weekdayHeaderHeight = 32.0;
+
+/// The letters of the shown weekdays over a month grid, or with
+/// [abbreviated] their three-letter names as a [DayCell] in the week strip
+/// shows them, one per column: equal shares of the header's width, or with
+/// [columnWidth], columns that wide, scrolled across by [horizontal]'s
+/// offset as the grid under them is, and clipped to the header.
+class WeekdayHeader extends StatelessWidget {
+  const WeekdayHeader({
+    super.key = const ValueKey<String>("weekday-header"),
+    required this.weekdays,
+    this.abbreviated = false,
+    this.columnWidth,
+    this.horizontal,
+  });
+
+  final WeekdaySet weekdays;
+
+  /// Whether each column shows its weekday's three-letter name, "Mon",
+  /// rather than its letter.
+  final bool abbreviated;
+
+  /// The width of each column; null for equal shares of the width.
+  final double? columnWidth;
+
+  /// The grid's horizontal scroll, which a header of [columnWidth] wide
+  /// columns follows.
+  final ScrollController? horizontal;
+
+  @override
+  Widget build(BuildContext context) {
+    final width = columnWidth;
+    final letters = <Widget>[
+      for (var column = 0; column < weekdayLetters.length; column++)
+        if (weekdays.containsColumn(column))
+          if (width == null)
+            Expanded(child: _buildLetter(column))
+          else
+            SizedBox(width: width, child: _buildLetter(column)),
+    ];
+    if (width == null) {
+      return SizedBox(
+        height: weekdayHeaderHeight,
+        child: Row(children: letters),
+      );
+    }
+    final scroll = horizontal;
+    final row = Row(mainAxisSize: MainAxisSize.min, children: letters);
+    return SizedBox(
+      height: weekdayHeaderHeight,
+      child: ClipRect(
+        child: OverflowBox(
+          alignment: AlignmentDirectional.centerStart,
+          maxWidth: double.infinity,
+          child: scroll == null
+              ? row
+              : AnimatedBuilder(
+                  animation: scroll,
+                  child: row,
+                  builder: (context, child) {
+                    final offset = scroll.hasClients ? scroll.offset : 0.0;
+                    return Transform.translate(
+                      offset: Offset(-offset, 0.0),
+                      child: child,
+                    );
+                  },
+                ),
+        ),
       ),
     );
   }
 
-  /// A dot on the selected pill, a ring elsewhere, and the same space
-  /// when the day has no items, so every number sits at the same height.
-  Widget _buildMarker() {
-    if (!hasItems) {
-      return const SizedBox(width: 5.0, height: 5.0);
-    }
-    if (isSelected) {
-      return const SizedBox(
-        width: 5.0,
-        height: 5.0,
-        child: Center(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: HarborColors.onPrimary,
-              shape: BoxShape.circle,
-            ),
-            child: SizedBox(width: 4.0, height: 4.0),
-          ),
+  Widget _buildLetter(int column) {
+    if (abbreviated) {
+      return Center(
+        child: Text(
+          weekdayAbbreviations[column],
+          style: const TextStyle(fontSize: 12.0, color: HarborColors.textMuted),
         ),
       );
     }
-    return Container(
-      width: 5.0,
-      height: 5.0,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: HarborColors.primary, width: 1.2),
+    return Center(
+      child: Text(
+        weekdayLetters[column],
+        style: const TextStyle(
+          fontSize: 15.0,
+          fontWeight: FontWeight.w600,
+          color: HarborColors.text,
+        ),
       ),
     );
   }

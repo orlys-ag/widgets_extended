@@ -91,16 +91,12 @@ void main() {
       ),
       HarborColors.onPrimary,
     );
-    // Another day's marker is a primary ring.
+    // Another day's marker is a primary badge.
     final thursday = dayFinder(DateTime(2026, 4, 23));
-    final ring = tester
-        .widgetList<Container>(
-          find.descendant(of: thursday, matching: find.byType(Container)),
-        )
-        .map((container) => container.decoration)
-        .whereType<BoxDecoration>()
-        .singleWhere((decoration) => decoration.shape == BoxShape.circle);
-    expect((ring.border! as Border).top.color, HarborColors.primary);
+    final badge = tester.widget<DecoratedBox>(
+      find.byKey(dayBadgeKey(DateTime(2026, 4, 23))),
+    );
+    expect((badge.decoration as BoxDecoration).color, HarborColors.primary);
 
     await tester.tap(thursday);
     await tester.pumpAndSettle();
@@ -114,8 +110,8 @@ void main() {
     final card = find.byKey(itemCardKey(designCritiqueId));
     final cardFill = decorationIn(tester, card);
     expect(cardFill.color, const Color(0xFFE0ECEB));
-    expect((cardFill.border! as Border).left.width, 4.0);
-    expect((cardFill.border! as Border).left.color, const Color(0xFF1F7A72));
+    expect(cardFill.borderRadius, BorderRadius.circular(16.0));
+    expect(cardFill.border, isNull);
     final icons = tester
         .widgetList<Icon>(
           find.descendant(of: card, matching: find.byType(Icon)),

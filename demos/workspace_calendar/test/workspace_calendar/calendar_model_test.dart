@@ -566,6 +566,68 @@ void main() {
     expect(harness.lastCall.body!["startMinute"], 480);
   });
 
+  test("M9 isWithinShown holds for the days inside the shown range", () {
+    final model = Harness().model;
+    expect(model.isWithinShown(weekFirst, weekFirst), isFalse);
+
+    model.show(weekFirst, weekLast);
+    expect(model.isWithinShown(weekFirst, weekLast), isTrue);
+    expect(
+      model.isWithinShown(DateTime(2026, 4, 22), DateTime(2026, 4, 22)),
+      isTrue,
+    );
+    expect(
+      model.isWithinShown(DateTime(2026, 4, 19), DateTime(2026, 4, 21)),
+      isFalse,
+    );
+    expect(
+      model.isWithinShown(DateTime(2026, 4, 25), DateTime(2026, 4, 27)),
+      isFalse,
+    );
+  });
+
+  test("M10 a prefetch reads only the unread days, keeps the shown range "
+      "and its status, and notifies once it marks days read", () async {
+    final harness = Harness();
+    final model = harness.model;
+    model.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<Map<String, Object?>>[]);
+    await settle();
+    final notifications = harness.notifications;
+
+    model.prefetch(weekFirst, weekLast);
+    expect(harness.api.calls, hasLength(1));
+
+    // Of April 23 to May 3, April 27 on are unread.
+    model.prefetch(DateTime(2026, 4, 23), aprilLast);
+    expect(harness.api.calls, hasLength(2));
+    final read = harness.lastCall;
+    expect((read.first, read.last), (DateTime(2026, 4, 27), aprilLast));
+    // The read in flight covers these.
+    model.prefetch(DateTime(2026, 4, 28), DateTime(2026, 4, 29));
+    expect(harness.api.calls, hasLength(2));
+    expect(model.status, CalendarLoadStatus.ready);
+    expect(model.isShown(weekFirst, weekLast), isTrue);
+    expect(harness.notifications, notifications);
+
+    read.succeed(<Map<String, Object?>>[
+      task("item-1", DateTime(2026, 4, 28), 540, 600).toJson(),
+    ]);
+    await settle();
+    expect(harness.notifications, notifications + 1);
+    expect(model.dayHasShownItems(DateTime(2026, 4, 28)), isTrue);
+    expect(model.dayHasShownItems(DateTime(2026, 4, 29)), isFalse);
+
+    // A failed one notifies nothing and leaves its days unread, so the
+    // next one sends again.
+    model.prefetch(DateTime(2026, 5, 4), DateTime(2026, 5, 10));
+    harness.lastCall.fail();
+    await settle();
+    expect(harness.notifications, notifications + 1);
+    model.prefetch(DateTime(2026, 5, 4), DateTime(2026, 5, 10));
+    expect(harness.api.calls, hasLength(4));
+  });
+
   group("first free", () {
     final day = DateTime(2026, 4, 22);
 
@@ -621,6 +683,22 @@ void main() {
       expect(harness.api.calls, hasLength(calls + 1));
       expect(model.isLocked("item-1"), isTrue);
       expect(model.firstFreeRange(day), (start: 60, end: 120));
+    });
+
+    test("FF5 a search from a minute starts there, rounded up to the slots "
+        "and no earlier than the hours, and with nothing free after it "
+        "starts again at the hours' start", () async {
+      final model = await readDay(Harness(), <CalendarItem>[
+        task("item-1", day, 480, 540),
+        task("item-2", day, 900, 960),
+      ]);
+      model.hours = const DayHours(480, 1200);
+      expect(model.firstFreeRange(day, from: 840), (start: 840, end: 900));
+      // 14:10 rounds up to 14:15, and each hour from there to 15:00 meets
+      // item-2.
+      expect(model.firstFreeRange(day, from: 850), (start: 960, end: 1020));
+      expect(model.firstFreeRange(day, from: 300), (start: 540, end: 600));
+      expect(model.firstFreeRange(day, from: 1200), (start: 540, end: 600));
     });
   });
 }

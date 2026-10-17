@@ -5,8 +5,11 @@ library;
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
+import 'package:workspace_calendar/workspace_calendar/day_list.dart';
+import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
@@ -21,6 +24,30 @@ Finder cardFinder(String id) {
 
 Finder dayFinder(DateTime day) {
   return find.byKey(dayCellKey(day));
+}
+
+/// A task [id] on April 22 from [start] to [end] minutes after midnight,
+/// as the calendar shows it.
+ShownItem entryAt(String id, int start, int end) {
+  return ShownItem(
+    CalendarItem.fromJson(<String, Object?>{
+      ...taskJson(id, DateTime(2026, 4, 22), start, end),
+      "id": id,
+    }),
+    pending: false,
+  );
+}
+
+/// [dayListRowsOf] of [entries], each item as its id and each hour as its
+/// minute.
+List<Object> rowsOf(List<ShownItem> entries) {
+  return <Object>[
+    for (final row in dayListRowsOf(entries))
+      switch (row) {
+        DayListItem(:final entry) => entry.id,
+        DayListHour(:final minute) => minute,
+      },
+  ];
 }
 
 /// Opens [id]'s card menu and picks [action], "Edit" or "Delete".
@@ -146,7 +173,7 @@ void main() {
       final standupTop = tester.getRect(cardFinder(standupId)).top;
       final reviewTop = tester.getRect(cardFinder(reviewId)).top;
       expect(reviewTop, greaterThan(standupTop));
-      expect(find.byType(SyncedSliverTree<String, ShownItem>), findsOneWidget);
+      expect(find.byType(SyncedSliverTree<String, DayListRow>), findsOneWidget);
       if (!edit) {
         // A confirmed delete animates the card out: one frame after the
         // answer it is still there, and the card below is on its way up.
@@ -184,7 +211,7 @@ void main() {
         expect(reviewMid, lessThan(reviewTop));
         expect(reviewMid, greaterThan(reviewEnd));
       }
-      expect(find.byType(SyncedSliverTree<String, ShownItem>), findsOneWidget);
+      expect(find.byType(SyncedSliverTree<String, DayListRow>), findsOneWidget);
       await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
     }
@@ -221,8 +248,8 @@ void main() {
       "fastOutSlowIn", (tester) async {
     await pumpCalendar(tester);
 
-    final list = tester.widget<SyncedSliverTree<String, ShownItem>>(
-      find.byType(SyncedSliverTree<String, ShownItem>),
+    final list = tester.widget<SyncedSliverTree<String, DayListRow>>(
+      find.byType(SyncedSliverTree<String, DayListRow>),
     );
     for (final family in TreeAnimationFamily.values) {
       final spec = list.animationStyle.specFor(family);
@@ -233,5 +260,81 @@ void main() {
       );
       expect(spec.curve, Curves.fastOutSlowIn, reason: "$family");
     }
+  });
+
+  test("L6 the rows put an hour before an item for each whole hour from "
+      "the earlier items' latest end to the item's start", () {
+    expect(
+      rowsOf(<ShownItem>[
+        entryAt("a", 8 * 60, 9 * 60),
+        entryAt("b", 10 * 60, 11 * 60),
+        entryAt("c", 13 * 60, 14 * 60),
+      ]),
+      <Object>["a", 9 * 60, "b", 11 * 60, 12 * 60, "c"],
+    );
+    // An hour an item covers has no row.
+    expect(
+      rowsOf(<ShownItem>[
+        entryAt("a", 8 * 60, 11 * 60),
+        entryAt("b", 9 * 60, 10 * 60),
+        entryAt("c", 12 * 60, 13 * 60),
+      ]),
+      <Object>["a", "b", 11 * 60, "c"],
+    );
+    // An end between whole hours starts the hours at the next one, and
+    // items that start together have none between them.
+    expect(
+      rowsOf(<ShownItem>[
+        entryAt("a", 8 * 60, 9 * 60 + 15),
+        entryAt("b", 11 * 60, 12 * 60),
+        entryAt("c", 11 * 60, 11 * 60 + 30),
+      ]),
+      <Object>["a", 10 * 60, "b", "c"],
+    );
+  });
+
+  testWidgets("L7 a card sits right of its start time over its length, and "
+      "an hour between the items that none covers is a dashed row, all in "
+      "the hour label format", (tester) async {
+    await pumpCalendar(tester);
+    await tester.tap(dayFinder(DateTime(2026, 4, 22)));
+    await tester.pumpAndSettle();
+    final time = find.byKey(dayListTimeKey(standupId));
+    final card = cardFinder(standupId);
+    final hour = find.byKey(dayListHourKey(10 * 60));
+    Finder inside(Finder of, String text) {
+      return find.descendant(of: of, matching: find.text(text));
+    }
+
+    expect(inside(time, "09:30"), findsOneWidget);
+    expect(inside(time, "30m"), findsOneWidget);
+    expect(
+      tester.getRect(inside(time, "30m")).top,
+      greaterThanOrEqualTo(tester.getRect(inside(time, "09:30")).bottom),
+    );
+    expect(
+      tester.getRect(time).right,
+      lessThanOrEqualTo(tester.getRect(card).left),
+    );
+    expect(inside(card, "09:30 - 10:00"), findsOneWidget);
+    expect(inside(hour, "10:00"), findsOneWidget);
+    expect(
+      tester.renderObject(
+        find.descendant(of: hour, matching: find.byType(CustomPaint)),
+      ),
+      paints
+        ..line(color: HarborColors.outline)
+        ..line(color: HarborColors.outline),
+    );
+
+    await tester.tap(find.byTooltip("Calendar settings"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(hourLabelFormatKey));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(195.0, 20.0));
+    await tester.pumpAndSettle();
+    expect(inside(time, "9:30 AM"), findsOneWidget);
+    expect(inside(card, "9:30 AM - 10 AM"), findsOneWidget);
+    expect(inside(hour, "10 AM"), findsOneWidget);
   });
 }

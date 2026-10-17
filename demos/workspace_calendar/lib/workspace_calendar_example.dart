@@ -1,34 +1,54 @@
 /// A workspace calendar on the board module, over a calendar API, in four
 /// views: Agenda, a month grid that folds into the selected day's week
-/// while the day list under it, the selected day's items, is scrolled;
+/// while the day list under it, the selected day's items beside their
+/// start times and lengths, is scrolled;
 /// Month, the month's weeks with each item as a chip on the days it
 /// covers; and Week and Day, timed grids of the selected day's week and of
 /// that day alone, where items are created, moved, resized, edited and
 /// deleted.
 ///
-/// Agenda's month grid is a [Board] with no items. Each day is a cell, a
-/// tap selects it through the board's cell selection, and the arrow keys
-/// move that selection once the board has focus. The board always holds
-/// the whole month of the selected day; the folded strip is that board
-/// clipped to one row and shifted so the selected week shows. Selecting a
+/// Day's header card holds a strip of a week's worth of days, opening on
+/// the selected day's week, whose days a tap selects and which a drag
+/// slides day by day, across weeks and months, without selecting, the
+/// header naming the month of the day at its middle; the calendar reads a
+/// selected day's whole week, and the strip the weeks of the days it
+/// shows, so a step within the week, or a tap on a day the strip shows,
+/// reads nothing. Day's grid has no day header, the strip naming its day,
+/// and its blocks show their times and summaries.
+///
+/// Agenda's month grid is a [Board] with no items, under the weekdays'
+/// three-letter names. Each day is a cell, its number on a circle as the strip
+/// shows it, with a badge when it has items; a tap selects it through the
+/// board's cell selection, and the arrow keys move that selection once the
+/// board has focus. The day list marks each whole hour between its items
+/// that no item covers with a dashed row. The board always holds
+/// the whole month of the selected day; while it folds, it is clipped to
+/// a shrinking window shifted so the selected week shows, and once folded,
+/// Day's strip takes the window's place, opening on that week. Selecting a
 /// day in another month, by a tap on a muted day, the chevrons or a key,
 /// switches the board to that month.
 ///
 /// Month's grid is a [MonthBoard], whose weeks fill the screen. Under the
-/// settings' Show all items they grow with their chips; under Fit to
-/// screen they keep their share, and a busy day shows the chips that fit
-/// and "+N more". A tap on a chip edits its item, and a tap anywhere else
-/// on a day opens that day in Day. A long press on a day creates an
-/// item there at the day's first free hour, selecting the day when it is
-/// in the month. Its keys and chevrons move the selected day as Agenda's
-/// do.
+/// settings' Fit to screen, the layout the calendar starts on, they keep
+/// their share, and a busy day shows the chips that fit and "+N more" on a
+/// soft yellow banner; under Show all items they grow with their chips.
+/// Days at least 100 px wide in weeks at least 136 px tall show cards,
+/// which add an item's times to its title. A tap on a chip edits its item,
+/// and a tap anywhere else on a day opens that day in Day. A long press on
+/// a day creates an item there at the day's first free hour, selecting the
+/// day when it is in the month. Its keys and chevrons move the selected
+/// day as Agenda's do.
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
 /// The settings sheet chooses whether the weekends show, how Month fits
-/// its weeks, the hours the calendar shows and schedules in, and the least
-/// size of the timed grids' cells. A selected day is always on a shown weekday. More only reports
-/// that it is not available.
+/// its weeks, the hours the calendar shows and schedules in, whether Week
+/// and Day label them AM/PM, the least width of a day in Week, Day and
+/// Month, and the least height of the timed grids' slots, whose ratio to
+/// its default scales Month's weeks past their share of the screen. A
+/// selected day is always on a shown weekday. Every view rings today's
+/// number in a lighter blue than the primary. More only reports that it is
+/// not available.
 library;
 
 import 'dart:async';
@@ -49,6 +69,7 @@ import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/month_board.dart';
 import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
+import 'workspace_calendar/week_strip.dart';
 
 enum _CalendarMode {
   agenda("Agenda"),
@@ -147,6 +168,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   late final CalendarModel _model;
 
   late DateTime _selected = _today.value;
+
+  /// The day at the middle of the strip since it was last moved other than
+  /// to follow the selection, whose month the header names; null until it
+  /// is.
+  DateTime? _stripDay;
 
   /// The month of [_selected], which is the lattice the board shows.
   late MonthGrid _grid = MonthGrid.of(_selected, weekdays: _settings.weekdays);
@@ -272,7 +298,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The days the timed grid shows: the selected day's Monday-to-Sunday
   /// week in the week mode, the selected day alone in the day mode, and
-  /// null in Agenda and Month. [_showRange] and the grid both read it.
+  /// null in Agenda and Month.
   ({DateTime first, int count})? get _timedDays {
     switch (_mode) {
       case _CalendarMode.agenda:
@@ -285,14 +311,21 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  /// Shows the month grid's days in Agenda and Month and [_timedDays]
-  /// otherwise, which reads whatever of them is not read yet.
+  /// Shows the month grid's days in Agenda and Month, the timed grid's week
+  /// in the week mode, and in the day mode the shown days of the selected
+  /// day's week, so a step within that week reads nothing. Reads whatever
+  /// of them is not read yet.
   void _showRange() {
-    final days = _timedDays;
-    if (days == null) {
-      _model.show(_grid.firstDay, _grid.lastDay);
-    } else {
-      _model.show(days.first, addDays(days.first, days.count - 1));
+    switch (_mode) {
+      case _CalendarMode.agenda:
+      case _CalendarMode.month:
+        _model.show(_grid.firstDay, _grid.lastDay);
+      case _CalendarMode.week:
+        final days = _timedDays!;
+        _model.show(days.first, addDays(days.first, days.count - 1));
+      case _CalendarMode.day:
+        final days = shownDaysOfWeek(_selected, _settings.weekdays);
+        _model.show(days.first, days.last);
     }
   }
 
@@ -315,6 +348,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     final monthChanged = !_grid.contains(day);
     setState(() {
       _selected = day;
+      _stripDay = null;
       if (monthChanged) {
         _grid = MonthGrid.of(day, weekdays: _settings.weekdays);
       }
@@ -373,6 +407,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     setState(() {
       _mode = mode;
       _collapsed = false;
+      _stripDay = null;
     });
     _animateCollapse();
     _showRange();
@@ -389,14 +424,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _setMode(_CalendarMode.day);
   }
 
-  /// The create flow for [day] at its first free hour, selecting [day]
-  /// first when it is a day of the shown month; a day of another month
-  /// leaves the selection and the month as they are.
-  void _createOn(DateTime day) {
+  /// The create flow for [day] at its first free hour, from [from] when
+  /// given, selecting [day] first when it is a day of the shown month; a
+  /// day of another month leaves the selection and the month as they are.
+  void _createOn(DateTime day, {int? from}) {
     if (_grid.contains(day)) {
       _select(day);
     }
-    final free = _model.firstFreeRange(day);
+    final free = _model.firstFreeRange(day, from: from);
     showCreateFlow(
       context,
       model: _model,
@@ -409,12 +444,26 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
+  /// The app bar's Add outside Agenda: the create flow on the selected
+  /// day, in Month at its first free hour, and in Week and Day at its first
+  /// free hour from [addFromMinute], near the time the grid opens at.
+  void _add() {
+    if (_mode == _CalendarMode.month) {
+      _createOn(_selected);
+    } else {
+      _createOn(_selected, from: addFromMinute(_selected, _now.value));
+    }
+  }
+
+  /// Folds or unfolds Agenda's month. The month that unfolds is the
+  /// selected day's, so the header names it again.
   void _setCollapsed(bool collapsed) {
     if (collapsed == _collapsed || _mode != _CalendarMode.agenda) {
       return;
     }
     setState(() {
       _collapsed = collapsed;
+      _stripDay = null;
     });
     _animateCollapse();
   }
@@ -558,16 +607,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
-          if (agenda || month)
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline),
-              tooltip: "Add",
-              onPressed: month
-                  ? () {
-                      _createOn(_selected);
-                    }
-                  : _openWeekMode,
-            ),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            tooltip: "Add",
+            onPressed: agenda ? _openWeekMode : _add,
+          ),
           IconButton(
             icon: const Icon(Icons.tune),
             tooltip: "Calendar settings",
@@ -598,7 +642,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   _CalendarHeader _buildCalendarHeader() {
     return _CalendarHeader(
-      day: _selected,
+      day: _stripDay ?? _selected,
       mode: _mode,
       stepUnit: _stepUnit,
       onPrevious: () {
@@ -612,8 +656,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   /// The header on a card of its own, above the grids of Month, Week and
-  /// Day.
-  Widget _buildHeaderCard() {
+  /// Day, with [below] under it on the card.
+  Widget _buildHeaderCard({Widget? below}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 8.0),
       child: DecoratedBox(
@@ -623,14 +667,25 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         ),
         child: Padding(
           padding: const EdgeInsets.all(8.0),
-          child: _buildCalendarHeader(),
+          child: below == null
+              ? _buildCalendarHeader()
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    _buildCalendarHeader(),
+                    const SizedBox(height: 4.0),
+                    below,
+                  ],
+                ),
         ),
       ),
     );
   }
 
   /// The month grid and the day list in Agenda; the month board in Month;
-  /// a timed grid of [_timedDays], across the body's full width, otherwise.
+  /// a timed grid of [_timedDays], across the body's full width, otherwise,
+  /// under the week strip in the day mode.
   Widget _buildCalendarView() {
     if (_mode == _CalendarMode.month) {
       return _buildMonthView();
@@ -640,7 +695,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _buildHeaderCard(),
+          _buildHeaderCard(
+            below: _mode != _CalendarMode.day ? null : _buildStrip(),
+          ),
           Expanded(
             child: TimedGrid(
               // Each mode builds its own grid, which opens scrolled to its
@@ -660,6 +717,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               onCreate: (range) {
                 showCreateFlow(context, model: _model, range: range);
               },
+              // The week strip names Day's one day.
+              showsDayHeader: _mode != _CalendarMode.day,
             ),
           ),
         ],
@@ -701,6 +760,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                         error: _model.error,
                         onRetry: _model.retry,
                         entries: entries,
+                        format: _settings.hourLabelFormat,
                         onEdit: (id) {
                           showEditForm(context, model: _model, id: id);
                         },
@@ -728,27 +788,21 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         Expanded(
           child: ColoredBox(
             color: HarborColors.surface,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _WeekdayHeader(weekdays: _settings.weekdays),
-                Expanded(
-                  child: MonthBoard(
-                    key: const ValueKey<String>("month-board"),
-                    model: _model,
-                    grid: _grid,
-                    layout: _settings.monthLayout,
-                    selectedDay: _selected,
-                    today: _today,
-                    onSelectDay: _select,
-                    onOpenDay: _openDayMode,
-                    onCreateOnDay: _createOn,
-                    onOpenItem: (id) {
-                      showEditForm(context, model: _model, id: id);
-                    },
-                  ),
-                ),
-              ],
+            child: MonthBoard(
+              key: const ValueKey<String>("month-board"),
+              model: _model,
+              grid: _grid,
+              layout: _settings.monthLayout,
+              minDayWidth: _settings.minDayWidth,
+              weekScale: _settings.monthWeekScale,
+              selectedDay: _selected,
+              today: _today,
+              onSelectDay: _select,
+              onOpenDay: _openDayMode,
+              onCreateOnDay: _createOn,
+              onOpenItem: (id) {
+                showEditForm(context, model: _model, id: id);
+              },
             ),
           ),
         ),
@@ -803,10 +857,31 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
+  /// The strip of days Day's header card holds and Agenda's folded month
+  /// becomes. Its weekdays are fixed for its life, so new ones build a new
+  /// strip.
+  Widget _buildStrip() {
+    return WeekStrip(
+      key: ValueKey<WeekdaySet>(_settings.weekdays),
+      model: _model,
+      selectedDay: _selected,
+      today: _today.value,
+      weekdays: _settings.weekdays,
+      onSelectDay: _select,
+      onBrowse: (day) {
+        setState(() {
+          _stripDay = day;
+        });
+      },
+    );
+  }
+
   /// The weekday header and the board at collapse [t]. The board keeps
   /// the height of the whole month; the window over it shrinks from the
   /// month to one row while the board moves up by the rows above the
-  /// selected week, so that week slides to the top of the window.
+  /// selected week, so that week slides to the top of the window. Once
+  /// folded, at a [t] of 1, Day's strip takes the window's place, opening
+  /// on the selected week as the window shows it.
   Widget _buildGrid(double t, Widget board) {
     final weeks = _grid.weekCount;
     final monthHeight = weeks * _rowHeight;
@@ -821,7 +896,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
             heightFactor: 1.0 - t,
             child: Opacity(
               opacity: 1.0 - t,
-              child: _WeekdayHeader(weekdays: _settings.weekdays),
+              child: WeekdayHeader(
+                weekdays: _settings.weekdays,
+                abbreviated: true,
+              ),
             ),
           ),
         ),
@@ -831,17 +909,19 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
             return SizedBox(
               key: const ValueKey<String>("calendar-grid"),
               height: lerpDouble(monthHeight, _rowHeight, t),
-              child: ClipRect(
-                child: OverflowBox(
-                  alignment: Alignment.topCenter,
-                  minHeight: monthHeight,
-                  maxHeight: monthHeight,
-                  child: Transform.translate(
-                    offset: Offset(0.0, -t * selectedRow * _rowHeight),
-                    child: board,
-                  ),
-                ),
-              ),
+              child: t == 1.0
+                  ? _buildStrip()
+                  : ClipRect(
+                      child: OverflowBox(
+                        alignment: Alignment.topCenter,
+                        minHeight: monthHeight,
+                        maxHeight: monthHeight,
+                        child: Transform.translate(
+                          offset: Offset(0.0, -t * selectedRow * _rowHeight),
+                          child: board,
+                        ),
+                      ),
+                    ),
             );
           },
         ),
@@ -860,8 +940,9 @@ class _CalendarHeader extends StatelessWidget {
     required this.onModeSelected,
   });
 
-  /// The selected day, whose month, in three letters, and year the title
-  /// names.
+  /// The day whose month, in three letters, and year the title names: the
+  /// selected day, or the day at the middle of the strip once it is moved
+  /// other than to follow the selection.
   final DateTime day;
 
   /// The mode picked from the menu, which the label names.
@@ -972,40 +1053,6 @@ class _CalendarHeader extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// The letters of the shown weekdays over the month grid, one per board
-/// column: both divide the same width into equal parts.
-class _WeekdayHeader extends StatelessWidget {
-  const _WeekdayHeader({required this.weekdays});
-
-  final WeekdaySet weekdays;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      key: const ValueKey<String>("weekday-header"),
-      height: 32.0,
-      child: Row(
-        children: <Widget>[
-          for (var column = 0; column < weekdayLetters.length; column++)
-            if (weekdays.containsColumn(column))
-              Expanded(
-                child: Center(
-                  child: Text(
-                    weekdayLetters[column],
-                    style: const TextStyle(
-                      fontSize: 15.0,
-                      fontWeight: FontWeight.w600,
-                      color: HarborColors.text,
-                    ),
-                  ),
-                ),
-              ),
-        ],
-      ),
     );
   }
 }

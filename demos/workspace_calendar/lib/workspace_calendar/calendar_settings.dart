@@ -1,7 +1,11 @@
 /// What the calendar's settings choose: the weekdays it shows, the hours
-/// it shows and schedules in, how Month fits its weeks, and the size of
-/// the timed grid's cells.
+/// it shows and schedules in, how the timed grid labels its hours, how
+/// Month fits its weeks, the least width of a day in Week, Day and Month,
+/// and the least height of the timed grid's slots, which also scales the
+/// height of Month's weeks.
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -97,15 +101,47 @@ enum MonthLayout {
   final String label;
 }
 
+/// How the timed grid's hour gutter names the times it labels.
+enum HourLabelFormat {
+  /// "13:00", as [clockLabel] writes it.
+  twentyFourHour,
+
+  /// "1 PM", as [hourLabel] writes it.
+  twelveHour,
+}
+
+/// What the hour gutter names [minute] minutes after midnight with in
+/// [format]: [clockLabel]'s "13:00" in 24-hour, and in AM/PM the hour,
+/// its minutes where it has some, and the half of the day, as "1 PM" or
+/// "8:15 AM". Midnight, 1440 included, reads "12 AM" and noon "12 PM".
+String hourLabel(int minute, HourLabelFormat format) {
+  if (format == HourLabelFormat.twentyFourHour) {
+    return clockLabel(minute);
+  }
+  final ofDay = minute % minutesPerDay;
+  final hour = ofDay ~/ 60;
+  final half = hour < 12 ? "AM" : "PM";
+  final shown = hour % 12 == 0 ? 12 : hour % 12;
+  final minutes = ofDay % 60;
+  if (minutes == 0) {
+    return "$shown $half";
+  }
+  return "$shown:${minutes.toString().padLeft(2, "0")} $half";
+}
+
 /// What the settings sheet chooses: the [weekdays] the calendar shows, the
-/// [hours] it shows and schedules in, Month's [monthLayout], and the least
-/// size of the timed grid's cells, which stretch past it to fill the grid.
+/// [hours] it shows and schedules in, the [hourLabelFormat] the timed grid
+/// labels them in, Month's [monthLayout], the least width of a day in
+/// Week, Day and Month, and the least height of the timed grid's slots,
+/// which stretch past them to fill the screen, and through it the height
+/// of Month's weeks.
 @immutable
 class CalendarSettings {
   const CalendarSettings({
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
-    this.monthLayout = MonthLayout.showAll,
+    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
+    this.monthLayout = MonthLayout.fitScreen,
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
   });
@@ -116,6 +152,8 @@ class CalendarSettings {
 
   final DayHours hours;
 
+  final HourLabelFormat hourLabelFormat;
+
   final MonthLayout monthLayout;
 
   /// The least width of a day column, in logical pixels.
@@ -124,9 +162,17 @@ class CalendarSettings {
   /// The least height of one slot, in logical pixels.
   final double minSlotHeight;
 
+  /// How many times its share of Month's height a week rests at:
+  /// [minSlotHeight] over [defaultMinSlotHeight], and never less than 1, so
+  /// at the default slot height and under it the weeks fit the screen.
+  double get monthWeekScale {
+    return math.max(1.0, minSlotHeight / defaultMinSlotHeight);
+  }
+
   CalendarSettings copyWith({
     WeekdaySet? weekdays,
     DayHours? hours,
+    HourLabelFormat? hourLabelFormat,
     MonthLayout? monthLayout,
     double? minDayWidth,
     double? minSlotHeight,
@@ -134,6 +180,7 @@ class CalendarSettings {
     return CalendarSettings(
       weekdays: weekdays ?? this.weekdays,
       hours: hours ?? this.hours,
+      hourLabelFormat: hourLabelFormat ?? this.hourLabelFormat,
       monthLayout: monthLayout ?? this.monthLayout,
       minDayWidth: minDayWidth ?? this.minDayWidth,
       minSlotHeight: minSlotHeight ?? this.minSlotHeight,
@@ -145,6 +192,7 @@ class CalendarSettings {
     return other is CalendarSettings &&
         other.weekdays == weekdays &&
         other.hours == hours &&
+        other.hourLabelFormat == hourLabelFormat &&
         other.monthLayout == monthLayout &&
         other.minDayWidth == minDayWidth &&
         other.minSlotHeight == minSlotHeight;
@@ -155,6 +203,7 @@ class CalendarSettings {
     return Object.hash(
       weekdays,
       hours,
+      hourLabelFormat,
       monthLayout,
       minDayWidth,
       minSlotHeight,
@@ -163,7 +212,8 @@ class CalendarSettings {
 
   @override
   String toString() {
-    return "CalendarSettings($weekdays, $hours, ${monthLayout.name}, "
-        "day width $minDayWidth, slot height $minSlotHeight)";
+    return "CalendarSettings($weekdays, $hours, ${hourLabelFormat.name}, "
+        "${monthLayout.name}, day width $minDayWidth, "
+        "slot height $minSlotHeight)";
   }
 }

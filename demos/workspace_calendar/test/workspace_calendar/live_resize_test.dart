@@ -140,7 +140,7 @@ void main() {
   ) async {
     final api = await pumpCalendar(tester, size: tall);
     await pickMode(tester, "Day");
-    final slot = cellRect(tester, rowOf(9 * 60), 1).height;
+    final slot = cellRect(tester, dayRowOf(9 * 60), 1).height;
     final before = tester.getRect(blockFinder(brainstormId));
     await expectLiveResize(
       tester,

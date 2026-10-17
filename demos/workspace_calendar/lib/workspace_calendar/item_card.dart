@@ -3,9 +3,9 @@ library;
 
 import 'package:flutter/material.dart';
 
-import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
+import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
 /// The key of the card showing the item [id].
@@ -15,21 +15,31 @@ ValueKey<String> itemCardKey(String id) {
 
 enum _CardAction { edit, delete }
 
-/// An item's card: its type's tint with a 4 px edge in the type's colour,
-/// the type's icon, the time range, the title, the schema's summaries, and
-/// a menu with Edit and Delete. While [ShownItem.pending] the card is
-/// dimmed with a progress indicator and its menu is disabled.
+/// An item's card: a rounded box in its type's tint holding the type's
+/// icon and the title, a menu with Edit and Delete beside them, the
+/// schema's summaries under them, and the time range, in [format], at the
+/// bottom right. While [ShownItem.pending] the card is dimmed with a
+/// progress indicator and its menu is disabled.
 class ItemCard extends StatelessWidget {
   const ItemCard({
     super.key,
     required this.entry,
+    required this.format,
     required this.onEdit,
     required this.onDelete,
   });
 
   final ShownItem entry;
+
+  /// How the time range names its times, as [hourLabel] writes them.
+  final HourLabelFormat format;
+
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+
+  /// The width of the icon column and the gap after it, which the lines
+  /// under the title are indented by.
+  static const double _iconIndent = 26.0;
 
   @override
   Widget build(BuildContext context) {
@@ -47,32 +57,19 @@ class ItemCard extends StatelessWidget {
     Widget card = DecoratedBox(
       decoration: BoxDecoration(
         color: style.tint,
-        border: Border(left: BorderSide(color: style.edge, width: 4.0)),
+        borderRadius: BorderRadius.circular(16.0),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12.0, 10.0, 4.0, 12.0),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.fromLTRB(14.0, 6.0, 4.0, 12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.only(top: 2.0),
-              child: Icon(style.icon, size: 20.0, color: style.edge),
-            ),
-            const SizedBox(width: 10.0),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    "${clockLabel(item.startMinute)}-"
-                    "${clockLabel(item.endMinute)}",
-                    style: const TextStyle(
-                      fontSize: 14.0,
-                      color: HarborColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 4.0),
-                  Text(
+            Row(
+              children: <Widget>[
+                Icon(style.icon, size: 18.0, color: style.edge),
+                const SizedBox(width: _iconIndent - 18.0),
+                Expanded(
+                  child: Text(
                     item.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
@@ -82,44 +79,60 @@ class ItemCard extends StatelessWidget {
                       color: HarborColors.text,
                     ),
                   ),
-                  if (summaries.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 4.0),
-                    Text(
-                      summaries.join(", "),
-                      style: const TextStyle(
-                        fontSize: 14.0,
-                        color: HarborColors.textSecondary,
+                ),
+                PopupMenuButton<_CardAction>(
+                  tooltip: "Item actions",
+                  enabled: !pending,
+                  icon: const Icon(
+                    Icons.more_horiz,
+                    color: HarborColors.textMuted,
+                  ),
+                  color: HarborColors.surface,
+                  onSelected: (action) {
+                    switch (action) {
+                      case _CardAction.edit:
+                        onEdit();
+                      case _CardAction.delete:
+                        onDelete();
+                    }
+                  },
+                  itemBuilder: (context) {
+                    return const <PopupMenuEntry<_CardAction>>[
+                      PopupMenuItem<_CardAction>(
+                        value: _CardAction.edit,
+                        child: Text("Edit"),
                       ),
-                    ),
-                  ],
-                ],
-              ),
+                      PopupMenuItem<_CardAction>(
+                        value: _CardAction.delete,
+                        child: Text("Delete"),
+                      ),
+                    ];
+                  },
+                ),
+              ],
             ),
-            PopupMenuButton<_CardAction>(
-              tooltip: "Item actions",
-              enabled: !pending,
-              icon: const Icon(Icons.more_horiz, color: HarborColors.textMuted),
-              color: HarborColors.surface,
-              onSelected: (action) {
-                switch (action) {
-                  case _CardAction.edit:
-                    onEdit();
-                  case _CardAction.delete:
-                    onDelete();
-                }
-              },
-              itemBuilder: (context) {
-                return const <PopupMenuEntry<_CardAction>>[
-                  PopupMenuItem<_CardAction>(
-                    value: _CardAction.edit,
-                    child: Text("Edit"),
+            if (summaries.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(_iconIndent, 0.0, 10.0, 0.0),
+                child: Text(
+                  summaries.join(", "),
+                  style: const TextStyle(
+                    fontSize: 14.0,
+                    color: HarborColors.textSecondary,
                   ),
-                  PopupMenuItem<_CardAction>(
-                    value: _CardAction.delete,
-                    child: Text("Delete"),
-                  ),
-                ];
-              },
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(_iconIndent, 6.0, 10.0, 0.0),
+              child: Text(
+                "${hourLabel(item.startMinute, format)} - "
+                "${hourLabel(item.endMinute, format)}",
+                textAlign: TextAlign.end,
+                style: const TextStyle(
+                  fontSize: 13.0,
+                  color: HarborColors.textSecondary,
+                ),
+              ),
             ),
           ],
         ),

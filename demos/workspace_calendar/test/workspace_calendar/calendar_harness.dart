@@ -39,9 +39,34 @@ const String dayOffId = "item-28";
 /// The Monday of [today]'s week.
 final DateTime monday = DateTime(2026, 4, 20);
 
-/// The timed grid's row of [minute]: row 0 is the day header.
+/// Week's timed grid row of [minute], over the whole day's hours: row 0 is
+/// the day header and row 1 the room above the first slot.
 int rowOf(int minute) {
+  return 2 + minute ~/ 15;
+}
+
+/// Day's timed grid row of [minute], over the whole day's hours: the grid
+/// has no day header, so row 0 is the room above the first slot.
+int dayRowOf(int minute) {
   return 1 + minute ~/ 15;
+}
+
+/// The timed grid's gutter cell that a screen reader hears as [label],
+/// the clock time an hour label there names. Needs semantics on.
+Finder gutterLabelFinder(String label) {
+  return find.bySemanticsLabel(label);
+}
+
+/// The room the timed grid keeps above its first slot and below its last:
+/// half an hour label, as the foreground lays the labels out, and 2 px.
+double labelRoom(WidgetTester tester) {
+  return paintGridForeground(tester).paragraphs.first.paragraph.height / 2 +
+      2.0;
+}
+
+/// The first day the timed grid shows, which in Day mode is its one day.
+DateTime gridDay(WidgetTester tester) {
+  return tester.widget<TimedGrid>(find.byType(TimedGrid)).firstDay;
 }
 
 /// The week grid's column of the day [weekday] days after [monday]:
@@ -210,10 +235,18 @@ class CanvasRecord {
 }
 
 /// A canvas that records the rects and lines drawn on it, each with its
-/// paint, in the coordinates they were drawn in. Every other call is
-/// ignored.
+/// paint, in the coordinates they were drawn in, the paragraphs drawn and
+/// the rects it is clipped to. Every other call is ignored.
 class RecordingCanvas implements Canvas {
   final List<CanvasRecord> records = <CanvasRecord>[];
+
+  /// The rects passed to [clipRect], in the order they were passed.
+  final List<Rect> clips = <Rect>[];
+
+  /// The paragraphs drawn, each with the offset of its top left, in the
+  /// order they were drawn.
+  final List<({ui.Paragraph paragraph, Offset offset})> paragraphs =
+      <({ui.Paragraph paragraph, Offset offset})>[];
 
   /// The filled rects drawn in [color].
   Iterable<Rect> fillsOf(Color color) {
@@ -240,6 +273,11 @@ class RecordingCanvas implements Canvas {
   }
 
   @override
+  void drawParagraph(ui.Paragraph paragraph, Offset offset) {
+    paragraphs.add((paragraph: paragraph, offset: offset));
+  }
+
+  @override
   void save() {}
 
   @override
@@ -250,7 +288,9 @@ class RecordingCanvas implements Canvas {
     Rect rect, {
     ui.ClipOp clipOp = ui.ClipOp.intersect,
     bool doAntiAlias = true,
-  }) {}
+  }) {
+    clips.add(rect);
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -264,5 +304,15 @@ RecordingCanvas paintGridBackground(WidgetTester tester) {
   final viewport = gridViewport(tester);
   final canvas = RecordingCanvas();
   viewport.background!.paint(canvas, viewport);
+  return canvas;
+}
+
+/// Paints the timed grid's foreground, the line marking the current time,
+/// onto a new [RecordingCanvas], which stays empty where the grid has no
+/// foreground.
+RecordingCanvas paintGridForeground(WidgetTester tester) {
+  final viewport = gridViewport(tester);
+  final canvas = RecordingCanvas();
+  viewport.foreground?.paint(canvas, viewport);
   return canvas;
 }

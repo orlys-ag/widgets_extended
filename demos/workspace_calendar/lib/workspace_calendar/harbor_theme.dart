@@ -18,6 +18,17 @@ abstract final class HarborColors {
   static const Color textMuted = Color(0xFF5B6677);
   static const Color error = Color(0xFFB3261E);
   static const Color onPrimary = Color(0xFFFFFFFF);
+
+  /// A lighter blue than [primary], for the ring around today's number:
+  /// 3:1 or more against [surface], [background] and [primaryTint], and
+  /// lighter than [primary] where it rings a selected day's fill.
+  static const Color todayRing = Color(0xFF4C86D0);
+
+  /// A soft yellow for a notice row, with [noticeEdge] for its rule and
+  /// [onNotice] for its text and icon.
+  static const Color notice = Color(0xFFFFF4C2);
+  static const Color noticeEdge = Color(0xFFF0D77A);
+  static const Color onNotice = Color(0xFF5C4300);
 }
 
 /// How an item of one type is drawn: [tint] fills it, a 4 px [edge] runs
@@ -65,6 +76,16 @@ HarborTypeStyle harborTypeStyleOf(CalendarItemType type) {
         icon: Icons.flag,
       );
   }
+}
+
+/// The ring that marks today's number, a 2 px [HarborColors.todayRing]
+/// line around a box whose corners have [radius]: a foreground
+/// decoration, so it pads nothing and shows over a selected day's fill.
+BoxDecoration harborTodayRing(double radius) {
+  return BoxDecoration(
+    border: Border.all(color: HarborColors.todayRing, width: 2.0),
+    borderRadius: BorderRadius.circular(radius),
+  );
 }
 
 /// The opacity of the block a move leaves behind on the timed grid, where

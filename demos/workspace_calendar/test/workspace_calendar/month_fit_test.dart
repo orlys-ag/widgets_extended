@@ -211,4 +211,29 @@ void main() {
     expect(fit.hidden[cellIndex(april(9))], 2);
     expect(idsOf(fit.shown), isEmpty);
   });
+
+  test("F7 a week rests at its share of the height times the scale, "
+      "floored to 1/64, and never under the strip and one lane", () {
+    expect(fittedWeekExtent(500.0, 5), 100.0);
+    expect(fittedWeekExtent(500.0, 5, scale: 1.5), 150.0);
+    // 200 / 3 is 66.66..., whose 1/64 floor is 4266 / 64.
+    expect(fittedWeekExtent(100.0, 3, scale: 2.0), 4266 / 64);
+    expect(
+      fittedWeekExtent(100.0, 5, scale: 2.0),
+      monthStripHeight + monthLaneExtent,
+    );
+    expect(
+      fittedWeekExtent(double.infinity, 5, scale: 3.0),
+      monthStripHeight + monthLaneExtent,
+    );
+  });
+
+  test("F8 days show cards from 100 px wide in weeks from 136 px tall, "
+      "which hold three card lanes", () {
+    expect(monthShowsCards(100.0, 136.0), isTrue);
+    expect(monthShowsCards(100.0 - 1 / 64, 136.0), isFalse);
+    expect(monthShowsCards(100.0, 136.0 - 1 / 64), isFalse);
+    expect(monthLanesThatFit(136.0, laneExtent: monthCardExtent), 3);
+    expect(monthLanesThatFit(136.0 - 1 / 64, laneExtent: monthCardExtent), 2);
+  });
 }

@@ -14,33 +14,55 @@ import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_model.dart';
 import 'calendar_settings.dart';
+import 'day_cell.dart';
 import 'harbor_theme.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
 /// below: the row axis's lane padding.
 const double monthStripHeight = 28.0;
 
-/// The height of one chip lane: the row axis's lane extent.
+/// The height of one chip lane: the row axis's lane extent while the days
+/// show chips.
 const double monthLaneExtent = 18.0;
 
+/// The height of one card lane: the row axis's lane extent while the days
+/// show cards ([monthShowsCards]).
+const double monthCardExtent = 36.0;
+
+/// The least width of a day that shows its items as cards.
+const double monthCardMinWidth = 100.0;
+
+/// The least height a week must rest at for its days to show their items
+/// as cards: the number strip and three card lanes.
+const double monthCardMinHeight = monthStripHeight + 3 * monthCardExtent;
+
+/// Whether days [width] wide, in weeks resting at [extent], show their
+/// items as cards, which hold an item's times and its type's icon under
+/// its title, rather than as one-line chips: when both reach
+/// [monthCardMinWidth] and [monthCardMinHeight].
+bool monthShowsCards(double width, double extent) {
+  return width >= monthCardMinWidth && extent >= monthCardMinHeight;
+}
+
 /// The height a week of the month board rests at: [height] shared by
-/// [weekCount] weeks, floored to a multiple of 1/64 so the weeks never add
-/// up past [height], and never less than the strip and one lane. A
-/// non-finite [height] gives that least.
-double fittedWeekExtent(double height, int weekCount) {
+/// [weekCount] weeks and times [scale], floored to a multiple of 1/64 so
+/// at a [scale] of 1 the weeks never add up past [height], and never less
+/// than the strip and one lane. A non-finite [height] gives that least.
+double fittedWeekExtent(double height, int weekCount, {double scale = 1.0}) {
+  assert(scale >= 1.0);
   const least = monthStripHeight + monthLaneExtent;
   if (!height.isFinite || weekCount <= 0) {
     return least;
   }
-  final share = (height / weekCount * 64.0).floorToDouble() / 64.0;
+  final share = (height / weekCount * scale * 64.0).floorToDouble() / 64.0;
   return math.max(share, least);
 }
 
-/// The lanes a week resting at [extent] holds below its number strip: the
-/// whole lanes that fit, and at least one.
-int monthLanesThatFit(double extent) {
+/// The lanes [laneExtent] tall that a week resting at [extent] holds below
+/// its number strip: the whole lanes that fit, and at least one.
+int monthLanesThatFit(double extent, {double laneExtent = monthLaneExtent}) {
   assert(extent.isFinite);
-  final lanes = ((extent - monthStripHeight) / monthLaneExtent).floor();
+  final lanes = ((extent - monthStripHeight) / laneExtent).floor();
   return math.max(lanes, 1);
 }
 
@@ -74,6 +96,12 @@ ValueKey<String> monthDayKey(DateTime day) {
 /// The key of the number strip of the cell showing [day].
 ValueKey<String> monthStripKey(DateTime day) {
   return ValueKey<String>("month-strip-${isoDate(day)}");
+}
+
+/// The key of the banner saying how many chips the cell showing [day]
+/// hides.
+ValueKey<String> monthMoreKey(DateTime day) {
+  return ValueKey<String>("month-more-${isoDate(day)}");
 }
 
 /// One item's bar in one calendar week: the month board's payload.
@@ -318,20 +346,31 @@ int compareMonthChips(MonthChip a, MonthChip b) {
   );
 }
 
-/// The month of [grid] on the board, showing what [model] shows for its
-/// days.
+/// The month of [grid] on the board, under the letters of its weekdays,
+/// showing what [model] shows for its days.
 ///
-/// The weeks fill the board's height. Under [MonthLayout.showAll] they
-/// grow, past that, to hold their chips, and the board then scrolls; under
-/// [MonthLayout.fitScreen] each holds the lanes that fit
-/// ([monthLanesThatFit]), [fitMonthPlacements] chooses the chips it shows,
-/// and a day that hides some says "+N more" in its last lane. Each day
-/// shows its number in a strip across its top, today's in the primary
-/// colour and the selected day's on the primary pill. Each item shows as one bar per calendar week it
-/// covers, a chip one lane tall in its type's colours, square where it
-/// continues into the week before or after; a pending item's chip is
-/// dimmed and takes no tap. Lines part the weeks and the days, and each
-/// day of another month lies on the background colour.
+/// The days share the board's width, and are never narrower than
+/// [minDayWidth]: past the width, the board scrolls across, the letters
+/// with it. The weeks share the board's height, each resting at
+/// [weekScale] times its share: past 1, the board scrolls down. The board
+/// opens scrolled to show the selected day, and does again for a new
+/// month, a new [minDayWidth] and a new [weekScale].
+///
+/// Under [MonthLayout.showAll] the weeks grow past their resting height to
+/// hold their chips, and the board then scrolls; under
+/// [MonthLayout.fitScreen] each holds the lanes that fit at its resting
+/// height ([monthLanesThatFit]), [fitMonthPlacements] chooses the chips it
+/// shows, and a day that hides some says "+N more" on a soft yellow banner
+/// in its last lane. Each day shows its number in a strip across its top,
+/// today's in the primary colour inside a lighter blue ring
+/// ([harborTodayRing]) and the selected day's on the primary pill. Each
+/// item shows as one bar per calendar week it covers, in its type's
+/// colours and square where it continues into the week before or after: a
+/// chip one lane tall holding its title, or, in days large enough
+/// ([monthShowsCards]), a card two chips tall holding its title over its
+/// type's icon and its times. A pending item's bar is dimmed and takes no
+/// tap. Lines part the weeks and the days, and each day of another month
+/// lies on the background colour.
 ///
 /// A tap on a chip reports [onOpenItem], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
@@ -342,14 +381,17 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// model animates; a new month or a new set of weekdays does not, and
 /// settles at once whatever chip was still growing in or shrinking out. A
 /// new size alone refits the weeks at once and leaves the chips' motion
-/// running, unless under [MonthLayout.fitScreen] it changes the lanes a
-/// week holds, which settles them as a new month does.
+/// running, unless it turns chips into cards or back, or under
+/// [MonthLayout.fitScreen] changes the lanes a week holds, which settles
+/// them as a new month does.
 class MonthBoard extends StatefulWidget {
   const MonthBoard({
     super.key,
     required this.model,
     required this.grid,
     this.layout = MonthLayout.showAll,
+    this.minDayWidth = minDayWidthLow,
+    this.weekScale = 1.0,
     required this.selectedDay,
     required this.today,
     required this.onSelectDay,
@@ -366,6 +408,13 @@ class MonthBoard extends StatefulWidget {
   /// Whether a week grows to hold its chips or keeps its share of the
   /// height and hides the chips that do not fit.
   final MonthLayout layout;
+
+  /// The least width of a day, in logical pixels.
+  final double minDayWidth;
+
+  /// How many times its share of the board's height a week rests at, at
+  /// least 1.
+  final double weekScale;
 
   /// A shown day of [grid]'s month.
   final DateTime selectedDay;
@@ -398,10 +447,11 @@ typedef _KeptChip = ({MonthChip chip, Widget widget});
 /// it for.
 typedef _KeptDay = ({DateTime day, bool selected, Widget widget});
 
-/// How many chips a day hides, and the lane its "+N more" takes.
-typedef _Hidden = ({int count, int lane});
+/// How many chips a day hides, the lane its "+N more" takes, and the
+/// height of a lane.
+typedef _Hidden = ({int count, int lane, double laneExtent});
 
-const _Hidden _noneHidden = (count: 0, lane: 0);
+const _Hidden _noneHidden = (count: 0, lane: 0, laneExtent: monthLaneExtent);
 
 class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// The columns' width before the first layout, which replaces it.
@@ -418,15 +468,21 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// The vertical scroll, which [_revealSelected] reads.
   final ScrollController _scroll = ScrollController();
 
+  /// The horizontal scroll, which the weekday letters follow.
+  final ScrollController _horizontal = ScrollController();
+
   /// The board's focus, which a tap or a long press on a day asks for, so
   /// the arrow keys reach the board.
   final FocusNode _focusNode = FocusNode(debugLabel: "MonthBoard");
 
   /// Held in fields because `Board` replaces its delegate, and so rebuilds
   /// every cell and chip, whenever a builder it gets is not identical to
-  /// the previous one; the selection config likewise.
+  /// the previous one; the selection config likewise. The board gets the
+  /// card builder while [_cards] holds, so a turn from chips to cards or
+  /// back rebuilds every bar.
   late final BoardCellBuilder<String, MonthChip> _cellBuilder = _buildDay;
-  late final BoardItemBuilder<String, MonthChip> _itemBuilder = _buildChip;
+  late final BoardItemBuilder<String, MonthChip> _chipBuilder = _buildChip;
+  late final BoardItemBuilder<String, MonthChip> _cardBuilder = _buildCard;
   late final BoardSelectionConfig _selectionConfig = BoardSelectionConfig(
     mode: BoardSelectionMode.cell,
     onChanged: _handleBoardSelection,
@@ -453,6 +509,10 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   double _fitted = 0.0;
   double _columnWidth = 0.0;
 
+  /// Whether the axes were last given card lanes ([monthShowsCards]), and
+  /// the bars are cards.
+  bool _cards = false;
+
   /// The lanes a week held at the last sync, under
   /// [MonthLayout.fitScreen]; null under [MonthLayout.showAll], where the
   /// weeks grow.
@@ -465,8 +525,9 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// Whether the last sync found its days ready.
   bool _syncedReady = false;
 
-  /// Whether a sync still owes a reveal of the selected day: set at the
-  /// start and by a new grid, cleared by the first sync after it that
+  /// Whether a layout still owes a reveal of the selected day: set at the
+  /// start, by a new grid and by a new [MonthBoard.minDayWidth] or
+  /// [MonthBoard.weekScale], cleared by the first layout after it that
   /// finds the days ready.
   bool _revealPending = true;
 
@@ -477,9 +538,10 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// the write reports nothing to [MonthBoard.onSelectDay].
   bool _writingSelection = false;
 
-  /// The chips the item builder returned, by chip key, kept so a payload
+  /// The bars the item builders returned, by chip key, kept so a payload
   /// that did not change returns the same instance and builds nothing.
-  /// Holds no key but those the latest sync placed and those in [_dropped].
+  /// Holds no key but those the latest sync placed and those in [_dropped],
+  /// and no bar but those of the kind [_cards] names.
   final Map<String, _KeptChip> _chips = <String, _KeptChip>{};
 
   /// The day cells the cell builder returned, one entry per cell of the
@@ -511,7 +573,11 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _board = BoardController<String, MonthChip>(
       vsync: this,
       // Both replaced by the first layout, which knows the size.
-      rows: _rowsConfig(grid, fittedWeekExtent(double.infinity, 1)),
+      rows: _rowsConfig(
+        grid,
+        fittedWeekExtent(double.infinity, 1),
+        monthLaneExtent,
+      ),
       columns: BoardAxisConfig(
         axis: UniformAxis(grid.columnCount, _placeholderColumnWidth),
       ),
@@ -548,6 +614,11 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       _days = _emptyDays(widget.grid);
       _background = _MonthGridPainter(widget.grid);
     }
+    if (widget.minDayWidth != oldWidget.minDayWidth ||
+        widget.weekScale != oldWidget.weekScale) {
+      // Larger days may push the selected one out of view.
+      _revealPending = true;
+    }
     if (gridChanged || widget.selectedDay != oldWidget.selectedDay) {
       // Reaches the cells through the board's post-frame relay, since this
       // runs in the build.
@@ -562,6 +633,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     // The board has unmounted by now: an element's children unmount
     // before its state disposes.
     _scroll.dispose();
+    _horizontal.dispose();
     _focusNode.dispose();
     _board.dispose();
     _today.dispose();
@@ -580,11 +652,15 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   }
 
   /// [weekCount] weeks resting at [fitted], each growing past it to its
-  /// strip plus its lanes.
-  static BoardAxisConfig _rowsConfig(MonthGrid grid, double fitted) {
+  /// strip plus its lanes, each [laneExtent] tall.
+  static BoardAxisConfig _rowsConfig(
+    MonthGrid grid,
+    double fitted,
+    double laneExtent,
+  ) {
     return BoardAxisConfig(
       axis: LazyContentAxis(grid.weekCount, fitted, minTrackExtent: fitted),
-      laneExtent: monthLaneExtent,
+      laneExtent: laneExtent,
       lanePadding: monthStripHeight,
     );
   }
@@ -653,13 +729,16 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     widget.onOpenItem(id);
   }
 
-  /// Gives the board the axes [size], the grid and the layout ask for and,
-  /// when a sync is pending or the lanes a week holds under
-  /// [MonthLayout.fitScreen] changed, the chips of the items the model
-  /// shows on the grid's days, none while they are not ready, all in one
-  /// batch and so one structural notification; the sync also tells each
-  /// day what it hides ([_writeHidden]). Called from the layout callback,
-  /// so the first frame lays the board out at its size.
+  /// Gives the board the axes [size], the grid, the layout, the least day
+  /// width and the week scale ask for, with card lanes where the days are
+  /// large enough for cards ([monthShowsCards]) and,
+  /// when a sync is pending, the days turned from chips to cards or back,
+  /// or the lanes a week holds under [MonthLayout.fitScreen] changed, the
+  /// bars of the items the model shows on the grid's days, none while
+  /// they are not ready, all in one batch and so one structural
+  /// notification; the sync also tells each day what it hides
+  /// ([_writeHidden]). Called from the layout callback, so the first frame
+  /// lays the board out at its size.
   ///
   /// A sync animates only when it follows the model alone, its days are
   /// ready and the last sync's were. Any other sync runs under
@@ -672,24 +751,31 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   void _layoutBoard(Size size) {
     final grid = widget.grid;
     final layout = widget.layout;
-    final fitted = fittedWeekExtent(size.height, grid.weekCount);
-    final lanes = layout == MonthLayout.fitScreen
-        ? monthLanesThatFit(fitted)
-        : null;
+    final fitted = fittedWeekExtent(
+      size.height,
+      grid.weekCount,
+      scale: widget.weekScale,
+    );
     final width = size.width.isFinite && size.width > 0.0
-        ? size.width / grid.columnCount
+        ? math.max(widget.minDayWidth, size.width / grid.columnCount)
         : _columnWidth;
+    final cards = monthShowsCards(width, fitted);
+    final laneExtent = cards ? monthCardExtent : monthLaneExtent;
+    final lanes = layout == MonthLayout.fitScreen
+        ? monthLanesThatFit(fitted, laneExtent: laneExtent)
+        : null;
     final fittedGrid = _fittedGrid;
     final rowsChanged =
         fittedGrid == null ||
         !_sameGrid(grid, fittedGrid) ||
         layout != _fittedLayout ||
-        fitted != _fitted;
+        fitted != _fitted ||
+        cards != _cards;
     final columnsChanged =
         width > 0.0 &&
         (width != _columnWidth ||
             _board.columns.axis.trackCount != grid.columnCount);
-    final sync = _syncPending || lanes != _syncedLanes;
+    final sync = _syncPending || lanes != _syncedLanes || cards != _cards;
     if (!rowsChanged && !columnsChanged && !sync) {
       return;
     }
@@ -724,7 +810,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       if (rowsChanged) {
         // A new axis instance each time, so no measurement outlives its
         // month or its fit.
-        _board.rows = _rowsConfig(grid, fitted);
+        _board.rows = _rowsConfig(grid, fitted, laneExtent);
       }
       if (columnsChanged) {
         _board.columns = BoardAxisConfig(
@@ -746,8 +832,24 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _fittedGrid = grid;
     _fittedLayout = layout;
     _fitted = fitted;
+    if (cards != _cards) {
+      // The build that follows hands the board the other builder, which
+      // asks for every bar again.
+      _chips.clear();
+      _cards = cards;
+    }
     if (columnsChanged) {
       _columnWidth = width;
+    }
+    // Owed by a new grid, which syncs, or a new least day width, which may
+    // only refit the columns.
+    if (_revealPending) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _revealSelected(grid, again: true);
+      });
+      if (ready) {
+        _revealPending = false;
+      }
     }
     if (placements == null) {
       return;
@@ -759,34 +861,31 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _syncedReady = ready;
     _syncedLanes = lanes;
     _placed = next;
-    _writeHidden(grid, hidden, lanes);
+    _writeHidden(grid, hidden, lanes, laneExtent);
     // A key in `_dropped` may still be exiting: the board keeps its child
     // and calls the item builder for it on every delegate rebuild, which
     // must hand back the kept instance.
     _chips.removeWhere((key, kept) {
       return !next.containsKey(key) && !_dropped.containsKey(key);
     });
-    if (_revealPending) {
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        _revealSelected(grid, again: true);
-      });
-      if (ready) {
-        _revealPending = false;
-      }
-    }
   }
 
   /// Tells each cell of [grid] how many chips it hides by [hidden], and
-  /// that its "+N more" takes the last of [lanes]; every cell hides none
-  /// when [hidden] is null. Runs in the layout callback's build scope, so
-  /// the cells that listen rebuild in it.
-  void _writeHidden(MonthGrid grid, Int32List? hidden, int? lanes) {
+  /// that its "+N more" takes the last of [lanes], each [laneExtent] tall;
+  /// every cell hides none when [hidden] is null. Runs in the layout
+  /// callback's build scope, so the cells that listen rebuild in it.
+  void _writeHidden(
+    MonthGrid grid,
+    Int32List? hidden,
+    int? lanes,
+    double laneExtent,
+  ) {
     final cells = grid.weekCount * grid.columnCount;
     for (var i = 0; i < _hidden.length; i++) {
       final count = hidden != null && i < cells ? hidden[i] : 0;
       _hidden[i].value = count == 0
           ? _noneHidden
-          : (count: count, lane: lanes! - 1);
+          : (count: count, lane: lanes! - 1, laneExtent: laneExtent);
     }
   }
 
@@ -920,7 +1019,17 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     BuildContext context,
     BoardItemView<String, MonthChip> view,
   ) {
-    final chip = view.item;
+    return _buildBar(view.item, card: false);
+  }
+
+  Widget _buildCard(
+    BuildContext context,
+    BoardItemView<String, MonthChip> view,
+  ) {
+    return _buildBar(view.item, card: true);
+  }
+
+  Widget _buildBar(MonthChip chip, {required bool card}) {
     final kept = _chips[chip.key];
     if (kept != null && kept.chip == chip) {
       return kept.widget;
@@ -930,6 +1039,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       child: _MonthChipBox(
         key: monthChipKey(chip.key),
         chip: chip,
+        card: card,
         onOpen: _openItem,
       ),
     );
@@ -941,39 +1051,55 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        _layoutBoard(constraints.biggest);
+        final size = constraints.biggest;
+        // The board takes the height under the letters, whose columns the
+        // layout sizes first.
+        _layoutBoard(
+          Size(size.width, math.max(0.0, size.height - weekdayHeaderHeight)),
+        );
         final model = widget.model;
-        return Stack(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Positioned.fill(
-              child: Board<String, MonthChip>(
-                controller: _board,
-                cellBuilder: _cellBuilder,
-                itemBuilder: _itemBuilder,
-                background: _background,
-                selection: _selectionConfig,
-                focusNode: _focusNode,
-                // The board scrolls on its own, not with the screen's
-                // primary scroll controller.
-                primary: false,
-                verticalDetails: ScrollableDetails.vertical(
-                  controller: _scroll,
-                ),
-                // As wide as its lattice, so it never scrolls across.
-                horizontalDetails: const ScrollableDetails.horizontal(
-                  physics: NeverScrollableScrollPhysics(),
-                ),
+            WeekdayHeader(
+              weekdays: widget.grid.weekdays,
+              columnWidth: _columnWidth,
+              horizontal: _horizontal,
+            ),
+            Expanded(
+              child: Stack(
+                children: <Widget>[
+                  Positioned.fill(
+                    child: Board<String, MonthChip>(
+                      controller: _board,
+                      cellBuilder: _cellBuilder,
+                      itemBuilder: _cards ? _cardBuilder : _chipBuilder,
+                      background: _background,
+                      selection: _selectionConfig,
+                      focusNode: _focusNode,
+                      // The board scrolls on its own, not with the screen's
+                      // primary scroll controller.
+                      primary: false,
+                      verticalDetails: ScrollableDetails.vertical(
+                        controller: _scroll,
+                      ),
+                      horizontalDetails: ScrollableDetails.horizontal(
+                        controller: _horizontal,
+                      ),
+                    ),
+                  ),
+                  if (!_daysReady)
+                    Positioned.fill(
+                      child: _MonthLoadOverlay(
+                        error: model.status == CalendarLoadStatus.failed
+                            ? model.error
+                            : null,
+                        onRetry: model.retry,
+                      ),
+                    ),
+                ],
               ),
             ),
-            if (!_daysReady)
-              Positioned.fill(
-                child: _MonthLoadOverlay(
-                  error: model.status == CalendarLoadStatus.failed
-                      ? model.error
-                      : null,
-                  onRetry: model.retry,
-                ),
-              ),
           ],
         );
       },
@@ -1069,7 +1195,8 @@ String _hiddenLabel(int count) {
 
 /// One day of the month board: a tap anywhere on it outside its chips
 /// opens the day and a long press creates on it. Its number sits in the
-/// strip across its top, and while it hides chips, "+N more" in its lane.
+/// strip across its top, and while it hides chips, "+N more" on a soft
+/// yellow banner in its lane.
 class _MonthDayCell extends StatelessWidget {
   const _MonthDayCell({
     super.key,
@@ -1143,8 +1270,8 @@ class _MonthDayCell extends StatelessWidget {
                   Positioned(
                     left: 0.0,
                     right: 0.0,
-                    top: monthStripHeight + hides.lane * monthLaneExtent,
-                    height: monthLaneExtent,
+                    top: monthStripHeight + hides.lane * hides.laneExtent,
+                    height: hides.laneExtent,
                     child: _buildMore(hides.count),
                   ),
               ],
@@ -1155,20 +1282,32 @@ class _MonthDayCell extends StatelessWidget {
     );
   }
 
+  /// "+N more" on a soft yellow banner, inset in its lane as a chip is,
+  /// so the gap between two chips parts it from the chip above.
   Widget _buildMore(int count) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4.0),
-      // Scaled down, rather than cut off, in a day too narrow for it.
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerLeft,
-        child: Text(
-          "+$count more",
-          maxLines: 1,
-          style: const TextStyle(
-            fontSize: 11.0,
-            fontWeight: FontWeight.w600,
-            color: HarborColors.textSecondary,
+      padding: const EdgeInsets.all(1.0),
+      child: DecoratedBox(
+        key: monthMoreKey(day),
+        decoration: BoxDecoration(
+          color: HarborColors.notice,
+          borderRadius: BorderRadius.circular(4.0),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4.0),
+          // Scaled down, rather than cut off, in a day too narrow for it.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              "+$count more",
+              maxLines: 1,
+              style: const TextStyle(
+                fontSize: 11.0,
+                fontWeight: FontWeight.w600,
+                color: HarborColors.onNotice,
+              ),
+            ),
           ),
         ),
       ),
@@ -1194,31 +1333,43 @@ class _MonthDayCell extends StatelessWidget {
         color: color,
       ),
     );
-    if (!isSelected) {
+    if (!isSelected && !isToday) {
       return number;
     }
     return Container(
       width: 30.0,
       height: 22.0,
       alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: HarborColors.primary,
-        borderRadius: BorderRadius.circular(11.0),
-      ),
+      decoration: isSelected
+          ? BoxDecoration(
+              color: HarborColors.primary,
+              borderRadius: BorderRadius.circular(11.0),
+            )
+          : null,
+      foregroundDecoration: isToday ? harborTodayRing(11.0) : null,
       child: number,
     );
   }
 }
 
-/// One chip: a lane-tall box over its lane band's top, holding the bar
-/// inside a 1 px inset. The bar is the type's tint with a 4 px edge in the
-/// type's colour, as [HarborTypeStyle] draws an item, and the title on one
-/// line, rounded at an end where the item starts or ends and square where
-/// it continues. Dimmed while pending, when a tap on it does nothing.
+/// One item's bar in one week: a lane-tall box over its lane band's top,
+/// holding the bar inside a 1 px inset. The bar is the type's tint with a
+/// 4 px edge in the type's colour, as [HarborTypeStyle] draws an item,
+/// rounded at an end where the item starts or ends and square where it
+/// continues. A chip, one [monthLaneExtent] lane tall, holds the title on
+/// one line; a [card], one [monthCardExtent] lane tall, holds the title
+/// over the type's icon and the item's times. Dimmed while pending, when a
+/// tap on it does nothing.
 class _MonthChipBox extends StatelessWidget {
-  const _MonthChipBox({super.key, required this.chip, required this.onOpen});
+  const _MonthChipBox({
+    super.key,
+    required this.chip,
+    required this.card,
+    required this.onOpen,
+  });
 
   final MonthChip chip;
+  final bool card;
   final ValueChanged<String> onOpen;
 
   @override
@@ -1227,11 +1378,23 @@ class _MonthChipBox extends StatelessWidget {
     final item = entry.item;
     final pending = entry.pending;
     final style = harborTypeStyleOf(item.type);
+    final extent = card ? monthCardExtent : monthLaneExtent;
     const radius = Radius.circular(4.0);
     void open() {
       onOpen(entry.id);
     }
 
+    final title = Text(
+      item.title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      softWrap: false,
+      style: TextStyle(
+        fontSize: card ? 12.0 : 11.0,
+        fontWeight: FontWeight.w600,
+        color: HarborColors.text,
+      ),
+    );
     Widget bar = ClipRRect(
       borderRadius: BorderRadius.horizontal(
         left: chip.continuesBefore ? Radius.zero : radius,
@@ -1246,20 +1409,9 @@ class _MonthChipBox extends StatelessWidget {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    softWrap: false,
-                    style: const TextStyle(
-                      fontSize: 11.0,
-                      fontWeight: FontWeight.w600,
-                      color: HarborColors.text,
-                    ),
-                  ),
-                ),
+                child: card
+                    ? _buildCardLines(title, item, style)
+                    : Align(alignment: Alignment.centerLeft, child: title),
               ),
             ),
           ],
@@ -1277,7 +1429,7 @@ class _MonthChipBox extends StatelessWidget {
       excludeSemantics: true,
       child: SizedBox(
         width: double.infinity,
-        height: monthLaneExtent,
+        height: extent,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           // Takes a tap while pending too, doing nothing, so neither the
@@ -1290,14 +1442,45 @@ class _MonthChipBox extends StatelessWidget {
             child: ClipRect(
               child: OverflowBox(
                 alignment: Alignment.topLeft,
-                minHeight: monthLaneExtent - 2.0,
-                maxHeight: monthLaneExtent - 2.0,
+                minHeight: extent - 2.0,
+                maxHeight: extent - 2.0,
                 child: bar,
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// A card's [title] over its type's icon and [item]'s times, as
+  /// [clockLabel] writes them, each line cut short where the day is too
+  /// narrow for it.
+  Widget _buildCardLines(Text title, CalendarItem item, HarborTypeStyle style) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        title,
+        Row(
+          children: <Widget>[
+            Icon(style.icon, size: 11.0, color: style.edge),
+            const SizedBox(width: 3.0),
+            Flexible(
+              child: Text(
+                "${clockLabel(item.startMinute)}-${clockLabel(item.endMinute)}",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: const TextStyle(
+                  fontSize: 11.0,
+                  color: HarborColors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

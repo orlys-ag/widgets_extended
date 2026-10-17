@@ -5,7 +5,9 @@ library;
 
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
+import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
+import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -38,6 +40,28 @@ Color? headerNumberColor(WidgetTester tester, DateTime day) {
   return tester.widget<Text>(number).style!.color;
 }
 
+/// The foreground decoration of the one [Container] under [finder] that
+/// has one, the ring around today's number; null when none has one.
+BoxDecoration? ringIn(WidgetTester tester, Finder finder) {
+  final rings = tester
+      .widgetList<Container>(
+        find.descendant(of: finder, matching: find.byType(Container)),
+      )
+      .map((container) => container.foregroundDecoration)
+      .whereType<BoxDecoration>()
+      .toList();
+  return rings.isEmpty ? null : rings.single;
+}
+
+/// A 2 px ring in [HarborColors.todayRing] on every side.
+final Matcher isTodayRing = predicate<BoxDecoration?>((decoration) {
+  final border = decoration?.border;
+  return border is Border &&
+      border.isUniform &&
+      border.top.color == HarborColors.todayRing &&
+      border.top.width == 2.0;
+}, "a 2 px ring in the today ring colour");
+
 /// Whether the week grid's background fills part of column [col] in the
 /// primary tint.
 bool isTinted(WidgetTester tester, int col) {
@@ -49,10 +73,10 @@ bool isTinted(WidgetTester tester, int col) {
   });
 }
 
-/// The lines the week grid's background draws in the colour of the line
+/// The lines the week grid's foreground draws in the colour of the line
 /// marking the current time.
 List<CanvasRecord> nowLines(WidgetTester tester) {
-  return paintGridBackground(tester).lines.where((line) {
+  return paintGridForeground(tester).lines.where((line) {
     return line.isIn(HarborColors.error);
   }).toList();
 }
@@ -175,5 +199,39 @@ void main() {
     expect(headerNumberColor(tester, thursday), HarborColors.primary);
     expect(nowLines(tester), hasLength(1));
     expect(nowLines(tester).single.from, nearOffset(slot.topLeft));
+  });
+
+  testWidgets("N5 every view rings today's number in the lighter blue, and "
+      "Month rings it over the selected day's fill", (tester) async {
+    await pumpCalendar(tester);
+    await tester.tap(find.byKey(dayCellKey(thursday)));
+    await tester.pumpAndSettle();
+    expect(ringIn(tester, find.byKey(dayCellKey(tuesday))), isTodayRing);
+    expect(ringIn(tester, find.byKey(dayCellKey(thursday))), isNull);
+
+    await pickMode(tester, "Week");
+    expect(ringIn(tester, find.byKey(dayHeaderKey(tuesday))), isTodayRing);
+    expect(ringIn(tester, find.byKey(dayHeaderKey(thursday))), isNull);
+
+    await pickMode(tester, "Day");
+    expect(ringIn(tester, find.byKey(weekStripDayKey(tuesday))), isTodayRing);
+    expect(ringIn(tester, find.byKey(weekStripDayKey(thursday))), isNull);
+
+    await pickMode(tester, "Month");
+    expect(ringIn(tester, find.byKey(monthStripKey(tuesday))), isTodayRing);
+    expect(ringIn(tester, find.byKey(monthStripKey(thursday))), isNull);
+
+    // Today selected: the pill's fill, and the ring over it.
+    await pickMode(tester, "Day");
+    await tester.tap(find.byKey(weekStripDayKey(tuesday)));
+    await tester.pumpAndSettle();
+    await pickMode(tester, "Month");
+    final number = find.descendant(
+      of: find.byKey(monthStripKey(tuesday)),
+      matching: find.byType(Container),
+    );
+    final fill = tester.widget<Container>(number).decoration as BoxDecoration?;
+    expect(fill?.color, HarborColors.primary);
+    expect(ringIn(tester, find.byKey(monthStripKey(tuesday))), isTodayRing);
   });
 }

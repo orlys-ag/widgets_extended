@@ -62,6 +62,17 @@ const List<String> weekdayShortNames = <String>[
 ];
 
 /// Indexed by [weekdayColumn].
+const List<String> weekdayAbbreviations = <String>[
+  "Mon",
+  "Tue",
+  "Wed",
+  "Thu",
+  "Fri",
+  "Sat",
+  "Sun",
+];
+
+/// Indexed by [weekdayColumn].
 const List<String> weekdayLetters = <String>["M", "T", "W", "T", "F", "S", "S"];
 
 DateTime dateOnly(DateTime date) {
@@ -223,6 +234,17 @@ DateTime nextShownDay(DateTime day, int direction, WeekdaySet weekdays) {
   return next;
 }
 
+/// The days of [day]'s Monday-to-Sunday week whose weekday [weekdays]
+/// holds, in order.
+List<DateTime> shownDaysOfWeek(DateTime day, WeekdaySet weekdays) {
+  assert(!weekdays.isEmpty);
+  final monday = weekStartOf(day);
+  return <DateTime>[
+    for (var column = 0; column < DateTime.daysPerWeek; column++)
+      if (weekdays.containsColumn(column)) addDays(monday, column),
+  ];
+}
+
 /// The local midnight of [day], the inverse of [dayNumber].
 DateTime dateOfDayNumber(int day) {
   final utc = DateTime.fromMillisecondsSinceEpoch(
@@ -266,6 +288,21 @@ String clockLabel(int minute) {
   final hours = (minute ~/ 60).toString().padLeft(2, "0");
   final minutes = (minute % 60).toString().padLeft(2, "0");
   return "$hours:$minutes";
+}
+
+/// "45m", "1h" or "1h 30m": [minutes] as the day list writes an item's
+/// length.
+String durationLabel(int minutes) {
+  assert(minutes >= 0);
+  final hours = minutes ~/ 60;
+  final rest = minutes % 60;
+  if (hours == 0) {
+    return "${rest}m";
+  }
+  if (rest == 0) {
+    return "${hours}h";
+  }
+  return "${hours}h ${rest}m";
 }
 
 /// "Today, April 21", "Monday, April 27", or with the year appended when

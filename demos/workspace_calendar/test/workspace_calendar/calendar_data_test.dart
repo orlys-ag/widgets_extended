@@ -1,5 +1,5 @@
-/// The calendar's dates over some of the weekdays: the month grid, and the
-/// shown day near a hidden one.
+/// The calendar's dates over some of the weekdays: the month grid, the
+/// shown day near a hidden one, and the shown days of a week.
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
@@ -60,6 +60,35 @@ void main() {
       );
     });
 
+    test("shownDaysOfWeek lists the shown days of the day's Monday-first "
+        "week", () {
+      expect(shownDaysOfWeek(DateTime(2026, 4, 22), WeekdaySet.all), <DateTime>[
+        for (var day = 20; day <= 26; day++) DateTime(2026, 4, day),
+      ]);
+      // A Sunday is the last day of its week, and May 1 2026 a Friday.
+      expect(
+        shownDaysOfWeek(DateTime(2026, 5, 3), WeekdaySet.workweek),
+        <DateTime>[
+          DateTime(2026, 4, 27),
+          DateTime(2026, 4, 28),
+          DateTime(2026, 4, 29),
+          DateTime(2026, 4, 30),
+          DateTime(2026, 5, 1),
+        ],
+      );
+      expect(
+        shownDaysOfWeek(
+          DateTime(2026, 4, 22),
+          WeekdaySet.of(const <int>[0, 2, 6]),
+        ),
+        <DateTime>[
+          DateTime(2026, 4, 20),
+          DateTime(2026, 4, 22),
+          DateTime(2026, 4, 26),
+        ],
+      );
+    });
+
     test("nextShownDay steps over hidden days either way", () {
       const workweek = WeekdaySet.workweek;
       expect(
@@ -74,6 +103,14 @@ void main() {
         nextShownDay(DateTime(2026, 4, 27), -1, workweek),
         DateTime(2026, 4, 24),
       );
+    });
+  });
+
+  group("D3 durationLabel", () {
+    test("writes minutes, whole hours, and hours with minutes", () {
+      expect(durationLabel(45), "45m");
+      expect(durationLabel(60), "1h");
+      expect(durationLabel(90), "1h 30m");
     });
   });
 }

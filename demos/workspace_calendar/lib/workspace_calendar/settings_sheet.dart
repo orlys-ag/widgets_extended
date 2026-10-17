@@ -1,6 +1,7 @@
 /// The calendar's settings sheet: whether the weekends show, how Month
-/// fits its weeks, the hours the calendar shows and schedules in, and the
-/// least size of the timed grid's cells.
+/// fits its weeks, the hours the calendar shows and schedules in, how the
+/// timed grid labels them, the least width of a day in Week, Day and
+/// Month, and the least height of the timed grid's slots.
 library;
 
 import 'package:flutter/material.dart';
@@ -22,6 +23,11 @@ const ValueKey<String> monthLayoutKey = ValueKey<String>(
 
 /// The key of the sheet's hours slider.
 const ValueKey<String> hoursSliderKey = ValueKey<String>("settings-hours");
+
+/// The key of the sheet's AM/PM hour labels switch.
+const ValueKey<String> hourLabelFormatKey = ValueKey<String>(
+  "settings-hour-label-format",
+);
 
 /// The key of the sheet's day width slider.
 const ValueKey<String> dayWidthSliderKey = ValueKey<String>(
@@ -60,7 +66,8 @@ Future<void> showCalendarSettings(
 
 /// The sheet [showCalendarSettings] opens: a switch for the weekends, a
 /// segmented button for Month's layout, a range slider for the hours, in
-/// whole hours at least one apart, and a slider for each least size.
+/// whole hours at least one apart, a switch for AM/PM hour labels, and a
+/// slider for each least size.
 class CalendarSettingsSheet extends StatefulWidget {
   const CalendarSettingsSheet({
     super.key,
@@ -177,7 +184,21 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               "Items are made and moved inside these hours. One reaching "
               "past them shows cut off, and its form changes it.",
             ),
-            const SizedBox(height: 16.0),
+            SwitchListTile(
+              key: hourLabelFormatKey,
+              contentPadding: EdgeInsets.zero,
+              title: const Text("AM/PM hour labels"),
+              value: _settings.hourLabelFormat == HourLabelFormat.twelveHour,
+              onChanged: (twelveHour) {
+                _set(
+                  _settings.copyWith(
+                    hourLabelFormat: twelveHour
+                        ? HourLabelFormat.twelveHour
+                        : HourLabelFormat.twentyFourHour,
+                  ),
+                );
+              },
+            ),
             _Heading(
               label: "Day width",
               value: "At least ${_settings.minDayWidth.round()} px",

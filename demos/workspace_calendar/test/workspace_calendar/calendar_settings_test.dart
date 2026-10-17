@@ -166,24 +166,87 @@ void main() {
   });
 
   group("C6 CalendarSettings month layout", () {
-    test("starts on Show all items and takes part in copyWith and ==", () {
+    test("starts on Fit to screen and takes part in copyWith and ==", () {
       const settings = CalendarSettings();
-      expect(settings.monthLayout, MonthLayout.showAll);
-      final fit = settings.copyWith(monthLayout: MonthLayout.fitScreen);
-      expect(fit.monthLayout, MonthLayout.fitScreen);
+      expect(settings.monthLayout, MonthLayout.fitScreen);
+      final all = settings.copyWith(monthLayout: MonthLayout.showAll);
+      expect(all.monthLayout, MonthLayout.showAll);
       expect(
-        fit.copyWith(minSlotHeight: 20.0).monthLayout,
-        MonthLayout.fitScreen,
+        all.copyWith(minSlotHeight: 20.0).monthLayout,
+        MonthLayout.showAll,
       );
-      expect(fit == settings, isFalse);
-      final again = settings.copyWith(monthLayout: MonthLayout.fitScreen);
-      expect(fit == again, isTrue);
-      expect(fit.hashCode == settings.hashCode, isFalse);
+      expect(all == settings, isFalse);
+      final again = settings.copyWith(monthLayout: MonthLayout.showAll);
+      expect(all == again, isTrue);
+      expect(all.hashCode == settings.hashCode, isFalse);
     });
 
     test("names each layout", () {
       expect(MonthLayout.showAll.label, "Show all items");
       expect(MonthLayout.fitScreen.label, "Fit to screen");
+    });
+  });
+
+  group("C7 hourLabel", () {
+    test("names a minute as clockLabel does in 24-hour", () {
+      const format = HourLabelFormat.twentyFourHour;
+      expect(hourLabel(0, format), "00:00");
+      expect(hourLabel(13 * 60, format), "13:00");
+      expect(hourLabel(8 * 60 + 15, format), "08:15");
+      expect(hourLabel(24 * 60, format), "24:00");
+    });
+
+    test("names the hour and the half of the day in AM/PM, with minutes "
+        "where there are some", () {
+      const format = HourLabelFormat.twelveHour;
+      expect(hourLabel(0, format), "12 AM");
+      expect(hourLabel(60, format), "1 AM");
+      expect(hourLabel(9 * 60, format), "9 AM");
+      expect(hourLabel(11 * 60, format), "11 AM");
+      expect(hourLabel(12 * 60, format), "12 PM");
+      expect(hourLabel(13 * 60, format), "1 PM");
+      expect(hourLabel(22 * 60, format), "10 PM");
+      expect(hourLabel(24 * 60, format), "12 AM");
+      expect(hourLabel(8 * 60 + 15, format), "8:15 AM");
+      expect(hourLabel(12 * 60 + 5, format), "12:05 PM");
+    });
+  });
+
+  group("C8 CalendarSettings hour label format", () {
+    test("starts on 24-hour and takes part in copyWith and ==", () {
+      const settings = CalendarSettings();
+      expect(settings.hourLabelFormat, HourLabelFormat.twentyFourHour);
+      final twelve = settings.copyWith(
+        hourLabelFormat: HourLabelFormat.twelveHour,
+      );
+      expect(twelve.hourLabelFormat, HourLabelFormat.twelveHour);
+      expect(
+        twelve.copyWith(minSlotHeight: 20.0).hourLabelFormat,
+        HourLabelFormat.twelveHour,
+      );
+      expect(twelve == settings, isFalse);
+      final again = settings.copyWith(
+        hourLabelFormat: HourLabelFormat.twelveHour,
+      );
+      expect(twelve == again, isTrue);
+      expect(twelve.hashCode == settings.hashCode, isFalse);
+    });
+  });
+
+  group("C9 CalendarSettings month week scale", () {
+    test("is 1 at the default slot height and under it, and above it the "
+        "slot height over the default", () {
+      const settings = CalendarSettings();
+      expect(settings.monthWeekScale, 1.0);
+      expect(
+        settings.copyWith(minSlotHeight: minSlotHeightLow).monthWeekScale,
+        1.0,
+      );
+      expect(settings.copyWith(minSlotHeight: 24.0).monthWeekScale, 1.5);
+      expect(
+        settings.copyWith(minSlotHeight: minSlotHeightHigh).monthWeekScale,
+        3.0,
+      );
     });
   });
 }

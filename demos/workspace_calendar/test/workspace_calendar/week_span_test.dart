@@ -1,5 +1,6 @@
 /// How an item's days and minutes map onto the timed grid's tracks, and
-/// back from the span a drop reports.
+/// back from the span a drop reports, and the minute a grid's Add looks
+/// from.
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
@@ -371,5 +372,16 @@ void main() {
         ),
       );
     });
+  });
+
+  test("S5 Add looks from the next whole hour on the clock's day, from the "
+      "clock on a whole hour, and from 08:00 on any other day", () {
+    final tuesday = DateTime(2026, 4, 21);
+    expect(addFromMinute(tuesday, DateTime(2026, 4, 21, 14, 20)), 900);
+    expect(addFromMinute(tuesday, DateTime(2026, 4, 21, 14)), 840);
+    expect(
+      addFromMinute(DateTime(2026, 4, 22), DateTime(2026, 4, 21, 14, 20)),
+      480,
+    );
   });
 }
