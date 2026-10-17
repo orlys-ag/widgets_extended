@@ -438,6 +438,14 @@ view: a tree short enough to fit its viewport declares no visual overflow, so
 the viewport pushes no clip either. The header is now clipped to the sliver's
 paint region at the top as it already was at the bottom, and the 0.0.35
 no-clip fast path still applies to settled headers.
+- Fix: when the tree removed rows after a frame, rows scrolled out of its cache
+region or rows of removed nodes, it also built every other widget waiting to
+rebuild. A widget outside the tree that an earlier post-frame callback had
+called `setState` on threw "Tried to build dirty widget in the wrong build
+scope" in debug builds, and then ignored its `setState` calls until its parent
+rebuilt it; in release builds it was built inside the callback, outside a
+frame. Removing rows now builds nothing, and that widget rebuilds in the next
+frame.
 
 ## 0.0.35
 
