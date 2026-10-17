@@ -1,8 +1,8 @@
-/// What the calendar's settings choose: the weekdays it shows, the hours
-/// it shows and schedules in, how the timed grid labels its hours, how
-/// Month fits its weeks, the least width of a day in Week, Day and Month,
-/// and the least height of the timed grid's slots, which also scales the
-/// height of Month's weeks.
+/// What the calendar's settings choose: the weekdays it shows and the one
+/// its weeks start on, the hours it shows and schedules in, how the timed
+/// grid labels its hours, how Month fits its weeks, the least width of a
+/// day in Week, Day and Month, and the least height of the timed grid's
+/// slots, which also scales the height of Month's weeks.
 library;
 
 import 'dart:math' as math;
@@ -129,12 +129,12 @@ String hourLabel(int minute, HourLabelFormat format) {
   return "$shown:${minutes.toString().padLeft(2, "0")} $half";
 }
 
-/// What the settings sheet chooses: the [weekdays] the calendar shows, the
-/// [hours] it shows and schedules in, the [hourLabelFormat] the timed grid
-/// labels them in, Month's [monthLayout], the least width of a day in
-/// Week, Day and Month, and the least height of the timed grid's slots,
-/// which stretch past them to fill the screen, and through it the height
-/// of Month's weeks.
+/// What the settings sheet chooses: the [weekdays] the calendar shows and
+/// the one its weeks start on, the [hours] it shows and schedules in, the
+/// [hourLabelFormat] the timed grid labels them in, Month's [monthLayout],
+/// the least width of a day in Week, Day and Month, and the least height
+/// of the timed grid's slots, which stretch past them to fill the screen,
+/// and through it the height of Month's weeks.
 @immutable
 class CalendarSettings {
   const CalendarSettings({
@@ -146,8 +146,9 @@ class CalendarSettings {
     this.minSlotHeight = defaultMinSlotHeight,
   });
 
-  /// The weekdays the calendar shows: at least one, which the month grid
-  /// and the timed grid assert.
+  /// The weekdays the calendar shows, at least one, which the month grid
+  /// and the timed grid assert, and the weekday its weeks start on, which
+  /// orders them in every view.
   final WeekdaySet weekdays;
 
   final DayHours hours;

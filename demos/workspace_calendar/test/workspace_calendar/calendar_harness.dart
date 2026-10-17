@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/gestures.dart';
@@ -315,4 +316,16 @@ RecordingCanvas paintGridForeground(WidgetTester tester) {
   final canvas = RecordingCanvas();
   viewport.foreground?.paint(canvas, viewport);
   return canvas;
+}
+
+/// Shows Saturday and Sunday where the open settings sheet hides them and
+/// hides them where it shows them, both in one change, through its days
+/// shown buttons' own callback. Pumps nothing.
+void flipWeekends(WidgetTester tester) {
+  final days = tester.widget<SegmentedButton<int>>(find.byKey(shownDaysKey));
+  days.onSelectionChanged!(
+    days.selected
+        .difference(const <int>{5, 6})
+        .union(const <int>{5, 6}.difference(days.selected)),
+  );
 }

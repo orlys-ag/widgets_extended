@@ -132,14 +132,20 @@ int weekdayColumnOfDay(int day) {
   return (day + 3) % 7;
 }
 
-/// A set of weekdays, each named by its [weekdayColumn]: Monday is 0 and
-/// Sunday 6.
+/// A set of weekdays, each named by its [weekdayColumn], Monday 0 and
+/// Sunday 6, and the weekday a week starts on, [firstColumn]: the shown
+/// weekdays and their order, in every view of the calendar.
 @immutable
 class WeekdaySet {
-  const WeekdaySet._(this._bits);
+  const WeekdaySet._(this._bits, [this.firstColumn = 0]);
 
-  /// The weekdays [columns] names, each 0 to 6.
-  factory WeekdaySet.of(Iterable<int> columns) {
+  /// The weekdays [columns] names, each 0 to 6, in weeks that start on
+  /// the weekday [firstColumn] names.
+  factory WeekdaySet.of(Iterable<int> columns, {int firstColumn = 0}) {
+    assert(
+      firstColumn >= 0 && firstColumn < DateTime.daysPerWeek,
+      "A weekday column is 0 to 6, not $firstColumn.",
+    );
     var bits = 0;
     for (final column in columns) {
       assert(
@@ -148,20 +154,58 @@ class WeekdaySet {
       );
       bits |= 1 << column;
     }
-    return WeekdaySet._(bits);
+    return WeekdaySet._(bits, firstColumn);
   }
 
-  /// Every day of the week.
+  /// Every day of the week, from Monday.
   static const WeekdaySet all = WeekdaySet._(0x7F);
 
-  /// Monday to Friday.
+  /// Monday to Friday, from Monday.
   static const WeekdaySet workweek = WeekdaySet._(0x1F);
 
   /// Bit `n` is set when the set holds the column `n`.
   final int _bits;
 
+  /// The [weekdayColumn] of the weekday a week starts on.
+  final int firstColumn;
+
   bool get isEmpty {
     return _bits == 0;
+  }
+
+  /// These weekdays in weeks that start on the weekday [column] names.
+  WeekdaySet startingOn(int column) {
+    return WeekdaySet.of(columns, firstColumn: column);
+  }
+
+  /// The weekday columns the set holds, in week order: from [firstColumn]
+  /// on, wrapping past Sunday.
+  List<int> get columns {
+    return <int>[
+      for (var offset = 0; offset < DateTime.daysPerWeek; offset++)
+        if (containsColumn(columnAt(offset))) columnAt(offset),
+    ];
+  }
+
+  /// The weekday column [offset] days after the week's first day.
+  int columnAt(int offset) {
+    return (firstColumn + offset) % DateTime.daysPerWeek;
+  }
+
+  /// The days from the week's first day to the weekday [column]: 0 to 6.
+  int offsetOf(int column) {
+    return (column - firstColumn) % DateTime.daysPerWeek;
+  }
+
+  /// The first day of the week holding [date], at local midnight.
+  DateTime weekStartOf(DateTime date) {
+    return addDays(dateOnly(date), -offsetOf(weekdayColumn(date)));
+  }
+
+  /// The [dayNumber] of the first day of the week holding the [dayNumber]
+  /// [day].
+  int weekStartOfDay(int day) {
+    return day - offsetOf(weekdayColumnOfDay(day));
   }
 
   /// Whether the set holds the weekday column [column].
@@ -181,21 +225,23 @@ class WeekdaySet {
 
   @override
   bool operator ==(Object other) {
-    return other is WeekdaySet && other._bits == _bits;
+    return other is WeekdaySet &&
+        other._bits == _bits &&
+        other.firstColumn == firstColumn;
   }
 
   @override
   int get hashCode {
-    return _bits.hashCode;
+    return Object.hash(_bits, firstColumn);
   }
 
   @override
   String toString() {
     final names = <String>[
-      for (var column = 0; column < DateTime.daysPerWeek; column++)
-        if (containsColumn(column)) weekdayShortNames[column],
+      for (final column in columns) weekdayShortNames[column],
     ];
-    return "WeekdaySet(${names.join(", ")})";
+    return "WeekdaySet(${names.join(", ")}; "
+        "from ${weekdayShortNames[firstColumn]})";
   }
 }
 
@@ -234,14 +280,14 @@ DateTime nextShownDay(DateTime day, int direction, WeekdaySet weekdays) {
   return next;
 }
 
-/// The days of [day]'s Monday-to-Sunday week whose weekday [weekdays]
-/// holds, in order.
+/// The days of [day]'s week, which starts on [weekdays]' first weekday,
+/// whose weekday [weekdays] holds, in order.
 List<DateTime> shownDaysOfWeek(DateTime day, WeekdaySet weekdays) {
   assert(!weekdays.isEmpty);
-  final monday = weekStartOf(day);
+  final start = weekdays.weekStartOf(day);
   return <DateTime>[
-    for (var column = 0; column < DateTime.daysPerWeek; column++)
-      if (weekdays.containsColumn(column)) addDays(monday, column),
+    for (final column in weekdays.columns)
+      addDays(start, weekdays.offsetOf(column)),
   ];
 }
 
@@ -337,8 +383,9 @@ String itemCountLabel(int count) {
   return "$count items";
 }
 
-/// The weeks one month occupies, Monday first, with a column for each
-/// weekday [weekdays] holds. Row 0 is the first week holding a shown day
+/// The weeks one month occupies, each starting on [weekdays]' first
+/// weekday, with a column for each weekday [weekdays] holds, in its
+/// order. Row 0 is the first week holding a shown day
 /// of the month and the last row the last such week, so a month takes
 /// four to six rows; the cells before the month's first day and after its
 /// last belong to the adjacent months.
@@ -350,11 +397,10 @@ class MonthGrid {
     WeekdaySet weekdays = WeekdaySet.all,
   }) {
     assert(!weekdays.isEmpty, "A month grid shows at least one weekday.");
-    final leading = weekdayColumn(DateTime(year, month));
+    final leading = weekdays.offsetOf(weekdayColumn(DateTime(year, month)));
     final days = daysInMonth(year, month);
     final columns = <int>[
-      for (var column = 0; column < DateTime.daysPerWeek; column++)
-        if (weekdays.containsColumn(column)) column,
+      for (final column in weekdays.columns) weekdays.offsetOf(column),
     ];
     bool holdsShownDay(int week) {
       for (final column in columns) {
@@ -400,10 +446,12 @@ class MonthGrid {
   final int month;
   final WeekdaySet weekdays;
 
-  /// Cells of the month's first week, Monday first, before its first day.
+  /// Cells of the month's first week, from its first weekday, before its
+  /// first day.
   final int _leading;
 
-  /// The weekday column each grid column shows, ascending.
+  /// The days from a week's first day to the weekday each grid column
+  /// shows, ascending.
   final List<int> _columns;
 
   /// The week of the month, counted from its first, that row 0 shows.

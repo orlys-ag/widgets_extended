@@ -1082,8 +1082,20 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.byKey(dayCellKey(DateTime(2026, 4, 23))));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    for (var i = 0; i < 25; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
     final card = find.byKey(itemCardKey(uxFlowId));
+    // Whether the card lies in [day]'s block: below its header and above
+    // the next day's.
+    bool cardIn(DateTime day) {
+      final top = tester.getRect(card).top;
+      final next = find.byKey(dayListHeaderKey(addDays(day, 1)));
+      return top > tester.getRect(find.byKey(dayListHeaderKey(day))).top &&
+          (next.evaluate().isEmpty || top < tester.getRect(next).top);
+    }
+
+    expect(cardIn(DateTime(2026, 4, 23)), isTrue);
     expect(fadeOf(tester, card), 0.5);
     expect(indicatorSizeIn(tester, card), const Size(12.0, 12.0));
     expect(
@@ -1101,12 +1113,14 @@ void main() {
     );
     await tester.tap(find.byKey(dayCellKey(today)));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(card, findsNothing);
+    for (var i = 0; i < 25; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
 
     await tester.pump(latency);
     await tester.pumpAndSettle();
     expect(find.text("Saving failed."), findsOneWidget);
+    expect(cardIn(today), isTrue);
     expect(card, findsOneWidget);
     expect(fadeOf(tester, card), 1.0);
     expect(

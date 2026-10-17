@@ -113,4 +113,64 @@ void main() {
       expect(durationLabel(90), "1h 30m");
     });
   });
+
+  group("D4 WeekdaySet's first weekday", () {
+    test("orders the columns from it, finds each week's first day, and "
+        "tells two sets apart by it", () {
+      final fromWednesday = WeekdaySet.workweek.startingOn(2);
+      expect(fromWednesday.firstColumn, 2);
+      expect(fromWednesday.columns, <int>[2, 3, 4, 0, 1]);
+      expect(fromWednesday.offsetOf(1), 6);
+      // April 21, 2026 is a Tuesday, and April 22 a Wednesday.
+      expect(
+        fromWednesday.weekStartOf(DateTime(2026, 4, 21)),
+        DateTime(2026, 4, 15),
+      );
+      expect(
+        fromWednesday.weekStartOf(DateTime(2026, 4, 22)),
+        DateTime(2026, 4, 22),
+      );
+      expect(
+        fromWednesday.weekStartOfDay(dayNumber(DateTime(2026, 4, 21))),
+        dayNumber(DateTime(2026, 4, 15)),
+      );
+      expect(fromWednesday == WeekdaySet.workweek, isFalse);
+      expect(
+        fromWednesday == WeekdaySet.of(<int>[0, 1, 2, 3, 4], firstColumn: 2),
+        isTrue,
+      );
+    });
+  });
+
+  group("D5 MonthGrid and shownDaysOfWeek from the first weekday", () {
+    // May 2026 runs from a Friday to a Sunday.
+    test("starts each week on the first weekday", () {
+      final may = MonthGrid(2026, 5, weekdays: WeekdaySet.all.startingOn(6));
+      expect(may.firstDay, DateTime(2026, 4, 26));
+    });
+
+    test("holds the weeks a later first weekday adds", () {
+      final may = MonthGrid(2026, 5, weekdays: WeekdaySet.all.startingOn(6));
+      expect(may.weekCount, 6);
+    });
+
+    test("puts the shown weekdays' columns in the week's order", () {
+      final may = MonthGrid(
+        2026,
+        5,
+        weekdays: WeekdaySet.workweek.startingOn(6),
+      );
+      expect(may.dateAt(1, 0), DateTime(2026, 5, 4));
+    });
+
+    test("lists a week's shown days from its first weekday", () {
+      expect(
+        shownDaysOfWeek(
+          DateTime(2026, 4, 21),
+          WeekdaySet.workweek.startingOn(6),
+        ),
+        <DateTime>[for (var day = 20; day <= 24; day++) DateTime(2026, 4, day)],
+      );
+    });
+  });
 }

@@ -1,7 +1,7 @@
 /// A workspace calendar on the board module, over a calendar API, in four
-/// views: Agenda, a month grid that folds into the selected day's week
-/// while the day list under it, the selected day's items beside their
-/// start times and lengths, is scrolled;
+/// views: Agenda, a month grid over a list of the days, one after another,
+/// each day's items beside their start times and lengths, the month
+/// folding into the selected day's week as the list is scrolled;
 /// Month, the month's weeks with each item as a chip on the days it
 /// covers; and Week and Day, timed grids of the selected day's week and of
 /// that day alone, where items are created, moved, resized, edited and
@@ -20,8 +20,14 @@
 /// three-letter names. Each day is a cell, its number on a circle as the strip
 /// shows it, with a badge when it has items; a tap selects it through the
 /// board's cell selection, and the arrow keys move that selection once the
-/// board has focus. The day list marks each whole hour between its items
-/// that no item covers with a dashed row. The board always holds
+/// board has focus. The list under it ([DayList]) runs both ways from the
+/// selected day: a selected day scrolls to its top, animating, and a drag
+/// or a fling of the list selects each day it brings to the top. Each
+/// day's header sticks at the top while its items scroll under it; the
+/// list marks each whole hour between a day's items that no item covers
+/// with a dashed row, and a day without items with one reading "No items".
+/// A drag of the list folds the month, and a downward drag on the folded
+/// strip unfolds it. The board always holds
 /// the whole month of the selected day; while it folds, it is clipped to
 /// a shrinking window shifted so the selected week shows, and once folded,
 /// Day's strip takes the window's place, opening on that week. Selecting a
@@ -41,7 +47,8 @@
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
-/// The settings sheet chooses whether the weekends show, how Month fits
+/// The settings sheet chooses the weekday a week starts on, which every
+/// view's weeks and columns follow, and which weekdays show, how Month fits
 /// its weeks, the hours the calendar shows and schedules in, whether Week
 /// and Day label them AM/PM, the least width of a day in Week, Day and
 /// Month, and the least height of the timed grids' slots, whose ratio to
@@ -296,16 +303,16 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return BoardSelection(anchor: cell, focus: cell);
   }
 
-  /// The days the timed grid shows: the selected day's Monday-to-Sunday
-  /// week in the week mode, the selected day alone in the day mode, and
-  /// null in Agenda and Month.
+  /// The days the timed grid shows: the selected day's week, from the
+  /// settings' first weekday, in the week mode, the selected day alone in
+  /// the day mode, and null in Agenda and Month.
   ({DateTime first, int count})? get _timedDays {
     switch (_mode) {
       case _CalendarMode.agenda:
       case _CalendarMode.month:
         return null;
       case _CalendarMode.week:
-        return (first: weekStartOf(_selected), count: 7);
+        return (first: _settings.weekdays.weekStartOf(_selected), count: 7);
       case _CalendarMode.day:
         return (first: _selected, count: 1);
     }
@@ -477,10 +484,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   /// A drag that moves the list's content up folds the month into its
-  /// week; a drag that pulls the list down at its top unfolds it. Only
-  /// drags count, so a fling that coasts back to the top leaves the week
-  /// showing. Overscroll counts as well, so a list too short to scroll
-  /// still folds and unfolds.
+  /// week; the list runs on both ways, so a downward drag on the folded
+  /// strip unfolds it ([_buildGrid]). Only drags count, so the scroll that
+  /// brings a selected day to the list's top folds nothing. Overscroll
+  /// counts as well.
   bool _handleListScroll(ScrollNotification notification) {
     if (notification.depth != 0) {
       return false;
@@ -495,14 +502,18 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     } else {
       return false;
     }
-    final metrics = notification.metrics;
     if (delta > 0.0) {
       _setCollapsed(true);
-    } else if (delta < 0.0 && metrics.pixels <= metrics.minScrollExtent) {
-      _setCollapsed(false);
     }
     return false;
   }
+
+  /// The distance down a drag on the folded strip goes before it unfolds
+  /// the month.
+  static const double _unfoldDistance = 16.0;
+
+  /// How far down the drag on the folded strip has gone.
+  double _unfoldDrag = 0.0;
 
   void _openSettings() {
     showCalendarSettings(
@@ -512,8 +523,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// New weekdays move a selected day they hide to the nearest shown one
-  /// and rebuild the month board's lattice, whose cells they change.
+  /// New weekdays, or a new first weekday, move a selected day they hide
+  /// to the nearest shown one and rebuild the month board's lattice, whose
+  /// cells they change.
   void _applySettings(CalendarSettings settings) {
     final weekdaysChanged = settings.weekdays != _settings.weekdays;
     setState(() {
@@ -701,8 +713,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           Expanded(
             child: TimedGrid(
               // Each mode builds its own grid, which opens scrolled to its
-              // opening time.
-              key: ValueKey<_CalendarMode>(_mode),
+              // opening time, and so does a week of one shown weekday, as a
+              // grid keeps one day column or more than one.
+              key: ValueKey<(_CalendarMode, bool)>((
+                _mode,
+                days.count > 1 && _settings.weekdays.columns.length > 1,
+              )),
               model: _model,
               settings: _settings,
               firstDay: days.first,
@@ -731,46 +747,24 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 0.0),
           child: _buildCalendarCard(),
         ),
-        // Only the day header and the list follow the model; the month
+        // A list of its own: it follows the model itself, and the month
         // board's cells follow it through their own marker listeners.
         Expanded(
-          child: ListenableBuilder(
-            listenable: _model,
-            builder: (context, child) {
-              final ready = _model.status == CalendarLoadStatus.ready;
-              final entries = _model.itemsOn(_selected);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16.0, 20.0, 16.0, 12.0),
-                    child: _DayHeader(
-                      title: dayTitle(_selected, _today.value),
-                      count: ready ? entries.length : null,
-                    ),
-                  ),
-                  Expanded(
-                    child: NotificationListener<ScrollNotification>(
-                      onNotification: _handleListScroll,
-                      // Keyed by day, so another day's list is a new tree
-                      // that starts at its top and does not animate in.
-                      child: DayList(
-                        key: ValueKey<DateTime>(_selected),
-                        status: _model.status,
-                        error: _model.error,
-                        onRetry: _model.retry,
-                        entries: entries,
-                        format: _settings.hourLabelFormat,
-                        onEdit: (id) {
-                          showEditForm(context, model: _model, id: id);
-                        },
-                        onDelete: _deleteFromCard,
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _handleListScroll,
+            child: DayList(
+              key: const ValueKey<String>("day-list"),
+              model: _model,
+              weekdays: _settings.weekdays,
+              format: _settings.hourLabelFormat,
+              selectedDay: _selected,
+              today: _today.value,
+              onTopDay: _select,
+              onEdit: (id) {
+                showEditForm(context, model: _model, id: id);
+              },
+              onDelete: _deleteFromCard,
+            ),
           ),
         ),
       ],
@@ -910,7 +904,18 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               key: const ValueKey<String>("calendar-grid"),
               height: lerpDouble(monthHeight, _rowHeight, t),
               child: t == 1.0
-                  ? _buildStrip()
+                  ? GestureDetector(
+                      onVerticalDragStart: (details) {
+                        _unfoldDrag = 0.0;
+                      },
+                      onVerticalDragUpdate: (details) {
+                        _unfoldDrag += details.delta.dy;
+                        if (_unfoldDrag >= _unfoldDistance) {
+                          _setCollapsed(false);
+                        }
+                      },
+                      child: _buildStrip(),
+                    )
                   : ClipRect(
                       child: OverflowBox(
                         alignment: Alignment.topCenter,
@@ -1052,45 +1057,6 @@ class _CalendarHeader extends StatelessWidget {
             ),
           ),
         ),
-      ],
-    );
-  }
-}
-
-class _DayHeader extends StatelessWidget {
-  const _DayHeader({required this.title, required this.count});
-
-  final String title;
-
-  /// The day's item count, or null while the shown range is not ready.
-  final int? count;
-
-  @override
-  Widget build(BuildContext context) {
-    final count = this.count;
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 16.0,
-              fontWeight: FontWeight.w700,
-              color: HarborColors.text,
-            ),
-          ),
-        ),
-        if (count != null)
-          Text(
-            itemCountLabel(count),
-            style: const TextStyle(
-              fontSize: 15.0,
-              fontWeight: FontWeight.w600,
-              color: HarborColors.textSecondary,
-            ),
-          ),
       ],
     );
   }

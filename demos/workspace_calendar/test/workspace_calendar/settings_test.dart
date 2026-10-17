@@ -9,6 +9,7 @@ import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
+import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -108,10 +109,19 @@ Finder arrowIn(String id, IconData icon) {
   return find.descendant(of: blockFinder(id), matching: find.byIcon(icon));
 }
 
-/// Opens the sheet, flips the weekends switch with a tap and closes it.
+/// The labels of the open settings sheet's days shown buttons, in order.
+List<String> shownDayLabels(WidgetTester tester) {
+  final days = tester.widget<SegmentedButton<int>>(find.byKey(shownDaysKey));
+  return <String>[
+    for (final segment in days.segments) (segment.label! as Text).data!,
+  ];
+}
+
+/// Opens the sheet, shows or hides Saturday and Sunday together and closes
+/// it.
 Future<void> toggleWeekends(WidgetTester tester) async {
   await openSettings(tester);
-  await tester.tap(find.byKey(weekendsSwitchKey));
+  flipWeekends(tester);
   await tester.pumpAndSettle();
   await closeSettings(tester);
 }
@@ -680,5 +690,94 @@ void main() {
     await tester.tap(find.byTooltip("Next month"));
     await tester.pumpAndSettle();
     expect(find.text("Friday, May 29"), findsOneWidget);
+  });
+
+  testWidgets("W6 the week starts on the weekday the settings pick, in "
+      "the sheet's days and in every view", (tester) async {
+    await pumpCalendar(tester);
+    await openSettings(tester);
+    await tester.tap(find.byKey(weekStartKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Sunday").last);
+    await tester.pumpAndSettle();
+    expect(shownDayLabels(tester), <String>[
+      "Sun",
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat",
+    ]);
+    await closeSettings(tester);
+
+    expect(weekdayHeaderLetters(tester), <String>[
+      "Sun",
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat",
+    ]);
+    expect(
+      tester.getRect(dayFinder(2026, 3, 29)).left,
+      near(tester.getRect(monthGridFinder()).left),
+    );
+
+    await pickMode(tester, "Day");
+    expect(
+      tester.getRect(find.byKey(weekStripDayKey(DateTime(2026, 4, 19)))).left,
+      near(tester.getRect(find.byType(WeekStrip)).left),
+    );
+
+    await pickMode(tester, "Week");
+    expect(headerFinder(DateTime(2026, 4, 19)), findsOneWidget);
+
+    await pickMode(tester, "Month");
+    expect(weekdayHeaderLetters(tester), <String>[
+      "S",
+      "M",
+      "T",
+      "W",
+      "T",
+      "F",
+      "S",
+    ]);
+  });
+
+  testWidgets("W7 the sheet hides any weekday from the views, and keeps "
+      "the last one shown", (tester) async {
+    await pumpCalendar(tester);
+    await openSettings(tester);
+    await tester.tap(
+      find.descendant(of: find.byKey(shownDaysKey), matching: find.text("Wed")),
+    );
+    await tester.pumpAndSettle();
+    await closeSettings(tester);
+    expect(weekdayHeaderLetters(tester), <String>[
+      "Mon",
+      "Tue",
+      "Thu",
+      "Fri",
+      "Sat",
+      "Sun",
+    ]);
+    await pickMode(tester, "Week");
+    expect(headerFinder(DateTime(2026, 4, 22)), findsNothing);
+
+    await openSettings(tester);
+    tester
+        .widget<SegmentedButton<int>>(find.byKey(shownDaysKey))
+        .onSelectionChanged!(const <int>{0});
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byKey(shownDaysKey), matching: find.text("Mon")),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SegmentedButton<int>>(find.byKey(shownDaysKey)).selected,
+      const <int>{0},
+    );
   });
 }

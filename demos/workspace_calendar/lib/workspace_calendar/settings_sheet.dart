@@ -1,7 +1,8 @@
-/// The calendar's settings sheet: whether the weekends show, how Month
-/// fits its weeks, the hours the calendar shows and schedules in, how the
-/// timed grid labels them, the least width of a day in Week, Day and
-/// Month, and the least height of the timed grid's slots.
+/// The calendar's settings sheet: the weekday a week starts on and the
+/// weekdays the calendar shows, how Month fits its weeks, the hours the
+/// calendar shows and schedules in, how the timed grid labels them, the
+/// least width of a day in Week, Day and Month, and the least height of
+/// the timed grid's slots.
 library;
 
 import 'package:flutter/material.dart';
@@ -11,10 +12,11 @@ import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
-/// The key of the sheet's weekends switch.
-const ValueKey<String> weekendsSwitchKey = ValueKey<String>(
-  "settings-weekends",
-);
+/// The key of the sheet's menu of the weekday a week starts on.
+const ValueKey<String> weekStartKey = ValueKey<String>("settings-week-start");
+
+/// The key of the sheet's buttons of the weekdays the calendar shows.
+const ValueKey<String> shownDaysKey = ValueKey<String>("settings-shown-days");
 
 /// The key of the sheet's month layout buttons.
 const ValueKey<String> monthLayoutKey = ValueKey<String>(
@@ -44,7 +46,8 @@ String hoursLabel(DayHours hours) {
   return "${clockLabel(hours.start)} - ${clockLabel(hours.end)}";
 }
 
-/// Opens the settings sheet on [settings]. Each change applies at once
+/// Opens the settings sheet on [settings], at most nine tenths of the
+/// screen's height, scrolling past it. Each change applies at once
 /// through [onChanged], so the calendar behind the sheet shows it while
 /// the sheet is open. Completes when the sheet closes.
 Future<void> showCalendarSettings(
@@ -56,6 +59,9 @@ Future<void> showCalendarSettings(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
+    constraints: BoxConstraints(
+      maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+    ),
     // Light, so the calendar the changes apply to shows through.
     barrierColor: Colors.black12,
     builder: (context) {
@@ -64,8 +70,10 @@ Future<void> showCalendarSettings(
   );
 }
 
-/// The sheet [showCalendarSettings] opens: a switch for the weekends, a
-/// segmented button for Month's layout, a range slider for the hours, in
+/// The sheet [showCalendarSettings] opens: a menu of the weekday a week
+/// starts on, a button for each weekday, in the week's order, that shows
+/// or hides it, never hiding the last one shown, a segmented button for
+/// Month's layout, a range slider for the hours, in
 /// whole hours at least one apart, a switch for AM/PM hour labels, and a
 /// slider for each least size.
 class CalendarSettingsSheet extends StatefulWidget {
@@ -114,6 +122,7 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
   @override
   Widget build(BuildContext context) {
     final hours = _settings.hours;
+    final weekdays = _settings.weekdays;
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(24.0, 0.0, 24.0, 16.0),
@@ -130,20 +139,78 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               ),
             ),
             const SizedBox(height: 8.0),
-            SwitchListTile(
-              key: weekendsSwitchKey,
-              contentPadding: EdgeInsets.zero,
-              title: const Text("Show weekends"),
-              value: _settings.weekdays != WeekdaySet.workweek,
-              onChanged: (show) {
+            Row(
+              children: <Widget>[
+                const Expanded(
+                  child: Text(
+                    "Week starts on",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _Heading.labelStyle,
+                  ),
+                ),
+                DropdownButton<int>(
+                  key: weekStartKey,
+                  value: weekdays.firstColumn,
+                  underline: const SizedBox.shrink(),
+                  items: <DropdownMenuItem<int>>[
+                    for (
+                      var column = 0;
+                      column < DateTime.daysPerWeek;
+                      column++
+                    )
+                      DropdownMenuItem<int>(
+                        value: column,
+                        child: Text(weekdayNames[column]),
+                      ),
+                  ],
+                  onChanged: (column) {
+                    if (column != null) {
+                      _set(
+                        _settings.copyWith(
+                          weekdays: weekdays.startingOn(column),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
+            const _Heading(label: "Days shown"),
+            const SizedBox(height: 8.0),
+            SegmentedButton<int>(
+              key: shownDaysKey,
+              expandedInsets: EdgeInsets.zero,
+              multiSelectionEnabled: true,
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                padding: WidgetStatePropertyAll<EdgeInsetsGeometry>(
+                  EdgeInsets.zero,
+                ),
+              ),
+              segments: <ButtonSegment<int>>[
+                for (var offset = 0; offset < DateTime.daysPerWeek; offset++)
+                  ButtonSegment<int>(
+                    value: weekdays.columnAt(offset),
+                    label: Text(
+                      weekdayAbbreviations[weekdays.columnAt(offset)],
+                      style: const TextStyle(fontSize: 13.0),
+                    ),
+                  ),
+              ],
+              selected: weekdays.columns.toSet(),
+              onSelectionChanged: (selected) {
                 _set(
                   _settings.copyWith(
-                    weekdays: show ? WeekdaySet.all : WeekdaySet.workweek,
+                    weekdays: WeekdaySet.of(
+                      selected,
+                      firstColumn: weekdays.firstColumn,
+                    ),
                   ),
                 );
               },
             ),
-            const SizedBox(height: 8.0),
+            const SizedBox(height: 16.0),
             const _Heading(label: "Month layout"),
             const SizedBox(height: 8.0),
             SegmentedButton<MonthLayout>(
@@ -248,6 +315,13 @@ class _Heading extends StatelessWidget {
   final String label;
   final String? value;
 
+  /// The style of a section's label.
+  static const TextStyle labelStyle = TextStyle(
+    fontSize: 15.0,
+    fontWeight: FontWeight.w600,
+    color: HarborColors.text,
+  );
+
   @override
   Widget build(BuildContext context) {
     final value = this.value;
@@ -256,14 +330,7 @@ class _Heading extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 15.0,
-            fontWeight: FontWeight.w600,
-            color: HarborColors.text,
-          ),
-        ),
+        Text(label, style: labelStyle),
         if (value != null) ...<Widget>[
           const SizedBox(width: 12.0),
           Expanded(

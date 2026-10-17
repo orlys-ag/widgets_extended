@@ -236,4 +236,27 @@ void main() {
     expect(monthLanesThatFit(136.0, laneExtent: monthCardExtent), 3);
     expect(monthLanesThatFit(136.0 - 1 / 64, laneExtent: monthCardExtent), 2);
   });
+
+  test("F9 a bar splits at the weeks' first weekday and continues across "
+      "it", () {
+    final fromSunday = MonthGrid(
+      2026,
+      4,
+      weekdays: WeekdaySet.all.startingOn(6),
+    );
+    final placements = monthPlacementsOf(<ShownItem>[
+      task("x", april(25), 9, dayCount: 2),
+    ], fromSunday);
+    expect(
+      <String>[for (final placement in placements) placement.item.key],
+      <String>["x@2026-04-19", "x@2026-04-26"],
+    );
+    expect(
+      <(bool, bool)>[
+        for (final placement in placements)
+          (placement.item.continuesBefore, placement.item.continuesAfter),
+      ],
+      <(bool, bool)>[(false, true), (true, false)],
+    );
+  });
 }

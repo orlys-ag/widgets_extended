@@ -232,11 +232,12 @@ class DayCell extends StatelessWidget {
 /// The height of a [WeekdayHeader].
 const double weekdayHeaderHeight = 32.0;
 
-/// The letters of the shown weekdays over a month grid, or with
-/// [abbreviated] their three-letter names as a [DayCell] in the week strip
-/// shows them, one per column: equal shares of the header's width, or with
-/// [columnWidth], columns that wide, scrolled across by [horizontal]'s
-/// offset as the grid under them is, and clipped to the header.
+/// The letters of the shown weekdays over a month grid, in [weekdays]'
+/// order, or with [abbreviated] their three-letter names as a [DayCell] in
+/// the week strip shows them, one per column: equal shares of the header's
+/// width, or with [columnWidth], columns that wide, scrolled across by
+/// [horizontal]'s offset as the grid under them is, and clipped to the
+/// header.
 class WeekdayHeader extends StatelessWidget {
   const WeekdayHeader({
     super.key = const ValueKey<String>("weekday-header"),
@@ -263,12 +264,11 @@ class WeekdayHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final width = columnWidth;
     final letters = <Widget>[
-      for (var column = 0; column < weekdayLetters.length; column++)
-        if (weekdays.containsColumn(column))
-          if (width == null)
-            Expanded(child: _buildLetter(column))
-          else
-            SizedBox(width: width, child: _buildLetter(column)),
+      for (final column in weekdays.columns)
+        if (width == null)
+          Expanded(child: _buildLetter(column))
+        else
+          SizedBox(width: width, child: _buildLetter(column)),
     ];
     if (width == null) {
       return SizedBox(

@@ -19,7 +19,8 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 const double weekStripHeight = 48.0;
 
 /// As many days side by side as [weekdays] holds of a week, opening on the
-/// shown days of [selectedDay]'s Monday-to-Sunday week. Each is a [DayCell]
+/// shown days of [selectedDay]'s week, which starts on [weekdays]' first
+/// weekday. Each is a [DayCell]
 /// as Agenda's folded month shows it: its weekday's three-letter name
 /// over its number on a circle, the selected day's in the primary colour,
 /// today's ringed, and a badge on a day with items once the model has read
@@ -30,8 +31,8 @@ const double weekStripHeight = 48.0;
 /// to rest on a whole day, the nearest to where a fling would carry the
 /// strip. While the strip moves other than to follow the selected day, it
 /// reports each day that comes to its middle through [onBrowse]; once it
-/// rests, it asks the model to read the shown days of the Monday-to-Sunday
-/// weeks of the days it shows, so their markers show, and Day, which reads
+/// rests, it asks the model to read the shown days of the weeks of the
+/// days it shows, so their markers show, and Day, which reads
 /// a selected day's whole week, shows any of them at once on a tap. A new
 /// [selectedDay] the strip does not show the middle of brings the strip,
 /// after the frame, to the shown days of that day's week, sliding when
@@ -80,15 +81,16 @@ class _WeekStripState extends State<WeekStrip> {
   /// view centres on, so the days before index 0 lie at negative offsets.
   static const Key _forwardKey = ValueKey<String>("strip-forward");
 
-  /// The Monday of [WeekStrip.selectedDay]'s week when the strip was
+  /// The first day of [WeekStrip.selectedDay]'s week when the strip was
   /// first built. Index 0 is that week's first shown day, and each index
   /// after or before it the next or the previous shown day.
-  late final DateTime _origin = weekStartOf(widget.selectedDay);
+  late final DateTime _origin = widget.weekdays.weekStartOf(widget.selectedDay);
 
-  /// The weekday columns [WeekStrip.weekdays] holds, ascending.
+  /// The days from a week's first day to each weekday [WeekStrip.weekdays]
+  /// holds, ascending.
   late final List<int> _columns = <int>[
-    for (var column = 0; column < DateTime.daysPerWeek; column++)
-      if (widget.weekdays.containsColumn(column)) column,
+    for (final column in widget.weekdays.columns)
+      widget.weekdays.offsetOf(column),
   ];
 
   final ScrollController _scroll = ScrollController();
@@ -140,8 +142,8 @@ class _WeekStripState extends State<WeekStrip> {
   /// The day at [index].
   DateTime _dayAt(int index) {
     final week = _floorDiv(index, _count);
-    final column = _columns[index - week * _count];
-    return addDays(_origin, week * DateTime.daysPerWeek + column);
+    final offset = _columns[index - week * _count];
+    return addDays(_origin, week * DateTime.daysPerWeek + offset);
   }
 
   /// The index of [day], or where [day] is not shown, of the first shown
@@ -149,9 +151,9 @@ class _WeekStripState extends State<WeekStrip> {
   int _indexOf(DateTime day) {
     final days = daysBetween(_origin, day);
     final week = _floorDiv(days, DateTime.daysPerWeek);
-    final column = days - week * DateTime.daysPerWeek;
+    final offset = days - week * DateTime.daysPerWeek;
     var position = 0;
-    while (position < _count && _columns[position] < column) {
+    while (position < _count && _columns[position] < offset) {
       position++;
     }
     return week * _count + position;
@@ -170,7 +172,8 @@ class _WeekStripState extends State<WeekStrip> {
         middle <= position.pixels + position.viewportDimension) {
       return;
     }
-    final target = _indexOf(weekStartOf(widget.selectedDay)) * extent;
+    final target =
+        _indexOf(widget.weekdays.weekStartOf(widget.selectedDay)) * extent;
     _following = true;
     if ((target - position.pixels).abs() <= _count * extent) {
       _scroll

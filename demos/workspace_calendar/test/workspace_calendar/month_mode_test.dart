@@ -263,10 +263,11 @@ Future<void> setSlotHeight(WidgetTester tester, double height) async {
   await tester.pumpAndSettle();
 }
 
-/// Opens the calendar settings, flips the weekends switch and closes them.
+/// Opens the calendar settings, shows or hides Saturday and Sunday together
+/// and closes them.
 Future<void> toggleWeekends(WidgetTester tester) async {
   await openSettings(tester);
-  await tester.tap(find.byKey(weekendsSwitchKey));
+  flipWeekends(tester);
   await tester.pumpAndSettle();
   await closeSettings(tester);
 }
@@ -1170,7 +1171,7 @@ void main() {
       }
 
       controller.addStructuralListener(onStructural);
-      await tester.tap(find.byKey(weekendsSwitchKey));
+      flipWeekends(tester);
       await tester.pump();
       expect(structural, 1);
       controller.removeStructuralListener(onStructural);

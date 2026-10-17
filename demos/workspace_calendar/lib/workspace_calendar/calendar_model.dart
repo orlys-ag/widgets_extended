@@ -69,6 +69,10 @@ class CalendarModel extends ChangeNotifier {
   /// The reads in flight, in the order they were sent.
   final List<_Read> _reads = <_Read>[];
 
+  /// The unread days, by [dayNumber], whose last read failed, until a read
+  /// is sent for them again.
+  final Set<int> _failedDays = <int>{};
+
   int? _shownFirst;
   int? _shownLast;
 
@@ -141,6 +145,17 @@ class CalendarModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether [day] is read.
+  bool isRead(DateTime day) {
+    return _readDays.containsKey(dayNumber(day));
+  }
+
+  /// Whether the last read of [day], which is unread, failed, and no read
+  /// has been sent for it since.
+  bool readFailed(DateTime day) {
+    return _failedDays.contains(dayNumber(day));
+  }
+
   /// Whether the shown range is exactly [first] to [last].
   bool isShown(DateTime first, DateTime last) {
     return _shownFirst == dayNumber(first) && _shownLast == dayNumber(last);
@@ -179,7 +194,8 @@ class CalendarModel extends ChangeNotifier {
   /// showing them, so the markers of days about to show appear once read,
   /// as the week strip's other weeks do. Sends nothing when every day is
   /// read or a read in flight covers the unread ones. Changes neither the
-  /// shown range nor [status], and a failed read leaves its days unread.
+  /// shown range nor [status], and a failed read leaves its days unread and
+  /// marks them [readFailed].
   void prefetch(DateTime first, DateTime last) {
     final unread = _unreadSpanOf(dayNumber(first), dayNumber(last));
     if (unread == null ||
@@ -225,6 +241,9 @@ class CalendarModel extends ChangeNotifier {
   _Read _send(int first, int last) {
     final read = _Read(first, last);
     _reads.add(read);
+    _failedDays.removeWhere((day) {
+      return day >= first && day <= last;
+    });
     _api
         .list(dateOfDayNumber(first), dateOfDayNumber(last))
         .then(
@@ -238,9 +257,11 @@ class CalendarModel extends ChangeNotifier {
     return read;
   }
 
-  /// A read's answer. A read the shown range does not wait on changes no
-  /// load state, so it notifies only when it marked days read, whose
-  /// markers [dayHasShownItems] may now show.
+  /// A read's answer. A failed one marks [readFailed] each of its days that
+  /// no read has filled and no read in flight covers. A read the shown
+  /// range does not wait on changes no load state, so it notifies only
+  /// when it marked days read, whose markers [dayHasShownItems] may now
+  /// show, or failed.
   void _finishRead(
     _Read read, {
     List<Map<String, Object?>>? items,
@@ -251,8 +272,18 @@ class CalendarModel extends ChangeNotifier {
     }
     _reads.remove(read);
     final marked = items != null && _applyRead(read, items);
+    var failed = false;
+    if (items == null) {
+      for (var day = read.first; day <= read.last; day++) {
+        if (!_readDays.containsKey(day) &&
+            _inFlightCovering(day, day) == null &&
+            _failedDays.add(day)) {
+          failed = true;
+        }
+      }
+    }
     if (!identical(_awaited, read)) {
-      if (marked) {
+      if (marked || failed) {
         notifyListeners();
       }
       return;

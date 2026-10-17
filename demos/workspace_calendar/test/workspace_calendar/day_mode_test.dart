@@ -5,6 +5,7 @@ library;
 import 'dart:ui' as ui;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
@@ -402,21 +403,31 @@ void main() {
   testWidgets("D5 Day mode reads the selected day's week, so a step within "
       "it shows its day at once", (tester) async {
     final api = await pumpCalendar(tester, size: tall);
+    // Agenda read April's grid and its list the weeks of the days it built:
+    // the last day read ends a week.
+    var readTo = today;
+    for (final request in api.requests) {
+      final last = request.last;
+      if (last != null && last.isAfter(readTo)) {
+        readTo = last;
+      }
+    }
+    expect(readTo.weekday, DateTime.sunday);
     final lists = listCalls(api);
     await pickMode(tester, "Day");
     expect(listCalls(api), lists);
 
-    // April's grid runs to May 3, which the first read covered.
-    await step(tester, "Next day", times: 12);
-    expect(gridDay(tester), DateTime(2026, 5, 3));
+    await step(tester, "Next day", times: daysBetween(today, readTo));
+    expect(gridDay(tester), readTo);
     expect(listCalls(api), lists);
 
     await tester.tap(find.byTooltip("Next day"));
     await tester.pump();
     expect(listCalls(api), lists + 1);
     final read = api.requests.last;
-    expect(read.first, DateTime(2026, 5, 4));
-    expect(read.last, DateTime(2026, 5, 10));
+    final monday = addDays(readTo, 1);
+    expect(read.first, monday);
+    expect(read.last, addDays(monday, 6));
     final overlay = find.descendant(
       of: find.byType(TimedGrid),
       matching: find.byType(CircularProgressIndicator),
@@ -425,13 +436,13 @@ void main() {
     await tester.pump(api.latency);
     await tester.pump();
     expect(overlay, findsNothing);
-    expect(gridDay(tester), DateTime(2026, 5, 4));
+    expect(gridDay(tester), monday);
 
-    for (var day = 5; day <= 10; day++) {
+    for (var day = 1; day <= 6; day++) {
       await tester.tap(find.byTooltip("Next day"));
       await tester.pump();
-      expect(gridDay(tester), DateTime(2026, 5, day));
-      expect(overlay, findsNothing, reason: "May $day");
+      expect(gridDay(tester), addDays(monday, day));
+      expect(overlay, findsNothing, reason: "${addDays(monday, day)}");
     }
     expect(listCalls(api), lists + 1);
     await tester.pumpAndSettle();

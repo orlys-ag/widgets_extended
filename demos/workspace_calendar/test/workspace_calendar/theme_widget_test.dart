@@ -4,6 +4,7 @@ library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
+import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -166,7 +167,13 @@ void main() {
     await tester.tap(dayFinder(DateTime(2026, 4, 25)));
     await tester.pumpAndSettle();
     expect(
-      textColorOf(tester, find.text("No items on this day.")),
+      textColorOf(
+        tester,
+        find.descendant(
+          of: find.byKey(dayListEmptyKey(DateTime(2026, 4, 25))),
+          matching: find.text("No items"),
+        ),
+      ),
       HarborColors.textMuted,
     );
   });

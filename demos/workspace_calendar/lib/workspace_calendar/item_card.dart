@@ -31,6 +31,20 @@ class ItemCard extends StatelessWidget {
 
   final ShownItem entry;
 
+  /// The summaries [item]'s schema gives it, in the schema's order, which
+  /// the card shows under its title.
+  static List<String> summariesOf(CalendarItem item) {
+    final schema = schemaOf(item.type);
+    final summaries = <String>[];
+    for (final key in schema.summaryKeys) {
+      final summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
+      if (summary != null) {
+        summaries.add(summary);
+      }
+    }
+    return summaries;
+  }
+
   /// How the time range names its times, as [hourLabel] writes them.
   final HourLabelFormat format;
 
@@ -45,14 +59,7 @@ class ItemCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final item = entry.item;
     final style = harborTypeStyleOf(item.type);
-    final schema = schemaOf(item.type);
-    final summaries = <String>[];
-    for (final key in schema.summaryKeys) {
-      final summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
-      if (summary != null) {
-        summaries.add(summary);
-      }
-    }
+    final summaries = summariesOf(item);
     final pending = entry.pending;
     Widget card = DecoratedBox(
       decoration: BoxDecoration(

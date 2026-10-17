@@ -618,14 +618,37 @@ void main() {
     expect(model.dayHasShownItems(DateTime(2026, 4, 28)), isTrue);
     expect(model.dayHasShownItems(DateTime(2026, 4, 29)), isFalse);
 
-    // A failed one notifies nothing and leaves its days unread, so the
-    // next one sends again.
+    // A failed one leaves its days unread and marks them failed, so the
+    // next one sends again, which clears the mark.
     model.prefetch(DateTime(2026, 5, 4), DateTime(2026, 5, 10));
     harness.lastCall.fail();
     await settle();
-    expect(harness.notifications, notifications + 1);
+    expect(harness.notifications, notifications + 2);
+    expect(model.isRead(DateTime(2026, 5, 4)), isFalse);
+    expect(model.readFailed(DateTime(2026, 5, 4)), isTrue);
+    expect(model.readFailed(DateTime(2026, 4, 28)), isFalse);
     model.prefetch(DateTime(2026, 5, 4), DateTime(2026, 5, 10));
     expect(harness.api.calls, hasLength(4));
+    expect(model.readFailed(DateTime(2026, 5, 4)), isFalse);
+  });
+
+  test("M11 a day is read once a read fills it, and a failed read of the "
+      "shown range marks its days failed too", () async {
+    final harness = Harness();
+    final model = harness.model;
+    model.show(weekFirst, weekLast);
+    expect(model.isRead(weekFirst), isFalse);
+    harness.lastCall.fail();
+    await settle();
+    expect(model.status, CalendarLoadStatus.failed);
+    expect(model.readFailed(weekFirst), isTrue);
+
+    model.retry();
+    expect(model.readFailed(weekFirst), isFalse);
+    harness.lastCall.succeed(<Map<String, Object?>>[]);
+    await settle();
+    expect(model.isRead(weekFirst), isTrue);
+    expect(model.readFailed(weekFirst), isFalse);
   });
 
   group("first free", () {

@@ -13,7 +13,6 @@ import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:flutter/gestures.dart';
@@ -287,7 +286,7 @@ void main() {
     final api = await pumpDay(tester);
     await tester.tap(find.byTooltip("Calendar settings"));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(weekendsSwitchKey));
+    flipWeekends(tester);
     await tester.pumpAndSettle();
     await tester.tapAt(const Offset(195.0, 20.0));
     await tester.pumpAndSettle();
@@ -435,7 +434,7 @@ void main() {
     expect(find.text("Today, April 21"), findsOneWidget);
     expect(find.text("May 2026"), findsOneWidget);
 
-    await tester.drag(find.byType(DayList), const Offset(0.0, 120.0));
+    await tester.drag(find.byType(WeekStrip), const Offset(0.0, 120.0));
     await tester.pumpAndSettle();
     expect(find.text("Apr 2026"), findsOneWidget);
 

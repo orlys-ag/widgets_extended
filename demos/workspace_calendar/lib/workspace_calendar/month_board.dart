@@ -78,7 +78,7 @@ const BoardAnimationStyle monthBoardAnimationStyle =
     );
 
 /// The key of the item [id]'s bar in the calendar week starting on
-/// [weekStart], a Monday: `"<id>@<yyyy-mm-dd>"`.
+/// [weekStart]: `"<id>@<yyyy-mm-dd>"`.
 String monthSegmentKey(String id, DateTime weekStart) {
   return "$id@${isoDate(weekStart)}";
 }
@@ -114,16 +114,16 @@ class MonthChip {
     required this.continuesAfter,
   });
 
-  /// [monthSegmentKey] of the item's id and the week's Monday.
+  /// [monthSegmentKey] of the item's id and the week's first day.
   final String key;
 
   final ShownItem entry;
 
-  /// Whether the item's first day precedes the week's Monday, whatever
+  /// Whether the item's first day precedes the week's first day, whatever
   /// weekdays show.
   final bool continuesBefore;
 
-  /// Whether the item's last day follows the week's Sunday, whatever
+  /// Whether the item's last day follows the week's last day, whatever
   /// weekdays show.
   final bool continuesAfter;
 
@@ -172,10 +172,9 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
     final first = dayNumber(item.day);
     final last = first + item.dayCount - 1;
     for (var row = 0; row < weeks; row++) {
-      final rowFirst = days[row * columns];
-      final monday = rowFirst - weekdayColumnOfDay(rowFirst);
-      final sunday = monday + DateTime.daysPerWeek - 1;
-      if (last < monday || first > sunday) {
+      final weekFirst = grid.weekdays.weekStartOfDay(days[row * columns]);
+      final weekLast = weekFirst + DateTime.daysPerWeek - 1;
+      if (last < weekFirst || first > weekLast) {
         continue;
       }
       var from = -1;
@@ -195,10 +194,10 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
       placements.add(
         BoardPlacement<MonthChip>(
           MonthChip(
-            key: monthSegmentKey(entry.id, dateOfDayNumber(monday)),
+            key: monthSegmentKey(entry.id, dateOfDayNumber(weekFirst)),
             entry: entry,
-            continuesBefore: first < monday,
-            continuesAfter: last > sunday,
+            continuesBefore: first < weekFirst,
+            continuesAfter: last > weekLast,
           ),
           BoardSpan(rowStart: row, colStart: from, colSpan: to - from + 1),
         ),

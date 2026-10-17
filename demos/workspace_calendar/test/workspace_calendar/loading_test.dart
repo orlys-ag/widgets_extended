@@ -9,6 +9,7 @@ import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
+import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -17,7 +18,9 @@ import 'calendar_harness.dart';
 const Duration latency = Duration(seconds: 1);
 const Duration oneFrame = Duration(milliseconds: 16);
 
-final Finder loading = find.byKey(const ValueKey<String>("day-list-loading"));
+/// The loading row of May 21, the day a step to May from April 21
+/// selects.
+final Finder loading = find.byKey(dayListLoadingKey(DateTime(2026, 5, 21)));
 
 Finder dayFinder(DateTime day) {
   return find.byKey(dayCellKey(day));
@@ -41,6 +44,15 @@ Finder overlayShowing(Finder content) {
   return find.descendant(of: find.byType(TimedGrid), matching: content);
 }
 
+/// Pumps 400 ms of frames, in which the list scrolls to a newly
+/// selected day.
+Future<void> revealFrames(WidgetTester tester) async {
+  await tester.pump();
+  for (var i = 0; i < 25; i++) {
+    await tester.pump(const Duration(milliseconds: 16));
+  }
+}
+
 int listCalls(MockCalendarApi api) {
   return api.requests.where((request) {
     return request.method == CalendarMethod.list;
@@ -55,12 +67,12 @@ void main() {
     );
 
     await tester.tap(find.byTooltip("Next month"));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 900));
+    await revealFrames(tester);
+    await tester.pump(const Duration(milliseconds: 500));
     expect(loading, findsOneWidget);
     await tester.pump(const Duration(milliseconds: 100));
-    expect(loading, findsNothing);
     await tester.pumpAndSettle();
+    expect(loading, findsNothing);
     expect(
       find.descendant(
         of: find.byKey(itemCardKey(releasePlanningId)),
@@ -69,8 +81,8 @@ void main() {
       findsOneWidget,
     );
 
-    // A failed read shows its error and Retry inside the list, which still
-    // folds and unfolds the month.
+    // A failed read shows its error and Retry in each day it left
+    // unread, and the month still folds and unfolds.
     api.failurePolicy = (request) {
       return request.method == CalendarMethod.list ? "Reading failed." : null;
     };
@@ -78,29 +90,39 @@ void main() {
     await tester.pump();
     await tester.pump(latency);
     await tester.pumpAndSettle();
-    expect(find.text("Reading failed."), findsOneWidget);
-    expect(find.widgetWithText(TextButton, "Retry"), findsOneWidget);
+    final failed = find.byKey(dayListFailedKey(DateTime(2026, 6, 21)));
+    final retry = find.descendant(
+      of: failed,
+      matching: find.widgetWithText(TextButton, "Retry"),
+    );
+    expect(
+      find.descendant(of: failed, matching: find.text("Reading failed.")),
+      findsOneWidget,
+    );
+    expect(retry, findsOneWidget);
     final row = rowHeight(tester);
     await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
     await tester.pumpAndSettle();
     expect(tester.getSize(gridFinder()).height, row);
-    await tester.drag(find.byType(DayList), const Offset(0.0, 120.0));
+    await tester.drag(find.byType(WeekStrip), const Offset(0.0, 120.0));
     await tester.pumpAndSettle();
     expect(tester.getSize(gridFinder()).height, 5 * row);
     expect(
       tester.getRect(dayFinder(DateTime(2026, 6, 1))).topLeft,
       tester.getRect(gridFinder()).topLeft,
     );
+    await tester.tap(dayFinder(DateTime(2026, 6, 21)));
+    await tester.pumpAndSettle();
 
     api.failurePolicy = null;
     final reads = listCalls(api);
-    await tester.tap(find.widgetWithText(TextButton, "Retry"));
+    await tester.tap(retry);
     await tester.pump();
     expect(listCalls(api), reads + 1);
     await tester.pump(latency);
     await tester.pumpAndSettle();
     expect(find.text("Sunday, June 21"), findsOneWidget);
-    expect(find.text("No items on this day."), findsOneWidget);
+    expect(find.byKey(dayListEmptyKey(DateTime(2026, 6, 21))), findsOneWidget);
     await tester.tap(dayFinder(DateTime(2026, 6, 4)));
     await tester.pumpAndSettle();
     expect(
@@ -133,8 +155,7 @@ void main() {
     );
 
     await tester.tap(find.byTooltip("Next month"));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await revealFrames(tester);
     expect(loading, findsOneWidget);
     // Read with April before May showed.
     expect(hasMarker(tester, DateTime(2026, 4, 27)), isTrue);
