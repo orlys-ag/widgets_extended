@@ -43,17 +43,6 @@ int _openingMinuteOf(GridTracks tracks, DateTime now) {
   return minute.clamp(hours.start, hours.end - minutesPerSlot);
 }
 
-/// The minute the Add of a grid looks for a free hour on [day] from: on
-/// [now]'s day the next whole hour, [now] itself when it is one, and
-/// [_openingMinute] on any other day, where the grid opens.
-int addFromMinute(DateTime day, DateTime now) {
-  if (dayNumber(day) != dayNumber(now)) {
-    return _openingMinute;
-  }
-  final minute = now.hour * 60 + now.minute;
-  return (minute + 59) ~/ 60 * 60;
-}
-
 /// The style the grid animates its blocks with: every family over
 /// [harborMotionDuration] on [harborMotionCurve].
 const BoardAnimationStyle timedGridAnimationStyle = BoardAnimationStyle.uniform(
@@ -557,7 +546,9 @@ CreateRange createRangeOver(
 /// picks the rectangle of slots it covers, at once with a mouse or a
 /// stylus and after a press and hold on touch, so a touch drag without one
 /// scrolls the grid, and a tap, or a hold let go where it began, picks one
-/// hour from its slot, or up to the end of the hours.
+/// hour from its slot, or up to the end of the hours. The slots picked
+/// stay marked, as a range being dragged is, until the create flow
+/// [onCreate] opens closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than the least sizes [settings] choose; past those, it scrolls.
@@ -608,8 +599,9 @@ class TimedGrid extends StatefulWidget {
   final ValueChanged<DateTime> onSelectDay;
   final ValueChanged<String> onOpenItem;
 
-  /// Reports the slots a create gesture on empty cells picked.
-  final ValueChanged<CreateRange> onCreate;
+  /// Opens the create flow for the slots a create gesture on empty cells
+  /// picked, and completes when it closes.
+  final Future<void> Function(CreateRange range) onCreate;
 
   @override
   State<TimedGrid> createState() {
@@ -744,6 +736,14 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   /// The drag the board runs, or null.
   _GridDrag? _drag;
+
+  /// The first and the last slot of the range whose create flow is open,
+  /// which the background marks; null while none is.
+  ({({int row, int col}) anchor, ({int row, int col}) focus})? _creating;
+
+  /// Counts the create flows opened, so only the last one's close clears
+  /// [_creating].
+  int _creates = 0;
 
   /// Where the line marking [TimedGrid.now] sits, or null where the grid
   /// does not show it.
@@ -1604,7 +1604,32 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (cell == null) {
       return;
     }
-    widget.onCreate(createRangeAt(_tracks, cell));
+    _create(cell, null, createRangeAt(_tracks, cell));
+  }
+
+  /// Reports [range] through [TimedGrid.onCreate], marking the slots from
+  /// [anchor] to [focus], or to the end of [range] in [anchor]'s column
+  /// where [focus] is null, until the create flow closes.
+  void _create(
+    ({int row, int col}) anchor,
+    ({int row, int col})? focus,
+    CreateRange range,
+  ) {
+    final create = ++_creates;
+    setState(() {
+      _creating = (
+        anchor: anchor,
+        focus:
+            focus ?? (row: _tracks.rowOf(range.endMinute) - 1, col: anchor.col),
+      );
+    });
+    widget.onCreate(range).whenComplete(() {
+      if (mounted && create == _creates) {
+        setState(() {
+          _creating = null;
+        });
+      }
+    });
   }
 
   Drag? _beginRange(Offset position) {
@@ -1643,11 +1668,12 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (!mounted || !identical(_range, range)) {
       return;
     }
-    final created = range.focus == range.anchor
+    final hold = range.focus == range.anchor;
+    final created = hold
         ? createRangeAt(_tracks, range.anchor)
         : createRangeOver(_tracks, range.anchor, range.focus);
     _clearRange(range);
-    widget.onCreate(created);
+    _create(range.anchor, hold ? null : range.focus, created);
   }
 
   void _clearRange(_RangeDrag range) {
@@ -1778,8 +1804,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
           background: _TimedGridPainter(
             tracks: _tracks,
             today: widget.today,
-            rangeAnchor: range?.anchor,
-            rangeFocus: range?.focus,
+            rangeAnchor: range?.anchor ?? _creating?.anchor,
+            rangeFocus: range?.focus ?? _creating?.focus,
             landing: drag != null && drag.kind == BoardDragKind.move
                 ? drag.target
                 : null,
@@ -2514,7 +2540,8 @@ class _LoadOverlay extends StatelessWidget {
 
 /// The grid behind the cells, drawn for the visible body tracks alone: the
 /// body, and across the slots the weekend and today's columns; the create range
-/// being dragged and the slots a move would land on, each filled like today's
+/// being dragged, or whose create flow is open, and the slots a move would
+/// land on, each filled like today's
 /// column and edged in the primary colour so it shows over that column too; and
 /// a line at the top of each slot row, under the last one and at the left of
 /// each day column, across the slots. The room above and below the slots shows

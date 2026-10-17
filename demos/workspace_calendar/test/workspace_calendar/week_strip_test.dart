@@ -509,7 +509,7 @@ void main() {
     /// Taps Today, and checks halfway through the slide that the strip
     /// shows the last day of today's week and the first of the next.
     Future<void> slideToToday() async {
-      await tester.tap(find.byTooltip("Today"));
+      await tapToday(tester);
       await tester.pump();
       await tester.pump();
       await tester.pump(harborMotionDuration ~/ 2);

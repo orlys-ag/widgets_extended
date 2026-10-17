@@ -776,26 +776,20 @@ void main() {
     );
   });
 
-  testWidgets("E1 the calendar opens out of edit mode, and the sheet's "
-      "switch turns it on and off, the app bar showing Add only in it", (
-    tester,
-  ) async {
+  testWidgets("E1 the calendar opens out of edit mode, and the settings "
+      "sheet has no edit mode switch", (tester) async {
     await pumpCalendar(tester);
-    expect(find.byTooltip("Add"), findsNothing);
-
+    await openBar(tester);
+    final pencil = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip("Edit mode"),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(pencil.isSelected, isFalse);
     await openSettings(tester);
-    SwitchListTile editSwitch() {
-      return tester.widget<SwitchListTile>(find.byKey(editModeKey));
-    }
-
-    expect(editSwitch().value, isFalse);
-    await tester.tap(find.byKey(editModeKey));
-    await tester.pumpAndSettle();
-    expect(editSwitch().value, isTrue);
-    await closeSettings(tester);
-    expect(find.byTooltip("Add"), findsOneWidget);
-
-    await toggleEditMode(tester);
-    expect(find.byTooltip("Add"), findsNothing);
+    // Setup sanity: the sheet shows.
+    expect(find.text("Lock past days"), findsOneWidget);
+    expect(find.text("Edit mode"), findsNothing);
   });
 }

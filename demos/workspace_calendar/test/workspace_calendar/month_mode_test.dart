@@ -786,26 +786,6 @@ void main() {
   );
 
   testWidgets(
-    "M13 Month's Add creates on the selected day with no floating button; "
-    "Agenda's opens Week",
-    (tester) async {
-      await pumpSeededMonth(tester, editing: true);
-      await tester.tap(find.byTooltip("Add"));
-      await tester.pumpAndSettle();
-      await pickTask(tester);
-      expect(find.text("2026-04-21"), findsOneWidget);
-      await tester.tap(formButton("Cancel"));
-      await tester.pumpAndSettle();
-      expect(find.byTooltip("Add item"), findsNothing);
-
-      await pickMode(tester, "Agenda");
-      await tester.tap(find.byTooltip("Add"));
-      await tester.pumpAndSettle();
-      expect(find.text("Week"), findsOneWidget);
-    },
-  );
-
-  testWidgets(
     "M14 the chevrons step a month and a key onto next month's muted day "
     "re-dates the grid",
     (tester) async {
@@ -1236,7 +1216,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(28)]);
 
-      await tester.tap(find.byTooltip("Add"));
+      // On the day's number strip: its chips fill the rest of it.
+      await tester.longPress(stripFinder(april(28)));
       await tester.pumpAndSettle();
       await pickTask(tester);
       await chooseOption(tester, "Start", "16:00");
@@ -2093,7 +2074,7 @@ void main() {
       await tester.tap(find.byTooltip("Next month"));
       await tester.pump(harnessLatency);
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip("Today"));
+      await tapToday(tester);
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(22)]);
     },

@@ -176,7 +176,7 @@ void main() {
     expect(find.byTooltip("Next week"), findsOneWidget);
 
     await openPicker(tester);
-    await tester.tap(find.byTooltip("Today"));
+    await tapToday(tester);
     await tester.pumpAndSettle();
     expect(find.byType(MonthStrip), findsNothing);
   });

@@ -373,15 +373,4 @@ void main() {
       );
     });
   });
-
-  test("S5 Add looks from the next whole hour on the clock's day, from the "
-      "clock on a whole hour, and from 08:00 on any other day", () {
-    final tuesday = DateTime(2026, 4, 21);
-    expect(addFromMinute(tuesday, DateTime(2026, 4, 21, 14, 20)), 900);
-    expect(addFromMinute(tuesday, DateTime(2026, 4, 21, 14)), 840);
-    expect(
-      addFromMinute(DateTime(2026, 4, 22), DateTime(2026, 4, 21, 14, 20)),
-      480,
-    );
-  });
 }

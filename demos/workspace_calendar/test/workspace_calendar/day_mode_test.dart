@@ -204,7 +204,7 @@ Future<void> pumpGrid(
           now: now,
           onSelectDay: (day) {},
           onOpenItem: (id) {},
-          onCreate: (range) {},
+          onCreate: (range) async {},
           showsDayHeader: false,
         ),
       ),
@@ -228,7 +228,6 @@ void main() {
     expect(gridDay(tester), today);
     expect(find.byKey(dayCellKey(today)), findsNothing);
     expect(find.byType(DayList), findsNothing);
-    expect(find.byTooltip("Add"), findsOneWidget);
     expect(find.byTooltip("Add item"), findsNothing);
     expect(find.byTooltip("Previous day"), findsOneWidget);
     expect(find.byTooltip("Next day"), findsOneWidget);
@@ -938,48 +937,6 @@ void main() {
     await pickMode(tester, "Week");
     expect(blockFinder(ninety), findsOneWidget);
     expect(lineOf(ninety, "17:00-18:30"), findsNothing);
-  });
-
-  testWidgets("D16 Day's Add creates on the selected day at its first free "
-      "hour from the next whole hour, and from 08:00 on another day", (
-    tester,
-  ) async {
-    final api = MockCalendarApi(
-      seed: <Map<String, Object?>>[taskJson("Busy", today, 15 * 60, 16 * 60)],
-      latency: harnessLatency,
-    );
-    await pumpCalendar(
-      tester,
-      editing: true,
-      api: api,
-      clock: () {
-        return DateTime(2026, 4, 21, 14, 20);
-      },
-    );
-    await pickMode(tester, "Day");
-
-    // 15:00 is the next whole hour, and taken until 16:00.
-    await tester.tap(find.byTooltip("Add"));
-    await tester.pumpAndSettle();
-    await expectCreateForm(
-      tester,
-      type: "Task",
-      day: "2026-04-21",
-      start: "16:00",
-      end: "17:00",
-    );
-
-    await tester.tap(find.byTooltip("Next day"));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip("Add"));
-    await tester.pumpAndSettle();
-    await expectCreateForm(
-      tester,
-      type: "Task",
-      day: "2026-04-22",
-      start: "08:00",
-      end: "09:00",
-    );
   });
 
   testWidgets("D17 Day counts the items before its hours in a yellow row "

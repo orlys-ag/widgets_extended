@@ -1046,15 +1046,12 @@ void main() {
     expect(api.requests.last.method, CalendarMethod.delete);
   });
 
-  testWidgets("W8 Agenda's Add opens Week mode, and no view has a floating "
-      "add button", (tester) async {
+  testWidgets("W8 no view has a floating add button", (tester) async {
     await pumpCalendar(tester, editing: true);
     expect(find.byType(FloatingActionButton), findsNothing);
 
-    await tester.tap(find.byTooltip("Add"));
-    await tester.pumpAndSettle();
+    await pickMode(tester, "Week");
     expect(blockFinder(designCritiqueId), findsOneWidget);
-    expect(find.byTooltip("Add"), findsOneWidget);
     expect(find.byType(FloatingActionButton), findsNothing);
   });
 
@@ -2364,34 +2361,6 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets("W29 Week's Add creates on the selected day", (tester) async {
-    await pumpCalendar(
-      tester,
-      editing: true,
-      api: MockCalendarApi(latency: harnessLatency),
-      clock: () {
-        return DateTime(2026, 4, 21, 14, 20);
-      },
-    );
-    await pickMode(tester, "Week");
-    await tester.tap(headerFinder(DateTime(2026, 4, 23)));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip("Add"));
-    await tester.pumpAndSettle();
-    expect(find.text("New item"), findsOneWidget);
-    await tester.tap(find.text("Task").last);
-    await tester.pumpAndSettle();
-    expect(find.text("2026-04-23"), findsOneWidget);
-    expect(
-      find.descendant(
-        of: dropdownFinder("Start"),
-        matching: find.text("08:00"),
-      ),
-      findsOneWidget,
-    );
-  });
-
   /// Drags the bottom strip of [id]'s block down by two slots with a
   /// mouse, which the grid's scrollable never takes, and lets the drop
   /// settle.
@@ -2789,5 +2758,38 @@ void main() {
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
     expect(tester.getRect(block).top, near(before.top - cell.height));
+  });
+
+  testWidgets("W41 in edit mode a tap on an empty slot marks the hour it "
+      "creates until the create flow closes", (tester) async {
+    await pumpCalendar(tester, editing: true, size: tall);
+    await pickMode(tester, "Week");
+
+    /// The rects the background edges in the primary colour.
+    Iterable<Rect> marks() {
+      return paintGridBackground(tester).records
+          .where((record) {
+            return !record.isLine &&
+                !record.isFill &&
+                record.isIn(HarborColors.primary);
+          })
+          .map((record) {
+            return record.rect!;
+          });
+    }
+
+    expect(marks(), isEmpty);
+    await tapCell(tester, rowOf(20 * 60), colOf(6));
+    expect(find.text("New item"), findsOneWidget);
+    final viewport = gridViewport(tester);
+    final hour = viewport
+        .rectOfCell(rowOf(20 * 60), colOf(6))!
+        .expandToInclude(viewport.rectOfCell(rowOf(20 * 60 + 45), colOf(6))!);
+    expect(marks().single, rectMoreOrLessEquals(hour.deflate(1.0)));
+
+    await tester.tapAt(const Offset(10.0, 10.0));
+    await tester.pumpAndSettle();
+    expect(find.text("New item"), findsNothing);
+    expect(marks(), isEmpty);
   });
 }

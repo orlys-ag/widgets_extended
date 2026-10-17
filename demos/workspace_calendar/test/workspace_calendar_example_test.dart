@@ -484,14 +484,16 @@ void main() {
     await tester.pumpAndSettle();
     // Setup sanity: the step left today's month.
     expect(find.text("May 2026"), findsOneWidget);
-    await tapAndSettle(tester, find.byTooltip("Today"));
+    await tapToday(tester);
+    await tester.pumpAndSettle();
     expect(find.text("Apr 2026"), findsOneWidget);
 
     await pickMode(tester, "Week");
     await tapAndSettle(tester, find.byTooltip("Next week"));
     await tester.pump(harnessLatency);
     await tester.pumpAndSettle();
-    await tapAndSettle(tester, find.byTooltip("Today"));
+    await tapToday(tester);
+    await tester.pumpAndSettle();
     expect(find.byKey(dayHeaderKey(today)), findsOneWidget);
   });
 
@@ -513,5 +515,67 @@ void main() {
       ),
       16.0,
     );
+  });
+
+  testWidgets("E18 the app bar has no Today or Add, and its chevron slides "
+      "a bar down from under it, pushing the calendar down, with the edit "
+      "mode pencil and Today, and back up", (tester) async {
+    await pumpCalendar(tester);
+    final appBar = tester.getRect(find.byType(AppBar));
+    final title = find.byTooltip("Pick a month");
+    final closedTop = tester.getRect(title).top;
+    expect(find.byKey(calendarBarKey), findsNothing);
+    expect(find.byTooltip("Today"), findsNothing);
+    expect(find.byTooltip("Add"), findsNothing);
+
+    await tester.tap(find.byTooltip("Calendar settings bar"));
+    await tester.pump();
+    await tester.pump(harborMotionDuration ~/ 2);
+    final half = tester.getRect(find.byKey(calendarBarKey));
+    await tester.pumpAndSettle();
+    final open = tester.getRect(find.byKey(calendarBarKey));
+    expect(open.top, appBar.bottom);
+    expect(half.bottom, greaterThan(appBar.bottom));
+    expect(half.bottom, lessThan(open.bottom));
+    expect(find.byTooltip("Edit mode"), findsOneWidget);
+    expect(find.byTooltip("Today"), findsOneWidget);
+    expect(tester.getRect(title).top, closedTop + open.height);
+
+    await tester.tap(find.byTooltip("Calendar settings bar"));
+    await tester.pump();
+    await tester.pump(harborMotionDuration ~/ 2);
+    expect(
+      tester.getRect(find.byKey(calendarBarKey)).bottom,
+      lessThan(open.bottom),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(calendarBarKey), findsNothing);
+    expect(tester.getRect(title).top, closedTop);
+  });
+
+  testWidgets("E19 the bar's pencil switches edit mode, filled while it is "
+      "on", (tester) async {
+    await pumpCalendar(tester);
+    await openBar(tester);
+    IconButton pencil() {
+      return tester.widget<IconButton>(
+        find.ancestor(
+          of: find.byTooltip("Edit mode"),
+          matching: find.byType(IconButton),
+        ),
+      );
+    }
+
+    final gap = find.byKey(dayListGapKey(today, 0));
+    expect(pencil().isSelected, isFalse);
+    expect(gap, findsNothing);
+    await tester.tap(find.byTooltip("Edit mode"));
+    await tester.pumpAndSettle();
+    expect(pencil().isSelected, isTrue);
+    expect(gap, findsOneWidget);
+    await tester.tap(find.byTooltip("Edit mode"));
+    await tester.pumpAndSettle();
+    expect(pencil().isSelected, isFalse);
+    expect(gap, findsNothing);
   });
 }

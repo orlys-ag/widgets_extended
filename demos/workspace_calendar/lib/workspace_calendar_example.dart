@@ -54,16 +54,21 @@
 ///
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
-/// The settings sheet chooses edit mode, which the calendar opens out of
-/// unless it is given it: out of it the calendar is read-only, so nothing
-/// is moved, resized or created, a tap on an item opens its form
-/// read-only, and the app bar has no Add. The
-/// sheet also chooses the weekday a week starts on, which every
-/// view's weeks and columns follow, and which weekdays show, how Month fits
-/// its weeks, the hours the calendar shows and schedules in, whether Week
-/// and Day label them AM/PM, the least width of a day in Week, Day and
-/// Month, and the least height of the timed grids' slots, whose ratio to
-/// its default scales Month's weeks past their share of the screen. A
+///
+/// The app bar's chevron opens a bar under it, and closes it again, the
+/// bar sliding down from under the app bar, or back up, over
+/// [harborMotionDuration]: the calendar bar, holding edit mode's pencil,
+/// filled while it is on, and Today. The calendar opens out of edit mode
+/// unless it is given it, and with the bar closed. Out of edit mode the
+/// calendar is read-only, so nothing is moved, resized or created, and a
+/// tap on an item opens its form read-only. The settings sheet, which
+/// opens from the app bar's More menu, chooses the weekday a week starts
+/// on, which every view's weeks and columns follow, and which weekdays
+/// show, how Month fits its weeks, the hours the calendar shows and
+/// schedules in, whether Week and Day label them AM/PM, the least width of
+/// a day in Week, Day and Month, and the least height of the timed grids'
+/// slots, whose ratio to its default scales Month's weeks past their share
+/// of the screen. A
 /// selected day is always on a shown weekday. Every view rings today's
 /// number in a lighter blue than the primary.
 ///
@@ -73,16 +78,15 @@
 /// resize or get created there, and an item in progress changes only its
 /// end. A create with no time left after the lock on its day says so.
 ///
-/// Today, in the app bar, selects today, or the shown day nearest it, in
-/// every view, and slides a strip a drag moved away back to it. A tap on
+/// Today, in the calendar bar, selects today, or the shown day nearest it,
+/// in every view, and slides a strip a drag moved away back to it. A tap on
 /// the header's month opens the month picker, a [MonthStrip], until a
 /// month is picked or the title is tapped again: Agenda's and Day's card
 /// folds to show it in the strip's place, and Week and Month show it under
 /// the header. While it shows, the title names the year of the month at
 /// its middle and the chevrons step a year; a month picked selects its day
 /// of the selected day's day of the month, as a month step does, and
-/// unfolds the card on that month. The settings sheet opens from the app
-/// bar's More menu.
+/// unfolds the card on that month.
 library;
 
 import 'dart:async';
@@ -160,8 +164,8 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// minute. Null reads [DateTime.now].
   final DateTime Function()? clock;
 
-  /// Whether the calendar opens in edit mode, which its settings sheet
-  /// then switches.
+  /// Whether the calendar opens in edit mode, which the calendar bar's
+  /// pencil then switches.
   final bool editing;
 
   static final ThemeData _theme = buildHarborTheme();
@@ -265,6 +269,16 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// The width the column axis was last fitted to.
   double _columnsWidth = 0.0;
 
+  /// Whether the calendar bar is open, or opening.
+  bool _barOpen = false;
+
+  /// How far the calendar bar shows, 0 closed and 1 open, animated on
+  /// [harborMotionCurve] by [_toggleBar].
+  late final AnimationController _barController = AnimationController(
+    vsync: this,
+    duration: harborMotionDuration,
+  );
+
   /// How far the calendar card has folded, 0 for the month and 1 for its
   /// week: linear, so a drag on the pull tab moves it with the finger, and
   /// animated on [harborMotionCurve] by [_animateCollapse].
@@ -327,6 +341,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _model.dispose();
     _board.dispose();
     _collapseController.dispose();
+    _barController.dispose();
     // The cells and the timed grid listening to these have unmounted by
     // now: an element's children unmount before it does.
     _today.dispose();
@@ -511,40 +526,37 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _showRange();
   }
 
-  /// The week mode, on the selected day's week.
-  void _openWeekMode() {
-    _setMode(_CalendarMode.week);
-  }
-
   /// The day mode, on [day].
   void _openDayMode(DateTime day) {
     _select(day);
     _setMode(_CalendarMode.day);
   }
 
-  /// The create flow for [day] at its first free hour, from [from] when
-  /// given, selecting [day] first when it is a day of the shown month; a
-  /// day of another month leaves the selection and the month as they are.
-  void _createOn(DateTime day, {int? from}) {
+  /// The create flow for [day] at its first free hour, selecting [day]
+  /// first when it is a day of the shown month; a day of another month
+  /// leaves the selection and the month as they are.
+  void _createOn(DateTime day) {
     if (_grid.contains(day)) {
       _select(day);
     }
-    _openCreateFlow(day, from: from);
+    _openCreateFlow(day);
   }
 
-  /// The create flow on [day] at its first free hour from [from], and from
-  /// the first time the history lock leaves free on [day], or an hour from
-  /// that time where none after it is free; where the lock leaves no time
-  /// in the hours, a message instead.
-  void _openCreateFlow(DateTime day, {int? from}) {
+  /// The create flow on [day] at its first free hour from the first time
+  /// the history lock leaves free on [day], or an hour from that time
+  /// where none after it is free; where the lock leaves no time in the
+  /// hours, a message instead.
+  void _openCreateFlow(DateTime day) {
     final hours = _settings.hours;
     final earliest = _lock.earliestStartOn(day);
     if (earliest > hours.end - minutesPerSlot) {
       _showMessage("Past times are locked.");
       return;
     }
-    final lower = math.max(from ?? 0, earliest);
-    final free = _model.firstFreeRange(day, from: lower == 0 ? from : lower);
+    final free = _model.firstFreeRange(
+      day,
+      from: earliest == 0 ? null : earliest,
+    );
     final start = math.max(free.start, earliest);
     showCreateFlow(
       context,
@@ -559,17 +571,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       ),
       lock: _currentLock,
     );
-  }
-
-  /// The app bar's Add outside Agenda: the create flow on the selected
-  /// day, in Month at its first free hour, and in Week and Day at its first
-  /// free hour from [addFromMinute], near the time the grid opens at.
-  void _add() {
-    if (_mode == _CalendarMode.month) {
-      _createOn(_selected);
-    } else {
-      _createOn(_selected, from: addFromMinute(_selected, _now.value));
-    }
   }
 
   /// Folds or unfolds Agenda's month. The month that unfolds is the
@@ -760,6 +761,18 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
+  /// Opens the calendar bar, or closes it.
+  void _toggleBar() {
+    setState(() {
+      _barOpen = !_barOpen;
+    });
+    _barController.animateTo(_barOpen ? 1.0 : 0.0, curve: harborMotionCurve);
+  }
+
+  void _toggleEditing() {
+    _applySettings(_settings.copyWith(editing: !_settings.editing));
+  }
+
   void _openSettings() {
     showCalendarSettings(
       context,
@@ -857,7 +870,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   @override
   Widget build(BuildContext context) {
-    final agenda = _mode == _CalendarMode.agenda;
     final month = _mode == _CalendarMode.month;
     return Scaffold(
       // A form's keyboard leaves the month board's height, and so its
@@ -878,16 +890,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
-          if (_settings.editing)
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline),
-              tooltip: "Add",
-              onPressed: agenda ? _openWeekMode : _add,
-            ),
           IconButton(
-            icon: const Icon(Icons.today),
-            tooltip: "Today",
-            onPressed: _goToToday,
+            tooltip: "Calendar settings bar",
+            onPressed: _toggleBar,
+            icon: AnimatedRotation(
+              turns: _barOpen ? 0.5 : 0.0,
+              duration: harborMotionDuration,
+              curve: harborMotionCurve,
+              child: const Icon(Icons.keyboard_arrow_down),
+            ),
           ),
           PopupMenuButton<_MoreAction>(
             tooltip: "More",
@@ -916,7 +927,63 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           ),
         ],
       ),
-      body: _buildCalendarView(),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          _buildBar(),
+          Expanded(child: _buildCalendarView()),
+        ],
+      ),
+    );
+  }
+
+  /// The calendar bar, at the height [_barController] gives it, its bottom
+  /// part showing first so it slides down from under the app bar; nothing
+  /// while it is closed.
+  Widget _buildBar() {
+    return AnimatedBuilder(
+      animation: _barController,
+      child: DecoratedBox(
+        key: calendarBarKey,
+        decoration: const BoxDecoration(
+          color: HarborColors.surface,
+          border: Border(bottom: BorderSide(color: HarborColors.outline)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+          child: Row(
+            children: <Widget>[
+              IconButton.filled(
+                tooltip: "Edit mode",
+                isSelected: _settings.editing,
+                icon: const Icon(Icons.edit_outlined),
+                selectedIcon: const Icon(Icons.edit),
+                onPressed: _toggleEditing,
+              ),
+              const SizedBox(width: 8.0),
+              IconButton(
+                tooltip: "Today",
+                color: HarborColors.text,
+                icon: const Icon(Icons.today),
+                onPressed: _goToToday,
+              ),
+            ],
+          ),
+        ),
+      ),
+      builder: (context, child) {
+        final shown = _barController.value;
+        if (shown == 0.0) {
+          return const SizedBox.shrink();
+        }
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            heightFactor: shown,
+            child: child,
+          ),
+        );
+      },
     );
   }
 
@@ -1005,7 +1072,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 onSelectDay: _select,
                 onOpenItem: _openItem,
                 onCreate: (range) {
-                  showCreateFlow(
+                  return showCreateFlow(
                     context,
                     model: _model,
                     range: range,
@@ -1393,6 +1460,9 @@ class _CalendarHeader extends StatelessWidget {
     );
   }
 }
+
+/// The key of the calendar bar the app bar's chevron opens.
+const ValueKey<String> calendarBarKey = ValueKey<String>("calendar-bar");
 
 /// The key of the calendar card's pull tab.
 const ValueKey<String> calendarPullTabKey = ValueKey<String>(

@@ -190,14 +190,29 @@ Future<void> openSettings(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-/// Opens the settings sheet, flips its edit mode switch and closes the
-/// sheet with a tap on the barrier above it.
+/// Opens the calendar bar with the app bar's chevron where it is closed.
+Future<void> openBar(WidgetTester tester) async {
+  if (find.byTooltip("Today").evaluate().isEmpty) {
+    await tester.tap(find.byTooltip("Calendar settings bar"));
+    await tester.pumpAndSettle();
+  }
+}
+
+/// Opens the calendar bar where it is closed, flips edit mode with its
+/// pencil, and closes the bar.
 Future<void> toggleEditMode(WidgetTester tester) async {
-  await openSettings(tester);
-  await tester.tap(find.byKey(editModeKey));
+  await openBar(tester);
+  await tester.tap(find.byTooltip("Edit mode"));
   await tester.pumpAndSettle();
-  await tester.tapAt(const Offset(195.0, 20.0));
+  await tester.tap(find.byTooltip("Calendar settings bar"));
   await tester.pumpAndSettle();
+}
+
+/// Taps Today in the calendar bar, opening the bar first where it is
+/// closed, and pumps nothing after the tap.
+Future<void> tapToday(WidgetTester tester) async {
+  await openBar(tester);
+  await tester.tap(find.byTooltip("Today"));
 }
 
 /// The timed grid's viewport: the one board keyed by item id strings.

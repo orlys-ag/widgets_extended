@@ -1,5 +1,5 @@
-/// The calendar's settings sheet: edit mode, the history lock, the weekday
-/// a week starts on
+/// The calendar's settings sheet: the history lock, the weekday a week
+/// starts on
 /// and the weekdays the calendar shows, how Month fits its weeks, the
 /// hours the calendar shows and schedules in, how the timed grid labels
 /// them, the least width of a day in Week, Day and Month, and the least
@@ -12,9 +12,6 @@ import 'calendar_data.dart';
 import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
-
-/// The key of the sheet's edit mode switch.
-const ValueKey<String> editModeKey = ValueKey<String>("settings-edit-mode");
 
 /// The key of the sheet's switch of the history lock of past days.
 const ValueKey<String> lockPastKey = ValueKey<String>("settings-lock-past");
@@ -83,9 +80,9 @@ Future<void> showCalendarSettings(
   );
 }
 
-/// The sheet [showCalendarSettings] opens: a switch for edit mode, one for
-/// the history lock of past days and, under it, one that extends the lock
-/// to earlier today, which takes input only while the first is on, a menu
+/// The sheet [showCalendarSettings] opens: a switch for the history lock of
+/// past days and, under it, one that extends the lock to earlier today,
+/// which takes input only while the first is on, a menu
 /// of the weekday a week starts on, a button for each weekday, in the
 /// week's order, that shows or hides it, never hiding the last one shown,
 /// a segmented button for Month's layout, a range slider for the hours, in
@@ -152,19 +149,6 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
                 fontWeight: FontWeight.w600,
                 color: HarborColors.text,
               ),
-            ),
-            SwitchListTile(
-              key: editModeKey,
-              contentPadding: EdgeInsets.zero,
-              title: const Text("Edit mode"),
-              value: _settings.editing,
-              onChanged: (editing) {
-                _set(_settings.copyWith(editing: editing));
-              },
-            ),
-            const _Note(
-              "Off, the calendar is read-only: items open read-only, and "
-              "nothing is moved, resized or added.",
             ),
             SwitchListTile(
               key: lockPastKey,
