@@ -21,10 +21,10 @@ const int monthStripCount = 7;
 
 /// [monthStripCount] months side by side, as tall as the week strip,
 /// opening with [middleMonth] at its middle. Each month is a cell as the
-/// week strip's days are: its year in small type over its three-letter
-/// name on a pill, [selectedMonth]'s filled with the primary colour and
-/// [currentMonth]'s ringed as today's number is. A tap on a month reports
-/// [onSelectMonth].
+/// week strip's days are: its three-letter name on a pill, under its year
+/// in small type for January, [selectedMonth]'s filled with the primary
+/// colour and [currentMonth]'s ringed as today's number is. A tap on a
+/// month reports [onSelectMonth].
 ///
 /// A horizontal drag slides the strip through the months, across years,
 /// and selects nothing; a release comes to rest on a whole month, the
@@ -246,11 +246,12 @@ class _MonthStripState extends State<MonthStrip> {
   }
 }
 
-/// One month of the [MonthStrip]: its year in small muted type over its
-/// three-letter name on a pill as tall as a [DayCell]'s circle, filled with
-/// the primary colour when [isSelected] and ringed as today's number is
-/// when [isCurrent]. A screen reader hears it as a button named by the
-/// month and the year.
+/// One month of the [MonthStrip]: its three-letter name on a pill as tall
+/// as a [DayCell]'s circle, filled with the primary colour when
+/// [isSelected] and ringed as today's number is when [isCurrent], under a
+/// line that holds the year in small muted type for January, where a year
+/// starts, and is empty for every other month, so the pills line up. A
+/// screen reader hears it as a button named by the month and the year.
 class MonthCell extends StatelessWidget {
   const MonthCell({
     super.key,
@@ -289,10 +290,18 @@ class MonthCell extends StatelessWidget {
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.only(bottom: 2.0),
+              // The forced strut gives the empty line the year's height,
+              // which an empty paragraph would otherwise take from the
+              // font.
               child: Text(
-                "${month.year}",
+                month.month == DateTime.january ? "${month.year}" : "",
                 maxLines: 1,
                 softWrap: false,
+                strutStyle: const StrutStyle(
+                  fontSize: 12.0,
+                  height: 1.2,
+                  forceStrutHeight: true,
+                ),
                 style: const TextStyle(
                   fontSize: 12.0,
                   height: 1.2,

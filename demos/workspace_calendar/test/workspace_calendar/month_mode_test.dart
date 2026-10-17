@@ -14,6 +14,7 @@ import 'package:widgets_extended/board/board_controller.dart'
     show BoardControllerInternals;
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
@@ -265,13 +266,13 @@ Future<void> setSlotHeight(WidgetTester tester, double height) async {
   await tester.pumpAndSettle();
 }
 
-/// Opens the calendar settings, shows or hides Saturday and Sunday together
-/// and closes them.
+/// Opens the calendar bar, shows or hides Saturday and Sunday together and
+/// closes it.
 Future<void> toggleWeekends(WidgetTester tester) async {
-  await openSettings(tester);
+  await openBar(tester);
   flipWeekends(tester);
   await tester.pumpAndSettle();
-  await closeSettings(tester);
+  await closeBar(tester);
 }
 
 /// Opens the calendar settings, picks the month layout [label] and closes
@@ -1048,8 +1049,11 @@ void main() {
     expect(ticks, 0);
     expect(controller.debugSlideInstallCount, slides);
 
+    // The bar opens first, as its slide resizes the board.
+    await openBar(tester);
     structural = 0;
-    await toggleWeekends(tester);
+    flipWeekends(tester);
+    await tester.pumpAndSettle();
     expect(structural, 1);
     expect(ticks, 0);
 
@@ -1149,7 +1153,7 @@ void main() {
       // The delete is sent here, and answered a latency later.
       final sent = tester.binding.clock.now();
       await tester.pumpAndSettle();
-      await openSettings(tester);
+      await openBar(tester);
       await tester.pump(latency - tester.binding.clock.now().difference(sent));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
@@ -1188,7 +1192,7 @@ void main() {
       }
       expect(ticks, 0);
       controller.removeAnimationListener(onTick);
-      await closeSettings(tester);
+      await closeBar(tester);
     },
   );
 
@@ -2064,13 +2068,13 @@ void main() {
     "it",
     (tester) async {
       await pumpSeededMonth(tester);
-      await openSettings(tester);
+      await openBar(tester);
       final days = tester.widget<SegmentedButton<int>>(
         find.byKey(shownDaysKey),
       );
       days.onSelectionChanged!(days.selected.difference(const <int>{1}));
       await tester.pumpAndSettle();
-      await closeSettings(tester);
+      await closeBar(tester);
       await tester.tap(find.byTooltip("Next month"));
       await tester.pump(harnessLatency);
       await tester.pumpAndSettle();

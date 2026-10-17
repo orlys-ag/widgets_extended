@@ -3,6 +3,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
@@ -11,7 +12,6 @@ import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -450,13 +450,10 @@ void main() {
         ..line(color: HarborColors.outline),
     );
 
-    await openSettings(tester);
-    await tester.ensureVisible(find.byKey(hourLabelFormatKey));
-    await tester.pumpAndSettle();
+    await openBar(tester);
     await tester.tap(find.byKey(hourLabelFormatKey));
     await tester.pumpAndSettle();
-    await tester.tapAt(const Offset(195.0, 20.0));
-    await tester.pumpAndSettle();
+    await closeBar(tester);
     expect(inside(time, "9:30 AM"), findsOneWidget);
     expect(inside(gap, "10 AM"), findsOneWidget);
   });
@@ -622,13 +619,12 @@ void main() {
     expect(find.byKey(dayListGapKey(day, 0)), findsOneWidget);
     expect(find.byKey(dayListGapKey(day, 8 * 60)), findsNothing);
 
-    await openSettings(tester);
+    await openBar(tester);
     tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
       const RangeValues(8.0, 18.0),
     );
     await tester.pumpAndSettle();
-    await tester.tapAt(const Offset(195.0, 20.0));
-    await tester.pumpAndSettle();
+    await closeBar(tester);
     expect(find.byKey(dayListGapKey(day, 0)), findsNothing);
     expect(find.byKey(dayListGapKey(day, 8 * 60)), findsOneWidget);
   });

@@ -131,8 +131,8 @@ String hourLabel(int minute, HourLabelFormat format) {
   return "$shown:${minutes.toString().padLeft(2, "0")} $half";
 }
 
-/// What the settings sheet chooses: whether the calendar is in [editing]
-/// mode, whether the history lock holds past days, [lockPast], and earlier
+/// What the calendar bar and the settings sheet choose: whether the
+/// calendar is in [editing] mode, whether the history lock holds past days, [lockPast], and earlier
 /// today too, [lockEarlierToday], the [weekdays] it shows and the one its
 /// weeks start on, the
 /// [hours] it shows and schedules in, the [hourLabelFormat] the timed grid

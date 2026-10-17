@@ -3,6 +3,7 @@
 /// day list's counts, over the seeded mock.
 library;
 
+import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -475,8 +476,8 @@ void main() {
     expect(gridHeight(tester), month);
   });
 
-  testWidgets("E15 Today, in the app bar, selects today from another month "
-      "or week", (tester) async {
+  testWidgets("E15 Today, in the calendar bar, selects today from another "
+      "month or week", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Month");
     await tapAndSettle(tester, find.byTooltip("Next month"));
@@ -518,14 +519,14 @@ void main() {
   });
 
   testWidgets("E18 the app bar has no Today or Add, and its chevron slides "
-      "a bar down from under it, pushing the calendar down, with the edit "
-      "mode pencil and Today, and back up", (tester) async {
+      "a bar down from under it, pushing the calendar down, with Today and "
+      "the edit mode switch, and back up", (tester) async {
     await pumpCalendar(tester);
     final appBar = tester.getRect(find.byType(AppBar));
     final title = find.byTooltip("Pick a month");
     final closedTop = tester.getRect(title).top;
     expect(find.byKey(calendarBarKey), findsNothing);
-    expect(find.byTooltip("Today"), findsNothing);
+    expect(todayButtonFinder(), findsNothing);
     expect(find.byTooltip("Add"), findsNothing);
 
     await tester.tap(find.byTooltip("Calendar settings bar"));
@@ -537,8 +538,8 @@ void main() {
     expect(open.top, appBar.bottom);
     expect(half.bottom, greaterThan(appBar.bottom));
     expect(half.bottom, lessThan(open.bottom));
-    expect(find.byTooltip("Edit mode"), findsOneWidget);
-    expect(find.byTooltip("Today"), findsOneWidget);
+    expect(find.byKey(editModeKey), findsOneWidget);
+    expect(todayButtonFinder(), findsOneWidget);
     expect(tester.getRect(title).top, closedTop + open.height);
 
     await tester.tap(find.byTooltip("Calendar settings bar"));
@@ -553,29 +554,84 @@ void main() {
     expect(tester.getRect(title).top, closedTop);
   });
 
-  testWidgets("E19 the bar's pencil switches edit mode, filled while it is "
-      "on", (tester) async {
+  testWidgets("E19 the bar's edit mode switch, or a tap on its label, "
+      "turns edit mode on and off, a screen reader hearing the label and the "
+      "switch as one switch", (tester) async {
+    final semantics = tester.ensureSemantics();
     await pumpCalendar(tester);
     await openBar(tester);
-    IconButton pencil() {
-      return tester.widget<IconButton>(
-        find.ancestor(
-          of: find.byTooltip("Edit mode"),
-          matching: find.byType(IconButton),
-        ),
-      );
+    bool editing() {
+      return tester.widget<Switch>(find.byKey(editModeKey)).value;
     }
 
     final gap = find.byKey(dayListGapKey(today, 0));
-    expect(pencil().isSelected, isFalse);
+    expect(editing(), isFalse);
     expect(gap, findsNothing);
-    await tester.tap(find.byTooltip("Edit mode"));
+    expect(
+      tester.getSemantics(find.byKey(editModeKey)),
+      isSemantics(label: "Edit mode", hasToggledState: true, isToggled: false),
+    );
+    await tester.tap(find.byKey(editModeKey));
     await tester.pumpAndSettle();
-    expect(pencil().isSelected, isTrue);
+    expect(editing(), isTrue);
     expect(gap, findsOneWidget);
-    await tester.tap(find.byTooltip("Edit mode"));
+    await tester.tap(find.text("Edit mode"));
     await tester.pumpAndSettle();
-    expect(pencil().isSelected, isFalse);
+    expect(editing(), isFalse);
     expect(gap, findsNothing);
+    semantics.dispose();
   });
+
+  testWidgets("E20 Today, in the bar, is a text button naming it in 14 px "
+      "type", (tester) async {
+    await pumpCalendar(tester);
+    await openBar(tester);
+    final text = find.descendant(
+      of: todayButtonFinder(),
+      matching: find.text("Today"),
+    );
+    expect(
+      tester.renderObject<RenderParagraph>(text).text.style!.fontSize,
+      14.0,
+    );
+  });
+
+  for (final width in <double>[390.0, 320.0]) {
+    testWidgets("E21 at $width px the bar lines its titles, Today's text, "
+        "its days and its hours slider up 16 px in from its start, and its "
+        "switches, its week start menu, its days and its slider 16 px in "
+        "from its end, overflowing nothing", (tester) async {
+      await pumpCalendar(tester, size: Size(width, 844.0));
+      await openBar(tester);
+      final bar = tester.getRect(find.byKey(calendarBarKey));
+      double left(Finder finder) {
+        return tester.getRect(finder).left;
+      }
+
+      double right(Finder finder) {
+        return tester.getRect(finder).right;
+      }
+
+      final start = bar.left + 16.0;
+      final end = bar.right - 16.0;
+      expect(
+        left(
+          find.descendant(
+            of: todayButtonFinder(),
+            matching: find.text("Today"),
+          ),
+        ),
+        start,
+      );
+      expect(left(find.text("Days shown")), start);
+      expect(left(find.textContaining("Hours")), start);
+      expect(left(find.byKey(shownDaysKey)), start);
+      expect(right(find.byKey(shownDaysKey)), end);
+      expect(left(find.byKey(hoursSliderKey)), start);
+      expect(right(find.byKey(hoursSliderKey)), end);
+      expect(right(find.byKey(editModeKey)), end);
+      expect(right(find.byKey(weekStartKey)), end);
+      expect(right(find.byKey(hourLabelFormatKey)), end);
+    });
+  }
 }

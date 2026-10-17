@@ -57,20 +57,19 @@
 ///
 /// The app bar's chevron opens a bar under it, and closes it again, the
 /// bar sliding down from under the app bar, or back up, over
-/// [harborMotionDuration]: the calendar bar, holding edit mode's pencil,
-/// filled while it is on, and Today. The calendar opens out of edit mode
-/// unless it is given it, and with the bar closed. Out of edit mode the
-/// calendar is read-only, so nothing is moved, resized or created, and a
-/// tap on an item opens its form read-only. The settings sheet, which
-/// opens from the app bar's More menu, chooses the weekday a week starts
-/// on, which every view's weeks and columns follow, and which weekdays
-/// show, how Month fits its weeks, the hours the calendar shows and
-/// schedules in, whether Week and Day label them AM/PM, the least width of
-/// a day in Week, Day and Month, and the least height of the timed grids'
-/// slots, whose ratio to its default scales Month's weeks past their share
-/// of the screen. A
-/// selected day is always on a shown weekday. Every view rings today's
-/// number in a lighter blue than the primary.
+/// [harborMotionDuration]: the calendar bar ([CalendarBar]), holding
+/// Today, the edit mode switch, the weekday a week starts on, which every
+/// view's weeks and columns follow, and which weekdays show, the hours the
+/// calendar shows and schedules in, and whether Week and Day label them
+/// AM/PM. The calendar opens out of edit mode unless it is given it, and
+/// with the bar closed. Out of edit mode the calendar is read-only, so
+/// nothing is moved, resized or created, and a tap on an item opens its
+/// form read-only. The settings sheet, which opens from the app bar's More
+/// menu, chooses how Month fits its weeks, the least width of a day in
+/// Week, Day and Month, and the least height of the timed grids' slots,
+/// whose ratio to its default scales Month's weeks past their share of the
+/// screen. A selected day is always on a shown weekday. Every view rings
+/// today's number in a lighter blue than the primary.
 ///
 /// The sheet also chooses the history lock, which in edit mode keeps the
 /// past as it is: no item before today, or with its second switch before
@@ -97,6 +96,7 @@ import 'package:flutter/material.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';
+import 'workspace_calendar/calendar_bar.dart';
 import 'workspace_calendar/calendar_data.dart';
 import 'workspace_calendar/calendar_model.dart';
 import 'workspace_calendar/calendar_schema.dart';
@@ -165,7 +165,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
   final DateTime Function()? clock;
 
   /// Whether the calendar opens in edit mode, which the calendar bar's
-  /// pencil then switches.
+  /// edit mode switch then turns on and off.
   final bool editing;
 
   static final ThemeData _theme = buildHarborTheme();
@@ -262,8 +262,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// opened, as it is again when the picker closes with no pick.
   bool _foldedBeforePicker = false;
 
-  /// What the settings sheet last chose, and before it chooses, the
-  /// defaults with the edit mode the calendar was given.
+  /// What the calendar bar and the settings sheet last chose, and before
+  /// they choose, the defaults with the edit mode the calendar was given.
   late CalendarSettings _settings = CalendarSettings(editing: widget.editing);
 
   /// The width the column axis was last fitted to.
@@ -769,10 +769,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _barController.animateTo(_barOpen ? 1.0 : 0.0, curve: harborMotionCurve);
   }
 
-  void _toggleEditing() {
-    _applySettings(_settings.copyWith(editing: !_settings.editing));
-  }
-
   void _openSettings() {
     showCalendarSettings(
       context,
@@ -943,33 +939,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   Widget _buildBar() {
     return AnimatedBuilder(
       animation: _barController,
-      child: DecoratedBox(
+      child: CalendarBar(
         key: calendarBarKey,
-        decoration: const BoxDecoration(
-          color: HarborColors.surface,
-          border: Border(bottom: BorderSide(color: HarborColors.outline)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-          child: Row(
-            children: <Widget>[
-              IconButton.filled(
-                tooltip: "Edit mode",
-                isSelected: _settings.editing,
-                icon: const Icon(Icons.edit_outlined),
-                selectedIcon: const Icon(Icons.edit),
-                onPressed: _toggleEditing,
-              ),
-              const SizedBox(width: 8.0),
-              IconButton(
-                tooltip: "Today",
-                color: HarborColors.text,
-                icon: const Icon(Icons.today),
-                onPressed: _goToToday,
-              ),
-            ],
-          ),
-        ),
+        settings: _settings,
+        onChanged: _applySettings,
+        onToday: _goToToday,
       ),
       builder: (context, child) {
         final shown = _barController.value;

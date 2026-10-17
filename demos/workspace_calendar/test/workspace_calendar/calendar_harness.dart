@@ -1,14 +1,14 @@
 /// Helpers the calendar's widget tests share: the fixed day, the host the
-/// calendar is pumped in, the settings sheet and a switch of its edit
-/// mode, the timed grid's viewport, a block's selection and move, a read
+/// calendar is pumped in, the settings sheet, the calendar bar and its edit
+/// mode switch and Today, the timed grid's viewport, a block's selection and move, a read
 /// of the mock, and a canvas that records what a painter draws.
 library;
 
 import 'dart:ui' as ui;
 
+import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/gestures.dart';
@@ -192,27 +192,37 @@ Future<void> openSettings(WidgetTester tester) async {
 
 /// Opens the calendar bar with the app bar's chevron where it is closed.
 Future<void> openBar(WidgetTester tester) async {
-  if (find.byTooltip("Today").evaluate().isEmpty) {
+  if (find.byKey(calendarBarKey).evaluate().isEmpty) {
     await tester.tap(find.byTooltip("Calendar settings bar"));
     await tester.pumpAndSettle();
   }
 }
 
-/// Opens the calendar bar where it is closed, flips edit mode with its
-/// pencil, and closes the bar.
-Future<void> toggleEditMode(WidgetTester tester) async {
-  await openBar(tester);
-  await tester.tap(find.byTooltip("Edit mode"));
-  await tester.pumpAndSettle();
+/// Closes the open calendar bar with the app bar's chevron.
+Future<void> closeBar(WidgetTester tester) async {
   await tester.tap(find.byTooltip("Calendar settings bar"));
   await tester.pumpAndSettle();
+}
+
+/// Opens the calendar bar where it is closed, flips its edit mode switch,
+/// and closes the bar.
+Future<void> toggleEditMode(WidgetTester tester) async {
+  await openBar(tester);
+  await tester.tap(find.byKey(editModeKey));
+  await tester.pumpAndSettle();
+  await closeBar(tester);
+}
+
+/// The calendar bar's Today.
+Finder todayButtonFinder() {
+  return find.widgetWithText(TextButton, "Today");
 }
 
 /// Taps Today in the calendar bar, opening the bar first where it is
 /// closed, and pumps nothing after the tap.
 Future<void> tapToday(WidgetTester tester) async {
   await openBar(tester);
-  await tester.tap(find.byTooltip("Today"));
+  await tester.tap(todayButtonFinder());
 }
 
 /// The timed grid's viewport: the one board keyed by item id strings.
@@ -377,7 +387,7 @@ RecordingCanvas paintGridForeground(WidgetTester tester) {
   return canvas;
 }
 
-/// Shows Saturday and Sunday where the open settings sheet hides them and
+/// Shows Saturday and Sunday where the open calendar bar hides them and
 /// hides them where it shows them, both in one change, through its days
 /// shown buttons' own callback. Pumps nothing.
 void flipWeekends(WidgetTester tester) {

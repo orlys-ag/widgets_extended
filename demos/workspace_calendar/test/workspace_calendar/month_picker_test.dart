@@ -203,14 +203,40 @@ void main() {
   testWidgets("P8 a pick whose day of the month falls on a hidden weekday "
       "selects the next shown day of that month", (tester) async {
     await pumpCalendar(tester);
-    await openSettings(tester);
+    await openBar(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
-    await tester.tapAt(const Offset(195.0, 20.0));
-    await tester.pumpAndSettle();
+    await closeBar(tester);
     await openPicker(tester);
     // June 21 is a Sunday.
     await pickMonth(tester, 2026, 6);
     expect(dayCell(tester, DateTime(2026, 6, 22)).isSelected, isTrue);
+  });
+
+  testWidgets("P9 January alone names its year over its pill, the other "
+      "months' pills lining up with its, and a screen reader hears every "
+      "month with its year", (tester) async {
+    final semantics = tester.ensureSemantics();
+    await pumpCalendar(tester);
+    await openPicker(tester);
+    Finder textIn(int month, String text) {
+      return find.descendant(
+        of: monthCellFinder(2026, month),
+        matching: find.text(text),
+      );
+    }
+
+    const names = <String>["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+    final january = tester.getRect(textIn(1, "Jan")).top;
+    expect(textIn(1, "2026"), findsOneWidget);
+    for (var month = 2; month <= 7; month++) {
+      expect(textIn(month, "2026"), findsNothing);
+      expect(tester.getRect(textIn(month, names[month - 1])).top, january);
+    }
+    expect(
+      tester.getSemantics(monthCellFinder(2026, 2)),
+      isSemantics(label: "February 2026"),
+    );
+    semantics.dispose();
   });
 }
