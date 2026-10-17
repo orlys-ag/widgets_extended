@@ -151,8 +151,9 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               },
             ),
             const _Note(
-              "Off, items open read-only and nothing is added or "
-              "resized; a long press still moves an item.",
+              "Off, items open read-only and nothing resizes; in Week and "
+              "Day a long press still moves an item, or on an empty slot "
+              "adds one.",
             ),
             const SizedBox(height: 8.0),
             Row(

@@ -509,7 +509,7 @@ CreateRange createRangeOver(
 /// the top band drags its start time, the bottom band its end time, and, on
 /// more than one day, the right band its day count. Out of it a block has no
 /// bands, so a touch drag from its edge scrolls the grid as one anywhere
-/// else does, and no gesture on an empty cell creates.
+/// else does.
 /// A move dropped onto another item's time lands at the nearest free time
 /// that shows, on that day or the day before or after it, and goes back
 /// where there is none; a resize dragged onto one stops at its
@@ -529,11 +529,12 @@ CreateRange createRangeOver(
 /// more" in the column of each day with N of them, and while some are after
 /// them, a row frozen against the last slot does; the hour gutter runs on
 /// beside both. An item on no shown day has no block either,
-/// and a pill in the day header's corner counts it. In edit mode empty body
-/// cells take a create gesture, reported through [onCreate]: a tap picks one
-/// hour from its slot, or up to the end of the hours; a drag picks the
-/// rectangle of slots it covers, at once for a mouse or a stylus and after a
-/// press and hold on touch, so a touch drag without one scrolls the grid.
+/// and a pill in the day header's corner counts it. Empty body cells take a
+/// create gesture, reported through [onCreate]: a drag picks the rectangle
+/// of slots it covers, after a press and hold on touch, so a touch drag
+/// without one scrolls the grid, and a hold let go where it began picks one
+/// hour from its slot, or up to the end of the hours. In edit mode a mouse
+/// or a stylus drags at once, and a tap picks one hour as a hold does.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than the least sizes [settings] choose; past those, it scrolls.
@@ -1403,13 +1404,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return _bodyCellAtLocal(viewport, viewport.globalToLocal(global));
   }
 
-  /// Whether a press at [global] may create: the grid is in edit mode, no
-  /// range runs, it lies over a body cell, no item paints under it, and the
-  /// grid is neither scrolling nor just stopped by this press.
+  /// Whether a press at [global] may create: no range runs, it lies over a
+  /// body cell, no item paints under it, and the grid is neither scrolling
+  /// nor just stopped by this press.
   bool _admits(Offset global) {
-    if (!widget.settings.editing) {
-      return false;
-    }
     final viewport = _findViewport();
     if (viewport == null || _scrollJustStopped || _range != null) {
       return false;
@@ -1437,7 +1435,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return false;
   }
 
-  /// Arms the create gestures for an admitted press. A listener's pointer
+  /// Arms the create gestures for an admitted press: out of edit mode only
+  /// the range that starts after a press and hold. A listener's pointer
   /// down runs before the arena closes, so they join it beside the
   /// scrollable's pan; each recognizer ignores the pointer kinds it does
   /// not support.
@@ -1445,8 +1444,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (!_admits(event.position)) {
       return;
     }
-    _tap.addPointer(event);
-    _immediateRange.addPointer(event);
+    if (widget.settings.editing) {
+      _tap.addPointer(event);
+      _immediateRange.addPointer(event);
+    }
     _delayedRange.addPointer(event);
   }
 

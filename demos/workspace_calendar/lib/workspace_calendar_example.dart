@@ -4,8 +4,8 @@
 /// the selected day's week as the list is scrolled;
 /// Month, the month's weeks with each item as a chip on the days it
 /// covers; and Week and Day, timed grids of the selected day's week and of
-/// that day alone, where items are moved, and in edit mode created,
-/// resized, edited and deleted.
+/// that day alone, where items are moved and created, and in edit mode
+/// also resized, edited and deleted.
 ///
 /// Day shows Agenda's calendar card folded: a strip of a week's worth of
 /// days, opening on the selected day's week, whose days a tap selects and
@@ -55,9 +55,9 @@
 /// The calendar reads the range it shows through a [CalendarModel], which
 /// caches the days it has read and writes one change per item at a time.
 /// The settings sheet chooses edit mode, which the calendar opens out of
-/// unless it is given it: out of it the calendar's items only move, by a
-/// long press in Week and Day, a tap on one opening its form read-only,
-/// and the app bar has no Add. The
+/// unless it is given it: out of it a long press in Week and Day still
+/// moves an item, or on an empty slot creates one, but a tap on an item
+/// opens its form read-only, and the app bar has no Add. The
 /// sheet also chooses the weekday a week starts on, which every
 /// view's weeks and columns follow, and which weekdays show, how Month fits
 /// its weeks, the hours the calendar shows and schedules in, whether Week

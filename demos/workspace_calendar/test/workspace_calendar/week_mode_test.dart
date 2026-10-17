@@ -2468,7 +2468,7 @@ void main() {
     );
   });
 
-  testWidgets("W34 out of edit mode a tap or a range drag on an empty slot "
+  testWidgets("W34 out of edit mode a tap or a mouse drag on an empty slot "
       "creates nothing", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
@@ -2544,5 +2544,33 @@ void main() {
     );
     await tester.tap(formButton("Close"));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets("W36 out of edit mode a press and hold on an empty slot, "
+      "dragged or not, still creates", (tester) async {
+    await pumpCalendar(tester);
+    await pickMode(tester, "Week");
+    final from = rowOf(14 * 60);
+    final saturday = colOf(5);
+
+    var gesture = await tester.startGesture(centerOf(tester, from, saturday));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.moveTo(centerOf(tester, rowOf(14 * 60 + 45), colOf(6)));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text("New item"), findsOneWidget);
+    await tester.tap(find.text("Task").last);
+    await tester.pumpAndSettle();
+    // The drag's rectangle, Saturday and Sunday.
+    expect(fieldText(tester, "Days"), "2");
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    gesture = await tester.startGesture(centerOf(tester, from, saturday));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text("New item"), findsOneWidget);
   });
 }
