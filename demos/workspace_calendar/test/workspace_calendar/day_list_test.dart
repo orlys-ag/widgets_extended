@@ -449,8 +449,7 @@ void main() {
         ..line(color: HarborColors.outline),
     );
 
-    await tester.tap(find.byTooltip("Calendar settings"));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     await tester.tap(find.byKey(hourLabelFormatKey));
     await tester.pumpAndSettle();
     await tester.tapAt(const Offset(195.0, 20.0));
@@ -620,8 +619,7 @@ void main() {
     expect(find.byKey(dayListGapKey(day, 0)), findsOneWidget);
     expect(find.byKey(dayListGapKey(day, 8 * 60)), findsNothing);
 
-    await tester.tap(find.byTooltip("Calendar settings"));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
       const RangeValues(8.0, 18.0),
     );
@@ -663,5 +661,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(menu, findsOneWidget);
     expect(tester.getSize(card).height, height);
+  });
+
+  testWidgets("L16 the time column ends the start time, the chip and a gap "
+      "row's label a gap short of the card and the dashed line", (
+    tester,
+  ) async {
+    // Half-size text, so the test font's wide glyphs leave the times room
+    // in their column to align by.
+    tester.platformDispatcher.textScaleFactorTestValue = 0.5;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final day = DateTime(2026, 4, 22);
+    await pumpCalendar(tester, editing: true);
+    await tester.tap(dayFinder(day));
+    await tester.pumpAndSettle();
+    final time = find.byKey(dayListTimeKey(standupId));
+    final card = tester.getRect(cardFinder(standupId));
+    final end = card.left - dayListTimeGap;
+    expect(
+      tester
+          .getRect(find.descendant(of: time, matching: find.text("09:30")))
+          .right,
+      moreOrLessEquals(end),
+    );
+    expect(
+      tester.getRect(find.byKey(dayListDurationKey(standupId))).right,
+      moreOrLessEquals(end),
+    );
+
+    final gap = find.byKey(dayListGapKey(day, 10 * 60));
+    final line = tester.getRect(
+      find.descendant(of: gap, matching: find.byType(CustomPaint)).first,
+    );
+    expect(
+      tester
+          .getRect(find.descendant(of: gap, matching: find.text("10:00")))
+          .right,
+      moreOrLessEquals(line.left - dayListTimeGap),
+    );
   });
 }

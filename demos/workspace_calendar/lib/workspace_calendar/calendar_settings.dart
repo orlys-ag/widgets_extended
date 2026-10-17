@@ -149,10 +149,10 @@ class CalendarSettings {
     this.minSlotHeight = defaultMinSlotHeight,
   });
 
-  /// Whether the calendar's items can be resized, edited and deleted, and
-  /// created by every gesture. Out of edit mode, in Week and Day, a long
-  /// press still moves an item, and one on an empty slot, dragged or not,
-  /// still creates one.
+  /// Whether the calendar's items can be edited and deleted, and created by
+  /// every gesture. Out of edit mode, in Week and Day, a long press still
+  /// moves an item and selects it, whose handles then resize it, and a long
+  /// press on an empty slot, dragged or not, still creates one.
   final bool editing;
 
   /// The weekdays the calendar shows, at least one, which the month grid

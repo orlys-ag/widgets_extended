@@ -26,8 +26,8 @@ Matcher nearRect(Rect value) {
   return rectMoreOrLessEquals(value, epsilon: 0.5);
 }
 
-/// Drags the strip of [id]'s block at [strip] by [delta] with a mouse,
-/// which the grid's scrollable never takes, and expects the block at
+/// Selects [id]'s block, drags its strip at [strip] by [delta] with a
+/// mouse, which the grid's scrollable never takes, and expects the block at
 /// [expected] on the frame after the move and on every frame after the
 /// release until the write has been answered.
 Future<void> expectLiveResize(
@@ -37,6 +37,7 @@ Future<void> expectLiveResize(
   Offset delta,
   Rect expected,
 ) async {
+  await selectBlock(tester, id);
   final gesture = await tester.startGesture(
     strip,
     kind: PointerDeviceKind.mouse,

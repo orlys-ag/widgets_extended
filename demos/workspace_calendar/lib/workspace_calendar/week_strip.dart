@@ -35,8 +35,9 @@ const double weekStripHeight = 48.0;
 /// days it shows, so their markers show, and Day, which reads
 /// a selected day's whole week, shows any of them at once on a tap. A new
 /// [selectedDay] the strip does not show the middle of brings the strip,
-/// after the frame, to the shown days of that day's week, sliding when
-/// they are at most a week away and jumping otherwise.
+/// after the frame, to the shown days of that day's week, sliding there,
+/// from a week short of them when they are further away; a new [recalls]
+/// does too, wherever [selectedDay] is.
 ///
 /// [weekdays] are fixed for the strip's life: give a strip that changes
 /// them its own key.
@@ -49,6 +50,7 @@ class WeekStrip extends StatefulWidget {
     required this.weekdays,
     required this.onSelectDay,
     required this.onBrowse,
+    this.recalls = 0,
   });
 
   final CalendarModel model;
@@ -65,6 +67,10 @@ class WeekStrip extends StatefulWidget {
   /// Reports the day that has come to the middle of the strip, which for an
   /// odd count of days is in the month most of the days it shows are in.
   final ValueChanged<DateTime> onBrowse;
+
+  /// Counts the calls to bring the strip back to [selectedDay]'s week,
+  /// from wherever a drag left it, even where it shows [selectedDay].
+  final int recalls;
 
   @override
   State<WeekStrip> createState() {
@@ -105,6 +111,10 @@ class _WeekStripState extends State<WeekStrip> {
   /// reports no day through [WeekStrip.onBrowse].
   bool _following = false;
 
+  /// Counts the slides that follow the selected day, so the end of one a
+  /// later slide stopped leaves [_following] to that later one.
+  int _follows = 0;
+
   @override
   void didUpdateWidget(WeekStrip oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -115,11 +125,12 @@ class _WeekStripState extends State<WeekStrip> {
     );
     // Any new selected day, even one the strip showed, since a drag may
     // have moved it away since.
-    if (widget.selectedDay != oldWidget.selectedDay) {
+    final recalled = widget.recalls != oldWidget.recalls;
+    if (recalled || widget.selectedDay != oldWidget.selectedDay) {
       // After the frame, because a scroll dispatches scroll notifications,
       // which must not reach their listeners mid-build.
       SchedulerBinding.instance.addPostFrameCallback((_) {
-        _showSelected();
+        _showSelected(always: recalled);
       });
     }
   }
@@ -159,36 +170,42 @@ class _WeekStripState extends State<WeekStrip> {
     return week * _count + position;
   }
 
-  /// Brings the strip to the shown days of the selected day's week where
-  /// the middle of that day's cell lies outside it.
-  void _showSelected() {
+  /// Slides the strip to the shown days of the selected day's week where
+  /// the middle of that day's cell lies outside it, or [always]. Days more
+  /// than a week away are jumped to a week short of first, so the slide is
+  /// a week's at most, as fast whatever the distance.
+  void _showSelected({required bool always}) {
     final extent = _extent;
     if (!mounted || !_scroll.hasClients || extent == null) {
       return;
     }
     final position = _scroll.position;
     final middle = (_indexOf(widget.selectedDay) + 0.5) * extent;
-    if (middle >= position.pixels &&
+    if (!always &&
+        middle >= position.pixels &&
         middle <= position.pixels + position.viewportDimension) {
       return;
     }
     final target =
         _indexOf(widget.weekdays.weekStartOf(widget.selectedDay)) * extent;
+    final week = _count * extent;
+    final distance = target - position.pixels;
+    final follow = ++_follows;
     _following = true;
-    if ((target - position.pixels).abs() <= _count * extent) {
-      _scroll
-          .animateTo(
-            target,
-            duration: harborMotionDuration,
-            curve: harborMotionCurve,
-          )
-          .whenComplete(() {
-            _following = false;
-          });
-    } else {
-      _scroll.jumpTo(target);
-      _following = false;
+    if (distance.abs() > week) {
+      _scroll.jumpTo(target - distance.sign * week);
     }
+    _scroll
+        .animateTo(
+          target,
+          duration: harborMotionDuration,
+          curve: harborMotionCurve,
+        )
+        .whenComplete(() {
+          if (follow == _follows) {
+            _following = false;
+          }
+        });
   }
 
   /// Keeps the day at the strip's start where a new width gives a day a

@@ -1430,6 +1430,7 @@ void main() {
     /// Drags a strip of [id]'s block with a mouse, which the grid's
     /// scrollable never takes, then lets the write it causes complete.
     Future<void> dragStrip(String id, Offset strip, Offset delta) async {
+      await selectBlock(tester, id);
       final gesture = await tester.startGesture(
         strip,
         kind: PointerDeviceKind.mouse,
@@ -1931,7 +1932,8 @@ void main() {
 
     /// Drags a strip of a block with a mouse, which the grid's scrollable
     /// never takes, then lets the write it causes complete.
-    Future<void> dragStrip(Offset strip, Offset delta) async {
+    Future<void> dragStrip(String id, Offset strip, Offset delta) async {
+      await selectBlock(tester, id);
       final gesture = await tester.startGesture(
         strip,
         kind: PointerDeviceKind.mouse,
@@ -1949,6 +1951,7 @@ void main() {
     // it stops where the brainstorm starts.
     final uxFlow = tester.getRect(blockFinder(uxFlowId));
     await dragStrip(
+      uxFlowId,
       Offset(uxFlow.center.dx, uxFlow.bottom - 3.0),
       Offset(0.0, 12 * slot),
     );
@@ -1963,6 +1966,7 @@ void main() {
     // Thursday, three days in all.
     final brainstorm = tester.getRect(blockFinder(brainstormId));
     await dragStrip(
+      brainstormId,
       Offset(brainstorm.right - 3.0, brainstorm.center.dy),
       Offset(3 * dayWidth, 0.0),
     );
@@ -2078,6 +2082,7 @@ void main() {
 
     // A resize names the times it would give, and outlines nothing: the
     // block itself shows them.
+    await selectBlock(tester, reviewId);
     final review = tester.getRect(blockFinder(reviewId));
     final resize = await tester.startGesture(
       Offset(review.center.dx, review.bottom - 3.0),
@@ -2143,7 +2148,8 @@ void main() {
 
     /// Drags a strip of a block with a mouse, which the grid's scrollable
     /// never takes, then lets the write it causes complete.
-    Future<void> dragStrip(Offset strip, Offset delta) async {
+    Future<void> dragStrip(String id, Offset strip, Offset delta) async {
+      await selectBlock(tester, id);
       final gesture = await tester.startGesture(
         strip,
         kind: PointerDeviceKind.mouse,
@@ -2160,6 +2166,7 @@ void main() {
     // hour up.
     final standup = tester.getRect(blockFinder(standupId));
     await dragStrip(
+      standupId,
       Offset(standup.center.dx, standup.top + 3.0),
       Offset(0.0, -2 * slot),
     );
@@ -2174,6 +2181,7 @@ void main() {
     // ends, at 13:00.
     final brainstorm = tester.getRect(blockFinder(brainstormId));
     await dragStrip(
+      brainstormId,
       Offset(brainstorm.center.dx, brainstorm.top + 3.0),
       Offset(0.0, -12 * slot),
     );
@@ -2400,10 +2408,9 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets("W30 out of edit mode a block's strips resize nothing", (
-    tester,
-  ) async {
-    await pumpCalendar(tester, size: tall);
+  testWidgets("W30 a block that is not selected has no resize strips, even "
+      "in edit mode", (tester) async {
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     final before = tester.getRect(blockFinder(brainstormId));
     await dragBottomStrip(tester, brainstormId);
@@ -2422,9 +2429,9 @@ void main() {
     expect(tester.getRect(blockFinder(brainstormId)), before);
   });
 
-  testWidgets("W31 out of edit mode a touch drag from a block's strip "
-      "scrolls the grid", (tester) async {
-    await pumpCalendar(tester, size: tall);
+  testWidgets("W31 a touch drag from the edge of a block that is not "
+      "selected scrolls the grid, even in edit mode", (tester) async {
+    await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     final before = tester.getRect(blockFinder(brainstormId));
     await tester.dragFrom(
@@ -2453,19 +2460,68 @@ void main() {
     );
   });
 
-  testWidgets("W33 edit mode turned on in the settings lets a strip resize", (
-    tester,
-  ) async {
-    await pumpCalendar(tester, size: tall);
+  testWidgets("W33 a long press selects a block, out of edit mode too, "
+      "whose handles then resize it, and a tap on it keeps the selection "
+      "while a tap elsewhere clears it", (tester) async {
+    final api = await pumpCalendar(tester, size: tall);
     await pickMode(tester, "Week");
-    await toggleEditMode(tester);
-    final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
-    final before = tester.getRect(blockFinder(brainstormId));
-    await dragBottomStrip(tester, brainstormId);
-    expect(
-      tester.getRect(blockFinder(brainstormId)).height,
-      moreOrLessEquals(before.height + 2 * slot, epsilon: 0.5),
+    final handles = find.byKey(blockHandlesKey(brainstormId));
+    final block = blockFinder(brainstormId);
+    final cell = cellRect(tester, rowOf(9 * 60), colOf(0));
+    expect(handles, findsNothing);
+    await selectBlock(tester, brainstormId);
+    expect(handles, findsOneWidget);
+
+    /// Drags from [from] by [delta] with a mouse, and lets the write it
+    /// causes complete.
+    Future<void> drag(Offset from, Offset delta) async {
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(delta);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await tester.pump(api.latency);
+      await tester.pumpAndSettle();
+    }
+
+    var before = tester.getRect(block);
+    await drag(
+      Offset(before.center.dx, before.bottom - 3.0),
+      Offset(0.0, 2 * cell.height),
     );
+    expect(
+      tester.getRect(block).bottom,
+      moreOrLessEquals(before.bottom + 2 * cell.height, epsilon: 0.5),
+    );
+    before = tester.getRect(block);
+    await drag(
+      Offset(before.center.dx, before.top + 3.0),
+      Offset(0.0, -2 * cell.height),
+    );
+    expect(
+      tester.getRect(block).top,
+      moreOrLessEquals(before.top - 2 * cell.height, epsilon: 0.5),
+    );
+    before = tester.getRect(block);
+    await drag(
+      Offset(before.right - 3.0, before.center.dy),
+      Offset(cell.width, 0.0),
+    );
+    expect(
+      tester.getRect(block).width,
+      moreOrLessEquals(before.width + cell.width, epsilon: 0.5),
+    );
+
+    await tester.tap(block);
+    await tester.pumpAndSettle();
+    await tester.tap(formButton("Close"));
+    await tester.pumpAndSettle();
+    expect(handles, findsOneWidget);
+    await tapCell(tester, rowOf(20 * 60), colOf(6));
+    expect(handles, findsNothing);
   });
 
   testWidgets("W34 out of edit mode a tap or a mouse drag on an empty slot "
@@ -2572,5 +2628,175 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsOneWidget);
+  });
+
+  testWidgets("W37 a long press on another block moves the selection to "
+      "it, and a week step that takes the block off the grid clears it", (
+    tester,
+  ) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    await selectBlock(tester, brainstormId);
+    await selectBlock(tester, standupId);
+    expect(find.byKey(blockHandlesKey(brainstormId)), findsNothing);
+    expect(find.byKey(blockHandlesKey(standupId)), findsOneWidget);
+
+    for (final step in <String>["Next week", "Previous week"]) {
+      await tester.tap(find.byTooltip(step));
+      await tester.pump(harnessLatency);
+      await tester.pumpAndSettle();
+    }
+    // Setup sanity: the block is back on the grid.
+    expect(blockFinder(standupId), findsOneWidget);
+    expect(find.byKey(blockHandlesKey(standupId)), findsNothing);
+  });
+
+  testWidgets("W38 a selected block's grips are pills filled with the "
+      "primary colour, each centred on its top, bottom or right edge", (
+    tester,
+  ) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    await selectBlock(tester, brainstormId);
+    final block = tester.getRect(blockFinder(brainstormId));
+
+    /// The grip on [side] and its decoration.
+    ({Rect rect, BoxDecoration decoration}) grip(AxisDirection side) {
+      final finder = find.byKey(blockGripKey(brainstormId, side));
+      final box = tester.widget<DecoratedBox>(
+        find.descendant(of: finder, matching: find.byType(DecoratedBox)),
+      );
+      return (
+        rect: tester.getRect(finder),
+        decoration: box.decoration as BoxDecoration,
+      );
+    }
+
+    final top = grip(AxisDirection.up);
+    final bottom = grip(AxisDirection.down);
+    final right = grip(AxisDirection.right);
+    // The grips lie on the outline's middle, a pixel inside the block.
+    expect(top.rect.center.dy, moreOrLessEquals(block.top, epsilon: 1.5));
+    expect(top.rect.center.dx, near(block.center.dx));
+    expect(bottom.rect.center.dy, moreOrLessEquals(block.bottom, epsilon: 1.5));
+    expect(bottom.rect.center.dx, near(block.center.dx));
+    expect(right.rect.center.dx, moreOrLessEquals(block.right, epsilon: 1.5));
+    expect(right.rect.center.dy, near(block.center.dy));
+
+    expect(top.rect.width, greaterThan(2 * top.rect.height));
+    expect(right.rect.height, greaterThan(2 * right.rect.width));
+    for (final each in <({Rect rect, BoxDecoration decoration})>[
+      top,
+      bottom,
+      right,
+    ]) {
+      expect(each.decoration.color, HarborColors.primary);
+      expect(
+        each.decoration.borderRadius,
+        BorderRadius.circular(each.rect.shortestSide / 2),
+      );
+    }
+  });
+
+  testWidgets("W39 a press just outside a selected block, by an edge, "
+      "resizes it by touch or by mouse, under the resize cursor; a tap "
+      "there keeps the selection, and a press further out scrolls", (
+    tester,
+  ) async {
+    final api = await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    await selectBlock(tester, brainstormId);
+    final block = blockFinder(brainstormId);
+    final cell = cellRect(tester, rowOf(9 * 60), colOf(0));
+
+    Future<void> settle() async {
+      await tester.pumpAndSettle();
+      await tester.pump(api.latency);
+      await tester.pumpAndSettle();
+    }
+
+    var before = tester.getRect(block);
+    final hover = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+      pointer: 1,
+    );
+    addTearDown(hover.removePointer);
+    MouseCursor? cursor() {
+      return RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1);
+    }
+
+    await hover.addPointer(location: Offset.zero);
+    await hover.moveTo(Offset(before.center.dx, before.top - 4.0));
+    await tester.pump();
+    expect(cursor(), SystemMouseCursors.resizeUpDown);
+    await hover.moveTo(Offset(before.right + 4.0, before.center.dy));
+    await tester.pump();
+    expect(cursor(), SystemMouseCursors.resizeLeftRight);
+    await hover.moveTo(Offset(before.center.dx, before.bottom + 20.0));
+    await tester.pump();
+    expect(cursor(), SystemMouseCursors.basic);
+
+    await tester.dragFrom(
+      Offset(before.center.dx, before.top - 4.0),
+      Offset(0.0, -2 * cell.height),
+    );
+    await settle();
+    expect(tester.getRect(block).top, near(before.top - 2 * cell.height));
+    expect(tester.getRect(block).bottom, near(before.bottom));
+
+    before = tester.getRect(block);
+    final mouse = await tester.startGesture(
+      Offset(before.center.dx, before.bottom + 4.0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await mouse.moveBy(Offset(0.0, 2 * cell.height));
+    await tester.pump();
+    await mouse.up();
+    await settle();
+    expect(tester.getRect(block).bottom, near(before.bottom + 2 * cell.height));
+    expect(tester.getRect(block).top, near(before.top));
+
+    before = tester.getRect(block);
+    await tester.dragFrom(
+      Offset(before.right + 4.0, before.center.dy),
+      Offset(cell.width, 0.0),
+    );
+    await settle();
+    expect(tester.getRect(block).width, near(before.width + cell.width));
+
+    before = tester.getRect(block);
+    await tester.tapAt(Offset(before.center.dx, before.bottom + 4.0));
+    await tester.pumpAndSettle();
+    expect(find.byKey(blockHandlesKey(brainstormId)), findsOneWidget);
+
+    await tester.dragFrom(
+      Offset(before.center.dx, before.bottom + 20.0),
+      const Offset(0.0, 120.0),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getRect(block).height, near(before.height));
+    expect(tester.getRect(block).top, greaterThan(before.top));
+  });
+
+  testWidgets("W40 once the selection moves to another block, a press just "
+      "outside that block resizes it", (tester) async {
+    final api = await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    await selectBlock(tester, brainstormId);
+    await selectBlock(tester, standupId);
+    final block = blockFinder(standupId);
+    final cell = cellRect(tester, rowOf(9 * 60), colOf(0));
+    final before = tester.getRect(block);
+    final mouse = await tester.startGesture(
+      Offset(before.center.dx, before.top - 4.0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await mouse.moveBy(Offset(0.0, -cell.height));
+    await tester.pump();
+    await mouse.up();
+    await tester.pumpAndSettle();
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    expect(tester.getRect(block).top, near(before.top - cell.height));
   });
 }

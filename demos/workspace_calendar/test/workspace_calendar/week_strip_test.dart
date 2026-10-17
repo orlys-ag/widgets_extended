@@ -229,8 +229,9 @@ void main() {
     expect(stripCell(tester, april(26)).isSelected, isTrue);
   });
 
-  testWidgets("WS5 a selected day weeks away jumps the strip there and "
-      "reports nothing", (tester) async {
+  testWidgets("WS5 a selected day weeks away slides the strip there from a "
+      "week short of it, and reports nothing, nor does a slide a new "
+      "selected day stops", (tester) async {
     final model = CalendarModel(
       api: MockCalendarApi(latency: harnessLatency),
       onWriteFailed: (message) {},
@@ -269,23 +270,39 @@ void main() {
     setHost(() {
       selected = may(19);
     });
-    // The frame that rebuilds the strip, then the one after it jumped,
-    // with no time between them for a slide.
+    // The frame that rebuilds the strip, which jumps after it, then the
+    // slide's first tick.
     await tester.pump();
     await tester.pump();
+    expect(stripDays(tester), run(may(11), 7));
+    await tester.pump(harborMotionDuration ~/ 2);
+    expect(stripDays(tester), containsAll(<DateTime>[may(17), may(18)]));
+    await tester.pumpAndSettle();
     expect(stripDays(tester), run(may(18), 7));
     expect(stripCell(tester, may(19)).isSelected, isTrue);
+
+    setHost(() {
+      selected = april(21);
+    });
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(harborMotionDuration ~/ 2);
+    setHost(() {
+      selected = may(26);
+    });
     await tester.pumpAndSettle();
+    expect(stripDays(tester), run(may(25), 7));
     expect(reported, isEmpty);
     expect(browsed, isEmpty);
+    // The read the strip asks for at rest.
+    await tester.pump(harnessLatency);
   });
 
   testWidgets("WS6 with the weekends hidden the strip shows five weekdays "
       "and slides through the weekdays alone, and it and Day read only "
       "them", (tester) async {
     final api = await pumpDay(tester);
-    await tester.tap(find.byTooltip("Calendar settings"));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
     await tester.tapAt(const Offset(195.0, 20.0));
@@ -478,5 +495,38 @@ void main() {
       tester.getRect(circleOf(april(23))).topRight,
     );
     expect(find.byKey(dayBadgeKey(april(22))), findsNothing);
+  });
+
+  testWidgets("WS14 Today slides the strip back to the selected today from "
+      "where a drag moved it, and to today from a day weeks away", (
+    tester,
+  ) async {
+    await pumpDay(tester);
+    await slideStrip(tester, 7);
+    // Setup sanity: the strip shows the next week, today still selected.
+    expect(stripDays(tester), run(april(27), 7));
+
+    /// Taps Today, and checks halfway through the slide that the strip
+    /// shows the last day of today's week and the first of the next.
+    Future<void> slideToToday() async {
+      await tester.tap(find.byTooltip("Today"));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(harborMotionDuration ~/ 2);
+      expect(stripDays(tester), containsAll(<DateTime>[april(26), april(27)]));
+      await tester.pumpAndSettle();
+      expect(stripDays(tester), run(april(20), 7));
+    }
+
+    await slideToToday();
+
+    await slideStrip(tester, 21);
+    await tester.tap(stripDay(may(13)));
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    // Setup sanity: May 13, three weeks on, is selected where it shows.
+    expect(stripDays(tester), run(may(11), 7));
+    expect(gridDay(tester), may(13));
+    await slideToToday();
   });
 }

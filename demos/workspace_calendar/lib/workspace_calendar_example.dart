@@ -4,8 +4,8 @@
 /// the selected day's week as the list is scrolled;
 /// Month, the month's weeks with each item as a chip on the days it
 /// covers; and Week and Day, timed grids of the selected day's week and of
-/// that day alone, where items are moved and created, and in edit mode
-/// also resized, edited and deleted.
+/// that day alone, where items are moved, resized and created, and in edit
+/// mode also edited and deleted.
 ///
 /// Day shows Agenda's calendar card folded: a strip of a week's worth of
 /// days, opening on the selected day's week, whose days a tap selects and
@@ -56,8 +56,9 @@
 /// caches the days it has read and writes one change per item at a time.
 /// The settings sheet chooses edit mode, which the calendar opens out of
 /// unless it is given it: out of it a long press in Week and Day still
-/// moves an item, or on an empty slot creates one, but a tap on an item
-/// opens its form read-only, and the app bar has no Add. The
+/// moves an item, whose handles then resize it, or on an empty slot
+/// creates one, but a tap on an item opens its form read-only, and the app
+/// bar has no Add. The
 /// sheet also chooses the weekday a week starts on, which every
 /// view's weeks and columns follow, and which weekdays show, how Month fits
 /// its weeks, the hours the calendar shows and schedules in, whether Week
@@ -65,8 +66,13 @@
 /// Month, and the least height of the timed grids' slots, whose ratio to
 /// its default scales Month's weeks past their share of the screen. A
 /// selected day is always on a shown weekday. Every view rings today's
-/// number in a lighter blue than the primary. More only reports that it is
-/// not available.
+/// number in a lighter blue than the primary.
+///
+/// Today, in the app bar, selects today, or the shown day nearest it, in
+/// every view, and slides a strip a drag moved away back to it; a tap on
+/// the header's month opens a date picker of the shown weekdays, whose
+/// pick is selected the same way. The settings sheet opens from the app
+/// bar's More menu.
 library;
 
 import 'dart:async';
@@ -90,15 +96,18 @@ import 'workspace_calendar/timed_grid.dart';
 import 'workspace_calendar/week_strip.dart';
 
 enum _CalendarMode {
-  agenda("Agenda"),
   month("Month"),
   week("Week"),
-  day("Day");
+  day("Day"),
+  agenda("Agenda");
 
   const _CalendarMode(this.label);
 
   final String label;
 }
+
+/// The entries of the app bar's More menu.
+enum _MoreAction { settings }
 
 /// What the chevrons step by, which their tooltips name.
 enum _StepUnit {
@@ -215,6 +224,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// its month. Only meaningful in Agenda and Day, which start unfolded
   /// and folded.
   bool _collapsed = false;
+
+  /// Counts the calls that bring the strip back to the selected day, which
+  /// [WeekStrip.recalls] passes on.
+  int _stripRecalls = 0;
 
   /// What the settings sheet last chose, and before it chooses, the
   /// defaults with the edit mode the calendar was given.
@@ -598,6 +611,44 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// How far down the drag on the folded strip has gone.
   double _unfoldDrag = 0.0;
 
+  /// Selects [day], a shown day, which brings Agenda's list and Day's
+  /// strip to it; when it is selected already, the strip slides back to it
+  /// from where a drag moved it.
+  void _goTo(DateTime day) {
+    if (day == _selected) {
+      if (_stripDay != null) {
+        setState(() {
+          _stripDay = null;
+          _stripRecalls++;
+        });
+      }
+      return;
+    }
+    _select(day);
+  }
+
+  void _goToToday() {
+    _goTo(shownDayNear(_today.value, _settings.weekdays));
+  }
+
+  /// A date picker of the shown weekdays, opening on the selected day, five
+  /// years either side of its year.
+  Future<void> _pickDay() async {
+    final weekdays = _settings.weekdays;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selected,
+      firstDate: DateTime(_selected.year - 5),
+      lastDate: DateTime(_selected.year + 5, 12, 31),
+      selectableDayPredicate: (day) {
+        return weekdays.containsDay(dayNumber(day));
+      },
+    );
+    if (picked != null && mounted) {
+      _goTo(dateOnly(picked));
+    }
+  }
+
   void _openSettings() {
     showCalendarSettings(
       context,
@@ -718,15 +769,33 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               onPressed: agenda ? _openWeekMode : _add,
             ),
           IconButton(
-            icon: const Icon(Icons.tune),
-            tooltip: "Calendar settings",
-            onPressed: _openSettings,
+            icon: const Icon(Icons.today),
+            tooltip: "Today",
+            onPressed: _goToToday,
           ),
-          IconButton(
-            icon: const Icon(Icons.more_vert),
+          PopupMenuButton<_MoreAction>(
             tooltip: "More",
-            onPressed: () {
-              _showMessage("More options are not available yet.");
+            icon: const Icon(Icons.more_vert),
+            color: HarborColors.surface,
+            onSelected: (action) {
+              switch (action) {
+                case _MoreAction.settings:
+                  _openSettings();
+              }
+            },
+            itemBuilder: (context) {
+              return const <PopupMenuEntry<_MoreAction>>[
+                PopupMenuItem<_MoreAction>(
+                  value: _MoreAction.settings,
+                  child: Row(
+                    children: <Widget>[
+                      Icon(Icons.tune, color: HarborColors.text),
+                      SizedBox(width: 12.0),
+                      Flexible(child: Text("Calendar settings")),
+                    ],
+                  ),
+                ),
+              ];
             },
           ),
         ],
@@ -747,6 +816,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         _step(1);
       },
       onModeSelected: _setMode,
+      onPickDay: _pickDay,
     );
   }
 
@@ -973,6 +1043,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       selectedDay: _selected,
       today: _today.value,
       weekdays: _settings.weekdays,
+      recalls: _stripRecalls,
       onSelectDay: _select,
       onBrowse: (day) {
         setState(() {
@@ -1055,6 +1126,7 @@ class _CalendarHeader extends StatelessWidget {
     required this.onPrevious,
     required this.onNext,
     required this.onModeSelected,
+    required this.onPickDay,
   });
 
   /// The day whose month, in three letters, and year the title names: the
@@ -1071,8 +1143,11 @@ class _CalendarHeader extends StatelessWidget {
   final VoidCallback onNext;
   final ValueChanged<_CalendarMode> onModeSelected;
 
+  /// The title was tapped.
+  final VoidCallback onPickDay;
+
   static const TextStyle _titleStyle = TextStyle(
-    fontSize: 20.0,
+    fontSize: 16.0,
     fontWeight: FontWeight.w600,
     color: HarborColors.text,
   );
@@ -1122,13 +1197,20 @@ class _CalendarHeader extends StatelessWidget {
               // Shrinks, and the title in it, only where the row is too
               // narrow for it.
               Flexible(
-                child: SizedBox(
-                  width: _titleWidth(context, day.year),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      "${monthShortNames[day.month - 1]} ${day.year}",
-                      style: _titleStyle,
+                child: Tooltip(
+                  message: "Go to a day",
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8.0),
+                    onTap: onPickDay,
+                    child: SizedBox(
+                      width: _titleWidth(context, day.year),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          "${monthShortNames[day.month - 1]} ${day.year}",
+                          style: _titleStyle,
+                        ),
+                      ),
                     ),
                   ),
                 ),

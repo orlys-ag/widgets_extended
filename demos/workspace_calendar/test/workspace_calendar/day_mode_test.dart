@@ -135,8 +135,7 @@ Future<void> step(WidgetTester tester, String tooltip, {int times = 1}) async {
 /// Opens the settings sheet, sets the hours to [start] to [end] o'clock
 /// and closes it.
 Future<void> setHours(WidgetTester tester, int start, int end) async {
-  await tester.tap(find.byTooltip("Calendar settings"));
-  await tester.pumpAndSettle();
+  await openSettings(tester);
   tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
     RangeValues(start.toDouble(), end.toDouble()),
   );
@@ -883,8 +882,7 @@ void main() {
     await pumpCalendar(tester, api: api);
     // Slots of 12 px, so a block's lines get its rows times 12, less its
     // 1 px margins and 3 px paddings.
-    await tester.tap(find.byTooltip("Calendar settings"));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     tester.widget<Slider>(find.byKey(slotHeightSliderKey)).onChanged!(12.0);
     await tester.pumpAndSettle();
     await tester.tapAt(const Offset(195.0, 20.0));
@@ -1043,8 +1041,7 @@ void main() {
     expect(cellRect(tester, 24, dayColumn).bottom, near(bottom.top));
 
     // AM/PM names the hours to a screen reader as the gutter does.
-    await tester.tap(find.byTooltip("Calendar settings"));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     await tester.tap(find.byKey(hourLabelFormatKey));
     await tester.pumpAndSettle();
     await tester.tapAt(const Offset(195.0, 20.0));
@@ -1077,8 +1074,7 @@ void main() {
     );
     await pumpCalendar(tester, api: api);
     await pickMode(tester, "Day");
-    await tester.tap(find.byTooltip("Calendar settings"));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
       const RangeValues(8.0, 14.0),
     );

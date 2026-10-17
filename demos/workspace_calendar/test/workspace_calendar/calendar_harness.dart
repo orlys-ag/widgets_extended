@@ -1,7 +1,7 @@
 /// Helpers the calendar's widget tests share: the fixed day, the host the
-/// calendar is pumped in, a switch of its edit mode, the timed grid's
-/// viewport, a block move, a read of the mock, and a canvas that records
-/// what a painter draws.
+/// calendar is pumped in, the settings sheet and a switch of its edit
+/// mode, the timed grid's viewport, a block's selection and move, a read
+/// of the mock, and a canvas that records what a painter draws.
 library;
 
 import 'dart:ui' as ui;
@@ -88,8 +88,8 @@ Rect cellRect(WidgetTester tester, int row, int col) {
   return viewport.localToGlobal(rect.topLeft) & rect.size;
 }
 
-/// Opens the calendar's mode menu and picks [mode], "Agenda", "Month", "Week"
-/// or "Day".
+/// Opens the calendar's mode menu and picks [mode], "Month", "Week", "Day"
+/// or "Agenda".
 Future<void> pickMode(WidgetTester tester, String mode) async {
   await tester.tap(find.byTooltip("Calendar view"));
   await tester.pumpAndSettle();
@@ -182,11 +182,18 @@ Future<MockCalendarApi> pumpCalendar(
   return mock;
 }
 
+/// Opens the settings sheet from the app bar's More menu.
+Future<void> openSettings(WidgetTester tester) async {
+  await tester.tap(find.byTooltip("More"));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text("Calendar settings"));
+  await tester.pumpAndSettle();
+}
+
 /// Opens the settings sheet, flips its edit mode switch and closes the
 /// sheet with a tap on the barrier above it.
 Future<void> toggleEditMode(WidgetTester tester) async {
-  await tester.tap(find.byTooltip("Calendar settings"));
-  await tester.pumpAndSettle();
+  await openSettings(tester);
   await tester.tap(find.byKey(editModeKey));
   await tester.pumpAndSettle();
   await tester.tapAt(const Offset(195.0, 20.0));
@@ -198,6 +205,15 @@ RenderBoardViewport<String> gridViewport(WidgetTester tester) {
   return tester.allRenderObjects
       .whereType<RenderBoardViewport<String>>()
       .single;
+}
+
+/// Long-presses the block of the item [id] and lets go where it lifted,
+/// which selects it, so its resize handles show, and moves nothing.
+Future<void> selectBlock(WidgetTester tester, String id) async {
+  final gesture = await tester.startGesture(tester.getCenter(blockFinder(id)));
+  await tester.pump(kLongPressTimeout + kPressTimeout);
+  await gesture.up();
+  await tester.pumpAndSettle();
 }
 
 /// Long-presses [block] and drops it so its top-left corner lands on

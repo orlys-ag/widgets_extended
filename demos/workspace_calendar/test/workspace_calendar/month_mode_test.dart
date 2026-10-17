@@ -39,6 +39,10 @@ const Duration oneFrame = Duration(milliseconds: 16);
 const double strip = 28.0;
 const double lane = 18.0;
 
+/// A phone a little shorter than the harness's, whose weeks rest at
+/// 135 px: five chip lanes, and short of a card week.
+const Size shortPhone = Size(390.0, 839.0);
+
 DateTime april(int day) {
   return DateTime(2026, 4, day);
 }
@@ -84,9 +88,10 @@ Future<MockCalendarApi> pumpMonth(
   Duration latency = harnessLatency,
   bool showAll = false,
   bool editing = false,
+  Size size = const Size(390.0, 844.0),
 }) async {
   final api = MockCalendarApi(seed: seed, latency: latency);
-  await pumpCalendar(tester, api: api, editing: editing);
+  await pumpCalendar(tester, api: api, editing: editing, size: size);
   await pickMode(tester, "Month");
   if (showAll) {
     await pickMonthLayout(tester, "Show all items");
@@ -240,11 +245,6 @@ int listCount(MockCalendarApi api) {
   }).length;
 }
 
-Future<void> openSettings(WidgetTester tester) async {
-  await tester.tap(find.byTooltip("Calendar settings"));
-  await tester.pumpAndSettle();
-}
-
 /// Closes the sheet with a tap on the barrier above it.
 Future<void> closeSettings(WidgetTester tester) async {
   await tester.tapAt(const Offset(195.0, 20.0));
@@ -358,7 +358,7 @@ int fillCount(WidgetTester tester) {
 
 void main() {
   testWidgets(
-    "M1 the menu lists Agenda, Month, Week and Day and the calendar opens "
+    "M1 the menu lists Month, Week, Day and Agenda and the calendar opens "
     "in Agenda",
     (tester) async {
       await pumpCalendar(tester);
@@ -375,7 +375,7 @@ void main() {
         findsNWidgets(4),
       );
       final tops = <double>[
-        for (final label in <String>["Agenda", "Month", "Week", "Day"])
+        for (final label in <String>["Month", "Week", "Day", "Agenda"])
           tester.getRect(find.text(label).last).top,
       ];
       for (var i = 1; i < tops.length; i++) {
@@ -1151,7 +1151,7 @@ void main() {
     "M17c an exit in flight at a weekday change is retired with the sync and "
     "paints nothing",
     (tester) async {
-      const latency = Duration(seconds: 1);
+      const latency = Duration(seconds: 2);
       await pumpMonth(
         tester,
         editing: true,
@@ -1166,9 +1166,11 @@ void main() {
       await tester.tap(formButton("Delete"));
       await tester.pumpAndSettle();
       await tester.tap(formButton("Delete").last);
+      // The delete is sent here, and answered a latency later.
+      final sent = tester.binding.clock.now();
       await tester.pumpAndSettle();
       await openSettings(tester);
-      await tester.pump(latency);
+      await tester.pump(latency - tester.binding.clock.now().difference(sent));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       final exiting = tester.getSize(first).height;
@@ -1489,7 +1491,7 @@ void main() {
   testWidgets(
     "M23 a new size alone leaves a confirmed create's enter running",
     (tester) async {
-      await pumpMonth(tester, editing: true);
+      await pumpMonth(tester, editing: true, size: shortPhone);
       await longPressDay(tester, april(22));
       await pickTask(tester);
       await tester.enterText(fieldFinder("Title"), "New");
@@ -1987,6 +1989,7 @@ void main() {
         ...hourlyTasks(april(23), 4, 11),
       ],
       showAll: true,
+      size: shortPhone,
     );
     final bar = chipFinder("item-1", april(20));
     Finder inBar(Finder finder) {
@@ -2034,7 +2037,7 @@ void main() {
     await setDayWidth(tester, 100.0);
     await setSlotHeight(tester, 18.0);
     await closeSettings(tester);
-    // A 1.125 scale of 135 px weeks rests at 151.875 px, which holds three
+    // A 1.125 scale of 136 px weeks rests at 153 px, which holds three
     // card lanes: two cards and the banner.
     expect(find.text("+6 more"), findsOneWidget);
     final day = tester.getRect(dayFinder(april(22)));
@@ -2072,6 +2075,34 @@ void main() {
       await longPressDay(tester, april(22));
       expect(find.text("New item"), findsOneWidget);
       semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    "M42 with today's weekday hidden, Today selects the shown day nearest "
+    "it, and the date picker offers the shown weekdays alone",
+    (tester) async {
+      await pumpSeededMonth(tester);
+      await openSettings(tester);
+      final days = tester.widget<SegmentedButton<int>>(
+        find.byKey(shownDaysKey),
+      );
+      days.onSelectionChanged!(days.selected.difference(const <int>{1}));
+      await tester.pumpAndSettle();
+      await closeSettings(tester);
+      await tester.tap(find.byTooltip("Next month"));
+      await tester.pump(harnessLatency);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip("Today"));
+      await tester.pumpAndSettle();
+      expect(pilledDays(tester), <DateTime>[april(22)]);
+
+      await tester.tap(find.byTooltip("Go to a day"));
+      await tester.pumpAndSettle();
+      final shown = tester
+          .widget<DatePickerDialog>(find.byType(DatePickerDialog))
+          .selectableDayPredicate!;
+      expect(<bool>[shown(april(21)), shown(april(22))], <bool>[false, true]);
     },
   );
 }

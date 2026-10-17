@@ -35,8 +35,12 @@ const TreeAnimationSpec _dayListAnimationSpec = TreeAnimationSpec(
 );
 
 /// The width of the column of times left of the cards and the dashed
-/// lines.
+/// lines, whose times end [dayListTimeGap] short of them.
 const double dayListTimeWidth = 72.0;
+
+/// The room between the end of the times, which the time column aligns
+/// right, and the cards or the dashed lines.
+const double dayListTimeGap = 8.0;
 
 /// The days the list holds on either side of the day it was built or last
 /// centred on.
@@ -318,7 +322,8 @@ List<DayListRow> dayListRowsOf(
 /// [selectedDay] to as many after, on a [SyncedSliverTree] whose roots are
 /// the days' headers, which stick at the list's top, each over one block
 /// ([DayListBody]) holding the day's rows ([dayListRowsOf]), each card
-/// right of its start time over a chip of its length, and a dashed row for
+/// right of its start time over a chip of its length, both aligned right,
+/// and a dashed row for
 /// each gap in [hours] that no item covers, with a button that reports
 /// [onCreateIn]; "No items" on a dashed row for a day without items, with
 /// a button that reports [onCreateOn]; a progress indicator while the day
@@ -1035,11 +1040,12 @@ class _DayListState extends State<DayList> {
     final item = entry.item;
     return Row(
       children: <Widget>[
-        SizedBox(
+        Container(
           key: dayListTimeKey(entry.id),
           width: dayListTimeWidth,
+          padding: const EdgeInsets.only(right: dayListTimeGap),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: <Widget>[
               Text(
                 hourLabel(item.startMinute, widget.format),
@@ -1087,8 +1093,9 @@ class _DayListState extends State<DayList> {
     );
   }
 
-  /// [label] in the time column, a dashed line across the cards' width,
-  /// and at its end a button that adds an item there through [onAdd].
+  /// [label] at the end of the time column, a dashed line across the
+  /// cards' width, and at its end a button that adds an item there through
+  /// [onAdd].
   Widget _buildDashed({
     required Key key,
     required String label,
@@ -1100,8 +1107,10 @@ class _DayListState extends State<DayList> {
       height: 24.0,
       child: Row(
         children: <Widget>[
-          SizedBox(
+          Container(
             width: dayListTimeWidth,
+            padding: const EdgeInsets.only(right: dayListTimeGap),
+            alignment: Alignment.centerRight,
             child: Text(
               label,
               maxLines: 1,

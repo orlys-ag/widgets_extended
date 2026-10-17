@@ -7,9 +7,12 @@ import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
+import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -359,11 +362,14 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets("E11 More is not available", (tester) async {
+  testWidgets("E11 the settings sheet opens from the app bar's More menu, "
+      "and from no button of its own", (tester) async {
     await pumpCalendar(tester);
+    expect(find.byTooltip("Calendar settings"), findsNothing);
 
     await tapAndSettle(tester, find.byTooltip("More"));
-    expect(find.text("More options are not available yet."), findsOneWidget);
+    await tapAndSettle(tester, find.text("Calendar settings"));
+    expect(find.byType(CalendarSettingsSheet), findsOneWidget);
   });
 
   testWidgets("E12 the month folds and unfolds over 300 ms on "
@@ -467,5 +473,62 @@ void main() {
     await tester.tap(tab);
     await tester.pumpAndSettle();
     expect(gridHeight(tester), month);
+  });
+
+  testWidgets("E15 Today, in the app bar, selects today from another month "
+      "or week", (tester) async {
+    await pumpCalendar(tester);
+    await pickMode(tester, "Month");
+    await tapAndSettle(tester, find.byTooltip("Next month"));
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    // Setup sanity: the step left today's month.
+    expect(find.text("May 2026"), findsOneWidget);
+    await tapAndSettle(tester, find.byTooltip("Today"));
+    expect(find.text("Apr 2026"), findsOneWidget);
+
+    await pickMode(tester, "Week");
+    await tapAndSettle(tester, find.byTooltip("Next week"));
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    await tapAndSettle(tester, find.byTooltip("Today"));
+    expect(find.byKey(dayHeaderKey(today)), findsOneWidget);
+  });
+
+  testWidgets("E16 a tap on the header's month opens a date picker on the "
+      "selected day, whose pick is selected", (tester) async {
+    await pumpCalendar(tester);
+    await pickMode(tester, "Week");
+    await tapAndSettle(tester, find.byTooltip("Go to a day"));
+    final picker = find.byType(DatePickerDialog);
+    expect(tester.widget<DatePickerDialog>(picker).initialDate, today);
+    await tapAndSettle(
+      tester,
+      find.descendant(of: picker, matching: find.text("28")),
+    );
+    await tapAndSettle(tester, find.text("OK"));
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    expect(find.byKey(dayHeaderKey(DateTime(2026, 4, 28))), findsOneWidget);
+  });
+
+  testWidgets("E17 the header names the month and the view in 16 px type", (
+    tester,
+  ) async {
+    await pumpCalendar(tester);
+    double sizeOf(Finder text) {
+      return tester.renderObject<RenderParagraph>(text).text.style!.fontSize!;
+    }
+
+    expect(sizeOf(find.text("Apr 2026")), 16.0);
+    expect(
+      sizeOf(
+        find.descendant(
+          of: find.byTooltip("Calendar view"),
+          matching: find.text("Agenda"),
+        ),
+      ),
+      16.0,
+    );
   });
 }

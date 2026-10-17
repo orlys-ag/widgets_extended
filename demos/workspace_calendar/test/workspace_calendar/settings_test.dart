@@ -50,11 +50,6 @@ int updateCount(MockCalendarApi api) {
   }).length;
 }
 
-Future<void> openSettings(WidgetTester tester) async {
-  await tester.tap(find.byTooltip("Calendar settings"));
-  await tester.pumpAndSettle();
-}
-
 /// Closes the sheet with a tap on the barrier above it.
 Future<void> closeSettings(WidgetTester tester) async {
   await tester.tapAt(const Offset(195.0, 20.0));

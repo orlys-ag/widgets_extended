@@ -1,7 +1,7 @@
 /// The calendar's timed grid: consecutive days on the board, with a frozen
 /// hour gutter and, where it shows one, a frozen day header, one row per
-/// 15-minute slot, and the days' items as blocks that move, and in edit
-/// mode resize.
+/// 15-minute slot, and the days' items as blocks that move, and once
+/// selected resize.
 library;
 
 import 'dart:async';
@@ -67,6 +67,19 @@ ValueKey<String> dayHeaderKey(DateTime day) {
 /// The key of the block showing the item [id].
 ValueKey<String> blockKey(String id) {
   return ValueKey<String>("block-$id");
+}
+
+/// The key of the outline and the resize handles over the block of the
+/// item [id] while it is selected.
+ValueKey<String> blockHandlesKey(String id) {
+  return ValueKey<String>("block-handles-$id");
+}
+
+/// The key of the grip of the selected block of the item [id] that lies
+/// across its edge on [side]: [AxisDirection.up], [AxisDirection.down] or
+/// [AxisDirection.right].
+ValueKey<String> blockGripKey(String id, AxisDirection side) {
+  return ValueKey<String>("block-grip-$id-${side.name}");
 }
 
 /// The key of the pill counting the shown items on no day the grid has a
@@ -505,11 +518,14 @@ CreateRange createRangeOver(
 /// day header reports [onSelectDay]. On a grid of one day column each
 /// block uses the width to show its times and its summaries.
 ///
-/// A long press on an item moves it. In edit mode, which [settings] choose,
-/// the top band drags its start time, the bottom band its end time, and, on
-/// more than one day, the right band its day count. Out of it a block has no
-/// bands, so a touch drag from its edge scrolls the grid as one anywhere
-/// else does.
+/// A long press on an item lifts it to move and selects its block, in edit
+/// mode, which [settings] choose, and out of it; a tap anywhere but on the
+/// selected block, or its item leaving the grid, clears the selection. Only
+/// the selected block has resize handles, over an outline: its top drags
+/// its start time, its bottom its end time, and, on more than one day, its
+/// right edge its day count, each from a press on either side of the
+/// edge, where a pill lies across it. A touch drag from another block's
+/// edge scrolls the grid as one anywhere else does.
 /// A move dropped onto another item's time lands at the nearest free time
 /// that shows, on that day or the day before or after it, and goes back
 /// where there is none; a resize dragged onto one stops at its
@@ -629,19 +645,13 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final BoardCellBuilder<String, ShownItem> _cellBuilder = _buildCell;
   late final BoardItemBuilder<String, ShownItem> _itemBuilder = _buildItem;
 
-  /// The board's drag config in edit mode and out of it, one instance of
-  /// each, so a rebuild of this state hands the board the config it
-  /// already has, and a switch between them keeps every block's `State`.
-  /// Out of edit mode the config admits no resize edge, so a press anywhere
-  /// on a block starts a move after a long press.
-  late final BoardDragConfig<String> _editConfig = _dragConfigOf(resizes: true);
-  late final BoardDragConfig<String> _viewConfig = _dragConfigOf(
-    resizes: false,
-  );
-
-  /// A single day column has no right strip: there is no column to drag
-  /// its edge onto. Whether the grid has more than one column is fixed for
-  /// its life, which [didUpdateWidget] asserts.
+  /// One instance, so a rebuild of this state hands the board the config
+  /// it already has. The board builds no handles of its own: each block
+  /// carries the handle that moves it after a long press, and the selected
+  /// block the resize handles the config's edges admit ([_Block]). A single
+  /// day column has no right strip: there is no column to drag its edge
+  /// onto. Whether the grid has more than one column is fixed for its
+  /// life, which [didUpdateWidget] asserts.
   ///
   /// A move [_canDropAt] refuses for meeting another item slides to the
   /// placement nearest on screen that holds it clear, at any time that
@@ -650,32 +660,50 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// another item stops its dragged edge at that item. The drag reports
   /// keep [_drag], which the landing label and outline show. A drag's
   /// start plays a haptic, and the block a move carries casts a shadow.
-  BoardDragConfig<String> _dragConfigOf({required bool resizes}) {
-    return BoardDragConfig<String>(
-      canDrag: _canDrag,
-      canDropAt: _canDropAt,
-      dropFit: const BoardDropFit(
-        minFreeFraction: 0.0,
-        rowRadius: double.infinity,
-        colRadius: 1.0,
-        clampResizes: true,
-      ),
-      onItemMoved: _commit,
-      onItemResized: _commit,
-      resizeEdges: resizes && _tracks.columnCount > 1
-          ? BoardResizeEdges.trailing
-          : BoardResizeEdges.none,
-      primaryResizeEdges: resizes
-          ? BoardResizeEdges.both
-          : BoardResizeEdges.none,
-      draggedItemOpacity: harborDraggedItemOpacity,
-      dragProxyBuilder: _buildLiftedBlock,
-      hapticsOnDrag: true,
-      onDragStart: _handleDragStart,
-      onDragTargetChanged: _handleDragTarget,
-      onDragEnd: _handleDragEnd,
-    );
-  }
+  late final BoardDragConfig<String> _dragConfig = BoardDragConfig<String>(
+    canDrag: _canDrag,
+    canDropAt: _canDropAt,
+    dropFit: const BoardDropFit(
+      minFreeFraction: 0.0,
+      rowRadius: double.infinity,
+      colRadius: 1.0,
+      clampResizes: true,
+    ),
+    onItemMoved: _commit,
+    onItemResized: _commit,
+    resizeEdges: _tracks.columnCount > 1
+        ? BoardResizeEdges.trailing
+        : BoardResizeEdges.none,
+    primaryResizeEdges: BoardResizeEdges.both,
+    buildDefaultDragHandles: false,
+    draggedItemOpacity: harborDraggedItemOpacity,
+    dragProxyBuilder: _buildLiftedBlock,
+    hapticsOnDrag: true,
+    onDragStart: _handleDragStart,
+    onDragTargetChanged: _handleDragTarget,
+    onDragEnd: _handleDragEnd,
+  );
+
+  /// The id of the item whose block a long press last lifted, which shows
+  /// its resize handles, or null. The blocks listen to it, as the item
+  /// builder runs only when the board rebuilds an item.
+  final ValueNotifier<String?> _selectedBlock = ValueNotifier<String?>(null);
+
+  /// The selected block's handles, while it is built.
+  final _HandlesSlot _handles = _HandlesSlot();
+
+  /// The cursor over the strips outside the selected block that resize it,
+  /// [MouseCursor.defer] anywhere else.
+  final ValueNotifier<MouseCursor> _besideCursor = ValueNotifier<MouseCursor>(
+    MouseCursor.defer,
+  );
+
+  /// The presses that went down off the selected block, by pointer: where
+  /// each went down, and the block selected then. One let go within its
+  /// slop of there, with that block still selected, is a tap elsewhere,
+  /// which clears the selection.
+  final Map<int, ({Offset at, String id})> _pressesOff =
+      <int, ({Offset at, String id})>{};
 
   /// The drag the board runs, or null.
   _GridDrag? _drag;
@@ -906,6 +934,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     widget.model.removeListener(_handleModel);
     _header.dispose();
     _hiddenCount.dispose();
+    _selectedBlock.dispose();
+    _besideCursor.dispose();
     _hourLabels.dispose();
     // The board has unmounted by now, so nothing still listens to the
     // controller.
@@ -1092,6 +1122,13 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (!animated) {
       _scheduleStyleRestore();
     }
+    final selected = _selectedBlock.value;
+    if (selected != null &&
+        !placements.any((placement) {
+          return placement.item.id == selected;
+        })) {
+      _selectedBlock.value = null;
+    }
     _syncedReady = ready;
     _hiddenCount.value = hidden;
   }
@@ -1248,6 +1285,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   void _handleDragStart(String id, BoardDragKind kind) {
     if (!mounted) {
       return;
+    }
+    if (kind == BoardDragKind.move) {
+      _selectedBlock.value = id;
     }
     setState(() {
       _drag = (id: id, kind: kind, resolved: false, target: null);
@@ -1435,12 +1475,23 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return false;
   }
 
-  /// Arms the create gestures for an admitted press: out of edit mode only
-  /// the range that starts after a press and hold. A listener's pointer
-  /// down runs before the arena closes, so they join it beside the
-  /// scrollable's pan; each recognizer ignores the pointer kinds it does
-  /// not support.
+  /// Starts a resize for a press beside the selected block, keeps any
+  /// other press off it for [_handlePointerUp], and arms the create
+  /// gestures for an admitted press: out of edit mode only the range that
+  /// starts after a press and hold. A listener's pointer down runs before
+  /// the arena closes, so they join it beside the scrollable's pan; each
+  /// recognizer ignores the pointer kinds it does not support.
   void _handlePointerDown(PointerDownEvent event) {
+    final selected = _selectedBlock.value;
+    if (selected != null) {
+      final under = _itemAt(event.position);
+      if (under == null && _startBeside(event)) {
+        return;
+      }
+      if (under != selected) {
+        _pressesOff[event.pointer] = (at: event.position, id: selected);
+      }
+    }
     if (!_admits(event.position)) {
       return;
     }
@@ -1449,6 +1500,59 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       _immediateRange.addPointer(event);
     }
     _delayedRange.addPointer(event);
+  }
+
+  /// Clears the selection for a tap off the selected block, which a press
+  /// lifting another block, and so selecting it, is not.
+  void _handlePointerUp(PointerUpEvent event) {
+    final press = _pressesOff.remove(event.pointer);
+    if (press == null || _selectedBlock.value != press.id) {
+      return;
+    }
+    final slop = computeHitSlop(
+      event.kind,
+      MediaQuery.maybeGestureSettingsOf(context),
+    );
+    if ((event.position - press.at).distance <= slop) {
+      _selectedBlock.value = null;
+    }
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _pressesOff.remove(event.pointer);
+  }
+
+  /// Starts a resize of the selected block for a press over a body cell,
+  /// and over no block, on a strip outside the selected block beside one
+  /// of its edges, which the board, hit-testing a block only within its
+  /// bounds, gives no handle; reports whether it did.
+  bool _startBeside(PointerDownEvent event) {
+    final handles = _handles.current;
+    return handles != null &&
+        _bodyCellAt(event.position) != null &&
+        handles.startOutside(event);
+  }
+
+  /// Shows the resize cursor over the strips [_startBeside] starts from.
+  void _handleHover(PointerHoverEvent event) {
+    final handles = _handles.current;
+    var cursor = MouseCursor.defer;
+    if (handles != null &&
+        _selectedBlock.value != null &&
+        _itemAt(event.position) == null &&
+        _bodyCellAt(event.position) != null) {
+      cursor = handles.cursorOutside(event.position);
+    }
+    _besideCursor.value = cursor;
+  }
+
+  /// The id of the item whose block lies under [global], or null.
+  String? _itemAt(Offset global) {
+    final viewport = _findViewport();
+    if (viewport == null) {
+      return null;
+    }
+    return viewport.itemAt(viewport.globalToLocal(global));
   }
 
   void _handleTapUp(TapUpDetails details) {
@@ -1577,6 +1681,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       showsSummary: view.span.rowSpan >= 3,
       cutAtStart: entry.item.startMinute < hours.start,
       cutAtEnd: entry.item.endMinute > hours.end,
+      selection: _selectedBlock,
+      handles: _handles,
+      resizesDays: _tracks.columnCount > 1,
       onOpen: entry.pending
           ? null
           : () {
@@ -1603,8 +1710,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     );
     _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
     final landingText = _landingText();
-    final board = Listener(
+    final listener = Listener(
       onPointerDown: _handlePointerDown,
+      onPointerUp: _handlePointerUp,
+      onPointerCancel: _handlePointerCancel,
       child: NotificationListener<ScrollNotification>(
         onNotification: _handleScrollNotification,
         child: Board<String, ShownItem>(
@@ -1629,12 +1738,19 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
             reachAbove: _notices.above ? _noticeHeight : 0.0,
             reachBelow: _notices.below ? _noticeHeight : 0.0,
           ),
-          drag: widget.settings.editing ? _editConfig : _viewConfig,
+          drag: _dragConfig,
           // The grid scrolls on its own, not with the screen's primary
           // scroll controller.
           primary: false,
         ),
       ),
+    );
+    final board = ValueListenableBuilder<MouseCursor>(
+      valueListenable: _besideCursor,
+      child: listener,
+      builder: (context, cursor, child) {
+        return MouseRegion(cursor: cursor, onHover: _handleHover, child: child);
+      },
     );
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1803,7 +1919,9 @@ class _DayHeaderCell extends StatelessWidget {
 
 /// One item on the grid: its type's tint with a 4 px edge, its text, and
 /// an arrow at each end the grid's hours cut. Dimmed with a progress
-/// indicator while [ShownItem.pending].
+/// indicator while [ShownItem.pending]. A long press on it moves it, and
+/// while [selection] names its item, an outline and the resize handles
+/// lie over it ([_BlockHandles]).
 ///
 /// A [detailed] block, which a grid of one day column shows, has its title
 /// and its times on its first line, the times wrapping under a title too
@@ -1818,10 +1936,23 @@ class _Block extends StatelessWidget {
     required this.showsSummary,
     required this.cutAtStart,
     required this.cutAtEnd,
+    required this.selection,
+    required this.handles,
+    required this.resizesDays,
     required this.onOpen,
   });
 
   final ShownItem entry;
+
+  /// The id of the item whose block is selected, or null.
+  final ValueListenable<String?> selection;
+
+  /// Where the handles register while this block is selected.
+  final _HandlesSlot handles;
+
+  /// Whether the selected block has a handle on its right edge, which
+  /// drags its day count: on a grid of more than one day column.
+  final bool resizesDays;
 
   final bool detailed;
 
@@ -1902,9 +2033,33 @@ class _Block extends StatelessWidget {
         ],
       );
     }
-    return Padding(
-      padding: const EdgeInsets.all(1.0),
-      child: GestureDetector(onTap: onOpen, child: content),
+    final block = BoardDelayedDragHandle(
+      child: Padding(
+        padding: const EdgeInsets.all(1.0),
+        child: GestureDetector(onTap: onOpen, child: content),
+      ),
+    );
+    // One shape selected or not, so a selection keeps the block's State.
+    return ValueListenableBuilder<String?>(
+      valueListenable: selection,
+      child: block,
+      builder: (context, selected, child) {
+        return Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            child!,
+            if (selected == entry.id)
+              Positioned.fill(
+                child: _BlockHandles(
+                  key: blockHandlesKey(entry.id),
+                  id: entry.id,
+                  slot: handles,
+                  resizesDays: resizesDays,
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -2656,5 +2811,338 @@ class _HourLabels {
       label.dispose();
     }
     _labels.clear();
+  }
+}
+
+/// Where the selected block's [_BlockHandles] register while they are
+/// built, so a press outside the block reaches them from [TimedGrid]'s
+/// listener.
+class _HandlesSlot {
+  _BlockHandlesState? current;
+}
+
+/// The cursor of a resize on [axis].
+MouseCursor _resizeCursorOf(Axis axis) {
+  return axis == Axis.vertical
+      ? SystemMouseCursors.resizeUpDown
+      : SystemMouseCursors.resizeLeftRight;
+}
+
+/// The selected block's outline and resize handles, over the block. Each
+/// edge that resizes, the top, the bottom and, where [resizesDays], the
+/// right, has a pill-shaped grip lying across its middle on the outline,
+/// half outside the block, and takes a press on either side of it: inside
+/// the block, a strip [depth] deep and never more than a third of the
+/// block, so a short block keeps room to move by, takes the press
+/// outright, the top and the bottom taking a corner, as the board's own
+/// bands do; outside it, where the board hit-tests no part of the block,
+/// [TimedGrid]'s listener hands a press up to [depth] away to
+/// [_BlockHandlesState.startOutside] through [slot].
+class _BlockHandles extends StatefulWidget {
+  const _BlockHandles({
+    super.key,
+    required this.id,
+    required this.slot,
+    required this.resizesDays,
+  });
+
+  /// How far a resize press reaches from an edge into the block at most,
+  /// and out of it.
+  static const double depth = 12.0;
+
+  /// The outline's width, on whose middle the grips lie.
+  static const double outlineWidth = 2.0;
+
+  /// A grip's length along its edge, at most three fifths of the edge.
+  static const double gripLength = 24.0;
+
+  static const double gripThickness = 8.0;
+
+  /// The block's item, which names the grips' keys.
+  final String id;
+
+  final _HandlesSlot slot;
+  final bool resizesDays;
+
+  @override
+  State<_BlockHandles> createState() {
+    return _BlockHandlesState();
+  }
+}
+
+class _BlockHandlesState extends State<_BlockHandles> {
+  @override
+  void initState() {
+    super.initState();
+    widget.slot.current = this;
+  }
+
+  @override
+  void dispose() {
+    // The block selected next may have registered first.
+    if (identical(widget.slot.current, this)) {
+      widget.slot.current = null;
+    }
+    super.dispose();
+  }
+
+  /// The edge, and its axis, whose strip outside the block, [depth] deep
+  /// and as long as the edge, holds [global], or null.
+  ({BoardResizeEdges edge, Axis axis})? _edgeOutsideAt(Offset global) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) {
+      return null;
+    }
+    final local = box.globalToLocal(global);
+    final size = box.size;
+    const depth = _BlockHandles.depth;
+    if (local.dx >= 0.0 && local.dx <= size.width) {
+      if (local.dy < 0.0 && local.dy >= -depth) {
+        return (edge: BoardResizeEdges.leading, axis: Axis.vertical);
+      }
+      if (local.dy >= size.height && local.dy <= size.height + depth) {
+        return (edge: BoardResizeEdges.trailing, axis: Axis.vertical);
+      }
+    }
+    if (widget.resizesDays &&
+        local.dy >= 0.0 &&
+        local.dy <= size.height &&
+        local.dx >= size.width &&
+        local.dx <= size.width + depth) {
+      return (edge: BoardResizeEdges.trailing, axis: Axis.horizontal);
+    }
+    return null;
+  }
+
+  /// Starts a resize for [event] where it lies on a strip outside the
+  /// block, and reports whether it did.
+  bool startOutside(PointerDownEvent event) {
+    final strip = _edgeOutsideAt(event.position);
+    final scope = context.getInheritedWidgetOfExactType<BoardItemDragScope>();
+    if (strip == null || scope == null || !scope.canDrag) {
+      return false;
+    }
+    scope.startDrag(
+      event,
+      _PromptMultiDragGestureRecognizer()
+        ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context),
+      strip.edge,
+      strip.axis,
+    );
+    return true;
+  }
+
+  /// The resize cursor of the strip outside the block that holds
+  /// [global], or [MouseCursor.defer] off them.
+  MouseCursor cursorOutside(Offset global) {
+    final strip = _edgeOutsideAt(global);
+    return strip == null ? MouseCursor.defer : _resizeCursorOf(strip.axis);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        final rows = math.min(_BlockHandles.depth, height / 3);
+        final columns = math.min(_BlockHandles.depth, width / 3);
+        final across = math.min(_BlockHandles.gripLength, width * 0.6);
+        final down = math.min(_BlockHandles.gripLength, height * 0.6);
+        // From the block's edge to a grip's near side, which centres the
+        // grip on the outline's middle.
+        const lead =
+            _BlockHandles.outlineWidth / 2 - _BlockHandles.gripThickness / 2;
+        final id = widget.id;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: <Widget>[
+            const Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.fromBorderSide(
+                      BorderSide(
+                        color: HarborColors.primary,
+                        width: _BlockHandles.outlineWidth,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (widget.resizesDays)
+              Positioned(
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+                width: columns,
+                child: const _ResizeHandle(
+                  edge: BoardResizeEdges.trailing,
+                  axis: Axis.horizontal,
+                ),
+              ),
+            Positioned(
+              top: 0.0,
+              left: 0.0,
+              right: 0.0,
+              height: rows,
+              child: const _ResizeHandle(
+                edge: BoardResizeEdges.leading,
+                axis: Axis.vertical,
+              ),
+            ),
+            Positioned(
+              left: 0.0,
+              right: 0.0,
+              bottom: 0.0,
+              height: rows,
+              child: const _ResizeHandle(
+                edge: BoardResizeEdges.trailing,
+                axis: Axis.vertical,
+              ),
+            ),
+            Positioned(
+              top: lead,
+              left: (width - across) / 2,
+              width: across,
+              height: _BlockHandles.gripThickness,
+              child: _Grip(key: blockGripKey(id, AxisDirection.up)),
+            ),
+            Positioned(
+              bottom: lead,
+              left: (width - across) / 2,
+              width: across,
+              height: _BlockHandles.gripThickness,
+              child: _Grip(key: blockGripKey(id, AxisDirection.down)),
+            ),
+            if (widget.resizesDays)
+              Positioned(
+                top: (height - down) / 2,
+                right: lead,
+                width: _BlockHandles.gripThickness,
+                height: down,
+                child: _Grip(key: blockGripKey(id, AxisDirection.right)),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A strip over the selected block that starts a resize of its [edge] on
+/// [axis] at once, under its axis's resize cursor.
+class _ResizeHandle extends StatelessWidget {
+  const _ResizeHandle({required this.edge, required this.axis});
+
+  final BoardResizeEdges edge;
+  final Axis axis;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: _resizeCursorOf(axis),
+      child: BoardDragHandle(
+        edge: edge,
+        axis: axis,
+        behavior: HitTestBehavior.opaque,
+        child: const SizedBox.expand(),
+      ),
+    );
+  }
+}
+
+/// A resize handle's grip: a pill filled with the primary colour, as the
+/// outline it lies across is, ringed in the surface colour, which parts it
+/// from the outline and the block's tint, over a soft shadow. Takes no
+/// press: the strip under it and the grid's listener take them.
+class _Grip extends StatelessWidget {
+  const _Grip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: HarborColors.primary,
+          border: Border.fromBorderSide(
+            BorderSide(color: HarborColors.surface, width: 1.5),
+          ),
+          borderRadius: BorderRadius.all(
+            Radius.circular(_BlockHandles.gripThickness / 2),
+          ),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 2.0,
+              offset: Offset(0.0, 1.0),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A multi-drag recognizer for a press on a strip outside the selected
+/// block, which lies over no handle: it wins the press's arena when the
+/// arena closes, before the scrollable's drag can reach its slop, and
+/// starts the drag at the pointer's first move, so a tap starts none.
+class _PromptMultiDragGestureRecognizer extends MultiDragGestureRecognizer {
+  _PromptMultiDragGestureRecognizer() : super(debugOwner: null);
+
+  /// The state [addAllowedPointer] has just created, which it accepts.
+  _PromptPointerState? _created;
+
+  @override
+  MultiDragPointerState createNewPointerState(PointerDownEvent event) {
+    final state = _PromptPointerState(
+      event.position,
+      event.kind,
+      gestureSettings,
+    );
+    _created = state;
+    return state;
+  }
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    _created!.acceptNow();
+    _created = null;
+  }
+
+  @override
+  String get debugDescription {
+    return "prompt multidrag";
+  }
+}
+
+class _PromptPointerState extends MultiDragPointerState {
+  _PromptPointerState(super.initialPosition, super.kind, super.gestureSettings);
+
+  /// Starts the drag, once the arena has accepted the pointer; null until
+  /// then and once the drag has started.
+  GestureMultiDragStartCallback? _starter;
+
+  /// Accepts the pointer while its arena is open, which makes this the
+  /// arena's winner when it closes.
+  void acceptNow() {
+    resolve(GestureDisposition.accepted);
+  }
+
+  @override
+  void accepted(GestureMultiDragStartCallback starter) {
+    _starter = starter;
+  }
+
+  @override
+  void checkForResolutionAfterMove() {
+    final starter = _starter;
+    if (starter != null && pendingDelta != Offset.zero) {
+      _starter = null;
+      starter(initialPosition);
+    }
   }
 }
