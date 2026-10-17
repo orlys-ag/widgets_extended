@@ -122,6 +122,7 @@ The contract of `Fenwick`, the axes, spans and the start rule, `SpanIndex`, `Ove
   a landing from a user's drag taking the position.
 - **`board_views.dart` / `board_config.dart` / `board_background.dart`**:
   the builder view values (`select()` routes through the controller), the
-  config and report types, and the geometry-fed background painters.
+  config and report types, and the geometry-fed background and
+  foreground painters.
 - **`board.dart`**: the barrel; the names its explicit `show` clauses list, and anything
   omitted is internal regardless of its name.

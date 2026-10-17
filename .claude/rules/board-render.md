@@ -70,8 +70,11 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   test, which band holds the interval) is laid out where its band's
   cells are and takes no track-resize shift there, and is obtained by four extra span-index
   queries over the bands, a straddler scrolling under the band as before;
-  six paint planes (scrolled cells, scrolled items, band cells, band
-  items, corner cells, corner items), whose item painted rects are
+  the background painter, six paint planes (scrolled cells, scrolled
+  items, band cells, band items, corner cells, corner items), then the
+  foreground painter, each painter called directly on the canvas, the
+  foreground reading it after the children so it lands above their
+  layers; the planes' item painted rects are
   computed ONCE per paint into a scratch the clip decision and the paint
   pass share while hit-testing and `itemAt` read live, with hit-testing
   in exact reverse and `applyPaintTransform` mirroring the per-item

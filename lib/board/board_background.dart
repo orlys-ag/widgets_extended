@@ -1,10 +1,12 @@
-/// Background painting for the board: the read-only geometry view a
-/// painter receives, the painter contract, and a stock grid painter.
+/// Background and foreground painting for the board: the read-only
+/// geometry view a painter receives, the two painter contracts, and a
+/// stock grid painter.
 library;
 
 import 'package:flutter/painting.dart';
 
-/// What a [BoardBackgroundPainter] may read while painting.
+/// What a [BoardBackgroundPainter] or a [BoardForegroundPainter] may read
+/// while painting.
 ///
 /// Implemented by the board's render object and handed to the painter on
 /// every paint; no per-paint object is allocated.
@@ -65,6 +67,22 @@ abstract class BoardBackgroundPainter {
 
   /// Whether replacing [old] with this painter requires a repaint.
   bool shouldRepaint(covariant BoardBackgroundPainter old);
+}
+
+/// Paints over every cell and item, the frozen bands' included. Costs no
+/// render children: the render object calls [paint] directly as its last
+/// paint pass, inside the viewport's clip when it clips. What a painter
+/// draws for scrolled tracks it clips to
+/// [BoardGeometryView.scrolledRegion] itself, or it lands on the bands.
+abstract class BoardForegroundPainter {
+  const BoardForegroundPainter();
+
+  /// Paints onto [canvas], reading [geometry] for what is visible and
+  /// where it sits.
+  void paint(Canvas canvas, BoardGeometryView geometry);
+
+  /// Whether replacing [old] with this painter requires a repaint.
+  bool shouldRepaint(covariant BoardForegroundPainter old);
 }
 
 /// The tracks of one axis a painter walks: the visible SCROLLED tracks,

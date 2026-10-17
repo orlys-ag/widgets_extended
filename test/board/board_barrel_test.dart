@@ -39,6 +39,7 @@ void main() {
         BoardRenderPort,
         RenderBoardViewport,
         BoardBackgroundPainter,
+        BoardForegroundPainter,
         BoardGridPainter,
         BoardGeometryView,
         Board,
@@ -58,11 +59,10 @@ void main() {
         BoardDropTarget,
         BoardDragKind,
       ];
-      // 34 since item 7S of the 2026-09-23 audit fixes, which took
-      // BoardDragController off the barrel: no app can reach the board's
-      // instance. Item 7K took BoardAnimationReader, the type of an
-      // internal getter, off before it.
-      expect(types, hasLength(34));
+      // BoardDragController and BoardAnimationReader are not on the list:
+      // no app can reach the board's drag controller, and the reader is
+      // the type of an internal getter.
+      expect(types, hasLength(35));
       // The three typedefs are not type literals; a nullable declaration
       // per name is the compile-level reference.
       BoardCellBuilder<String, Object?>? cellBuilder;
@@ -113,7 +113,7 @@ void main() {
         shown.add(name.trim());
       }
     }
-    expect(shown, hasLength(37));
+    expect(shown, hasLength(38));
     const internals = <String>{
       "BoardStore",
       "SpanIndex",
