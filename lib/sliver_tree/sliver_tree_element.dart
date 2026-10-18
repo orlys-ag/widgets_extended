@@ -18,7 +18,8 @@ abstract class TreeChildManager<TKey> {
   /// Creates or updates the child for the given node.
   void createChild(TKey nodeId);
 
-  /// Removes the child for the given node.
+  /// Removes the child for the given node, from inside the render object's
+  /// layout, so the frame that removes it also disposes its element.
   void removeChild(TKey nodeId);
 
   /// Called when layout starts.
@@ -52,14 +53,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
 
   /// Whether we're currently in a layout callback.
   bool _inLayout = false;
-
-  /// Whether garbage collection is already scheduled.
-  bool _gcScheduled = false;
-
-  /// Whether stale-node eviction is already scheduled for a post-frame
-  /// callback. Dedupes across layout passes so continuous scroll doesn't
-  /// queue one callback per frame (each of which would walk [_children]).
-  bool _staleEvictionScheduled = false;
 
   /// Keys whose mounted widget may be stale and needs refresh.
   ///
@@ -132,8 +125,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     widget.controller.removeStructuralListener(_onStructuralChange);
     widget.controller.removeAnimationListener(_onAnimationTick);
     widget.controller.removeNodeDataListener(_onNodeDataChanged);
-    _gcScheduled = false;
-    _staleEvictionScheduled = false;
     super.unmount();
   }
 
@@ -176,20 +167,11 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       renderObject.controller = newWidget.controller;
       // Old-controller keys are meaningless under the new controller;
       // drop the queue and let createChild rebuild against fresh data.
+      // A key only the old controller has keeps its Element here and its
+      // RenderBox there, with no live nodeData: the render object keeps
+      // its children across the swap (see its controller setter), and the
+      // layout that setter marks drops both through [removeChild].
       _dirtyKeys.clear();
-      // Schedule a GC pass: keys that existed under the old controller
-      // but not under the new one would otherwise survive as stale
-      // elements. The renderObject's _children map is deliberately NOT
-      // cleared in the controller setter (keys shared by both
-      // controllers must keep their adopted render boxes; see the
-      // setter's comment), so an old-only key keeps its Element here
-      // AND its RenderBox there, with no live nodeData. The GC pass
-      // evicts both: updateChild(element, null, slot) routes through
-      // removeRenderObjectChild, which drops the adopted box.
-      // Without this, a parent rebuild can swap controllers and leave
-      // dead rows participating in find/semantics/focus until the next
-      // structural notification on the new controller fires GC.
-      _scheduleGarbageCollection();
     }
 
     // Parent rebuild: the `nodeBuilder` closure may have captured new
@@ -257,7 +239,8 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   ///     Queued lazily; consumed in [createChild] for retained rows.
   ///   - empty set: structural change occurred but no mounted row's
   ///     builder output changed (new rows first-build via [createChild],
-  ///     removed rows GC'd); only relayout + GC are required. Nothing
+  ///     removed rows go through [removeChild]); only relayout is
+  ///     required. Nothing
   ///     is added to [_dirtyKeys]; avoiding this queue is what keeps an
   ///     external `ChangeNotifier` subscriber that rebuilds SliverTree's
   ///     ancestor from amplifying the empty-set notify into a refresh
@@ -265,7 +248,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   ///   - non-empty set: queue exactly the listed mounted keys.
   void _onStructuralChange(Set<TKey>? affectedKeys) {
     renderObject.markNeedsLayout();
-    _scheduleGarbageCollection();
 
     if (affectedKeys == null) {
       _dirtyKeys.addAll(_children.keys);
@@ -338,8 +320,8 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
       //   FLIP active (a drag release with no commit). Dropping it would
       //   leave that tick matching no branch at all, since the
       //   paint-only branch below also requires `hasSlides`, and the
-      //   post-settle layout that `_scheduleStaleEviction` rides would
-      //   disappear.
+      //   post-settle layout, whose end evicts the rows the slides kept
+      //   (`RenderSliverTree._evictUnretainedChildren`), would disappear.
       //
       // With no preview in play the two disjuncts flip on the same tick,
       // so one branch means one layout and the exact per-slide layout
@@ -377,66 +359,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     renderObject.markNeedsLayout();
   }
 
-  /// Schedules cleanup of elements for nodes that no longer exist.
-  void _scheduleGarbageCollection() {
-    if (_gcScheduled) return;
-    _gcScheduled = true;
-
-    // Run after the frame when we're definitely not in layout
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _gcScheduled = false;
-      if (!mounted || _inLayout) return;
-      _collectGarbage();
-    });
-  }
-
-  /// Removes elements for nodes that no longer exist in the controller.
-  ///
-  /// Only evicts *dead* nodes (removed from the tree entirely). Stale-node
-  /// eviction (mounted rows that scrolled outside the cache region) is
-  /// handled separately by [_scheduleStaleEviction] on a post-layout
-  /// cadence.
-  void _collectGarbage() {
-    final controller = widget.controller;
-    final deadNodes = <TKey>[];
-
-    // Dead nodes: no longer in the controller at all. Always evict.
-    for (final nodeId in _children.keys) {
-      if (controller.getNodeData(nodeId) == null) {
-        deadNodes.add(nodeId);
-      }
-    }
-
-    if (deadNodes.isEmpty) return;
-
-    // Batch evictions to avoid frame spikes after animation settles.
-    // Scale batch size with dead count so large removals clear faster.
-    final maxPerPass = deadNodes.length.clamp(50, 200);
-    final evictNow = deadNodes.length <= maxPerPass
-        ? deadNodes
-        : deadNodes.sublist(0, maxPerPass);
-
-    // lockState, not buildScope: removing a row only deactivates its
-    // element, and a buildScope would then build every dirty element of
-    // this element's build scope, which from a post-frame callback can hold
-    // widgets outside this tree that an earlier callback marked dirty.
-    // lockState still refuses a setState from a deactivating row.
-    owner!.lockState(() {
-      for (final nodeId in evictNow) {
-        final element = _children.remove(nodeId);
-        _dirtyKeys.remove(nodeId);
-        if (element != null) {
-          updateChild(element, null, nodeId);
-        }
-      }
-    });
-
-    // If more remain, schedule another pass.
-    if (deadNodes.length > maxPerPass) {
-      _scheduleGarbageCollection();
-    }
-  }
-
   // ══════════════════════════════════════════════════════════════════════════
   // TREE CHILD MANAGER
   // ══════════════════════════════════════════════════════════════════════════
@@ -449,109 +371,6 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
   @override
   void didFinishLayout() {
     _inLayout = false;
-    _scheduleStaleEviction();
-  }
-
-  /// Schedules eviction of mounted children that are outside the cache
-  /// region and not needed as sticky headers.
-  ///
-  /// Skipped while animations OR FLIP slides are active so exiting rows
-  /// keep their element until the animation settles. Including slides
-  /// in the gate is defensive: under rapid cascaded `moveNode(animate:
-  /// true)` batches, a row's slide-engine entry can settle and clear
-  /// (delta=0) on one frame; on the same post-frame, this eviction
-  /// callback would otherwise race a follow-up batch's pending mutation
-  /// and evict a row whose new slide hasn't installed yet, leaving a
-  /// "row missing in viewport until next layout" gap that only resolves
-  /// on a subsequent scroll-triggered re-layout. With the slide gate,
-  /// eviction is paused for the entire cascade and runs once after all
-  /// slides have settled.
-  ///
-  /// FLIP-ONLY, deliberately, not the composed `hasActiveSlides`. A
-  /// make-room preview offset is HELD rather than decaying, so the
-  /// composed flag stays true from a drag's first resolve to its
-  /// release and this gate would suspend eviction for the whole drag:
-  /// every row an autoscroll drag passed stayed mounted until the drop.
-  /// The cascade hazard above is specific to FLIP slides, whose ticks
-  /// are paint-only, and preview-shifted rows do not need the gate
-  /// because layout admits them (see
-  /// [RenderSliverTree.admittedSlideBound]), which leaves them retained
-  /// by the ordinary cache-region check.
-  ///
-  /// Kept, but do not read it as load-bearing. Overreach widens the
-  /// admitted cache region by the composed bound, so any row that can be
-  /// painting near the viewport is IN that region and is retained by the
-  /// cache-region check before the slide-delta clause is ever reached;
-  /// the window that clause covered, "slide installed, no layout yet",
-  /// is itself closed by the bound-driven layout. Measured on a
-  /// 300-row long transit, removing this gate and that clause together
-  /// changes nothing: same mounted counts (18 steady, 33 peak), same
-  /// final state, no assertion. It stays because it costs one bool and
-  /// because the hazard it names, a settle racing a pending mutation in
-  /// one post-frame, is a window no test has managed to construct
-  /// either way. `RenderSliverTree`'s unbuilt-row assertion is what
-  /// would catch its removal going wrong.
-  ///
-  /// The [_staleEvictionScheduled] flag dedupes across layout passes,
-  /// continuous scroll fires `didFinishLayout` every frame, but we only
-  /// want one post-frame eviction sweep per frame. The [_children] walk
-  /// happens inside the post-frame callback (not in the hot layout
-  /// path) so per-layout cost stays O(1).
-  void _scheduleStaleEviction() {
-    if (_staleEvictionScheduled) return;
-    if (widget.controller.hasActiveAnimations) return;
-    if (widget.controller.hasActiveFlipSlides) {
-      return;
-    }
-    _staleEvictionScheduled = true;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _staleEvictionScheduled = false;
-      if (!mounted || _inLayout) return;
-      // An animation may have started between scheduling and firing,
-      // e.g. the user expanded a node in the same frame. Bail out so we
-      // don't evict a row that's about to begin its enter/exit animation
-      // OR its FLIP slide.
-      if (widget.controller.hasActiveAnimations) return;
-      if (widget.controller.hasActiveFlipSlides) {
-        return;
-      }
-
-      final render = renderObject;
-      final staleNodes = <TKey>[];
-      for (final nodeId in _children.keys) {
-        // Dead rows are handled by [_collectGarbage]; skip them here so
-        // both paths don't race over the same element.
-        if (widget.controller.getNodeData(nodeId) == null) continue;
-        if (!render.isNodeRetained(nodeId)) {
-          staleNodes.add(nodeId);
-        }
-      }
-      if (staleNodes.isEmpty) return;
-
-      // Batch evictions to cap per-frame work after a large scroll.
-      // Scale with stale count so big sweeps clear quickly without
-      // pathologically long pauses.
-      final maxPerPass = staleNodes.length.clamp(50, 200);
-      final evictNow = staleNodes.length <= maxPerPass
-          ? staleNodes
-          : staleNodes.sublist(0, maxPerPass);
-
-      // lockState, not buildScope, for the reason [_collectGarbage] gives.
-      owner!.lockState(() {
-        for (final nodeId in evictNow) {
-          final element = _children.remove(nodeId);
-          _dirtyKeys.remove(nodeId);
-          if (element != null) {
-            updateChild(element, null, nodeId);
-          }
-        }
-      });
-
-      if (staleNodes.length > maxPerPass) {
-        _scheduleStaleEviction();
-      }
-    });
   }
 
   @override
@@ -588,10 +407,20 @@ class SliverTreeElement<TKey, TData> extends RenderObjectElement
     });
   }
 
+  /// Drops the element of [nodeId], which deactivates it inside the
+  /// render object's layout, so the frame's [BuildOwner.finalizeTree]
+  /// disposes it before the next pointer event can reach it.
   @override
   void removeChild(TKey nodeId) {
-    // No-op: we don't actively remove children because it triggers
-    // markNeedsLayout. Stale children remain but are not painted/hit-tested.
+    assert(_inLayout, 'removeChild must be called during layout');
+    final element = _children.remove(nodeId);
+    _dirtyKeys.remove(nodeId);
+    if (element == null) {
+      return;
+    }
+    owner!.buildScope(this, () {
+      updateChild(element, null, nodeId);
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════

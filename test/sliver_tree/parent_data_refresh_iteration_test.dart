@@ -171,21 +171,43 @@ void main() {
       );
 
       // Churn: collapse, re-expand, insert, remove. Re-layout each time
-      // and verify the bound holds.
+      // and verify the bound holds. The loop runs before the layout's
+      // eviction, over the children mounted before the step and those the
+      // layout creates, which stay: the rows mounted before the step or
+      // after it.
+      final keys = <String>[
+        "root",
+        for (int i = 0; i < 20; i++) "n$i",
+        "n_new",
+      ];
+      Set<String> mounted() {
+        return <String>{
+          for (final key in keys)
+            if (sliver.getChildForNode(key) != null) key,
+        };
+      }
+
+      int bound(Set<String> before) {
+        return before.union(mounted()).length;
+      }
+
+      var before = mounted();
       controller.collapse(key: "root", animate: false);
       await tester.pumpAndSettle();
       expect(
         sliver.debugLastParentDataRefreshIterationCount,
-        lessThanOrEqualTo(sliver.debugChildCount),
+        lessThanOrEqualTo(bound(before)),
       );
 
+      before = mounted();
       controller.expand(key: "root", animate: false);
       await tester.pumpAndSettle();
       expect(
         sliver.debugLastParentDataRefreshIterationCount,
-        lessThanOrEqualTo(sliver.debugChildCount),
+        lessThanOrEqualTo(bound(before)),
       );
 
+      before = mounted();
       controller.insert(
         parentKey: "root",
         node: const TreeNode(key: "n_new", data: "N_NEW"),
@@ -193,14 +215,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         sliver.debugLastParentDataRefreshIterationCount,
-        lessThanOrEqualTo(sliver.debugChildCount),
+        lessThanOrEqualTo(bound(before)),
       );
 
+      before = mounted();
       controller.remove(key: "n0");
       await tester.pumpAndSettle();
       expect(
         sliver.debugLastParentDataRefreshIterationCount,
-        lessThanOrEqualTo(sliver.debugChildCount),
+        lessThanOrEqualTo(bound(before)),
       );
     },
   );
