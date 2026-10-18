@@ -446,6 +446,18 @@ scope" in debug builds, and then ignored its `setState` calls until its parent
 rebuilt it; in release builds it was built inside the callback, outside a
 frame. Removing rows now builds nothing, and that widget rebuilds in the next
 frame.
+- Fix: a row the tree dropped, one scrolled out of its cache region or one of a
+removed node, stayed deactivated until the next frame, because the tree dropped
+it after a frame had already disposed what it removed. A widget in that row
+that listens to every pointer event until it is disposed, such as a `Tooltip`,
+was still reached by the next pointer event, and in debug builds threw "Looking
+up a deactivated widget's ancestor is unsafe", then "multiple tickers were
+created". The tree now drops such rows at the end of the layout that leaves
+them unretained, as Flutter's own slivers drop theirs, so the same frame
+disposes them; a row still waits for a running enter, exit or extent animation
+or FLIP slide before it goes. `TreeChildManager.removeChild`, which
+`SliverTreeElement` left empty, now removes the row, and the render object
+calls it inside its layout.
 
 ## 0.0.35
 
