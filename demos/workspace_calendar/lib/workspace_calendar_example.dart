@@ -84,13 +84,15 @@
 ///
 /// Today, in the calendar bar, selects today, or the shown day nearest it,
 /// in every view, and slides a strip a drag moved away back to it. A tap on
-/// the header's month opens the month picker, a [MonthStrip], until a
-/// month is picked or the title is tapped again: Agenda's and Day's card
-/// folds to show it in the strip's place, and Week and Month show it under
-/// the header. While it shows, the title names the year of the month at
-/// its middle and the chevrons step a year; a month picked selects its day
-/// of the selected day's day of the month, as a month step does, and
-/// unfolds the card on that month.
+/// the header's month opens the month picker, a [MonthPicker], until a
+/// month is picked or the title is tapped again: in Agenda's and Day's
+/// card it fades in over the days as they fade out, the card's height
+/// moving from theirs to its, and back as it closes, the days showing as
+/// they were; Week and Month show it under the header. While it shows,
+/// the title names its year, and the chevrons or a swipe across it step a
+/// year; a month picked selects its day of the selected day's day of the
+/// month, as a month step does, and shows that month, unfolded in Agenda's
+/// and Day's card.
 library;
 
 import 'dart:async';
@@ -98,6 +100,7 @@ import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';
@@ -113,7 +116,7 @@ import 'workspace_calendar/history_lock.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/month_board.dart';
-import 'workspace_calendar/month_strip.dart';
+import 'workspace_calendar/month_picker.dart';
 import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
 import 'workspace_calendar/week_strip.dart';
@@ -263,13 +266,17 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// Whether the month picker shows.
   bool _picksMonth = false;
 
-  /// The first day of the month at the month picker's middle, whose year
-  /// the title names while it shows.
-  DateTime _pickerMonth = DateTime(0);
+  /// The year the month picker shows, which the title names while it
+  /// shows.
+  int _pickerYear = 0;
 
-  /// Whether Agenda's or Day's card was folded when the month picker
-  /// opened, as it is again when the picker closes with no pick.
-  bool _foldedBeforePicker = false;
+  /// How far the month picker has taken the place of Agenda's and Day's
+  /// days in the card, 0 for the days and 1 for the picker, animated on
+  /// [harborMotionCurve].
+  late final AnimationController _pickerShown = AnimationController(
+    vsync: this,
+    duration: harborMotionDuration,
+  );
 
   /// What the calendar bar and the settings sheet last chose, and before
   /// they choose, the defaults with the edit mode the calendar was given.
@@ -360,6 +367,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _model.dispose();
     _board.dispose();
     _collapseController.dispose();
+    _pickerShown.dispose();
     _barController.dispose();
     // The cells and the timed grid listening to these have unmounted by
     // now: an element's children unmount before it does.
@@ -521,7 +529,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     switch (_stepUnit) {
       case _StepUnit.year:
         setState(() {
-          _pickerMonth = addMonths(_pickerMonth, 12 * direction);
+          _pickerYear += direction;
         });
       case _StepUnit.day:
         _select(nextShownDay(_selected, direction, weekdays));
@@ -542,6 +550,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       _picksMonth = false;
     });
     _collapseController.value = _collapsed ? 1.0 : 0.0;
+    _pickerShown.value = 0.0;
     _showRange();
   }
 
@@ -723,56 +732,57 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _goTo(shownDayNear(_today.value, _settings.weekdays));
   }
 
-  /// Opens the month picker on the selected day's month, folding
-  /// Agenda's or Day's card to show it.
+  /// Opens the month picker on the selected day's year, in Agenda's and
+  /// Day's card in place of the days, folded or not.
   void _openMonthPicker() {
     setState(() {
       _picksMonth = true;
-      _pickerMonth = DateTime(_selected.year, _selected.month);
-      _foldedBeforePicker = _collapsed;
+      _pickerYear = _selected.year;
     });
-    if (_showsCalendarCard) {
-      _settleCollapse(true);
-    }
+    _pickerShown.animateTo(1.0, curve: harborMotionCurve);
   }
 
-  /// Closes the month picker with no pick, folding Agenda's or Day's card
-  /// back as it was.
+  /// Closes the month picker with no pick, Agenda's or Day's card showing
+  /// its days as it did before.
   void _closeMonthPicker() {
     setState(() {
       _picksMonth = false;
     });
-    if (_showsCalendarCard) {
-      _settleCollapse(_foldedBeforePicker);
-    }
+    _pickerShown.animateTo(0.0, curve: harborMotionCurve);
   }
 
   /// Selects the day of [month] a month step from the selected day would,
-  /// closes the month picker, and unfolds Agenda's or Day's card on it.
+  /// closes the month picker, and shows Agenda's or Day's card unfolded on
+  /// that month, as the days come back in place of the picker.
   void _pickMonth(DateTime month) {
     final months =
         (month.year - _selected.year) * 12 + month.month - _selected.month;
     _select(shownDayNear(addMonths(_selected, months), _settings.weekdays));
     setState(() {
       _picksMonth = false;
+      if (_showsCalendarCard) {
+        _collapsed = false;
+        _stripDay = null;
+      }
     });
     if (_showsCalendarCard) {
-      _settleCollapse(false);
+      _collapseController.value = 0.0;
     }
+    _pickerShown.animateTo(0.0, curve: harborMotionCurve);
   }
 
-  /// The month picker, on [_pickerMonth], filling the selected day's month
+  /// The month picker, on [_pickerYear], filling the selected day's month
   /// and ringing today's.
   Widget _buildMonthPicker() {
-    return MonthStrip(
+    return MonthPicker(
       key: const ValueKey<String>("month-picker"),
-      middleMonth: _pickerMonth,
+      year: _pickerYear,
       selectedMonth: DateTime(_selected.year, _selected.month),
       currentMonth: DateTime(_today.value.year, _today.value.month),
       onSelectMonth: _pickMonth,
-      onBrowse: (month) {
+      onBrowse: (year) {
         setState(() {
-          _pickerMonth = month;
+          _pickerYear = year;
         });
       },
     );
@@ -990,7 +1000,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         _step(1);
       },
       onModeSelected: _setMode,
-      year: _picksMonth ? _pickerMonth.year : null,
+      year: _picksMonth ? _pickerYear : null,
       onTitle: _picksMonth ? _closeMonthPicker : _openMonthPicker,
     );
   }
@@ -1197,25 +1207,74 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
             _buildCalendarHeader(),
             const SizedBox(height: 4.0),
             AnimatedBuilder(
-              animation: _collapseController,
-              child: board,
-              builder: (context, child) {
-                return _buildGrid(_collapseController.value, child!);
-              },
-            ),
-            _PullTab(
-              folded: _collapsed,
-              onDragStart: (details) {
-                _collapseController.stop();
-              },
-              onDragUpdate: _dragFold,
-              onDragEnd: _endFoldDrag,
-              onTap: () {
-                _settleCollapse(!_collapsed);
+              animation: _pickerShown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  AnimatedBuilder(
+                    animation: _collapseController,
+                    child: board,
+                    builder: (context, child) {
+                      return _buildGrid(_collapseController.value, child!);
+                    },
+                  ),
+                  _PullTab(
+                    folded: _collapsed,
+                    onDragStart: (details) {
+                      _collapseController.stop();
+                    },
+                    onDragUpdate: _dragFold,
+                    onDragEnd: _endFoldDrag,
+                    onTap: () {
+                      _settleCollapse(!_collapsed);
+                    },
+                  ),
+                ],
+              ),
+              builder: (context, days) {
+                return _buildDaysArea(_pickerShown.value, days!);
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// The calendar card's [days] under its header and the month picker in
+  /// their place, the picker [shown] of the way in: each fades by how far
+  /// the other is in, only the one coming in or in takes pointers, and the
+  /// area is as tall as the days, [shown] of the way to the picker's
+  /// height. The days are built until the picker is all the way in, and the
+  /// picker from when it starts in.
+  Widget _buildDaysArea(double shown, Widget days) {
+    return ClipRect(
+      clipBehavior: shown > 0.0 && shown < 1.0 ? Clip.hardEdge : Clip.none,
+      child: _HeightLerp(
+        key: calendarDaysAreaKey,
+        t: shown,
+        first: shown < 1.0
+            ? IgnorePointer(
+                ignoring: _picksMonth,
+                child: Opacity(opacity: 1.0 - shown, child: days),
+              )
+            : const SizedBox.shrink(),
+        second: shown > 0.0
+            ? IgnorePointer(
+                ignoring: !_picksMonth,
+                child: Opacity(
+                  opacity: shown,
+                  // The picker does not fold, so it has no pull tab; under
+                  // it the card pads its bottom as the header card does in
+                  // Week and Month.
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0),
+                    child: _buildMonthPicker(),
+                  ),
+                ),
+              )
+            : const SizedBox.shrink(),
       ),
     );
   }
@@ -1245,8 +1304,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// month to one row while the board moves up by the rows above the
   /// selected week, so that week slides to the top of the window. Once
   /// folded, at a [t] of 1, Day's strip takes the window's place, as tall
-  /// as a row, opening on the selected week as the window shows it, or the
-  /// month picker while it shows.
+  /// as a row, opening on the selected week as the window shows it.
   Widget _buildGrid(double t, Widget board) {
     final weeks = _grid.weekCount;
     final monthHeight = weeks * _rowHeight;
@@ -1285,7 +1343,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                           _setCollapsed(false);
                         }
                       },
-                      child: _picksMonth ? _buildMonthPicker() : _buildStrip(),
+                      child: _buildStrip(),
                     )
                   : ClipRect(
                       child: OverflowBox(
@@ -1459,6 +1517,110 @@ const ValueKey<String> calendarBarKey = ValueKey<String>("calendar-bar");
 const ValueKey<String> calendarPullTabKey = ValueKey<String>(
   "calendar-pull-tab",
 );
+
+/// The key of the calendar card's area under its header, which holds the
+/// days or the month picker.
+const ValueKey<String> calendarDaysAreaKey = ValueKey<String>(
+  "calendar-days-area",
+);
+
+/// [first] and [second] across its width at their own heights, both from
+/// its top, [second] painted over [first], in an area as tall as [first],
+/// [t] of the way to [second]'s height.
+class _HeightLerp extends MultiChildRenderObjectWidget {
+  _HeightLerp({
+    super.key,
+    required this.t,
+    required Widget first,
+    required Widget second,
+  }) : super(children: <Widget>[first, second]);
+
+  final double t;
+
+  @override
+  _RenderHeightLerp createRenderObject(BuildContext context) {
+    return _RenderHeightLerp(t);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderHeightLerp renderObject,
+  ) {
+    renderObject.t = t;
+  }
+}
+
+class _HeightLerpParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderHeightLerp extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _HeightLerpParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _HeightLerpParentData> {
+  _RenderHeightLerp(this._t);
+
+  double _t;
+
+  set t(double value) {
+    if (value == _t) {
+      return;
+    }
+    _t = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _HeightLerpParentData) {
+      child.parentData = _HeightLerpParentData();
+    }
+  }
+
+  Size _sizeFor(BoxConstraints constraints, double first, double second) {
+    return constraints.constrain(
+      Size(constraints.maxWidth, lerpDouble(first, second, _t)!),
+    );
+  }
+
+  @override
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    final childConstraints = BoxConstraints.tightFor(
+      width: constraints.maxWidth,
+    );
+    return _sizeFor(
+      constraints,
+      firstChild!.getDryLayout(childConstraints).height,
+      lastChild!.getDryLayout(childConstraints).height,
+    );
+  }
+
+  @override
+  void performLayout() {
+    final childConstraints = BoxConstraints.tightFor(
+      width: constraints.maxWidth,
+    );
+    var child = firstChild;
+    while (child != null) {
+      child.layout(childConstraints, parentUsesSize: true);
+      child = childAfter(child);
+    }
+    size = _sizeFor(
+      constraints,
+      firstChild!.size.height,
+      lastChild!.size.height,
+    );
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    defaultPaint(context, offset);
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    return defaultHitTestChildren(result, position: position);
+  }
+}
 
 /// A short bar under the calendar card's days that a vertical drag moves
 /// with the finger, folding the month into its week or unfolding it, and
