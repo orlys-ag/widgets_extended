@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
+import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/month_picker.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
@@ -98,8 +99,23 @@ Future<void> pickMonth(WidgetTester tester, int year, int month) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> closePicker(WidgetTester tester) async {
+  await tester.tap(find.byTooltip("Close the months"));
+  await tester.pumpAndSettle();
+}
+
 DayCell dayCell(WidgetTester tester, DateTime day) {
   return tester.widget<DayCell>(find.byKey(dayCellKey(day)));
+}
+
+/// The day cell of [day] in Day's strip.
+DayCell stripCell(WidgetTester tester, DateTime day) {
+  return tester.widget<DayCell>(
+    find.descendant(
+      of: find.byKey(weekStripDayKey(day)),
+      matching: find.byType(DayCell),
+    ),
+  );
 }
 
 /// The window of Agenda's and Day's card over the month board.
@@ -168,16 +184,19 @@ void main() {
     expect(pickerRows(tester), yearRows(2026));
   });
 
-  testWidgets("P2 a month picked selects the selected day's day of it and "
-      "shows its month; the title tapped again closes the picker with no "
-      "pick, the card showing its days as they were, unfolded or folded", (
-    tester,
-  ) async {
+  testWidgets("P2 a month picked selects the selected day's day of it, "
+      "which the picker, staying open, fills; the title tapped again closes "
+      "the picker, the card showing the selected day's month, its days as "
+      "they were, unfolded or folded", (tester) async {
     await pumpCalendar(tester);
     // April and June 2026 are five weeks each.
     final month = tester.getSize(calendarGrid).height;
     await openPicker(tester);
     await pickMonth(tester, 2026, 6);
+    expect(find.byType(MonthPicker), findsOneWidget);
+    expect(monthCell(tester, 2026, 6).isSelected, isTrue);
+    expect(monthCell(tester, 2026, 4).isSelected, isFalse);
+    await closePicker(tester);
     expect(find.byType(MonthPicker), findsNothing);
     expect(find.text("Jun 2026"), findsOneWidget);
     expect(dayCell(tester, DateTime(2026, 6, 21)).isSelected, isTrue);
@@ -255,38 +274,27 @@ void main() {
     expect(pickerTitle("2026"), findsOneWidget);
   });
 
-  testWidgets("P5 in Day the picker takes the folded strip's place, and a "
-      "pick brings back its month unfolded, the strip never showing", (
-    tester,
-  ) async {
+  testWidgets("P5 in Day the picker takes the folded strip's place, a pick "
+      "shows its day in the grid with the picker staying open, and the title "
+      "gives the strip back on that day", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Day");
     await openPicker(tester);
     expect(find.byType(MonthPicker), findsOneWidget);
     expect(find.byType(WeekStrip), findsNothing);
-    await tester.tap(monthCellFinder(2026, 5));
-    final may21 = find.byKey(dayCellKey(DateTime(2026, 5, 21)));
-    for (var i = 0; i < 30; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-      expect(find.byType(WeekStrip), findsNothing);
-      // May 2026 is five weeks, which the card shows whole whenever it
-      // shows the days.
-      if (may21.evaluate().isNotEmpty) {
-        expect(
-          tester.getSize(calendarGrid).height,
-          moreOrLessEquals(5 * tester.getSize(may21).height),
-        );
-      }
-    }
-    await tester.pump(harnessLatency);
-    await tester.pumpAndSettle();
-    expect(dayCell(tester, DateTime(2026, 5, 21)).isSelected, isTrue);
+    await pickMonth(tester, 2026, 5);
+    expect(find.byType(MonthPicker), findsOneWidget);
     expect(gridDay(tester), DateTime(2026, 5, 21));
+    await closePicker(tester);
+    expect(find.byType(WeekStrip), findsOneWidget);
+    expect(stripCell(tester, DateTime(2026, 5, 21)).isSelected, isTrue);
   });
 
   testWidgets("P6 in Week and Month the picker opens under the header, its "
       "chevrons stepping its year, and a pick selects the selected day's day "
-      "of its month", (tester) async {
+      "of its month, which the grid under the picker, staying open, shows", (
+    tester,
+  ) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
     await openPicker(tester);
@@ -298,13 +306,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(pickerRows(tester), yearRows(2026));
     await pickMonth(tester, 2026, 7);
-    expect(find.byType(MonthPicker), findsNothing);
+    expect(find.byType(MonthPicker), findsOneWidget);
     expect(find.byKey(dayHeaderKey(DateTime(2026, 7, 21))), findsOneWidget);
 
     await pickMode(tester, "Month");
     await openPicker(tester);
     expect(find.byType(MonthPicker), findsOneWidget);
     await pickMonth(tester, 2026, 9);
+    expect(find.byType(MonthPicker), findsOneWidget);
+    expect(find.byKey(monthDayKey(DateTime(2026, 9, 21))), findsOneWidget);
+    await closePicker(tester);
     expect(find.text("Sep 2026"), findsOneWidget);
   });
 
@@ -352,6 +363,7 @@ void main() {
     await openPicker(tester);
     // June 21 is a Sunday.
     await pickMonth(tester, 2026, 6);
+    await closePicker(tester);
     expect(dayCell(tester, DateTime(2026, 6, 22)).isSelected, isTrue);
   });
 
@@ -446,7 +458,7 @@ void main() {
 
   testWidgets("P13 the picker and Agenda's month, or Day's strip, fade "
       "into each other as the card's height moves smoothly from one's to "
-      "the other's, opening, closing and picking", (tester) async {
+      "the other's, opening and closing", (tester) async {
     await pumpCalendar(tester);
     final area = find.byKey(calendarDaysAreaKey);
     final month = tester.getSize(area).height;
@@ -474,8 +486,8 @@ void main() {
     expect(picker, greaterThan(strip));
     await tester.tap(find.byTooltip("Pick a month"));
     expectSmooth(await areaHeights(tester), strip, picker);
-    await tester.tap(monthCellFinder(2026, 4));
-    expectSmooth(await areaHeights(tester), picker, month);
+    await tester.tap(find.byTooltip("Close the months"));
+    expectSmooth(await areaHeights(tester), picker, strip);
   });
 
   testWidgets("P14 while the picker comes in only it takes taps, and while "
@@ -515,8 +527,9 @@ void main() {
   });
 
   testWidgets("P15 in Week and Month the picker fades in under the header "
-      "as the header's card grows smoothly to hold it, and back on closing "
-      "and on a pick", (tester) async {
+      "as the header's card grows smoothly to hold it, and back on closing", (
+    tester,
+  ) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
     final area = find.byKey(calendarDaysAreaKey);
@@ -539,7 +552,7 @@ void main() {
     await pickMode(tester, "Month");
     await tester.tap(find.byTooltip("Pick a month"));
     expectSmooth(await areaHeights(tester), 0.0, picker);
-    await tester.tap(monthCellFinder(2026, 4));
+    await tester.tap(find.byTooltip("Close the months"));
     expectSmooth(await areaHeights(tester), picker, 0.0);
   });
 }

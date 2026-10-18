@@ -88,16 +88,15 @@
 ///
 /// Today, in the calendar bar, selects today, or the shown day nearest it,
 /// in every view, and slides a strip a drag moved away back to it. A tap on
-/// the header's month opens the month picker, a [MonthPicker], until a
-/// month is picked or the title is tapped again: in Agenda's and Day's
-/// card it fades in over the days as they fade out, the card's height
-/// moving from theirs to its, and back as it closes, the days showing as
-/// they were; in Week and Month it fades in under the header as the
-/// header's card grows to hold it, and back as it closes. While it shows,
-/// the title names its year, and the chevrons or a swipe across it step a
-/// year; a month picked selects its day of the selected day's day of the
-/// month, as a month step does, and shows that month, unfolded in Agenda's
-/// and Day's card.
+/// the header's month opens the month picker, a [MonthPicker], until the
+/// title is tapped again: in Agenda's and Day's card it fades in over the
+/// days as they fade out, the card's height moving from theirs to its, and
+/// back as it closes, the days showing folded or unfolded as they were; in
+/// Week and Month it fades in under the header as the header's card grows
+/// to hold it, and back as it closes. While it shows, the title names its
+/// year, and the chevrons or a swipe across it step a year; a month picked
+/// selects its day of the selected day's day of the month, as a month step
+/// does, and the picker stays open, filling that month.
 library;
 
 import 'dart:async';
@@ -747,8 +746,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _pickerShown.animateTo(1.0, curve: harborMotionCurve);
   }
 
-  /// Closes the month picker with no pick, Agenda's or Day's card showing
-  /// its days as it did before.
+  /// Closes the month picker, Agenda's or Day's card showing its days,
+  /// folded or unfolded as it did before.
   void _closeMonthPicker() {
     setState(() {
       _picksMonth = false;
@@ -756,24 +755,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _pickerShown.animateTo(0.0, curve: harborMotionCurve);
   }
 
-  /// Selects the day of [month] a month step from the selected day would,
-  /// closes the month picker, and shows Agenda's or Day's card unfolded on
-  /// that month, as the days come back in place of the picker.
+  /// Selects the day of [month] a month step from the selected day would.
+  /// The month picker stays open, filling [month].
   void _pickMonth(DateTime month) {
     final months =
         (month.year - _selected.year) * 12 + month.month - _selected.month;
     _select(shownDayNear(addMonths(_selected, months), _settings.weekdays));
-    setState(() {
-      _picksMonth = false;
-      if (_showsCalendarCard) {
-        _collapsed = false;
-        _stripDay = null;
-      }
-    });
-    if (_showsCalendarCard) {
-      _collapseController.value = 0.0;
-    }
-    _pickerShown.animateTo(0.0, curve: harborMotionCurve);
   }
 
   /// The month picker, on [_pickerYear], filling the selected day's month
