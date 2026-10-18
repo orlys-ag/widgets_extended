@@ -239,4 +239,25 @@ void main() {
     );
     semantics.dispose();
   });
+
+  testWidgets("P10 at 1.3 times the text size the picker under Week's "
+      "header is as tall as January's year over its pill, and nothing "
+      "overflows", (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await pumpCalendar(tester);
+    await pickMode(tester, "Week");
+    await openPicker(tester);
+    final year = find.descendant(
+      of: monthCellFinder(2026, 1),
+      matching: find.text("2026"),
+    );
+    expect(
+      tester.getSize(find.byType(MonthStrip)).height,
+      moreOrLessEquals(
+        tester.getSize(year).height + stripLabelGap + dayCircleSize,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  });
 }

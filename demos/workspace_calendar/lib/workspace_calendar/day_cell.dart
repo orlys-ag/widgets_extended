@@ -83,6 +83,41 @@ class _DayMarkerListenerState extends State<DayMarkerListener> {
 /// The diameter of a [DayCell]'s circle.
 const double dayCircleSize = 32.0;
 
+/// The style of the line over a strip cell's circle or pill: a [DayCell]'s
+/// weekday name and a MonthCell's year.
+const TextStyle stripLabelStyle = TextStyle(
+  fontSize: 12.0,
+  height: 1.2,
+  color: HarborColors.textMuted,
+);
+
+/// The space between a strip cell's label line and its circle or pill.
+const double stripLabelGap = 2.0;
+
+/// The height of a cell of the week or the month strip, a [DayCell] at a
+/// full collapse or a MonthCell: a line of [stripLabelStyle] as Text lays
+/// it out in [context], at its text style and scale, then [stripLabelGap]
+/// and [dayCircleSize]. The line's height is set by the style's height,
+/// whatever the line reads.
+double stripCellHeight(BuildContext context) {
+  final defaultStyle = DefaultTextStyle.of(context);
+  final painter = TextPainter(
+    text: TextSpan(
+      text: weekdayAbbreviations.first,
+      style: defaultStyle.style.merge(stripLabelStyle),
+    ),
+    textDirection: TextDirection.ltr,
+    textScaler: MediaQuery.textScalerOf(context),
+    textHeightBehavior:
+        defaultStyle.textHeightBehavior ??
+        DefaultTextHeightBehavior.maybeOf(context),
+    maxLines: 1,
+  )..layout();
+  final line = painter.height;
+  painter.dispose();
+  return line + stripLabelGap + dayCircleSize;
+}
+
 /// The key of the badge on the circle of a [DayCell] for [day] that has
 /// items.
 ValueKey<String> dayBadgeKey(DateTime day) {
@@ -209,14 +244,10 @@ class DayCell extends StatelessWidget {
               child: Opacity(
                 opacity: t,
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 2.0),
+                  padding: const EdgeInsets.only(bottom: stripLabelGap),
                   child: Text(
                     weekdayAbbreviations[weekdayColumn(day)],
-                    style: const TextStyle(
-                      fontSize: 12.0,
-                      height: 1.2,
-                      color: HarborColors.textMuted,
-                    ),
+                    style: stripLabelStyle,
                   ),
                 ),
               ),

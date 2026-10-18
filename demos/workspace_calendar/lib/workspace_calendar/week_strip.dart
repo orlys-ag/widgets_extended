@@ -15,16 +15,14 @@ ValueKey<String> weekStripDayKey(DateTime day) {
   return ValueKey<String>("strip-day-${isoDate(day)}");
 }
 
-/// The strip's height, which is a row of Agenda's month grid.
-const double weekStripHeight = 48.0;
-
 /// As many days side by side as [weekdays] holds of a week, opening on the
 /// shown days of [selectedDay]'s week, which starts on [weekdays]' first
 /// weekday. Each is a [DayCell]
 /// as Agenda's folded month shows it: its weekday's three-letter name
 /// over its number on a circle, the selected day's in the primary colour,
 /// today's ringed, and a badge on a day with items once the model has read
-/// it. A tap on a day reports [onSelectDay].
+/// it. The strip is as tall as a day ([stripCellHeight]), at any text
+/// size. A tap on a day reports [onSelectDay].
 ///
 /// A horizontal drag slides the strip through the shown days, one after
 /// another across weeks and months, and selects nothing; a release comes
@@ -253,7 +251,7 @@ class _WeekStripState extends State<WeekStrip> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: weekStripHeight,
+      height: stripCellHeight(context),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final extent = constraints.maxWidth / _count;

@@ -212,7 +212,11 @@ class _WorkspaceCalendar extends StatefulWidget {
 
 class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     with TickerProviderStateMixin {
-  static const double _rowHeight = 48.0;
+  /// The height of a row of the month grid: a strip cell's
+  /// ([stripCellHeight]) at the text size [didChangeDependencies] reads,
+  /// so a week folds into the strip with the weekday names its cells grow
+  /// fitting.
+  double _rowHeight = 48.0;
 
   /// The clock's time, read again at the start of each minute.
   late final ValueNotifier<DateTime> _now = ValueNotifier<DateTime>(
@@ -322,6 +326,16 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _board.setSelection(_selectionOf(_selected));
     _showRange();
     _scheduleMinute(_now.value);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final height = stripCellHeight(context);
+    if (height != _rowHeight) {
+      _rowHeight = height;
+      _board.rows = _rowsFor(_grid);
+    }
   }
 
   @override
@@ -1230,9 +1244,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// the height of the whole month; the window over it shrinks from the
   /// month to one row while the board moves up by the rows above the
   /// selected week, so that week slides to the top of the window. Once
-  /// folded, at a [t] of 1, Day's strip takes the window's place, opening
-  /// on the selected week as the window shows it, or the month picker
-  /// while it shows.
+  /// folded, at a [t] of 1, Day's strip takes the window's place, as tall
+  /// as a row, opening on the selected week as the window shows it, or the
+  /// month picker while it shows.
   Widget _buildGrid(double t, Widget board) {
     final weeks = _grid.weekCount;
     final monthHeight = weeks * _rowHeight;
