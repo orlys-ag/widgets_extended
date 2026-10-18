@@ -1,9 +1,10 @@
 /// The Harbor palette: a mid-dark blue primary over light surfaces, the
-/// colours and icon of each item type, and the theme the calendar applies
-/// to itself.
+/// colours and icon of each item type, the calendar theme its views draw
+/// with, and the Material theme the calendar applies to itself.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 
 import 'calendar_schema.dart';
 
@@ -98,6 +99,37 @@ const Duration harborMotionDuration = Duration(milliseconds: 300);
 
 /// The curve each animation the calendar runs eases on.
 const Curve harborMotionCurve = Curves.fastOutSlowIn;
+
+/// The calendar views' theme in the Harbor palette: each colour the
+/// [HarborColors] value of its name, the notice outline [HarborColors.noticeEdge],
+/// [harborDraggedItemOpacity], [harborMotionDuration] on
+/// [harborMotionCurve], and the Material icons the views draw, over the
+/// built-in text styles.
+const CalendarThemeData harborCalendarTheme = CalendarThemeData(
+  primary: HarborColors.primary,
+  onPrimary: HarborColors.onPrimary,
+  primaryTint: HarborColors.primaryTint,
+  background: HarborColors.background,
+  surface: HarborColors.surface,
+  outline: HarborColors.outline,
+  text: HarborColors.text,
+  textSecondary: HarborColors.textSecondary,
+  textMuted: HarborColors.textMuted,
+  error: HarborColors.error,
+  notice: HarborColors.notice,
+  noticeOutline: HarborColors.noticeEdge,
+  onNotice: HarborColors.onNotice,
+  todayRing: HarborColors.todayRing,
+  todayRingWidth: 2.0,
+  draggedBlockOpacity: harborDraggedItemOpacity,
+  motionDuration: harborMotionDuration,
+  motionCurve: harborMotionCurve,
+  beforeHoursIcon: Icons.keyboard_arrow_up,
+  afterHoursIcon: Icons.keyboard_arrow_down,
+  durationIcon: Icons.hourglass_empty,
+  entryMenuIcon: Icons.more_horiz,
+  addEntryIcon: Icons.add,
+);
 
 /// The calendar's own Material 3 theme, independent of the host's.
 ThemeData buildHarborTheme() {

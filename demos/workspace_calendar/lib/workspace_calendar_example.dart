@@ -105,6 +105,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';
@@ -159,6 +160,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
     this.api,
     this.clock,
     this.editing = false,
+    this.calendarTheme = harborCalendarTheme,
   });
 
   /// The day the calendar opens on and marks as today. Null opens on the
@@ -180,19 +182,26 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// edit mode switch then turns on and off.
   final bool editing;
 
+  /// The theme the calendar's views draw with, [harborCalendarTheme] unless
+  /// given. It shadows any [CalendarTheme] of the host's.
+  final CalendarThemeData calendarTheme;
+
   static final ThemeData _theme = buildHarborTheme();
 
   @override
   Widget build(BuildContext context) {
     // Above the calendar's state, so every dialog and menu it opens from
-    // its own context captures this theme.
+    // its own context captures both themes.
     return Theme(
       data: _theme,
-      child: _WorkspaceCalendar(
-        today: today,
-        api: api,
-        clock: clock ?? DateTime.now,
-        editing: editing,
+      child: CalendarTheme(
+        data: calendarTheme,
+        child: _WorkspaceCalendar(
+          today: today,
+          api: api,
+          clock: clock ?? DateTime.now,
+          editing: editing,
+        ),
       ),
     );
   }
