@@ -83,22 +83,21 @@ class _DayMarkerListenerState extends State<DayMarkerListener> {
 /// The diameter of a [DayCell]'s circle.
 const double dayCircleSize = 32.0;
 
-/// The style of the line over a strip cell's circle or pill: a [DayCell]'s
-/// weekday name and a MonthCell's year.
+/// The style of the line over a strip cell's circle: a [DayCell]'s weekday
+/// name.
 const TextStyle stripLabelStyle = TextStyle(
   fontSize: 12.0,
   height: 1.2,
   color: HarborColors.textMuted,
 );
 
-/// The space between a strip cell's label line and its circle or pill.
+/// The space between a strip cell's label line and its circle.
 const double stripLabelGap = 2.0;
 
-/// The height of a cell of the week or the month strip, a [DayCell] at a
-/// full collapse or a MonthCell: a line of [stripLabelStyle] as Text lays
-/// it out in [context], at its text style and scale, then [stripLabelGap]
-/// and [dayCircleSize]. The line's height is set by the style's height,
-/// whatever the line reads.
+/// The height of a cell of the week strip, a [DayCell] at a full collapse:
+/// a line of [stripLabelStyle] as Text lays it out in [context], at its
+/// text style and scale, then [stripLabelGap] and [dayCircleSize]. The
+/// line's height is set by the style's height, whatever the line reads.
 double stripCellHeight(BuildContext context) {
   final defaultStyle = DefaultTextStyle.of(context);
   final painter = TextPainter(
