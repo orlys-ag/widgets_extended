@@ -15,6 +15,7 @@ import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
+import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -527,5 +528,70 @@ void main() {
     expect(stripDays(tester), run(may(11), 7));
     expect(gridDay(tester), may(13));
     await slideToToday();
+  });
+
+  testWidgets("WS15 at 1.3 times the text size the strip is as tall as a "
+      "day's name over its circle, and nothing overflows", (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final model = CalendarModel(
+      api: MockCalendarApi(latency: harnessLatency),
+      onWriteFailed: (message) {},
+    );
+    addTearDown(model.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: <Widget>[
+              WeekStrip(
+                model: model,
+                selectedDay: april(21),
+                today: april(21),
+                weekdays: WeekdaySet.all,
+                onSelectDay: (day) {},
+                onBrowse: (day) {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    final name = find.descendant(
+      of: stripDay(april(21)),
+      matching: find.text("Tue"),
+    );
+    expect(
+      tester.getSize(find.byType(WeekStrip)).height,
+      moreOrLessEquals(
+        tester.getSize(name).height + stripLabelGap + dayCircleSize,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("WS16 at 1.3 times the text size Agenda's month folds, with "
+      "nothing overflowing, to a row as tall as a strip day, which the "
+      "strip fills", (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await pumpCalendar(tester);
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
+    // Setup sanity: the month folded into the strip.
+    expect(find.byType(WeekStrip), findsOneWidget);
+    final name = find.descendant(
+      of: stripDay(april(21)),
+      matching: find.text("Tue"),
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey<String>("calendar-grid")))
+          .height,
+      moreOrLessEquals(
+        tester.getSize(name).height + stripLabelGap + dayCircleSize,
+      ),
+    );
+    expect(tester.takeException(), isNull);
   });
 }

@@ -19,8 +19,9 @@ ValueKey<String> monthStripMonthKey(DateTime month) {
 /// How many months the strip shows at a time.
 const int monthStripCount = 7;
 
-/// [monthStripCount] months side by side, as tall as the week strip,
-/// opening with [middleMonth] at its middle. Each month is a cell as the
+/// [monthStripCount] months side by side, as tall as a month
+/// ([stripCellHeight]) at any text size, as the week strip is, opening
+/// with [middleMonth] at its middle. Each month is a cell as the
 /// week strip's days are: its three-letter name on a pill, under its year
 /// in small type for January, [selectedMonth]'s filled with the primary
 /// colour and [currentMonth]'s ringed as today's number is. A tap on a
@@ -193,7 +194,7 @@ class _MonthStripState extends State<MonthStrip> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: weekStripHeight,
+      height: stripCellHeight(context),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final extent = constraints.maxWidth / monthStripCount;
@@ -289,7 +290,7 @@ class MonthCell extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.only(bottom: 2.0),
+              padding: const EdgeInsets.only(bottom: stripLabelGap),
               // The forced strut gives the empty line the year's height,
               // which an empty paragraph would otherwise take from the
               // font.
@@ -297,16 +298,11 @@ class MonthCell extends StatelessWidget {
                 month.month == DateTime.january ? "${month.year}" : "",
                 maxLines: 1,
                 softWrap: false,
-                strutStyle: const StrutStyle(
-                  fontSize: 12.0,
-                  height: 1.2,
+                strutStyle: StrutStyle.fromTextStyle(
+                  stripLabelStyle,
                   forceStrutHeight: true,
                 ),
-                style: const TextStyle(
-                  fontSize: 12.0,
-                  height: 1.2,
-                  color: HarborColors.textMuted,
-                ),
+                style: stripLabelStyle,
               ),
             ),
             Container(
