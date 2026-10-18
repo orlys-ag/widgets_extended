@@ -2805,4 +2805,106 @@ void main() {
       ),
     );
   });
+
+  testWidgets("W42 a range dragged onto an item stops at its edge, however "
+      "far past it the finger jumps: first its times in the pressed day, "
+      "then its days, while each is free over those times", (tester) async {
+    await pumpCalendar(tester, editing: true);
+    await pickMode(tester, "Week");
+
+    /// Holds a touch on [from] in [fromWeekday]'s column, jumps it to each
+    /// of [to] in one move, lets go, and checks the create form's range.
+    Future<void> expectRange(
+      (int minute, int weekday) from,
+      List<(int minute, int weekday)> to, {
+      required String day,
+      required String start,
+      required String end,
+      required String days,
+    }) async {
+      final gesture = await tester.startGesture(
+        centerOf(tester, rowOf(from.$1), colOf(from.$2)),
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      for (final point in to) {
+        await gesture.moveTo(
+          centerOf(tester, rowOf(point.$1), colOf(point.$2)),
+        );
+        await tester.pump();
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Task").last);
+      await tester.pumpAndSettle();
+      expect(find.text(day), findsOneWidget);
+      expect(
+        find.descendant(
+          of: dropdownFinder("Start"),
+          matching: find.text(start),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dropdownFinder("End"), matching: find.text(end)),
+        findsOneWidget,
+      );
+      expect(fieldText(tester, "Days"), days);
+      await tester.tap(formButton("Cancel"));
+      await tester.pumpAndSettle();
+    }
+
+    // Tuesday holds 10:00 to 13:00 and 14:00 to 15:00.
+    await expectRange(
+      (13 * 60, 1),
+      <(int, int)>[(15 * 60 + 30, 1)],
+      day: "2026-04-21",
+      start: "13:00",
+      end: "14:00",
+      days: "1",
+    );
+    await expectRange(
+      (13 * 60 + 45, 1),
+      <(int, int)>[(9 * 60 + 30, 1)],
+      day: "2026-04-21",
+      start: "13:00",
+      end: "14:00",
+      days: "1",
+    );
+    // Back from past the edge, the range follows the finger again.
+    await expectRange(
+      (13 * 60, 1),
+      <(int, int)>[(15 * 60 + 30, 1), (13 * 60 + 30, 1)],
+      day: "2026-04-21",
+      start: "13:00",
+      end: "13:45",
+      days: "1",
+    );
+    // Friday holds 13:00 to 14:30, and Monday 09:00 to 17:00.
+    await expectRange(
+      (13 * 60, 2),
+      <(int, int)>[(13 * 60 + 30, 4)],
+      day: "2026-04-22",
+      start: "13:00",
+      end: "13:45",
+      days: "2",
+    );
+    await expectRange(
+      (13 * 60, 2),
+      <(int, int)>[(13 * 60 + 30, 0)],
+      day: "2026-04-21",
+      start: "13:00",
+      end: "13:45",
+      days: "2",
+    );
+    // Thursday is free from 11:00 to 14:00, so the times reach 13:45
+    // there, and Friday, which is not free over them, adds no day.
+    await expectRange(
+      (11 * 60, 3),
+      <(int, int)>[(13 * 60 + 30, 4)],
+      day: "2026-04-23",
+      start: "11:00",
+      end: "13:45",
+      days: "1",
+    );
+  });
 }

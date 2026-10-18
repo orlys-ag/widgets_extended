@@ -425,9 +425,15 @@ void main() {
   });
 
   testWidgets("K10 in Week a press and hold before now creates nothing, and "
-      "a range dragged up from after now stops at the first slot after "
-      "it", (tester) async {
-    await pumpLocked(tester);
+      "a range dragged up from after now, slot by slot or in one jump, stops "
+      "at the first slot after it", (tester) async {
+    // After Running ends, so the lock, not Running, stops the range.
+    await pumpLocked(
+      tester,
+      clock: () {
+        return DateTime(2026, 4, 21, 12, 37);
+      },
+    );
     await pickMode(tester, "Week");
     var gesture = await tester.startGesture(centerOf(tester, 9 * 60, 1));
     await tester.pump(const Duration(milliseconds: 600));
@@ -435,9 +441,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
 
-    gesture = await tester.startGesture(centerOf(tester, 13 * 60, 1));
+    gesture = await tester.startGesture(centerOf(tester, 13 * 60 + 30, 1));
     await tester.pump(const Duration(milliseconds: 600));
-    for (var minute = 12 * 60 + 45; minute >= 9 * 60; minute -= 15) {
+    for (var minute = 13 * 60 + 15; minute >= 9 * 60; minute -= 15) {
       await gesture.moveTo(centerOf(tester, minute, 1));
       await tester.pump();
     }
@@ -445,7 +451,19 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(dropdownShows("Start", "11:15"), findsOneWidget);
+    expect(dropdownShows("Start", "12:45"), findsOneWidget);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    gesture = await tester.startGesture(centerOf(tester, 13 * 60 + 30, 1));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.moveTo(centerOf(tester, 9 * 60, 1));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Task").last);
+    await tester.pumpAndSettle();
+    expect(dropdownShows("Start", "12:45"), findsOneWidget);
   });
 
   testWidgets("K11 a past item's form is read-only; a running one's keeps "
