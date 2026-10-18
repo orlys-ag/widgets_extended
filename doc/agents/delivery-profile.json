@@ -53,6 +53,23 @@
       ],
       "vocabulary": "Module vocabulary: nids and the *Nid hot-path variants, three coordinate spaces (sliver scroll, sliver paint, viewport scroll), five animation sources under AnimationCoordinator, exit and edge ghosts, sticky pins, pending-deletion nodes, TreeAnimationStyle families with a per-family zero kill switch."
     },
+    "calendar": {
+      "paths": [
+        "^lib/calendar/",
+        "^test/calendar/"
+      ],
+      "guidance": [
+        ".claude/rules/calendar.md",
+        ".claude/rules/calendar-dates.md",
+        ".claude/rules/calendar-entries.md",
+        ".claude/rules/calendar-policy.md",
+        ".claude/rules/calendar-store.md",
+        ".claude/rules/calendar-presentation.md",
+        ".claude/rules/calendar-views.md",
+        ".claude/rules/calendar-composition.md"
+      ],
+      "vocabulary": "Module vocabulary: seven layers, each a directory of lib/calendar/ (dates, entries, policy, store, presentation, views, composition), whose imports run only up that order, with Material in composition alone and nothing the demo owns; entries (CalendarEntry<T>, with a host payload): timed entries, which Week and Day draw as one piece per day they cover, and all-day entries, covering whole local days from midnight to midnight; the board and sliver_tree modules, reached through their own barrels; the slot the timed grid's rows and gestures snap to; board lanes for entries sharing time; pending writes, one per entry, a failure releasing it; a CalendarStore, in memory or caching over a data source; the overlap rule, the history lock and CalendarEditPolicy; CalendarTheme; and civil days on the local wall clock."
+    },
     "workspace_calendar": {
       "paths": [
         "^demos/workspace_calendar/"

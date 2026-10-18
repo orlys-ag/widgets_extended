@@ -12,6 +12,12 @@ A Flutter package (`widgets_extended`) providing rich utility widgets, in these 
 
 The barrel file `lib/widgets_extended.dart` re-exports each of them.
 
+A fourth module, calendar, does not exist yet: `lib/calendar/` is reserved for
+it, a calendar widget (`CalendarView`) with Agenda, Day, Week and Month views on
+the board and sliver_tree modules, whose rules are in
+`.claude/rules/calendar.md`. No package release ships while `lib/calendar/`
+exists and `lib/widgets_extended.dart` does not export it.
+
 `demos/workspace_calendar/` is a tracked demo app, a month, week and day
 calendar on the board and the synced sliver tree. It depends on the library by
 path and is not part of it: nothing under `lib/` imports it.
@@ -127,6 +133,7 @@ layer rule's `paths:` names the files it governs.
 |---|---|
 | [sliver_tree architecture](.claude/rules/sliver-tree.md), and the `sliver-tree-*.md` layer rules naming the file | Editing `lib/sliver_tree/**`, `lib/sectioned_sliver_list/**` or their tests |
 | [board architecture](.claude/rules/board.md), and the `board-*.md` layer rules naming the file | Editing `lib/board/**` or its tests |
+| [calendar architecture](.claude/rules/calendar.md), and the `calendar-*.md` rule of the file's layer | Editing `lib/calendar/**` or its tests, or changing demo code so it can move into `lib/calendar/` |
 | [Testing patterns](.claude/rules/testing.md) | Writing or changing tests under `test/**` |
 | [Comments](.claude/rules/comments.md) | Adding or changing a comment in Dart source under `lib/`, `test/` or `examples/` |
 | [Feature delivery method](doc/agents/delivery-method.md) | Writing a plan, or running, resuming or reading a feature-delivery run, whose files are under `plans/delivery/` |
