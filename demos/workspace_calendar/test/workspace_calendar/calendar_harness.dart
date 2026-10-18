@@ -88,8 +88,8 @@ Rect cellRect(WidgetTester tester, int row, int col) {
   return viewport.localToGlobal(rect.topLeft) & rect.size;
 }
 
-/// Opens the calendar's mode menu and picks [mode], "Month", "Week", "Day"
-/// or "Agenda".
+/// Opens the calendar's mode menu and picks [mode], "Agenda", "Day", "Week"
+/// or "Month".
 Future<void> pickMode(WidgetTester tester, String mode) async {
   await tester.tap(find.byTooltip("Calendar view"));
   await tester.pumpAndSettle();

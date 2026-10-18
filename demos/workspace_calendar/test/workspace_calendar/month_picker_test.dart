@@ -513,4 +513,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("May 2026"), findsNothing);
   });
+
+  testWidgets("P15 in Week and Month the picker fades in under the header "
+      "as the header's card grows smoothly to hold it, and back on closing "
+      "and on a pick", (tester) async {
+    await pumpCalendar(tester);
+    await pickMode(tester, "Week");
+    final area = find.byKey(calendarDaysAreaKey);
+    // Setup sanity: closed, the area under the header holds nothing.
+    expect(tester.getSize(area).height, 0.0);
+    await tester.tap(find.byTooltip("Pick a month"));
+    var shownMidway = false;
+    final opening = await areaHeights(
+      tester,
+      atMiddle: () {
+        shownMidway = find.byType(MonthPicker).evaluate().length == 1;
+      },
+    );
+    final picker = tester.getSize(area).height;
+    expect(shownMidway, isTrue);
+    expectSmooth(opening, 0.0, picker);
+    await tester.tap(find.byTooltip("Close the months"));
+    expectSmooth(await areaHeights(tester), picker, 0.0);
+
+    await pickMode(tester, "Month");
+    await tester.tap(find.byTooltip("Pick a month"));
+    expectSmooth(await areaHeights(tester), 0.0, picker);
+    await tester.tap(monthCellFinder(2026, 4));
+    expectSmooth(await areaHeights(tester), picker, 0.0);
+  });
 }
