@@ -248,6 +248,32 @@ void main() {
         3.0,
       );
     });
+
+    test("is at most maxMonthWeekScale, the most slot height over the "
+        "default", () {
+      expect(maxMonthWeekScale, 3.0);
+    });
+
+    test("withMonthWeekScale sets the slot height the scale reads, and at 1 "
+        "keeps one at or under the default and lowers one over it to the "
+        "default", () {
+      const settings = CalendarSettings();
+      expect(settings.withMonthWeekScale(2.5).minSlotHeight, 40.0);
+      expect(
+        settings
+            .copyWith(minSlotHeight: 10.0)
+            .withMonthWeekScale(1.0)
+            .minSlotHeight,
+        10.0,
+      );
+      expect(
+        settings
+            .copyWith(minSlotHeight: 30.0)
+            .withMonthWeekScale(1.0)
+            .minSlotHeight,
+        defaultMinSlotHeight,
+      );
+    });
   });
 
   group("C10 CalendarSettings edit mode", () {

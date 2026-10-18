@@ -73,8 +73,12 @@
 /// menu, chooses how Month fits its weeks, the least width of a day in
 /// Week, Day and Month, and the least height of the timed grids' slots,
 /// whose ratio to its default scales Month's weeks past their share of the
-/// screen. A selected day is always on a shown weekday. Every view rings
-/// today's number in a lighter blue than the primary.
+/// screen. A pinch of two fingers on Week's, Day's or Month's grid sets
+/// those two sizes too, zooming around the point between the fingers: up
+/// and down the slot height, or Month's week scale, and across, where the
+/// grid has more than one day, the day width. A selected day is always on
+/// a shown weekday. Every view rings today's number in a lighter blue than
+/// the primary.
 ///
 /// The sheet also chooses the history lock, which in edit mode keeps the
 /// past as it is: no item before today, or with its second switch before
@@ -1087,6 +1091,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                     lock: _currentLock,
                   );
                 },
+                onZoom: (minSlotHeight, minDayWidth) {
+                  _applySettings(
+                    _settings.copyWith(
+                      minSlotHeight: minSlotHeight,
+                      minDayWidth: minDayWidth,
+                    ),
+                  );
+                },
                 // The week strip names Day's one day.
                 showsDayHeader: _mode != _CalendarMode.day,
               ),
@@ -1172,6 +1184,13 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               onOpenDay: _openDayMode,
               onCreateOnDay: _settings.editing ? _createOn : null,
               onOpenItem: _openItem,
+              onZoom: (weekScale, minDayWidth) {
+                _applySettings(
+                  _settings
+                      .withMonthWeekScale(weekScale)
+                      .copyWith(minDayWidth: minDayWidth),
+                );
+              },
             ),
           ),
         ),

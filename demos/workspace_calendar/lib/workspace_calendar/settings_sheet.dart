@@ -195,7 +195,7 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
             ),
             const _Note(
               "Days and slots stretch to fill the grid; larger sizes make "
-              "it scroll.",
+              "it scroll. A pinch on a grid sets them too.",
             ),
           ],
         ),
