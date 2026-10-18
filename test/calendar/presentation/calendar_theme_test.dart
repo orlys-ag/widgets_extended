@@ -391,7 +391,13 @@ Object fullValueOf(String name, int index) {
   }
   final icon = iconNames.indexOf(name);
   if (icon >= 0) {
-    return IconData(0xe100 + icon, fontFamily: "MaterialIcons");
+    return const <IconData>[
+      IconData(0xe100, fontFamily: "MaterialIcons"),
+      IconData(0xe101, fontFamily: "MaterialIcons"),
+      IconData(0xe102, fontFamily: "MaterialIcons"),
+      IconData(0xe103, fontFamily: "MaterialIcons"),
+      IconData(0xe104, fontFamily: "MaterialIcons"),
+    ][icon];
   }
   switch (name) {
     case "todayRingWidth":
@@ -411,14 +417,69 @@ Object fullValueOf(String name, int index) {
   return style.copyWith(fontSize: size + 1.0 + index / 100.0);
 }
 
-/// A theme naming every parameter, each with a value unlike its built-in
-/// one; each call builds a new instance.
+/// A theme naming every constructor parameter, each with a value unlike its
+/// built-in one; each call builds a new instance.
 CalendarThemeData fullTheme() {
-  var theme = const CalendarThemeData();
-  for (var i = 0; i < fieldNames.length; i++) {
-    theme = withValue(theme, fieldNames[i], fullValueOf(fieldNames[i], i));
+  T full<T>(String name) {
+    return fullValueOf(name, fieldNames.indexOf(name)) as T;
   }
-  return theme;
+
+  return CalendarThemeData(
+    primary: full("primary"),
+    onPrimary: full("onPrimary"),
+    primaryTint: full("primaryTint"),
+    background: full("background"),
+    surface: full("surface"),
+    outline: full("outline"),
+    text: full("text"),
+    textSecondary: full("textSecondary"),
+    textMuted: full("textMuted"),
+    error: full("error"),
+    notice: full("notice"),
+    noticeOutline: full("noticeOutline"),
+    onNotice: full("onNotice"),
+    todayRing: full("todayRing"),
+    todayRingWidth: full("todayRingWidth"),
+    draggedBlockOpacity: full("draggedBlockOpacity"),
+    motionDuration: full("motionDuration"),
+    motionCurve: full("motionCurve"),
+    beforeHoursIcon: full("beforeHoursIcon"),
+    afterHoursIcon: full("afterHoursIcon"),
+    durationIcon: full("durationIcon"),
+    entryMenuIcon: full("entryMenuIcon"),
+    addEntryIcon: full("addEntryIcon"),
+    hourLabelStyle: full("hourLabelStyle"),
+    dayHeaderWeekdayStyle: full("dayHeaderWeekdayStyle"),
+    dayHeaderNumberStyle: full("dayHeaderNumberStyle"),
+    blockTitleStyle: full("blockTitleStyle"),
+    blockSummaryStyle: full("blockSummaryStyle"),
+    detailedBlockTitleStyle: full("detailedBlockTitleStyle"),
+    detailedBlockDetailStyle: full("detailedBlockDetailStyle"),
+    landingLabelStyle: full("landingLabelStyle"),
+    badgeStyle: full("badgeStyle"),
+    noticeStyle: full("noticeStyle"),
+    messageStyle: full("messageStyle"),
+    monthDayNumberStyle: full("monthDayNumberStyle"),
+    monthDayNumberMarkedStyle: full("monthDayNumberMarkedStyle"),
+    monthMoreStyle: full("monthMoreStyle"),
+    chipTitleStyle: full("chipTitleStyle"),
+    monthCardTitleStyle: full("monthCardTitleStyle"),
+    monthCardTimeStyle: full("monthCardTimeStyle"),
+    agendaHeaderTitleStyle: full("agendaHeaderTitleStyle"),
+    agendaHeaderEmptyTitleStyle: full("agendaHeaderEmptyTitleStyle"),
+    agendaHeaderCountStyle: full("agendaHeaderCountStyle"),
+    agendaHeaderEmptyCountStyle: full("agendaHeaderEmptyCountStyle"),
+    agendaTimeStyle: full("agendaTimeStyle"),
+    entryCardTitleStyle: full("entryCardTitleStyle"),
+    entryCardSummaryStyle: full("entryCardSummaryStyle"),
+    dayNumberStyle: full("dayNumberStyle"),
+    dayNumberMarkedStyle: full("dayNumberMarkedStyle"),
+    stripWeekdayStyle: full("stripWeekdayStyle"),
+    weekdayHeaderStyle: full("weekdayHeaderStyle"),
+    weekdayLetterStyle: full("weekdayLetterStyle"),
+    monthNameStyle: full("monthNameStyle"),
+    monthNameMarkedStyle: full("monthNameMarkedStyle"),
+  );
 }
 
 /// An sRGB colour as three 8-bit channels.
