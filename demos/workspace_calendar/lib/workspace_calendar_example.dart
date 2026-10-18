@@ -73,8 +73,12 @@
 /// menu, chooses how Month fits its weeks, the least width of a day in
 /// Week, Day and Month, and the least height of the timed grids' slots,
 /// whose ratio to its default scales Month's weeks past their share of the
-/// screen. A selected day is always on a shown weekday. Every view rings
-/// today's number in a lighter blue than the primary.
+/// screen. A pinch of two fingers on Week's, Day's or Month's grid sets
+/// those two sizes too, zooming around the point between the fingers: up
+/// and down the slot height, or Month's week scale, and across, where the
+/// grid has more than one day, the day width. A selected day is always on
+/// a shown weekday. Every view rings today's number in a lighter blue than
+/// the primary.
 ///
 /// The sheet also chooses the history lock, which in edit mode keeps the
 /// past as it is: no item before today, or with its second switch before
@@ -88,7 +92,8 @@
 /// month is picked or the title is tapped again: in Agenda's and Day's
 /// card it fades in over the days as they fade out, the card's height
 /// moving from theirs to its, and back as it closes, the days showing as
-/// they were; Week and Month show it under the header. While it shows,
+/// they were; in Week and Month it fades in under the header as the
+/// header's card grows to hold it, and back as it closes. While it shows,
 /// the title names its year, and the chevrons or a swipe across it step a
 /// year; a month picked selects its day of the selected day's day of the
 /// month, as a month step does, and shows that month, unfolded in Agenda's
@@ -122,10 +127,10 @@ import 'workspace_calendar/timed_grid.dart';
 import 'workspace_calendar/week_strip.dart';
 
 enum _CalendarMode {
-  month("Month"),
-  week("Week"),
+  agenda("Agenda"),
   day("Day"),
-  agenda("Agenda");
+  week("Week"),
+  month("Month");
 
   const _CalendarMode(this.label);
 
@@ -270,9 +275,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// shows.
   int _pickerYear = 0;
 
-  /// How far the month picker has taken the place of Agenda's and Day's
-  /// days in the card, 0 for the days and 1 for the picker, animated on
-  /// [harborMotionCurve].
+  /// How far the month picker has come in, 0 for out and 1 for in: in
+  /// place of Agenda's and Day's days in the card, and under the header in
+  /// Week and Month. Animated on [harborMotionCurve].
   late final AnimationController _pickerShown = AnimationController(
     vsync: this,
     duration: harborMotionDuration,
@@ -1005,9 +1010,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// The header on a card of its own, above the grids of Month, Week and
-  /// Day, with [below] under it on the card.
-  Widget _buildHeaderCard({Widget? below}) {
+  /// The header on a card of its own, above the grids of Month and Week,
+  /// with the month picker coming in under it ([_buildPickerArea]).
+  Widget _buildHeaderCard() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 8.0),
       child: DecoratedBox(
@@ -1017,17 +1022,23 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         ),
         child: Padding(
           padding: const EdgeInsets.all(8.0),
-          child: below == null
-              ? _buildCalendarHeader()
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    _buildCalendarHeader(),
-                    const SizedBox(height: 4.0),
-                    below,
-                  ],
-                ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _buildCalendarHeader(),
+              AnimatedBuilder(
+                animation: _pickerShown,
+                builder: (context, child) {
+                  return _buildPickerArea(
+                    _pickerShown.value,
+                    const SizedBox.shrink(),
+                    const EdgeInsets.only(top: 4.0),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1051,7 +1062,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               child: _buildCalendarCard(),
             )
           else
-            _buildHeaderCard(below: _picksMonth ? _buildMonthPicker() : null),
+            _buildHeaderCard(),
           Expanded(
             child: NotificationListener<ScrollNotification>(
               onNotification: _handleBoardScroll,
@@ -1078,6 +1089,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                     model: _model,
                     range: range,
                     lock: _currentLock,
+                  );
+                },
+                onZoom: (minSlotHeight, minDayWidth) {
+                  _applySettings(
+                    _settings.copyWith(
+                      minSlotHeight: minSlotHeight,
+                      minDayWidth: minDayWidth,
+                    ),
                   );
                 },
                 // The week strip names Day's one day.
@@ -1148,7 +1167,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _buildHeaderCard(below: _picksMonth ? _buildMonthPicker() : null),
+        _buildHeaderCard(),
         Expanded(
           child: ColoredBox(
             color: HarborColors.surface,
@@ -1165,6 +1184,13 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               onOpenDay: _openDayMode,
               onCreateOnDay: _settings.editing ? _createOn : null,
               onOpenItem: _openItem,
+              onZoom: (weekScale, minDayWidth) {
+                _applySettings(
+                  _settings
+                      .withMonthWeekScale(weekScale)
+                      .copyWith(minDayWidth: minDayWidth),
+                );
+              },
             ),
           ),
         ),
@@ -1233,7 +1259,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 ],
               ),
               builder: (context, days) {
-                return _buildDaysArea(_pickerShown.value, days!);
+                // The picker does not fold, so it has no pull tab; under it
+                // the card pads its bottom as the header card does in Week
+                // and Month.
+                return _buildPickerArea(
+                  _pickerShown.value,
+                  days!,
+                  const EdgeInsets.only(bottom: 8.0),
+                );
               },
             ),
           ],
@@ -1242,13 +1275,17 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// The calendar card's [days] under its header and the month picker in
-  /// their place, the picker [shown] of the way in: each fades by how far
-  /// the other is in, only the one coming in or in takes pointers, and the
-  /// area is as tall as the days, [shown] of the way to the picker's
-  /// height. The days are built until the picker is all the way in, and the
-  /// picker from when it starts in.
-  Widget _buildDaysArea(double shown, Widget days) {
+  /// [days] under the header and the month picker, padded by
+  /// [pickerPadding], in their place, the picker [shown] of the way in:
+  /// each fades by how far the other is in, only the one coming in or in
+  /// takes pointers, and the area is as tall as [days], [shown] of the way
+  /// to the padded picker's height. [days] are built until the picker is
+  /// all the way in, and the picker from when it starts in.
+  Widget _buildPickerArea(
+    double shown,
+    Widget days,
+    EdgeInsetsGeometry pickerPadding,
+  ) {
     return ClipRect(
       clipBehavior: shown > 0.0 && shown < 1.0 ? Clip.hardEdge : Clip.none,
       child: _HeightLerp(
@@ -1265,11 +1302,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 ignoring: !_picksMonth,
                 child: Opacity(
                   opacity: shown,
-                  // The picker does not fold, so it has no pull tab; under
-                  // it the card pads its bottom as the header card does in
-                  // Week and Month.
                   child: Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
+                    padding: pickerPadding,
                     child: _buildMonthPicker(),
                   ),
                 ),
@@ -1518,8 +1552,9 @@ const ValueKey<String> calendarPullTabKey = ValueKey<String>(
   "calendar-pull-tab",
 );
 
-/// The key of the calendar card's area under its header, which holds the
-/// days or the month picker.
+/// The key of the area under the calendar header that the month picker
+/// comes into: in Agenda's and Day's card in place of the days, and under
+/// the header in Week's and Month's.
 const ValueKey<String> calendarDaysAreaKey = ValueKey<String>(
   "calendar-days-area",
 );

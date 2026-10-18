@@ -16,6 +16,7 @@ import 'calendar_model.dart';
 import 'calendar_settings.dart';
 import 'day_cell.dart';
 import 'harbor_theme.dart';
+import 'pinch_zoom.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
 /// below: the row axis's lane padding.
@@ -384,6 +385,15 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// running, unless it turns chips into cards or back, or under
 /// [MonthLayout.fitScreen] changes the lanes a week holds, which settles
 /// them as a new month does.
+///
+/// A pinch of two fingers zooms the board around the point between them,
+/// reporting through [onZoom] the week scale and the least day width it
+/// zooms to, from the scale and the width the board shows: a pinch up and
+/// down the week scale, from 1 to [maxMonthWeekScale], and one across the
+/// day width, within the widths the settings offer. A new scale or width
+/// a pinch brings does not scroll to the selected day. While two fingers
+/// are down the board does not scroll, and a tap or a long press of
+/// fingers that pinched does nothing.
 class MonthBoard extends StatefulWidget {
   const MonthBoard({
     super.key,
@@ -398,6 +408,7 @@ class MonthBoard extends StatefulWidget {
     required this.onOpenDay,
     required this.onCreateOnDay,
     required this.onOpenItem,
+    this.onZoom,
   });
 
   final CalendarModel model;
@@ -436,6 +447,11 @@ class MonthBoard extends StatefulWidget {
   /// The chip of this item, which is not pending, was tapped.
   final ValueChanged<String> onOpenItem;
 
+  /// Reports the week scale and the least day width a pinch zooms to,
+  /// which the board shows once [weekScale] and [minDayWidth] bring them;
+  /// null for a board no pinch zooms.
+  final void Function(double weekScale, double minDayWidth)? onZoom;
+
   @override
   State<MonthBoard> createState() {
     return _MonthBoardState();
@@ -472,6 +488,26 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
 
   /// The horizontal scroll, which the weekday letters follow.
   final ScrollController _horizontal = ScrollController();
+
+  late final PinchTracker _pinch = PinchTracker(
+    onStart: _startPinch,
+    onUpdate: _pinchTo,
+    onEnd: _endPinch,
+  );
+
+  final ScrollHolder _scrollHold = ScrollHolder();
+
+  /// The week scale and the day width the board showed when the running
+  /// pinch started; null while none runs.
+  ({double weekScale, double day})? _pinchFrom;
+
+  /// Where the fingers of the pinch that last reported a zoom met, in the
+  /// board's coordinates, until the next layout holds the lattice there
+  /// ([_holdPinchFocal]).
+  Offset? _pinchFocal;
+
+  /// The area the board fills, whose coordinates are the board's.
+  final GlobalKey _boardAreaKey = GlobalKey();
 
   /// The board's focus, which a tap or a long press on a day asks for, so
   /// the arrow keys reach the board.
@@ -600,6 +636,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _writeSelection();
     widget.model.addListener(_handleModel);
     widget.today.addListener(_handleToday);
+    _pinch.holding.addListener(_handleHolding);
   }
 
   @override
@@ -623,9 +660,11 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       _days = _emptyDays(widget.grid);
       _background = _MonthGridPainter(widget.grid);
     }
-    if (widget.minDayWidth != oldWidget.minDayWidth ||
-        widget.weekScale != oldWidget.weekScale) {
-      // Larger days may push the selected one out of view.
+    if ((widget.minDayWidth != oldWidget.minDayWidth ||
+            widget.weekScale != oldWidget.weekScale) &&
+        _pinchFocal == null) {
+      // Larger days may push the selected one out of view. A pinch keeps
+      // the point between its fingers in view instead.
       _revealPending = true;
     }
     if (gridChanged || widget.selectedDay != oldWidget.selectedDay) {
@@ -639,6 +678,8 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   void dispose() {
     widget.model.removeListener(_handleModel);
     widget.today.removeListener(_handleToday);
+    _pinch.dispose();
+    _scrollHold.release();
     // The board has unmounted by now: an element's children unmount
     // before its state disposes.
     _scroll.dispose();
@@ -726,13 +767,16 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   }
 
   void _openDay(DateTime day) {
+    if (_pinch.pinched.value) {
+      return;
+    }
     _focusNode.requestFocus();
     widget.onOpenDay(day);
   }
 
   void _createOnDay(DateTime day) {
     final create = widget.onCreateOnDay;
-    if (create == null) {
+    if (create == null || _pinch.pinched.value) {
       return;
     }
     _focusNode.requestFocus();
@@ -740,7 +784,89 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   }
 
   void _openItem(String id) {
-    widget.onOpenItem(id);
+    if (!_pinch.pinched.value) {
+      widget.onOpenItem(id);
+    }
+  }
+
+  bool _startPinch(PinchAxis axis, Offset focal) {
+    _pinchFrom = (weekScale: widget.weekScale, day: _columnWidth);
+    return true;
+  }
+
+  /// Reports through [MonthBoard.onZoom] the week scale or the least day
+  /// width the pinch zooms to, its scale times the one shown at its start,
+  /// within the ones offered, and notes where its fingers meet for the
+  /// layout that follows.
+  void _pinchTo(PinchUpdate update) {
+    final from = _pinchFrom;
+    final onZoom = widget.onZoom;
+    final area = _boardAreaKey.currentContext?.findRenderObject();
+    if (from == null || onZoom == null || area is! RenderBox) {
+      return;
+    }
+    var weekScale = widget.weekScale;
+    var day = widget.minDayWidth;
+    switch (update.axis) {
+      case PinchAxis.vertical:
+        weekScale = (from.weekScale * update.scale).clamp(
+          1.0,
+          maxMonthWeekScale,
+        );
+      case PinchAxis.horizontal:
+        day = (from.day * update.scale).clamp(minDayWidthLow, minDayWidthHigh);
+    }
+    if (weekScale == widget.weekScale && day == widget.minDayWidth) {
+      return;
+    }
+    _pinchFocal = area.globalToLocal(update.focal);
+    onZoom(weekScale, day);
+  }
+
+  void _endPinch() {
+    _pinchFrom = null;
+  }
+
+  /// Holds the board's scrolling while two fingers are down, and lets it
+  /// go after.
+  void _handleHolding() {
+    if (_pinch.holding.value) {
+      _scrollHold.hold(<ScrollPosition?>[
+        _scroll.hasClients ? _scroll.position : null,
+        _horizontal.hasClients ? _horizontal.position : null,
+      ]);
+    } else {
+      _scrollHold.release();
+    }
+  }
+
+  /// Keeps the lattice point under [focal] there across the axes that
+  /// replaced [oldRows] and [oldColumns] ([holdFocalAcrossAxisSwap]). The
+  /// board has no frozen tracks.
+  void _holdPinchFocal(
+    Offset focal,
+    BoardAxisConfig oldRows,
+    BoardAxisConfig oldColumns,
+  ) {
+    if (_scroll.hasClients && !identical(oldRows.axis, _board.rows.axis)) {
+      holdFocalAcrossAxisSwap(
+        _scroll.position,
+        old: oldRows.axis,
+        next: _board.rows.axis,
+        band: 0.0,
+        focal: focal.dy,
+      );
+    }
+    if (_horizontal.hasClients &&
+        !identical(oldColumns.axis, _board.columns.axis)) {
+      holdFocalAcrossAxisSwap(
+        _horizontal.position,
+        old: oldColumns.axis,
+        next: _board.columns.axis,
+        band: 0.0,
+        focal: focal.dx,
+      );
+    }
   }
 
   /// Gives the board the axes [size], the grid, the layout, the least day
@@ -763,6 +889,10 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// resizes, and a new row axis takes each week's first measurement
   /// without animating it.
   void _layoutBoard(Size size) {
+    final focal = _pinchFocal;
+    _pinchFocal = null;
+    final oldRows = _board.rows;
+    final oldColumns = _board.columns;
     final grid = widget.grid;
     final layout = widget.layout;
     final fitted = fittedWeekExtent(
@@ -840,6 +970,9 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
         _board.setItems(placements);
       }
     });
+    if (focal != null) {
+      _holdPinchFocal(focal, oldRows, oldColumns);
+    }
     if (settles) {
       _scheduleStyleRestore();
     }
@@ -1085,21 +1218,28 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
               child: Stack(
                 children: <Widget>[
                   Positioned.fill(
-                    child: Board<String, MonthChip>(
-                      controller: _board,
-                      cellBuilder: _cellBuilder,
-                      itemBuilder: _cards ? _cardBuilder : _chipBuilder,
-                      background: _background,
-                      selection: _selectionConfig,
-                      focusNode: _focusNode,
-                      // The board scrolls on its own, not with the screen's
-                      // primary scroll controller.
-                      primary: false,
-                      verticalDetails: ScrollableDetails.vertical(
-                        controller: _scroll,
-                      ),
-                      horizontalDetails: ScrollableDetails.horizontal(
-                        controller: _horizontal,
+                    child: Listener(
+                      key: _boardAreaKey,
+                      onPointerDown: _pinch.handleEvent,
+                      onPointerMove: _pinch.handleEvent,
+                      onPointerUp: _pinch.handleEvent,
+                      onPointerCancel: _pinch.handleEvent,
+                      child: Board<String, MonthChip>(
+                        controller: _board,
+                        cellBuilder: _cellBuilder,
+                        itemBuilder: _cards ? _cardBuilder : _chipBuilder,
+                        background: _background,
+                        selection: _selectionConfig,
+                        focusNode: _focusNode,
+                        // The board scrolls on its own, not with the screen's
+                        // primary scroll controller.
+                        primary: false,
+                        verticalDetails: ScrollableDetails.vertical(
+                          controller: _scroll,
+                        ),
+                        horizontalDetails: ScrollableDetails.horizontal(
+                          controller: _horizontal,
+                        ),
                       ),
                     ),
                   ),

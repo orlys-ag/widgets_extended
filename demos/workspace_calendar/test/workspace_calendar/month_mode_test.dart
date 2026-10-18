@@ -359,7 +359,7 @@ int fillCount(WidgetTester tester) {
 
 void main() {
   testWidgets(
-    "M1 the menu lists Month, Week, Day and Agenda and the calendar opens "
+    "M1 the menu lists Agenda, Day, Week and Month and the calendar opens "
     "in Agenda",
     (tester) async {
       await pumpCalendar(tester);
@@ -376,7 +376,7 @@ void main() {
         findsNWidgets(4),
       );
       final tops = <double>[
-        for (final label in <String>["Month", "Week", "Day", "Agenda"])
+        for (final label in <String>["Agenda", "Day", "Week", "Month"])
           tester.getRect(find.text(label).last).top,
       ];
       for (var i = 1; i < tops.length; i++) {

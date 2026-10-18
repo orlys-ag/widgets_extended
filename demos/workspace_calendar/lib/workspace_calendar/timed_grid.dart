@@ -20,6 +20,7 @@ import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 import 'history_lock.dart';
+import 'pinch_zoom.dart';
 
 const double _headerHeight = 40.0;
 const double _gutterWidth = 56.0;
@@ -534,6 +535,14 @@ CreateRange createRangeOver(
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than the least sizes [settings] choose; past those, it scrolls.
+/// A pinch of two fingers zooms the grid around the point between them,
+/// reporting through [onZoom] the least sizes it zooms to, from the sizes
+/// the grid shows, within the sizes the settings offer: a pinch up and
+/// down the slot height, and one across, on more than one day column, the
+/// day width. While two fingers are down the grid does not scroll, and a
+/// finger that pinched clears no selection when it lifts off the selected
+/// block. No pinch starts while a block moves or resizes or a create range
+/// runs.
 class TimedGrid extends StatefulWidget {
   const TimedGrid({
     super.key,
@@ -547,6 +556,7 @@ class TimedGrid extends StatefulWidget {
     required this.onSelectDay,
     required this.onOpenItem,
     required this.onCreate,
+    this.onZoom,
     this.showsDayHeader = true,
   }) : assert(dayCount >= 1);
 
@@ -585,6 +595,11 @@ class TimedGrid extends StatefulWidget {
   /// picked, and completes when it closes.
   final Future<void> Function(CreateRange range) onCreate;
 
+  /// Reports the least slot height and day width a pinch zooms to, which
+  /// the grid shows once [settings] bring them; null for a grid no pinch
+  /// zooms.
+  final void Function(double minSlotHeight, double minDayWidth)? onZoom;
+
   @override
   State<TimedGrid> createState() {
     return _TimedGridState();
@@ -613,6 +628,23 @@ typedef _NowMark = ({int column, int minute});
 
 class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final BoardController<String, ShownItem> _board;
+
+  late final PinchTracker _pinch = PinchTracker(
+    onStart: _startPinch,
+    onUpdate: _pinchTo,
+    onEnd: _endPinch,
+  );
+
+  /// The slot height and day width the grid showed when the running pinch
+  /// started; null while none runs.
+  ({double slot, double day})? _pinchFrom;
+
+  /// Where the fingers of the pinch that last reported a zoom met, in the
+  /// board viewport's coordinates, until the next fit of the axes holds
+  /// the lattice there ([_holdPinchFocal]).
+  Offset? _pinchFocal;
+
+  final ScrollHolder _scrollHold = ScrollHolder();
 
   /// The rows counting the items outside the hours that the grid lays out
   /// above and below its slots.
@@ -812,6 +844,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _pinch.holding.addListener(_handleHolding);
     _tap = TapGestureRecognizer(debugOwner: this)..onTapUp = _handleTapUp;
     // Each pointer kind goes to one range recognizer. A precise pointer
     // starts a range once it passes its hit slop, before the scrollable's
@@ -950,6 +983,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   @override
   void dispose() {
     widget.now.removeListener(_handleNow);
+    _pinch.dispose();
+    _scrollHold.release();
     _tap.dispose();
     _immediateRange.dispose();
     _delayedRange.dispose();
@@ -1056,6 +1091,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// rebuilds the gutter cells and so what they tell a screen reader.
   void _fitAxes(Size size) {
     _size = size;
+    final oldRows = _board.rows;
+    final oldColumns = _board.columns;
     final settings = widget.settings;
     final dayWidth = math.max(
       settings.minDayWidth,
@@ -1080,6 +1117,102 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         settings.hourLabelFormat != _rowFormat) {
       _slotHeight = slotHeight;
       _replaceRows();
+    }
+    _holdPinchFocal(oldRows, oldColumns);
+  }
+
+  /// Keeps the lattice point under [_pinchFocal] there across the axes
+  /// that replaced [oldRows] and [oldColumns] ([holdFocalAcrossAxisSwap]),
+  /// and clears it.
+  void _holdPinchFocal(BoardAxisConfig oldRows, BoardAxisConfig oldColumns) {
+    final focal = _pinchFocal;
+    final viewport = _findViewport();
+    if (focal == null || viewport == null) {
+      return;
+    }
+    _pinchFocal = null;
+    final vertical = viewport.verticalPosition;
+    if (vertical != null && !identical(oldRows.axis, _board.rows.axis)) {
+      holdFocalAcrossAxisSwap(
+        vertical,
+        old: oldRows.axis,
+        next: _board.rows.axis,
+        band: _leadingExtent,
+        focal: focal.dy,
+      );
+    }
+    final horizontal = viewport.horizontalPosition;
+    if (horizontal != null &&
+        !identical(oldColumns.axis, _board.columns.axis)) {
+      holdFocalAcrossAxisSwap(
+        horizontal,
+        old: oldColumns.axis,
+        next: _board.columns.axis,
+        band: _gutterWidth,
+        focal: focal.dx,
+      );
+    }
+  }
+
+  /// Starts a pinch from the sizes the grid shows, unless a block moves
+  /// or resizes or a create range runs.
+  bool _startPinch(PinchAxis axis, Offset focal) {
+    if (_range != null || _drag != null) {
+      return false;
+    }
+    _pinchFrom = (slot: _slotHeight, day: _dayWidth);
+    return true;
+  }
+
+  /// Reports through [TimedGrid.onZoom] the least size the pinch zooms its
+  /// axis to, its scale times the size shown at its start, within the
+  /// sizes the settings offer, and notes where its fingers meet for the
+  /// fit that follows. On one day column a pinch across zooms nothing.
+  void _pinchTo(PinchUpdate update) {
+    final from = _pinchFrom;
+    final onZoom = widget.onZoom;
+    final viewport = _findViewport();
+    if (from == null || onZoom == null || viewport == null) {
+      return;
+    }
+    final settings = widget.settings;
+    var slot = settings.minSlotHeight;
+    var day = settings.minDayWidth;
+    switch (update.axis) {
+      case PinchAxis.vertical:
+        slot = (from.slot * update.scale).clamp(
+          minSlotHeightLow,
+          minSlotHeightHigh,
+        );
+      case PinchAxis.horizontal:
+        if (_tracks.columnCount == 1) {
+          return;
+        }
+        day = (from.day * update.scale).clamp(minDayWidthLow, minDayWidthHigh);
+    }
+    if (slot == settings.minSlotHeight && day == settings.minDayWidth) {
+      return;
+    }
+    _pinchFocal = viewport.globalToLocal(update.focal);
+    onZoom(slot, day);
+  }
+
+  void _endPinch() {
+    _pinchFrom = null;
+  }
+
+  /// Holds the board's scrolling while two fingers are down, unless a
+  /// block drag or a create range runs, which no pinch starts beside, and
+  /// lets it go after.
+  void _handleHolding() {
+    final viewport = _findViewport();
+    if (_pinch.holding.value && _range == null && _drag == null) {
+      _scrollHold.hold(<ScrollPosition?>[
+        viewport?.verticalPosition,
+        viewport?.horizontalPosition,
+      ]);
+    } else {
+      _scrollHold.release();
     }
   }
 
@@ -1510,6 +1643,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// before the arena closes, so they join it beside the scrollable's pan;
   /// each recognizer ignores the pointer kinds it does not support.
   void _handlePointerDown(PointerDownEvent event) {
+    _pinch.handleEvent(event);
     final selected = _selectedBlock.value;
     if (selected != null) {
       final under = _itemAt(event.position);
@@ -1531,8 +1665,11 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// Clears the selection for a tap off the selected block, which a press
   /// lifting another block, and so selecting it, is not.
   void _handlePointerUp(PointerUpEvent event) {
+    _pinch.handleEvent(event);
     final press = _pressesOff.remove(event.pointer);
-    if (press == null || _selectedBlock.value != press.id) {
+    if (press == null ||
+        _pinch.pinched.value ||
+        _selectedBlock.value != press.id) {
       return;
     }
     final slop = computeHitSlop(
@@ -1545,6 +1682,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
+    _pinch.handleEvent(event);
     _pressesOff.remove(event.pointer);
   }
 
@@ -1829,6 +1967,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     final landingText = _landingText();
     final listener = Listener(
       onPointerDown: _handlePointerDown,
+      onPointerMove: _pinch.handleEvent,
       onPointerUp: _handlePointerUp,
       onPointerCancel: _handlePointerCancel,
       child: NotificationListener<ScrollNotification>(

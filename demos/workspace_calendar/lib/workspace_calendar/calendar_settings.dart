@@ -87,6 +87,10 @@ const double minSlotHeightHigh = 48.0;
 /// The slot height the grid has before the settings change it.
 const double defaultMinSlotHeight = 16.0;
 
+/// The most [CalendarSettings.monthWeekScale] the settings offer: the
+/// most slot height over its default.
+const double maxMonthWeekScale = minSlotHeightHigh / defaultMinSlotHeight;
+
 /// How Month lays out a week whose chips need more lanes than its share
 /// of the board's height holds.
 enum MonthLayout {
@@ -211,6 +215,18 @@ class CalendarSettings {
   /// at the default slot height and under it the weeks fit the screen.
   double get monthWeekScale {
     return math.max(1.0, minSlotHeight / defaultMinSlotHeight);
+  }
+
+  /// These settings with [monthWeekScale] at [scale], at least 1: the slot
+  /// height [scale] times its default above 1, and at 1 the slot height
+  /// as it is where that is at most its default, and its default where it
+  /// is over it.
+  CalendarSettings withMonthWeekScale(double scale) {
+    return copyWith(
+      minSlotHeight: scale > 1.0
+          ? defaultMinSlotHeight * scale
+          : math.min(minSlotHeight, defaultMinSlotHeight),
+    );
   }
 
   CalendarSettings copyWith({
