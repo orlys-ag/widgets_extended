@@ -506,7 +506,8 @@ CreateRange createRangeOver(
 /// A move dropped onto another item's time lands at the nearest free time
 /// that shows, on that day or the day before or after it, and goes back
 /// where there is none; a resize dragged onto one stops at its
-/// edge. While a drag runs, a label over the grid names the day and times a
+/// edge, and so does a create's range, its times first, in the day it was
+/// pressed on, then its days, as far as each is free over those times. While a drag runs, a label over the grid names the day and times a
 /// release would give, or that a move has nowhere to land, and a move outlines
 /// the slots it would land on. A line over the blocks marks the time [now]
 /// holds in its day's column, and the grid opens scrolled to the hour before it
@@ -1630,19 +1631,74 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return range;
   }
 
-  /// Moves [range]'s focus to [focus], unless the range would then start
-  /// before the history lock's boundary.
+  /// Moves [range]'s focus toward [focus], as far as [_reach] takes it.
   void _moveRange(_RangeDrag range, ({int row, int col}) focus) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
-    final over = createRangeOver(_tracks, range.anchor, focus);
-    if (!_lock.value.admitsStart(over.day, over.startMinute)) {
+    final reached = _reach(range.anchor, focus);
+    if (reached == range.focus) {
       return;
     }
     setState(() {
-      range.focus = focus;
+      range.focus = reached;
     });
+  }
+
+  /// The focus a range from [anchor] reaches toward [focus]: the rows of
+  /// [anchor]'s column toward [focus]'s row, then the columns toward
+  /// [focus]'s column over those rows, each up to the last before one
+  /// [_admitsRange] refuses, so the range stops at an item's edge, or at
+  /// the history lock's boundary, however far past it [focus] lies.
+  ({int row, int col}) _reach(
+    ({int row, int col}) anchor,
+    ({int row, int col}) focus,
+  ) {
+    final items = widget.model.itemsBetween(
+      _tracks.dateAt(math.min(anchor.col, focus.col)),
+      _tracks.dateAt(math.max(anchor.col, focus.col)),
+    );
+    var row = anchor.row;
+    final rowStep = (focus.row - anchor.row).sign;
+    while (row != focus.row &&
+        _admitsRange(anchor, (row: row + rowStep, col: anchor.col), items)) {
+      row += rowStep;
+    }
+    var col = anchor.col;
+    final colStep = (focus.col - anchor.col).sign;
+    while (col != focus.col &&
+        _admitsRange(anchor, (row: row, col: col + colStep), items)) {
+      col += colStep;
+    }
+    return (row: row, col: col);
+  }
+
+  /// Whether the range from [anchor] to [focus] starts where the history
+  /// lock admits a start and shares no time, under [itemsConflict], with
+  /// any of [items].
+  bool _admitsRange(
+    ({int row, int col}) anchor,
+    ({int row, int col}) focus,
+    List<ShownItem> items,
+  ) {
+    final range = createRangeOver(_tracks, anchor, focus);
+    if (!_lock.value.admitsStart(range.day, range.startMinute)) {
+      return false;
+    }
+    final ItemShape shape = (
+      // itemsConflict reads no type.
+      type: CalendarItemType.task,
+      firstDay: dayNumber(range.day),
+      dayCount: range.dayCount,
+      start: range.startMinute,
+      end: range.endMinute,
+    );
+    for (final item in items) {
+      if (itemsConflict(shape, item.item.shape)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void _endRange(_RangeDrag range) {
