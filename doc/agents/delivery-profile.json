@@ -4,6 +4,7 @@
   "codePaths": [
     "lib",
     "test",
+    "demos",
     "pubspec.yaml",
     "analysis_options.yaml",
     "README.md",
@@ -51,6 +52,13 @@
         ".claude/rules/sliver-tree-sync.md"
       ],
       "vocabulary": "Module vocabulary: nids and the *Nid hot-path variants, three coordinate spaces (sliver scroll, sliver paint, viewport scroll), five animation sources under AnimationCoordinator, exit and edge ghosts, sticky pins, pending-deletion nodes, TreeAnimationStyle families with a per-family zero kill switch."
+    },
+    "workspace_calendar": {
+      "paths": [
+        "^demos/workspace_calendar/"
+      ],
+      "guidance": [],
+      "vocabulary": "Demo vocabulary: demos/workspace_calendar is demo code on the library by path, never part of it: a CalendarModel over a CalendarApi (the seeded MockCalendarApi) that shows a write pending until the API answers, a month grid of DayCell widgets, a DayList on a SyncedSliverTree, and a TimedGrid, a board of one row per 15-minute slot and one column per day with a frozen header and hour gutter, whose blocks move and resize through the board's drag."
     }
   },
   "gates": [
@@ -104,6 +112,32 @@
         ]
       },
       "scope": "final"
+    },
+    {
+      "name": "demo-analyze",
+      "command": "(cd demos/workspace_calendar && flutter analyze)",
+      "pass": "it prints No issues found!",
+      "when": {
+        "paths": [
+          "^lib/",
+          "^demos/workspace_calendar/",
+          "^pubspec\\.yaml$"
+        ]
+      },
+      "scope": "step"
+    },
+    {
+      "name": "demo-test",
+      "command": "(cd demos/workspace_calendar && flutter test)",
+      "pass": "it prints All tests passed!",
+      "when": {
+        "paths": [
+          "^lib/",
+          "^demos/workspace_calendar/",
+          "^pubspec\\.yaml$"
+        ]
+      },
+      "scope": "step"
     },
     {
       "name": "delivery-harness",

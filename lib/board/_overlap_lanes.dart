@@ -39,9 +39,11 @@ class OverlapLaneResolver {
   /// written when [laneAxis] is null.
   final Map<int, List<int>> _laneBuckets = <int, List<int>>{};
 
-  /// Lane-axis buckets whose members changed since the last resolve.
-  /// CLEARED by every flush, from either arm, which is exactly why the
-  /// structural notification's key set rides [_laneChangedIds] instead.
+  /// Lane-axis buckets whose members changed since the last resolve, or
+  /// that [invalidateOrderOf] or [invalidateAllBuckets] marked for a
+  /// re-sort. CLEARED by every flush, from either arm, which is exactly
+  /// why the structural notification's key set rides [_laneChangedIds]
+  /// instead.
   final Set<int> _dirtyBuckets = <int>{};
 
   /// Ids whose assigned lane or lane count differs from the one they held.
@@ -65,6 +67,33 @@ class OverlapLaneResolver {
   Int32List _spanScratch = Int32List(0);
   Int32List _nextInLaneScratch = Int32List(0);
   Int32List _laneCursorScratch = Int32List(0);
+
+  /// The members of the bucket an ordered sort is sorting, copied before
+  /// the sort so a throw can put them back. `List.sort` carries a member
+  /// in a local while it shifts the ones around it, so a throw mid-sort
+  /// can leave one member twice and another gone. Grown by doubling in
+  /// [_ensureOrderBackup] and never shrunk, so a steady-state ordered sort
+  /// allocates nothing.
+  Int32List _orderBackup = Int32List(0);
+
+  /// The lane order among members whose sweep-axis intervals are
+  /// identical, over their ids, or null for none. Applied after the
+  /// sweep-axis start and the descending end and before the id, by both
+  /// sorts, and called nowhere else. Written by the controller only.
+  int Function(int a, int b)? idOrder;
+
+  /// The sweep-axis reads and the order of the sort [_sortMembers] runs,
+  /// non-null only while it runs. Neither sort is re-entrant: the order is
+  /// a function of two payloads, as `BoardController.laneOrder`'s contract
+  /// states, and reads no lane.
+  double Function(int id)? _sortStartOf;
+  double Function(int id)? _sortEndOf;
+  int Function(int a, int b)? _sortOrder;
+
+  /// Debug-only: growths of the ordered sort's backup buffer. Rejects the
+  /// seam of counting resolves, which reads the same whether the buffer is
+  /// kept or allocated on every ordered sort.
+  int debugOrderBackupGrowCount = 0;
 
   /// Debug-only: lane-axis buckets [ensureResolved] has actually
   /// processed, whichever arm called it. Rejects the seam of asserting the
@@ -114,6 +143,28 @@ class OverlapLaneResolver {
   /// Whether any bucket is waiting to be resolved.
   bool get hasDirtyBuckets {
     return _dirtyBuckets.isNotEmpty;
+  }
+
+  /// The lane-axis tracks holding a bucket. A live view: callers that
+  /// mutate the resolver while they walk it copy it first.
+  Iterable<int> get occupiedTracks {
+    return _laneBuckets.keys;
+  }
+
+  /// Dirties [id]'s bucket when [id] is laned, so the next resolve sorts
+  /// it again under [idOrder]: a payload write changes what the order
+  /// answers without changing a member or a span.
+  void invalidateOrderOf(int id) {
+    if (!isLaned(id)) {
+      return;
+    }
+    _dirtyBuckets.add(_store.startIndexOf(id, _laneAxis!));
+  }
+
+  /// Dirties every bucket, so the next resolve sorts each again under the
+  /// current [idOrder].
+  void invalidateAllBuckets() {
+    _dirtyBuckets.addAll(_laneBuckets.keys);
   }
 
   /// The largest resolved lane count among [track]'s laned members, or 0
@@ -267,6 +318,109 @@ class OverlapLaneResolver {
     _laneCursorScratch = Int32List(grown);
   }
 
+  /// Grows [_orderBackup] so it holds at least [length] entries, doubling
+  /// as [_ensureSweepScratch] does.
+  void _ensureOrderBackup(int length) {
+    if (_orderBackup.length >= length) {
+      return;
+    }
+    var grown = _orderBackup.isEmpty ? 8 : _orderBackup.length * 2;
+    while (grown < length) {
+      grown *= 2;
+    }
+    _orderBackup = Int32List(grown);
+    debugOrderBackupGrowCount++;
+  }
+
+  /// The one member order both sorts read: sweep-axis start ascending,
+  /// sweep-axis end DESCENDING, then [order] where it is non-null and
+  /// answers non-zero, then id ascending.
+  static int _compareMembers(
+    int a,
+    int b,
+    double Function(int id) startOf,
+    double Function(int id) endOf,
+    int Function(int a, int b)? order,
+  ) {
+    final startA = startOf(a);
+    final startB = startOf(b);
+    if (startA != startB) {
+      return startA < startB ? -1 : 1;
+    }
+    final endA = endOf(a);
+    final endB = endOf(b);
+    if (endA != endB) {
+      return endA > endB ? -1 : 1;
+    }
+    if (order != null) {
+      final ordered = order(a, b);
+      if (ordered != 0) {
+        return ordered;
+      }
+    }
+    return a.compareTo(b);
+  }
+
+  /// Sorts [members] in place by [_compareMembers] under [idOrder].
+  ///
+  /// With an order, the members are backed up first: a throw from the
+  /// sort, the app's order or `List.sort` itself, puts them back, is
+  /// reported, and the members are sorted without the order, so the
+  /// resolve completes ordered by id among identical intervals and nothing
+  /// escapes layout or a lane read.
+  void _sortMembers(
+    List<int> members,
+    double Function(int id) startOf,
+    double Function(int id) endOf,
+  ) {
+    final order = idOrder;
+    _sortStartOf = startOf;
+    _sortEndOf = endOf;
+    _sortOrder = order;
+    try {
+      if (order == null) {
+        members.sort(_compareSorting);
+        return;
+      }
+      final count = members.length;
+      _ensureOrderBackup(count);
+      final backup = _orderBackup;
+      for (var i = 0; i < count; i++) {
+        backup[i] = members[i];
+      }
+      try {
+        members.sort(_compareSorting);
+      } catch (error, stack) {
+        for (var i = 0; i < count; i++) {
+          members[i] = backup[i];
+        }
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: "widgets_extended board",
+            context: ErrorDescription(
+              "while ordering a board's lanes with BoardController.laneOrder",
+            ),
+          ),
+        );
+        _sortOrder = null;
+        members.sort(_compareSorting);
+      }
+    } finally {
+      _sortStartOf = null;
+      _sortEndOf = null;
+      _sortOrder = null;
+    }
+  }
+
+  /// The comparator of the sort [_sortMembers] runs. It reads that sort's
+  /// reads and order from fields rather than capturing them, so a sort
+  /// allocates one closure, the tear-off, and no closure context.
+  int _compareSorting(int a, int b) {
+    return _compareMembers(a, b, _sortStartOf!, _sortEndOf!, _sortOrder);
+  }
+
   /// The four steps of the sweep, over HALF-OPEN intervals on the
   /// non-lane axis.
   void _resolveBucket(int track) {
@@ -275,24 +429,21 @@ class OverlapLaneResolver {
       return;
     }
     final sweep = sweepAxis!;
+    double startOf(int id) {
+      return _store.startTrackOf(id, sweep);
+    }
+
+    double endOf(int id) {
+      return _store.endTrackOf(id, sweep);
+    }
+
     // Step 1: sort by sweep-axis start ascending, then sweep-axis end
-    // DESCENDING, then id ascending. The id tie-break is load-bearing:
-    // `List.sort` is not stable and a lane change costs the item's State,
-    // so without a final key two resolves over unchanged state can swap
-    // two identical intervals and re-key both.
-    bucket.sort((a, b) {
-      final startA = _store.startTrackOf(a, sweep);
-      final startB = _store.startTrackOf(b, sweep);
-      if (startA != startB) {
-        return startA < startB ? -1 : 1;
-      }
-      final endA = _store.endTrackOf(a, sweep);
-      final endB = _store.endTrackOf(b, sweep);
-      if (endA != endB) {
-        return endA > endB ? -1 : 1;
-      }
-      return a.compareTo(b);
-    });
+    // DESCENDING, then the lane order where one is set, then id
+    // ascending. The id tie-break is load-bearing: `List.sort` is not
+    // stable and a lane change costs the item's State, so without a final
+    // key two resolves over unchanged state can swap two identical
+    // intervals and re-key both.
+    _sortMembers(bucket, startOf, endOf);
     assert(() {
       final laneAxis = _laneAxis!;
       for (final id in bucket) {
@@ -311,18 +462,9 @@ class OverlapLaneResolver {
       }
       return true;
     }());
-    _sweep(
-      bucket,
-      (id) {
-        return _store.startTrackOf(id, sweep);
-      },
-      (id) {
-        return _store.endTrackOf(id, sweep);
-      },
-      (from, until, laneCount, assigned, spans) {
-        _closeCluster(bucket, assigned, spans, from, until, laneCount);
-      },
-    );
+    _sweep(bucket, startOf, endOf, (from, until, laneCount, assigned, spans) {
+      _closeCluster(bucket, assigned, spans, from, until, laneCount);
+    });
   }
 
   /// The sweep core, shared by the store-writing resolve and the
@@ -534,19 +676,7 @@ class OverlapLaneResolver {
       if (members.isEmpty) {
         continue;
       }
-      members.sort((a, b) {
-        final startA = startOf(a);
-        final startB = startOf(b);
-        if (startA != startB) {
-          return startA < startB ? -1 : 1;
-        }
-        final endA = endOf(a);
-        final endB = endOf(b);
-        if (endA != endB) {
-          return endA > endB ? -1 : 1;
-        }
-        return a.compareTo(b);
-      });
+      _sortMembers(members, startOf, endOf);
       _sweep(members, startOf, endOf, (
         from,
         until,

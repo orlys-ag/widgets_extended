@@ -363,11 +363,13 @@ extension BoardControllerInternals<TKey, TItem>
   /// `previewGap`: [prospective] is the SPAN the drag resolves to, never
   /// the hovered cell, and a null [duration] or [curve] resolves there
   /// against `effectiveMakeRoom`, which keeps the kill-switch disjunction
-  /// two-termed.
+  /// two-termed. [resizeAxis] is a resize's dragged axis, on which the
+  /// preview of its own item is direct.
   void previewMakeRoomGap({
     required TKey draggedKey,
     required BoardSpan prospective,
     bool lifted = false,
+    Axis? resizeAxis,
     Duration? duration,
     Curve? curve,
   }) {
@@ -377,6 +379,7 @@ extension BoardControllerInternals<TKey, TItem>
       draggedId: id,
       prospective: prospective,
       lifted: lifted,
+      resizeAxis: resizeAxis,
       duration: duration,
       curve: curve,
     );

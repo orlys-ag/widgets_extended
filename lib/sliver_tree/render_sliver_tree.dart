@@ -188,9 +188,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // widget updates don't trigger `insertRenderObjectChild`.
     //
     // Stale entries for keys that exist only under the old controller
-    // are evicted by the element manager's GC pass (scheduled from
-    // `update` when the controller swaps), which calls
-    // `removeRenderObjectChild` and properly drops the adopted box.
+    // are dropped at the end of the layout this marks
+    // ([_evictUnretainedChildren]), whose `childManager.removeChild`
+    // routes through `removeRenderObjectChild` and drops the adopted box.
     markNeedsLayout();
   }
 
@@ -509,8 +509,9 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
   /// Iteration count of the post-sticky parentData refresh loop on the
   /// last layout. Reset at the top of `performLayout`. The loop iterates
-  /// `_children.keys` exactly once, so this counter is bounded by
-  /// `_children.length`: verified by
+  /// `_children.keys` exactly once, before the layout's eviction, so this
+  /// counter is bounded by `_children.length` as the loop finds it, which
+  /// that eviction may then reduce: verified by
   /// `test/sliver_tree/parent_data_refresh_iteration_test.dart`.
   /// Diagnostic only; no runtime invariant is enforced by this field.
   @visibleForTesting
@@ -1534,7 +1535,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   void resizeScratchArrays(int capacity) =>
       _sticky.resizeScratchArrays(capacity);
 
-  /// Nodes explicitly pinned against stale eviction, regardless of cache
+  /// Nodes explicitly pinned against eviction, regardless of cache
   /// region or animation state. Deliberately generic (not "the dragged
   /// key"): the render object stays ignorant of drag semantics and the
   /// set is reusable for any future retention need. Currently pinned by
@@ -1544,7 +1545,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// never fire).
   final Set<TKey> _pinnedNodes = <TKey>{};
 
-  /// Pins [id] against stale eviction until [unpinNode]. Idempotent.
+  /// Pins [id] against eviction until [unpinNode]. Idempotent.
   @override
   void pinNode(TKey id) {
     _pinnedNodes.add(id);
@@ -1606,17 +1607,18 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
   /// Whether the given node is retained by the current layout, i.e. it is
   /// explicitly pinned, in the cache region, a sticky header, or a
-  /// phantom-exit ghost mid-FLIP. Used by the element to decide whether
-  /// an off-screen child can be evicted. O(1) (Map containsKey + Set
-  /// lookup), no allocation.
+  /// phantom-exit ghost mid-FLIP. Read at the end of each layout to decide
+  /// whether an off-screen child can be evicted
+  /// ([_evictUnretainedChildren]). O(1) (Map containsKey + Set lookup), no
+  /// allocation.
   bool isNodeRetained(TKey id) {
     if (_pinnedNodes.contains(id)) return true;
     // Phantom-exit ghosts: retain past visible-order purge so their
     // slide can finish. Removed from _phantomExitGhosts when their FLIP
     // slide settles (Step 0a's criterion is FLIP-only, so a HELD
     // make-room preview no longer extends this pin for the length of a
-    // drag), after which the next stale eviction will release the
-    // render box normally.
+    // drag), after which the next layout's eviction releases the render
+    // box normally.
     final ghosts = _phantomExitGhosts;
     if (ghosts != null && ghosts.containsKey(id)) return true;
     // Edge-anchor exit ghosts: retain so the parallel ghost paint pass
@@ -1645,7 +1647,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     // the slide settles (delta=0), this branch falls through and the
     // next eviction releases the box normally.
     // FLIP-only, for the reason spelled out in
-    // `SliverTreeElement._scheduleStaleEviction`: a held preview offset
+    // [_evictUnretainedChildren]: a held preview offset
     // never decays, so the composed read retained every row a preview
     // touched for the whole drag. A preview-shifted row is admitted by
     // layout instead, so the cache-region check above already covers it.
@@ -1937,8 +1939,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
   /// admission that did not widen for a composed offset (see
   /// [admittedSlideBound]), or an eviction that dropped a row whose
   /// slide was between settling and re-installing, which is the hazard
-  /// `SliverTreeElement._scheduleStaleEviction`'s FLIP gate exists to
-  /// prevent and which no test otherwise pins.
+  /// [_evictUnretainedChildren]'s FLIP gate exists to prevent and which no
+  /// test otherwise pins.
   ///
   /// Scoped to frames with slide activity: a row can legitimately be
   /// unbuilt and on-screen for one frame during structural churn, before
@@ -2448,7 +2450,8 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
 
   /// Filters out children whose nodes have been removed from the controller
   /// (or are mid-exit) so screen readers don't announce/focus them while
-  /// the render boxes wait for their post-frame eviction.
+  /// the render boxes wait for their exit animation to settle and the
+  /// layout after it to evict them.
   ///
   /// Walks in visual order (sticky headers first, then in-flow visible
   /// nodes top-to-bottom) so screen readers announce rows in the same
@@ -2724,6 +2727,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
       // window this layout never opened.
       _admittedSlideBound = 0.0;
       geometry = SliverGeometry.zero;
+      _evictUnretainedChildren();
       childManager?.didFinishLayout();
       return;
     }
@@ -3542,7 +3546,7 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         final child = _children[nodeId]!;
         final nid = _controller.nidOf(nodeId);
         if (nid < 0) {
-          // Dead key: purge handled by stale-node eviction.
+          // Dead key: dropped by the eviction at the end of this layout.
           continue;
         }
         // Admitted children already had their parentData written by the
@@ -3573,11 +3577,12 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
         // A stale child (mounted, not admitted this frame) may have been
         // rebuilt this frame with a layout-affecting change: the make-room
         // placeholder swap (H5) does exactly that to every mounted row of
-        // the dragged subtree, admitted or not. Post-frame eviction is too
-        // late for this frame's semantics flush, which asserts, while
-        // merging a node's semantics children, that none of their render
-        // objects still needs layout, so lay it out here with the
-        // constraints [_layoutNodeChild] would use. A clean child
+        // the dragged subtree, admitted or not. A child the eviction at the
+        // end of this layout keeps, a pinned row or one an animation
+        // holds, still reaches this frame's semantics flush, which
+        // asserts, while merging a node's semantics children, that none of
+        // their render objects still needs layout, so lay it out here with
+        // the constraints [_layoutNodeChild] would use. A clean child
         // early-outs inside `layout`, so the steady state pays a few
         // comparisons per stale row. No extent write: the row is off the
         // painted surface and its stored extent stays authoritative.
@@ -3668,7 +3673,67 @@ class RenderSliverTree<TKey, TData> extends RenderSliver
     _lastTotalScrollExtent = totalScrollExtent;
     _animationsWereActive = hasAnimations;
 
+    _evictUnretainedChildren();
     childManager?.didFinishLayout();
+  }
+
+  /// The most children one layout drops; a layout that leaves more
+  /// schedules another, so a large sweep spreads over frames.
+  static const int _maxEvictionsPerLayout = 200;
+
+  /// Drops the children this layout does not keep, through
+  /// [TreeChildManager.removeChild] inside the layout, as Flutter's own
+  /// slivers drop theirs in [RenderSliverMultiBoxAdaptor.collectGarbage]:
+  /// the frame's [BuildOwner.finalizeTree] then disposes their elements,
+  /// so none is left deactivated for the next pointer event to reach.
+  ///
+  /// A child whose node the controller no longer has always goes. A child
+  /// [isNodeRetained] does not hold goes only while no enter, exit or
+  /// extent animation and no FLIP slide runs, so a row keeps its element
+  /// until its animation settles; the settle tick's layout drops it.
+  ///
+  /// The slide gate reads [TreeController.hasActiveFlipSlides], FLIP only,
+  /// not the composed [TreeController.hasActiveSlides]: a make-room
+  /// preview offset is HELD rather than decaying, so the composed flag
+  /// stays true from a drag's first resolve to its release and would keep
+  /// every row an autoscroll passed mounted until the drop. Rows a preview
+  /// shifts need no gate, because layout admits them (see
+  /// [admittedSlideBound]) and the cache-region check keeps them. The FLIP
+  /// gate covers a row whose slide settles while a following batch's
+  /// slide has not installed yet.
+  void _evictUnretainedChildren() {
+    final manager = childManager;
+    if (manager == null || _children.isEmpty) {
+      return;
+    }
+    final settled =
+        !_controller.hasActiveAnimations && !_controller.hasActiveFlipSlides;
+    final evict = <TKey>[];
+    for (final id in _children.keys) {
+      if (_controller.getNodeData(id) == null ||
+          (settled && !isNodeRetained(id))) {
+        evict.add(id);
+        if (evict.length == _maxEvictionsPerLayout) {
+          break;
+        }
+      }
+    }
+    if (evict.isEmpty) {
+      return;
+    }
+    invokeLayoutCallback<SliverConstraints>((SliverConstraints constraints) {
+      for (final id in evict) {
+        manager.removeChild(id);
+      }
+    });
+    if (evict.length == _maxEvictionsPerLayout) {
+      // Marking now would be a no-op inside this layout.
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (attached) {
+          markNeedsLayout();
+        }
+      });
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════

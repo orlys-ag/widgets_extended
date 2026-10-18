@@ -111,6 +111,7 @@ The contract of `Board`. The conventions every layer follows are in `board.md`.
   each pointer to one, so a touch drag over cells is the scrollable's;
   a running range owns a `BoardAutoScroller`, the drag layer's, with the
   layer as ticker provider and the selection config's zone and speed,
+  and no lift hold or ramp,
   and listens to both scroll positions for its length, re-extending
   from the last pointer as content scrolls under it;
   tap for cell; fraction snap quantizes

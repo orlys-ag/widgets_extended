@@ -1004,12 +1004,14 @@ class _ReorderableRowState<TKey> extends State<_ReorderableRow<TKey>> {
     // remaining unmount paths (dead-node GC deliberately ignores pins,
     // a purged row has nothing left to build).
     //
-    // deactivate() only ever runs inside a BuildOwner.buildScope, for
-    // the removed-and-purged case, the element's post-frame dead-node GC
+    // deactivate() only ever runs while the framework locks state: inside
+    // a BuildOwner.buildScope, or, for the removed-and-purged case, inside
+    // the BuildOwner.lockState of the element's post-frame dead-node GC
     // pass. cancelDrag()'s notifyListeners and the ancestor's setState
     // must therefore NOT run synchronously here: they would throw
-    // "setState() or markNeedsBuild() called during build" and abort the
-    // rest of the GC pass. Only the local flag flip stays synchronous;
+    // "setState() or markNeedsBuild() called during build", or "called
+    // when widget tree was locked", and abort the rest of the GC pass.
+    // Only the local flag flip stays synchronous;
     // the teardown is deferred to a post-frame callback (the first point
     // guaranteed outside every build scope; a microtask can still land
     // inside this frame's build window). The callback re-validates

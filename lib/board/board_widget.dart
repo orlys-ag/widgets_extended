@@ -30,10 +30,9 @@ import 'render_board_viewport.dart';
 
 /// A two-axis scrolling cell lattice driven by a [BoardController].
 ///
-/// The full fifteen-parameter surface; `background`, `drag`, `selection`,
-/// `focusNode` and `autofocus` landed as optional named parameters with
-/// their types, so every call site written against the cells-only
-/// constructor compiles unchanged.
+/// `background`, `foreground`, `drag`, `selection`, `focusNode` and
+/// `autofocus` are optional named parameters, so every call site written
+/// against the cells-only constructor compiles unchanged.
 ///
 /// KEYBOARD. The board takes focus from a tap or a range press on a cell,
 /// from Tab while [selection] is active (enabled, and a mode other than
@@ -67,6 +66,7 @@ class Board<TKey, TItem> extends StatefulWidget {
     required this.cellBuilder,
     this.itemBuilder,
     this.background,
+    this.foreground,
     this.drag,
     this.selection,
     this.addRepaintBoundaries = true,
@@ -99,6 +99,11 @@ class Board<TKey, TItem> extends StatefulWidget {
   /// Painted behind every cell and item, at no render-child cost. Null
   /// paints nothing.
   final BoardBackgroundPainter? background;
+
+  /// Painted over every cell and item, the frozen bands' included, at no
+  /// render-child cost; a drag's moved visual paints over it. Null paints
+  /// nothing.
+  final BoardForegroundPainter? foreground;
 
   /// Drag-and-drop policy, or null for a board that does not drag.
   ///
@@ -570,6 +575,7 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
     final Widget board = _BoardScrollView<TKey, TItem>(
       controller: widget.controller,
       background: widget.background,
+      foreground: widget.foreground,
       selection: widget.selection,
       delegate: _delegate,
       mainAxis: widget.mainAxis,
@@ -1704,6 +1710,7 @@ class _BoardScrollView<TKey, TItem> extends TwoDimensionalScrollView {
   const _BoardScrollView({
     required this.controller,
     required this.background,
+    required this.foreground,
     required this.selection,
     required this.focusNode,
     required this.autofocus,
@@ -1725,6 +1732,8 @@ class _BoardScrollView<TKey, TItem> extends TwoDimensionalScrollView {
   final BoardController<TKey, TItem> controller;
 
   final BoardBackgroundPainter? background;
+
+  final BoardForegroundPainter? foreground;
 
   final String? restorationId;
 
@@ -1821,6 +1830,7 @@ class _BoardScrollView<TKey, TItem> extends TwoDimensionalScrollView {
     final Widget viewport = _BoardViewport<TKey, TItem>(
       controller: controller,
       background: background,
+      foreground: foreground,
       delegate: delegate,
       mainAxis: mainAxis,
       clipBehavior: clipBehavior,
@@ -2374,6 +2384,7 @@ class _BoardViewport<TKey, TItem> extends TwoDimensionalViewport {
   const _BoardViewport({
     required this.controller,
     required this.background,
+    required this.foreground,
     required super.delegate,
     required super.mainAxis,
     required super.verticalOffset,
@@ -2388,6 +2399,8 @@ class _BoardViewport<TKey, TItem> extends TwoDimensionalViewport {
 
   final BoardBackgroundPainter? background;
 
+  final BoardForegroundPainter? foreground;
+
   @override
   RenderBoardViewport<TKey> createRenderObject(BuildContext context) {
     // The constructor forwards the base's seven required parameters only
@@ -2396,6 +2409,7 @@ class _BoardViewport<TKey, TItem> extends TwoDimensionalViewport {
     return RenderBoardViewport<TKey>(
       controller: controller,
       background: background,
+      foreground: foreground,
       horizontalOffset: horizontalOffset,
       horizontalAxisDirection: horizontalAxisDirection,
       verticalOffset: verticalOffset,
@@ -2427,6 +2441,7 @@ class _BoardViewport<TKey, TItem> extends TwoDimensionalViewport {
     renderObject
       ..controller = controller
       ..background = background
+      ..foreground = foreground
       ..horizontalOffset = horizontalOffset
       ..horizontalAxisDirection = horizontalAxisDirection
       ..verticalOffset = verticalOffset

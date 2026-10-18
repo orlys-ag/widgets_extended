@@ -1,10 +1,10 @@
 /// The sectioned counterpart of the sliver_tree tuning-liveness repros:
 /// `SectionedReorderBridge.updateDragTunings` pushes the LIVE config's
 /// drag tunings (`autoExpandDelay`, `autoScrollEdgeZone`,
-/// `autoScrollMaxVelocity`) onto the reorder controller's mutable
-/// fields. Both sectioned widget forms call it from `didUpdateWidget`,
-/// so a rebuilt config's tunings reach the controller and are captured
-/// by the next drag session.
+/// `autoScrollMaxVelocity`, `autoScrollRampDuration`) onto the reorder
+/// controller's mutable fields. Both sectioned widget forms call it from
+/// `didUpdateWidget`, so a rebuilt config's tunings reach the controller
+/// and are captured by the next drag session.
 ///
 /// Repro-test methodology: on pre-fix code the controller fields were
 /// final and seeded once at bridge construction, so no later config
@@ -50,11 +50,16 @@ void main() {
     );
     expect(bridge.reorderController.autoScrollEdgeZone, 48.0);
     expect(bridge.reorderController.autoScrollMaxVelocity, 1200.0);
+    expect(
+      bridge.reorderController.autoScrollRampDuration,
+      const Duration(milliseconds: 300),
+    );
 
     config = const SectionedReorderConfig<String, String, String>(
       autoExpandDelay: Duration(milliseconds: 150),
       autoScrollEdgeZone: 80.0,
       autoScrollMaxVelocity: 600.0,
+      autoScrollRampDuration: Duration(milliseconds: 120),
     );
     bridge.updateDragTunings();
 
@@ -65,5 +70,9 @@ void main() {
     );
     expect(bridge.reorderController.autoScrollEdgeZone, 80.0);
     expect(bridge.reorderController.autoScrollMaxVelocity, 600.0);
+    expect(
+      bridge.reorderController.autoScrollRampDuration,
+      const Duration(milliseconds: 120),
+    );
   });
 }

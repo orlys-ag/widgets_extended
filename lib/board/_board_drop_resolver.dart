@@ -150,17 +150,35 @@ class BoardDropResolver {
     return axis == wholeTrackAxis ? 1.0 : quantumOf(snap);
   }
 
-  /// A MOVE's target, and the window of starts each axis was placed in,
-  /// from the samples `_resolve` took this resolve: [corner] at the
-  /// proxy's content-leading corner, [centre] at its centre and [pointer]
-  /// at the finger. Total: the samples are non-null by the caller's
-  /// check. See [BoardDropResolver] for the lift rule it applies.
+  /// A MOVE's target, the window of starts each axis was placed in, and
+  /// the LEAN of each axis, from the samples `_resolve` took this resolve:
+  /// [corner] at the proxy's content-leading corner, [centre] at its
+  /// centre and [pointer] at the finger. Total: the samples are non-null
+  /// by the caller's check. See [BoardDropResolver] for the lift rule it
+  /// applies.
   ///
   /// [pointerAnchoredAxis] is the axis whose start a whole-track move
   /// takes from the POINTER rather than from the corner, or null when
   /// neither axis does. The caller passes the lane axis of a LANED item
   /// and nothing else.
-  static ({BoardDropTarget target, BoardStartWindow rows, BoardStartWindow cols})
+  ///
+  /// The lean is how far, in track space, the dragged item shows past the
+  /// target's start on the axis, which the snap discarded: on a corner
+  /// axis the corner's coordinate less the start; on the pointer-anchored
+  /// axis the finger's place across its cell less its place across the
+  /// cell it grabbed, since the item follows the finger and its painted
+  /// lead there is a lane origin. An axis that keeps the stored start
+  /// leans by the corner's displacement since the lift. Each is rounded
+  /// to an eighth of the axis's grid ([_leanOf]). The drop fit measures
+  /// its candidates from the target's start plus the lean, so of two
+  /// placements equally far from the snapped start it takes the one the
+  /// item leans toward.
+  static ({
+    BoardDropTarget target,
+    BoardStartWindow rows,
+    BoardStartWindow cols,
+    ({double row, double col}) lean,
+  })
   resolveMove({
     required BoardPointSample corner,
     required BoardPointSample centre,
@@ -220,11 +238,13 @@ class BoardDropResolver {
     );
     final rowStart = row.start;
     final colStart = col.start;
+    final lean = (row: row.lean, col: col.lean);
     if (rowStart == null && colStart == null) {
       return (
         target: BoardDropTarget(span: draggedSpan, kind: BoardDragKind.move),
         rows: row.window,
         cols: col.window,
+        lean: lean,
       );
     }
     // A move never changes an item's extent: the span fractions carry
@@ -245,12 +265,14 @@ class BoardDropResolver {
       ),
       rows: row.window,
       cols: col.window,
+      lean: lean,
     );
   }
 
   /// One axis of a move: the start it resolves to, null where the axis
-  /// keeps the stored one, and the window of starts it was placed in.
-  static ({double? start, BoardStartWindow window}) _moveAxis({
+  /// keeps the stored one, the window of starts it was placed in, and its
+  /// lean (see [resolveMove]).
+  static ({double? start, BoardStartWindow window, double lean}) _moveAxis({
     required Axis axis,
     required BoardAxisSample corner,
     required BoardAxisSample centre,
@@ -276,33 +298,42 @@ class BoardDropResolver {
         : quantumOn(axis, snap, pointerAnchoredAxis);
     // The window of a kept axis: the lattice the stored span lies in,
     // which the nudge may still step.
-    final kept = (
-      start: null,
-      window: pinnedPathOf(
-        pinned,
-        pointer,
-        extent: extent,
-        quantum: quantum,
-      ).window,
-    );
+    final keptWindow = pinnedPathOf(
+      pinned,
+      pointer,
+      extent: extent,
+      quantum: quantum,
+    ).window;
+    ({double? start, BoardStartWindow window, double lean}) kept(double lean) {
+      return (start: null, window: keptWindow, lean: _leanOf(lean, quantum));
+    }
+
     if (laneAxis) {
       final path = regionPathOf(pointer, extent: 1.0, quantum: 1.0);
-      if (liftCorner != null && liftPointer != null) {
+      final at = coordinateIn(path, pointer);
+      // The finger's place across its cell less its place across the
+      // cell it grabbed: zero without a lift sample to read that from.
+      var across = 0.0;
+      if (liftPointer != null) {
         final liftPath = regionPathOf(liftPointer, extent: 1.0, quantum: 1.0);
-        if (sameLattice(path, liftPath) &&
-            coordinateIn(path, pointer).floor() ==
-                coordinateIn(liftPath, liftPointer).floor()) {
-          return kept;
+        final liftAt = coordinateIn(liftPath, liftPointer);
+        across = (at - at.floorToDouble()) - (liftAt - liftAt.floorToDouble());
+        if (liftCorner != null &&
+            sameLattice(path, liftPath) &&
+            at.floor() == liftAt.floor()) {
+          return kept(across);
         }
       }
-      final start = clampToWindow(
-        (coordinateIn(path, pointer).floor() - grabCell).toDouble(),
-        path.window,
-      ).floorToDouble();
+      final cellStart = (at.floor() - grabCell).toDouble();
+      final start = clampToWindow(cellStart, path.window).floorToDouble();
       if (_landsBack(start, stored)) {
-        return kept;
+        return kept(cellStart + across - stored);
       }
-      return (start: start, window: path.window);
+      return (
+        start: start,
+        window: path.window,
+        lean: _leanOf(cellStart + across - start, quantum),
+      );
     }
     // THE ITEM FIELD: the corner read in the lattice the item paints in.
     double? displacement;
@@ -310,7 +341,7 @@ class BoardDropResolver {
       final lift = itemCoordinateOf(pinned, liftCorner);
       displacement = itemCoordinateOf(pinned, corner) - lift;
       if (_unmoved(snap, lift, displacement)) {
-        return kept;
+        return kept(displacement);
       }
     }
     final whole = snap.mode == BoardSnapMode.track;
@@ -357,10 +388,12 @@ class BoardDropResolver {
       extent: extent,
       quantum: quantum,
     );
+    // A guard refusal implies a displacement: an axis with none refuses
+    // nothing.
     var start = place(path);
     if (refused(start, path)) {
       if (path.band == null) {
-        return kept;
+        return kept(displacement!);
       }
       // FALL THROUGH: a refused band placement is placed and guarded
       // again on the scrolled path, the whole lattice where no scrolled
@@ -368,13 +401,25 @@ class BoardDropResolver {
       path = pinnedPathOf(null, corner, extent: extent, quantum: quantum);
       start = place(path);
       if (refused(start, path)) {
-        return kept;
+        return kept(displacement!);
       }
     }
+    final lean = coordinateIn(path, corner) - start;
     if (_landsBack(start, stored)) {
-      return kept;
+      return kept(lean);
     }
-    return (start: start, window: path.window);
+    return (start: start, window: path.window, lean: _leanOf(lean, quantum));
+  }
+
+  /// The grain of a lean, in steps per grid quantum.
+  static const double _leanSteps = 8.0;
+
+  /// [lean] rounded to an eighth of [quantum]: fine enough that an item
+  /// leaning a sixteenth of a quantum toward one side counts as leaning,
+  /// and coarse enough that a pointer's jitter, or a sample's rounding
+  /// error on a grid line, does not change it.
+  static double _leanOf(double lean, double quantum) {
+    return (lean / quantum * _leanSteps).roundToDouble() / _leanSteps * quantum;
   }
 
   /// A RESIZE's target from the pointer's sample this resolve and its

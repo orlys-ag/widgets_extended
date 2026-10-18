@@ -1,10 +1,11 @@
 /// Repro tests for live drag tunings: `autoExpandDelay`,
-/// `autoScrollEdgeZone` and `autoScrollMaxVelocity` are mutable on
-/// [TreeReorderController] and captured once per drag session at
-/// `startDrag`, the same per-session policy as the animation style. A
-/// change between drags applies to the next session; a mid-drag change
-/// never retunes the live one. `SyncedSliverTree` pushes the config's
-/// tunings onto the controller on every rebuild.
+/// `autoScrollEdgeZone`, `autoScrollMaxVelocity` and
+/// `autoScrollRampDuration` are mutable on [TreeReorderController] and
+/// captured once per drag session at `startDrag`, the same per-session
+/// policy as the animation style. A change between drags applies to the
+/// next session; a mid-drag change never retunes the live one.
+/// `SyncedSliverTree` pushes the config's tunings onto the controller on
+/// every rebuild.
 ///
 /// Repro-test methodology: on pre-fix code the controller fields were
 /// final and the widgets forwarded them only at construction, so the
@@ -258,6 +259,7 @@ void main() {
     );
     expect(captured!.autoScrollEdgeZone, 48.0);
     expect(captured!.autoScrollMaxVelocity, 1200.0);
+    expect(captured!.autoScrollRampDuration, const Duration(milliseconds: 300));
 
     await tester.pumpWidget(
       harness(
@@ -266,6 +268,7 @@ void main() {
           autoExpandDelay: const Duration(milliseconds: 150),
           autoScrollEdgeZone: 80.0,
           autoScrollMaxVelocity: 600.0,
+          autoScrollRampDuration: const Duration(milliseconds: 120),
         ),
       ),
     );
@@ -276,5 +279,6 @@ void main() {
     );
     expect(captured!.autoScrollEdgeZone, 80.0);
     expect(captured!.autoScrollMaxVelocity, 600.0);
+    expect(captured!.autoScrollRampDuration, const Duration(milliseconds: 120));
   });
 }

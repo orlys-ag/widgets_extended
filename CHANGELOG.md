@@ -52,6 +52,9 @@ duration is a kill switch.
 - Added `BoardGridPainter` and `BoardBackgroundPainter`, which paint behind the
 lattice from its live track geometry (`BoardGeometryView`), frozen bands
 included.
+- Added `Board.foreground` and `BoardForegroundPainter`, which paint over every
+cell and item from the same geometry, frozen bands included. A painter that
+draws for scrolled tracks clips itself to `BoardGeometryView.scrolledRegion`.
 - Fix: a new `BoardDragConfig` instance, which an inline config in a parent's
 `build` is on every rebuild of that parent, cancelled a live drag and rebuilt
 every cell and item. `Board` now assigns it to the drag controller it has
@@ -156,6 +159,15 @@ it.
 cancelled after `canDropAt` refused its last hover releases it, restarted its
 close from where it painted, over a whole duration. A gap or a resize preview
 already closing now keeps the schedule its first release started.
+- Fix: a drag resize's edge trailed the pointer, easing to each new size on
+the `makeRoom` clock. The dragged edge now follows the pointer: the item is
+painted and laid out at the size the drop would commit on the frame after the
+pointer crosses each grid line, on both axes and both edges, and a drop needs
+no glide on the dragged edge. What the resize causes still animates on the
+`makeRoom` clock:
+the neighbours it displaces, and the item's own share of a lane it starts or
+stops sharing. A cancel, or a target `canDropAt` refuses, still closes the
+preview on that clock from where it paints.
 - Fix: `removeItem`, or a `setItems` dropping the key, on an item whose enter
 was still in flight after a restyle turned `itemEnterExit` off kept the key on
 the board until the next frame, against `removeItem`'s synchronous removal
@@ -283,6 +295,20 @@ used to round it into the footer. On every board, with frozen bands or none,
 where the lattice's end and a whole-track snap would pull a moved item back
 against the drag, the item keeps its place: an item filling the lower half of
 the last row, dragged down half a row, used to move up to the row's upper half.
+- A `BoardDropFit` slide reaches its whole radius. Past four steps of the snap's
+grid it tries the placements flush against another item, so it lands on the
+nearest placement that holds the item clear wherever it lies within the radius;
+it used to stop after four steps whatever the radius asked for.
+`double.infinity` is a radius that reaches every placement the drop could take
+on its axis.
+- A `BoardDropFit` slide measures from where the dragged item shows, not from
+the cell the snap put it in, so of two free placements equally near that cell it
+takes the one on the side the item leans toward. It used to take the earlier row
+and the leftmost column whatever side the item was on. The slide follows the
+finger across a refused cell.
+- Added `BoardDropFit.clampResizes`, off by default: a resize `canDropAt`
+refuses for running into another item stops its dragged edge at that item,
+nearest the pointer, instead of going back.
 - Added `BoardRenderPort.trackSampleAt`, which maps a point on each axis in both
 lattices the axis can paint, the frozen band's and the scrolled tracks', with the
 band geometry a drop reads; `trackSpaceAt` is its painted coordinate.
@@ -291,6 +317,19 @@ ignored.
 - Fix: dragging into an edge zone with the board already scrolled to its end kept
 requesting a frame every vsync. Autoscroll now stops at the end and resumes when
 the pointer moves.
+- A board drag or a tree reorder that starts inside an autoscroll edge zone no
+longer scrolls at once: that edge stays still until the pointer moves toward it
+by more than 4 px from the farthest it has been from it, so an item lifted near
+an edge can be carried away from it without the content moving under it. It
+used to scroll from the lift, even while the item was dragged away from the
+edge. A zone the lift was not in scrolls as soon as the pointer enters it, and
+the board's range selection is unchanged.
+- Added `autoScrollRampDuration`, 300 ms by default, to `BoardDragConfig`,
+`TreeReorderController`, `TreeReorderConfig` and `SectionedReorderConfig`.
+Autoscroll's speed rises by at most its maximum velocity per that duration,
+from rest each time it starts, instead of jumping to the speed the pointer's
+place in the zone asks for; slowing down and stopping stay immediate. One that
+is not positive restores the immediate start.
 - Fix: a drop target that `canDropAt` refused stayed refused while the pointer
 rested on it, even after the board changed to allow it, and one it accepted stayed
 accepted after the board changed to refuse it. A board change during a drag now
@@ -379,12 +418,46 @@ and `onDragEnd` are how an app follows a drag. `BoardDragKind` and
 - `BoardController.animateTrackResize`, an internal-use channel, no longer
 takes a target extent: it reads the one the axis stores. The internal-use
 `BoardController.finalizeTrackResize` is removed.
+- Added `BoardController.laneOrder`, a constructor parameter and a settable
+property: a `Comparator` over items that orders the lanes of items whose
+intervals along the sweep axis are identical in one lane-axis track, after
+their start and their descending end and before the internal id that breaks
+its ties. `hasLaneOrder` says whether one is set, through any reference. With
+none, lanes resolve as before. Assigning another order re-sorts every occupied
+lane bucket and fires one structural notification naming the keys whose lane
+changed, an empty set when none did. Under an order, a payload write of a
+laned item through `updateItem`, through `setItems` for a kept key, or by
+re-adding a key while it exits re-sorts that item's bucket, and the items it
+re-lanes slide. An `updateItem` whose re-sort moves a lane fires one
+structural notification naming the keys it re-laned and no item-data
+notification, in a `runBatch` or outside one. An order that throws is
+reported through `FlutterError.reportError`, and that sort orders by id.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin with no clip, so it was drawn over whatever sat above the scroll
 view: a tree short enough to fit its viewport declares no visual overflow, so
 the viewport pushes no clip either. The header is now clipped to the sliver's
 paint region at the top as it already was at the bottom, and the 0.0.35
 no-clip fast path still applies to settled headers.
+- Fix: when the tree removed rows after a frame, rows scrolled out of its cache
+region or rows of removed nodes, it also built every other widget waiting to
+rebuild. A widget outside the tree that an earlier post-frame callback had
+called `setState` on threw "Tried to build dirty widget in the wrong build
+scope" in debug builds, and then ignored its `setState` calls until its parent
+rebuilt it; in release builds it was built inside the callback, outside a
+frame. Removing rows now builds nothing, and that widget rebuilds in the next
+frame.
+- Fix: a row the tree dropped, one scrolled out of its cache region or one of a
+removed node, stayed deactivated until the next frame, because the tree dropped
+it after a frame had already disposed what it removed. A widget in that row
+that listens to every pointer event until it is disposed, such as a `Tooltip`,
+was still reached by the next pointer event, and in debug builds threw "Looking
+up a deactivated widget's ancestor is unsafe", then "multiple tickers were
+created". The tree now drops such rows at the end of the layout that leaves
+them unretained, as Flutter's own slivers drop theirs, so the same frame
+disposes them; a row still waits for a running enter, exit or extent animation
+or FLIP slide before it goes. `TreeChildManager.removeChild`, which
+`SliverTreeElement` left empty, now removes the row, and the render object
+calls it inside its layout.
 
 ## 0.0.35
 

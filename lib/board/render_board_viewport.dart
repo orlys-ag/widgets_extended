@@ -43,11 +43,13 @@ import 'board_render_port.dart';
 
 /// The render object behind `Board`.
 ///
-/// ONE type parameter: layout never reads an item's payload, so the
+/// ONE type parameter: this object reads no item's payload, so the
 /// controller is held key-only as `BoardController<TKey, Object?>`, which
 /// is the shape `tree_reorder_controller.dart:92` uses for the same
-/// reason. The typed `TItem` view stays in the delegate, which `Board`'s
-/// `State` owns.
+/// reason. The lane flush it runs can call the controller's
+/// [BoardController.laneOrder], which reads payloads, through the
+/// controller. The typed `TItem` view stays in the delegate, which
+/// `Board`'s `State` owns.
 class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     implements BoardRenderPort<TKey>, BoardGeometryView {
   /// Creates a board viewport driven by [controller].
@@ -61,6 +63,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   RenderBoardViewport({
     required BoardController<TKey, Object?> controller,
     required BoardBackgroundPainter? background,
+    BoardForegroundPainter? foreground,
     required super.horizontalOffset,
     required super.horizontalAxisDirection,
     required super.verticalOffset,
@@ -70,7 +73,8 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     required super.childManager,
     super.clipBehavior,
   }) : _controller = controller,
-       _background = background;
+       _background = background,
+       _foreground = foreground;
 
   /// Consecutive STAGNANT placement passes one `layoutChildSequence`
   /// may run before it gives up: passes that neither settled nor measured
@@ -105,6 +109,31 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     }
     final old = _background;
     _background = value;
+    if (value == null ||
+        old == null ||
+        value.runtimeType != old.runtimeType ||
+        value.shouldRepaint(old)) {
+      markNeedsPaint();
+    }
+  }
+
+  BoardForegroundPainter? _foreground;
+
+  /// The foreground painter, run as the LAST paint pass, over every cell
+  /// and item. It costs no render children: [paint] calls it directly on
+  /// the canvas.
+  BoardForegroundPainter? get foreground {
+    return _foreground;
+  }
+
+  /// Repaints when the painter appears, disappears, changes type, or
+  /// reports [BoardForegroundPainter.shouldRepaint] against the old one.
+  set foreground(BoardForegroundPainter? value) {
+    if (identical(value, _foreground)) {
+      return;
+    }
+    final old = _foreground;
+    _foreground = value;
     if (value == null ||
         old == null ||
         value.runtimeType != old.runtimeType ||
@@ -3207,9 +3236,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       // painter reads whatever bounds the last layout recorded and
       // decides. The bounds are usually empty here, but a builder that
       // returns null for every visible cell empties the lists while the
-      // bounds stay real.
+      // bounds stay real. The foreground paints for the same reason.
       _clipRectLayer.layer = null;
       _paintBackground(context, offset);
+      _paintForeground(context, offset);
       return;
     }
     // THE PAINTED-RECT SCRATCH, filled once for this call. An item's
@@ -3266,6 +3296,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       _frozenPaintOrder.length,
     );
     _paintItems(context, offset, _cornerItemStart, _itemPaintOrder.length);
+    _paintForeground(context, offset);
   }
 
   void _paintCells(
@@ -3992,6 +4023,24 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     canvas.save();
     canvas.translate(offset.dx, offset.dy);
     background.paint(canvas, this);
+    canvas.restore();
+  }
+
+  /// The last paint pass: the foreground painter, over every plane, set up
+  /// as [_paintBackground] sets up its own. The canvas is read after the
+  /// children paint, so it lies above them: `PaintingContext.paintChild`
+  /// ends the current recording for a repaint-boundary child, and the
+  /// next `PaintingContext.canvas` read starts a new one above that
+  /// child's layer.
+  void _paintForeground(PaintingContext context, Offset offset) {
+    final foreground = _foreground;
+    if (foreground == null) {
+      return;
+    }
+    final canvas = context.canvas;
+    canvas.save();
+    canvas.translate(offset.dx, offset.dy);
+    foreground.paint(canvas, this);
     canvas.restore();
   }
 

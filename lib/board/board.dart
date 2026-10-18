@@ -23,7 +23,11 @@ export '_board_span.dart' show BoardPlacement, BoardSpan;
 export 'board_animation_style.dart'
     show BoardAnimationFamily, BoardAnimationSpec, BoardAnimationStyle;
 export 'board_background.dart'
-    show BoardBackgroundPainter, BoardGeometryView, BoardGridPainter;
+    show
+        BoardBackgroundPainter,
+        BoardForegroundPainter,
+        BoardGeometryView,
+        BoardGridPainter;
 export 'board_config.dart'
     show
         BoardDragConfig,

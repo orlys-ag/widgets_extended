@@ -110,7 +110,9 @@ typedef BoardSemanticsActionsBuilder<TKey> =
       Map<CustomSemanticsAction, VoidCallback> builtIn,
     );
 
-/// When and how far a refused move may slide onto nearby free space.
+/// When and how far a refused move may slide onto nearby free space, and
+/// whether a refused resize stops at the item in its way
+/// ([clampResizes]).
 ///
 /// It acts ONLY on a refusal, so it does nothing at all without a
 /// [BoardDragConfig.canDropAt] that issues one: the board has no opinion
@@ -132,16 +134,24 @@ typedef BoardSemanticsActionsBuilder<TKey> =
 /// reason the board cannot see, a business rule of the app's own, never
 /// slides anything.
 ///
-/// The search steps by the drag's snap quantum, and by whole tracks on
-/// the lane axis of a laned item, which moves there by whole tracks.
+/// The search moves the box on the drag's snap grid, and by whole tracks
+/// on the lane axis of a laned item, which moves there by whole tracks.
+/// On each axis it tries the placements up to four grid steps away and,
+/// up to the radius, the placements flush against another item: the
+/// first clear of an item's far side, and the last ending before its
+/// near side. The nearest placement on that grid holding the box clear of
+/// every other item is always among them, so the slide reaches that
+/// placement wherever it lies within the radius; [BoardDragConfig.canDropAt]
+/// is asked about free placements only, nearest first.
 @immutable
 class BoardDropFit {
   /// Creates a fit policy. The defaults help a box that is at least half
-  /// free and search one track on each axis.
+  /// free, search one track on each axis, and leave resizes refused.
   const BoardDropFit({
     this.minFreeFraction = 0.5,
     this.rowRadius = 1.0,
     this.colRadius = 1.0,
+    this.clampResizes = false,
   }) : assert(minFreeFraction >= 0.0 && minFreeFraction <= 1.0),
        assert(rowRadius >= 0.0),
        assert(colRadius >= 0.0);
@@ -177,13 +187,33 @@ class BoardDropFit {
   /// How far the search may slide the placement along the ROW axis, in
   /// tracks. Zero pins the axis for the slide, which is what a calendar
   /// wants on its day axis: slide within the day, never to another day.
-  /// The move back onto the lattice the class doc describes is not bound
-  /// by it.
+  /// `double.infinity` reaches every placement the drop could take on the
+  /// axis. The move back onto the lattice the class doc describes is not
+  /// bound by it.
   final double rowRadius;
 
   /// The same along the COLUMN axis. The two are separate because the
   /// useful configuration is asymmetric; see [rowRadius].
   final double colRadius;
+
+  /// Whether a RESIZE [BoardDragConfig.canDropAt] refuses stops its
+  /// dragged edge at the item in its way rather than going back.
+  ///
+  /// It acts when the refused span meets an item that the item's span at
+  /// the start of the drag does not; an item the two already shared does
+  /// not stop the edge. The edge then takes the placement nearest the
+  /// pointer, between where the drag started and where it was refused,
+  /// that holds the span clear of those items and that
+  /// [BoardDragConfig.canDropAt] admits, on the snap's grid: the edge
+  /// flush against the first such item, a placement up to four grid steps
+  /// back from the refused edge, or the edge where the drag started, which
+  /// reports the span unchanged. The stopped span is the drag's target, so
+  /// the preview shows it and a release reports it through
+  /// [BoardDragConfig.onItemResized].
+  ///
+  /// [minFreeFraction] and the radii govern moves only: a stopped edge
+  /// never leaves the stretch the drag itself swept.
+  final bool clampResizes;
 }
 
 /// Policy for the drag layer.
@@ -243,6 +273,7 @@ class BoardDragConfig<TKey> {
     this.hapticsOnDrag = false,
     this.autoScrollEdgeZone = 48.0,
     this.autoScrollMaxVelocity = 1200.0,
+    this.autoScrollRampDuration = const Duration(milliseconds: 300),
     this.dragStartDelay = kLongPressTimeout,
     this.resizeHandleExtent = 12.0,
     this.onDragStart,
@@ -293,7 +324,8 @@ class BoardDragConfig<TKey> {
   final bool Function(TKey key, BoardSpan span)? canDropAt;
 
   /// Whether a move [canDropAt] refuses may slide onto nearby free
-  /// space, and how far. Null, the default, refuses as before; see
+  /// space, and how far, and whether a refused resize stops at the item
+  /// in its way. Null, the default, refuses as before; see
   /// [BoardDropFit], which still fires only on a [canDropAt] refusal.
   final BoardDropFit? dropFit;
 
@@ -370,11 +402,26 @@ class BoardDragConfig<TKey> {
   /// scrolled region where a drag's pointer scrolls the board toward
   /// that edge. Measured from the region's edges, so it sits just inside
   /// a frozen band; zero turns autoscroll off.
+  ///
+  /// A drag that starts inside a zone scrolls nothing toward that edge
+  /// until the pointer moves toward it by more than 4 px from the
+  /// farthest it has been from that edge since the lift, so an item
+  /// lifted near an edge can be carried away from it without the board
+  /// moving under it. A zone the lift was not in scrolls as soon as the
+  /// pointer enters it.
   final double autoScrollEdgeZone;
 
   /// Scroll speed, in logical pixels per second, with the pointer at the
   /// edge itself; it ramps linearly from zero at the zone's inner edge.
   final double autoScrollMaxVelocity;
+
+  /// How long autoscroll takes to reach [autoScrollMaxVelocity] from
+  /// rest. The speed the pointer's place in a zone asks for is reached no
+  /// faster than that rate: it rises by at most [autoScrollMaxVelocity]
+  /// per this duration, from zero each time autoscroll starts, while a
+  /// slower speed, or a stop, is taken at once. One that is not positive
+  /// applies no limit, so the scroll starts at the speed asked for.
+  final Duration autoScrollRampDuration;
 
   /// How long a press on an item must rest before its default handle
   /// lifts it; a move past the touch slop within it gives the pointer to

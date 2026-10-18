@@ -567,7 +567,8 @@ void main() {
           lift: const Offset(60.0, 105.0),
           to: const Offset(60.0, 155.0),
         );
-        // Setup sanity: rows [3, 4), and the preview animates.
+        // Setup sanity: rows [3, 4), and the preview stands at once, its
+        // lead and extent moved together with nothing in motion.
         _expectSpan(
           drag.currentTarget?.span,
           rowStart: 3.0,
@@ -575,7 +576,11 @@ void main() {
           colStart: 1.0,
           colEnd: 2.0,
         );
-        expect(controller.anim.hasMakeRoomMotion, isTrue);
+        expect(
+          viewport.paintedRectOfItem("m")!.top,
+          moreOrLessEquals(150.0, epsilon: 0.01),
+        );
+        expect(controller.anim.hasMakeRoomMotion, isFalse);
         // TARGET a: the far edge holds on every frame of the preview.
         expect(
           viewport.paintedRectOfItem("m")!.bottom,
@@ -1252,7 +1257,7 @@ void main() {
             lift: const Offset(60.0, 105.0),
             to: const Offset(60.0, 155.0),
           );
-          // Setup sanity: rows [3, 4), animating.
+          // Setup sanity: rows [3, 4), standing at once.
           _expectSpan(
             drag.currentTarget?.span,
             rowStart: 3.0,
@@ -1263,7 +1268,11 @@ void main() {
           for (var i = 0; i < 5; i++) {
             await tester.pump(_frame);
           }
-          expect(controller.anim.hasMakeRoomMotion, isTrue);
+          _expectRect(
+            viewport.paintedRectOfItem("m"),
+            const Rect.fromLTRB(40.0, 150.0, 80.0, 200.0),
+          );
+          expect(controller.anim.hasMakeRoomMotion, isFalse);
           return (controller, viewport, drag);
         }
 

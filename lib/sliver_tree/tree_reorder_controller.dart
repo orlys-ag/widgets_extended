@@ -67,6 +67,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     this.onReorder,
     this.autoScrollEdgeZone = 48.0,
     this.autoScrollMaxVelocity = 1200.0,
+    this.autoScrollRampDuration = const Duration(milliseconds: 300),
     this.autoExpandDelay = const Duration(milliseconds: 700),
   }) {
     // Runtime check in all build modes: asserts disappear in release.
@@ -127,6 +128,13 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   /// triggers autoscroll. Velocity ramps linearly from 0 at the zone's
   /// inner edge to [autoScrollMaxVelocity] at the viewport edge.
   ///
+  /// A drag that starts inside a zone scrolls nothing toward that edge
+  /// until the pointer moves toward it by more than 4 px from the
+  /// farthest it has been from that edge since the lift, so a row lifted
+  /// near an edge can be carried away from it without the list moving
+  /// under it. A zone the lift was not in scrolls as soon as the pointer
+  /// enters it.
+  ///
   /// Mutable at runtime. Captured once per drag session at [startDrag]
   /// (the same per-session policy as the animation style), so a change
   /// never retunes a live drag; the next drag picks it up.
@@ -137,6 +145,18 @@ class TreeReorderController<TKey> extends ChangeNotifier {
   /// Mutable at runtime; captured per drag session, see
   /// [autoScrollEdgeZone].
   double autoScrollMaxVelocity;
+
+  /// How long autoscroll takes to reach [autoScrollMaxVelocity] from
+  /// rest. The velocity the pointer's place in a zone asks for is reached
+  /// no faster than that rate: it rises by at most
+  /// [autoScrollMaxVelocity] per this duration, from zero each time
+  /// autoscroll starts, while a slower velocity, or a stop, is taken at
+  /// once. One that is not positive applies no limit, so the scroll
+  /// starts at the velocity asked for.
+  ///
+  /// Mutable at runtime; captured per drag session, see
+  /// [autoScrollEdgeZone].
+  Duration autoScrollRampDuration;
 
   /// How long the pointer must dwell on an `into` target that is
   /// collapsed (and has live children to reveal) before the target
@@ -337,6 +357,7 @@ class TreeReorderController<TKey> extends ChangeNotifier {
       pointerGlobal: () => session.pointerGlobal,
       edgeZone: autoScrollEdgeZone,
       maxVelocity: autoScrollMaxVelocity,
+      rampDuration: autoScrollRampDuration,
     );
     session.dwell = DwellExpander<TKey>(
       treeController: treeController,
@@ -376,7 +397,8 @@ class TreeReorderController<TKey> extends ChangeNotifier {
     _pointerPosition.value = pointerGlobal;
     // One choreography site: probe + resolver + every behavior. The
     // make-room gap of a session born over a valid slot opens here, and
-    // the edge-zone-at-start autoscroll evaluation runs here too.
+    // the autoscroller's first evaluation, the lift's, which holds the
+    // edge zones the finger lifts in, runs here too.
     session.resolve();
     // Drag session just started; currentTarget may have become non-null.
     notifyListeners();

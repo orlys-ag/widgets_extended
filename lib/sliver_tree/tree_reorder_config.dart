@@ -22,9 +22,10 @@ import 'tree_reorder_controller.dart';
 ///
 /// The config's PRESENCE is fixed when the widget is created. Its
 /// CONTENTS are live on every rebuild. The drag tunings
-/// ([autoExpandDelay], [autoScrollEdgeZone], [autoScrollMaxVelocity])
-/// are captured once per drag session at drag start, so a changed value
-/// applies from the next drag rather than retuning a live one.
+/// ([autoExpandDelay], [autoScrollEdgeZone], [autoScrollMaxVelocity],
+/// [autoScrollRampDuration]) are captured once per drag session at drag
+/// start, so a changed value applies from the next drag rather than
+/// retuning a live one.
 ///
 /// To toggle reorder at runtime, keep the config and flip [enabled],
 /// which disarms every handle rather than leaving grips that decline.
@@ -44,6 +45,7 @@ class TreeReorderConfig<TKey> {
     this.autoExpandDelay = const Duration(milliseconds: 700),
     this.autoScrollEdgeZone = 48.0,
     this.autoScrollMaxVelocity = 1200.0,
+    this.autoScrollRampDuration = const Duration(milliseconds: 300),
     this.onControllerCreated,
   });
 
@@ -215,6 +217,11 @@ class TreeReorderConfig<TKey> {
   /// Peak autoscroll velocity. Live on rebuild; captured per drag
   /// session.
   final double autoScrollMaxVelocity;
+
+  /// How long autoscroll takes to reach [autoScrollMaxVelocity] from
+  /// rest; see [TreeReorderController.autoScrollRampDuration]. Live on
+  /// rebuild; captured per drag session.
+  final Duration autoScrollRampDuration;
 
   /// Hands back the internally owned reorder controller, right after it
   /// is created.

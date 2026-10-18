@@ -1,3 +1,8 @@
 # Claude Code parses these files, and its Workflow tool refuses a script that
 # holds a carriage return, so every checkout keeps them LF.
 .claude/** text eol=lf
+
+# The Flutter tool writes these with LF and rewrites any copy whose content
+# differs, so a CRLF checkout would show them modified after every pub get.
+demos/workspace_calendar/windows/flutter/generated_plugin_registrant.* text eol=lf
+demos/workspace_calendar/windows/flutter/generated_plugins.cmake text eol=lf

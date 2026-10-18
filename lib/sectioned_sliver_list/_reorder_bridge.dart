@@ -49,6 +49,7 @@ class SectionedReorderBridge<K extends Object, Section, Item> {
       autoExpandDelay: _config.autoExpandDelay,
       autoScrollEdgeZone: _config.autoScrollEdgeZone,
       autoScrollMaxVelocity: _config.autoScrollMaxVelocity,
+      autoScrollRampDuration: _config.autoScrollRampDuration,
     );
   }
 
@@ -59,9 +60,10 @@ class SectionedReorderBridge<K extends Object, Section, Item> {
   /// final and capture these forwarders once.
   ///
   /// The drag tunings (`autoExpandDelay`, `autoScrollEdgeZone`,
-  /// `autoScrollMaxVelocity`) live on the controller's MUTABLE fields
-  /// rather than behind these forwarders, so a changed value reaches it
-  /// only when the owner calls [updateDragTunings].
+  /// `autoScrollMaxVelocity`, `autoScrollRampDuration`) live on the
+  /// controller's MUTABLE fields rather than behind these forwarders, so a
+  /// changed value reaches it only when the owner calls
+  /// [updateDragTunings].
   final SectionedReorderConfig<K, Section, Item> Function() _configOf;
 
   /// Whether a kind needs its callback to count as enabled. True in the
@@ -110,7 +112,8 @@ class SectionedReorderBridge<K extends Object, Section, Item> {
     reorderController
       ..autoExpandDelay = config.autoExpandDelay
       ..autoScrollEdgeZone = config.autoScrollEdgeZone
-      ..autoScrollMaxVelocity = config.autoScrollMaxVelocity;
+      ..autoScrollMaxVelocity = config.autoScrollMaxVelocity
+      ..autoScrollRampDuration = config.autoScrollRampDuration;
   }
 
   /// Whether this kind of drag is switched on at all. In the declarative

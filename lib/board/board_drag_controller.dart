@@ -1,7 +1,8 @@
 /// The board's drag layer: the session controller, and the autoscroll
 /// behaviour a session owns.
 ///
-/// Key-only: layout and commit reporting never read an item's payload.
+/// Key-only: this layer reads no item's payload. The make-room preview's
+/// dry run can call the board controller's lane order, which does.
 /// The controller talks to the render layer through two routes only:
 /// `BoardRenderPort`, and for a resize's samples the sampler the render
 /// object registers beside it, which the board controller's internal
@@ -13,6 +14,7 @@ library;
 
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
@@ -192,7 +194,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// cancelled exactly as `endDrag(cancel: true)` cancels one.
   /// [BoardDragConfig.canDrag] is not asked again: it decides whether a
   /// drag may START. A session that passes adopts the new autoscroll
-  /// zone and velocity at once and re-resolves its target after the
+  /// zone, velocity and ramp at once and re-resolves its target after the
   /// frame, so a new snap or `canDropAt` answers for the pointer where
   /// it already is.
   BoardDragConfig<TKey> get config {
@@ -214,7 +216,8 @@ class BoardDragController<TKey> extends ChangeNotifier {
     }
     session.autoScroller
       ..edgeZone = value.autoScrollEdgeZone
-      ..maxVelocity = value.autoScrollMaxVelocity;
+      ..maxVelocity = value.autoScrollMaxVelocity
+      ..rampDuration = value.autoScrollRampDuration;
     final pointer = _pointerPosition.value;
     if (pointer != null) {
       session.autoScroller.evaluate(pointer);
@@ -255,6 +258,17 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// window by a grid step while the span stays the same, and a nudge
   /// chosen from the old window would otherwise stand.
   ({BoardStartWindow rows, BoardStartWindow cols})? _lastResolvedWindows;
+
+  /// The lean the resolver returned beside [_lastResolvedSpan], null for
+  /// a resize. The early-out compares it only after a refusal, the one
+  /// answer the lean can change: the drop fit measures from it, and a
+  /// finger moving inside a refused placement moves the lean.
+  ({double row, double col})? _lastResolvedLean;
+
+  /// The drop gate's answer for [_lastResolvedSpan]: true admitted, false
+  /// refused, null a throw. Read only while [_lastResolvedSpan] matches,
+  /// so the sites that clear that record clear this one's use too.
+  bool? _lastDropAnswer;
 
   /// A RESIZE's sample on its resized axis from the last [_resolve] that
   /// reached the resolver, null for a move. A sample within the
@@ -544,6 +558,8 @@ class BoardDragController<TKey> extends ChangeNotifier {
         port: renderPort,
         edgeZone: config.autoScrollEdgeZone,
         maxVelocity: config.autoScrollMaxVelocity,
+        rampDuration: config.autoScrollRampDuration,
+        holdsLiftZones: true,
         // The tick re-points the scroll subscriptions BEFORE its jumpTo:
         // a position swapped mid-hold leaves the listener on the dead
         // one, and with no pointer event coming, nothing else can move
@@ -591,9 +607,8 @@ class BoardDragController<TKey> extends ChangeNotifier {
     if (!identical(_session, session)) {
       return true;
     }
-    // Evaluated at start too, not only per move: a finger that lifts an
-    // item already inside an edge zone autoscrolls with no move event
-    // ever arriving.
+    // Evaluated at start too, not only per move: the first evaluation is
+    // the lift's, which holds each edge whose zone the finger lifts in.
     session.autoScroller.evaluate(local);
     notifyListeners();
     return true;
@@ -1045,6 +1060,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     final draggedSpan = boardController.spanOf(session.key)!;
     final BoardDropTarget resolved;
     ({BoardStartWindow rows, BoardStartWindow cols})? windows;
+    ({double row, double col})? lean;
     if (move) {
       // A move resolves from the proxy's content-LEADING corner, the
       // point its span starts at, which is the proxy's painted top-left
@@ -1089,6 +1105,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       );
       resolved = answer.target;
       windows = (rows: answer.rows, cols: answer.cols);
+      lean = answer.lean;
     } else {
       // A resize resolves from the pointer's displacement since the
       // lift, in track space, and only once its resized axis's sample
@@ -1115,8 +1132,13 @@ class BoardDragController<TKey> extends ChangeNotifier {
         pinned: _pinsAt(session.key, pointer),
       );
     }
-    if (resolved.span == _lastResolvedSpan &&
-        windows == _lastResolvedWindows) {
+    // Over the same placement, only a new lean after a refusal resolves
+    // again: an admitted placement is the target whatever the lean, and a
+    // throw gets no nudge to measure from it.
+    final samePlacement =
+        resolved.span == _lastResolvedSpan && windows == _lastResolvedWindows;
+    if (samePlacement &&
+        (_lastDropAnswer != false || lean == _lastResolvedLean)) {
       return;
     }
     // Recorded for every resolver answer, before the refusal branch and
@@ -1126,6 +1148,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // scan for each of them.
     _lastResolvedSpan = resolved.span;
     _lastResolvedWindows = windows;
+    _lastResolvedLean = lean;
     var target = resolved;
     // A canDropAt refusal at RESOLUTION, not just at commit: a refused
     // target leaves currentTarget null and releases the gap, so nothing
@@ -1133,13 +1156,18 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // as re-validation against a predicate that changed its answer.
     //
     // A refusal is also where the NUDGE gets its one chance; a null
-    // answer from it leaves the arm exactly as it was.
-    final answer = askCanDropAt(config, session.key, target.span);
+    // answer from it leaves the arm exactly as it was. The same placement
+    // keeps the refusal it had: the predicate is asked again only after
+    // a change that clears the record, as it is for any placement.
+    final answer = samePlacement
+        ? false
+        : askCanDropAt(config, session.key, target.span);
+    _lastDropAnswer = answer;
     if (answer != true) {
       // A throw, answered null, is a refusal with no nudge: the nudge is
       // for overlaps, and a throw says nothing about one.
       final fitted = answer == false
-          ? _fitRefusal(session, target, windows)
+          ? _fitRefusal(session, target, windows, lean)
           : null;
       if (fitted == null) {
         if (_currentTarget != null) {
@@ -1153,6 +1181,11 @@ class BoardDragController<TKey> extends ChangeNotifier {
         }
         return;
       }
+      // A new lean that lands where the last one did changes nothing, so
+      // it notifies nothing.
+      if (samePlacement && fitted == _currentTarget) {
+        return;
+      }
       target = fitted;
     }
     _currentTarget = target;
@@ -1160,6 +1193,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       draggedKey: session.key,
       prospective: target.span,
       lifted: session.kind == BoardDragKind.move,
+      resizeAxis: _resizedAxisOf(session.kind),
       duration: session.makeRoomDuration,
       curve: session.makeRoomCurve,
     );
@@ -1167,15 +1201,26 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _reportTarget(session);
   }
 
+  /// The axis whose edge a drag of [kind] moves; null for a move.
+  static Axis? _resizedAxisOf(BoardDragKind kind) {
+    switch (kind) {
+      case BoardDragKind.move:
+        return null;
+      case BoardDragKind.resizeRowStart:
+      case BoardDragKind.resizeRowEnd:
+        return Axis.vertical;
+      case BoardDragKind.resizeColStart:
+      case BoardDragKind.resizeColEnd:
+        return Axis.horizontal;
+    }
+  }
+
   /// The sample a resize of [kind] reads: its resized axis's.
   static BoardAxisSample _resizedAxisSampleOf(
     BoardDragKind kind,
     BoardPointSample pointer,
   ) {
-    return kind == BoardDragKind.resizeRowStart ||
-            kind == BoardDragKind.resizeRowEnd
-        ? pointer.row
-        : pointer.col;
+    return _resizedAxisOf(kind) == Axis.vertical ? pointer.row : pointer.col;
   }
 
   /// Whether a resize's sample [now] resolves to what [held] did: the
@@ -1320,26 +1365,34 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// meets slides onto the nearest nearby placement that holds the whole
   /// box and that the app admits; a box lying past the lattice's end is
   /// first moved onto it, into [windows], and taken there when the app
-  /// admits it. Null leaves the refusal exactly as it was, which is what
-  /// the policy's absence, a resize and a throw asking about the moved box
-  /// produce, and, unless the moved box is admitted, a policy with no
-  /// step, a closed gate and an empty search.
+  /// admits it. A refused RESIZE is [_clampRefusedResize]'s, under a
+  /// policy that clamps resizes. Null leaves the refusal exactly as it
+  /// was, which is what the policy's absence, a resize it does not clamp
+  /// and a throw asking about the moved box produce, and, unless the
+  /// moved box is admitted, a policy with no step, a closed gate and an
+  /// empty search.
   ///
   /// [windows] are the windows the resolver placed each axis in, which a
   /// candidate is clamped into on an axis the scan steps, so a refused
   /// span in a band is nudged within the band and a scrolled one only to
-  /// starts that show; null for a resize.
+  /// starts that show; null for a resize. [lean] is the lean the resolver
+  /// returned beside [refused], null for a resize: the scan measures its
+  /// candidates from the refused start plus it, where the item shows.
   BoardDropTarget? _fitRefusal(
     _DragSession<TKey> session,
     BoardDropTarget refused,
     ({BoardStartWindow rows, BoardStartWindow cols})? windows,
+    ({double row, double col})? lean,
   ) {
     final policy = config.dropFit;
     final canDropAt = config.canDropAt;
-    if (policy == null ||
-        canDropAt == null ||
-        windows == null ||
-        session.kind != BoardDragKind.move) {
+    if (policy == null || canDropAt == null) {
+      return null;
+    }
+    if (session.kind != BoardDragKind.move) {
+      return policy.clampResizes ? _clampRefusedResize(session, refused) : null;
+    }
+    if (windows == null) {
       return null;
     }
     final rowAxis = boardController.rows.axis;
@@ -1357,6 +1410,14 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // resolver anchors to the pointer, exactly as the resolver moves it.
     final wholeTrackAxis = _pointerAnchoredAxis(session);
     var box = refused.span;
+    // Read off the refused span before the move onto the lattice below,
+    // since the item shows where the drag put it, not where that moves it.
+    final reference = lean == null
+        ? null
+        : (
+            row: box.startTrackOn(Axis.vertical) + lean.row,
+            col: box.startTrackOn(Axis.horizontal) + lean.col,
+          );
     final onto = BoardDropFitter.ontoLattice(
       box,
       rowCount: rowAxis.trackCount,
@@ -1438,11 +1499,51 @@ class BoardDragController<TKey> extends ChangeNotifier {
       rowWindow: windows.rows,
       colWindow: windows.cols,
       wholeTrackAxis: wholeTrackAxis,
+      reference: reference,
     );
     if (fitted == null) {
       return null;
     }
     return BoardDropTarget(span: fitted, kind: refused.kind);
+  }
+
+  /// A refused RESIZE with its dragged edge stopped at the item in its
+  /// way ([BoardDropFitter.clampedResize]), or null where nothing stops
+  /// it. The item's stored span is its span at the lift: a mutation of
+  /// the dragged item ends the session. The obstacles are gathered once,
+  /// over the whole tracks the refused span covers, which hold every
+  /// candidate: each lies between the stored span and the refused one.
+  BoardDropTarget? _clampRefusedResize(
+    _DragSession<TKey> session,
+    BoardDropTarget refused,
+  ) {
+    final lift = boardController.spanOf(session.key);
+    if (lift == null) {
+      return null;
+    }
+    final span = refused.span;
+    final rowStart = trackIndexOf(span.startTrackOn(Axis.vertical));
+    final colStart = trackIndexOf(span.startTrackOn(Axis.horizontal));
+    final region = BoardSpan(
+      rowStart: rowStart,
+      colStart: colStart,
+      rowSpan: trackEndIndexOf(span.endTrackOn(Axis.vertical)) - rowStart,
+      colSpan: trackEndIndexOf(span.endTrackOn(Axis.horizontal)) - colStart,
+    );
+    final clamped = BoardDropFitter.clampedResize(
+      lift: lift,
+      refused: span,
+      kind: session.kind,
+      snap: config.snap,
+      obstacles: _obstaclesIn(session, region),
+      accepts: (candidate) {
+        return askCanDropAt(config, session.key, candidate) == true;
+      },
+    );
+    if (clamped == null) {
+      return null;
+    }
+    return BoardDropTarget(span: clamped, kind: refused.kind);
   }
 
   /// The SEARCH REGION: on each axis, [BoardDropFitter.searchRangeOn] of
@@ -1651,14 +1752,56 @@ class BoardDragController<TKey> extends ChangeNotifier {
   }
 }
 
+/// How far, in logical pixels, a pointer moves toward a held edge, from
+/// the farthest it has been from that edge, to release the hold.
+const double _holdReleaseSlop = 4.0;
+
+/// One edge's hold: whether the edge is held, and the farthest the
+/// pointer has been from it since the hold began.
+///
+/// Distances are a paint-space coordinate that grows away from the
+/// edge, so only their differences mean anything: a hold compares the
+/// pointer with its own farthest, never with the edge.
+class _EdgeHold {
+  bool held = false;
+  double _farthest = 0.0;
+
+  void begin(double distance) {
+    held = true;
+    _farthest = distance;
+  }
+
+  /// Follows the pointer at [distance]: the farthest grows with it, and
+  /// a pointer nearer the edge than the farthest by more than
+  /// [_holdReleaseSlop] releases the hold for good.
+  void track(double distance) {
+    if (!held) {
+      return;
+    }
+    if (distance > _farthest) {
+      _farthest = distance;
+    } else if (_farthest - distance > _holdReleaseSlop) {
+      held = false;
+    }
+  }
+}
+
 /// Two-axis edge autoscroll: one per-session ticker integrating a
 /// velocity ramp into both positions.
+///
+/// Where the pointer is in a zone sets each axis's TARGET velocity; the
+/// tick drives each axis at a SPEED that follows its target, rising by at
+/// most [maxVelocity] per [rampDuration] and taking a slower target, a
+/// reversal or a stop at once, so content never jumps from rest to a
+/// fast scroll.
 class BoardAutoScroller {
   BoardAutoScroller({
     required TickerProvider vsync,
     required BoardRenderPort<Object?> port,
     required this.edgeZone,
     required this.maxVelocity,
+    this.rampDuration = Duration.zero,
+    this.holdsLiftZones = false,
     this.onTick,
   }) : _port = port {
     _ticker = vsync.createTicker(_tick);
@@ -1667,18 +1810,42 @@ class BoardAutoScroller {
   /// Runs at the head of every tick, before the positions are driven.
   final VoidCallback? onTick;
 
+  /// Whether the first [evaluate], the lift's, holds each edge whose zone
+  /// its position lies in: see [evaluate].
+  final bool holdsLiftZones;
+
   final BoardRenderPort<Object?> _port;
 
   /// Mutable because the drag controller's config is: a new config
-  /// updates a live session's zone and velocity in place.
+  /// updates a live session's zone, velocity and ramp in place.
   double edgeZone;
   double maxVelocity;
+
+  /// How long the speed takes to rise from rest to [maxVelocity]; one
+  /// that is not positive lets the speed take its target at once.
+  Duration rampDuration;
 
   late final Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
 
+  /// The paint-space velocities the pointer's place asks for, set by
+  /// [evaluate].
   double _verticalVelocity = 0.0;
   double _horizontalVelocity = 0.0;
+
+  /// The paint-space velocities the tick drives, following the targets
+  /// under the ramp; zero whenever the ticker is stopped.
+  double _verticalSpeed = 0.0;
+  double _horizontalSpeed = 0.0;
+
+  /// Whether [evaluate] has run: its first run is the lift's.
+  bool _evaluated = false;
+
+  /// The four paint-space edges' holds.
+  final _EdgeHold _topHold = _EdgeHold();
+  final _EdgeHold _bottomHold = _EdgeHold();
+  final _EdgeHold _leftHold = _EdgeHold();
+  final _EdgeHold _rightHold = _EdgeHold();
 
   /// The velocity for a finger [distanceIntoZone] pixels into an edge
   /// zone of [zone], ramping linearly to [max] at the edge itself.
@@ -1700,17 +1867,51 @@ class BoardAutoScroller {
   /// itself is choosing one of its frozen tracks and scrolls nothing on
   /// that axis. Past the viewport's own edge the finger drives at full
   /// speed, band or not.
+  ///
+  /// Under [holdsLiftZones], the first call holds each edge whose zone
+  /// [local] lies in, and a held edge drives nothing until the finger has
+  /// moved toward it by more than [_holdReleaseSlop] from the farthest it
+  /// has been from it since; a release lasts for the rest of the session.
   void evaluate(Offset local) {
     final vertical = _port.verticalPosition;
     final horizontal = _port.horizontalPosition;
     final region = _port.scrolledRegion;
     final size = _port.viewportDimension;
-    _verticalVelocity = vertical == null
+    var verticalVelocity = vertical == null
         ? 0.0
         : _axisVelocity(local.dy, region.top, region.bottom, size.height);
-    _horizontalVelocity = horizontal == null
+    var horizontalVelocity = horizontal == null
         ? 0.0
         : _axisVelocity(local.dx, region.left, region.right, size.width);
+    if (holdsLiftZones) {
+      if (!_evaluated) {
+        if (verticalVelocity < 0.0) {
+          _topHold.begin(local.dy);
+        } else if (verticalVelocity > 0.0) {
+          _bottomHold.begin(-local.dy);
+        }
+        if (horizontalVelocity < 0.0) {
+          _leftHold.begin(local.dx);
+        } else if (horizontalVelocity > 0.0) {
+          _rightHold.begin(-local.dx);
+        }
+      }
+      _topHold.track(local.dy);
+      _bottomHold.track(-local.dy);
+      _leftHold.track(local.dx);
+      _rightHold.track(-local.dx);
+      if ((verticalVelocity < 0.0 && _topHold.held) ||
+          (verticalVelocity > 0.0 && _bottomHold.held)) {
+        verticalVelocity = 0.0;
+      }
+      if ((horizontalVelocity < 0.0 && _leftHold.held) ||
+          (horizontalVelocity > 0.0 && _rightHold.held)) {
+        horizontalVelocity = 0.0;
+      }
+    }
+    _evaluated = true;
+    _verticalVelocity = verticalVelocity;
+    _horizontalVelocity = horizontalVelocity;
     // A zone whose scroll is already at its end in the direction it
     // drives starts nothing: the tick would clamp every step to where the
     // position is.
@@ -1719,10 +1920,37 @@ class BoardAutoScroller {
       _lastElapsed = Duration.zero;
       _ticker.start();
     } else if (!active && _ticker.isActive) {
-      // Reset the time base on every stop, so a later start does not
-      // integrate the gap.
-      _ticker.stop();
+      _stop();
     }
+  }
+
+  /// Stops the ticker and brings both speeds to rest, so a later start
+  /// rises from zero. [_lastElapsed] is reset at the start, so a later
+  /// start does not integrate the gap either.
+  void _stop() {
+    _ticker.stop();
+    _verticalSpeed = 0.0;
+    _horizontalSpeed = 0.0;
+  }
+
+  /// [speed] moved toward [target] by at most [maxGain] in magnitude: a
+  /// target no faster than [speed] in the same direction is taken at
+  /// once, and one in the other direction is approached from rest.
+  static double _rampedSpeed(double speed, double target, double maxGain) {
+    final from = speed * target > 0.0 ? speed : 0.0;
+    if (target.abs() <= from.abs()) {
+      return target;
+    }
+    return from + math.min(target.abs() - from.abs(), maxGain) * target.sign;
+  }
+
+  /// The most the speed may gain over [dt] seconds.
+  double _maxGainOver(double dt) {
+    final ramp = rampDuration.inMicroseconds / Duration.microsecondsPerSecond;
+    if (ramp <= 0.0) {
+      return double.infinity;
+    }
+    return maxVelocity * dt / ramp;
   }
 
   /// The paint-space velocity for a finger at [position] on an axis
@@ -1752,13 +1980,20 @@ class BoardAutoScroller {
     onTick?.call();
     final dt = (elapsed - _lastElapsed).inMicroseconds / 1e6;
     _lastElapsed = elapsed;
+    final maxGain = _maxGainOver(dt);
+    _verticalSpeed = _rampedSpeed(_verticalSpeed, _verticalVelocity, maxGain);
+    _horizontalSpeed = _rampedSpeed(
+      _horizontalSpeed,
+      _horizontalVelocity,
+      maxGain,
+    );
     // The velocities are PAINT-space: negative drives toward the painted
     // top or left edge. The scroll offset is content-space, so the step
     // passes through the one delta conversion, which negates it on a
     // reversed axis, where the content beyond the painted top edge lies at
     // GREATER offsets.
     final step = _port.contentDeltaFromPaint(
-      Offset(_horizontalVelocity * dt, _verticalVelocity * dt),
+      Offset(_horizontalSpeed * dt, _verticalSpeed * dt),
     );
     // A null position mid-drag is a defunct scrollable: stop that axis
     // and keep the session; cancellation is the backstop's job.
@@ -1766,6 +2001,7 @@ class BoardAutoScroller {
     if (_verticalVelocity != 0.0) {
       if (vertical == null) {
         _verticalVelocity = 0.0;
+        _verticalSpeed = 0.0;
       } else {
         vertical.jumpTo(
           (vertical.pixels + step.dy).clamp(
@@ -1779,6 +2015,7 @@ class BoardAutoScroller {
     if (_horizontalVelocity != 0.0) {
       if (horizontal == null) {
         _horizontalVelocity = 0.0;
+        _horizontalSpeed = 0.0;
       } else {
         horizontal.jumpTo(
           (horizontal.pixels + step.dx).clamp(
@@ -1790,11 +2027,13 @@ class BoardAutoScroller {
     }
     // Stopped once no axis can move, a zero velocity or a position at its
     // end alike, rather than ticking a clamped step every frame. The
-    // velocities stay: [evaluate], at start and on every pointer move,
-    // is the restart door, as the pointer update is for Flutter's own
-    // edge autoscroller (`widgets/scrollable_helpers.dart:282-303`).
+    // target velocities stay, and the speeds come to rest: [evaluate], at
+    // start and on every pointer move, is the restart door, as the pointer
+    // update is for Flutter's own edge autoscroller
+    // (`widgets/scrollable_helpers.dart:282-303`), and a restart rises
+    // from zero.
     if (!_canAdvance()) {
-      _ticker.stop();
+      _stop();
     }
   }
 

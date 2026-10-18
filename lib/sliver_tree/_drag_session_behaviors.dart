@@ -16,6 +16,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
@@ -24,10 +25,53 @@ import '_drag_session.dart';
 import '_drop_zone_resolver.dart';
 import 'tree_controller.dart';
 
+/// How far, in logical pixels, a pointer moves toward a held edge, from
+/// the farthest it has been from that edge, to release the hold.
+const double _holdReleaseSlop = 4.0;
+
+/// One edge's hold: whether the edge is held, and the farthest the
+/// pointer has been from it since the hold began.
+///
+/// Distances are a viewport coordinate that grows away from the edge, so
+/// only their differences mean anything: a hold compares the pointer
+/// with its own farthest, never with the edge.
+class _EdgeHold {
+  bool held = false;
+  double _farthest = 0.0;
+
+  void begin(double distance) {
+    held = true;
+    _farthest = distance;
+  }
+
+  /// Follows the pointer at [distance]: the farthest grows with it, and
+  /// a pointer nearer the edge than the farthest by more than
+  /// [_holdReleaseSlop] releases the hold for good.
+  void track(double distance) {
+    if (!held) {
+      return;
+    }
+    if (distance > _farthest) {
+      _farthest = distance;
+    } else if (_farthest - distance > _holdReleaseSlop) {
+      held = false;
+    }
+  }
+}
+
 /// Edge-zone autoscroll. Owns its ticker per session, created here and
 /// disposed in [detach], so no ticker state outlives a drag. Keys off the
 /// FINGER's viewport position, never the probe, because an edge zone is
 /// about where the hand is, not where the card is.
+///
+/// The first sample it evaluates is the lift's, and each edge whose zone
+/// that sample lies in is HELD: it drives nothing until the finger has
+/// moved toward it by more than [_holdReleaseSlop] from the farthest it
+/// has been from it since, and a release lasts for the rest of the
+/// session. Where the finger is in a zone sets the TARGET velocity; the
+/// tick drives a SPEED that follows it, rising by at most the maximum
+/// velocity per the ramp duration and taking a slower target, a reversal
+/// or a stop at once, so content never jumps from rest to a fast scroll.
 class AutoScroller<TKey> {
   AutoScroller({
     required TickerProvider vsync,
@@ -35,10 +79,12 @@ class AutoScroller<TKey> {
     required Offset Function() pointerGlobal,
     required double edgeZone,
     required double maxVelocity,
+    required Duration rampDuration,
   }) : _space = space,
        _pointerGlobal = pointerGlobal,
        _edgeZone = edgeZone,
-       _maxVelocity = maxVelocity {
+       _maxVelocity = maxVelocity,
+       _rampDuration = rampDuration {
     _ticker = vsync.createTicker(_onTick);
   }
 
@@ -46,9 +92,20 @@ class AutoScroller<TKey> {
   final Offset Function() _pointerGlobal;
   final double _edgeZone;
   final double _maxVelocity;
+  final Duration _rampDuration;
 
   late final Ticker _ticker;
   Duration? _lastTick;
+
+  /// The velocity the tick drives, following the target under the ramp;
+  /// zero whenever the ticker is stopped.
+  double _speed = 0.0;
+
+  /// Whether a sample has been evaluated: the first is the lift's.
+  bool _sampled = false;
+
+  final _EdgeHold _topHold = _EdgeHold();
+  final _EdgeHold _bottomHold = _EdgeHold();
 
   /// Pure velocity ramp: 0 at the zone's inner edge, [maxVelocity] at the
   /// viewport edge, negative in the leading zone, and 0 between them.
@@ -74,17 +131,14 @@ class AutoScroller<TKey> {
     return 0.0;
   }
 
-  /// Starts or stops the ticker for the pointer's current edge-zone
-  /// membership. A null [sample] means the scrollable is gone: stop.
+  /// Starts or stops the ticker for the velocity the pointer's place asks
+  /// for. A null [sample] means the scrollable is gone: stop.
   void evaluate(PointerSample? sample) {
     if (sample == null) {
       _stop();
       return;
     }
-    final inEdgeZone =
-        sample.viewportDy < _edgeZone ||
-        sample.viewportDy > sample.viewportHeight - _edgeZone;
-    if (inEdgeZone) {
+    if (_targetVelocity(sample) != 0.0) {
       if (!_ticker.isActive) {
         _lastTick = null;
         _ticker.start();
@@ -94,13 +148,53 @@ class AutoScroller<TKey> {
     }
   }
 
-  /// Idles the ticker and forgets the last tick stamp, so a later start
-  /// begins a fresh time base instead of integrating a stale gap.
+  /// The velocity [sample]'s place in a zone asks for, zero toward a held
+  /// edge. Holds the lift's zones on the first sample, and follows every
+  /// hold with the pointer.
+  double _targetVelocity(PointerSample sample) {
+    final velocity = velocityAt(
+      viewportDy: sample.viewportDy,
+      viewportHeight: sample.viewportHeight,
+      edgeZone: _edgeZone,
+      maxVelocity: _maxVelocity,
+    );
+    if (!_sampled) {
+      _sampled = true;
+      if (velocity < 0.0) {
+        _topHold.begin(sample.viewportDy);
+      } else if (velocity > 0.0) {
+        _bottomHold.begin(-sample.viewportDy);
+      }
+    }
+    _topHold.track(sample.viewportDy);
+    _bottomHold.track(-sample.viewportDy);
+    if ((velocity < 0.0 && _topHold.held) ||
+        (velocity > 0.0 && _bottomHold.held)) {
+      return 0.0;
+    }
+    return velocity;
+  }
+
+  /// [speed] moved toward [target] by at most [maxGain] in magnitude: a
+  /// target no faster than [speed] in the same direction is taken at
+  /// once, and one in the other direction is approached from rest.
+  static double _rampedSpeed(double speed, double target, double maxGain) {
+    final from = speed * target > 0.0 ? speed : 0.0;
+    if (target.abs() <= from.abs()) {
+      return target;
+    }
+    return from + math.min(target.abs() - from.abs(), maxGain) * target.sign;
+  }
+
+  /// Idles the ticker, brings the speed to rest and forgets the last tick
+  /// stamp, so a later start rises from zero on a fresh time base instead
+  /// of integrating a stale gap.
   void _stop() {
     if (_ticker.isActive) {
       _ticker.stop();
     }
     _lastTick = null;
+    _speed = 0.0;
   }
 
   /// Integrates one frame of scroll velocity into the scroll position.
@@ -116,12 +210,7 @@ class AutoScroller<TKey> {
       return;
     }
 
-    final velocity = velocityAt(
-      viewportDy: sample.viewportDy,
-      viewportHeight: sample.viewportHeight,
-      edgeZone: _edgeZone,
-      maxVelocity: _maxVelocity,
-    );
+    final velocity = _targetVelocity(sample);
     if (velocity == 0) {
       _stop();
       return;
@@ -132,8 +221,17 @@ class AutoScroller<TKey> {
         : elapsed - _lastTick!;
     _lastTick = elapsed;
 
-    final newPixels = (position.pixels + velocity * dt.inMicroseconds / 1e6)
-        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    final seconds = dt.inMicroseconds / 1e6;
+    final ramp = _rampDuration.inMicroseconds / 1e6;
+    _speed = _rampedSpeed(
+      _speed,
+      velocity,
+      ramp <= 0.0 ? double.infinity : _maxVelocity * seconds / ramp,
+    );
+    final newPixels = (position.pixels + _speed * seconds).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
     if (newPixels != position.pixels) {
       // jumpTo synchronously notifies the session's scroll-position
       // listener, which re-resolves the target and coalesces the

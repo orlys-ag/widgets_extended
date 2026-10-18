@@ -1485,8 +1485,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
   /// the render object's two edge-ghost `clearAll` gates (Step 9 and
   /// layout Step 0b), the sliver element's settle-transition layout
   /// (which is the only thing that schedules that cleanup), and the
-  /// element's two stale-eviction gates, FLIP-only because a held
-  /// preview would otherwise suspend eviction for a whole drag.
+  /// render object's eviction gate, FLIP-only because a held preview
+  /// would otherwise suspend eviction for a whole drag.
   ///
   /// Every OTHER consumer must keep reading [hasActiveSlides]: paint,
   /// hit-testing and the painted-truth snapshot all care about where
@@ -3937,8 +3937,8 @@ class TreeController<TKey, TData> extends ChangeNotifier {
     // with it.
     if (newDepth != oldDepth) {
       // Structural, not expansion-gated: a row collapsed earlier in the
-      // same handler is still mounted (removeChild is a no-op in the
-      // element and eviction is post-frame), and createChild never
+      // same handler is still mounted (rows are evicted only at the end
+      // of a layout), and createChild never
       // rebuilds a mounted row that is not dirty, so an expansion-gated
       // set leaves it rendering its pre-move depth. Same reason expand()
       // uses getDescendants for its base-change staging.

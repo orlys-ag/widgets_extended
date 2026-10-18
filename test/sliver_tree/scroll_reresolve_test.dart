@@ -1,6 +1,5 @@
 /// D5 repro tests: the drop target must stay honest when the viewport
-/// scrolls WITHOUT a pointer move, and autoscroll must engage when the
-/// drag starts inside an edge zone.
+/// scrolls WITHOUT a pointer move.
 ///
 /// Repro-test methodology: each test asserts the EXPECTED behavior and
 /// fails on pre-D5 code, where re-resolution is driven only by pointer
@@ -114,46 +113,4 @@ void main() {
   // at a slot boundary, so no scroll of any size leaves the target intact
   // to assert against. The re-resolve-on-scroll contract itself is covered
   // by the test above.
-
-  testWidgets("a drag starting inside the edge zone autoscrolls without any "
-      "pointer move", (tester) async {
-    final h = await _mount(tester, rowCount: 100);
-    final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
-
-    // Scroll deep so upward autoscroll has runway, then long-press a
-    // row whose center sits INSIDE the top 48px edge zone.
-    scrollable.position.jumpTo(1000.0);
-    await tester.pump();
-
-    // r20 spans scroll-space 1000..1050 → viewport-local 0..50; its
-    // center (y=25) is inside the top edge zone.
-    final gesture = await tester.startGesture(
-      tester.getCenter(find.byKey(const ValueKey("row-r20"))),
-    );
-    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
-    expect(
-      h.reorder.isDragging,
-      isTrue,
-      reason: "setup: the long press started a session",
-    );
-
-    // Hold perfectly still and pump frames. The pointer is in the edge
-    // zone from the very first moment — autoscroll must engage without
-    // waiting for a pointer move.
-    for (var i = 0; i < 20; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-    }
-
-    expect(
-      scrollable.position.pixels,
-      lessThan(1000.0),
-      reason:
-          "a drag born inside the edge zone must autoscroll; "
-          "requiring a first pointer move leaves the session parked",
-    );
-
-    await gesture.up();
-    await tester.pump();
-    await tester.pumpAndSettle();
-  });
 }
