@@ -97,24 +97,6 @@ ValueKey<String> hiddenBelowKey(DateTime day) {
   return ValueKey<String>("grid-hidden-below-${isoDate(day)}");
 }
 
-/// What a screen reader says for [day]'s cell counting [count] items
-/// before [minute], or after it when [above] is false, naming the minute
-/// in [format].
-String hiddenRowLabel(
-  DateTime day,
-  int count,
-  int minute, {
-  required bool above,
-  required HourLabelFormat format,
-}) {
-  final date =
-      "${weekdayNames[weekdayColumn(day)]}, "
-      "${monthNames[day.month - 1]} ${day.day}";
-  final items = count == 1 ? "1 more item" : "$count more items";
-  final side = above ? "before" : "after";
-  return "$date, $items $side ${hourLabel(minute, format)}";
-}
-
 /// The shown items a grid has no block for, as the grid [tracks] lays out
 /// counts them: on each day column, those wholly before its hours and
 /// those wholly after them, and those on no day it has a column for.
@@ -469,14 +451,13 @@ CalendarItem itemFromSpan(
   );
 }
 
-/// What a tap on the body [cell] creates: one hour from its slot, or up to
-/// the end of the grid's hours when that comes first.
+/// What a tap on the body [cell] creates: its one slot.
 CreateRange createRangeAt(GridTracks tracks, ({int row, int col}) cell) {
   final start = tracks.minuteAt(cell.row);
   return CreateRange(
     day: tracks.dateAt(cell.col),
     startMinute: start,
-    endMinute: math.min(start + 60, tracks.hours.end),
+    endMinute: start + minutesPerSlot,
     dayCount: 1,
   );
 }
@@ -545,8 +526,8 @@ CreateRange createRangeOver(
 /// body cells take a create gesture, reported through [onCreate]: a drag
 /// picks the rectangle of slots it covers, at once with a mouse or a
 /// stylus and after a press and hold on touch, so a touch drag without one
-/// scrolls the grid, and a tap, or a hold let go where it began, picks one
-/// hour from its slot, or up to the end of the hours. The slots picked
+/// scrolls the grid, and a tap, or a hold let go where it began, picks its
+/// one slot. The slots picked
 /// stay marked, as a range being dragged is, until the create flow
 /// [onCreate] opens closes.
 ///

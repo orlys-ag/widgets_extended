@@ -25,13 +25,18 @@
 /// selected day: a selected day scrolls to its top, animating, and a drag
 /// or a fling of the list selects each day it brings to the top. Each
 /// day's header sticks at the top while its items scroll under it. Each
-/// item's card sits right of its start time, over a chip of its length. In
-/// edit mode the list marks each gap in the calendar's hours that no item
-/// covers with a dashed row, and a day without items with one reading "No
-/// items", each with a button that creates an item there, and each card
-/// has a menu of Edit and Delete; out of it a day without items shows its
-/// header alone. A drag of the list folds
-/// the month, and the pull tab under the card folds or unfolds it as far
+/// item's card sits right of its start time, over a chip of its length. An
+/// item wholly outside the calendar's hours shows only in a count on a
+/// soft yellow banner, above the day's cards for those before the hours
+/// and below them for those after, as Week's and Day's rows outside the
+/// hours count them. A red line marks the current time over the rows of
+/// the clock's day, the time on a pill at its start, crossing the card of
+/// an item running then as far as the item has run. In edit mode the list
+/// marks each gap in the hours that no item covers with a dashed row, a
+/// day without items with one across the hours, each with a button that
+/// creates an item there, and each card has a menu of Edit and Delete; out
+/// of it a day without items shows its header alone. A drag of the list
+/// folds the month, and the pull tab under the card folds or unfolds it as far
 /// as a drag on it moves, a tap on it switching; a downward drag on the
 /// folded strip unfolds it too. The board always holds
 /// the whole month of the selected day; while it folds, it is clipped to
@@ -47,7 +52,7 @@
 /// Days at least 100 px wide in weeks at least 136 px tall show cards,
 /// which add an item's times to its title. A tap on a chip opens its item,
 /// and a tap anywhere else on a day opens that day in Day. In edit mode a
-/// long press on a day creates an item there at the day's first free hour,
+/// long press on a day creates an item there at the day's first free slot,
 /// selecting the day when it is in the month; out of it a long press opens
 /// the day as a tap does. Its keys and chevrons move the selected
 /// day as Agenda's do.
@@ -532,7 +537,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _setMode(_CalendarMode.day);
   }
 
-  /// The create flow for [day] at its first free hour, selecting [day]
+  /// The create flow for [day] at its first free slot, selecting [day]
   /// first when it is a day of the shown month; a day of another month
   /// leaves the selection and the month as they are.
   void _createOn(DateTime day) {
@@ -542,10 +547,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _openCreateFlow(day);
   }
 
-  /// The create flow on [day] at its first free hour from the first time
-  /// the history lock leaves free on [day], or an hour from that time
-  /// where none after it is free; where the lock leaves no time in the
-  /// hours, a message instead.
+  /// The create flow on [day] at its first free slot from the first time
+  /// the history lock leaves free on [day], or the slot at that time where
+  /// none after it is free; where the lock leaves no time in the hours, a
+  /// message instead.
   void _openCreateFlow(DateTime day) {
     final hours = _settings.hours;
     final earliest = _lock.earliestStartOn(day);
@@ -564,9 +569,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       range: CreateRange(
         day: day,
         startMinute: start,
-        endMinute: start == free.start
-            ? free.end
-            : math.min(start + 60, hours.end),
+        endMinute: start + minutesPerSlot,
         dayCount: 1,
       ),
       lock: _currentLock,
@@ -1083,6 +1086,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               lock: _lock,
               selectedDay: _selected,
               today: _today.value,
+              now: _now,
               onTopDay: _select,
               onCreateIn: (day, startMinute, endMinute) {
                 showCreateFlow(
@@ -1097,7 +1101,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                   lock: _currentLock,
                 );
               },
-              onCreateOn: _openCreateFlow,
               onEdit: (id) {
                 showEditForm(
                   context,

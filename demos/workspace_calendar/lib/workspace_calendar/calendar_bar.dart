@@ -27,9 +27,9 @@ const ValueKey<String> hourLabelFormatKey = ValueKey<String>(
   "bar-hour-label-format",
 );
 
-/// "08:00 - 18:00" for [hours].
-String hoursLabel(DayHours hours) {
-  return "${clockLabel(hours.start)} - ${clockLabel(hours.end)}";
+/// "08:00 - 18:00", or "8 AM - 6 PM", for [hours] in [format].
+String hoursLabel(DayHours hours, HourLabelFormat format) {
+  return "${hourLabel(hours.start, format)} - ${hourLabel(hours.end, format)}";
 }
 
 /// The calendar bar on [settings], in three parts: Today, which reports
@@ -37,8 +37,11 @@ String hoursLabel(DayHours hours) {
 /// weekday a week starts on over a button for each weekday, in the
 /// week's order, that shows or hides it, never hiding the last one shown;
 /// and the hours, a switch for AM/PM hour labels over a range slider for
-/// the hours, in whole hours at least one apart. Each change reports the
-/// new settings through [onChanged].
+/// the hours, in whole hours at least one apart, with no labels over its
+/// thumbs, the hours, and to a screen reader the thumbs, reading as that
+/// switch says. Each change reports the
+/// new settings through [onChanged]. The switches are three quarters of
+/// their Material size.
 class CalendarBar extends StatelessWidget {
   const CalendarBar({
     super.key,
@@ -93,6 +96,7 @@ class CalendarBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final weekdays = settings.weekdays;
     final hours = settings.hours;
+    final format = settings.hourLabelFormat;
     // A Material rather than a decoration, so the ink of the labels'
     // taps shows on the bar.
     return Material(
@@ -212,11 +216,11 @@ class CalendarBar extends StatelessWidget {
             const SizedBox(height: 8.0),
             _Part(
               title: "Hours",
-              value: hoursLabel(hours),
+              value: hoursLabel(hours, format),
               trailing: _LabeledSwitch(
                 switchKey: hourLabelFormatKey,
                 label: "AM/PM",
-                value: settings.hourLabelFormat == HourLabelFormat.twelveHour,
+                value: format == HourLabelFormat.twelveHour,
                 onChanged: (twelveHour) {
                   _set(
                     settings.copyWith(
@@ -236,10 +240,9 @@ class CalendarBar extends StatelessWidget {
                 values: RangeValues(hours.start / 60, hours.end / 60),
                 max: 24.0,
                 divisions: 24,
-                labels: RangeLabels(
-                  clockLabel(hours.start),
-                  clockLabel(hours.end),
-                ),
+                semanticFormatterCallback: (value) {
+                  return hourLabel(value.round() * 60, format);
+                },
                 onChanged: _setHours,
               ),
             ),
@@ -335,6 +338,9 @@ class _LabeledSwitch extends StatelessWidget {
     required this.onChanged,
   });
 
+  /// The share of its Material size the switch shows at.
+  static const double _scale = 0.75;
+
   final Key switchKey;
   final String label;
   final bool value;
@@ -362,12 +368,21 @@ class _LabeledSwitch extends StatelessWidget {
                 ),
               ),
             ),
-            Switch(
-              key: switchKey,
-              value: value,
-              padding: EdgeInsets.zero,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              onChanged: onChanged,
+            // The switch has no size of its own to set, so its 52 by 40
+            // box, with no padding and a shrink-wrapped tap target, is
+            // scaled down, its layout and its taps with it.
+            SizedBox(
+              width: 52.0 * _scale,
+              height: 40.0 * _scale,
+              child: FittedBox(
+                child: Switch(
+                  key: switchKey,
+                  value: value,
+                  padding: EdgeInsets.zero,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: onChanged,
+                ),
+              ),
             ),
           ],
         ),

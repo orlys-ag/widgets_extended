@@ -370,7 +370,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dropdownFinder("End"), matching: find.text("15:00")),
+      find.descendant(of: dropdownFinder("End"), matching: find.text("14:15")),
       findsOneWidget,
     );
     expect(fieldText(tester, "Days"), "1");
@@ -417,7 +417,7 @@ void main() {
     final rect = tester.getRect(blockFinder(created));
     expect(rect.topLeft, nearOffset(slot.topLeft));
     expect(rect.width, near(slot.width));
-    expect(rect.height, near(4 * slot.height));
+    expect(rect.height, near(slot.height));
     final listed = await listAll(
       tester,
       api,
@@ -434,11 +434,11 @@ void main() {
       gridViewport(tester).verticalPosition!.maxScrollExtent,
     );
     await tester.pumpAndSettle();
-    await createAt(tester, rowOf(23 * 60 + 30), colOf(2), "Task");
+    await createAt(tester, rowOf(23 * 60 + 45), colOf(2), "Task");
     expect(
       find.descendant(
         of: dropdownFinder("Start"),
-        matching: find.text("23:30"),
+        matching: find.text("23:45"),
       ),
       findsOneWidget,
     );
@@ -528,7 +528,7 @@ void main() {
     await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
-    await expectForm("14:00", "15:00", "1");
+    await expectForm("14:00", "14:15", "1");
 
     // A touch drag without a hold scrolls and creates nothing.
     final vertical = gridViewport(tester).verticalPosition!;
@@ -2760,8 +2760,9 @@ void main() {
     expect(tester.getRect(block).top, near(before.top - cell.height));
   });
 
-  testWidgets("W41 in edit mode a tap on an empty slot marks the hour it "
-      "creates until the create flow closes", (tester) async {
+  testWidgets("W41 in edit mode a tap on an empty slot, or a touch hold let "
+      "go where it began, marks the one slot it creates until the create "
+      "flow closes", (tester) async {
     await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
 
@@ -2782,14 +2783,26 @@ void main() {
     await tapCell(tester, rowOf(20 * 60), colOf(6));
     expect(find.text("New item"), findsOneWidget);
     final viewport = gridViewport(tester);
-    final hour = viewport
-        .rectOfCell(rowOf(20 * 60), colOf(6))!
-        .expandToInclude(viewport.rectOfCell(rowOf(20 * 60 + 45), colOf(6))!);
-    expect(marks().single, rectMoreOrLessEquals(hour.deflate(1.0)));
+    final slot = viewport.rectOfCell(rowOf(20 * 60), colOf(6))!;
+    expect(marks().single, rectMoreOrLessEquals(slot.deflate(1.0)));
 
     await tester.tapAt(const Offset(10.0, 10.0));
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
     expect(marks(), isEmpty);
+
+    final hold = await tester.startGesture(
+      cellRect(tester, rowOf(21 * 60), colOf(6)).center,
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await hold.up();
+    await tester.pumpAndSettle();
+    expect(find.text("New item"), findsOneWidget);
+    expect(
+      marks().single,
+      rectMoreOrLessEquals(
+        viewport.rectOfCell(rowOf(21 * 60), colOf(6))!.deflate(1.0),
+      ),
+    );
   });
 }

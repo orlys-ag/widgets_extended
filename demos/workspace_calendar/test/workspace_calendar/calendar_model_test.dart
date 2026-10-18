@@ -670,42 +670,46 @@ void main() {
     }
 
     test(
-      "FF1 the first free range is the earliest hour that meets no shown item",
+      "FF1 the first free range is the earliest slot that meets no shown item",
       () async {
         final model = await readDay(Harness(), <CalendarItem>[
           task("item-1", day, 0, 60),
+          task("item-2", day, 75, 120),
         ]);
-        expect(model.firstFreeRange(day), (start: 60, end: 120));
+        expect(model.firstFreeRange(day), (start: 60, end: 75));
       },
     );
 
-    test("FF2 a range is cut at the hours' end", () async {
-      final model = await readDay(Harness(), <CalendarItem>[
-        task("item-1", day, 540, 690),
-      ]);
-      model.hours = const DayHours(540, 720);
-      expect(model.firstFreeRange(day), (start: 690, end: 720));
-    });
+    test(
+      "FF2 a day free only in the hours' last slot gets that slot",
+      () async {
+        final model = await readDay(Harness(), <CalendarItem>[
+          task("item-1", day, 540, 705),
+        ]);
+        model.hours = const DayHours(540, 720);
+        expect(model.firstFreeRange(day), (start: 705, end: 720));
+      },
+    );
 
-    test("FF3 with no free start the range is the hours' first hour", () async {
+    test("FF3 with no free start the range is the hours' first slot", () async {
       final model = await readDay(Harness(), <CalendarItem>[
         task("item-1", day, 0, 1440),
       ]);
-      expect(model.firstFreeRange(day), (start: 0, end: 60));
+      expect(model.firstFreeRange(day), (start: 0, end: 15));
     });
 
     test("FF4 a pending move counts where it shows", () async {
       final harness = Harness();
       final item = task("item-1", day, 60, 120);
       final model = await readDay(harness, <CalendarItem>[item]);
-      // Sanity: the stored item leaves the first hour free.
-      expect(model.firstFreeRange(day), (start: 0, end: 60));
+      // Sanity: the stored item leaves the first slot free.
+      expect(model.firstFreeRange(day), (start: 0, end: 15));
 
       final calls = harness.api.calls.length;
       model.requestMove(item.copyWith(startMinute: 0, endMinute: 60));
       expect(harness.api.calls, hasLength(calls + 1));
       expect(model.isLocked("item-1"), isTrue);
-      expect(model.firstFreeRange(day), (start: 60, end: 120));
+      expect(model.firstFreeRange(day), (start: 60, end: 75));
     });
 
     test("FF5 a search from a minute starts there, rounded up to the slots "
@@ -716,12 +720,13 @@ void main() {
         task("item-2", day, 900, 960),
       ]);
       model.hours = const DayHours(480, 1200);
-      expect(model.firstFreeRange(day, from: 840), (start: 840, end: 900));
-      // 14:10 rounds up to 14:15, and each hour from there to 15:00 meets
-      // item-2.
-      expect(model.firstFreeRange(day, from: 850), (start: 960, end: 1020));
-      expect(model.firstFreeRange(day, from: 300), (start: 540, end: 600));
-      expect(model.firstFreeRange(day, from: 1200), (start: 540, end: 600));
+      expect(model.firstFreeRange(day, from: 840), (start: 840, end: 855));
+      // 14:10 rounds up to 14:15.
+      expect(model.firstFreeRange(day, from: 850), (start: 855, end: 870));
+      // Each slot from 15:00 meets item-2 until it ends.
+      expect(model.firstFreeRange(day, from: 900), (start: 960, end: 975));
+      expect(model.firstFreeRange(day, from: 300), (start: 540, end: 555));
+      expect(model.firstFreeRange(day, from: 1200), (start: 540, end: 555));
     });
   });
 }

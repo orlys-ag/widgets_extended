@@ -498,10 +498,10 @@ void main() {
 
     await tester.tap(find.byKey(dayCellKey(sunday)));
     await tester.pumpAndSettle();
-    expect(addButtonsOf(dayListEmptyKey(sunday)), findsNothing);
+    expect(addButtonsOf(dayListGapKey(sunday, 0)), findsNothing);
     await tester.tap(find.byKey(dayCellKey(thursday)));
     await tester.pumpAndSettle();
-    expect(addButtonsOf(dayListEmptyKey(thursday)), findsOneWidget);
+    expect(addButtonsOf(dayListGapKey(thursday, 0)), findsOneWidget);
   });
 
   testWidgets("K13 in Agenda the add button of a gap now falls in adds from "

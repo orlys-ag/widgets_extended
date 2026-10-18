@@ -170,8 +170,8 @@ void main() {
       textColorOf(
         tester,
         find.descendant(
-          of: find.byKey(dayListEmptyKey(DateTime(2026, 4, 25))),
-          matching: find.text("No items"),
+          of: find.byKey(dayListGapKey(DateTime(2026, 4, 25), 0)),
+          matching: find.text("00:00"),
         ),
       ),
       HarborColors.textMuted,

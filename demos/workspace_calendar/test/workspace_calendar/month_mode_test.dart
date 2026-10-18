@@ -716,7 +716,7 @@ void main() {
 
   testWidgets(
     "M11a a long press on a day selects it and creates at the first free "
-    "hour",
+    "slot",
     (tester) async {
       await pumpMonth(
         tester,
@@ -727,7 +727,7 @@ void main() {
       await pickTask(tester);
       expect(find.text("2026-04-22"), findsOneWidget);
       expect(dropdownShows("Start", "01:00"), findsOneWidget);
-      expect(dropdownShows("End", "02:00"), findsOneWidget);
+      expect(dropdownShows("End", "01:15"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(22)]);
@@ -735,19 +735,18 @@ void main() {
   );
 
   testWidgets(
-    "M11b a day free only before the hours' end creates 30 minutes to the "
-    "end",
+    "M11b a day free only in the hours' last slot creates that slot",
     (tester) async {
       await pumpMonth(
         tester,
         editing: true,
         seed: <Map<String, Object?>>[
-          taskJson("Long", april(22), 0, 23 * 60 + 30),
+          taskJson("Long", april(22), 0, 23 * 60 + 45),
         ],
       );
       await longPressDay(tester, april(22));
       await pickTask(tester);
-      expect(dropdownShows("Start", "23:30"), findsOneWidget);
+      expect(dropdownShows("Start", "23:45"), findsOneWidget);
       expect(dropdownShows("End", "24:00"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
@@ -755,7 +754,7 @@ void main() {
   );
 
   testWidgets(
-    "M11c a day with no free start creates at the hours' first hour",
+    "M11c a day with no free start creates at the hours' first slot",
     (tester) async {
       await pumpMonth(
         tester,
@@ -765,7 +764,7 @@ void main() {
       await longPressDay(tester, april(22));
       await pickTask(tester);
       expect(dropdownShows("Start", "00:00"), findsOneWidget);
-      expect(dropdownShows("End", "01:00"), findsOneWidget);
+      expect(dropdownShows("End", "00:15"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },

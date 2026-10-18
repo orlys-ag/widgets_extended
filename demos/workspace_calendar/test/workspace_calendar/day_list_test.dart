@@ -25,6 +25,25 @@ Finder cardFinder(String id) {
   return find.byKey(itemCardKey(id));
 }
 
+/// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
+/// closes it.
+Future<void> pickHours(WidgetTester tester, int start, int end) async {
+  await openBar(tester);
+  tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
+    RangeValues(start.toDouble(), end.toDouble()),
+  );
+  await tester.pumpAndSettle();
+  await closeBar(tester);
+}
+
+/// Opens the calendar bar, flips its AM/PM switch and closes it.
+Future<void> flipHourFormat(WidgetTester tester) async {
+  await openBar(tester);
+  await tester.tap(find.byKey(hourLabelFormatKey));
+  await tester.pumpAndSettle();
+  await closeBar(tester);
+}
+
 Finder dayFinder(DateTime day) {
   return find.byKey(dayCellKey(day));
 }
@@ -41,18 +60,29 @@ ShownItem entryAt(String id, int start, int end) {
   );
 }
 
-/// [dayListRowsOf] of [entries] on April 22 in [hours], each item as its
-/// id and each gap as its start and end.
+/// [dayListRowsOf] of [entries] on April 22 in [hours], in edit mode
+/// unless not [editable], each item as its id, each gap as its start and
+/// end, and each banner as "before" or "after" and its count.
 List<Object> rowsOf(
   List<ShownItem> entries, {
   DayHours hours = DayHours.allDay,
+  bool editable = true,
 }) {
   return <Object>[
-    for (final row in dayListRowsOf(DateTime(2026, 4, 22), entries, hours))
+    for (final row in dayListRowsOf(
+      DateTime(2026, 4, 22),
+      entries,
+      hours,
+      editable: editable,
+    ))
       switch (row) {
         DayListItem(:final entry) => entry.id,
         DayListGap(:final start, :final end) => (start, end),
-        _ => throw StateError("$row is not an item or a gap."),
+        DayListHidden(:final count, :final above) => (
+          above ? "before" : "after",
+          count,
+        ),
+        _ => throw StateError("$row is not an item, a gap or a banner."),
       },
   ];
 }
@@ -392,8 +422,8 @@ void main() {
         (13 * 60, 24 * 60),
       ],
     );
-    // Only the calendar's hours have gaps, so an item before or after them
-    // makes none.
+    // Only the calendar's hours have gaps, so an item reaching past them
+    // makes none past them, and one wholly outside them none at all.
     const office = DayHours(8 * 60, 18 * 60);
     expect(
       rowsOf(<ShownItem>[
@@ -407,13 +437,46 @@ void main() {
         entryAt("a", 6 * 60, 7 * 60),
         entryAt("b", 19 * 60, 20 * 60),
       ], hours: office),
-      <Object>["a", (8 * 60, 18 * 60), "b"],
+      <Object>[("before", 1), (8 * 60, 18 * 60), ("after", 1)],
     );
   });
 
+  test("L18 an item wholly outside the hours has no row: a banner first "
+      "counts those before them and one last those after them, in edit "
+      "mode and out of it, and in edit mode a day with no item inside the "
+      "hours has one gap row across them", () {
+    const office = DayHours(8 * 60, 18 * 60);
+    final entries = <ShownItem>[
+      entryAt("a", 6 * 60, 7 * 60),
+      entryAt("b", 7 * 60, 8 * 60),
+      entryAt("c", 7 * 60, 9 * 60),
+      entryAt("e", 12 * 60, 13 * 60),
+      entryAt("d", 18 * 60, 19 * 60),
+    ];
+    expect(rowsOf(entries, hours: office, editable: false), <Object>[
+      ("before", 2),
+      "c",
+      "e",
+      ("after", 1),
+    ]);
+    expect(rowsOf(entries, hours: office), <Object>[
+      ("before", 2),
+      "c",
+      (9 * 60, 12 * 60),
+      "e",
+      (13 * 60, 18 * 60),
+      ("after", 1),
+    ]);
+    expect(rowsOf(const <ShownItem>[], hours: office), <Object>[
+      (8 * 60, 18 * 60),
+    ]);
+    expect(rowsOf(const <ShownItem>[], editable: false), isEmpty);
+  });
+
   testWidgets("L7 a card sits right of its start time over a chip of its "
-      "length, and shows no time itself, and a gap between the items is a "
-      "dashed row at its start, all in the hour label format", (tester) async {
+      "length behind an hourglass, and shows no time itself, and a gap "
+      "between the items is a dashed row at its start, all in the hour label "
+      "format", (tester) async {
     await pumpCalendar(tester, editing: true);
     await tester.tap(dayFinder(DateTime(2026, 4, 22)));
     await tester.pumpAndSettle();
@@ -431,6 +494,15 @@ void main() {
     expect(inside(time, "10:00"), findsNothing);
     expect(tester.getRect(chip).top, greaterThan(start.bottom));
     expect(inside(chip, "30m"), findsOneWidget);
+    final hourglass = find.descendant(
+      of: chip,
+      matching: find.byIcon(Icons.hourglass_empty),
+    );
+    expect(hourglass, findsOneWidget);
+    expect(
+      tester.getRect(hourglass).right,
+      lessThanOrEqualTo(tester.getRect(inside(chip, "30m")).left),
+    );
     expect(
       tester.getRect(time).right,
       lessThanOrEqualTo(tester.getRect(card).left),
@@ -554,9 +626,10 @@ void main() {
     expect(headerTop(tester, today), 0.0);
   });
 
-  testWidgets("L13 a gap's add button opens the create flow from its start "
-      "to an hour later or its end, whichever is first, and an empty day's "
-      "at its first free hour", (tester) async {
+  testWidgets("L13 a gap's add button opens the create flow on the gap's "
+      "first slot, and an empty day's on the hours' first slot", (
+    tester,
+  ) async {
     final day = DateTime(2026, 4, 22);
     final api = MockCalendarApi(
       seed: <Map<String, Object?>>[
@@ -593,21 +666,22 @@ void main() {
     await addFrom(find.byKey(dayListGapKey(day, 10 * 60)));
     expect(find.text("2026-04-22"), findsOneWidget);
     expect(shows("Start", "10:00"), findsOneWidget);
-    expect(shows("End", "10:30"), findsOneWidget);
+    expect(shows("End", "10:15"), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, "Cancel"));
     await tester.pumpAndSettle();
 
     // The gap after the last item, to the end of the day.
     await addFrom(find.byKey(dayListGapKey(day, 11 * 60 + 15)));
     expect(shows("Start", "11:15"), findsOneWidget);
-    expect(shows("End", "12:15"), findsOneWidget);
+    expect(shows("End", "11:30"), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, "Cancel"));
     await tester.pumpAndSettle();
 
-    await addFrom(find.byKey(dayListEmptyKey(DateTime(2026, 4, 23))));
+    // A day without items: one gap across the hours.
+    await addFrom(find.byKey(dayListGapKey(DateTime(2026, 4, 23), 0)));
     expect(find.text("2026-04-23"), findsOneWidget);
     expect(shows("Start", "00:00"), findsOneWidget);
-    expect(shows("End", "01:00"), findsOneWidget);
+    expect(shows("End", "00:15"), findsOneWidget);
   });
 
   testWidgets("L14 the gap rows follow the calendar's hours as the "
@@ -652,10 +726,10 @@ void main() {
     await tester.pumpAndSettle();
     // Setup sanity: the day shows.
     expect(find.byKey(dayListHeaderKey(empty)), findsOneWidget);
-    expect(find.byKey(dayListEmptyKey(empty)), findsNothing);
+    expect(find.byKey(dayListGapKey(empty, 0)), findsNothing);
 
     await toggleEditMode(tester);
-    expect(find.byKey(dayListEmptyKey(empty)), findsOneWidget);
+    expect(find.byKey(dayListGapKey(empty, 0)), findsOneWidget);
     await tester.tap(dayFinder(day));
     await tester.pumpAndSettle();
     expect(menu, findsOneWidget);
@@ -738,5 +812,472 @@ void main() {
     expect(bare.count.fontSize, 12.0);
     expect(bare.count.color, HarborColors.textMuted);
     expect(bare.height, full.height);
+  });
+
+  testWidgets("L19 an item wholly outside the hours leaves the list for a "
+      "soft yellow banner across the row's width, 16 px in from either "
+      "side, that counts it, above "
+      "the cards for those before the hours and below them for those "
+      "after, in the hour format and heard with its day, while the header "
+      "counts every item", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final day = DateTime(2026, 4, 22);
+    final api = MockCalendarApi(
+      seed: <Map<String, Object?>>[
+        taskJson("Early", day, 6 * 60, 7 * 60),
+        taskJson("Mid", day, 10 * 60, 11 * 60),
+        taskJson("Late", day, 19 * 60, 20 * 60),
+        taskJson("Later", day, 21 * 60, 22 * 60),
+      ],
+      latency: harnessLatency,
+    );
+    await pumpCalendar(tester, api: api);
+    await tester.tap(dayFinder(day));
+    await tester.pumpAndSettle();
+    final above = find.byKey(dayListHiddenKey(day, above: true));
+    final below = find.byKey(dayListHiddenKey(day, above: false));
+    Finder inside(Finder banner, Finder finder) {
+      return find.descendant(of: banner, matching: finder);
+    }
+
+    // Setup sanity: every item shows inside the whole day's hours.
+    expect(cardFinder("item-1"), findsOneWidget);
+
+    await openBar(tester);
+    tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
+      const RangeValues(8.0, 18.0),
+    );
+    await tester.pump();
+    await tester.pump(oneFrame);
+    // Leaving, Early shows its own start, with no strip.
+    expect(
+      find.descendant(
+        of: find.byKey(dayListTimeKey("item-1")),
+        matching: find.text("06:00"),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(itemCardStartsAtKey("item-1")), findsNothing);
+    await tester.pumpAndSettle();
+    await closeBar(tester);
+    expect(cardFinder("item-1"), findsNothing);
+    expect(cardFinder("item-3"), findsNothing);
+    expect(cardFinder("item-4"), findsNothing);
+    final mid = tester.getRect(cardFinder("item-2"));
+    expect(
+      inside(above, find.text("1 more item before 08:00")),
+      findsOneWidget,
+    );
+    expect(
+      inside(below, find.text("2 more items after 18:00")),
+      findsOneWidget,
+    );
+    expect(inside(above, find.byIcon(Icons.keyboard_arrow_up)), findsOneWidget);
+    expect(
+      inside(below, find.byIcon(Icons.keyboard_arrow_down)),
+      findsOneWidget,
+    );
+    final box = inside(above, find.byType(DecoratedBox)).first;
+    final decoration =
+        tester.widget<DecoratedBox>(box).decoration as BoxDecoration;
+    expect(decoration.color, HarborColors.notice);
+    final list = tester.getRect(find.byType(DayList));
+    expect(tester.getRect(box).left, list.left + dayListGutter);
+    expect(tester.getRect(box).right, list.right - dayListGutter);
+    expect(tester.getRect(above).bottom, lessThan(mid.top));
+    expect(tester.getRect(below).top, greaterThan(mid.bottom));
+    expect(
+      find.descendant(
+        of: find.byKey(dayListHeaderKey(day)),
+        matching: find.text("4 items"),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel("Wednesday, April 22, 1 more item before 08:00"),
+      findsOneWidget,
+    );
+
+    await flipHourFormat(tester);
+    expect(inside(above, find.text("1 more item before 8 AM")), findsOneWidget);
+
+    await pickHours(tester, 0, 24);
+    expect(cardFinder("item-1"), findsOneWidget);
+    expect(above, findsNothing);
+    expect(below, findsNothing);
+    semantics.dispose();
+  });
+
+  testWidgets("L20 in edit mode a day without items shows one gap row "
+      "across the hours, named by their start in the hour format, and only "
+      "its header says it has no items", (tester) async {
+    final empty = DateTime(2026, 4, 25);
+    await pumpCalendar(tester, editing: true);
+    await tester.tap(dayFinder(empty));
+    await tester.pumpAndSettle();
+    Finder labelOf(int start, String label) {
+      return find.descendant(
+        of: find.byKey(dayListGapKey(empty, start)),
+        matching: find.text(label),
+      );
+    }
+
+    expect(labelOf(0, "00:00"), findsOneWidget);
+    expect(labelOf(0, "No items"), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(dayListHeaderKey(empty)),
+        matching: find.text("No items"),
+      ),
+      findsOneWidget,
+    );
+
+    await pickHours(tester, 8, 18);
+    expect(labelOf(8 * 60, "08:00"), findsOneWidget);
+    await flipHourFormat(tester);
+    expect(labelOf(8 * 60, "8 AM"), findsOneWidget);
+  });
+
+  testWidgets("L21 a red line marks the clock's time over its day's rows, "
+      "from the cards to the list's right edge: across a running item's "
+      "card as far as the item has run, in the gap under the last row "
+      "started by then otherwise, and above the first row before any, the "
+      "time in a pill hugging it 8 px in from the list's left edge, the line "
+      "starting at the pill's end, in the hour format; "
+      "never outside the hours, nor on another day", (tester) async {
+    final day = DateTime(2026, 4, 22);
+    var now = DateTime(2026, 4, 22, 10, 15);
+    final api = MockCalendarApi(
+      seed: <Map<String, Object?>>[
+        taskJson("First", day, 10 * 60, 11 * 60),
+        taskJson("Second", day, 13 * 60, 14 * 60),
+        taskJson("Third", DateTime(2026, 4, 23), 9 * 60, 10 * 60),
+      ],
+      latency: harnessLatency,
+    );
+    await pumpCalendar(
+      tester,
+      api: api,
+      pinsToday: false,
+      clock: () {
+        return now;
+      },
+    );
+    final line = find.byKey(dayListNowKey);
+    double lineY() {
+      return tester.getRect(line).center.dy;
+    }
+
+    Rect card(String id) {
+      return tester.getRect(cardFinder(id));
+    }
+
+    Future<void> setNow(int hour, int minute) async {
+      now = DateTime(2026, 4, 22, hour, minute);
+      await tester.pump(const Duration(minutes: 1));
+    }
+
+    // A quarter of the way through First.
+    expect(line, findsOneWidget);
+    expect(
+      lineY(),
+      moreOrLessEquals(card("item-1").top + card("item-1").height / 4.0),
+    );
+    expect(
+      find.descendant(of: line, matching: find.text("10:15")),
+      findsOneWidget,
+    );
+    final list = tester.getRect(find.byType(DayList));
+    expect(tester.getRect(line).left, list.left);
+    expect(tester.getRect(line).right, list.right);
+    final label = find.descendant(of: line, matching: find.text("10:15"));
+    final pill = tester.getRect(
+      find.ancestor(of: label, matching: find.byType(DecoratedBox)),
+    );
+    expect(pill.left, list.left + 8.0);
+    final text = tester.renderObject<RenderParagraph>(label);
+    expect(
+      pill.width,
+      moreOrLessEquals(text.getMaxIntrinsicWidth(double.infinity) + 12.0),
+    );
+    expect(
+      tester
+          .getRect(
+            find.descendant(of: line, matching: find.byType(CustomPaint)),
+          )
+          .left,
+      pill.right,
+    );
+
+    await setNow(12, 0);
+    expect(lineY(), moreOrLessEquals(card("item-1").bottom + 6.0));
+
+    await setNow(9, 0);
+    expect(lineY(), moreOrLessEquals(card("item-1").top - 6.0));
+
+    // Second ends at 14:00, so the line passes under it.
+    await setNow(14, 0);
+    expect(lineY(), moreOrLessEquals(card("item-2").bottom + 6.0));
+    await flipHourFormat(tester);
+    expect(
+      find.descendant(of: line, matching: find.text("2 PM")),
+      findsOneWidget,
+    );
+
+    await pickHours(tester, 8, 18);
+    await setNow(18, 1);
+    expect(line, findsNothing);
+    await setNow(7, 59);
+    expect(line, findsNothing);
+    await setNow(8, 0);
+    expect(line, findsOneWidget);
+
+    // The clock's next day: the line moves to that day's block alone.
+    now = DateTime(2026, 4, 23, 8, 0);
+    await tester.pump(const Duration(minutes: 1));
+    expect(line, findsOneWidget);
+    expect(lineY(), moreOrLessEquals(card("item-3").top - 6.0));
+  });
+
+  testWidgets("L22 a card keeps 8 px left of its icon and right of its menu, "
+      "2 px above its title row and 8 px under its summaries, the title in "
+      "14 px type on a row as tall as its compact menu button, 40 px", (
+    tester,
+  ) async {
+    await pumpCalendar(tester, editing: true);
+    await tester.tap(dayFinder(DateTime(2026, 4, 22)));
+    await tester.pumpAndSettle();
+    final card = cardFinder(standupId);
+    final title = find.descendant(
+      of: card,
+      matching: find.text("Daily standup"),
+    );
+    final padding = tester.widget<Padding>(
+      find.descendant(of: card, matching: find.byType(Padding)).first,
+    );
+    expect(padding.padding, const EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 8.0));
+    expect(
+      tester.renderObject<RenderParagraph>(title).text.style!.fontSize,
+      14.0,
+    );
+    expect(
+      tester
+          .getSize(find.ancestor(of: title, matching: find.byType(Row)).first)
+          .height,
+      40.0,
+    );
+  });
+
+  testWidgets("L23 a header's background spans the list's width, its title "
+      "16 px in, and a row's time column starts and its card ends 16 px in "
+      "from the list's sides", (tester) async {
+    final day = DateTime(2026, 4, 22);
+    await pumpCalendar(tester);
+    await tester.tap(dayFinder(day));
+    await tester.pumpAndSettle();
+    final list = tester.getRect(find.byType(DayList));
+    final header = tester.getRect(find.byKey(dayListHeaderKey(day)));
+    expect(header.left, list.left);
+    expect(header.right, list.right);
+    expect(
+      tester.getRect(find.text("Tomorrow, April 22")).left,
+      list.left + dayListGutter,
+    );
+    expect(
+      tester.getRect(find.byKey(dayListTimeKey(standupId))).left,
+      list.left + dayListGutter,
+    );
+    expect(
+      tester.getRect(cardFinder(standupId)).right,
+      list.right - dayListGutter,
+    );
+  });
+
+  testWidgets("L24 an item reaching past the hours shows in its time column "
+      "the later of its start and theirs and its whole length, and "
+      "states its own start in a yellow strip across its card's top where "
+      "it starts before them, and its end in one across the card's bottom "
+      "where it ends after them, in the hour format", (tester) async {
+    final day = DateTime(2026, 4, 22);
+    final api = MockCalendarApi(
+      seed: <Map<String, Object?>>[
+        taskJson("Early", day, 7 * 60 + 30, 9 * 60),
+        taskJson("Late", day, 17 * 60, 19 * 60 + 30),
+        taskJson("Long", DateTime(2026, 4, 23), 6 * 60, 20 * 60),
+      ],
+      latency: harnessLatency,
+    );
+    await pumpCalendar(tester, api: api);
+    await tester.tap(dayFinder(day));
+    await tester.pumpAndSettle();
+    Finder time(String id, String text) {
+      return find.descendant(
+        of: find.byKey(dayListTimeKey(id)),
+        matching: find.text(text),
+      );
+    }
+
+    Finder length(String id, String text) {
+      return find.descendant(
+        of: find.byKey(dayListDurationKey(id)),
+        matching: find.text(text),
+      );
+    }
+
+    Finder onCard(String id, String text) {
+      return find.descendant(of: cardFinder(id), matching: find.text(text));
+    }
+
+    // Setup sanity: inside the whole day's hours nothing is cut.
+    expect(time("item-1", "07:30"), findsOneWidget);
+
+    await pickHours(tester, 8, 18);
+    expect(time("item-1", "08:00"), findsOneWidget);
+    expect(length("item-1", "1h 30m"), findsOneWidget);
+    expect(onCard("item-1", "Starts at 07:30"), findsOneWidget);
+    expect(find.byKey(itemCardEndsAtKey("item-1")), findsNothing);
+    expect(time("item-2", "17:00"), findsOneWidget);
+    expect(length("item-2", "2h 30m"), findsOneWidget);
+    expect(onCard("item-2", "Ends at 19:30"), findsOneWidget);
+    expect(find.byKey(itemCardStartsAtKey("item-2")), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(dayListTimeKey("item-1")),
+        matching: find.byIcon(Icons.keyboard_arrow_up),
+      ),
+      findsNothing,
+    );
+
+    // Long is cut at both ends.
+    final card = tester.getRect(cardFinder("item-3"));
+    const strip = ItemCard.stripHeight;
+    expect(
+      tester.getRect(find.byKey(itemCardStartsAtKey("item-3"))),
+      rectMoreOrLessEquals(
+        Rect.fromLTWH(card.left, card.top, card.width, strip),
+      ),
+    );
+    expect(
+      tester.getRect(find.byKey(itemCardEndsAtKey("item-3"))),
+      rectMoreOrLessEquals(
+        Rect.fromLTWH(card.left, card.bottom - strip, card.width, strip),
+      ),
+    );
+    for (final key in <Key>[
+      itemCardStartsAtKey("item-3"),
+      itemCardEndsAtKey("item-3"),
+    ]) {
+      final box = tester.widget<DecoratedBox>(find.byKey(key));
+      expect((box.decoration as BoxDecoration).color, HarborColors.notice);
+    }
+
+    await flipHourFormat(tester);
+    expect(time("item-1", "8 AM"), findsOneWidget);
+    expect(onCard("item-1", "Starts at 7:30 AM"), findsOneWidget);
+    expect(onCard("item-2", "Ends at 7:30 PM"), findsOneWidget);
+  });
+
+  testWidgets("L25 across a card the hours cut, the red line marks the "
+      "item's minutes inside them between the card's strips, and stays on "
+      "the card at the hours' end while the item runs past it", (tester) async {
+    final day = DateTime(2026, 4, 22);
+    var now = DateTime(2026, 4, 22, 8, 30);
+    final api = MockCalendarApi(
+      seed: <Map<String, Object?>>[
+        taskJson("Early", day, 7 * 60, 9 * 60),
+        taskJson("Late", day, 17 * 60, 19 * 60),
+      ],
+      latency: harnessLatency,
+    );
+    await pumpCalendar(
+      tester,
+      api: api,
+      pinsToday: false,
+      clock: () {
+        return now;
+      },
+    );
+    await pickHours(tester, 8, 18);
+    final line = find.byKey(dayListNowKey);
+    double lineY() {
+      return tester.getRect(line).center.dy;
+    }
+
+    Future<void> setNow(int hour, int minute) async {
+      now = DateTime(2026, 4, 22, hour, minute);
+      await tester.pump(const Duration(minutes: 1));
+    }
+
+    const strip = ItemCard.stripHeight;
+    // Early's hour inside the hours is 8:00 to 9:00, under its top strip.
+    final early = tester.getRect(cardFinder("item-1"));
+    expect(
+      lineY(),
+      moreOrLessEquals(early.top + strip + (early.height - strip) / 2.0),
+    );
+
+    // Late's is 17:00 to 18:00, over its bottom strip.
+    await setNow(17, 30);
+    final late = tester.getRect(cardFinder("item-2"));
+    expect(lineY(), moreOrLessEquals(late.top + (late.height - strip) / 2.0));
+    await setNow(18, 0);
+    expect(lineY(), moreOrLessEquals(late.bottom - strip));
+  });
+
+  testWidgets("L26 a pending card's progress indicator stays 8 px down its "
+      "title row under a strip stating its start", (tester) async {
+    final item = CalendarItem.fromJson(<String, Object?>{
+      ...taskJson("Early", DateTime(2026, 4, 22), 7 * 60, 9 * 60),
+      "id": "early",
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: SizedBox(
+            width: 300.0,
+            child: ItemCard(
+              entry: ShownItem(item, pending: true),
+              onEdit: null,
+              onDelete: null,
+              startsAt: "07:00",
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      tester.getRect(find.byType(CircularProgressIndicator)).top,
+      tester.getRect(find.byKey(itemCardStartsAtKey("early"))).bottom + 8.0,
+    );
+  });
+
+  testWidgets("L27 a card's strip keeps its height at twice the text size", (
+    tester,
+  ) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final item = CalendarItem.fromJson(<String, Object?>{
+      ...taskJson("Early", DateTime(2026, 4, 22), 7 * 60, 9 * 60),
+      "id": "early",
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: SizedBox(
+            width: 300.0,
+            child: ItemCard(
+              entry: ShownItem(item, pending: false),
+              onEdit: null,
+              onDelete: null,
+              startsAt: "07:00",
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      tester.getSize(find.byKey(itemCardStartsAtKey("early"))).height,
+      ItemCard.stripHeight,
+    );
   });
 }

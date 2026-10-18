@@ -289,7 +289,7 @@ void main() {
         CreateRange(
           day: thursday,
           startMinute: 600,
-          endMinute: 660,
+          endMinute: 615,
           dayCount: 1,
         ),
       );
@@ -349,7 +349,7 @@ void main() {
         CreateRange(
           day: tuesday,
           startMinute: 8 * 60,
-          endMinute: 9 * 60,
+          endMinute: 8 * 60 + 15,
           dayCount: 1,
         ),
       );

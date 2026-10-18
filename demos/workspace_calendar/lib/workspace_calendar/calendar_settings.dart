@@ -131,6 +131,24 @@ String hourLabel(int minute, HourLabelFormat format) {
   return "$shown:${minutes.toString().padLeft(2, "0")} $half";
 }
 
+/// What a screen reader says for a count of [count] of [day]'s items
+/// before [minute], or after it when [above] is false, naming the minute
+/// in [format]: the timed grid's rows and Agenda's banners outside the
+/// hours alike.
+String hiddenRowLabel(
+  DateTime day,
+  int count,
+  int minute, {
+  required bool above,
+  required HourLabelFormat format,
+}) {
+  final date =
+      "${weekdayNames[weekdayColumn(day)]}, "
+      "${monthNames[day.month - 1]} ${day.day}";
+  final side = above ? "before" : "after";
+  return "$date, ${moreItemsLabel(count)} $side ${hourLabel(minute, format)}";
+}
+
 /// What the calendar bar and the settings sheet choose: whether the
 /// calendar is in [editing] mode, whether the history lock holds past days, [lockPast], and earlier
 /// today too, [lockEarlierToday], the [weekdays] it shows and the one its

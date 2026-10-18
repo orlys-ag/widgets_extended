@@ -281,7 +281,7 @@ void main() {
       type: "Meeting",
       day: "2026-04-21",
       start: "16:00",
-      end: "17:00",
+      end: "16:15",
     );
 
     // A mouse drags at once, the whole move in one event.
@@ -551,7 +551,7 @@ void main() {
       type: "Meeting",
       day: "2026-04-21",
       start: "08:00",
-      end: "09:00",
+      end: "08:15",
     );
 
     final block = tester.getRect(blockFinder(uxFlowId));

@@ -390,14 +390,13 @@ class CalendarModel extends ChangeNotifier {
     return false;
   }
 
-  /// The first free hour of [day] inside [hours]: for each start from the
-  /// hours' start on the [minutesPerSlot] grid, the range from it to an
-  /// hour later or the hours' end, whichever comes first, the first one
-  /// that shares no time, under [itemsConflict], with an item [itemsOn]
-  /// lists for [day], pending ones where they show. With [from], the
-  /// starts begin at the later of it, rounded up to the grid, and the
+  /// The first free slot of [day] inside [hours]: for each start from the
+  /// hours' start on the [minutesPerSlot] grid, the slot from it, the
+  /// first one that shares no time, under [itemsConflict], with an item
+  /// [itemsOn] lists for [day], pending ones where they show. With [from],
+  /// the starts begin at the later of it, rounded up to the grid, and the
   /// hours' start, and only with none free from there at the hours' start.
-  /// With none free, the hours' first hour, which a create the API then
+  /// With none free, the hours' first slot, which a create the API then
   /// refuses for its overlap. The new item's type plays no part:
   /// [itemsConflict] ignores it.
   ({int start, int end}) firstFreeRange(DateTime day, {int? from}) {
@@ -414,7 +413,7 @@ class CalendarModel extends ChangeNotifier {
       }
     }
     return _firstFreeFrom(hours.start, day, shown) ??
-        (start: hours.start, end: math.min(hours.start + 60, hours.end));
+        (start: hours.start, end: hours.start + minutesPerSlot);
   }
 
   /// The first free range of [firstFreeRange]'s search on [day], starting
@@ -430,7 +429,7 @@ class CalendarModel extends ChangeNotifier {
       start <= hours.end - minutesPerSlot;
       start += minutesPerSlot
     ) {
-      final end = math.min(start + 60, hours.end);
+      final end = start + minutesPerSlot;
       final ItemShape shape = (
         type: CalendarItemType.task,
         firstDay: number,

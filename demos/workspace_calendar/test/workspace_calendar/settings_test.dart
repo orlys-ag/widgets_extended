@@ -574,6 +574,25 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets("H9 the bar's hours read as the AM/PM switch says, the "
+      "whole day as 12 AM - 12 AM, and its slider has no labels over its "
+      "thumbs, which a screen reader hears in that format", (tester) async {
+    await pumpCalendar(tester);
+    await openBar(tester);
+    RangeSlider slider() {
+      return tester.widget<RangeSlider>(find.byKey(hoursSliderKey));
+    }
+
+    expect(slider().labels, isNull);
+    expect(slider().semanticFormatterCallback!(8.0), "08:00");
+    await tester.tap(find.byKey(hourLabelFormatKey));
+    await tester.pumpAndSettle();
+    expect(find.textContaining("12 AM - 12 AM"), findsOneWidget);
+    expect(slider().semanticFormatterCallback!(8.0), "8 AM");
+    await setHours(tester, 8, 18);
+    expect(find.textContaining("8 AM - 6 PM"), findsOneWidget);
+  });
+
   testWidgets("W1 hiding the weekends leaves the week's five weekdays", (
     tester,
   ) async {

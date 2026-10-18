@@ -372,6 +372,11 @@ String dayTitle(DateTime day, DateTime today) {
   return "$name, $date";
 }
 
+/// "1 more item" or "N more items".
+String moreItemsLabel(int count) {
+  return count == 1 ? "1 more item" : "$count more items";
+}
+
 /// "No items", "1 item" or "N items".
 String itemCountLabel(int count) {
   if (count == 0) {

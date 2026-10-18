@@ -123,7 +123,7 @@ void main() {
     await tester.pump(latency);
     await tester.pumpAndSettle();
     expect(find.text("Sunday, June 21"), findsOneWidget);
-    expect(find.byKey(dayListEmptyKey(DateTime(2026, 6, 21))), findsOneWidget);
+    expect(find.byKey(dayListGapKey(DateTime(2026, 6, 21), 0)), findsOneWidget);
     await tester.tap(dayFinder(DateTime(2026, 6, 4)));
     await tester.pumpAndSettle();
     expect(

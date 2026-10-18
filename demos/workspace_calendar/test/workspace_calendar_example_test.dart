@@ -154,7 +154,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byKey(dayListEmptyKey(DateTime(2026, 4, 25))), findsOneWidget);
+    expect(find.byKey(dayListGapKey(DateTime(2026, 4, 25), 0)), findsOneWidget);
     expect(
       tester.getSemantics(dayFinder(2026, 4, 25)).label,
       startsWith("Saturday, April 25"),
@@ -634,4 +634,14 @@ void main() {
       expect(right(find.byKey(hourLabelFormatKey)), end);
     });
   }
+
+  testWidgets("E22 the bar's switches show at three quarters of their "
+      "Material size, 39 by 30 px", (tester) async {
+    await pumpCalendar(tester);
+    await openBar(tester);
+    final edit = tester.getRect(find.byKey(editModeKey));
+    final twelveHour = tester.getRect(find.byKey(hourLabelFormatKey));
+    expect(edit.size, const Size(39.0, 30.0));
+    expect(twelveHour.size, const Size(39.0, 30.0));
+  });
 }
