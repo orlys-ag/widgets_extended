@@ -113,6 +113,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_bar.dart';
 import 'workspace_calendar/calendar_model.dart';
+import 'workspace_calendar/calendar_schema.dart';
 import 'workspace_calendar/calendar_settings.dart';
 import 'workspace_calendar/day_cell.dart';
 import 'workspace_calendar/day_list.dart';
@@ -1095,6 +1096,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                     ),
                   );
                 },
+                maxDayCount: maxDayCount,
                 // The week strip names Day's one day.
                 showsDayHeader: _mode != _CalendarMode.day,
               ),

@@ -229,8 +229,9 @@ TypeSchema schemaOf(CalendarItemType type) {
 const int maxDayCount = 366;
 
 /// Whether an item may cover [dayCount] days: 1 to [maxDayCount]. The one
-/// test of that range, which [validateItemJson] and the week grid's drop
-/// check both read.
+/// test of that range, which [validateItemJson] reads; the composition
+/// passes [maxDayCount] to the timed grid, whose drop check holds a drop
+/// to it.
 bool isAllowedDayCount(int dayCount) {
   return dayCount >= 1 && dayCount <= maxDayCount;
 }

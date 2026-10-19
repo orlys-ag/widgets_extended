@@ -19,7 +19,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_item.dart';
 import 'calendar_model.dart';
-import 'calendar_schema.dart';
+import 'calendar_schema.dart' hide maxDayCount;
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 import 'history_lock.dart';
@@ -800,6 +800,7 @@ class TimedGrid extends StatefulWidget {
     required this.onOpenItem,
     required this.onCreate,
     this.onZoom,
+    this.maxDayCount,
     this.showsDayHeader = true,
   }) : assert(dayCount >= 1);
 
@@ -842,6 +843,10 @@ class TimedGrid extends StatefulWidget {
   /// the grid shows once [settings] bring them; null for a grid no pinch
   /// zooms.
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
+
+  /// The most days a drop may give an item, which it refuses past them;
+  /// null for no limit.
+  final int? maxDayCount;
 
   @override
   State<TimedGrid> createState() {
@@ -1666,7 +1671,9 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     }
     final time = entry.item.time;
     final converted = shapeFromSpan(time, from, span, _tracks);
-    if (!isAllowedDayCount(converted.dayCount) ||
+    final maxDays = widget.maxDayCount;
+    if (converted.dayCount < 1 ||
+        (maxDays != null && converted.dayCount > maxDays) ||
         !_lock.value.admits(time, converted)) {
       return false;
     }
