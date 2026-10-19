@@ -15,12 +15,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_model.dart';
-import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 import 'history_lock.dart';
 import 'item_card.dart';

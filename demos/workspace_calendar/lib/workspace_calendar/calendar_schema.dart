@@ -8,7 +8,8 @@
 /// the type's payload.
 library;
 
-import 'calendar_data.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
 enum CalendarItemType {
   task("task", "Task"),
@@ -223,11 +224,6 @@ TypeSchema schemaOf(CalendarItemType type) {
       return _deadlineSchema;
   }
 }
-
-/// The length of one slot, and the step every item time is a multiple of.
-const int minutesPerSlot = 15;
-
-const int minutesPerDay = 1440;
 
 /// The most days one item may cover.
 const int maxDayCount = 366;

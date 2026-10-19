@@ -3,8 +3,8 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
-import 'calendar_data.dart';
 import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 

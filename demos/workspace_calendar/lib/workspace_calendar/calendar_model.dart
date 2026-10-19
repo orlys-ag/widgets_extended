@@ -5,14 +5,17 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:widgets_extended/calendar/calendar.dart'
+    show CalendarLoadStatus;
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 import 'calendar_api.dart';
-import 'calendar_data.dart';
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 
-enum CalendarLoadStatus { loading, failed, ready }
+export 'package:widgets_extended/calendar/calendar.dart'
+    show CalendarLoadStatus;
 
 /// What a write on a locked item reports in place of sending anything.
 const String _lockedMessage = "This item has a change in progress.";

@@ -2,7 +2,8 @@
 /// calendar opens on.
 library;
 
-import 'calendar_data.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+
 import 'calendar_schema.dart';
 
 /// A task kept from the original demo: [day] counts whole days from today,

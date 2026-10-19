@@ -5,8 +5,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
-import 'calendar_data.dart';
 import 'calendar_model.dart';
 import 'day_cell.dart';
 

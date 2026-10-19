@@ -106,13 +106,13 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_bar.dart';
-import 'workspace_calendar/calendar_data.dart';
 import 'workspace_calendar/calendar_model.dart';
-import 'workspace_calendar/calendar_schema.dart';
 import 'workspace_calendar/calendar_settings.dart';
 import 'workspace_calendar/day_cell.dart';
 import 'workspace_calendar/day_list.dart';

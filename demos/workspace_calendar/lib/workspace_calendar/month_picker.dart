@@ -6,8 +6,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
-import 'calendar_data.dart';
 import 'day_cell.dart';
 
 /// The key of the month picker's cell showing [month].

@@ -2,7 +2,7 @@
 /// the clock, so only what does not depend on the date is checked.
 library;
 
-import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:workspace_calendar/main.dart';

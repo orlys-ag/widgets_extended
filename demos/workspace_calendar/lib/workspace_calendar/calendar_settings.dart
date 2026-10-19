@@ -10,62 +10,20 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-
-import 'calendar_data.dart';
-import 'calendar_schema.dart';
-
-/// The part of each day the calendar shows and schedules in: from [start]
-/// to [end] minutes after midnight, in whole slots.
-@immutable
-class DayHours {
-  const DayHours(this.start, this.end)
-    : assert(start >= 0 && start % minutesPerSlot == 0),
-      assert(end <= minutesPerDay && end % minutesPerSlot == 0),
-      assert(start < end);
-
-  /// The whole day, 00:00 to 24:00.
-  static const DayHours allDay = DayHours(0, minutesPerDay);
-
-  final int start;
-  final int end;
-
-  /// The slots from [start] to [end].
-  int get slotCount {
-    return (end - start) ~/ minutesPerSlot;
-  }
-
-  /// Whether the minutes [from] to [to] lie inside these hours.
-  bool contains(int from, int to) {
-    return from >= start && to <= end;
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is DayHours && other.start == start && other.end == end;
-  }
-
-  @override
-  int get hashCode {
-    return Object.hash(start, end);
-  }
-
-  @override
-  String toString() {
-    return "DayHours(${clockLabel(start)}-${clockLabel(end)})";
-  }
-}
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
 /// The field errors of an item from [start] to [end] minutes that does not
 /// lie in [hours], keyed as `validateItemJson` keys them: the start when it
 /// does not begin a slot inside them, the end when it does not end one.
 Map<String, String> hoursErrorsOf(int start, int end, DayHours hours) {
   return <String, String>{
-    if (start < hours.start || start > hours.end - minutesPerSlot)
+    if (!hours.holdsStart(start))
       "startMinute":
           "The start is ${clockLabel(hours.start)} to "
           "${clockLabel(hours.end - minutesPerSlot)}, inside the calendar's "
           "hours.",
-    if (end < hours.start + minutesPerSlot || end > hours.end)
+    if (!hours.holdsEnd(end))
       "endMinute":
           "The end is ${clockLabel(hours.start + minutesPerSlot)} to "
           "${clockLabel(hours.end)}, inside the calendar's hours.",

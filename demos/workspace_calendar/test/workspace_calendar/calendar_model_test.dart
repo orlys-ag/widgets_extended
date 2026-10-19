@@ -8,8 +8,8 @@ import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 /// One call the fake API received, completed by the test.
 class FakeCall {
