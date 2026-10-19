@@ -1,5 +1,5 @@
 /// The calendar's settings, in the calendar bar and the settings sheet,
-/// and what they change: the hours the timed grids show and the model
+/// and what they change: the hours the timed grids show and the store
 /// schedules in, the weekdays, and the least size of the grids' cells.
 library;
 

@@ -4,17 +4,18 @@
 /// The form is generated from the item type's schema and checks its input
 /// with the same validator the API runs, and against the history lock,
 /// before it sends anything; the
-/// model holds its days and minutes to the calendar's hours, and the time
+/// store holds its days and minutes to the calendar's hours, and the time
 /// fields offer the minutes inside them.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
 import 'calendar_api.dart';
+import 'calendar_api_source.dart';
 import 'calendar_item.dart';
-import 'calendar_model.dart';
 import 'calendar_schema.dart';
 import 'harbor_theme.dart';
 import 'history_lock.dart';
@@ -26,7 +27,7 @@ import 'timed_grid.dart';
 /// created.
 Future<void> showCreateFlow(
   BuildContext context, {
-  required CalendarModel model,
+  required CalendarStore<ItemPayload> store,
   required CreateRange range,
   required ValueGetter<HistoryLock> lock,
 }) async {
@@ -68,39 +69,39 @@ Future<void> showCreateFlow(
     dayCount: range.dayCount,
     fields: withFieldDefaults(type, const <String, Object?>{}),
   );
-  await _showForm(context, model: model, item: draft, lock: lock);
+  await _showForm(context, store: store, item: draft, lock: lock);
 }
 
 /// Opens the form for the stored item [id], whose Save the history [lock]
 /// that holds then checks; of an item the lock has [ItemHold.started] the
 /// day and the start take no input, and it has no Delete. Does nothing
-/// when the model does not hold it.
+/// when the store does not hold it.
 Future<void> showEditForm(
   BuildContext context, {
-  required CalendarModel model,
+  required CalendarStore<ItemPayload> store,
   required String id,
   required ValueGetter<HistoryLock> lock,
 }) async {
-  final item = model.storedItem(id);
+  final item = store.storedEntry(id);
   if (item == null) {
     return;
   }
-  await _showForm(context, model: model, item: item, lock: lock);
+  await _showForm(context, store: store, item: item, lock: lock);
 }
 
 /// Opens the form for the stored item [id] read-only: it shows the item's
 /// fields, takes no input and has Close for its one action. Does nothing
-/// when the model does not hold it.
+/// when the store does not hold it.
 Future<void> showItemDetails(
   BuildContext context, {
-  required CalendarModel model,
+  required CalendarStore<ItemPayload> store,
   required String id,
 }) async {
-  final item = model.storedItem(id);
+  final item = store.storedEntry(id);
   if (item == null) {
     return;
   }
-  await _showForm(context, model: model, item: item, readOnly: true);
+  await _showForm(context, store: store, item: item, readOnly: true);
 }
 
 /// Asks whether to delete an item. True when Delete was pressed.
@@ -132,7 +133,7 @@ Future<bool> confirmDelete(BuildContext context) async {
 
 Future<void> _showForm(
   BuildContext context, {
-  required CalendarModel model,
+  required CalendarStore<ItemPayload> store,
   required CalendarItem item,
   bool readOnly = false,
   ValueGetter<HistoryLock>? lock,
@@ -142,7 +143,7 @@ Future<void> _showForm(
     barrierDismissible: false,
     builder: (context) {
       return _ItemForm(
-        model: model,
+        store: store,
         item: item,
         readOnly: readOnly,
         lock: lock ?? _noLock,
@@ -160,13 +161,13 @@ HistoryLock _noLock() {
 /// which it only shows when [readOnly].
 class _ItemForm extends StatefulWidget {
   const _ItemForm({
-    required this.model,
+    required this.store,
     required this.item,
     required this.readOnly,
     required this.lock,
   });
 
-  final CalendarModel model;
+  final CalendarStore<ItemPayload> store;
   final CalendarItem item;
 
   /// Whether every control is disabled and Close is the one action.
@@ -336,23 +337,25 @@ class _ItemFormState extends State<_ItemForm> {
     final item = itemFromJson(json);
     try {
       if (_isDraft) {
-        await widget.model.create(item);
+        await widget.store.create(item);
       } else {
-        await widget.model.update(item);
+        await widget.store.update(item);
       }
-    } on CalendarValidationException catch (error) {
+    } on Object catch (error) {
+      final fieldErrors = writeFieldErrors(error);
+      if (fieldErrors == null &&
+          error is! CalendarStoreException &&
+          error is! CalendarApiException) {
+        rethrow;
+      }
       if (mounted) {
         setState(() {
           _saving = false;
-          _errors = error.fieldErrors;
-        });
-      }
-      return;
-    } on CalendarApiException catch (error) {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-          _message = error.message;
+          if (fieldErrors != null) {
+            _errors = fieldErrors;
+          } else {
+            _message = writeFailureMessage(error);
+          }
         });
       }
       return;
@@ -369,7 +372,7 @@ class _ItemFormState extends State<_ItemForm> {
       return;
     }
     Navigator.of(context).pop();
-    widget.model.requestDelete(widget.item.id!);
+    widget.store.requestDelete(widget.item.id!);
   }
 
   Future<void> _pickDay() async {
@@ -498,7 +501,7 @@ class _ItemFormState extends State<_ItemForm> {
     final type = widget.item.type;
     final style = harborTypeStyleOf(type);
     final message = _message;
-    final hours = widget.model.hours;
+    final hours = widget.store.hours;
     final started = _hold == ItemHold.started;
     final fields = <Widget>[
       Row(

@@ -20,7 +20,6 @@ import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_item.dart';
-import 'calendar_model.dart';
 import 'calendar_settings.dart';
 import 'history_lock.dart';
 import 'item_card.dart';
@@ -451,7 +450,7 @@ final class DayListFailed extends DayListRow {
 }
 
 /// The rows of [day]'s block for [entries], the day's items sorted by
-/// start as [CalendarModel.itemsOn] sorts them. An item with no minute
+/// start as [CalendarStore.entriesOn] sorts them. An item with no minute
 /// inside [hours] has no row: a [DayListHidden] first counts those before
 /// the hours, and one last those after them, as the timed grid counts the
 /// items it has no block for. Each other item has its row, and where
@@ -548,7 +547,7 @@ List<DayListRow> dayListRowsOf(
 class DayList extends StatefulWidget {
   const DayList({
     super.key,
-    required this.model,
+    required this.store,
     required this.weekdays,
     required this.format,
     required this.hours,
@@ -563,7 +562,7 @@ class DayList extends StatefulWidget {
     required this.onDelete,
   });
 
-  final CalendarModel model;
+  final CalendarStore<ItemPayload> store;
 
   /// The days the list shows.
   final WeekdaySet weekdays;
@@ -669,7 +668,7 @@ class _DayListState extends State<DayList> {
     super.initState();
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
-    widget.model.addListener(_handleModel);
+    widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _scheduleLanding();
   }
@@ -690,9 +689,9 @@ class _DayListState extends State<DayList> {
   @override
   void didUpdateWidget(DayList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.model != oldWidget.model) {
-      oldWidget.model.removeListener(_handleModel);
-      widget.model.addListener(_handleModel);
+    if (widget.store != oldWidget.store) {
+      oldWidget.store.removeListener(_handleStore);
+      widget.store.addListener(_handleStore);
     }
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);
@@ -703,7 +702,7 @@ class _DayListState extends State<DayList> {
       _rebuildOn(widget.selectedDay);
       return;
     }
-    if (widget.model != oldWidget.model ||
+    if (widget.store != oldWidget.store ||
         widget.hours != oldWidget.hours ||
         widget.editable != oldWidget.editable) {
       _rows = _rowsOf();
@@ -722,13 +721,13 @@ class _DayListState extends State<DayList> {
 
   @override
   void dispose() {
-    widget.model.removeListener(_handleModel);
+    widget.store.removeListener(_handleStore);
     widget.now.removeListener(_handleNow);
     _scroll.dispose();
     super.dispose();
   }
 
-  void _handleModel() {
+  void _handleStore() {
     setState(() {
       _rows = _rowsOf();
     });
@@ -834,26 +833,26 @@ class _DayListState extends State<DayList> {
   }
 
   List<DayListRow> _buildRows() {
-    final model = widget.model;
+    final store = widget.store;
     final rows = <DayListRow>[];
     for (var number = _first; number <= _last; number++) {
       if (!widget.weekdays.containsDay(number)) {
         continue;
       }
       final day = dateOfDayNumber(number);
-      if (!model.isRead(day)) {
+      if (!store.isRead(day)) {
         rows.add(DayListHeader(day, count: null));
         rows.add(
           DayListBody(
             day,
             rows: <DayListRow>[
-              model.readFailed(day) ? DayListFailed(day) : DayListLoading(day),
+              store.readFailed(day) ? DayListFailed(day) : DayListLoading(day),
             ],
           ),
         );
         continue;
       }
-      final entries = model.itemsOn(day);
+      final entries = store.entriesOn(day);
       rows.add(DayListHeader(day, count: entries.length));
       rows.add(
         DayListBody(
@@ -1105,7 +1104,7 @@ class _DayListState extends State<DayList> {
       return;
     }
     final weekdays = widget.weekdays;
-    widget.model.prefetch(
+    widget.store.prefetch(
       dateOfDayNumber(weekdays.weekStartOfDay(first)),
       dateOfDayNumber(weekdays.weekStartOfDay(last) + DateTime.daysPerWeek - 1),
     );
@@ -1114,8 +1113,8 @@ class _DayListState extends State<DayList> {
   /// Reads the shown range again when its read failed, and the days near
   /// the mounted rows.
   void _retry() {
-    if (widget.model.status == CalendarLoadStatus.failed) {
-      widget.model.retry();
+    if (widget.store.status == CalendarLoadStatus.failed) {
+      widget.store.retry();
     }
     _prefetchShown();
   }
@@ -1232,13 +1231,18 @@ class _DayListState extends State<DayList> {
           ),
         );
       case DayListFailed(:final day):
+        // A day a prefetch failed to read, while the shown range is ready,
+        // has no load error to show.
+        final loadError = widget.store.loadError;
         return _padded(
           Row(
             key: dayListFailedKey(day),
             children: <Widget>[
               Expanded(
                 child: Text(
-                  widget.model.error ?? "This day could not be read.",
+                  loadError == null
+                      ? "This day could not be read."
+                      : "$loadError",
                   style: _styles.message,
                 ),
               ),

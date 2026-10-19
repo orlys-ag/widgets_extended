@@ -1,12 +1,11 @@
 /// The calendar's Week mode: the timed grid, its create gestures, the
 /// pending writes on its blocks, the form it opens, its syncs with the
-/// model and its painter.
+/// store and its painter.
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
@@ -19,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_harness.dart';
@@ -158,9 +158,9 @@ Future<String> idOn(
   return items.singleWhere((item) => item["title"] == title)["id"]! as String;
 }
 
-/// The model the week grid shows.
-CalendarModel model(WidgetTester tester) {
-  return tester.widget<TimedGrid>(find.byType(TimedGrid)).model;
+/// The store the week grid shows.
+CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
+  return tester.widget<TimedGrid>(find.byType(TimedGrid)).store;
 }
 
 /// The block whose title is [title].
@@ -832,7 +832,7 @@ void main() {
     await tester.pump();
     expect(api.requests, hasLength(requests + 1));
     await tester.pump(const Duration(milliseconds: 900));
-    expect(model(tester).isLocked(brainstormId), isFalse);
+    expect(storeOf(tester).isPending(brainstormId), isFalse);
     await held.up();
     await tester.pump();
     await tester.pump(gridAnimationStyle(tester).effectiveDropSettle.duration);
@@ -920,7 +920,7 @@ void main() {
 
     /// Drops [id] at [target] and expects it back in its slot with nothing
     /// sent. The grid's own refusals show no snackbar, where a refusal the
-    /// model makes at the drop reports one.
+    /// store makes at the drop reports one.
     Future<void> refused(String id, Offset target, {bool byGrid = true}) async {
       final before = tester.getRect(blockFinder(id));
       await moveBlock(tester, blockFinder(id), target);
@@ -943,7 +943,7 @@ void main() {
 
     // Saturday 17:00 puts the Saturday-to-Monday Task on Monday
     // 2026-04-27 over "Retro prep", which the grid does not show but the
-    // model has read with April.
+    // store has read with April.
     await refused(
       retreat,
       cellRect(tester, rowOf(17 * 60), colOf(5)).topLeft,

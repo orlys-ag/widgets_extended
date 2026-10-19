@@ -7,7 +7,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
-import 'calendar_model.dart';
+import 'calendar_item.dart';
 import 'day_cell.dart';
 
 /// The key of the week strip's cell showing [day].
@@ -20,7 +20,7 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// weekday. Each is a [DayCell]
 /// as Agenda's folded month shows it: its weekday's three-letter name
 /// over its number on a circle, the selected day's in the primary colour,
-/// today's ringed, and a badge on a day with items once the model has read
+/// today's ringed, and a badge on a day with items once the store has read
 /// it. The strip is as tall as a day ([stripCellHeight]), at any text
 /// size. A tap on a day reports [onSelectDay].
 ///
@@ -29,7 +29,7 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// to rest on a whole day, the nearest to where a fling would carry the
 /// strip. While the strip moves other than to follow the selected day, it
 /// reports each day that comes to its middle through [onBrowse]; once it
-/// rests, it asks the model to read the shown days of the weeks of the
+/// rests, it asks the store to read the shown days of the weeks of the
 /// days it shows, so their markers show, and Day, which reads
 /// a selected day's whole week, shows any of them at once on a tap. A new
 /// [selectedDay] the strip does not show the middle of brings the strip,
@@ -43,7 +43,7 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 class WeekStrip extends StatefulWidget {
   const WeekStrip({
     super.key,
-    required this.model,
+    required this.store,
     required this.selectedDay,
     required this.today,
     required this.weekdays,
@@ -52,7 +52,7 @@ class WeekStrip extends StatefulWidget {
     this.recalls = 0,
   });
 
-  final CalendarModel model;
+  final CalendarStore<ItemPayload> store;
 
   /// The selected day, on a weekday [weekdays] holds.
   final DateTime selectedDay;
@@ -256,7 +256,7 @@ class _WeekStripState extends State<WeekStrip> {
     } else if (notification is ScrollEndNotification) {
       final first = _dayAt((start + _epsilon).floor());
       final last = _dayAt((start + _count - _epsilon).ceil() - 1);
-      widget.model.prefetch(
+      widget.store.prefetch(
         shownDaysOfWeek(first, widget.weekdays).first,
         shownDaysOfWeek(last, widget.weekdays).last,
       );
@@ -312,7 +312,7 @@ class _WeekStripState extends State<WeekStrip> {
         widget.onSelectDay(day);
       },
       child: DayMarkerListener(
-        model: widget.model,
+        store: widget.store,
         day: day,
         builder: (context, hasItems) {
           return DayCell(
