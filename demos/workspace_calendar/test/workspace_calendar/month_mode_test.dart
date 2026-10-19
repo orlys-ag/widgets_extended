@@ -57,7 +57,7 @@ DateTime may(int day) {
 Finder monthBoardFinder() {
   return find.descendant(
     of: find.byKey(const ValueKey<String>("month-board")),
-    matching: find.byType(Board<String, MonthChip>),
+    matching: find.byType(Board<String, MonthChip<ItemPayload>>),
   );
 }
 
@@ -975,7 +975,9 @@ void main() {
       final monday = april(20);
       final a = chipFinder("item-1", monday);
       final bKey = "month-chip-item-2@${isoDate(monday)}";
-      final store = tester.widget<MonthBoard>(find.byType(MonthBoard)).store;
+      final store = tester
+          .widget<MonthBoard<ItemPayload>>(find.byType(MonthBoard<ItemPayload>))
+          .store;
 
       store.requestDelete("item-1");
       await tester.pump(harnessLatency);

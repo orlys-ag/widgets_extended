@@ -1185,7 +1185,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         Expanded(
           child: ColoredBox(
             color: HarborColors.surface,
-            child: MonthBoard(
+            child: MonthBoard<ItemPayload>(
               key: const ValueKey<String>("month-board"),
               store: _store,
               grid: _grid,
@@ -1205,6 +1205,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                       .copyWith(minDayWidth: minDayWidth),
                 );
               },
+              chipBuilder: widget.builders.chip,
+              loadingBuilder: widget.builders.loading,
+              failureBuilder: widget.builders.failure,
+              // Whatever the builders, a bar names its item's type.
+              entryKindOf: harborEntryKind,
             ),
           ),
         ),

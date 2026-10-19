@@ -18,6 +18,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 
@@ -51,10 +52,14 @@ Finder marksOf(String form) {
 /// One call of a block builder.
 typedef BlockCall = ({ShownItem entry, CalendarBlockDetails details});
 
+/// One call of a chip builder.
+typedef ChipCall = ({ShownItem entry, CalendarChipDetails details});
+
 /// Builders that mark what they draw: each returns a [ColoredBox] keyed by
 /// [markKey], kept in [marks], and records its arguments.
 class MarkingBuilders {
   final List<BlockCall> blocks = <BlockCall>[];
+  final List<ChipCall> chips = <ChipCall>[];
   final List<CalendarLoadingState> loadings = <CalendarLoadingState>[];
   final List<CalendarFailureState> failures = <CalendarFailureState>[];
 
@@ -63,6 +68,7 @@ class MarkingBuilders {
 
   late final ItemBuilders builders = ItemBuilders(
     block: block,
+    chip: chip,
     loading: loading,
     failure: failure,
   );
@@ -85,6 +91,15 @@ class MarkingBuilders {
     return _mark("block", entry.id);
   }
 
+  Widget chip(
+    BuildContext context,
+    ShownItem entry,
+    CalendarChipDetails details,
+  ) {
+    chips.add((entry: entry, details: details));
+    return _mark("chip", entry.id);
+  }
+
   Widget loading(BuildContext context, CalendarLoadingState state) {
     loadings.add(state);
     return _mark("loading", state.site.name);
@@ -98,6 +113,13 @@ class MarkingBuilders {
   /// The last block call for the entry [id].
   BlockCall lastBlock(String id) {
     return blocks.lastWhere((call) {
+      return call.entry.id == id;
+    });
+  }
+
+  /// The last chip call for the entry [id].
+  ChipCall lastChip(String id) {
+    return chips.lastWhere((call) {
       return call.entry.id == id;
     });
   }
@@ -119,12 +141,27 @@ class MarkingBuilders {
 /// builders' output.
 class CountingBuilders {
   final Map<String, int> blockCalls = <String, int>{};
+  final Map<String, int> chipCalls = <String, int>{};
 
   late final ItemBuilders builders = ItemBuilders(
     block: block,
+    chip: chip,
     loading: harborLoadingBuilder,
     failure: harborFailureBuilder,
   );
+
+  Widget chip(
+    BuildContext context,
+    ShownItem entry,
+    CalendarChipDetails details,
+  ) {
+    chipCalls.update(entry.id, (count) => count + 1, ifAbsent: () => 1);
+    return harborChipBuilder(context, entry, details);
+  }
+
+  int get chips {
+    return chipCalls.values.fold(0, (sum, count) => sum + count);
+  }
 
   Widget block(
     BuildContext context,
@@ -141,6 +178,7 @@ class CountingBuilders {
 
   void clear() {
     blockCalls.clear();
+    chipCalls.clear();
   }
 }
 
@@ -257,6 +295,44 @@ bool isBelow(RenderObject node, RenderObject ancestor) {
 
 /// The grid.
 final Finder grid = find.byType(TimedGrid<ItemPayload>);
+
+/// The month board.
+final Finder month = find.byType(MonthBoard<ItemPayload>);
+
+/// Every bar slot of the month board, by the key [monthChipKey] gives it.
+Map<String, Finder> barSlots(WidgetTester tester) {
+  return <String, Finder>{
+    for (final element in find.byWidgetPredicate((widget) {
+      final key = widget.key;
+      return key is ValueKey<String> && key.value.startsWith("month-chip-");
+    }).evaluate())
+      (element.widget.key! as ValueKey<String>).value: find.byKey(
+        element.widget.key!,
+      ),
+  };
+}
+
+/// The id of the item whose bar the slot keyed [slotKey] holds.
+String barIdOf(String slotKey) {
+  final segment = slotKey.substring("month-chip-".length);
+  return segment.substring(0, segment.indexOf("@"));
+}
+
+/// Taps [tooltip]'s chevron, settling, until [shown] finds something, at
+/// most three times; reads fail meanwhile while [api]'s policy says so.
+Future<void> stepUntil(
+  WidgetTester tester,
+  MockCalendarApi api,
+  String tooltip,
+  Finder shown,
+) async {
+  for (var i = 0; i < 3 && shown.evaluate().isEmpty; i++) {
+    await tester.tap(find.byTooltip(tooltip));
+    await tester.pump();
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+  }
+}
 
 void main() {
   testWidgets("BW1 Week draws each block through its builder, its pending "
@@ -569,6 +645,7 @@ void main() {
     expect(counts.blocks, greaterThan(0));
     expect(counts.blocks, lessThanOrEqualTo(23));
     expect(counts.blockCalls.keys, <String>[brainstormId]);
+    expect(counts.chips, 0);
     counts.clear();
 
     // A scroll of the grid.
@@ -578,6 +655,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(vertical.pixels - before, greaterThan(200.0));
     expect(counts.blocks, 0);
+    expect(counts.chips, 0);
     counts.clear();
 
     // A pinch up and down the slots.
@@ -595,6 +673,7 @@ void main() {
       greaterThan(cell.height),
     );
     expect(counts.blocks, lessThanOrEqualTo(42));
+    expect(counts.chips, 0);
     var stayed = 0;
     for (final entry in kept.entries) {
       final id = entry.key.substring("block-".length);
@@ -966,5 +1045,297 @@ void main() {
       find.descendant(of: block, matching: find.text("second")),
       findsOneWidget,
     );
+  });
+
+  testWidgets("BM1 Month draws each chip through its builder, its pending "
+      "state included", (tester) async {
+    final marks = MarkingBuilders();
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: marks.builders,
+    );
+    await pickMode(tester, "Month");
+    final slots = barSlots(tester);
+    expect(slots.length, greaterThan(4));
+    for (final slot in slots.entries) {
+      final id = barIdOf(slot.key);
+      expect(marks.marked(tester, slot.value, "chip", id), isTrue, reason: id);
+    }
+    expect(marks.chips, isNotEmpty);
+    for (final call in marks.chips) {
+      expect(call.details.card, isFalse, reason: call.entry.id);
+    }
+
+    final slot = slots.entries.firstWhere((slot) {
+      return barIdOf(slot.key) == brainstormId;
+    }).value;
+    await tester.tap(slot);
+    await tester.pumpAndSettle();
+    expect(find.text("Edit Task"), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete").last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(marks.lastChip(brainstormId).entry.pending, isTrue);
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+    expect(slot, findsNothing);
+  });
+
+  testWidgets("BM2 days large enough for cards draw each bar through the "
+      "chip builder's card form", (tester) async {
+    final marks = MarkingBuilders();
+    await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      size: const Size(1200.0, 1600.0),
+      builders: marks.builders,
+    );
+    await pickMode(tester, "Month");
+    final cell = gridViewport(tester).rectOfCell(0, 0)!;
+    expect(monthShowsCards(cell.width, cell.height), isTrue);
+    final slots = barSlots(tester);
+    expect(slots.length, greaterThan(4));
+    for (final slot in slots.entries) {
+      final id = barIdOf(slot.key);
+      expect(marks.marked(tester, slot.value, "chip", id), isTrue, reason: id);
+      expect(marks.lastChip(id).details.card, isTrue, reason: id);
+    }
+  });
+
+  testWidgets("BM3 the month board's cover draws the loading and failure "
+      "builders' content for the grid's days", (tester) async {
+    final marks = MarkingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: marks.builders,
+    );
+    await pickMode(tester, "Month");
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pump();
+    await tester.pump(oneFrame);
+    expect(
+      find.descendant(
+        of: month,
+        matching: find.byKey(markKey("loading", "cover")),
+      ),
+      findsOneWidget,
+    );
+    final loading = marks.loadings.last;
+    expect(loading.site, CalendarStateSite.cover);
+    expect(loading.first, DateTime(2026, 4, 27));
+    expect(loading.last, DateTime(2026, 5, 31));
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    final failed = find.descendant(
+      of: month,
+      matching: find.byKey(markKey("failure", "cover")),
+    );
+    await stepUntil(tester, api, "Next month", failed);
+    expect(failed, findsOneWidget);
+    final failure = marks.failures.last;
+    expect(failure.site, CalendarStateSite.cover);
+    expect(
+      failure.error,
+      isA<CalendarFailureException>().having(
+        (error) => error.message,
+        "message",
+        "Reading failed.",
+      ),
+    );
+    int lists() {
+      return api.requests.where((request) {
+        return request.method == CalendarMethod.list;
+      }).length;
+    }
+
+    final before = lists();
+    failure.retry();
+    expect(lists(), before + 1);
+    api.failurePolicy = null;
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("BM4 given no builders the month board draws the module's "
+      "defaults", (tester) async {
+    final api = await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: const ItemBuilders(),
+    );
+    await pickMode(tester, "Month");
+    expect(find.byType(HarborChip), findsNothing);
+    final task = harborTypeStyleOf(CalendarItemType.task).edge;
+    final bar = find.byKey(monthChipKey(monthSegmentKey(brainstormId, monday)));
+    expect(bar, findsOneWidget);
+    final boxes = tester
+        .widgetList<ColoredBox>(
+          find.descendant(of: bar, matching: find.byType(ColoredBox)),
+        )
+        .toList();
+    expect(
+      boxes.where((box) {
+        return box.color ==
+            Color.alphaBlend(
+              task.withValues(alpha: harborCalendarTheme.entryTintOpacity),
+              harborCalendarTheme.surface,
+            );
+      }),
+      hasLength(1),
+    );
+    final edges = boxes.where((box) {
+      return box.color == task;
+    }).toList();
+    expect(edges, hasLength(1));
+    expect(tester.getSize(find.byWidget(edges.single)).width, 4.0);
+
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pump();
+    await tester.pump(oneFrame);
+    expect(
+      find.descendant(
+        of: month,
+        matching: find.byType(CalendarActivityIndicator),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: month,
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsNothing,
+    );
+    await pumpFor(tester, second);
+
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    final failed = find.descendant(of: month, matching: find.text(retryLabel));
+    for (var i = 0; i < 3 && failed.evaluate().isEmpty; i++) {
+      await tester.tap(find.byTooltip("Next month"));
+      await pumpFor(tester, const Duration(milliseconds: 1400));
+    }
+    expect(
+      find.descendant(of: month, matching: find.text(readFailedLabel)),
+      findsOneWidget,
+    );
+    expect(failed, findsOneWidget);
+    expect(find.text("Reading failed."), findsNothing);
+    api.failurePolicy = null;
+    await tester.tap(failed);
+    await pumpFor(tester, const Duration(milliseconds: 1400));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("BM5 a pinch and a scroll call the chip builder no more often "
+      "than the base built chips, and call no block builder", (tester) async {
+    final counts = CountingBuilders();
+    await pumpCalendar(tester, clock: nineOClock, builders: counts.builders);
+    await pickMode(tester, "Month");
+    expect(counts.chips, greaterThan(4));
+    counts.clear();
+
+    final first = gridViewport(tester).rectOfCell(0, 0)!;
+    await pinch(tester, tester.getCenter(month));
+    expect(
+      gridViewport(tester).rectOfCell(0, 0)!.height,
+      greaterThan(first.height),
+    );
+    expect(counts.chips, lessThanOrEqualTo(3));
+    expect(counts.blocks, 0);
+    counts.clear();
+
+    final vertical = gridViewport(tester).verticalPosition!;
+    final before = vertical.pixels;
+    await tester.drag(month, const Offset(0.0, -300.0));
+    await tester.pumpAndSettle();
+    expect(vertical.pixels - before, greaterThan(100.0));
+    expect(counts.chips, 0);
+    expect(counts.blocks, 0);
+  });
+
+  testWidgets("BM6 new builders reach a chip while it exits", (tester) async {
+    final a = MarkingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: a.builders,
+    );
+    await pickMode(tester, "Month");
+    final slot = find.byKey(
+      monthChipKey(monthSegmentKey(brainstormId, monday)),
+    );
+    expect(slot, findsOneWidget);
+    await tester.tap(slot);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete").last);
+    await tester.pump();
+    await tester.pump(api.latency);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getSize(slot).height, lessThan(monthLaneExtent));
+
+    final b = MarkingBuilders();
+    await tester.pumpWidget(
+      calendarApp(
+        api: api,
+        today: today,
+        clock: nineOClock,
+        editing: true,
+        builders: b.builders,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(b.marked(tester, slot, "chip", brainstormId), isTrue);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(slot, findsNothing);
+  });
+
+  testWidgets("BM7 a sync that leaves a bar as it was calls no chip builder "
+      "for it", (tester) async {
+    final counts = CountingBuilders();
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: counts.builders,
+    );
+    await pickMode(tester, "Month");
+    final kept = barSlots(tester).keys.where((key) {
+      return barIdOf(key) != brainstormId;
+    }).toList();
+    expect(kept.length, greaterThan(4));
+    counts.clear();
+
+    final store = tester.widget<MonthBoard<ItemPayload>>(month).store;
+    store.requestDelete(brainstormId);
+    await tester.pump();
+    expect(counts.chipCalls[brainstormId], greaterThan(0));
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    var stayed = 0;
+    for (final key in kept) {
+      if (find.byKey(ValueKey<String>(key)).evaluate().isNotEmpty) {
+        stayed++;
+        expect(counts.chipCalls[barIdOf(key)] ?? 0, 0, reason: key);
+      }
+    }
+    expect(stayed, greaterThan(4));
   });
 }

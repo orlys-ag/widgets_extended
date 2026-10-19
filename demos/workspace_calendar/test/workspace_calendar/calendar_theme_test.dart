@@ -1028,9 +1028,13 @@ void expectBoardMotion(
 }
 
 /// Month's board controller.
-BoardController<String, MonthChip> monthController(WidgetTester tester) {
+BoardController<String, MonthChip<ItemPayload>> monthController(
+  WidgetTester tester,
+) {
   return tester
-      .widget<Board<String, MonthChip>>(find.byType(Board<String, MonthChip>))
+      .widget<Board<String, MonthChip<ItemPayload>>>(
+        find.byType(Board<String, MonthChip<ItemPayload>>),
+      )
       .controller;
 }
 
@@ -1102,7 +1106,9 @@ CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
   if (list.evaluate().isNotEmpty) {
     return tester.widget<DayList>(list).store;
   }
-  return tester.widget<MonthBoard>(find.byType(MonthBoard)).store;
+  return tester
+      .widget<MonthBoard<ItemPayload>>(find.byType(MonthBoard<ItemPayload>))
+      .store;
 }
 
 /// The gutter cells the grid has built, in tree order.
@@ -1121,7 +1127,7 @@ List<Finder> viewRoots() {
   return <Finder>[
     for (final type in <Type>[
       TimedGrid<ItemPayload>,
-      MonthBoard,
+      MonthBoard<ItemPayload>,
       DayList,
       DayCell,
       WeekdayHeader,
@@ -1906,7 +1912,7 @@ void main() {
   testWidgets("C5 Month's board draws and runs on A at both sizes, and on "
       "B from the frame that installs it", (tester) async {
     final fields = <String>{};
-    final roots = <Finder>[find.byType(MonthBoard)];
+    final roots = <Finder>[find.byType(MonthBoard<ItemPayload>)];
     for (final size in const <Size>[Size(390.0, 844.0), Size(1100.0, 900.0)]) {
       final api = await pumpThemed(tester, sentinelA, size: size);
       await pickMode(tester, "Month");
@@ -1922,7 +1928,7 @@ void main() {
         // Friday's seven meetings take more lanes than a week holds.
         expect(
           find.descendant(
-            of: find.byType(MonthBoard),
+            of: find.byType(MonthBoard<ItemPayload>),
             matching: find.textContaining("more"),
           ),
           findsWidgets,
@@ -1965,7 +1971,7 @@ void main() {
       await failNextRead(tester, api, "Next month");
       expect(
         find.descendant(
-          of: find.byType(MonthBoard),
+          of: find.byType(MonthBoard<ItemPayload>),
           matching: find.text("Reading failed."),
         ),
         findsOneWidget,
@@ -3361,7 +3367,10 @@ void main() {
 
     // A failed read in each view.
     await failNextRead(tester, api, "Next month");
-    expect(textIn(find.byType(MonthBoard), "Reading failed."), findsOneWidget);
+    expect(
+      textIn(find.byType(MonthBoard<ItemPayload>), "Reading failed."),
+      findsOneWidget,
+    );
     await visit("Month, a failed read");
     for (final mode in <String>["Week", "Day", "Agenda"]) {
       await pickMode(tester, mode);

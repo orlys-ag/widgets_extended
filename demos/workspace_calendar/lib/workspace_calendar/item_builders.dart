@@ -16,10 +16,13 @@ import 'harbor_theme.dart';
 /// view's default.
 @immutable
 class ItemBuilders {
-  const ItemBuilders({this.block, this.loading, this.failure});
+  const ItemBuilders({this.block, this.chip, this.loading, this.failure});
 
   /// Week's and Day's blocks.
   final CalendarBlockBuilder<ItemPayload>? block;
+
+  /// Month's bars, in their chip and card forms.
+  final CalendarChipBuilder<ItemPayload>? chip;
 
   /// What each view shows while its days are read.
   final CalendarLoadingBuilder? loading;
@@ -31,6 +34,7 @@ class ItemBuilders {
 /// Harbor's builders, every field set.
 const ItemBuilders harborItemBuilders = ItemBuilders(
   block: harborBlockBuilder,
+  chip: harborChipBuilder,
   loading: harborLoadingBuilder,
   failure: harborFailureBuilder,
 );
@@ -42,6 +46,21 @@ Widget harborBlockBuilder(
   CalendarBlockDetails details,
 ) {
   return HarborBlock(entry: entry, details: details);
+}
+
+/// A [HarborChip] of [entry] and [details].
+Widget harborChipBuilder(
+  BuildContext context,
+  ShownItem entry,
+  CalendarChipDetails details,
+) {
+  return HarborChip(entry: entry, details: details);
+}
+
+/// The label of [entry]'s type, which names its kind to a screen reader on
+/// Month's bars.
+String? harborEntryKind(CalendarEntry<ItemPayload> entry) {
+  return entry.type.label;
 }
 
 /// A progress indicator: centred on the cover, and 16 square at the start
@@ -98,6 +117,9 @@ class _HarborStyles {
           color: theme.textSecondary,
         ),
       ),
+      chipTitle = theme.chipTitleStyle.copyWith(color: theme.text),
+      cardTitle = theme.monthCardTitleStyle.copyWith(color: theme.text),
+      cardTime = theme.monthCardTimeStyle.copyWith(color: theme.textSecondary),
       message = theme.messageStyle.copyWith(color: theme.error);
 
   /// The styles of [theme]: those made for it before, or for a theme `==`
@@ -142,6 +164,11 @@ class _HarborStyles {
   final TextStyle detail;
   final Widget cutStart;
   final Widget cutEnd;
+
+  /// A Month chip's title, and a Month card's title and times.
+  final TextStyle chipTitle;
+  final TextStyle cardTitle;
+  final TextStyle cardTime;
 
   /// A failed read's sentence.
   final TextStyle message;
@@ -343,6 +370,98 @@ class _BlockLinesDelegate extends FlowDelegate {
   @override
   bool shouldRepaint(_BlockLinesDelegate oldDelegate) {
     return false;
+  }
+}
+
+/// One item's bar in one week of Month: the type's tint with a 4 px edge
+/// in the type's colour, as [HarborTypeStyle] draws an item, rounded at an
+/// end where the item starts or ends and square where it continues. A chip
+/// holds the title on one line; a [CalendarChipDetails.card] holds the
+/// title over the type's icon and the item's times. Dimmed while pending.
+class HarborChip extends StatelessWidget {
+  const HarborChip({super.key, required this.entry, required this.details});
+
+  final ShownItem entry;
+  final CalendarChipDetails details;
+
+  @override
+  StatelessElement createElement() {
+    return _HarborElement(this);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final styles = _HarborStyles.of(context);
+    final item = entry.entry;
+    final style = harborTypeStyleOf(item.type);
+    const radius = Radius.circular(4.0);
+    final title = Text(
+      item.title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      softWrap: false,
+      style: details.card ? styles.cardTitle : styles.chipTitle,
+    );
+    Widget bar = ClipRRect(
+      borderRadius: BorderRadius.horizontal(
+        left: details.continuesBefore ? Radius.zero : radius,
+        right: details.continuesAfter ? Radius.zero : radius,
+      ),
+      child: ColoredBox(
+        color: style.tint,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            SizedBox(width: 4.0, child: ColoredBox(color: style.edge)),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                child: details.card
+                    ? _buildCardLines(title, item, style, styles)
+                    : Align(alignment: Alignment.centerLeft, child: title),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (entry.pending) {
+      bar = Opacity(opacity: 0.5, child: bar);
+    }
+    return bar;
+  }
+
+  /// A card's [title] over its type's icon and [item]'s times, as
+  /// [clockRangeLabel] writes them, each line cut short where the day is
+  /// too narrow for it.
+  Widget _buildCardLines(
+    Text title,
+    CalendarItem item,
+    HarborTypeStyle style,
+    _HarborStyles styles,
+  ) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        title,
+        Row(
+          children: <Widget>[
+            Icon(style.icon, size: 11.0, color: style.edge),
+            const SizedBox(width: 3.0),
+            Flexible(
+              child: Text(
+                clockRangeLabel(item.startMinute, item.endMinute),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: styles.cardTime,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 
