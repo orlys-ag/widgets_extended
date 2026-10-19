@@ -2,12 +2,11 @@
 /// of Agenda's folded month, which slides day by day.
 library;
 
-import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
-import 'calendar_item.dart';
 import 'day_cell.dart';
 
 /// The key of the week strip's cell showing [day].
@@ -40,7 +39,7 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 ///
 /// [weekdays] are fixed for the strip's life: give a strip that changes
 /// them its own key.
-class WeekStrip extends StatefulWidget {
+class WeekStrip<T> extends StatefulWidget {
   const WeekStrip({
     super.key,
     required this.store,
@@ -52,7 +51,7 @@ class WeekStrip extends StatefulWidget {
     this.recalls = 0,
   });
 
-  final CalendarStore<ItemPayload> store;
+  final CalendarStore<T> store;
 
   /// The selected day, on a weekday [weekdays] holds.
   final DateTime selectedDay;
@@ -72,12 +71,12 @@ class WeekStrip extends StatefulWidget {
   final int recalls;
 
   @override
-  State<WeekStrip> createState() {
-    return _WeekStripState();
+  State<WeekStrip<T>> createState() {
+    return _WeekStripState<T>();
   }
 }
 
-class _WeekStripState extends State<WeekStrip> {
+class _WeekStripState<T> extends State<WeekStrip<T>> {
   /// Below this, a fraction of a day width is taken for float error in
   /// the scroll offset.
   static const double _epsilon = 1e-6;
@@ -124,7 +123,7 @@ class _WeekStripState extends State<WeekStrip> {
   }
 
   @override
-  void didUpdateWidget(WeekStrip oldWidget) {
+  void didUpdateWidget(WeekStrip<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
     assert(
       widget.weekdays == oldWidget.weekdays,
@@ -311,7 +310,7 @@ class _WeekStripState extends State<WeekStrip> {
       onTap: () {
         widget.onSelectDay(day);
       },
-      child: DayMarkerListener(
+      child: DayMarkerListener<T>(
         store: widget.store,
         day: day,
         builder: (context, hasItems) {

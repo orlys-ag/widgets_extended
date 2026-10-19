@@ -1,5 +1,6 @@
-/// The calendar's data source over its API, and the sentences and field
-/// errors the calendar shows for the store's and the API's refusals.
+/// The calendar's data source over its API, the sentences and field errors
+/// the calendar shows for the store's and the API's refusals, and the
+/// sentences it shows for a failed read.
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
@@ -122,5 +123,16 @@ void main() {
       isNull,
     );
     expect(writeFieldErrors(StateError("x")), isNull);
+  });
+
+  test("AS4 a failed read reads as the API's sentence, the error itself, or "
+      "the unread day's sentence where there is no error", () {
+    expect(
+      readFailureMessage(const CalendarFailureException("Offline.")),
+      "Offline.",
+    );
+    expect(readFailureMessage(StateError("x")), "Bad state: x");
+    expect(readFailureMessage(null), "This day could not be read.");
+    expect(unreadDayMessage, "This day could not be read.");
   });
 }

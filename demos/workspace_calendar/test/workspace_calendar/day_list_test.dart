@@ -9,7 +9,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:workspace_calendar/workspace_calendar/item_card.dart';
+import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -98,7 +98,7 @@ DateTime selectedDay(WidgetTester tester) {
 /// The top of [day]'s header less the list's top.
 double headerTop(WidgetTester tester, DateTime day) {
   return tester.getRect(find.byKey(dayListHeaderKey(day))).top -
-      tester.getRect(find.byType(DayList)).top;
+      tester.getRect(find.byType(DayList<ItemPayload>)).top;
 }
 
 /// Opens [id]'s card menu and picks [action], "Edit" or "Delete".
@@ -106,7 +106,7 @@ Future<void> cardAction(WidgetTester tester, String id, String action) async {
   await tester.tap(
     find.descendant(
       of: cardFinder(id),
-      matching: find.byTooltip("Item actions"),
+      matching: find.bySemanticsLabel("Item actions"),
     ),
   );
   await tester.pumpAndSettle();
@@ -302,12 +302,12 @@ void main() {
       "day's header is at the list's top, and the days before it stay in "
       "the list", (tester) async {
     await pumpCalendar(tester);
-    final list = tester.getRect(find.byType(DayList));
+    final list = tester.getRect(find.byType(DayList<ItemPayload>));
     final position = tester
         .state<ScrollableState>(
           find
               .descendant(
-                of: find.byType(DayList),
+                of: find.byType(DayList<ItemPayload>),
                 matching: find.byType(Scrollable),
               )
               .first,
@@ -329,7 +329,10 @@ void main() {
     );
     // Pulled back past the day the list opened on, the day before that
     // shows.
-    await tester.drag(find.byType(DayList), const Offset(0.0, 1400.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, 1400.0),
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(dayListHeaderKey(DateTime(2026, 4, 20))), findsOneWidget);
   });
@@ -535,12 +538,18 @@ void main() {
       "header to the top selects that day", (tester) async {
     await pumpCalendar(tester);
     // Today's block is taller than this drag.
-    await tester.drag(find.byType(DayList), const Offset(0.0, -100.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -100.0),
+    );
     await tester.pumpAndSettle();
     expect(headerTop(tester, today), 0.0);
     expect(selectedDay(tester), today);
 
-    await tester.drag(find.byType(DayList), const Offset(0.0, -400.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -400.0),
+    );
     await tester.pumpAndSettle();
     expect(selectedDay(tester), DateTime(2026, 4, 22));
   });
@@ -594,7 +603,7 @@ void main() {
     final past = addDays(today, dayListWindowDays + 10);
     for (var i = 0; i < 40 && selectedDay(tester).isBefore(past); i++) {
       await tester.fling(
-        find.byType(DayList),
+        find.byType(DayList<ItemPayload>),
         const Offset(0.0, -2000.0),
         8000.0,
       );
@@ -716,7 +725,7 @@ void main() {
     final card = cardFinder(standupId);
     final menu = find.descendant(
       of: card,
-      matching: find.byTooltip("Item actions"),
+      matching: find.bySemanticsLabel("Item actions"),
     );
     final height = tester.getSize(card).height;
     expect(find.byKey(dayListGapKey(day, 10 * 60)), findsNothing);
@@ -881,7 +890,7 @@ void main() {
     final decoration =
         tester.widget<DecoratedBox>(box).decoration as BoxDecoration;
     expect(decoration.color, HarborColors.notice);
-    final list = tester.getRect(find.byType(DayList));
+    final list = tester.getRect(find.byType(DayList<ItemPayload>));
     expect(tester.getRect(box).left, list.left + dayListGutter);
     expect(tester.getRect(box).right, list.right - dayListGutter);
     expect(tester.getRect(above).bottom, lessThan(mid.top));
@@ -987,7 +996,7 @@ void main() {
       find.descendant(of: line, matching: find.text("10:15")),
       findsOneWidget,
     );
-    final list = tester.getRect(find.byType(DayList));
+    final list = tester.getRect(find.byType(DayList<ItemPayload>));
     expect(tester.getRect(line).left, list.left);
     expect(tester.getRect(line).right, list.right);
     final label = find.descendant(of: line, matching: find.text("10:15"));
@@ -1075,7 +1084,7 @@ void main() {
     await pumpCalendar(tester);
     await tester.tap(dayFinder(day));
     await tester.pumpAndSettle();
-    final list = tester.getRect(find.byType(DayList));
+    final list = tester.getRect(find.byType(DayList<ItemPayload>));
     final header = tester.getRect(find.byKey(dayListHeaderKey(day)));
     expect(header.left, list.left);
     expect(header.right, list.right);

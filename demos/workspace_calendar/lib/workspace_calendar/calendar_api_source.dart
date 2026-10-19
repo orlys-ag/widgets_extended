@@ -1,5 +1,6 @@
-/// The calendar's data source over its API, and the sentences and field
-/// errors the calendar shows for a write the store or the API refused.
+/// The calendar's data source over its API, the sentences and field errors
+/// the calendar shows for a write the store or the API refused, and the
+/// sentences it shows for a failed read.
 library;
 
 import 'package:widgets_extended/calendar/calendar.dart';
@@ -56,6 +57,23 @@ String writeFailureMessage(Object error) {
   }
   if (error is CalendarWritePendingException) {
     return lockedMessage;
+  }
+  if (error is CalendarApiException) {
+    return error.message;
+  }
+  return "$error";
+}
+
+/// What a day row says for a day whose read failed while the range the
+/// calendar shows is ready, which leaves it no error.
+const String unreadDayMessage = "This day could not be read.";
+
+/// The sentence the calendar shows for a failed read of [error], as the
+/// store holds it: an API error's own message, [unreadDayMessage] for
+/// none, and the error itself otherwise.
+String readFailureMessage(Object? error) {
+  if (error == null) {
+    return unreadDayMessage;
   }
   if (error is CalendarApiException) {
     return error.message;

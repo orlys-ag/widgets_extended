@@ -7,7 +7,6 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/material.dart';
@@ -152,7 +151,10 @@ void main() {
 
     // The card's menu opens the delete prompt under the demo's theme.
     await tester.tap(
-      find.descendant(of: card, matching: find.byTooltip("Item actions")),
+      find.descendant(
+        of: card,
+        matching: find.bySemanticsLabel("Item actions"),
+      ),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text("Delete").last);
@@ -208,7 +210,10 @@ void main() {
     await tester.pumpAndSettle();
     final card = find.byKey(itemCardKey(designCritiqueId));
     await tester.tap(
-      find.descendant(of: card, matching: find.byTooltip("Item actions")),
+      find.descendant(
+        of: card,
+        matching: find.bySemanticsLabel("Item actions"),
+      ),
     );
     await tester.pumpAndSettle();
     expect(

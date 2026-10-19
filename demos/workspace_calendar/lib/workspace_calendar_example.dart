@@ -121,6 +121,7 @@ import 'workspace_calendar/day_cell.dart';
 import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
 import 'workspace_calendar/history_lock.dart';
+import 'workspace_calendar/item_builders.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/month_board.dart';
@@ -164,6 +165,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
     this.clock,
     this.editing = false,
     this.calendarTheme = harborCalendarTheme,
+    this.builders = harborItemBuilders,
   });
 
   /// The day the calendar opens on and marks as today. Null opens on the
@@ -189,6 +191,10 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// given. It shadows any [CalendarTheme] of the host's.
   final CalendarThemeData calendarTheme;
 
+  /// What the views draw their items and states with, [harborItemBuilders]
+  /// unless given; a null field gives the view's default.
+  final ItemBuilders builders;
+
   static final ThemeData _theme = buildHarborTheme();
 
   @override
@@ -204,6 +210,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
           api: api,
           clock: clock ?? DateTime.now,
           editing: editing,
+          builders: builders,
         ),
       ),
     );
@@ -216,12 +223,14 @@ class _WorkspaceCalendar extends StatefulWidget {
     required this.api,
     required this.clock,
     required this.editing,
+    required this.builders,
   });
 
   final DateTime? today;
   final CalendarApi? api;
   final DateTime Function() clock;
   final bool editing;
+  final ItemBuilders builders;
 
   @override
   State<_WorkspaceCalendar> createState() {
@@ -875,7 +884,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     final day = _grid.dateAt(cell.row, cell.col);
     final inMonth = _grid.contains(day);
     final isSelected = cell.isSelected;
-    return DayMarkerListener(
+    return DayMarkerListener<ItemPayload>(
       store: _store,
       day: day,
       builder: (context, hasItems) {
@@ -1067,7 +1076,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           Expanded(
             child: NotificationListener<ScrollNotification>(
               onNotification: _handleBoardScroll,
-              child: TimedGrid(
+              child: TimedGrid<ItemPayload>(
                 // Each mode builds its own grid, which opens scrolled to its
                 // opening time, and so does a week of one shown weekday, as a
                 // grid keeps one day column or more than one.
@@ -1103,6 +1112,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 maxDayCount: maxDayCount,
                 // The week strip names Day's one day.
                 showsDayHeader: _mode != _CalendarMode.day,
+                blockBuilder: widget.builders.block,
+                loadingBuilder: widget.builders.loading,
+                failureBuilder: widget.builders.failure,
               ),
             ),
           ),
@@ -1121,7 +1133,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         Expanded(
           child: NotificationListener<ScrollNotification>(
             onNotification: _handleListScroll,
-            child: DayList(
+            child: DayList<ItemPayload>(
               key: const ValueKey<String>("day-list"),
               store: _store,
               weekdays: _settings.weekdays,
@@ -1155,6 +1167,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 );
               },
               onDelete: _deleteFromCard,
+              cardBuilder: widget.builders.card,
+              cardExtentOf: widget.builders.cardExtent,
+              addButtonBuilder: widget.builders.addButton,
+              loadingBuilder: widget.builders.loading,
+              failureBuilder: widget.builders.failure,
             ),
           ),
         ),
@@ -1173,7 +1190,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         Expanded(
           child: ColoredBox(
             color: HarborColors.surface,
-            child: MonthBoard(
+            child: MonthBoard<ItemPayload>(
               key: const ValueKey<String>("month-board"),
               store: _store,
               grid: _grid,
@@ -1193,6 +1210,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                       .copyWith(minDayWidth: minDayWidth),
                 );
               },
+              chipBuilder: widget.builders.chip,
+              loadingBuilder: widget.builders.loading,
+              failureBuilder: widget.builders.failure,
+              // Whatever the builders, a bar names its item's type.
+              entryKindOf: harborEntryKind,
             ),
           ),
         ),
@@ -1319,7 +1341,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// and Day. Its weekdays are fixed for its life, so new ones build a new
   /// strip.
   Widget _buildStrip() {
-    return WeekStrip(
+    return WeekStrip<ItemPayload>(
       key: ValueKey<WeekdaySet>(_settings.weekdays),
       store: _store,
       selectedDay: _selected,

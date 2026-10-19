@@ -1,4 +1,5 @@
-/// The English names and labels of the calendar's dates, times and counts.
+/// The calendar's English strings: the names and labels of its dates, times
+/// and counts, and the sentences and labels its default builders show.
 library;
 
 import 'calendar_dates.dart';
@@ -75,6 +76,31 @@ String clockLabel(int minute) {
   final hours = (minute ~/ 60).toString().padLeft(2, "0");
   final minutes = (minute % 60).toString().padLeft(2, "0");
   return "$hours:$minutes";
+}
+
+/// "09:00-10:00": the [clockLabel]s of [start] and [end], minutes after
+/// midnight.
+String clockRangeLabel(int start, int end) {
+  return "${clockLabel(start)}-${clockLabel(end)}";
+}
+
+/// The sentence the default failure builder shows for a read that failed.
+const String readFailedLabel = "The entries could not be read.";
+
+/// The label of the default failure builder's action, which reads the
+/// failed days again.
+const String retryLabel = "Retry";
+
+/// "Starts at 07:30": the strip across the top of a card whose entry starts
+/// at [time], before the hours its list shows.
+String startsAtLabel(String time) {
+  return "Starts at $time";
+}
+
+/// "Ends at 19:30": the strip across the bottom of a card whose entry ends
+/// at [time], after the hours its list shows.
+String endsAtLabel(String time) {
+  return "Ends at $time";
 }
 
 /// "45m", "1h" or "1h 30m": [minutes] as the day list writes an item's

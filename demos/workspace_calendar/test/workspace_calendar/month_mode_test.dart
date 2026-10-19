@@ -57,7 +57,7 @@ DateTime may(int day) {
 Finder monthBoardFinder() {
   return find.descendant(
     of: find.byKey(const ValueKey<String>("month-board")),
-    matching: find.byType(Board<String, MonthChip>),
+    matching: find.byType(Board<String, MonthChip<ItemPayload>>),
   );
 }
 
@@ -364,7 +364,7 @@ void main() {
     (tester) async {
       await pumpCalendar(tester);
       expect(find.text("Agenda"), findsOneWidget);
-      expect(find.byType(DayList), findsOneWidget);
+      expect(find.byType(DayList<ItemPayload>), findsOneWidget);
       expect(find.byType(DayCell), findsNWidgets(35));
 
       await tester.tap(find.byTooltip("Calendar view"));
@@ -415,7 +415,7 @@ void main() {
           expect(rect.top, greaterThanOrEqualTo(firstCell.top + strip - 0.5));
         }
       }
-      expect(find.byType(DayList), findsNothing);
+      expect(find.byType(DayList<ItemPayload>), findsNothing);
     },
   );
 
@@ -975,7 +975,9 @@ void main() {
       final monday = april(20);
       final a = chipFinder("item-1", monday);
       final bKey = "month-chip-item-2@${isoDate(monday)}";
-      final store = tester.widget<MonthBoard>(find.byType(MonthBoard)).store;
+      final store = tester
+          .widget<MonthBoard<ItemPayload>>(find.byType(MonthBoard<ItemPayload>))
+          .store;
 
       store.requestDelete("item-1");
       await tester.pump(harnessLatency);
@@ -1685,7 +1687,7 @@ void main() {
     (tester) async {
       await pumpCalendar(tester);
       await pickMode(tester, "Week");
-      final week = tester.getRect(find.byType(TimedGrid));
+      final week = tester.getRect(find.byType(TimedGrid<ItemPayload>));
 
       await pickMode(tester, "Month");
       final letters = tester.getRect(

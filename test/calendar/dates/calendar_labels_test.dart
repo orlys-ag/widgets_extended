@@ -1,5 +1,6 @@
-/// The calendar's English labels: lengths, clock times, day titles, counts
-/// and the names of months and weekdays.
+/// The calendar's English labels: lengths, clock times, day titles, counts,
+/// the names of months and weekdays, and the sentences and labels of the
+/// default builders.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -43,5 +44,13 @@ void main() {
       expect(weekdayShortNames[0], "Mo");
       expect(weekdayLetters, hasLength(7));
     });
+  });
+
+  test("L2 the default builders' sentences and labels", () {
+    expect(readFailedLabel, "The entries could not be read.");
+    expect(retryLabel, "Retry");
+    expect(startsAtLabel("07:30"), "Starts at 07:30");
+    expect(endsAtLabel("19:30"), "Ends at 19:30");
+    expect(clockRangeLabel(540, 600), "09:00-10:00");
   });
 }

@@ -1,6 +1,8 @@
-/// The calendar views draw what [CalendarTheme] holds: two sentinel themes,
+/// The calendar views, and Harbor's builders they draw their items and
+/// states with, draw what [CalendarTheme] holds: two sentinel themes,
 /// whose every value differs from Harbor's, from the built-in ones and from
-/// each other, and a probe that reads what each view paints.
+/// each other in each field the views and Harbor's builders read, and a
+/// probe that reads what each view paints.
 library;
 
 import 'dart:ui' as ui;
@@ -20,7 +22,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:workspace_calendar/workspace_calendar/item_card.dart';
+import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/month_picker.dart';
@@ -57,7 +59,8 @@ const List<String> iconNames = <String>[
   "addEntryIcon",
 ];
 
-/// The thirty-one text style fields, numbered from 1 in this order.
+/// The thirty-one text style fields the views and Harbor's builders read,
+/// numbered from 1 in this order.
 const List<String> styleNames = <String>[
   "hourLabelStyle",
   "dayHeaderWeekdayStyle",
@@ -779,7 +782,7 @@ Future<Set<String>> labelsOf(
   CalendarThemeData theme,
 ) async {
   final viewport = gridViewport(tester);
-  final context = tester.element(find.byType(TimedGrid));
+  final context = tester.element(find.byType(TimedGrid<ItemPayload>));
   final painter = TextPainter(
     text: TextSpan(
       text: "00:00",
@@ -873,7 +876,7 @@ double stripOffset(WidgetTester tester) {
   return tester
       .state<ScrollableState>(
         find.descendant(
-          of: find.byType(WeekStrip),
+          of: find.byType(WeekStrip<ItemPayload>),
           matching: find.byType(Scrollable),
         ),
       )
@@ -965,7 +968,7 @@ double listOffset(WidgetTester tester) {
   return tester
       .state<ScrollableState>(
         find.descendant(
-          of: find.byType(DayList),
+          of: find.byType(DayList<ItemPayload>),
           matching: find.byType(Scrollable),
         ),
       )
@@ -1025,9 +1028,13 @@ void expectBoardMotion(
 }
 
 /// Month's board controller.
-BoardController<String, MonthChip> monthController(WidgetTester tester) {
+BoardController<String, MonthChip<ItemPayload>> monthController(
+  WidgetTester tester,
+) {
   return tester
-      .widget<Board<String, MonthChip>>(find.byType(Board<String, MonthChip>))
+      .widget<Board<String, MonthChip<ItemPayload>>>(
+        find.byType(Board<String, MonthChip<ItemPayload>>),
+      )
       .controller;
 }
 
@@ -1091,15 +1098,17 @@ void expectBlockTitles(WidgetTester tester, CalendarThemeData theme) {
 /// The calendar's [CalendarStore], read from the view that shows, which a
 /// test writes through as the calendar does.
 CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
-  final grid = find.byType(TimedGrid);
+  final grid = find.byType(TimedGrid<ItemPayload>);
   if (grid.evaluate().isNotEmpty) {
-    return tester.widget<TimedGrid>(grid).store;
+    return tester.widget<TimedGrid<ItemPayload>>(grid).store;
   }
-  final list = find.byType(DayList);
+  final list = find.byType(DayList<ItemPayload>);
   if (list.evaluate().isNotEmpty) {
-    return tester.widget<DayList>(list).store;
+    return tester.widget<DayList<ItemPayload>>(list).store;
   }
-  return tester.widget<MonthBoard>(find.byType(MonthBoard)).store;
+  return tester
+      .widget<MonthBoard<ItemPayload>>(find.byType(MonthBoard<ItemPayload>))
+      .store;
 }
 
 /// The gutter cells the grid has built, in tree order.
@@ -1117,9 +1126,9 @@ List<Widget> gutterCells(WidgetTester tester) {
 List<Finder> viewRoots() {
   return <Finder>[
     for (final type in <Type>[
-      TimedGrid,
-      MonthBoard,
-      DayList,
+      TimedGrid<ItemPayload>,
+      MonthBoard<ItemPayload>,
+      DayList<ItemPayload>,
       DayCell,
       WeekdayHeader,
       MonthPicker,
@@ -1333,7 +1342,9 @@ void main() {
   ) async {
     final api = await pumpThemed(tester, harborCalendarTheme);
     await pickMode(tester, "Week");
-    final drawn = drawnUnder(tester, <Finder>[find.byType(TimedGrid)]);
+    final drawn = drawnUnder(tester, <Finder>[
+      find.byType(TimedGrid<ItemPayload>),
+    ]);
     for (final colour in <Color>[
       HarborColors.surface,
       HarborColors.outline,
@@ -1349,16 +1360,18 @@ void main() {
 
     await failNextRead(tester, api, "Next week");
     final message = find.descendant(
-      of: find.byType(TimedGrid),
+      of: find.byType(TimedGrid<ItemPayload>),
       matching: find.text("Reading failed."),
     );
     final retry = find.descendant(
-      of: find.byType(TimedGrid),
+      of: find.byType(TimedGrid<ItemPayload>),
       matching: find.text("Retry"),
     );
     expect(message, findsOneWidget);
     expect(retry, findsOneWidget);
-    final failed = drawnUnder(tester, <Finder>[find.byType(TimedGrid)]);
+    final failed = drawnUnder(tester, <Finder>[
+      find.byType(TimedGrid<ItemPayload>),
+    ]);
     final retryLabel = tester.renderObject<RenderParagraph>(retry);
     expect(failed.paragraphs.contains(tester.renderObject(message)), isTrue);
     expect(failed.paragraphs.contains(retryLabel), isFalse);
@@ -1394,7 +1407,7 @@ void main() {
     drawn = drawnUnder(tester, stripRoots);
     expectOnly(drawn, sentinelA, forbidden: const [], reason: "Day");
     fields.addAll(fieldsOf(drawn, sentinelA));
-    final week = tester.getSize(find.byType(WeekStrip)).width;
+    final week = tester.getSize(find.byType(WeekStrip<ItemPayload>)).width;
     await tester.tap(find.byKey(weekStripDayKey(april(26))));
     await tester.pumpAndSettle();
     var from = stripOffset(tester);
@@ -1421,9 +1434,9 @@ void main() {
       forbidden: <CalendarThemeData>[sentinelA],
       reason: "Day under B",
     );
-    final strip = tester.element(find.byType(WeekStrip));
+    final strip = tester.element(find.byType(WeekStrip<ItemPayload>));
     expect(
-      tester.getSize(find.byType(WeekStrip)).height,
+      tester.getSize(find.byType(WeekStrip<ItemPayload>)).height,
       moreOrLessEquals(
         lineHeightAt(strip, sentinelB.stripWeekdayStyle) +
             stripLabelGap +
@@ -1677,7 +1690,7 @@ void main() {
       "that installs it", (tester) async {
     final api = await pumpThemed(tester, sentinelA);
     await pickHours(tester, 8, 18);
-    final roots = <Finder>[find.byType(DayList)];
+    final roots = <Finder>[find.byType(DayList<ItemPayload>)];
     final fields = <String>{};
     void probe(String where) {
       final drawn = drawnUnder(tester, roots);
@@ -1735,7 +1748,7 @@ void main() {
     await failNextRead(tester, api, "Next month");
     expect(
       find.descendant(
-        of: find.byType(DayList),
+        of: find.byType(DayList<ItemPayload>),
         matching: find.text("Reading failed."),
       ),
       findsWidgets,
@@ -1800,7 +1813,7 @@ void main() {
     final api = await pumpThemed(tester, sentinelA);
     await pickHours(tester, 8, 18);
     await revealDay(tester, april(24));
-    final list = find.byType(DayList);
+    final list = find.byType(DayList<ItemPayload>);
     await tester.drag(list, const Offset(0.0, -420.0));
     await tester.pumpAndSettle();
     final header = find.byKey(dayListHeaderKey(april(24)));
@@ -1899,7 +1912,7 @@ void main() {
   testWidgets("C5 Month's board draws and runs on A at both sizes, and on "
       "B from the frame that installs it", (tester) async {
     final fields = <String>{};
-    final roots = <Finder>[find.byType(MonthBoard)];
+    final roots = <Finder>[find.byType(MonthBoard<ItemPayload>)];
     for (final size in const <Size>[Size(390.0, 844.0), Size(1100.0, 900.0)]) {
       final api = await pumpThemed(tester, sentinelA, size: size);
       await pickMode(tester, "Month");
@@ -1915,7 +1928,7 @@ void main() {
         // Friday's seven meetings take more lanes than a week holds.
         expect(
           find.descendant(
-            of: find.byType(MonthBoard),
+            of: find.byType(MonthBoard<ItemPayload>),
             matching: find.textContaining("more"),
           ),
           findsWidgets,
@@ -1958,7 +1971,7 @@ void main() {
       await failNextRead(tester, api, "Next month");
       expect(
         find.descendant(
-          of: find.byType(MonthBoard),
+          of: find.byType(MonthBoard<ItemPayload>),
           matching: find.text("Reading failed."),
         ),
         findsOneWidget,
@@ -2051,7 +2064,7 @@ void main() {
     final api = await pumpThemed(tester, sentinelA);
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
-    final roots = <Finder>[find.byType(TimedGrid)];
+    final roots = <Finder>[find.byType(TimedGrid<ItemPayload>)];
     final fields = <String>{};
     void probe(String where, {CalendarThemeData? theme}) {
       final drawn = drawnUnder(tester, roots);
@@ -2166,7 +2179,7 @@ void main() {
     await failNextRead(tester, api, "Next week");
     expect(
       find.descendant(
-        of: find.byType(TimedGrid),
+        of: find.byType(TimedGrid<ItemPayload>),
         matching: find.text("Reading failed."),
       ),
       findsOneWidget,
@@ -2447,7 +2460,7 @@ void main() {
       final icons = tester
           .widgetList<Icon>(
             find.descendant(
-              of: find.byType(DayList),
+              of: find.byType(DayList<ItemPayload>),
               matching: find.byType(Icon),
             ),
           )
@@ -2458,7 +2471,7 @@ void main() {
       final lines = tester
           .widgetList(
             find.descendant(
-              of: find.byType(DayList),
+              of: find.byType(DayList<ItemPayload>),
               matching: find.byWidgetPredicate((widget) {
                 if (widget is! Expanded) {
                   return false;
@@ -2925,7 +2938,7 @@ void main() {
     await failNextRead(tester, api, "Next week");
     expectText(
       tester,
-      textIn(find.byType(TimedGrid), "Reading failed."),
+      textIn(find.byType(TimedGrid<ItemPayload>), "Reading failed."),
       theme,
       "messageStyle",
       theme.error,
@@ -3279,7 +3292,10 @@ void main() {
         .widget<ColoredBox>(
           find
               .ancestor(
-                of: textIn(find.byType(TimedGrid), "Reading failed."),
+                of: textIn(
+                  find.byType(TimedGrid<ItemPayload>),
+                  "Reading failed.",
+                ),
                 matching: find.byType(ColoredBox),
               )
               .first,
@@ -3351,7 +3367,10 @@ void main() {
 
     // A failed read in each view.
     await failNextRead(tester, api, "Next month");
-    expect(textIn(find.byType(MonthBoard), "Reading failed."), findsOneWidget);
+    expect(
+      textIn(find.byType(MonthBoard<ItemPayload>), "Reading failed."),
+      findsOneWidget,
+    );
     await visit("Month, a failed read");
     for (final mode in <String>["Week", "Day", "Agenda"]) {
       await pickMode(tester, mode);
@@ -3413,7 +3432,7 @@ void main() {
 
     // A strip slide.
     await pickMode(tester, "Day");
-    final week = tester.getSize(find.byType(WeekStrip)).width;
+    final week = tester.getSize(find.byType(WeekStrip<ItemPayload>)).width;
     await tester.tap(find.byKey(weekStripDayKey(april(26))));
     await tester.pumpAndSettle();
     final strip = stripOffset(tester);
@@ -3558,7 +3577,9 @@ void main() {
           await closeBar(tester);
         case "Day":
           // A strip slide on B's motion.
-          final week = tester.getSize(find.byType(WeekStrip)).width;
+          final week = tester
+              .getSize(find.byType(WeekStrip<ItemPayload>))
+              .width;
           await tester.tap(find.byKey(weekStripDayKey(april(26))));
           await tester.pumpAndSettle();
           final from = stripOffset(tester);
@@ -3582,7 +3603,9 @@ void main() {
           await tester.pump();
           expect(gridBoard(tester).drag!.draggedItemOpacity, 0.3);
           expect(
-            drawnUnder(tester, <Finder>[find.byType(TimedGrid)]).alphas,
+            drawnUnder(tester, <Finder>[
+              find.byType(TimedGrid<ItemPayload>),
+            ]).alphas,
             contains(Color.getAlphaFromOpacity(0.3)),
           );
           await gesture.cancel();
@@ -3612,9 +3635,9 @@ void main() {
     expect(tester.takeException(), isNull);
     await gesture.up();
     await tester.pumpAndSettle();
-    final strip = tester.element(find.byType(WeekStrip));
+    final strip = tester.element(find.byType(WeekStrip<ItemPayload>));
     expect(
-      tester.getSize(find.byType(WeekStrip)).height,
+      tester.getSize(find.byType(WeekStrip<ItemPayload>)).height,
       moreOrLessEquals(
         lineHeightAt(strip, sentinelB.stripWeekdayStyle) +
             stripLabelGap +
@@ -3704,7 +3727,7 @@ void main() {
     }
     expect(gridBoard(tester).drag!.draggedItemOpacity, 0.3);
     expectOnly(
-      drawnUnder(tester, <Finder>[find.byType(TimedGrid)]),
+      drawnUnder(tester, <Finder>[find.byType(TimedGrid<ItemPayload>)]),
       sentinelB,
       forbidden: <CalendarThemeData>[sentinelA],
       reason: "the lerp's end",
@@ -3763,14 +3786,17 @@ void main() {
     await tester.pump();
     expect(
       tester.getRect(find.byKey(dayListHeaderKey(april(23)))).top,
-      moreOrLessEquals(tester.getRect(find.byType(DayList)).top, epsilon: 0.5),
+      moreOrLessEquals(
+        tester.getRect(find.byType(DayList<ItemPayload>)).top,
+        epsilon: 0.5,
+      ),
     );
     await tester.pumpAndSettle();
 
     // A strip slide, then a drag of the strip into the next month, which
     // the header names.
     await pickMode(tester, "Day");
-    final week = tester.getSize(find.byType(WeekStrip)).width;
+    final week = tester.getSize(find.byType(WeekStrip<ItemPayload>)).width;
     await tester.tap(find.byKey(weekStripDayKey(april(26))));
     await tester.pumpAndSettle();
     final from = stripOffset(tester);
@@ -3779,7 +3805,7 @@ void main() {
     expect(stripOffset(tester) - from, moreOrLessEquals(week));
     await tester.pumpAndSettle();
     final drag = await tester.startGesture(
-      tester.getCenter(find.byType(WeekStrip)),
+      tester.getCenter(find.byType(WeekStrip<ItemPayload>)),
     );
     await drag.moveBy(const Offset(-(kTouchSlop + 1.0), 0.0));
     await tester.pump();
@@ -3856,7 +3882,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.getRect(find.byKey(dayListHeaderKey(target))).top,
-      moreOrLessEquals(tester.getRect(find.byType(DayList)).top, epsilon: 0.5),
+      moreOrLessEquals(
+        tester.getRect(find.byType(DayList<ItemPayload>)).top,
+        epsilon: 0.5,
+      ),
     );
     expect(tester.takeException(), isNull);
   });

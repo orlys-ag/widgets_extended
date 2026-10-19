@@ -6,17 +6,15 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_item.dart';
 import 'calendar_settings.dart';
 import 'day_cell.dart';
-import 'harbor_theme.dart';
 import 'pinch_zoom.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
@@ -39,9 +37,9 @@ const double monthCardMinWidth = 100.0;
 const double monthCardMinHeight = monthStripHeight + 3 * monthCardExtent;
 
 /// Whether days [width] wide, in weeks resting at [extent], show their
-/// items as cards, which hold an item's times and its type's icon under
-/// its title, rather than as one-line chips: when both reach
-/// [monthCardMinWidth] and [monthCardMinHeight].
+/// items as cards, one [monthCardExtent] lane tall, which the chip builder
+/// draws in its card form, rather than as chips one [monthLaneExtent] lane
+/// tall: when both reach [monthCardMinWidth] and [monthCardMinHeight].
 bool monthShowsCards(double width, double extent) {
   return width >= monthCardMinWidth && extent >= monthCardMinHeight;
 }
@@ -81,9 +79,8 @@ BoardAnimationStyle monthBoardAnimationStyleOf(CalendarThemeData theme) {
   );
 }
 
-/// What a [MonthBoard] and the days, chips and overlay it builds draw and
-/// animate with, made from one [CalendarThemeData] by [forTheme] and never
-/// changed.
+/// What a [MonthBoard] and the days and overlay it builds draw and animate
+/// with, made from one [CalendarThemeData] by [forTheme] and never changed.
 @immutable
 class _MonthStyles {
   _MonthStyles._(this.theme)
@@ -113,10 +110,6 @@ class _MonthStyles {
         borderRadius: BorderRadius.circular(4.0),
       ),
       moreLabel = theme.monthMoreStyle.copyWith(color: theme.onNotice),
-      chipTitle = theme.chipTitleStyle.copyWith(color: theme.text),
-      cardTitle = theme.monthCardTitleStyle.copyWith(color: theme.text),
-      cardTime = theme.monthCardTimeStyle.copyWith(color: theme.textSecondary),
-      message = theme.messageStyle.copyWith(color: theme.error),
       scrim = theme.background.withValues(alpha: 0.85);
 
   /// The styles of [theme]: those made for it before, or for a theme `==`
@@ -173,13 +166,7 @@ class _MonthStyles {
   final BoxDecoration more;
   final TextStyle moreLabel;
 
-  final TextStyle chipTitle;
-  final TextStyle cardTitle;
-  final TextStyle cardTime;
-
-  /// A failed read's message, and the scrim over the board while its days
-  /// are not ready.
-  final TextStyle message;
+  /// The scrim over the board while its days are not ready.
   final Color scrim;
 }
 
@@ -212,7 +199,7 @@ ValueKey<String> monthMoreKey(DateTime day) {
 
 /// One item's bar in one calendar week: the month board's payload.
 @immutable
-class MonthChip {
+class MonthChip<T> {
   const MonthChip({
     required this.key,
     required this.entry,
@@ -223,7 +210,7 @@ class MonthChip {
   /// [monthSegmentKey] of the item's id and the week's first day.
   final String key;
 
-  final ShownItem entry;
+  final CalendarShownEntry<T> entry;
 
   /// Whether the item's first day precedes the week's first day, whatever
   /// weekdays show.
@@ -235,7 +222,7 @@ class MonthChip {
 
   @override
   bool operator ==(Object other) {
-    return other is MonthChip &&
+    return other is MonthChip<T> &&
         other.key == key &&
         other.entry == entry &&
         other.continuesBefore == continuesBefore &&
@@ -259,8 +246,8 @@ class MonthChip {
 /// first day to the last shown day on or before its last. A week whose
 /// shown days the item misses has none, which is the clipping
 /// `gridSpanOf` applies to the timed grid's columns.
-List<BoardPlacement<MonthChip>> monthPlacementsOf(
-  Iterable<ShownItem> shown,
+List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
+  Iterable<CalendarShownEntry<T>> shown,
   MonthGrid grid,
 ) {
   final weeks = grid.weekCount;
@@ -272,7 +259,7 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
       days[row * columns + col] = dayNumber(grid.dateAt(row, col));
     }
   }
-  final placements = <BoardPlacement<MonthChip>>[];
+  final placements = <BoardPlacement<MonthChip<T>>>[];
   for (final entry in shown) {
     final item = entry.entry;
     final first = dayNumber(item.day);
@@ -298,8 +285,8 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
         continue;
       }
       placements.add(
-        BoardPlacement<MonthChip>(
-          MonthChip(
+        BoardPlacement<MonthChip<T>>(
+          MonthChip<T>(
             key: monthSegmentKey(entry.id, dateOfDayNumber(weekFirst)),
             entry: entry,
             continuesBefore: first < weekFirst,
@@ -320,7 +307,7 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
 /// so a week's chips stack by the day each starts in the week, the longer
 /// first, and a bar continuing from the week before stacks above a chip
 /// starting on its first shown day.
-int compareMonthChips(MonthChip a, MonthChip b) {
+int compareMonthChips<T>(MonthChip<T> a, MonthChip<T> b) {
   final x = a.entry.entry;
   final y = b.entry.entry;
   // `day` is the first day at local midnight, so this compares days and
@@ -358,8 +345,9 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// on one of its days hides on all of them. A kept chip keeps its lane on
 /// the board, since the chips that push it there hold the lanes below the
 /// last, and those always show.
-({List<BoardPlacement<MonthChip>> shown, Int32List hidden}) fitMonthPlacements(
-  List<BoardPlacement<MonthChip>> placements,
+({List<BoardPlacement<MonthChip<T>>> shown, Int32List hidden})
+fitMonthPlacements<T>(
+  List<BoardPlacement<MonthChip<T>>> placements,
   MonthGrid grid,
   int lanes,
 ) {
@@ -443,7 +431,7 @@ int compareMonthChips(MonthChip a, MonthChip b) {
     return (shown: placements, hidden: hidden);
   }
   return (
-    shown: <BoardPlacement<MonthChip>>[
+    shown: <BoardPlacement<MonthChip<T>>>[
       for (var i = 0; i < placements.length; i++)
         if (!hides[i]) placements[i],
     ],
@@ -469,21 +457,23 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// in its last lane. Each day shows its number in a strip across its top,
 /// today's in the primary colour inside the today ring and the selected
 /// day's on the primary pill, in the [CalendarTheme] above the board. Each
-/// item shows as one bar per calendar week it covers, in its type's
-/// colours and square where it continues into the week before or after: a
-/// chip one lane tall holding its title, or, in days large enough
-/// ([monthShowsCards]), a card two chips tall holding its title over its
-/// type's icon and its times. A pending item's bar is dimmed and takes no
-/// tap. Lines part the weeks and the days, and each day of another month
-/// lies on the background colour.
+/// item shows as one bar per calendar week it covers, whose content is what
+/// [chipBuilder] draws, told whether the item continues into the week
+/// before or after: a chip one lane tall, or, in days large enough
+/// ([monthShowsCards]), a card two chips tall, the builder told it draws a
+/// card. A pending item's bar takes no tap, and the board names each bar to
+/// a screen reader, its kind as [entryKindOf] answers it. Lines part the
+/// weeks and the days, and each day of another month lies on the
+/// background colour.
 ///
 /// A tap on a chip reports [onOpenItem], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
 /// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
 /// last two give the board the keyboard, whose arrow
 /// keys move the selected day and report it through [onSelectDay]. While
-/// the days load, a progress indicator covers the board, and after a
-/// failed read the error and a Retry that reads again. A change of the
+/// the days are not ready a cover over the board takes every press,
+/// centring what [loadingBuilder] draws while they are read, and what
+/// [failureBuilder] draws when the read failed. A change of the
 /// store animates over the theme's motion; a new month or a new set of
 /// weekdays does not, and
 /// settles at once whatever chip was still growing in or shrinking out. A
@@ -500,7 +490,10 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// a pinch brings does not scroll to the selected day. While two fingers
 /// are down the board does not scroll, and a tap or a long press of
 /// fingers that pinched does nothing.
-class MonthBoard extends StatefulWidget {
+///
+/// A bar's content, the loading and the failure state are what their
+/// builders draw, the module's defaults where they are null.
+class MonthBoard<T> extends StatefulWidget {
   const MonthBoard({
     super.key,
     required this.store,
@@ -515,9 +508,13 @@ class MonthBoard extends StatefulWidget {
     required this.onCreateOnDay,
     required this.onOpenItem,
     this.onZoom,
+    this.chipBuilder,
+    this.loadingBuilder,
+    this.failureBuilder,
+    this.entryKindOf,
   });
 
-  final CalendarStore<ItemPayload> store;
+  final CalendarStore<T> store;
 
   /// The month the board shows.
   final MonthGrid grid;
@@ -558,14 +555,33 @@ class MonthBoard extends StatefulWidget {
   /// null for a board no pinch zooms.
   final void Function(double weekScale, double minDayWidth)? onZoom;
 
+  /// Draws each bar's content inside the lane the board gives it, in its
+  /// chip or card form; null for [defaultCalendarChipBuilder]. A new one,
+  /// not `==` to the last, draws every bar again.
+  final CalendarChipBuilder<T>? chipBuilder;
+
+  /// Draws the cover's content while the board's days are read; null for
+  /// [defaultCalendarLoadingBuilder].
+  final CalendarLoadingBuilder? loadingBuilder;
+
+  /// Draws the cover's content when the read of the board's days failed;
+  /// null for [defaultCalendarFailureBuilder].
+  final CalendarFailureBuilder? failureBuilder;
+
+  /// The word that names [CalendarEntry]'s kind in the label a screen
+  /// reader hears for its bar, after its title; null, or a null answer,
+  /// leaves the kind out. A new one, not `==` to the last, names every bar
+  /// again.
+  final String? Function(CalendarEntry<T> entry)? entryKindOf;
+
   @override
-  State<MonthBoard> createState() {
-    return _MonthBoardState();
+  State<MonthBoard<T>> createState() {
+    return _MonthBoardState<T>();
   }
 }
 
 /// A chip the item builder built, and the payload it built it for.
-typedef _KeptChip = ({MonthChip chip, Widget widget});
+typedef _KeptChip<T> = ({MonthChip<T> chip, Widget widget});
 
 /// A day cell the cell builder built, and the day and selection it built
 /// it for.
@@ -577,7 +593,8 @@ typedef _Hidden = ({int count, int lane, double laneExtent});
 
 const _Hidden _noneHidden = (count: 0, lane: 0, laneExtent: monthLaneExtent);
 
-class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
+class _MonthBoardState<T> extends State<MonthBoard<T>>
+    with TickerProviderStateMixin {
   /// The columns' width before the first layout, which replaces it.
   static const double _placeholderColumnWidth = 48.0;
 
@@ -587,7 +604,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// The most cells a month grid has: six weeks of seven days.
   static const int _mostCells = 6 * DateTime.daysPerWeek;
 
-  late final BoardController<String, MonthChip> _board;
+  late final BoardController<String, MonthChip<T>> _board;
 
   /// The vertical scroll, which [_revealSelected] reads.
   final ScrollController _scroll = ScrollController();
@@ -623,10 +640,20 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// every cell and chip, whenever a builder it gets is not identical to
   /// the previous one; the selection config likewise. The board gets the
   /// card builder while [_cards] holds, so a turn from chips to cards or
-  /// back rebuilds every bar.
-  late final BoardCellBuilder<String, MonthChip> _cellBuilder = _buildDay;
-  late final BoardItemBuilder<String, MonthChip> _chipBuilder = _buildChip;
-  late final BoardItemBuilder<String, MonthChip> _cardBuilder = _buildCard;
+  /// back rebuilds every bar. [didUpdateWidget] gives the board new bar
+  /// builders, and drops the kept bars, for a new
+  /// [MonthBoard.chipBuilder] or [MonthBoard.entryKindOf].
+  late final BoardCellBuilder<String, MonthChip<T>> _cellBuilder = _buildDay;
+  late BoardItemBuilder<String, MonthChip<T>> _chipBuilder = _buildChip;
+  late BoardItemBuilder<String, MonthChip<T>> _cardBuilder = _buildCard;
+
+  /// [MonthBoard.chipBuilder], or the module's default where it is null.
+  late CalendarChipBuilder<T> _barBuilder = _barBuilderOf(widget);
+
+  static CalendarChipBuilder<T> _barBuilderOf<T>(MonthBoard<T> widget) {
+    return widget.chipBuilder ?? defaultCalendarChipBuilder<T>;
+  }
+
   late final BoardSelectionConfig _selectionConfig = BoardSelectionConfig(
     mode: BoardSelectionMode.cell,
     onChanged: _handleBoardSelection,
@@ -700,7 +727,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// that did not change returns the same instance and builds nothing.
   /// Holds no key but those the latest sync placed and those in [_dropped],
   /// and no bar but those of the kind [_cards] names.
-  final Map<String, _KeptChip> _chips = <String, _KeptChip>{};
+  final Map<String, _KeptChip<T>> _chips = <String, _KeptChip<T>>{};
 
   /// The day cells the cell builder returned, one entry per cell of the
   /// grid at `row * columnCount + col`, refilled with nulls for each new
@@ -712,23 +739,23 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   late _MonthGridPainter _background;
 
   /// The latest sync's placements, by chip key.
-  Map<String, BoardPlacement<MonthChip>> _placed =
-      <String, BoardPlacement<MonthChip>>{};
+  Map<String, BoardPlacement<MonthChip<T>>> _placed =
+      <String, BoardPlacement<MonthChip<T>>>{};
 
   /// Over the animated syncs since the last sync that did not animate: the
   /// placements they stopped placing, by chip key, and the chip keys they
   /// started placing. Every exit and enter in flight is among them, since
   /// only an animated sync starts one; the controller's key reads cannot
   /// tell an exiting key from a retired one.
-  final Map<String, BoardPlacement<MonthChip>> _dropped =
-      <String, BoardPlacement<MonthChip>>{};
+  final Map<String, BoardPlacement<MonthChip<T>>> _dropped =
+      <String, BoardPlacement<MonthChip<T>>>{};
   final Set<String> _added = <String>{};
 
   @override
   void initState() {
     super.initState();
     final grid = widget.grid;
-    _board = BoardController<String, MonthChip>(
+    _board = BoardController<String, MonthChip<T>>(
       vsync: this,
       // Both replaced by the first layout, which knows the size.
       rows: _rowsConfig(
@@ -744,7 +771,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       },
       // Until the first didChangeDependencies assigns the theme's.
       animationStyle: BoardAnimationStyle.disabled,
-      laneOrder: compareMonthChips,
+      laneOrder: compareMonthChips<T>,
     );
     // Before the board subscribes, so it starts on the selected day and a
     // key moves from there.
@@ -783,8 +810,19 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   }
 
   @override
-  void didUpdateWidget(MonthBoard oldWidget) {
+  void didUpdateWidget(MonthBoard<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.chipBuilder != oldWidget.chipBuilder ||
+        widget.entryKindOf != oldWidget.entryKindOf) {
+      _barBuilder = _barBuilderOf(widget);
+      _chips.clear();
+      _chipBuilder = (context, view) {
+        return _buildChip(context, view);
+      };
+      _cardBuilder = (context, view) {
+        return _buildCard(context, view);
+      };
+    }
     if (widget.store != oldWidget.store) {
       oldWidget.store.removeListener(_handleStore);
       widget.store.addListener(_handleStore);
@@ -1067,10 +1105,10 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       return;
     }
     final ready = _daysReady;
-    List<BoardPlacement<MonthChip>>? placements;
+    List<BoardPlacement<MonthChip<T>>>? placements;
     Int32List? hidden;
     if (sync && !ready) {
-      placements = const <BoardPlacement<MonthChip>>[];
+      placements = <BoardPlacement<MonthChip<T>>>[];
     } else if (sync) {
       final all = monthPlacementsOf(
         widget.store.entriesBetween(grid.firstDay, grid.lastDay),
@@ -1084,7 +1122,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
         hidden = fit.hidden;
       }
     }
-    final next = <String, BoardPlacement<MonthChip>>{
+    final next = <String, BoardPlacement<MonthChip<T>>>{
       if (placements != null)
         for (final placement in placements) placement.item.key: placement,
     };
@@ -1182,7 +1220,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// Records what the animated sync placing [next] starts: each key
   /// [_placed] holds and [next] lacks exits, each key [next] holds and
   /// [_placed] lacks enters.
-  void _recordMotion(Map<String, BoardPlacement<MonthChip>> next) {
+  void _recordMotion(Map<String, BoardPlacement<MonthChip<T>>> next) {
     for (final entry in _placed.entries) {
       if (!next.containsKey(entry.key)) {
         _dropped[entry.key] = entry.value;
@@ -1209,10 +1247,10 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// adds the left-out ones whole, under new ids. Inside the sync's batch
   /// the two calls make one notification.
   void _setItemsSettled(
-    List<BoardPlacement<MonthChip>> placements,
-    Map<String, BoardPlacement<MonthChip>> next,
+    List<BoardPlacement<MonthChip<T>>> placements,
+    Map<String, BoardPlacement<MonthChip<T>>> next,
   ) {
-    final carry = <BoardPlacement<MonthChip>>[
+    final carry = <BoardPlacement<MonthChip<T>>>[
       for (final entry in _dropped.entries)
         if (!next.containsKey(entry.key)) entry.value,
     ];
@@ -1226,7 +1264,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       _board.setItems(placements);
       return;
     }
-    _board.setItems(<BoardPlacement<MonthChip>>[
+    _board.setItems(<BoardPlacement<MonthChip<T>>>[
       for (final placement in placements)
         if (!renew.contains(placement.item.key)) placement,
       ...carry,
@@ -1275,7 +1313,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
 
   Widget? _buildDay(
     BuildContext context,
-    BoardCellView<String, MonthChip> cell,
+    BoardCellView<String, MonthChip<T>> cell,
   ) {
     final grid = widget.grid;
     // A key moving the selection rebuilds the cells whose answer changed in
@@ -1308,34 +1346,68 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
 
   Widget _buildChip(
     BuildContext context,
-    BoardItemView<String, MonthChip> view,
+    BoardItemView<String, MonthChip<T>> view,
   ) {
     return _buildBar(view.item, card: false);
   }
 
   Widget _buildCard(
     BuildContext context,
-    BoardItemView<String, MonthChip> view,
+    BoardItemView<String, MonthChip<T>> view,
   ) {
     return _buildBar(view.item, card: true);
   }
 
-  Widget _buildBar(MonthChip chip, {required bool card}) {
+  /// The kept bar of [chip] where it was built for an equal chip, which the
+  /// board then neither updates nor rebuilds, so no bar's builder runs for
+  /// a sync that leaves its chip as it was; a new one otherwise.
+  Widget _buildBar(MonthChip<T> chip, {required bool card}) {
     final kept = _chips[chip.key];
     if (kept != null && kept.chip == chip) {
       return kept.widget;
     }
     final built = Align(
       alignment: Alignment.topLeft,
-      child: _MonthChipBox(
+      child: _MonthChipBox<T>(
         key: monthChipKey(chip.key),
         chip: chip,
         card: card,
+        builder: _barBuilder,
+        kindOf: widget.entryKindOf,
         onOpen: _openItem,
       ),
     );
     _chips[chip.key] = (chip: chip, widget: built);
     return built;
+  }
+
+  /// The cover's content: what the failure builder draws for the grid's
+  /// days when the read the store waits on failed, with the store's load
+  /// error as it holds it, and what the loading builder draws otherwise.
+  Widget _buildCover(BuildContext context, CalendarStore<T> store) {
+    final grid = widget.grid;
+    if (store.status == CalendarLoadStatus.failed) {
+      final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
+      return failure(
+        context,
+        CalendarFailureState(
+          site: CalendarStateSite.cover,
+          first: grid.firstDay,
+          last: grid.lastDay,
+          error: store.loadError,
+          retry: store.retry,
+        ),
+      );
+    }
+    final loading = widget.loadingBuilder ?? defaultCalendarLoadingBuilder;
+    return loading(
+      context,
+      CalendarLoadingState(
+        site: CalendarStateSite.cover,
+        first: grid.firstDay,
+        last: grid.lastDay,
+      ),
+    );
   }
 
   @override
@@ -1367,7 +1439,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
                       onPointerMove: _pinch.handleEvent,
                       onPointerUp: _pinch.handleEvent,
                       onPointerCancel: _pinch.handleEvent,
-                      child: Board<String, MonthChip>(
+                      child: Board<String, MonthChip<T>>(
                         controller: _board,
                         cellBuilder: _cellBuilder,
                         itemBuilder: _cards ? _cardBuilder : _chipBuilder,
@@ -1389,10 +1461,11 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
                   if (!_daysReady)
                     Positioned.fill(
                       child: _MonthLoadOverlay(
-                        error: store.status == CalendarLoadStatus.failed
-                            ? "${store.loadError}"
-                            : null,
-                        onRetry: store.retry,
+                        child: Builder(
+                          builder: (context) {
+                            return _buildCover(context, store);
+                          },
+                        ),
                       ),
                     ),
                 ],
@@ -1469,9 +1542,10 @@ String _dayLabel(DateTime day) {
       "${monthNames[day.month - 1]} ${day.day}";
 }
 
-/// What a screen reader says for [entry]'s chip: its title, type, days
-/// and times, and that it is pending while it is.
-String _chipLabel(ShownItem entry) {
+/// What a screen reader says for [entry]'s chip: its title, the [kind]
+/// where there is one, its days and times, and that it is pending while it
+/// is.
+String _chipLabel<T>(CalendarShownEntry<T> entry, String? kind) {
   final item = entry.entry;
   final times =
       "${clockLabel(item.startMinute)} to ${clockLabel(item.endMinute)}";
@@ -1482,7 +1556,9 @@ String _chipLabel(ShownItem entry) {
     final last = addDays(item.day, item.dayCount - 1);
     when = "${_dayLabel(item.day)} to ${_dayLabel(last)}, $times each day";
   }
-  final label = "${item.title}, ${item.type.label}, $when";
+  final label = kind == null
+      ? "${item.title}, $when"
+      : "${item.title}, $kind, $when";
   return entry.pending ? "$label, pending" : label;
 }
 
@@ -1633,75 +1709,41 @@ class _MonthDayCell extends StatelessWidget {
 }
 
 /// One item's bar in one week: a lane-tall box over its lane band's top,
-/// holding the bar inside a 1 px inset. The bar is the type's tint with a
-/// 4 px edge in the type's colour, as [HarborTypeStyle] draws an item,
-/// rounded at an end where the item starts or ends and square where it
-/// continues. A chip, one [monthLaneExtent] lane tall, holds the title on
-/// one line; a [card], one [monthCardExtent] lane tall, holds the title
-/// over the type's icon and the item's times. Dimmed while pending, when a
-/// tap on it does nothing.
-class _MonthChipBox extends StatelessWidget {
+/// holding, inside a 1 px inset and at its lane's height while the board
+/// grows or shrinks the band, what [builder] draws for the chip: a chip one
+/// [monthLaneExtent] lane tall, or a [card] one [monthCardExtent] lane
+/// tall. The box is one semantics node of the chip's label, the kind
+/// [kindOf] answers, and its tap, and takes a tap anywhere in it, which
+/// does nothing while the chip is pending.
+class _MonthChipBox<T> extends StatelessWidget {
   const _MonthChipBox({
     super.key,
     required this.chip,
     required this.card,
+    required this.builder,
+    required this.kindOf,
     required this.onOpen,
   });
 
-  final MonthChip chip;
+  final MonthChip<T> chip;
   final bool card;
+  final CalendarChipBuilder<T> builder;
+  final String? Function(CalendarEntry<T> entry)? kindOf;
   final ValueChanged<String> onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final styles = _MonthStyles.of(context);
     final entry = chip.entry;
-    final item = entry.entry;
     final pending = entry.pending;
-    final style = harborTypeStyleOf(item.type);
     final extent = card ? monthCardExtent : monthLaneExtent;
-    const radius = Radius.circular(4.0);
     void open() {
       onOpen(entry.id);
     }
 
-    final title = Text(
-      item.title,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      softWrap: false,
-      style: card ? styles.cardTitle : styles.chipTitle,
-    );
-    Widget bar = ClipRRect(
-      borderRadius: BorderRadius.horizontal(
-        left: chip.continuesBefore ? Radius.zero : radius,
-        right: chip.continuesAfter ? Radius.zero : radius,
-      ),
-      child: ColoredBox(
-        color: style.tint,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            SizedBox(width: 4.0, child: ColoredBox(color: style.edge)),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                child: card
-                    ? _buildCardLines(title, item, style, styles)
-                    : Align(alignment: Alignment.centerLeft, child: title),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (pending) {
-      bar = Opacity(opacity: 0.5, child: bar);
-    }
     return Semantics(
       container: true,
       button: !pending,
-      label: _chipLabel(entry),
+      label: _chipLabel(entry, kindOf?.call(entry.entry)),
       onTap: pending ? null : open,
       excludeSemantics: true,
       child: SizedBox(
@@ -1721,7 +1763,15 @@ class _MonthChipBox extends StatelessWidget {
                 alignment: Alignment.topLeft,
                 minHeight: extent - 2.0,
                 maxHeight: extent - 2.0,
-                child: bar,
+                child: _ChipContent<T>(
+                  entry: entry,
+                  details: CalendarChipDetails(
+                    card: card,
+                    continuesBefore: chip.continuesBefore,
+                    continuesAfter: chip.continuesAfter,
+                  ),
+                  builder: builder,
+                ),
               ),
             ),
           ),
@@ -1729,76 +1779,46 @@ class _MonthChipBox extends StatelessWidget {
       ),
     );
   }
+}
 
-  /// A card's [title] over its type's icon and [item]'s times, as
-  /// [clockLabel] writes them, each line cut short where the day is too
-  /// narrow for it.
-  Widget _buildCardLines(
-    Text title,
-    CalendarItem item,
-    HarborTypeStyle style,
-    _MonthStyles styles,
-  ) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        title,
-        Row(
-          children: <Widget>[
-            Icon(style.icon, size: 11.0, color: style.edge),
-            const SizedBox(width: 3.0),
-            Flexible(
-              child: Text(
-                "${clockLabel(item.startMinute)}-${clockLabel(item.endMinute)}",
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
-                style: styles.cardTime,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
+/// A bar's content: what [builder] draws for [entry] and [details], called
+/// in this widget's build, below the bar's semantics node and gesture, so a
+/// builder that throws loses its own output alone. The month board keeps
+/// each bar for an equal chip ([_MonthBoardState._buildBar]), so a sync
+/// that leaves a chip as it was builds none of it again.
+class _ChipContent<T> extends StatelessWidget {
+  const _ChipContent({
+    required this.entry,
+    required this.details,
+    required this.builder,
+  });
+
+  final CalendarShownEntry<T> entry;
+  final CalendarChipDetails details;
+  final CalendarChipBuilder<T> builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return builder(context, entry, details);
   }
 }
 
-/// Covers the board while its days are not ready, taking every press: a
-/// progress indicator while it loads, the error and Retry when the read
-/// failed. The timed grid's overlay looks and acts the same.
+/// Covers the board while its days are not ready, taking every press,
+/// whatever [child] paints: the scrim, with [child], the loading or the
+/// failure builder's content, centred on it. The timed grid's overlay acts
+/// the same.
 class _MonthLoadOverlay extends StatelessWidget {
-  const _MonthLoadOverlay({required this.error, required this.onRetry});
+  const _MonthLoadOverlay({required this.child});
 
-  final String? error;
-  final VoidCallback onRetry;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final styles = _MonthStyles.of(context);
-    final message = error;
     // A ColoredBox hit-tests as opaque, so no press reaches the board.
     return ColoredBox(
       color: styles.scrim,
-      child: Center(
-        child: message == null
-            ? const CircularProgressIndicator()
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                    child: Text(
-                      message,
-                      textAlign: TextAlign.center,
-                      style: styles.message,
-                    ),
-                  ),
-                  const SizedBox(height: 12.0),
-                  TextButton(onPressed: onRetry, child: const Text("Retry")),
-                ],
-              ),
-      ),
+      child: Center(child: child),
     );
   }
 }

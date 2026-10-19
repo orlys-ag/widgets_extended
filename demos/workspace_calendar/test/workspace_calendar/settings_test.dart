@@ -5,6 +5,7 @@ library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -625,7 +626,10 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byTooltip("1 item is on a day not shown"), findsOneWidget);
+    expect(
+      find.bySemanticsLabel("1 item is on a day not shown\n+1"),
+      findsOneWidget,
+    );
     expect(
       tester.getRect(find.byKey(hiddenCountKey)).center.dy,
       near(grid.localToGlobal(Offset.zero).dy + 20.0),
@@ -745,7 +749,7 @@ void main() {
     await pickMode(tester, "Day");
     expect(
       tester.getRect(find.byKey(weekStripDayKey(DateTime(2026, 4, 19)))).left,
-      near(tester.getRect(find.byType(WeekStrip)).left),
+      near(tester.getRect(find.byType(WeekStrip<ItemPayload>)).left),
     );
 
     await pickMode(tester, "Week");

@@ -4,6 +4,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -225,7 +226,10 @@ void main() {
     );
     final row = rowHeight(tester);
 
-    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -120.0),
+    );
     await tester.pumpAndSettle();
     expect(gridHeight(tester), row);
     expect(find.text("Agenda"), findsOneWidget);
@@ -252,7 +256,10 @@ void main() {
     expect(find.text("Tuesday, April 28"), findsOneWidget);
     expect(tester.getRect(stripDayFinder(4, 27)).topLeft, grid.topLeft);
 
-    await tester.drag(find.byType(WeekStrip), const Offset(0.0, 120.0));
+    await tester.drag(
+      find.byType(WeekStrip<ItemPayload>),
+      const Offset(0.0, 120.0),
+    );
     await tester.pumpAndSettle();
     expect(gridHeight(tester), 5 * row);
     expect(find.text("Agenda"), findsOneWidget);
@@ -265,7 +272,10 @@ void main() {
     // Folded again, the next week is May's, whose grid the calendar reads
     // as it shows it, and a pull on the strip unfolds the month while that
     // read runs.
-    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -120.0),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip("Next week"));
     await tester.pump();
@@ -273,7 +283,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     expect(find.text("Tuesday, May 5"), findsOneWidget);
-    await tester.drag(find.byType(WeekStrip), const Offset(0.0, 120.0));
+    await tester.drag(
+      find.byType(WeekStrip<ItemPayload>),
+      const Offset(0.0, 120.0),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(gridHeight(tester), 5 * row);
@@ -292,13 +305,22 @@ void main() {
     await pumpCalendar(tester);
     await tapAndSettle(tester, dayFinder(2026, 4, 27));
 
-    await tester.drag(find.byType(DayList), const Offset(0.0, -60.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -60.0),
+    );
     await tester.pumpAndSettle();
     expect(gridHeight(tester), rowHeight(tester));
-    await tester.drag(find.byType(DayList), const Offset(0.0, 600.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, 600.0),
+    );
     await tester.pumpAndSettle();
     expect(gridHeight(tester), rowHeight(tester));
-    await tester.drag(find.byType(WeekStrip), const Offset(0.0, 40.0));
+    await tester.drag(
+      find.byType(WeekStrip<ItemPayload>),
+      const Offset(0.0, 40.0),
+    );
     await tester.pumpAndSettle();
     expect(gridHeight(tester), 5 * rowHeight(tester));
   });
@@ -385,7 +407,10 @@ void main() {
       return month + (row - month) * t;
     }
 
-    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -120.0),
+    );
     // The fold's clock starts on the first frame.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -403,7 +428,10 @@ void main() {
 
     // Once the fold settles, the unfold eases out on the same curve.
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(WeekStrip), const Offset(0.0, 120.0));
+    await tester.drag(
+      find.byType(WeekStrip<ItemPayload>),
+      const Offset(0.0, 120.0),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     final t = Curves.fastOutSlowIn.transform(1.0 / 3.0);
