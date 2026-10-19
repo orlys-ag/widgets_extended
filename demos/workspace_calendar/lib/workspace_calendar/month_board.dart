@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_data.dart';
@@ -67,16 +68,120 @@ int monthLanesThatFit(double extent, {double laneExtent = monthLaneExtent}) {
   return math.max(lanes, 1);
 }
 
-/// The style the month board animates with: every family over
-/// [harborMotionDuration] on [harborMotionCurve]. The one site that
-/// declares the month board's motion.
-const BoardAnimationStyle monthBoardAnimationStyle =
-    BoardAnimationStyle.uniform(
-      BoardAnimationSpec(
-        duration: harborMotionDuration,
-        curve: harborMotionCurve,
+/// The style the month board animates with under [theme]: every family
+/// over its [CalendarThemeData.motionDuration] on its
+/// [CalendarThemeData.motionCurve], and every family off at a zero
+/// duration. The one site that declares the month board's motion.
+BoardAnimationStyle monthBoardAnimationStyleOf(CalendarThemeData theme) {
+  return BoardAnimationStyle.uniform(
+    BoardAnimationSpec(
+      duration: theme.motionDuration,
+      curve: theme.motionCurve,
+    ),
+  );
+}
+
+/// What a [MonthBoard] and the days, chips and overlay it builds draw and
+/// animate with, made from one [CalendarThemeData] by [forTheme] and never
+/// changed.
+@immutable
+class _MonthStyles {
+  _MonthStyles._(this.theme)
+    : animation = monthBoardAnimationStyleOf(theme),
+      outsidePaint = Paint()..color = theme.background,
+      linePaint = Paint()
+        ..color = theme.outline
+        ..strokeWidth = 1.0,
+      number = theme.monthDayNumberStyle.copyWith(color: theme.text),
+      mutedNumber = theme.monthDayNumberStyle.copyWith(color: theme.textMuted),
+      selectedNumber = theme.monthDayNumberMarkedStyle.copyWith(
+        color: theme.onPrimary,
       ),
-    );
+      todayNumber = theme.monthDayNumberMarkedStyle.copyWith(
+        color: theme.primary,
+      ),
+      selectedPill = BoxDecoration(
+        color: theme.primary,
+        borderRadius: BorderRadius.circular(11.0),
+      ),
+      ring = BoxDecoration(
+        border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
+        borderRadius: BorderRadius.circular(11.0),
+      ),
+      more = BoxDecoration(
+        color: theme.notice,
+        borderRadius: BorderRadius.circular(4.0),
+      ),
+      moreLabel = theme.monthMoreStyle.copyWith(color: theme.onNotice),
+      chipTitle = theme.chipTitleStyle.copyWith(color: theme.text),
+      cardTitle = theme.monthCardTitleStyle.copyWith(color: theme.text),
+      cardTime = theme.monthCardTimeStyle.copyWith(color: theme.textSecondary),
+      message = theme.messageStyle.copyWith(color: theme.error),
+      scrim = theme.background.withValues(alpha: 0.85);
+
+  /// The styles of [theme]: those made for it before, or for a theme `==`
+  /// to it last, so an equal theme makes none.
+  static _MonthStyles forTheme(CalendarThemeData theme) {
+    final kept = _memo[theme];
+    if (kept != null) {
+      return kept;
+    }
+    final last = _last;
+    final styles = last != null && last.theme == theme
+        ? last
+        : _MonthStyles._(theme);
+    _memo[theme] = styles;
+    _last = styles;
+    return styles;
+  }
+
+  /// The styles of the theme above [context], which [context] then depends
+  /// on.
+  static _MonthStyles of(BuildContext context) {
+    return forTheme(CalendarTheme.of(context));
+  }
+
+  static Expando<_MonthStyles> _memo = Expando<_MonthStyles>();
+  static _MonthStyles? _last;
+
+  /// Drops the styles made so far, which keep the code that made them
+  /// across a hot reload, so the next read makes them again.
+  static void _reset() {
+    _memo = Expando<_MonthStyles>();
+    _last = null;
+  }
+
+  final CalendarThemeData theme;
+
+  /// [monthBoardAnimationStyleOf] [theme].
+  final BoardAnimationStyle animation;
+
+  /// The background's days of another month, and its lines.
+  final Paint outsidePaint;
+  final Paint linePaint;
+
+  /// A day's number, in the shown month and in another, selected and
+  /// today's.
+  final TextStyle number;
+  final TextStyle mutedNumber;
+  final TextStyle selectedNumber;
+  final TextStyle todayNumber;
+  final BoxDecoration selectedPill;
+  final BoxDecoration ring;
+
+  /// A day's "+N more".
+  final BoxDecoration more;
+  final TextStyle moreLabel;
+
+  final TextStyle chipTitle;
+  final TextStyle cardTitle;
+  final TextStyle cardTime;
+
+  /// A failed read's message, and the scrim over the board while its days
+  /// are not ready.
+  final TextStyle message;
+  final Color scrim;
+}
 
 /// The key of the item [id]'s bar in the calendar week starting on
 /// [weekStart]: `"<id>@<yyyy-mm-dd>"`.
@@ -362,8 +467,8 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// height ([monthLanesThatFit]), [fitMonthPlacements] chooses the chips it
 /// shows, and a day that hides some says "+N more" on a soft yellow banner
 /// in its last lane. Each day shows its number in a strip across its top,
-/// today's in the primary colour inside a lighter blue ring
-/// ([harborTodayRing]) and the selected day's on the primary pill. Each
+/// today's in the primary colour inside the today ring and the selected
+/// day's on the primary pill, in the [CalendarTheme] above the board. Each
 /// item shows as one bar per calendar week it covers, in its type's
 /// colours and square where it continues into the week before or after: a
 /// chip one lane tall holding its title, or, in days large enough
@@ -379,7 +484,8 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// keys move the selected day and report it through [onSelectDay]. While
 /// the days load, a progress indicator covers the board, and after a
 /// failed read the error and a Retry that reads again. A change of the
-/// model animates; a new month or a new set of weekdays does not, and
+/// model animates over the theme's motion; a new month or a new set of
+/// weekdays does not, and
 /// settles at once whatever chip was still growing in or shrinking out. A
 /// new size alone refits the weeks at once and leaves the chips' motion
 /// running, unless it turns chips into cards or back, or under
@@ -575,8 +681,16 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// finds the days ready.
   bool _revealPending = true;
 
-  /// Whether a frame will put [monthBoardAnimationStyle] back.
+  /// Whether a frame will put the styles' animation back.
   bool _restoreScheduled = false;
+
+  /// What the board's background and builders draw with and the board
+  /// animates with; set by [_applyTheme].
+  _MonthStyles? _themed;
+
+  _MonthStyles get _styles {
+    return _themed!;
+  }
 
   /// True only while this state writes the board's selection itself, so
   /// the write reports nothing to [MonthBoard.onSelectDay].
@@ -593,9 +707,9 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// grid.
   late List<_KeptDay?> _days = _emptyDays(widget.grid);
 
-  /// The board's background for [MonthBoard.grid], made once per grid, so
-  /// a build that keeps the grid hands the board the same painter.
-  late _MonthGridPainter _background = _MonthGridPainter(widget.grid);
+  /// The board's background for [MonthBoard.grid], made once per grid and
+  /// styles, so a build that keeps both hands the board the same painter.
+  late _MonthGridPainter _background;
 
   /// The latest sync's placements, by chip key.
   Map<String, BoardPlacement<MonthChip>> _placed =
@@ -628,7 +742,8 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       keyOf: (chip) {
         return chip.key;
       },
-      animationStyle: monthBoardAnimationStyle,
+      // Until the first didChangeDependencies assigns the theme's.
+      animationStyle: BoardAnimationStyle.disabled,
       laneOrder: compareMonthChips,
     );
     // Before the board subscribes, so it starts on the selected day and a
@@ -637,6 +752,34 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     widget.model.addListener(_handleModel);
     widget.today.addListener(_handleToday);
     _pinch.holding.addListener(_handleHolding);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _applyTheme();
+  }
+
+  @override
+  void reassemble() {
+    _MonthStyles._reset();
+    super.reassemble();
+    _applyTheme();
+  }
+
+  /// Reads the styles of the theme above the board; on new ones, makes the
+  /// background again and gives the board their animation, unless a frame
+  /// will put it back after a sync that disabled it.
+  void _applyTheme() {
+    final styles = _MonthStyles.of(context);
+    if (identical(styles, _themed)) {
+      return;
+    }
+    _themed = styles;
+    _background = _MonthGridPainter(widget.grid, styles);
+    if (!_restoreScheduled) {
+      _board.animationStyle = styles.animation;
+    }
   }
 
   @override
@@ -658,7 +801,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       _syncPending = true;
       _revealPending = true;
       _days = _emptyDays(widget.grid);
-      _background = _MonthGridPainter(widget.grid);
+      _background = _MonthGridPainter(widget.grid, _styles);
     }
     if ((widget.minDayWidth != oldWidget.minDayWidth ||
             widget.weekScale != oldWidget.weekScale) &&
@@ -1091,7 +1234,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _board.setItems(placements);
   }
 
-  /// Puts [monthBoardAnimationStyle] back in a frame callback scheduled
+  /// Puts the styles' animation back in a frame callback scheduled
   /// after the batch of the sync that disabled it, so it runs at the next
   /// frame's start, before that frame's layout and after the sync's own
   /// layout has measured the weeks under the disabled style. That sync
@@ -1105,7 +1248,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     SchedulerBinding.instance.scheduleFrameCallback((_) {
       _restoreScheduled = false;
       if (mounted) {
-        _board.animationStyle = monthBoardAnimationStyle;
+        _board.animationStyle = _styles.animation;
       }
     });
   }
@@ -1264,21 +1407,18 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
 
 /// The month board's background: each day of another month on the
 /// background colour, and a line in the outline colour between every two
-/// weeks and every two shown weekdays, none around the board's edge.
+/// weeks and every two shown weekdays, none around the board's edge, in
+/// [styles]' paints.
 class _MonthGridPainter extends BoardBackgroundPainter {
-  _MonthGridPainter(this.grid)
+  _MonthGridPainter(this.grid, this.styles)
     : _outside = <bool>[
         for (var row = 0; row < grid.weekCount; row++)
           for (var col = 0; col < grid.columnCount; col++)
             !grid.contains(grid.dateAt(row, col)),
       ];
 
-  static final Paint _outsidePaint = Paint()..color = HarborColors.background;
-  static final Paint _linePaint = Paint()
-    ..color = HarborColors.outline
-    ..strokeWidth = 1.0;
-
   final MonthGrid grid;
+  final _MonthStyles styles;
 
   /// Whether each cell of [grid], at `row * columnCount + col`, shows a day
   /// of another month.
@@ -1294,10 +1434,12 @@ class _MonthGridPainter extends BoardBackgroundPainter {
       return;
     }
     final columns = grid.columnCount;
+    final outsidePaint = styles.outsidePaint;
+    final linePaint = styles.linePaint;
     for (var row = firstRow; row <= lastRow; row++) {
       for (var col = firstCol; col <= lastCol; col++) {
         if (_outside[row * columns + col]) {
-          canvas.drawRect(geometry.visibleCellRect(row, col), _outsidePaint);
+          canvas.drawRect(geometry.visibleCellRect(row, col), outsidePaint);
         }
       }
     }
@@ -1305,17 +1447,18 @@ class _MonthGridPainter extends BoardBackgroundPainter {
     final last = geometry.visibleCellRect(lastRow, lastCol);
     for (var row = math.max(firstRow, 1); row <= lastRow; row++) {
       final y = geometry.visibleCellRect(row, firstCol).top;
-      canvas.drawLine(Offset(first.left, y), Offset(last.right, y), _linePaint);
+      canvas.drawLine(Offset(first.left, y), Offset(last.right, y), linePaint);
     }
     for (var col = math.max(firstCol, 1); col <= lastCol; col++) {
       final x = geometry.visibleCellRect(firstRow, col).left;
-      canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), _linePaint);
+      canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), linePaint);
     }
   }
 
   @override
   bool shouldRepaint(covariant _MonthGridPainter old) {
-    return !_MonthBoardState._sameGrid(old.grid, grid);
+    return !_MonthBoardState._sameGrid(old.grid, grid) ||
+        !identical(old.styles, styles);
   }
 }
 
@@ -1382,6 +1525,7 @@ class _MonthDayCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = _dayLabel(day);
+    final styles = _MonthStyles.of(context);
     void open() {
       onOpen(day);
     }
@@ -1423,7 +1567,7 @@ class _MonthDayCell extends StatelessWidget {
                 SizedBox(
                   key: monthStripKey(day),
                   height: monthStripHeight,
-                  child: Center(child: _buildNumber(isToday)),
+                  child: Center(child: _buildNumber(isToday, styles)),
                 ),
                 if (hides.count > 0)
                   Positioned(
@@ -1431,7 +1575,7 @@ class _MonthDayCell extends StatelessWidget {
                     right: 0.0,
                     top: monthStripHeight + hides.lane * hides.laneExtent,
                     height: hides.laneExtent,
-                    child: _buildMore(hides.count),
+                    child: _buildMore(hides.count, styles),
                   ),
               ],
             ),
@@ -1443,55 +1587,37 @@ class _MonthDayCell extends StatelessWidget {
 
   /// "+N more" on a soft yellow banner, inset in its lane as a chip is,
   /// so the gap between two chips parts it from the chip above.
-  Widget _buildMore(int count) {
+  Widget _buildMore(int count, _MonthStyles styles) {
     return Padding(
       padding: const EdgeInsets.all(1.0),
       child: DecoratedBox(
         key: monthMoreKey(day),
-        decoration: BoxDecoration(
-          color: HarborColors.notice,
-          borderRadius: BorderRadius.circular(4.0),
-        ),
+        decoration: styles.more,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4.0),
           // Scaled down, rather than cut off, in a day too narrow for it.
           child: FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text(
-              "+$count more",
-              maxLines: 1,
-              style: const TextStyle(
-                fontSize: 11.0,
-                fontWeight: FontWeight.w600,
-                color: HarborColors.onNotice,
-              ),
-            ),
+            child: Text("+$count more", maxLines: 1, style: styles.moreLabel),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildNumber(bool isToday) {
-    final Color color;
+  Widget _buildNumber(bool isToday, _MonthStyles styles) {
+    final TextStyle style;
     if (isSelected) {
-      color = HarborColors.onPrimary;
+      style = styles.selectedNumber;
     } else if (isToday) {
-      color = HarborColors.primary;
+      style = styles.todayNumber;
     } else if (inMonth) {
-      color = HarborColors.text;
+      style = styles.number;
     } else {
-      color = HarborColors.textMuted;
+      style = styles.mutedNumber;
     }
-    final number = Text(
-      "${day.day}",
-      style: TextStyle(
-        fontSize: 13.0,
-        fontWeight: isSelected || isToday ? FontWeight.w600 : FontWeight.w400,
-        color: color,
-      ),
-    );
+    final number = Text("${day.day}", style: style);
     if (!isSelected && !isToday) {
       return number;
     }
@@ -1499,13 +1625,8 @@ class _MonthDayCell extends StatelessWidget {
       width: 30.0,
       height: 22.0,
       alignment: Alignment.center,
-      decoration: isSelected
-          ? BoxDecoration(
-              color: HarborColors.primary,
-              borderRadius: BorderRadius.circular(11.0),
-            )
-          : null,
-      foregroundDecoration: isToday ? harborTodayRing(11.0) : null,
+      decoration: isSelected ? styles.selectedPill : null,
+      foregroundDecoration: isToday ? styles.ring : null,
       child: number,
     );
   }
@@ -1533,6 +1654,7 @@ class _MonthChipBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _MonthStyles.of(context);
     final entry = chip.entry;
     final item = entry.item;
     final pending = entry.pending;
@@ -1548,11 +1670,7 @@ class _MonthChipBox extends StatelessWidget {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       softWrap: false,
-      style: TextStyle(
-        fontSize: card ? 12.0 : 11.0,
-        fontWeight: FontWeight.w600,
-        color: HarborColors.text,
-      ),
+      style: card ? styles.cardTitle : styles.chipTitle,
     );
     Widget bar = ClipRRect(
       borderRadius: BorderRadius.horizontal(
@@ -1569,7 +1687,7 @@ class _MonthChipBox extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4.0),
                 child: card
-                    ? _buildCardLines(title, item, style)
+                    ? _buildCardLines(title, item, style, styles)
                     : Align(alignment: Alignment.centerLeft, child: title),
               ),
             ),
@@ -1615,7 +1733,12 @@ class _MonthChipBox extends StatelessWidget {
   /// A card's [title] over its type's icon and [item]'s times, as
   /// [clockLabel] writes them, each line cut short where the day is too
   /// narrow for it.
-  Widget _buildCardLines(Text title, CalendarItem item, HarborTypeStyle style) {
+  Widget _buildCardLines(
+    Text title,
+    CalendarItem item,
+    HarborTypeStyle style,
+    _MonthStyles styles,
+  ) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1631,10 +1754,7 @@ class _MonthChipBox extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,
-                style: const TextStyle(
-                  fontSize: 11.0,
-                  color: HarborColors.textSecondary,
-                ),
+                style: styles.cardTime,
               ),
             ),
           ],
@@ -1655,10 +1775,11 @@ class _MonthLoadOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _MonthStyles.of(context);
     final message = error;
     // A ColoredBox hit-tests as opaque, so no press reaches the board.
     return ColoredBox(
-      color: HarborColors.background.withValues(alpha: 0.85),
+      color: styles.scrim,
       child: Center(
         child: message == null
             ? const CircularProgressIndicator()
@@ -1670,7 +1791,7 @@ class _MonthLoadOverlay extends StatelessWidget {
                     child: Text(
                       message,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: HarborColors.error),
+                      style: styles.message,
                     ),
                   ),
                   const SizedBox(height: 12.0),

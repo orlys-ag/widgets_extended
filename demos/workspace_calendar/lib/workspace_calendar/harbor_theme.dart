@@ -1,9 +1,10 @@
 /// The Harbor palette: a mid-dark blue primary over light surfaces, the
-/// colours and icon of each item type, and the theme the calendar applies
-/// to itself.
+/// colours and icon of each item type, the calendar theme its views draw
+/// with, and the Material theme the calendar applies to itself.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 
 import 'calendar_schema.dart';
 
@@ -78,16 +79,6 @@ HarborTypeStyle harborTypeStyleOf(CalendarItemType type) {
   }
 }
 
-/// The ring that marks today's number, a 2 px [HarborColors.todayRing]
-/// line around a box whose corners have [radius]: a foreground
-/// decoration, so it pads nothing and shows over a selected day's fill.
-BoxDecoration harborTodayRing(double radius) {
-  return BoxDecoration(
-    border: Border.all(color: HarborColors.todayRing, width: 2.0),
-    borderRadius: BorderRadius.circular(radius),
-  );
-}
-
 /// The opacity of the block a move leaves behind on the timed grid, where
 /// it marks the time the carried block came from.
 const double harborDraggedItemOpacity = 0.66;
@@ -98,6 +89,37 @@ const Duration harborMotionDuration = Duration(milliseconds: 300);
 
 /// The curve each animation the calendar runs eases on.
 const Curve harborMotionCurve = Curves.fastOutSlowIn;
+
+/// The calendar views' theme in the Harbor palette: each colour the
+/// [HarborColors] value of its name, the notice outline [HarborColors.noticeEdge],
+/// [harborDraggedItemOpacity], [harborMotionDuration] on
+/// [harborMotionCurve], and the Material icons the views draw, over the
+/// built-in text styles.
+const CalendarThemeData harborCalendarTheme = CalendarThemeData(
+  primary: HarborColors.primary,
+  onPrimary: HarborColors.onPrimary,
+  primaryTint: HarborColors.primaryTint,
+  background: HarborColors.background,
+  surface: HarborColors.surface,
+  outline: HarborColors.outline,
+  text: HarborColors.text,
+  textSecondary: HarborColors.textSecondary,
+  textMuted: HarborColors.textMuted,
+  error: HarborColors.error,
+  notice: HarborColors.notice,
+  noticeOutline: HarborColors.noticeEdge,
+  onNotice: HarborColors.onNotice,
+  todayRing: HarborColors.todayRing,
+  todayRingWidth: 2.0,
+  draggedBlockOpacity: harborDraggedItemOpacity,
+  motionDuration: harborMotionDuration,
+  motionCurve: harborMotionCurve,
+  beforeHoursIcon: Icons.keyboard_arrow_up,
+  afterHoursIcon: Icons.keyboard_arrow_down,
+  durationIcon: Icons.hourglass_empty,
+  entryMenuIcon: Icons.more_horiz,
+  addEntryIcon: Icons.add,
+);
 
 /// The calendar's own Material 3 theme, independent of the host's.
 ThemeData buildHarborTheme() {

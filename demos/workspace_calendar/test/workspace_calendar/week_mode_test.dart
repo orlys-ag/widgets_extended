@@ -237,7 +237,9 @@ void main() {
               .width,
     };
     expect(widths, isNotEmpty);
-    await tester.pump(timedGridAnimationStyle.effectiveItemEnterExit.duration);
+    await tester.pump(
+      gridAnimationStyle(tester).effectiveItemEnterExit.duration,
+    );
     for (final entry in widths.entries) {
       if (blockFinder(entry.key).evaluate().isEmpty) {
         continue;
@@ -833,7 +835,7 @@ void main() {
     expect(model(tester).isLocked(brainstormId), isFalse);
     await held.up();
     await tester.pump();
-    await tester.pump(timedGridAnimationStyle.effectiveDropSettle.duration);
+    await tester.pump(gridAnimationStyle(tester).effectiveDropSettle.duration);
     expect(api.requests, hasLength(requests + 2));
     expect(
       tester.getRect(blockFinder(uxFlowId)).topLeft,
@@ -1194,7 +1196,9 @@ void main() {
   testWidgets("W11 a new week does not animate", (tester) async {
     final api = await pumpCalendar(tester, editing: true);
     await pickMode(tester, "Week");
-    final enterExit = timedGridAnimationStyle.effectiveItemEnterExit.duration;
+    final enterExit = gridAnimationStyle(
+      tester,
+    ).effectiveItemEnterExit.duration;
 
     // The next week shows at once.
     final nextWeek = await listAll(

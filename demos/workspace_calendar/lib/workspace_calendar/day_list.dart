@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_data.dart';
@@ -21,21 +22,159 @@ import 'calendar_item.dart';
 import 'calendar_model.dart';
 import 'calendar_schema.dart';
 import 'calendar_settings.dart';
-import 'harbor_theme.dart';
 import 'history_lock.dart';
 import 'item_card.dart';
 
-/// The style the day list animates its rows with: every family over
-/// [harborMotionDuration] on [harborMotionCurve].
-const TreeAnimationStyle dayListAnimationStyle = TreeAnimationStyle(
-  expandCollapse: _dayListAnimationSpec,
-  reorderSlide: _dayListAnimationSpec,
-);
+/// The style the day list animates its rows with under [theme]: every
+/// family over its [CalendarThemeData.motionDuration] on its
+/// [CalendarThemeData.motionCurve], and every family off at a zero
+/// duration. The one site that declares the day list's motion.
+TreeAnimationStyle dayListAnimationStyleOf(CalendarThemeData theme) {
+  return TreeAnimationStyle.uniform(
+    duration: theme.motionDuration,
+    curve: theme.motionCurve,
+  );
+}
 
-const TreeAnimationSpec _dayListAnimationSpec = TreeAnimationSpec(
-  duration: harborMotionDuration,
-  curve: harborMotionCurve,
-);
+/// What [DayList] and the rows it builds draw and run with, made from one
+/// [CalendarThemeData] by [forTheme] and never changed.
+@immutable
+class _ListStyles {
+  _ListStyles._(this.theme)
+    : treeStyle = dayListAnimationStyleOf(theme),
+      time = theme.agendaTimeStyle.copyWith(color: theme.textSecondary),
+      gapTime = theme.agendaTimeStyle.copyWith(color: theme.textMuted),
+      title = theme.agendaHeaderTitleStyle.copyWith(color: theme.text),
+      emptyTitle = theme.agendaHeaderEmptyTitleStyle.copyWith(
+        color: theme.textMuted,
+      ),
+      count = theme.agendaHeaderCountStyle.copyWith(color: theme.textSecondary),
+      emptyCount = theme.agendaHeaderEmptyCountStyle.copyWith(
+        color: theme.textMuted,
+      ),
+      durationLabel = theme.badgeStyle.copyWith(color: theme.primary),
+      durationChip = BoxDecoration(
+        color: theme.primaryTint,
+        borderRadius: BorderRadius.circular(10.0),
+      ),
+      durationIcon = Icon(theme.durationIcon, size: 12.0, color: theme.primary),
+      banner = BoxDecoration(
+        color: theme.notice,
+        border: Border.all(color: theme.noticeOutline),
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      bannerLabel = theme.noticeStyle.copyWith(color: theme.onNotice),
+      beforeIcon = Icon(
+        theme.beforeHoursIcon,
+        size: 16.0,
+        color: theme.onNotice,
+      ),
+      afterIcon = Icon(theme.afterHoursIcon, size: 16.0, color: theme.onNotice),
+      message = theme.messageStyle.copyWith(color: theme.error),
+      dashedLine = Expanded(
+        child: CustomPaint(
+          painter: _DashedLinePainter(
+            Paint()
+              ..color = theme.outline
+              ..strokeWidth = 1.0,
+          ),
+          child: const SizedBox.expand(),
+        ),
+      ),
+      nowPill = BoxDecoration(
+        color: theme.error,
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      nowLabel = theme.badgeStyle.copyWith(color: theme.onPrimary),
+      nowLine = Expanded(
+        child: SizedBox(
+          height: 2.0 * _NowLinePainter.dotRadius,
+          child: CustomPaint(
+            painter: _NowLinePainter(
+              Paint()
+                ..color = theme.error
+                ..strokeWidth = 2.0,
+            ),
+          ),
+        ),
+      ),
+      addIcon = SizedBox.square(
+        dimension: _AddButton.size,
+        child: Icon(theme.addEntryIcon, size: 16.0, color: theme.primary),
+      );
+
+  /// The styles of [theme]: those made for it before, or for a theme `==`
+  /// to it last, so an equal theme makes none.
+  static _ListStyles forTheme(CalendarThemeData theme) {
+    final kept = _memo[theme];
+    if (kept != null) {
+      return kept;
+    }
+    final last = _last;
+    final styles = last != null && last.theme == theme
+        ? last
+        : _ListStyles._(theme);
+    _memo[theme] = styles;
+    _last = styles;
+    return styles;
+  }
+
+  /// The styles of the theme above [context], which [context] then depends
+  /// on.
+  static _ListStyles of(BuildContext context) {
+    return forTheme(CalendarTheme.of(context));
+  }
+
+  static Expando<_ListStyles> _memo = Expando<_ListStyles>();
+  static _ListStyles? _last;
+
+  /// Drops the styles made so far, which keep the code that made them
+  /// across a hot reload, so the next read makes them again.
+  static void _reset() {
+    _memo = Expando<_ListStyles>();
+    _last = null;
+  }
+
+  final CalendarThemeData theme;
+
+  /// [dayListAnimationStyleOf] [theme].
+  final TreeAnimationStyle treeStyle;
+
+  /// An item's start, and a gap's.
+  final TextStyle time;
+  final TextStyle gapTime;
+
+  /// A header's title and count, and an empty day's.
+  final TextStyle title;
+  final TextStyle emptyTitle;
+  final TextStyle count;
+  final TextStyle emptyCount;
+
+  /// The chip of an item's length.
+  final TextStyle durationLabel;
+  final BoxDecoration durationChip;
+  final Widget durationIcon;
+
+  /// A banner of the items outside the hours.
+  final BoxDecoration banner;
+  final TextStyle bannerLabel;
+  final Widget beforeIcon;
+  final Widget afterIcon;
+
+  /// A failed read's message.
+  final TextStyle message;
+
+  /// The dashed line of a gap row.
+  final Widget dashedLine;
+
+  /// The marker of the current time.
+  final BoxDecoration nowPill;
+  final TextStyle nowLabel;
+  final Widget nowLine;
+
+  /// The add button's plus, at the button's size.
+  final Widget addIcon;
+}
 
 /// The room between the list's sides and its rows' content.
 const double dayListGutter = 16.0;
@@ -403,6 +542,9 @@ List<DayListRow> dayListRowsOf(
 ///
 /// Every state stays inside one always-scrollable scroll view, so a drag
 /// on it reports the scroll an ancestor's listener reads.
+///
+/// The list draws and animates in the [CalendarTheme] above it, its
+/// cards' tints, edges and icons in their types' styles.
 class DayList extends StatefulWidget {
   const DayList({
     super.key,
@@ -467,15 +609,12 @@ class DayList extends StatefulWidget {
 }
 
 class _DayListState extends State<DayList> {
-  static const TextStyle _timeStyle = TextStyle(
-    fontSize: 12.0,
-    fontWeight: FontWeight.w600,
-    color: HarborColors.textSecondary,
-  );
-
   /// How far below the list's top a row must reach to make its day the
   /// top day.
   static const double _probe = 1.0;
+
+  /// What the rows draw with, the tree animates with and a reveal runs on.
+  late _ListStyles _styles;
 
   /// The [dayNumber]s of the first and the last day the list holds.
   late int _first;
@@ -533,6 +672,19 @@ class _DayListState extends State<DayList> {
     widget.model.addListener(_handleModel);
     widget.now.addListener(_handleNow);
     _scheduleLanding();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _styles = _ListStyles.of(context);
+  }
+
+  @override
+  void reassemble() {
+    _ListStyles._reset();
+    super.reassemble();
+    _styles = _ListStyles.of(context);
   }
 
   @override
@@ -718,8 +870,9 @@ class _DayListState extends State<DayList> {
     return rows;
   }
 
-  /// Scrolls [day]'s header to the list's top, animating, or re-centres
-  /// the list on it when it is too near or past either end of the days.
+  /// Scrolls [day]'s header to the list's top, animating over the theme's
+  /// motion, or at once where its duration is zero, or re-centres the list
+  /// on it when it is too near or past either end of the days.
   Future<void> _reveal(DateTime day) async {
     final number = dayNumber(day);
     final tree = _tree;
@@ -737,11 +890,12 @@ class _DayListState extends State<DayList> {
     _topDay = day;
     final reveals = ++_reveals;
     final key = DayListHeader.headerKeyOf(day);
+    final theme = _styles.theme;
     final landed = await tree.animateScrollToKey(
       key,
       scrollController: _scroll,
-      duration: harborMotionDuration,
-      curve: harborMotionCurve,
+      duration: theme.motionDuration,
+      curve: theme.motionCurve,
       extentEstimator: (key) {
         return _estimatedExtentOf(key, from);
       },
@@ -989,7 +1143,7 @@ class _DayListState extends State<DayList> {
                   : DayListHeader.headerKeyOf(row.day);
             },
             maxStickyDepth: 1,
-            animationStyle: dayListAnimationStyle,
+            animationStyle: _styles.treeStyle,
             onControllerCreated: (controller) {
               _tree = controller;
             },
@@ -1085,7 +1239,7 @@ class _DayListState extends State<DayList> {
               Expanded(
                 child: Text(
                   widget.model.error ?? "This day could not be read.",
-                  style: const TextStyle(color: HarborColors.error),
+                  style: _styles.message,
                 ),
               ),
               TextButton(onPressed: _retry, child: const Text("Retry")),
@@ -1107,28 +1261,17 @@ class _DayListState extends State<DayList> {
     );
   }
 
-  static const TextStyle _titleStyle = TextStyle(
-    fontSize: 16.0,
-    fontWeight: FontWeight.w700,
-    color: HarborColors.text,
-  );
-
-  static const TextStyle _countStyle = TextStyle(
-    fontSize: 15.0,
-    fontWeight: FontWeight.w600,
-    color: HarborColors.textSecondary,
-  );
-
   /// The day's title and how many items it shows, on the background
   /// colour, so the rows scrolling under it while it sticks stay hidden. A
-  /// day read to hold no items has both 3 px smaller and muted, on a line
-  /// as tall as a busy day's title takes, so its header is as tall.
+  /// day read to hold no items has both in their own styles, muted, on a
+  /// line as tall as a busy day's title takes, so its header is as tall.
   Widget _buildHeader(DayListHeader row) {
     final count = row.count;
     final empty = count == 0;
+    final styles = _styles;
     return ColoredBox(
       key: dayListHeaderKey(row.day),
-      color: HarborColors.background,
+      color: styles.theme.background,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
           dayListGutter,
@@ -1145,27 +1288,17 @@ class _DayListState extends State<DayList> {
                 overflow: TextOverflow.ellipsis,
                 strutStyle: empty
                     ? StrutStyle.fromTextStyle(
-                        DefaultTextStyle.of(context).style.merge(_titleStyle),
+                        DefaultTextStyle.of(context).style.merge(styles.title),
                         forceStrutHeight: true,
                       )
                     : null,
-                style: empty
-                    ? _titleStyle.copyWith(
-                        fontSize: 13.0,
-                        color: HarborColors.textMuted,
-                      )
-                    : _titleStyle,
+                style: empty ? styles.emptyTitle : styles.title,
               ),
             ),
             if (count != null)
               Text(
                 itemCountLabel(count),
-                style: empty
-                    ? _countStyle.copyWith(
-                        fontSize: 12.0,
-                        color: HarborColors.textMuted,
-                      )
-                    : _countStyle,
+                style: empty ? styles.emptyCount : styles.count,
               ),
           ],
         ),
@@ -1189,6 +1322,7 @@ class _DayListState extends State<DayList> {
       start = item.startMinute;
     }
     final hold = widget.lock.holdOf(item.shape);
+    final styles = _styles;
     return Row(
       children: <Widget>[
         Container(
@@ -1202,17 +1336,14 @@ class _DayListState extends State<DayList> {
                 hourLabel(start, widget.format),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: _timeStyle,
+                style: styles.time,
               ),
               const SizedBox(height: 6.0),
               FittedBox(
                 fit: BoxFit.scaleDown,
                 child: DecoratedBox(
                   key: dayListDurationKey(entry.id),
-                  decoration: BoxDecoration(
-                    color: HarborColors.primaryTint,
-                    borderRadius: BorderRadius.circular(10.0),
-                  ),
+                  decoration: styles.durationChip,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 7.0,
@@ -1221,19 +1352,11 @@ class _DayListState extends State<DayList> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        const Icon(
-                          Icons.hourglass_empty,
-                          size: 12.0,
-                          color: HarborColors.primary,
-                        ),
+                        styles.durationIcon,
                         const SizedBox(width: 2.0),
                         Text(
                           durationLabel(item.endMinute - item.startMinute),
-                          style: const TextStyle(
-                            fontSize: 11.0,
-                            fontWeight: FontWeight.w600,
-                            color: HarborColors.primary,
-                          ),
+                          style: styles.durationLabel,
                         ),
                       ],
                     ),
@@ -1276,6 +1399,7 @@ class _DayListState extends State<DayList> {
   Widget _buildHidden(DateTime day, int count, {required bool above}) {
     final minute = above ? widget.hours.start : widget.hours.end;
     final side = above ? "before" : "after";
+    final styles = _styles;
     return Semantics(
       container: true,
       label: hiddenRowLabel(
@@ -1291,11 +1415,7 @@ class _DayListState extends State<DayList> {
         children: <Widget>[
           Expanded(
             child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: HarborColors.notice,
-                border: Border.all(color: HarborColors.noticeEdge),
-                borderRadius: BorderRadius.circular(8.0),
-              ),
+              decoration: styles.banner,
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 8.0,
@@ -1303,13 +1423,7 @@ class _DayListState extends State<DayList> {
                 ),
                 child: Row(
                   children: <Widget>[
-                    Icon(
-                      above
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      size: 16.0,
-                      color: HarborColors.onNotice,
-                    ),
+                    above ? styles.beforeIcon : styles.afterIcon,
                     const SizedBox(width: 4.0),
                     Expanded(
                       child: Text(
@@ -1317,11 +1431,7 @@ class _DayListState extends State<DayList> {
                         "${hourLabel(minute, widget.format)}",
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12.0,
-                          fontWeight: FontWeight.w600,
-                          color: HarborColors.onNotice,
-                        ),
+                        style: styles.bannerLabel,
                       ),
                     ),
                   ],
@@ -1356,15 +1466,10 @@ class _DayListState extends State<DayList> {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: _timeStyle.copyWith(color: HarborColors.textMuted),
+              style: _styles.gapTime,
             ),
           ),
-          const Expanded(
-            child: CustomPaint(
-              painter: _DashedLinePainter(),
-              child: SizedBox.expand(),
-            ),
-          ),
+          _styles.dashedLine,
           const SizedBox(width: 8.0),
           if (onAdd == null)
             const SizedBox(width: _AddButton.size)
@@ -1379,9 +1484,9 @@ class _DayListState extends State<DayList> {
 /// [rows] one under another, each built by [builder]: a row the first
 /// build holds shows at once, and a row a later build adds grows in and
 /// fades in, while one it drops fades out and shrinks away where it was,
-/// each over [harborMotionDuration] on [harborMotionCurve]. A row a later
-/// build moves does both: it leaves where it was and comes in where it
-/// goes. The rows that stay in place are the most that keep their order,
+/// each over the [CalendarTheme]'s motion as it is when the row starts to
+/// move, or at once where its duration is zero. A row a later build moves
+/// does both: it leaves where it was and comes in where it goes. The rows that stay in place are the most that keep their order,
 /// so a move of one row moves that row alone. Where [overlayOf] is given,
 /// what it builds for a row that is not leaving lies over the row, at its
 /// size and free to paint past it.
@@ -1405,8 +1510,8 @@ class _AnimatedRows extends StatefulWidget {
 /// A row [_AnimatedRows] shows, and the animation that grows it in or
 /// shrinks it away.
 class _Shown {
-  _Shown(this.row, this.controller)
-    : curve = CurvedAnimation(parent: controller, curve: harborMotionCurve);
+  _Shown(this.row, this.controller, Curve motion)
+    : curve = CurvedAnimation(parent: controller, curve: motion);
 
   DayListRow row;
   final AnimationController controller;
@@ -1426,17 +1531,38 @@ class _AnimatedRowsState extends State<_AnimatedRows>
   /// The rows shown, leaving ones included, in the order they show.
   final List<_Shown> _shown = <_Shown>[];
 
+  /// What a row's motion is read from when it starts.
+  late _ListStyles _styles;
+
+  /// Whether the first rows are made, which [_styles] must be read for
+  /// first.
+  bool _started = false;
+
   @override
-  void initState() {
-    super.initState();
-    for (final row in widget.rows) {
-      _shown.add(_shownOf(row, from: 1.0));
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _styles = _ListStyles.of(context);
+    if (!_started) {
+      _started = true;
+      for (final row in widget.rows) {
+        _shown.add(_shownOf(row, from: 1.0));
+      }
     }
+  }
+
+  @override
+  void reassemble() {
+    super.reassemble();
+    _styles = _ListStyles.of(context);
   }
 
   @override
   void didUpdateWidget(_AnimatedRows oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // A frame that brings a new theme with new rows calls this before the
+    // rebuild that calls didChangeDependencies, so the rows started below
+    // read the theme here.
+    _styles = _ListStyles.of(context);
     if (identical(widget.rows, oldWidget.rows)) {
       return;
     }
@@ -1459,7 +1585,9 @@ class _AnimatedRowsState extends State<_AnimatedRows>
         kept.add(shown);
         next.add(shown);
       } else {
-        next.add(_shownOf(row, from: 0.0)..controller.forward());
+        final shown = _shownOf(row, from: 0.0);
+        _run(shown, forward: true);
+        next.add(shown);
       }
     }
     // Every other row leaves where it was, after the row it followed, or
@@ -1471,7 +1599,7 @@ class _AnimatedRowsState extends State<_AnimatedRows>
       }
       if (!shown.leaving) {
         shown.leaving = true;
-        shown.controller.reverse().whenComplete(() {
+        _run(shown, forward: false).whenComplete(() {
           _dropLeft(shown);
         });
       }
@@ -1518,14 +1646,25 @@ class _AnimatedRowsState extends State<_AnimatedRows>
   }
 
   _Shown _shownOf(DayListRow row, {required double from}) {
+    final theme = _styles.theme;
     return _Shown(
       row,
       AnimationController(
         vsync: this,
-        duration: harborMotionDuration,
+        duration: theme.motionDuration,
         value: from,
       ),
+      theme.motionCurve,
     );
+  }
+
+  /// Grows [shown] in, or shrinks it away where not [forward], on the
+  /// theme's motion as it is now.
+  TickerFuture _run(_Shown shown, {required bool forward}) {
+    final theme = _styles.theme;
+    shown.controller.duration = theme.motionDuration;
+    shown.curve.curve = theme.motionCurve;
+    return forward ? shown.controller.forward() : shown.controller.reverse();
   }
 
   /// Drops [shown] once it has shrunk away.
@@ -1789,9 +1928,10 @@ class _NowLayout extends SingleChildLayoutDelegate {
   }
 }
 
-/// The current time, [label], at the end of a red pill across the time
-/// column, and a red line from the cards to the row's right edge with a
-/// dot at its start, as the timed grid marks the current time.
+/// The current time, [label], at the end of a pill across the time
+/// column, and a line from the cards to the row's right edge with a dot at
+/// its start, in the theme's error colour, as the timed grid marks the
+/// current time.
 class _NowLine extends StatelessWidget {
   const _NowLine({required this.label});
 
@@ -1799,6 +1939,7 @@ class _NowLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _ListStyles.of(context);
     return Row(
       key: dayListNowKey,
       children: <Widget>[
@@ -1807,10 +1948,7 @@ class _NowLine extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.only(left: 8.0),
             child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: HarborColors.error,
-                borderRadius: BorderRadius.circular(8.0),
-              ),
+              decoration: styles.nowPill,
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 6.0,
@@ -1821,37 +1959,26 @@ class _NowLine extends StatelessWidget {
                   maxLines: 1,
                   softWrap: false,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 11.0,
-                    fontWeight: FontWeight.w600,
-                    color: HarborColors.onPrimary,
-                  ),
+                  style: styles.nowLabel,
                 ),
               ),
             ),
           ),
         ),
-        const Expanded(
-          child: SizedBox(
-            height: 2.0 * _NowLinePainter.dotRadius,
-            child: CustomPaint(painter: _NowLinePainter()),
-          ),
-        ),
+        styles.nowLine,
       ],
     );
   }
 }
 
-/// A red line across the middle of its box, 2 px thick, with a dot at its
+/// A line across the middle of its box in [_paint], with a dot at its
 /// start.
 class _NowLinePainter extends CustomPainter {
-  const _NowLinePainter();
+  const _NowLinePainter(this._paint);
 
   static const double dotRadius = 4.0;
 
-  static final Paint _paint = Paint()
-    ..color = HarborColors.error
-    ..strokeWidth = 2.0;
+  final Paint _paint;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1862,7 +1989,7 @@ class _NowLinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_NowLinePainter oldDelegate) {
-    return false;
+    return !identical(oldDelegate._paint, _paint);
   }
 }
 
@@ -1879,18 +2006,16 @@ class _AddButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _ListStyles.of(context);
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: HarborColors.primaryTint,
+        color: styles.theme.primaryTint,
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onPressed,
-          child: const SizedBox.square(
-            dimension: size,
-            child: Icon(Icons.add, size: 16.0, color: HarborColors.primary),
-          ),
+          child: styles.addIcon,
         ),
       ),
     );
@@ -1947,16 +2072,14 @@ class _DayMarkerState extends State<_DayMarker> {
   }
 }
 
-/// A dashed line in the outline colour across the middle of its box.
+/// A dashed line in [_paint] across the middle of its box.
 class _DashedLinePainter extends CustomPainter {
-  const _DashedLinePainter();
+  const _DashedLinePainter(this._paint);
 
   static const double _dash = 4.0;
   static const double _gap = 4.0;
 
-  static final Paint _paint = Paint()
-    ..color = HarborColors.outline
-    ..strokeWidth = 1.0;
+  final Paint _paint;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1969,6 +2092,6 @@ class _DashedLinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_DashedLinePainter oldDelegate) {
-    return false;
+    return !identical(oldDelegate._paint, _paint);
   }
 }

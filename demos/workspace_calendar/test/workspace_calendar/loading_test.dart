@@ -207,7 +207,9 @@ void main() {
       widths[key.value] = tester.getSize(find.byKey(key)).width;
     }
     expect(widths, contains("block-$teamOffsiteId"));
-    await tester.pump(timedGridAnimationStyle.effectiveItemEnterExit.duration);
+    await tester.pump(
+      gridAnimationStyle(tester).effectiveItemEnterExit.duration,
+    );
     for (final entry in widths.entries) {
       expect(
         tester.getSize(find.byKey(ValueKey<String>(entry.key))).width,

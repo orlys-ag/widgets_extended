@@ -1,5 +1,6 @@
 /// The demo keeps the Harbor theme under a host with its own theme, in
-/// its own widgets and in the dialogs it opens.
+/// its own widgets and in the dialogs and menus it opens, and its views
+/// draw Harbor's calendar theme under a host's own [CalendarTheme].
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
@@ -12,6 +13,7 @@ import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_harness.dart';
@@ -45,6 +47,27 @@ BoxDecoration decorationIn(WidgetTester tester, Finder finder) {
     }
   }
   throw StateError("No coloured box under $finder.");
+}
+
+/// Pumps the editing calendar on [today] at 390x844 under a host that
+/// places the built-in [CalendarTheme] above its navigator, and settles.
+Future<void> pumpUnderHostTheme(WidgetTester tester) async {
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(390.0, 844.0);
+  addTearDown(tester.view.reset);
+  final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+  await tester.pumpWidget(
+    MaterialApp(
+      // The M3 ink sparkle shader cannot load under the test binding.
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
+      builder: (context, child) {
+        return CalendarTheme(data: const CalendarThemeData(), child: child!);
+      },
+      home: WorkspaceCalendarExample(editing: true, today: today, api: api),
+    ),
+  );
+  await tester.pump(api.latency);
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -175,6 +198,56 @@ void main() {
         ),
       ),
       HarborColors.textMuted,
+    );
+  });
+
+  testWidgets("V2 the card menu's route reads Harbor's calendar theme under "
+      "a host's own", (tester) async {
+    await pumpUnderHostTheme(tester);
+    await tester.tap(dayFinder(DateTime(2026, 4, 23)));
+    await tester.pumpAndSettle();
+    final card = find.byKey(itemCardKey(designCritiqueId));
+    await tester.tap(
+      find.descendant(of: card, matching: find.byTooltip("Item actions")),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      CalendarTheme.of(tester.element(find.text("Delete").last)),
+      same(harborCalendarTheme),
+    );
+  });
+
+  testWidgets("V3 the views draw Harbor's calendar theme under a host's "
+      "own", (tester) async {
+    await pumpUnderHostTheme(tester);
+    expect(decorationIn(tester, dayFinder(today)).color, HarborColors.primary);
+    await tester.tap(dayFinder(DateTime(2026, 4, 23)));
+    await tester.pumpAndSettle();
+    final card = find.byKey(itemCardKey(designCritiqueId));
+    expect(
+      textColorOf(
+        tester,
+        find.descendant(of: card, matching: find.byType(Text)).first,
+      ),
+      HarborColors.text,
+    );
+
+    await pickMode(tester, "Week");
+    expect(
+      paintGridBackground(tester).fillsOf(HarborColors.surface),
+      isNotEmpty,
+    );
+    expect(
+      textColorOf(
+        tester,
+        find
+            .descendant(
+              of: blockFinder(designCritiqueId),
+              matching: find.byType(Text),
+            )
+            .first,
+      ),
+      HarborColors.text,
     );
   });
 }

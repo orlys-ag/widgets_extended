@@ -4,11 +4,11 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 
 import 'calendar_data.dart';
 import 'calendar_model.dart';
 import 'day_cell.dart';
-import 'harbor_theme.dart';
 
 /// The key of the week strip's cell showing [day].
 ValueKey<String> weekStripDayKey(DateTime day) {
@@ -33,9 +33,10 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// days it shows, so their markers show, and Day, which reads
 /// a selected day's whole week, shows any of them at once on a tap. A new
 /// [selectedDay] the strip does not show the middle of brings the strip,
-/// after the frame, to the shown days of that day's week, sliding there,
-/// from a week short of them when they are further away; a new [recalls]
-/// does too, wherever [selectedDay] is.
+/// after the frame, to the shown days of that day's week, sliding there
+/// over the [CalendarTheme]'s motion, or at once where its duration is
+/// zero, from a week short of them when they are further away; a new
+/// [recalls] does too, wherever [selectedDay] is.
 ///
 /// [weekdays] are fixed for the strip's life: give a strip that changes
 /// them its own key.
@@ -112,6 +113,15 @@ class _WeekStripState extends State<WeekStrip> {
   /// Counts the slides that follow the selected day, so the end of one a
   /// later slide stopped leaves [_following] to that later one.
   int _follows = 0;
+
+  /// The theme above the strip, whose motion a slide takes when it starts.
+  late CalendarThemeData _theme;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _theme = CalendarTheme.of(context);
+  }
 
   @override
   void didUpdateWidget(WeekStrip oldWidget) {
@@ -193,12 +203,18 @@ class _WeekStripState extends State<WeekStrip> {
     if (distance.abs() > week) {
       _scroll.jumpTo(target - distance.sign * week);
     }
+    final duration = _theme.motionDuration;
+    if (duration <= Duration.zero) {
+      // The jump dispatches its scroll notifications before it returns, so
+      // the follow ends here.
+      _scroll.jumpTo(target);
+      if (follow == _follows) {
+        _following = false;
+      }
+      return;
+    }
     _scroll
-        .animateTo(
-          target,
-          duration: harborMotionDuration,
-          curve: harborMotionCurve,
-        )
+        .animateTo(target, duration: duration, curve: _theme.motionCurve)
         .whenComplete(() {
           if (follow == _follows) {
             _following = false;

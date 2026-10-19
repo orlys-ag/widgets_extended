@@ -19,6 +19,7 @@ import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 
 import 'calendar_harness.dart';
 
@@ -248,18 +249,21 @@ void main() {
           body: StatefulBuilder(
             builder: (context, setState) {
               setHost = setState;
-              return WeekStrip(
-                model: model,
-                selectedDay: selected,
-                today: today,
-                weekdays: WeekdaySet.all,
-                onSelectDay: (day) {
-                  reported.add(day);
-                  setState(() {
-                    selected = day;
-                  });
-                },
-                onBrowse: browsed.add,
+              return CalendarTheme(
+                data: harborCalendarTheme,
+                child: WeekStrip(
+                  model: model,
+                  selectedDay: selected,
+                  today: today,
+                  weekdays: WeekdaySet.all,
+                  onSelectDay: (day) {
+                    reported.add(day);
+                    setState(() {
+                      selected = day;
+                    });
+                  },
+                  onBrowse: browsed.add,
+                ),
               );
             },
           ),
@@ -544,13 +548,16 @@ void main() {
         home: Scaffold(
           body: Column(
             children: <Widget>[
-              WeekStrip(
-                model: model,
-                selectedDay: april(21),
-                today: april(21),
-                weekdays: WeekdaySet.all,
-                onSelectDay: (day) {},
-                onBrowse: (day) {},
+              CalendarTheme(
+                data: harborCalendarTheme,
+                child: WeekStrip(
+                  model: model,
+                  selectedDay: april(21),
+                  today: april(21),
+                  weekdays: WeekdaySet.all,
+                  onSelectDay: (day) {},
+                  onBrowse: (day) {},
+                ),
               ),
             ],
           ),
