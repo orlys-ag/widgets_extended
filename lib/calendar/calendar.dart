@@ -2,6 +2,32 @@ export 'dates/calendar_dates.dart'
     show DayHours, WeekdaySet, dateOfDayNumber, dayNumber;
 export 'entries/calendar_data_source.dart' show CalendarDataSource;
 export 'entries/calendar_entry.dart' show CalendarEntry, CalendarEntryTime;
+export 'presentation/calendar_activity_indicator.dart'
+    show CalendarActivityIndicator;
+export 'presentation/calendar_builders.dart'
+    show
+        CalendarAddButtonBuilder,
+        CalendarAddButtonDetails,
+        CalendarBlockBuilder,
+        CalendarBlockDetails,
+        CalendarCardBuilder,
+        CalendarCardDetails,
+        CalendarChipBuilder,
+        CalendarChipDetails,
+        CalendarFailureBuilder,
+        CalendarFailureState,
+        CalendarLoadingBuilder,
+        CalendarLoadingState,
+        CalendarStateSite,
+        calendarCardStripExtent;
+export 'presentation/calendar_defaults.dart'
+    show
+        defaultCalendarAddButtonBuilder,
+        defaultCalendarBlockBuilder,
+        defaultCalendarCardBuilder,
+        defaultCalendarChipBuilder,
+        defaultCalendarFailureBuilder,
+        defaultCalendarLoadingBuilder;
 export 'presentation/calendar_theme.dart' show CalendarTheme, CalendarThemeData;
 export 'store/caching_calendar_store.dart' show CachingCalendarStore;
 export 'store/calendar_store.dart'

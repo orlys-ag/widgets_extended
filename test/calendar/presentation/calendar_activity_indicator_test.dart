@@ -95,7 +95,7 @@ void main() {
     final given = arcOf(tester);
     expect(given.sweep, moreOrLessEquals(3.0 * math.pi / 2.0));
     expect(given.rect, const Rect.fromLTWH(1.5, 1.5, 17.0, 17.0));
-    expect(given.paint.color, red);
+    expect(given.paint.color, isSameColorAs(red));
     expect(given.paint.strokeWidth, 3.0);
     expect(given.paint.style, PaintingStyle.stroke);
     expect(given.paint.strokeCap, StrokeCap.round);

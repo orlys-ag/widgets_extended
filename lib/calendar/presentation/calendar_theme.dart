@@ -18,14 +18,20 @@ import 'package:flutter/widgets.dart';
 /// the bold-text setting still apply. A text style's colour is not used:
 /// the view draws the text in the colour field each style's doc names.
 ///
+/// [entryTintOpacity], [pendingEntryOpacity] and [actionLabelStyle] are
+/// read by the module's default builders: the tint they fill an entry's
+/// box with, the opacity they draw a pending entry at, and the Retry of a
+/// failed read.
+///
 /// [CalendarTheme] hands a theme down the tree, and [CalendarTheme.of]
 /// reads it.
 @immutable
 class CalendarThemeData with Diagnosticable {
   /// Creates a theme; each parameter left out takes its built-in value.
   ///
-  /// [todayRingWidth] must be zero or more, and [draggedBlockOpacity] from
-  /// 0 to 1. [motionDuration] must be zero or more, and every text style
+  /// [todayRingWidth] must be zero or more, and [draggedBlockOpacity],
+  /// [entryTintOpacity] and [pendingEntryOpacity] each from 0 to 1.
+  /// [motionDuration] must be zero or more, and every text style
   /// must have `inherit: true`; [CalendarTheme.of] asserts those two in a
   /// debug build, since this constructor's asserts cannot read them.
   const CalendarThemeData({
@@ -45,6 +51,8 @@ class CalendarThemeData with Diagnosticable {
     this.todayRing = _todayRing,
     this.todayRingWidth = _todayRingWidth,
     this.draggedBlockOpacity = _draggedBlockOpacity,
+    this.entryTintOpacity = _entryTintOpacity,
+    this.pendingEntryOpacity = _pendingEntryOpacity,
     this.motionDuration = _motionDuration,
     this.motionCurve = _motionCurve,
     this.beforeHoursIcon = _beforeHoursIcon,
@@ -83,10 +91,19 @@ class CalendarThemeData with Diagnosticable {
     this.weekdayLetterStyle = _weekdayLetterStyle,
     this.monthNameStyle = _monthNameStyle,
     this.monthNameMarkedStyle = _monthNameMarkedStyle,
+    this.actionLabelStyle = _actionLabelStyle,
   }) : assert(todayRingWidth >= 0.0, "todayRingWidth must be zero or more."),
        assert(
          draggedBlockOpacity >= 0.0 && draggedBlockOpacity <= 1.0,
          "draggedBlockOpacity must be from 0 to 1.",
+       ),
+       assert(
+         entryTintOpacity >= 0.0 && entryTintOpacity <= 1.0,
+         "entryTintOpacity must be from 0 to 1.",
+       ),
+       assert(
+         pendingEntryOpacity >= 0.0 && pendingEntryOpacity <= 1.0,
+         "pendingEntryOpacity must be from 0 to 1.",
        );
 
   static const Color _primary = Color(0xFF3D4B5C);
@@ -105,6 +122,8 @@ class CalendarThemeData with Diagnosticable {
   static const Color _todayRing = Color(0xFF7A8899);
   static const double _todayRingWidth = 2.0;
   static const double _draggedBlockOpacity = 0.66;
+  static const double _entryTintOpacity = 0.14;
+  static const double _pendingEntryOpacity = 0.5;
   static const Duration _motionDuration = Duration(milliseconds: 300);
   static const Curve _motionCurve = Curves.fastOutSlowIn;
 
@@ -236,12 +255,17 @@ class CalendarThemeData with Diagnosticable {
     fontSize: 15.0,
     fontWeight: FontWeight.w600,
   );
+  static const TextStyle _actionLabelStyle = TextStyle(
+    fontSize: 14.0,
+    fontWeight: FontWeight.w600,
+  );
 
   /// The accent: a selected day's fill and badge, Month's selected pill, the
   /// month picker's selected pill, today's number and current month, the
   /// landing pill, the edge of the move and create marks, the selection
   /// outline and grips, the text and icon of the hidden-days pill and the
-  /// duration chip, and the add icon.
+  /// duration chip, the add icon and the default add button's icon, the
+  /// activity indicator, and the Retry label.
   final Color primary;
 
   /// Text drawn on [primary] and on [error].
@@ -258,7 +282,8 @@ class CalendarThemeData with Diagnosticable {
   final Color background;
 
   /// The timed grid's body, header and gutter cells, the ring of a grip and
-  /// of a badge, and the entry card's menu.
+  /// of a badge, and the entry card's menu; the default entries' tints
+  /// blend into it.
   final Color surface;
 
   /// The grid lines of Week, Day and Month, and Agenda's dashed gaps.
@@ -300,8 +325,17 @@ class CalendarThemeData with Diagnosticable {
   /// 0 to 1: the board's `BoardDragConfig.draggedItemOpacity`.
   final double draggedBlockOpacity;
 
+  /// The opacity of an entry's colour in the tint the default builders
+  /// fill its box with, blended over [surface]; from 0 to 1.
+  final double entryTintOpacity;
+
+  /// The opacity the default builders draw a pending entry at; from 0 to
+  /// 1.
+  final double pendingEntryOpacity;
+
   /// How long each animation the views run takes; zero or more. Zero turns
-  /// the views' motion off: every change shows at once.
+  /// the views' motion off: every change shows at once, and the activity
+  /// indicator stands still.
   final Duration motionDuration;
 
   /// The curve each animation the views run eases on.
@@ -450,7 +484,11 @@ class CalendarThemeData with Diagnosticable {
   /// month.
   final TextStyle monthNameMarkedStyle;
 
-  /// The 31 text styles, in the order the fields are declared.
+  /// The Retry of the default failure builder. Its colour is not used: it
+  /// draws in [primary].
+  final TextStyle actionLabelStyle;
+
+  /// The 32 text styles, in the order the fields are declared.
   List<TextStyle> get _textStyles {
     return <TextStyle>[
       hourLabelStyle,
@@ -484,6 +522,7 @@ class CalendarThemeData with Diagnosticable {
       weekdayLetterStyle,
       monthNameStyle,
       monthNameMarkedStyle,
+      actionLabelStyle,
     ];
   }
 
@@ -505,6 +544,8 @@ class CalendarThemeData with Diagnosticable {
     Color? todayRing,
     double? todayRingWidth,
     double? draggedBlockOpacity,
+    double? entryTintOpacity,
+    double? pendingEntryOpacity,
     Duration? motionDuration,
     Curve? motionCurve,
     IconData? beforeHoursIcon,
@@ -543,6 +584,7 @@ class CalendarThemeData with Diagnosticable {
     TextStyle? weekdayLetterStyle,
     TextStyle? monthNameStyle,
     TextStyle? monthNameMarkedStyle,
+    TextStyle? actionLabelStyle,
   }) {
     return CalendarThemeData(
       primary: primary ?? this.primary,
@@ -561,6 +603,8 @@ class CalendarThemeData with Diagnosticable {
       todayRing: todayRing ?? this.todayRing,
       todayRingWidth: todayRingWidth ?? this.todayRingWidth,
       draggedBlockOpacity: draggedBlockOpacity ?? this.draggedBlockOpacity,
+      entryTintOpacity: entryTintOpacity ?? this.entryTintOpacity,
+      pendingEntryOpacity: pendingEntryOpacity ?? this.pendingEntryOpacity,
       motionDuration: motionDuration ?? this.motionDuration,
       motionCurve: motionCurve ?? this.motionCurve,
       beforeHoursIcon: beforeHoursIcon ?? this.beforeHoursIcon,
@@ -608,6 +652,7 @@ class CalendarThemeData with Diagnosticable {
       weekdayLetterStyle: weekdayLetterStyle ?? this.weekdayLetterStyle,
       monthNameStyle: monthNameStyle ?? this.monthNameStyle,
       monthNameMarkedStyle: monthNameMarkedStyle ?? this.monthNameMarkedStyle,
+      actionLabelStyle: actionLabelStyle ?? this.actionLabelStyle,
     );
   }
 
@@ -615,11 +660,12 @@ class CalendarThemeData with Diagnosticable {
   /// [b] are the same instance.
   ///
   /// Colours interpolate with [Color.lerp], text styles with
-  /// [TextStyle.lerp], the duration with [lerpDuration] and the two doubles
-  /// with [lerpDouble]; the icons and the curve are [a]'s below 0.5 and
-  /// [b]'s from it. A [t] outside 0 to 1, as an overshooting curve gives,
-  /// may take the duration, [todayRingWidth] or [draggedBlockOpacity] out
-  /// of its domain, so each is clamped into it.
+  /// [TextStyle.lerp], the duration with [lerpDuration] and the four
+  /// doubles with [lerpDouble]; the icons and the curve are [a]'s below 0.5
+  /// and [b]'s from it. A [t] outside 0 to 1, as an overshooting curve
+  /// gives, may take the duration, [todayRingWidth], [draggedBlockOpacity],
+  /// [entryTintOpacity] or [pendingEntryOpacity] out of its domain, so each
+  /// is clamped into it.
   static CalendarThemeData lerp(
     CalendarThemeData a,
     CalendarThemeData b,
@@ -652,6 +698,16 @@ class CalendarThemeData with Diagnosticable {
       ),
       draggedBlockOpacity: clampDouble(
         lerpDouble(a.draggedBlockOpacity, b.draggedBlockOpacity, t)!,
+        0.0,
+        1.0,
+      ),
+      entryTintOpacity: clampDouble(
+        lerpDouble(a.entryTintOpacity, b.entryTintOpacity, t)!,
+        0.0,
+        1.0,
+      ),
+      pendingEntryOpacity: clampDouble(
+        lerpDouble(a.pendingEntryOpacity, b.pendingEntryOpacity, t)!,
         0.0,
         1.0,
       ),
@@ -777,6 +833,11 @@ class CalendarThemeData with Diagnosticable {
         b.monthNameMarkedStyle,
         t,
       )!,
+      actionLabelStyle: TextStyle.lerp(
+        a.actionLabelStyle,
+        b.actionLabelStyle,
+        t,
+      )!,
     );
   }
 
@@ -823,6 +884,8 @@ class CalendarThemeData with Diagnosticable {
         other.todayRing == todayRing &&
         other.todayRingWidth == todayRingWidth &&
         other.draggedBlockOpacity == draggedBlockOpacity &&
+        other.entryTintOpacity == entryTintOpacity &&
+        other.pendingEntryOpacity == pendingEntryOpacity &&
         other.motionDuration == motionDuration &&
         other.motionCurve == motionCurve &&
         other.beforeHoursIcon == beforeHoursIcon &&
@@ -860,7 +923,8 @@ class CalendarThemeData with Diagnosticable {
         other.weekdayHeaderStyle == weekdayHeaderStyle &&
         other.weekdayLetterStyle == weekdayLetterStyle &&
         other.monthNameStyle == monthNameStyle &&
-        other.monthNameMarkedStyle == monthNameMarkedStyle;
+        other.monthNameMarkedStyle == monthNameMarkedStyle &&
+        other.actionLabelStyle == actionLabelStyle;
   }
 
   @override
@@ -882,6 +946,8 @@ class CalendarThemeData with Diagnosticable {
       todayRing,
       todayRingWidth,
       draggedBlockOpacity,
+      entryTintOpacity,
+      pendingEntryOpacity,
       motionDuration,
       motionCurve,
       beforeHoursIcon,
@@ -937,6 +1003,20 @@ class CalendarThemeData with Diagnosticable {
           "draggedBlockOpacity",
           draggedBlockOpacity,
           defaultValue: _draggedBlockOpacity,
+        ),
+      )
+      ..add(
+        DoubleProperty(
+          "entryTintOpacity",
+          entryTintOpacity,
+          defaultValue: _entryTintOpacity,
+        ),
+      )
+      ..add(
+        DoubleProperty(
+          "pendingEntryOpacity",
+          pendingEntryOpacity,
+          defaultValue: _pendingEntryOpacity,
         ),
       )
       ..add(
@@ -1073,6 +1153,7 @@ class CalendarThemeData with Diagnosticable {
       monthNameMarkedStyle,
       _monthNameMarkedStyle,
     );
+    addStyle("actionLabelStyle", actionLabelStyle, _actionLabelStyle);
   }
 }
 
