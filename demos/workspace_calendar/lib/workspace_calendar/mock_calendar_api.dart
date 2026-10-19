@@ -5,6 +5,7 @@ library;
 import 'dart:async';
 
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/policy/overlap.dart';
 
 import 'calendar_api.dart';
 import 'calendar_item.dart';
@@ -222,20 +223,16 @@ class MockCalendarApi implements CalendarApi {
   /// The stored ids, other than [ownId], that the valid [body] may not
   /// share time with, read from the index of the days it covers.
   List<String> _conflictsOf(Map<String, Object?> body, String? ownId) {
-    final shape = CalendarItem.fromJson(body).shape;
+    final time = CalendarItem.fromJson(body).time;
     final seen = <String>{};
     final conflicts = <String>[];
-    for (
-      var day = shape.firstDay;
-      day < shape.firstDay + shape.dayCount;
-      day++
-    ) {
+    for (var day = time.firstDay; day < time.firstDay + time.dayCount; day++) {
       for (final id in _idsByDay[day] ?? const <String>{}) {
         if (id == ownId || !seen.add(id)) {
           continue;
         }
-        final other = CalendarItem.fromJson(_items[id]!).shape;
-        if (itemsConflict(shape, other)) {
+        final other = CalendarItem.fromJson(_items[id]!).time;
+        if (timesOverlap(time, other)) {
           conflicts.add(id);
         }
       }

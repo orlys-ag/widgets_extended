@@ -1,6 +1,6 @@
 /// The calendar's item types, the one schema registry that describes each
-/// type's payload, the one validator of an item's JSON, and the one
-/// overlap rule. The mock API and the form both read these.
+/// type's payload, and the one validator of an item's JSON. The mock API
+/// and the form both read these.
 ///
 /// An item is a JSON envelope: `id`, `type`, `title`, `day` (an ISO
 /// date), `startMinute` and `endMinute` (minutes after midnight),
@@ -416,25 +416,4 @@ Map<String, Object?> withFieldDefaults(
     }
   }
   return result;
-}
-
-/// What the overlap rule reads of an item. [firstDay] is a [dayNumber];
-/// [start] and [end] are minutes after midnight on each of its days.
-typedef ItemShape = ({
-  CalendarItemType type,
-  int firstDay,
-  int dayCount,
-  int start,
-  int end,
-});
-
-/// Whether [a] and [b] share time, which no two items may: their days
-/// meet and their half-open minute ranges `[start, end)` meet, whatever
-/// their types.
-bool itemsConflict(ItemShape a, ItemShape b) {
-  final daysMeet =
-      a.firstDay < b.firstDay + b.dayCount &&
-      b.firstDay < a.firstDay + a.dayCount;
-  final minutesMeet = a.start < b.end && b.start < a.end;
-  return daysMeet && minutesMeet;
 }

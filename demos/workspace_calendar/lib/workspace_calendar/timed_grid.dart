@@ -14,6 +14,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_item.dart';
@@ -413,7 +414,7 @@ const String noLandingLabel = "No free time near here";
 /// What the landing label says for a drag that would give an item
 /// [shape]: its first day, as [dayTitle] names it against [today], its
 /// times, and its day count when it covers more than one day.
-String landingLabel(ItemShape shape, DateTime today) {
+String landingLabel(CalendarEntryTime shape, DateTime today) {
   final day = dayTitle(dateOfDayNumber(shape.firstDay), today);
   final times = "${clockLabel(shape.start)}-${clockLabel(shape.end)}";
   if (shape.dayCount == 1) {
@@ -620,7 +621,7 @@ class GridTracks {
 /// days of it the grid has no column for and its minutes outside the
 /// grid's hours are clipped off; null when no shown day or no minute of it
 /// is left.
-BoardSpan? gridSpanOf(ItemShape shape, GridTracks tracks) {
+BoardSpan? gridSpanOf(CalendarEntryTime shape, GridTracks tracks) {
   final firstColumn = tracks.firstColumnFrom(shape.firstDay);
   final lastColumn = tracks.lastColumnUpTo(shape.firstDay + shape.dayCount - 1);
   final hours = tracks.hours;
@@ -648,8 +649,8 @@ BoardSpan? gridSpanOf(ItemShape shape, GridTracks tracks) {
 /// the only column edge the grid resizes, which keeps the start: the item
 /// keeps its first day and ends on the day of [to]'s last column, whatever
 /// the grid clipped of it.
-ItemShape shapeFromSpan(
-  ItemShape shape,
+CalendarEntryTime shapeFromSpan(
+  CalendarEntryTime shape,
   BoardSpan from,
   BoardSpan to,
   GridTracks tracks,
@@ -659,7 +660,6 @@ ItemShape shapeFromSpan(
   if (to.colSpan == from.colSpan) {
     final shift = tracks.dayAt(to.colStart) - tracks.dayAt(from.colStart);
     return (
-      type: shape.type,
       firstDay: shape.firstDay + shift,
       dayCount: shape.dayCount,
       start: start,
@@ -668,7 +668,6 @@ ItemShape shapeFromSpan(
   }
   final lastDay = tracks.dayAt(to.colStart + to.colSpan - 1);
   return (
-    type: shape.type,
     firstDay: shape.firstDay,
     dayCount: lastDay - shape.firstDay + 1,
     start: start,
@@ -684,7 +683,7 @@ CalendarItem itemFromSpan(
   BoardSpan to,
   GridTracks tracks,
 ) {
-  final shape = shapeFromSpan(item.shape, from, to, tracks);
+  final shape = shapeFromSpan(item.time, from, to, tracks);
   return item.copyWith(
     day: dateOfDayNumber(shape.firstDay),
     dayCount: shape.dayCount,
@@ -1540,7 +1539,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     ));
     final placements = <BoardPlacement<ShownItem>>[];
     for (final entry in shown) {
-      final span = gridSpanOf(entry.item.shape, _tracks);
+      final span = gridSpanOf(entry.item.time, _tracks);
       if (span != null) {
         placements.add(BoardPlacement<ShownItem>(entry, span));
       }
@@ -1570,7 +1569,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     final below = List<int>.filled(_tracks.columnCount, 0);
     var offDays = 0;
     for (final entry in shown) {
-      final shape = entry.item.shape;
+      final shape = entry.item.time;
       if (gridSpanOf(shape, _tracks) != null) {
         continue;
       }
@@ -1581,7 +1580,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         continue;
       }
       // On a shown day, so wholly outside the hours, on each of its days
-      // alike: an item's minutes are the same on each, as itemsConflict
+      // alike: an item's minutes are the same on each, as timesOverlap
       // reads them.
       final counts = shape.start < _tracks.hours.start ? above : below;
       for (var column = first; column <= last; column++) {
@@ -1665,9 +1664,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (from == span) {
       return true;
     }
-    final converted = shapeFromSpan(entry.item.shape, from, span, _tracks);
+    final time = entry.item.time;
+    final converted = shapeFromSpan(time, from, span, _tracks);
     if (!isAllowedDayCount(converted.dayCount) ||
-        !_lock.value.admits(entry.item.shape, converted)) {
+        !_lock.value.admits(time, converted)) {
       return false;
     }
     // The converted shape's own span, not the candidate's: an item clipped
@@ -1687,7 +1687,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         continue;
       }
       final occupant = _board.itemOf(other);
-      if (occupant != null && itemsConflict(converted, occupant.item.shape)) {
+      if (occupant != null && timesOverlap(converted, occupant.item.time)) {
         return false;
       }
     }
@@ -1793,7 +1793,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       return null;
     }
     return landingLabel(
-      shapeFromSpan(entry.item.shape, from, target, _tracks),
+      shapeFromSpan(entry.item.time, from, target, _tracks),
       widget.today,
     );
   }
@@ -2087,7 +2087,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   /// Whether the range from [anchor] to [focus] starts where the history
-  /// lock admits a start and shares no time, under [itemsConflict], with
+  /// lock admits a start and shares no time, under [timesOverlap], with
   /// any of [items].
   bool _admitsRange(
     ({int row, int col}) anchor,
@@ -2098,16 +2098,14 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (!_lock.value.admitsStart(range.day, range.startMinute)) {
       return false;
     }
-    final ItemShape shape = (
-      // itemsConflict reads no type.
-      type: CalendarItemType.task,
+    final CalendarEntryTime time = (
       firstDay: dayNumber(range.day),
       dayCount: range.dayCount,
       start: range.startMinute,
       end: range.endMinute,
     );
     for (final item in items) {
-      if (itemsConflict(shape, item.item.shape)) {
+      if (timesOverlap(time, item.item.time)) {
         return false;
       }
     }
@@ -2550,7 +2548,7 @@ class _Block extends StatelessWidget {
       listenable: Listenable.merge(<Listenable>[selection, lock]),
       child: content,
       builder: (context, child) {
-        final hold = lock.value.holdOf(entry.item.shape);
+        final hold = lock.value.holdOf(entry.item.time);
         return Stack(
           fit: StackFit.passthrough,
           children: <Widget>[

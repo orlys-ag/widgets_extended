@@ -3,6 +3,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 import 'calendar_schema.dart';
@@ -114,9 +115,9 @@ class CalendarItem {
     );
   }
 
-  ItemShape get shape {
+  /// The item's days and minutes, as the overlap rule reads them.
+  CalendarEntryTime get time {
     return (
-      type: type,
       firstDay: dayNumber(day),
       dayCount: dayCount,
       start: startMinute,

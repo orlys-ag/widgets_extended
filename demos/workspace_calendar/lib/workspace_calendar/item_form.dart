@@ -197,7 +197,7 @@ class _ItemFormState extends State<_ItemForm> {
   /// for a draft. Of a started one the day and the start take no input.
   late final ItemHold _hold = widget.item.id == null
       ? ItemHold.free
-      : widget.lock().holdOf(widget.item.shape);
+      : widget.lock().holdOf(widget.item.time);
 
   /// The text controllers of the schema's text, URL, long-text and text
   /// list fields, by key.
@@ -317,8 +317,8 @@ class _ItemFormState extends State<_ItemForm> {
     var errors = validateItemJson(json);
     if (errors.isEmpty) {
       errors = widget.lock().errorsOf(
-        _isDraft ? null : widget.item.shape,
-        CalendarItem.fromJson(json).shape,
+        _isDraft ? null : widget.item.time,
+        CalendarItem.fromJson(json).time,
       );
     }
     if (errors.isNotEmpty) {

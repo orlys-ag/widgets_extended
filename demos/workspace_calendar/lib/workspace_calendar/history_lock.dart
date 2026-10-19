@@ -3,9 +3,9 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
-import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 
 /// How the history lock holds an item.
@@ -62,15 +62,15 @@ class HistoryLock {
   /// The minute before which items are held, or null without a lock.
   final int? boundary;
 
-  static int _startOf(ItemShape shape) {
+  static int _startOf(CalendarEntryTime shape) {
     return shape.firstDay * minutesPerDay + shape.start;
   }
 
-  static int _endOf(ItemShape shape) {
+  static int _endOf(CalendarEntryTime shape) {
     return (shape.firstDay + shape.dayCount - 1) * minutesPerDay + shape.end;
   }
 
-  ItemHold holdOf(ItemShape shape) {
+  ItemHold holdOf(CalendarEntryTime shape) {
     final boundary = this.boundary;
     if (boundary == null || _startOf(shape) >= boundary) {
       return ItemHold.free;
@@ -81,7 +81,7 @@ class HistoryLock {
   /// Whether the item [from] may become [to]: a free one may not start
   /// before the boundary, a started one keeps its start and ends after the
   /// boundary, and a locked one keeps its times.
-  bool admits(ItemShape from, ItemShape to) {
+  bool admits(CalendarEntryTime from, CalendarEntryTime to) {
     final boundary = this.boundary;
     if (boundary == null) {
       return true;
@@ -124,7 +124,7 @@ class HistoryLock {
   /// The item form's errors for [to], a change of the stored [from] or,
   /// where [from] is null, a new item, which the lock refuses, keyed as
   /// `validateItemJson` keys them; empty where the lock admits it.
-  Map<String, String> errorsOf(ItemShape? from, ItemShape to) {
+  Map<String, String> errorsOf(CalendarEntryTime? from, CalendarEntryTime to) {
     final boundary = this.boundary;
     if (boundary == null || (from != null && admits(from, to))) {
       return const <String, String>{};

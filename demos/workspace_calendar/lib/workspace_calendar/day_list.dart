@@ -1321,7 +1321,7 @@ class _DayListState extends State<DayList> {
     if (!inside) {
       start = item.startMinute;
     }
-    final hold = widget.lock.holdOf(item.shape);
+    final hold = widget.lock.holdOf(item.time);
     final styles = _styles;
     return Row(
       children: <Widget>[

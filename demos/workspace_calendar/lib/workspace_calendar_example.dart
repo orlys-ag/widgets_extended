@@ -846,7 +846,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     final item = _model.storedItem(id);
     if (_settings.editing &&
         item != null &&
-        _lock.holdOf(item.shape) != ItemHold.locked) {
+        _lock.holdOf(item.time) != ItemHold.locked) {
       showEditForm(context, model: _model, id: id, lock: _currentLock);
     } else {
       showItemDetails(context, model: _model, id: id);
