@@ -79,16 +79,6 @@ HarborTypeStyle harborTypeStyleOf(CalendarItemType type) {
   }
 }
 
-/// The ring that marks today's number, a 2 px [HarborColors.todayRing]
-/// line around a box whose corners have [radius]: a foreground
-/// decoration, so it pads nothing and shows over a selected day's fill.
-BoxDecoration harborTodayRing(double radius) {
-  return BoxDecoration(
-    border: Border.all(color: HarborColors.todayRing, width: 2.0),
-    borderRadius: BorderRadius.circular(radius),
-  );
-}
-
 /// The opacity of the block a move leaves behind on the timed grid, where
 /// it marks the time the carried block came from.
 const double harborDraggedItemOpacity = 0.66;

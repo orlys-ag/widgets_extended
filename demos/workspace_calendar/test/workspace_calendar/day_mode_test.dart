@@ -22,6 +22,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_harness.dart';
@@ -172,9 +173,9 @@ Future<int> pixelAt(WidgetTester tester, Offset point) async {
   return argb;
 }
 
-/// Pumps a timed grid of [today] alone under [settings], with no day
-/// header, over an empty store, at [size], its clock at 09:00 on [today],
-/// and lets its read complete.
+/// Pumps a timed grid of [today] alone under [settings] and the Harbor
+/// calendar theme, with no day header, over an empty store, at [size], its
+/// clock at 09:00 on [today], and lets its read complete.
 Future<void> pumpGrid(
   WidgetTester tester,
   CalendarSettings settings, {
@@ -194,18 +195,21 @@ Future<void> pumpGrid(
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
-        body: TimedGrid(
-          model: model,
-          settings: settings,
-          firstDay: today,
-          dayCount: 1,
-          selectedDay: today,
-          today: today,
-          now: now,
-          onSelectDay: (day) {},
-          onOpenItem: (id) {},
-          onCreate: (range) async {},
-          showsDayHeader: false,
+        body: CalendarTheme(
+          data: harborCalendarTheme,
+          child: TimedGrid(
+            model: model,
+            settings: settings,
+            firstDay: today,
+            dayCount: 1,
+            selectedDay: today,
+            today: today,
+            now: now,
+            onSelectDay: (day) {},
+            onOpenItem: (id) {},
+            onCreate: (range) async {},
+            showsDayHeader: false,
+          ),
         ),
       ),
     ),
@@ -567,7 +571,7 @@ void main() {
     );
     await gesture.up();
     await tester.pump();
-    await tester.pump(timedGridAnimationStyle.effectiveDropSettle.duration);
+    await tester.pump(gridAnimationStyle(tester).effectiveDropSettle.duration);
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
     final moved = await stored(tester, api, uxFlowId);

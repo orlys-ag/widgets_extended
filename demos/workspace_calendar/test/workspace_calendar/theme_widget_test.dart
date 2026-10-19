@@ -216,4 +216,38 @@ void main() {
       same(harborCalendarTheme),
     );
   });
+
+  testWidgets("V3 the views draw Harbor's calendar theme under a host's "
+      "own", (tester) async {
+    await pumpUnderHostTheme(tester);
+    expect(decorationIn(tester, dayFinder(today)).color, HarborColors.primary);
+    await tester.tap(dayFinder(DateTime(2026, 4, 23)));
+    await tester.pumpAndSettle();
+    final card = find.byKey(itemCardKey(designCritiqueId));
+    expect(
+      textColorOf(
+        tester,
+        find.descendant(of: card, matching: find.byType(Text)).first,
+      ),
+      HarborColors.text,
+    );
+
+    await pickMode(tester, "Week");
+    expect(
+      paintGridBackground(tester).fillsOf(HarborColors.surface),
+      isNotEmpty,
+    );
+    expect(
+      textColorOf(
+        tester,
+        find
+            .descendant(
+              of: blockFinder(designCritiqueId),
+              matching: find.byType(Text),
+            )
+            .first,
+      ),
+      HarborColors.text,
+    );
+  });
 }

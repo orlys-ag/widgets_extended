@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_data.dart';
@@ -44,11 +45,250 @@ int _openingMinuteOf(GridTracks tracks, DateTime now) {
   return minute.clamp(hours.start, hours.end - minutesPerSlot);
 }
 
-/// The style the grid animates its blocks with: every family over
-/// [harborMotionDuration] on [harborMotionCurve].
-const BoardAnimationStyle timedGridAnimationStyle = BoardAnimationStyle.uniform(
-  BoardAnimationSpec(duration: harborMotionDuration, curve: harborMotionCurve),
-);
+/// The style the grid animates its blocks with under [theme]: every
+/// family over its [CalendarThemeData.motionDuration] on its
+/// [CalendarThemeData.motionCurve], and every family off at a zero
+/// duration. The one site that declares the grid's motion.
+BoardAnimationStyle timedGridAnimationStyleOf(CalendarThemeData theme) {
+  return BoardAnimationStyle.uniform(
+    BoardAnimationSpec(
+      duration: theme.motionDuration,
+      curve: theme.motionCurve,
+    ),
+  );
+}
+
+/// What a [TimedGrid] and the cells, blocks, labels and overlays it builds
+/// draw and animate with, made from one [CalendarThemeData] by [forTheme]
+/// and never changed.
+@immutable
+class _GridStyles {
+  _GridStyles._(this.theme)
+    : animation = timedGridAnimationStyleOf(theme),
+      surfacePaint = Paint()..color = theme.surface,
+      backgroundPaint = Paint()..color = theme.background,
+      tintPaint = Paint()..color = theme.primaryTint,
+      linePaint = Paint()
+        ..color = theme.outline
+        ..strokeWidth = 1.0,
+      markEdgePaint = Paint()
+        ..color = theme.primary
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0,
+      nowPaint = Paint()
+        ..color = theme.error
+        ..strokeWidth = 2.0,
+      surfaceBox = ColoredBox(color: theme.surface),
+      hourLabel = theme.hourLabelStyle.copyWith(color: theme.textSecondary),
+      headerWeekday = theme.dayHeaderWeekdayStyle.copyWith(
+        color: theme.textSecondary,
+      ),
+      headerNumber = theme.dayHeaderNumberStyle.copyWith(color: theme.text),
+      headerToday = theme.dayHeaderNumberStyle.copyWith(color: theme.primary),
+      headerRing = BoxDecoration(
+        border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
+        borderRadius: BorderRadius.circular(10.0),
+      ),
+      blockTitle = theme.blockTitleStyle.copyWith(color: theme.text),
+      blockSummary = theme.blockSummaryStyle.copyWith(
+        color: theme.textSecondary,
+      ),
+      detailedTitle = theme.detailedBlockTitleStyle.copyWith(color: theme.text),
+      detail = theme.detailedBlockDetailStyle.copyWith(
+        color: theme.textSecondary,
+      ),
+      cutStart = Positioned(
+        top: 0.0,
+        right: 0.0,
+        child: Icon(
+          theme.beforeHoursIcon,
+          size: 14.0,
+          color: theme.textSecondary,
+        ),
+      ),
+      cutEnd = Positioned(
+        bottom: 0.0,
+        right: 0.0,
+        child: Icon(
+          theme.afterHoursIcon,
+          size: 14.0,
+          color: theme.textSecondary,
+        ),
+      ),
+      hiddenPill = BoxDecoration(
+        color: theme.primaryTint,
+        borderRadius: BorderRadius.circular(10.0),
+      ),
+      hiddenLabel = theme.badgeStyle.copyWith(color: theme.primary),
+      moreLabel = theme.noticeStyle.copyWith(color: theme.onNotice),
+      noticeAbove = Icon(
+        theme.beforeHoursIcon,
+        size: _NoticeCell._arrowSize,
+        color: theme.onNotice,
+      ),
+      noticeBelow = Icon(
+        theme.afterHoursIcon,
+        size: _NoticeCell._arrowSize,
+        color: theme.onNotice,
+      ),
+      _noticeCells = _noticeCellsOf(theme),
+      landing = BoxDecoration(
+        color: theme.primary,
+        borderRadius: BorderRadius.circular(16.0),
+      ),
+      landingLabel = theme.landingLabelStyle.copyWith(color: theme.onPrimary),
+      scrim = theme.background.withValues(alpha: 0.85),
+      message = theme.messageStyle.copyWith(color: theme.error),
+      selectionOutline = Positioned.fill(
+        child: IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.fromBorderSide(
+                BorderSide(
+                  color: theme.primary,
+                  width: _BlockHandles.outlineWidth,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      grip = IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: theme.primary,
+            border: Border.fromBorderSide(
+              BorderSide(color: theme.surface, width: 1.5),
+            ),
+            borderRadius: const BorderRadius.all(
+              Radius.circular(_BlockHandles.gripThickness / 2),
+            ),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 2.0,
+                offset: Offset(0.0, 1.0),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  /// The styles of [theme]: those made for it before, or for a theme `==`
+  /// to it last, so an equal theme makes none.
+  static _GridStyles forTheme(CalendarThemeData theme) {
+    final kept = _memo[theme];
+    if (kept != null) {
+      return kept;
+    }
+    final last = _last;
+    final styles = last != null && last.theme == theme
+        ? last
+        : _GridStyles._(theme);
+    _memo[theme] = styles;
+    _last = styles;
+    return styles;
+  }
+
+  /// The styles of the theme above [context], which [context] then depends
+  /// on.
+  static _GridStyles of(BuildContext context) {
+    return forTheme(CalendarTheme.of(context));
+  }
+
+  static Expando<_GridStyles> _memo = Expando<_GridStyles>();
+  static _GridStyles? _last;
+
+  /// Drops the styles made so far, which keep the code that made them
+  /// across a hot reload, so the next read makes them again.
+  static void _reset() {
+    _memo = Expando<_GridStyles>();
+    _last = null;
+  }
+
+  /// A notice cell's fill and rules, above the slots or below them, in the
+  /// first day column or another: the rule faces the slots, and one parts
+  /// each day from the one before.
+  static List<BoxDecoration> _noticeCellsOf(CalendarThemeData theme) {
+    final edge = BorderSide(color: theme.noticeOutline);
+    return <BoxDecoration>[
+      for (final above in const <bool>[true, false])
+        for (final first in const <bool>[true, false])
+          BoxDecoration(
+            color: theme.notice,
+            border: Border(
+              left: first ? BorderSide.none : edge,
+              top: above ? BorderSide.none : edge,
+              bottom: above ? edge : BorderSide.none,
+            ),
+          ),
+    ];
+  }
+
+  final CalendarThemeData theme;
+
+  /// [timedGridAnimationStyleOf] [theme].
+  final BoardAnimationStyle animation;
+
+  /// The background's body, weekends, today's column and marked slots, its
+  /// lines, the marks' edge, and the foreground's current-time line.
+  final Paint surfacePaint;
+  final Paint backgroundPaint;
+  final Paint tintPaint;
+  final Paint linePaint;
+  final Paint markEdgePaint;
+  final Paint nowPaint;
+
+  /// A gutter cell and the corner over it.
+  final Widget surfaceBox;
+
+  /// The hour labels' own style, which the grid merges over the inherited
+  /// one.
+  final TextStyle hourLabel;
+
+  /// A day header's weekday and number, today's, and today's ring.
+  final TextStyle headerWeekday;
+  final TextStyle headerNumber;
+  final TextStyle headerToday;
+  final BoxDecoration headerRing;
+
+  /// A block's text, on a grid of several days and on a grid of one, and
+  /// the arrows at the ends the hours cut.
+  final TextStyle blockTitle;
+  final TextStyle blockSummary;
+  final TextStyle detailedTitle;
+  final TextStyle detail;
+  final Widget cutStart;
+  final Widget cutEnd;
+
+  /// The pill counting the items on no shown day.
+  final BoxDecoration hiddenPill;
+  final TextStyle hiddenLabel;
+
+  /// A cell of the rows counting the items outside the hours.
+  final TextStyle moreLabel;
+  final Widget noticeAbove;
+  final Widget noticeBelow;
+  final List<BoxDecoration> _noticeCells;
+
+  /// The pill naming where a drag lands.
+  final BoxDecoration landing;
+  final TextStyle landingLabel;
+
+  /// The overlay while the days are not ready.
+  final Color scrim;
+  final TextStyle message;
+
+  /// The selected block's outline, and its grips.
+  final Widget selectionOutline;
+  final Widget grip;
+
+  /// The fill and rules of a notice cell [above] the slots or below them,
+  /// in the [first] day column or another.
+  BoxDecoration noticeCell({required bool above, required bool first}) {
+    return _noticeCells[(above ? 0 : 2) + (first ? 0 : 1)];
+  }
+}
 
 /// The key of the day header cell showing [day].
 ValueKey<String> dayHeaderKey(DateTime day) {
@@ -543,6 +783,9 @@ CreateRange createRangeOver(
 /// finger that pinched clears no selection when it lifts off the selected
 /// block. No pinch starts while a block moves or resizes or a create range
 /// runs.
+///
+/// The grid draws in the [CalendarTheme] above it, its blocks' tints and
+/// edges in their types' styles, and animates on the theme's motion.
 class TimedGrid extends StatefulWidget {
   const TimedGrid({
     super.key,
@@ -676,10 +919,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// another item stops its dragged edge at that item. The drag reports
   /// keep [_drag], which the landing label and outline show. A drag's
   /// start plays a haptic, and the block a move carries casts a shadow.
-  late final BoardDragConfig<String> _editConfig = _dragConfigOf(enabled: true);
-  late final BoardDragConfig<String> _viewConfig = _dragConfigOf(
-    enabled: false,
-  );
+  /// [_applyTheme] makes both again for a theme with another dragged-block
+  /// opacity, which the board hands its live drag.
+  late BoardDragConfig<String> _editConfig;
+  late BoardDragConfig<String> _viewConfig;
 
   BoardDragConfig<String> _dragConfigOf({required bool enabled}) {
     return BoardDragConfig<String>(
@@ -699,7 +942,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
           : BoardResizeEdges.none,
       primaryResizeEdges: BoardResizeEdges.both,
       buildDefaultDragHandles: false,
-      draggedItemOpacity: harborDraggedItemOpacity,
+      draggedItemOpacity: _styles.theme.draggedBlockOpacity,
       dragProxyBuilder: _buildLiftedBlock,
       hapticsOnDrag: true,
       onDragStart: _handleDragStart,
@@ -806,13 +1049,6 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// text scale the last build found.
   final _HourLabels _hourLabels = _HourLabels();
 
-  /// The hour labels' own style, over the inherited text style.
-  static const TextStyle _hourLabelStyle = TextStyle(
-    fontSize: 11.0,
-    height: 1.0,
-    color: HarborColors.textSecondary,
-  );
-
   final GlobalKey _boardKey = GlobalKey();
 
   /// The board's viewport, found under [_boardKey] and kept while it is
@@ -838,8 +1074,15 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// Whether the last [_sync] found its days ready.
   bool _syncedReady = false;
 
-  /// Whether a frame callback will put [timedGridAnimationStyle] back.
+  /// Whether a frame callback will put the styles' animation back.
   bool _restoreScheduled = false;
+
+  /// What the grid draws and animates with; set by [_applyTheme].
+  _GridStyles? _themed;
+
+  _GridStyles get _styles {
+    return _themed!;
+  }
 
   @override
   void initState() {
@@ -874,7 +1117,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       keyOf: (entry) {
         return entry.id;
       },
-      animationStyle: timedGridAnimationStyle,
+      // The first sync disables it and schedules the theme's.
+      animationStyle: BoardAnimationStyle.disabled,
     );
     widget.model.addListener(_handleModel);
     widget.now.addListener(_handleNow);
@@ -978,6 +1222,35 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     _tap.gestureSettings = settings;
     _immediateRange.gestureSettings = settings;
     _delayedRange.gestureSettings = settings;
+    _applyTheme();
+  }
+
+  @override
+  void reassemble() {
+    _GridStyles._reset();
+    super.reassemble();
+    _applyTheme();
+  }
+
+  /// Reads the styles of the theme above the grid; on new ones, makes both
+  /// drag configs again where the dragged block's opacity changed, and
+  /// gives the board their animation, unless a frame will put it back
+  /// after a sync that disabled it, so that sync's motion stays off.
+  void _applyTheme() {
+    final styles = _GridStyles.of(context);
+    final old = _themed;
+    if (identical(styles, old)) {
+      return;
+    }
+    _themed = styles;
+    if (old == null ||
+        old.theme.draggedBlockOpacity != styles.theme.draggedBlockOpacity) {
+      _editConfig = _dragConfigOf(enabled: true);
+      _viewConfig = _dragConfigOf(enabled: false);
+    }
+    if (!_restoreScheduled) {
+      _board.animationStyle = styles.animation;
+    }
   }
 
   @override
@@ -1250,7 +1523,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// only when [animate] holds, its days are ready, the last sync found its
   /// own days ready and the rows stay as they were; any other runs under
   /// [BoardAnimationStyle.disabled], and so does every sync until a frame
-  /// callback restores [timedGridAnimationStyle]. New days reach this grid
+  /// callback restores the styles' animation. New days reach this grid
   /// through [didUpdateWidget], whose sync does not animate, and a sync
   /// that finds them not read yet leaves [_syncedReady] false, so the sync
   /// the read's completion runs does not animate either.
@@ -1336,7 +1609,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return true;
   }
 
-  /// Puts [timedGridAnimationStyle] back in a frame callback scheduled
+  /// Puts the styles' animation back in a frame callback scheduled
   /// after the diff of the sync that first disabled it. The style setter
   /// stops slides at once but leaves an enter or exit in flight to its
   /// next tick, which reads the style then, and transient callbacks run in
@@ -1353,7 +1626,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     SchedulerBinding.instance.scheduleFrameCallback((_) {
       _restoreScheduled = false;
       if (mounted) {
-        _board.animationStyle = timedGridAnimationStyle;
+        _board.animationStyle = _styles.animation;
       }
     });
   }
@@ -1474,14 +1747,15 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   /// The block a move carries, [proxy], over [liftedBlockShadows], which
-  /// ease in from none over the lift. The board calls this on every
-  /// pointer move with a tree of the same shape, so the lift runs once a
-  /// drag, from the frame the block lifts.
+  /// ease in from none over the theme's motion. The board calls this on
+  /// every pointer move with a tree of the same shape, so the lift runs
+  /// once a drag, from the frame the block lifts.
   Widget _buildLiftedBlock(BuildContext context, String id, Widget proxy) {
+    final theme = _styles.theme;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0.0, end: 1.0),
-      duration: harborMotionDuration,
-      curve: harborMotionCurve,
+      duration: theme.motionDuration,
+      curve: theme.motionCurve,
       child: proxy,
       builder: (context, lift, child) {
         return DecoratedBox(
@@ -1866,10 +2140,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   ) {
     if (widget.showsDayHeader && cell.row == 0) {
       if (cell.col == 0) {
-        return ColoredBox(
-          color: HarborColors.surface,
-          child: Center(child: _HiddenCount(count: _hiddenCount)),
-        );
+        return _HiddenCount(count: _hiddenCount);
       }
       return _DayHeaderCell(
         header: _header,
@@ -1881,7 +2152,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (above || cell.row == _rowBelow) {
       // The gutter runs on beside the rows, with no label.
       if (cell.col == 0) {
-        return const ColoredBox(color: HarborColors.surface);
+        return const _GutterCell();
       }
       return _NoticeCell(
         hidden: _hiddenCount,
@@ -1895,12 +2166,15 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       // shows through. The foreground paints the hour labels over it; a
       // row whose top or bottom line is labelled names it to a screen
       // reader.
-      const gutter = ColoredBox(color: HarborColors.surface);
       final label = _gutterLabelOf(cell.row);
       if (label == null) {
-        return gutter;
+        return const _GutterCell();
       }
-      return Semantics(container: true, label: label, child: gutter);
+      return Semantics(
+        container: true,
+        label: label,
+        child: const _GutterCell(),
+      );
     }
     // Body cells build nothing: the background painter draws the grid.
     return null;
@@ -1952,7 +2226,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     final model = widget.model;
     final range = _range;
     final drag = _drag;
-    var labelStyle = DefaultTextStyle.of(context).style.merge(_hourLabelStyle);
+    final styles = _styles;
+    var labelStyle = DefaultTextStyle.of(context).style.merge(styles.hourLabel);
     if (MediaQuery.boldTextOf(context)) {
       labelStyle = labelStyle.merge(
         const TextStyle(fontWeight: FontWeight.bold),
@@ -1978,6 +2253,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
           cellBuilder: _cellBuilder,
           itemBuilder: _itemBuilder,
           background: _TimedGridPainter(
+            styles: styles,
             tracks: _tracks,
             today: widget.today,
             rangeAnchor: range?.anchor ?? _creating?.anchor,
@@ -1987,6 +2263,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
                 : null,
           ),
           foreground: _GridForegroundPainter(
+            styles: styles,
             tracks: _tracks,
             labels: _hourLabels,
             labelsVersion: _hourLabels.version,
@@ -2115,6 +2392,7 @@ class _DayHeaderCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
     return ValueListenableBuilder<_HeaderState>(
       valueListenable: header,
       builder: (context, value, child) {
@@ -2133,34 +2411,23 @@ class _DayHeaderCell extends StatelessWidget {
             onSelectDay(day);
           },
           child: ColoredBox(
-            color: isSelected ? HarborColors.primaryTint : HarborColors.surface,
+            color: isSelected ? styles.theme.primaryTint : styles.theme.surface,
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Text(
                     weekdayShortNames[weekdayColumn(day)],
-                    style: const TextStyle(
-                      fontSize: 11.0,
-                      color: HarborColors.textSecondary,
-                    ),
+                    style: styles.headerWeekday,
                   ),
                   Container(
                     width: 30.0,
                     height: 20.0,
                     alignment: Alignment.center,
-                    foregroundDecoration: isToday
-                        ? harborTodayRing(10.0)
-                        : null,
+                    foregroundDecoration: isToday ? styles.headerRing : null,
                     child: Text(
                       "${day.day}",
-                      style: TextStyle(
-                        fontSize: 14.0,
-                        fontWeight: FontWeight.w700,
-                        color: isToday
-                            ? HarborColors.primary
-                            : HarborColors.text,
-                      ),
+                      style: isToday ? styles.headerToday : styles.headerNumber,
                     ),
                   ),
                 ],
@@ -2238,13 +2505,9 @@ class _Block extends StatelessWidget {
   /// Null while the item is pending, so a tap opens nothing.
   final VoidCallback? onOpen;
 
-  static const TextStyle _detailStyle = TextStyle(
-    fontSize: 12.0,
-    color: HarborColors.textSecondary,
-  );
-
   @override
   Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
     final item = entry.item;
     final style = harborTypeStyleOf(item.type);
     Widget content = DecoratedBox(
@@ -2252,33 +2515,15 @@ class _Block extends StatelessWidget {
         color: style.tint,
         border: Border(left: BorderSide(color: style.edge, width: 4.0)),
       ),
-      child: detailed ? _buildLines(item) : _buildCompact(item),
+      child: detailed ? _buildLines(item, styles) : _buildCompact(item, styles),
     );
     if (cutAtStart || cutAtEnd) {
       content = Stack(
         fit: StackFit.passthrough,
         children: <Widget>[
           content,
-          if (cutAtStart)
-            const Positioned(
-              top: 0.0,
-              right: 0.0,
-              child: Icon(
-                Icons.keyboard_arrow_up,
-                size: 14.0,
-                color: HarborColors.textSecondary,
-              ),
-            ),
-          if (cutAtEnd)
-            const Positioned(
-              bottom: 0.0,
-              right: 0.0,
-              child: Icon(
-                Icons.keyboard_arrow_down,
-                size: 14.0,
-                color: HarborColors.textSecondary,
-              ),
-            ),
+          if (cutAtStart) styles.cutStart,
+          if (cutAtEnd) styles.cutEnd,
         ],
       );
     }
@@ -2338,7 +2583,7 @@ class _Block extends StatelessWidget {
   /// The title and, when [showsSummary], the first summary, laid out at
   /// their natural height and clipped to the block, so a block shorter
   /// than its text does not overflow.
-  Widget _buildCompact(CalendarItem item) {
+  Widget _buildCompact(CalendarItem item, _GridStyles styles) {
     final schema = schemaOf(item.type);
     String? summary;
     if (showsSummary && schema.summaryKeys.isNotEmpty) {
@@ -2360,21 +2605,14 @@ class _Block extends StatelessWidget {
                 item.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 11.0,
-                  fontWeight: FontWeight.w600,
-                  color: HarborColors.text,
-                ),
+                style: styles.blockTitle,
               ),
               if (summary != null)
                 Text(
                   summary,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 10.0,
-                    color: HarborColors.textSecondary,
-                  ),
+                  style: styles.blockSummary,
                 ),
             ],
           ),
@@ -2385,7 +2623,7 @@ class _Block extends StatelessWidget {
 
   /// The title and the times, then each summary the item has, one per
   /// line, as [_BlockLinesDelegate] paints them.
-  Widget _buildLines(CalendarItem item) {
+  Widget _buildLines(CalendarItem item, _GridStyles styles) {
     final schema = schemaOf(item.type);
     final summaries = <String>[];
     for (final key in schema.summaryKeys) {
@@ -2407,16 +2645,12 @@ class _Block extends StatelessWidget {
                 item.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13.0,
-                  fontWeight: FontWeight.w600,
-                  color: HarborColors.text,
-                ),
+                style: styles.detailedTitle,
               ),
               Text(
                 "${clockLabel(item.startMinute)}-${clockLabel(item.endMinute)}",
                 maxLines: 1,
-                style: _detailStyle,
+                style: styles.detail,
               ),
             ],
           ),
@@ -2425,7 +2659,7 @@ class _Block extends StatelessWidget {
               summary,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: _detailStyle,
+              style: styles.detail,
             ),
         ],
       ),
@@ -2469,8 +2703,20 @@ class _BlockLinesDelegate extends FlowDelegate {
   }
 }
 
-/// Nothing, or a pill counting the shown items on no day the grid has a
-/// column for, whose tooltip says why.
+/// A gutter cell: the surface of the theme above it, so nothing scrolled
+/// beneath the gutter shows through.
+class _GutterCell extends StatelessWidget {
+  const _GutterCell();
+
+  @override
+  Widget build(BuildContext context) {
+    return _GridStyles.of(context).surfaceBox;
+  }
+}
+
+/// The day header's corner over the gutter, on the surface colour: nothing,
+/// or a pill counting the shown items on no day the grid has a column for,
+/// whose tooltip says why.
 class _HiddenCount extends StatelessWidget {
   const _HiddenCount({required this.count});
 
@@ -2478,38 +2724,34 @@ class _HiddenCount extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<_Hidden>(
-      valueListenable: count,
-      builder: (context, hidden, child) {
-        final value = hidden.offDays;
-        if (value == 0) {
-          return const SizedBox.shrink();
-        }
-        return Tooltip(
-          message: hiddenItemsLabel(value),
-          child: DecoratedBox(
-            key: hiddenCountKey,
-            decoration: BoxDecoration(
-              color: HarborColors.primaryTint,
-              borderRadius: BorderRadius.circular(10.0),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 6.0,
-                vertical: 2.0,
-              ),
-              child: Text(
-                "+$value",
-                style: const TextStyle(
-                  fontSize: 11.0,
-                  fontWeight: FontWeight.w600,
-                  color: HarborColors.primary,
+    final styles = _GridStyles.of(context);
+    return ColoredBox(
+      color: styles.theme.surface,
+      child: Center(
+        child: ValueListenableBuilder<_Hidden>(
+          valueListenable: count,
+          builder: (context, hidden, child) {
+            final value = hidden.offDays;
+            if (value == 0) {
+              return const SizedBox.shrink();
+            }
+            return Tooltip(
+              message: hiddenItemsLabel(value),
+              child: DecoratedBox(
+                key: hiddenCountKey,
+                decoration: styles.hiddenPill,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6.0,
+                    vertical: 2.0,
+                  ),
+                  child: Text("+$value", style: styles.hiddenLabel),
                 ),
               ),
-            ),
-          ),
-        );
-      },
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -2540,6 +2782,7 @@ class _NoticeCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
     return ValueListenableBuilder<_Hidden>(
       valueListenable: hidden,
       builder: (context, value, child) {
@@ -2552,18 +2795,12 @@ class _NoticeCell extends StatelessWidget {
         }
         final day = tracks.dateAt(column);
         final count = (above ? value.above : value.below)[column - 1];
-        const edge = BorderSide(color: HarborColors.noticeEdge);
         final cell = DecoratedBox(
           key: above ? hiddenAboveKey(day) : hiddenBelowKey(day),
-          decoration: BoxDecoration(
-            color: HarborColors.notice,
-            border: Border(
-              left: column > 1 ? edge : BorderSide.none,
-              top: above ? BorderSide.none : edge,
-              bottom: above ? edge : BorderSide.none,
-            ),
-          ),
-          child: count == 0 ? const SizedBox.expand() : _buildMore(count),
+          decoration: styles.noticeCell(above: above, first: column == 1),
+          child: count == 0
+              ? const SizedBox.expand()
+              : _buildMore(count, styles),
         );
         if (count == 0) {
           return cell;
@@ -2585,18 +2822,12 @@ class _NoticeCell extends StatelessWidget {
     );
   }
 
-  static const TextStyle _moreStyle = TextStyle(
-    fontSize: 12.0,
-    fontWeight: FontWeight.w600,
-    color: HarborColors.onNotice,
-  );
-
   static const double _arrowSize = 16.0;
   static const double _arrowGap = 2.0;
 
   /// The arrow and "+N more", or "+N" in a cell too narrow for "+N more"
   /// at its own size, scaled down in one too narrow for that.
-  Widget _buildMore(int count) {
+  Widget _buildMore(int count, _GridStyles styles) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6.0),
       child: LayoutBuilder(
@@ -2605,7 +2836,7 @@ class _NoticeCell extends StatelessWidget {
           final painter = TextPainter(
             text: TextSpan(
               text: more,
-              style: DefaultTextStyle.of(context).style.merge(_moreStyle),
+              style: DefaultTextStyle.of(context).style.merge(styles.moreLabel),
             ),
             textDirection: Directionality.of(context),
             textScaler: MediaQuery.textScalerOf(context),
@@ -2621,13 +2852,13 @@ class _NoticeCell extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Icon(
-                    above ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                    size: _arrowSize,
-                    color: HarborColors.onNotice,
-                  ),
+                  above ? styles.noticeAbove : styles.noticeBelow,
                   const SizedBox(width: _arrowGap),
-                  Text(fits ? more : "+$count", maxLines: 1, style: _moreStyle),
+                  Text(
+                    fits ? more : "+$count",
+                    maxLines: 1,
+                    style: styles.moreLabel,
+                  ),
                 ],
               ),
             ),
@@ -2647,14 +2878,12 @@ class _LandingLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
     return IgnorePointer(
       child: Center(
         child: DecoratedBox(
           key: landingLabelKey,
-          decoration: BoxDecoration(
-            color: HarborColors.primary,
-            borderRadius: BorderRadius.circular(16.0),
-          ),
+          decoration: styles.landing,
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: 12.0,
@@ -2663,11 +2892,7 @@ class _LandingLabel extends StatelessWidget {
             child: Text(
               text,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 13.0,
-                fontWeight: FontWeight.w600,
-                color: HarborColors.onPrimary,
-              ),
+              style: styles.landingLabel,
             ),
           ),
         ),
@@ -2687,10 +2912,11 @@ class _LoadOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
     final message = error;
     // A ColoredBox hit-tests as opaque, so no press reaches the board.
     return ColoredBox(
-      color: HarborColors.background.withValues(alpha: 0.85),
+      color: styles.scrim,
       child: Center(
         child: message == null
             ? const CircularProgressIndicator()
@@ -2702,7 +2928,7 @@ class _LoadOverlay extends StatelessWidget {
                     child: Text(
                       message,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: HarborColors.error),
+                      style: styles.message,
                     ),
                   ),
                   const SizedBox(height: 12.0),
@@ -2721,9 +2947,10 @@ class _LoadOverlay extends StatelessWidget {
 /// column and edged in the primary colour so it shows over that column too; and
 /// a line at the top of each slot row, under the last one and at the left of
 /// each day column, across the slots. The room above and below the slots shows
-/// the body alone. Every paint it draws with is built once.
+/// the body alone. Every paint it draws with is [styles]', made once per theme.
 class _TimedGridPainter extends BoardBackgroundPainter {
   const _TimedGridPainter({
+    required this.styles,
     required this.tracks,
     required this.today,
     required this.rangeAnchor,
@@ -2731,17 +2958,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     required this.landing,
   });
 
-  static final Paint _surfacePaint = Paint()..color = HarborColors.surface;
-  static final Paint _backgroundPaint = Paint()
-    ..color = HarborColors.background;
-  static final Paint _tintPaint = Paint()..color = HarborColors.primaryTint;
-  static final Paint _linePaint = Paint()
-    ..color = HarborColors.outline
-    ..strokeWidth = 1.0;
-  static final Paint _markEdgePaint = Paint()
-    ..color = HarborColors.primary
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = 2.0;
+  final _GridStyles styles;
   final GridTracks tracks;
   final DateTime today;
   final ({int row, int col})? rangeAnchor;
@@ -2762,7 +2979,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     final region = geometry.scrolledRegion;
     canvas.save();
     canvas.clipRect(region);
-    canvas.drawRect(region, _surfacePaint);
+    canvas.drawRect(region, styles.surfacePaint);
     final slotFirst = math.max(firstRow, tracks.firstSlotRow);
     final slotLast = math.min(lastRow, tracks.lastSlotRow);
     if (slotFirst > slotLast) {
@@ -2775,9 +2992,9 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     for (var col = firstCol; col <= lastCol; col++) {
       final Paint fill;
       if (col == todayColumn) {
-        fill = _tintPaint;
+        fill = styles.tintPaint;
       } else if (weekdayColumnOfDay(tracks.dayAt(col)) >= 5) {
-        fill = _backgroundPaint;
+        fill = styles.backgroundPaint;
       } else {
         continue;
       }
@@ -2812,13 +3029,14 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     }
     // The top line of each slot that shows, and the bottom line of the
     // last slot where the room below it shows.
+    final linePaint = styles.linePaint;
     for (var row = slotFirst; row <= math.min(lastRow, slotLast + 1); row++) {
       final y = geometry.visibleCellRect(row, firstCol).top;
-      canvas.drawLine(Offset(first.left, y), Offset(last.right, y), _linePaint);
+      canvas.drawLine(Offset(first.left, y), Offset(last.right, y), linePaint);
     }
     for (var col = firstCol; col <= lastCol; col++) {
       final x = geometry.visibleCellRect(slotFirst, col).left;
-      canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), _linePaint);
+      canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), linePaint);
     }
     canvas.restore();
   }
@@ -2843,13 +3061,14 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     final rect = geometry
         .visibleCellRect(firstRow, firstCol)
         .expandToInclude(geometry.visibleCellRect(lastRow, lastCol));
-    canvas.drawRect(rect, _tintPaint);
-    canvas.drawRect(rect.deflate(1.0), _markEdgePaint);
+    canvas.drawRect(rect, styles.tintPaint);
+    canvas.drawRect(rect.deflate(1.0), styles.markEdgePaint);
   }
 
   @override
   bool shouldRepaint(covariant _TimedGridPainter old) {
-    return old.tracks != tracks ||
+    return !identical(old.styles, styles) ||
+        old.tracks != tracks ||
         old.today != today ||
         old.rangeAnchor != rangeAnchor ||
         old.rangeFocus != rangeFocus ||
@@ -2877,6 +3096,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
 /// blocks.
 class _GridForegroundPainter extends BoardForegroundPainter {
   const _GridForegroundPainter({
+    required this.styles,
     required this.tracks,
     required this.labels,
     required this.labelsVersion,
@@ -2888,9 +3108,8 @@ class _GridForegroundPainter extends BoardForegroundPainter {
   /// The space between a label and the gutter's right edge.
   static const double _labelEnd = 6.0;
 
-  static final Paint _nowPaint = Paint()
-    ..color = HarborColors.error
-    ..strokeWidth = 2.0;
+  /// Holds the paint of the line marking the current time.
+  final _GridStyles styles;
 
   /// Whether a label names the top line of the slot [row]: the first slot,
   /// and every slot starting a whole hour. False for a row that is no
@@ -3014,14 +3233,16 @@ class _GridForegroundPainter extends BoardForegroundPainter {
     final y = rect.top + fraction * rect.height;
     canvas.save();
     canvas.clipRect(geometry.scrolledRegion);
-    canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), _nowPaint);
-    canvas.drawCircle(Offset(rect.left, y), 4.0, _nowPaint);
+    final nowPaint = styles.nowPaint;
+    canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), nowPaint);
+    canvas.drawCircle(Offset(rect.left, y), 4.0, nowPaint);
     canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _GridForegroundPainter old) {
-    return old.tracks != tracks ||
+    return !identical(old.styles, styles) ||
+        old.tracks != tracks ||
         old.now != now ||
         !identical(old.labels, labels) ||
         old.labelsVersion != labelsVersion ||
@@ -3217,6 +3438,7 @@ class _BlockHandlesState extends State<_BlockHandles> {
 
   @override
   Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
@@ -3233,20 +3455,7 @@ class _BlockHandlesState extends State<_BlockHandles> {
         return Stack(
           clipBehavior: Clip.none,
           children: <Widget>[
-            const Positioned.fill(
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border.fromBorderSide(
-                      BorderSide(
-                        color: HarborColors.primary,
-                        width: _BlockHandles.outlineWidth,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            styles.selectionOutline,
             if (widget.resizesDays)
               Positioned(
                 top: 0.0,
@@ -3340,26 +3549,7 @@ class _Grip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const IgnorePointer(
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: HarborColors.primary,
-          border: Border.fromBorderSide(
-            BorderSide(color: HarborColors.surface, width: 1.5),
-          ),
-          borderRadius: BorderRadius.all(
-            Radius.circular(_BlockHandles.gripThickness / 2),
-          ),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: Color(0x33000000),
-              blurRadius: 2.0,
-              offset: Offset(0.0, 1.0),
-            ),
-          ],
-        ),
-      ),
-    );
+    return _GridStyles.of(context).grip;
   }
 }
 

@@ -5,6 +5,7 @@ library;
 
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +14,8 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
@@ -544,9 +547,10 @@ Drawn drawnUnder(WidgetTester tester, List<Finder> roots) {
   final skip = <RenderObject>{};
   for (final root in roots) {
     for (final type in <Type>[CircularProgressIndicator, TextButton]) {
-      for (final element in find
-          .descendant(of: root, matching: find.byType(type))
-          .evaluate()) {
+      for (final element
+          in find
+              .descendant(of: root, matching: find.byType(type))
+              .evaluate()) {
         skip.add(element.renderObject!);
       }
     }
@@ -681,9 +685,7 @@ void expectOnly(
       reason: "$reason: untagged text style $style",
     );
   }
-  final bannedIcons = <IconData>{
-    for (final other in banned) ...iconsOf(other),
-  };
+  final bannedIcons = <IconData>{for (final other in banned) ...iconsOf(other)};
   final allowedIcons = <IconData>{...iconsOf(theme), ...typeIcons};
   for (final icon in drawn.icons) {
     expect(
@@ -739,7 +741,11 @@ Set<String> fieldsOf(Drawn drawn, CalendarThemeData theme) {
 
 /// The colour of the screen's pixel at the global [point], as 32-bit ARGB,
 /// read from the repaint boundary nearest above [over].
-Future<int> pixelAt(WidgetTester tester, RenderObject over, Offset point) async {
+Future<int> pixelAt(
+  WidgetTester tester,
+  RenderObject over,
+  Offset point,
+) async {
   RenderObject? node = over;
   while (node != null && node is! RenderRepaintBoundary) {
     node = node.parent;
@@ -856,7 +862,9 @@ Finder stripCellOf(DateTime day) {
 /// The style of the number [cell] draws for [day].
 TextStyle numberStyleOf(WidgetTester tester, Finder cell, DateTime day) {
   return tester
-      .widget<Text>(find.descendant(of: cell, matching: find.text("${day.day}")))
+      .widget<Text>(
+        find.descendant(of: cell, matching: find.text("${day.day}")),
+      )
       .style!;
 }
 
@@ -981,7 +989,10 @@ double sizeFactorOf(WidgetTester tester, Key key) {
   return tester
       .widget<SizeTransition>(
         find
-            .ancestor(of: find.byKey(key), matching: find.byType(SizeTransition))
+            .ancestor(
+              of: find.byKey(key),
+              matching: find.byType(SizeTransition),
+            )
             .first,
       )
       .sizeFactor
@@ -1018,6 +1029,88 @@ BoardController<String, MonthChip> monthController(WidgetTester tester) {
   return tester
       .widget<Board<String, MonthChip>>(find.byType(Board<String, MonthChip>))
       .controller;
+}
+
+/// The timed grid's board.
+Board<String, ShownItem> gridBoard(WidgetTester tester) {
+  return tester.widget<Board<String, ShownItem>>(
+    find.byType(Board<String, ShownItem>),
+  );
+}
+
+/// The title [Text] of the block of the item [id], whose title is [title].
+Text blockTitleOf(WidgetTester tester, String id, String title) {
+  return tester.widget<Text>(
+    find.descendant(of: blockFinder(id), matching: find.text(title)),
+  );
+}
+
+/// The ids and titles of [themeSeed]'s items, in the mock's numbering.
+const Map<String, String> seedTitles = <String, String>{
+  "item-1": "Planning",
+  "item-2": "Early sync",
+  "item-3": "Late sync",
+  "item-4": "Report",
+  "item-5": "Release",
+  "item-6": "Slot 1",
+  "item-7": "Slot 2",
+  "item-8": "Slot 3",
+  "item-9": "Slot 4",
+  "item-10": "Slot 5",
+  "item-11": "Slot 6",
+  "item-12": "Slot 7",
+  "item-13": "Away",
+};
+
+/// Expects every block the grid has built to draw its title in
+/// [theme]'s block title colour and tag.
+void expectBlockTitles(WidgetTester tester, CalendarThemeData theme) {
+  var seen = 0;
+  for (final entry in seedTitles.entries) {
+    final title = find.descendant(
+      of: blockFinder(entry.key),
+      matching: find.text(entry.value),
+    );
+    for (final element in title.evaluate()) {
+      final style = (element.widget as Text).style!;
+      expect(style.color, theme.text, reason: entry.value);
+      expect(
+        style.letterSpacing,
+        anyOf(
+          theme.blockTitleStyle.letterSpacing,
+          theme.detailedBlockTitleStyle.letterSpacing,
+        ),
+        reason: entry.value,
+      );
+      seen++;
+    }
+  }
+  expect(seen, greaterThan(0));
+}
+
+/// The calendar's [CalendarModel], read from the view that shows, which a
+/// test writes through as the calendar does.
+CalendarModel modelOf(WidgetTester tester) {
+  final grid = find.byType(TimedGrid);
+  if (grid.evaluate().isNotEmpty) {
+    return tester.widget<TimedGrid>(grid).model;
+  }
+  final list = find.byType(DayList);
+  if (list.evaluate().isNotEmpty) {
+    return tester.widget<DayList>(list).model;
+  }
+  return tester.widget<MonthBoard>(find.byType(MonthBoard)).model;
+}
+
+/// The gutter cells the grid has built, in tree order.
+List<Widget> gutterCells(WidgetTester tester) {
+  return tester
+      .widgetList(
+        find.byWidgetPredicate((widget) {
+          return widget.runtimeType.toString() == "_GutterCell";
+        }),
+      )
+      .toList();
 }
 
 /// Starts a drag on the calendar card's pull tab and moves it [distance]
@@ -1064,7 +1157,9 @@ void main() {
     expect(tagsOf(sentinelA), hasLength(31));
     expect(tagsOf(sentinelB), hasLength(31));
     expect(
-      tagsOf(sentinelA).keys.toSet().intersection(tagsOf(sentinelB).keys.toSet()),
+      tagsOf(
+        sentinelA,
+      ).keys.toSet().intersection(tagsOf(sentinelB).keys.toSet()),
       isEmpty,
     );
     for (final colour in <Color>[
@@ -1094,7 +1189,11 @@ void main() {
     ];
     final harborArgb = <int>{for (final colour in harbor) colour.toARGB32()};
     for (final colour in coloursOf(const CalendarThemeData())) {
-      expect(harborArgb.contains(colour.toARGB32()), isFalse, reason: "$colour");
+      expect(
+        harborArgb.contains(colour.toARGB32()),
+        isFalse,
+        reason: "$colour",
+      );
     }
   });
 
@@ -1115,10 +1214,7 @@ void main() {
     }
     expect(drawn.styles, isNotEmpty);
     expect(drawn.spacings, <double?>{0.25});
-    final tags = <double>{
-      ...tagsOf(sentinelA).keys,
-      ...tagsOf(sentinelB).keys,
-    };
+    final tags = <double>{...tagsOf(sentinelA).keys, ...tagsOf(sentinelB).keys};
     expect(drawn.spacings.intersection(tags), isEmpty);
 
     await failNextRead(tester, api, "Next week");
@@ -1134,18 +1230,13 @@ void main() {
     expect(retry, findsOneWidget);
     final failed = drawnUnder(tester, <Finder>[find.byType(TimedGrid)]);
     final retryLabel = tester.renderObject<RenderParagraph>(retry);
-    expect(
-      failed.paragraphs.contains(tester.renderObject(message)),
-      isTrue,
-    );
+    expect(failed.paragraphs.contains(tester.renderObject(message)), isTrue);
     expect(failed.paragraphs.contains(retryLabel), isFalse);
     expect(failed.styles.contains(retryLabel.text.style), isFalse);
   });
 
   testWidgets("C3 day cells, weekday headers, the strip and the picker draw "
-      "and run on A, and on B from the frame that installs it", (
-    tester,
-  ) async {
+      "and run on A, and on B from the frame that installs it", (tester) async {
     final api = await pumpThemed(tester, sentinelA);
     final fields = <String>{};
     final agendaRoots = <Finder>[
@@ -1183,7 +1274,10 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 450));
-    expect(stripOffset(tester) - from, moreOrLessEquals(week / 2, epsilon: 1.0));
+    expect(
+      stripOffset(tester) - from,
+      moreOrLessEquals(week / 2, epsilon: 1.0),
+    );
     await tester.pump(const Duration(milliseconds: 450));
     expect(stripOffset(tester) - from, moreOrLessEquals(week, epsilon: 0.01));
     await tester.pumpAndSettle();
@@ -1256,7 +1350,8 @@ void main() {
       reason: "Month under B",
     );
     final picker = tester.element(find.byType(MonthPicker));
-    final scaler = tester.widget<MonthCell>(find.byType(MonthCell).first)
+    final scaler = tester
+        .widget<MonthCell>(find.byType(MonthCell).first)
         .nameScaler;
     final room =
         tester.getSize(find.byType(MonthPicker)).width / monthPickerColumns -
@@ -1336,10 +1431,7 @@ void main() {
     final todays = numberStyleOf(tester, cellOf(april(21)), april(21));
     await gesture.moveBy(const Offset(0.0, -10.0));
     await tester.pump();
-    expect(
-      tester.widget<DayCell>(cellOf(april(22))).collapse.value,
-      isNot(t),
-    );
+    expect(tester.widget<DayCell>(cellOf(april(22))).collapse.value, isNot(t));
     expect(
       identical(numberStyleOf(tester, cellOf(april(24)), april(24)), selected),
       isTrue,
@@ -1565,7 +1657,9 @@ void main() {
     expect(find.text("No items"), findsWidgets);
     expect(
       lineHeightAt(header, sentinelB.agendaHeaderTitleStyle),
-      isNot(lineHeightAt(header, const CalendarThemeData().agendaHeaderTitleStyle)),
+      isNot(
+        lineHeightAt(header, const CalendarThemeData().agendaHeaderTitleStyle),
+      ),
     );
   });
 
@@ -1596,10 +1690,7 @@ void main() {
     );
     expect(title.style!.letterSpacing, tagOf(18, 40));
     expect(title.style!.color, sentinelB.text);
-    expect(
-      tester.widget<ColoredBox>(header).color,
-      sentinelB.background,
-    );
+    expect(tester.widget<ColoredBox>(header).color, sentinelB.background);
     expectOnly(
       drawnUnder(tester, <Finder>[list]),
       sentinelB,
@@ -1781,7 +1872,9 @@ void main() {
     final chip = find.byKey(monthChipKey(monthSegmentKey("item-1", april(20))));
     TextStyle chipTitle() {
       return tester
-          .widget<Text>(find.descendant(of: chip, matching: find.text("Planning")))
+          .widget<Text>(
+            find.descendant(of: chip, matching: find.text("Planning")),
+          )
           .style!;
     }
 
@@ -1818,6 +1911,513 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(chip, findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("C6 Week's and Day's grid draws and runs on A, and on B "
+      "from the frame that installs it, during a lift that then drops", (
+    tester,
+  ) async {
+    final api = await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Week");
+    await pickHours(tester, 8, 18);
+    final roots = <Finder>[find.byType(TimedGrid)];
+    final fields = <String>{};
+    void probe(String where, {CalendarThemeData? theme}) {
+      final drawn = drawnUnder(tester, roots);
+      expectOnly(
+        drawn,
+        theme ?? sentinelA,
+        forbidden: theme == null ? const [] : <CalendarThemeData>[sentinelA],
+        reason: where,
+      );
+      if (theme == null) {
+        fields.addAll(fieldsOf(drawn, sentinelA));
+      }
+    }
+
+    probe("Week");
+    fields.addAll(await labelsOf(tester, sentinelA));
+    expectBoardMotion(
+      gridBoard(tester).controller,
+      const Duration(milliseconds: 900),
+      Curves.linear,
+    );
+
+    // A selected block's outline and grips.
+    await selectBlock(tester, "item-1");
+    expect(find.byKey(blockHandlesKey("item-1")), findsOneWidget);
+    probe("a selected block");
+
+    // A lift and its landing label, the block left behind at A's opacity
+    // and the lift's shadow coming in on A's motion.
+    final block = blockFinder("item-6");
+    final slot = tester.getRect(block);
+    final gesture = await tester.startGesture(slot.center);
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    expect(gridBoard(tester).drag!.draggedItemOpacity, 0.4);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    final shadow = tester.widget<DecoratedBox>(find.byKey(liftedBlockKey));
+    expect(
+      (shadow.decoration as BoxDecoration).boxShadow!.first.color.a,
+      moreOrLessEquals(liftedBlockShadows.first.color.a * 0.5, epsilon: 0.01),
+    );
+    await gesture.moveBy(Offset(0.0, slot.height * 2.0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byKey(landingLabelKey), findsOneWidget);
+    probe("a lift");
+
+    // B from the frame that installs it: the carried block and the lattice,
+    // the drag configs and the faded block's alpha.
+    await installTheme(tester, api, sentinelB);
+    final carried = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(liftedBlockKey),
+        matching: find.text("Slot 1"),
+      ),
+    );
+    expect(carried.style!.color, sentinelB.text);
+    expect(carried.style!.letterSpacing, tagOf(4, 40));
+    expectBlockTitles(tester, sentinelB);
+    expect(gridBoard(tester).drag!.draggedItemOpacity, 0.3);
+    final underB = drawnUnder(tester, roots);
+    expect(underB.alphas, contains(Color.getAlphaFromOpacity(0.3)));
+    expectOnly(
+      underB,
+      sentinelB,
+      forbidden: <CalendarThemeData>[sentinelA],
+      reason: "a lift under B",
+    );
+
+    // The lift moves on and drops where the pointer is: four hours below
+    // where it lifted, past Friday's other meetings.
+    await gesture.moveBy(Offset(0.0, slot.height * 6.0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final target = tester.getRect(find.byKey(liftedBlockKey));
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(gridAnimationStyle(tester).effectiveDropSettle.duration);
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    final stored = (await listAll(
+      tester,
+      api,
+      april(24),
+      april(24),
+    )).firstWhere((item) => item["title"] == "Slot 1");
+    expect(stored["startMinute"], 12 * 60);
+    expect(
+      tester.getRect(block).top,
+      moreOrLessEquals(target.top, epsilon: 1.0),
+    );
+    probe("after the drop under B", theme: sentinelB);
+    await labelsOf(tester, sentinelB);
+    expectBoardMotion(
+      gridBoard(tester).controller,
+      const Duration(milliseconds: 600),
+      Curves.easeIn,
+    );
+    await installTheme(tester, api, sentinelA);
+    await tester.pumpAndSettle();
+
+    // Weekends hidden, then Day, then a failed read.
+    await openBar(tester);
+    flipWeekends(tester);
+    await tester.pumpAndSettle();
+    await closeBar(tester);
+    probe("Week without weekends");
+    await pickMode(tester, "Day");
+    probe("Day");
+    await labelsOf(tester, sentinelA);
+    await pickMode(tester, "Week");
+    await failNextRead(tester, api, "Next week");
+    expect(
+      find.descendant(
+        of: find.byType(TimedGrid),
+        matching: find.text("Reading failed."),
+      ),
+      findsOneWidget,
+    );
+    probe("a failed read");
+    expect(
+      fields,
+      containsAll(<String>[
+        ...styleNames.sublist(1, 8),
+        "noticeStyle",
+        "draggedBlockOpacity",
+      ]),
+    );
+  });
+
+  testWidgets("C6 over all-day hours, a theme with taller hour labels keeps "
+      "the hour at the top of a grid lifting a block", (tester) async {
+    final api = await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Week");
+    final viewport = gridViewport(tester);
+    final region = viewport.scrolledRegion;
+    final block = blockFinder("item-7");
+    final center = viewport.globalToLocal(tester.getCenter(block));
+    // Setup sanity: the block to lift shows, and the grid is scrolled into
+    // the slots, past A's label room.
+    expect(region.contains(center), isTrue);
+    final gesture = await tester.startGesture(tester.getCenter(block));
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await tester.pump();
+    final before = viewport.verticalPosition!.pixels;
+    expect(before, greaterThan(6.5));
+    await installTheme(tester, api, sentinelB);
+    expect(
+      gridViewport(tester).verticalPosition!.pixels,
+      moreOrLessEquals(before + 0.5),
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("C6 a theme change in the frame of a week step leaves the "
+      "board under the disabled style until the restore frame, which puts "
+      "back the new theme's", (tester) async {
+    final api = await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Week");
+    modelOf(tester).requestDelete("item-6");
+    await tester.pump();
+    await tester.pump(api.latency);
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 300));
+    // Setup sanity: the deleted block is shrinking away across its day.
+    final block = blockFinder("item-6");
+    expect(block, findsOneWidget);
+    final width = tester.getSize(block).width;
+    final controller = gridBoard(tester).controller;
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(tester.getSize(block).width, lessThan(width));
+
+    // The week step's sync disables the style and schedules its restore;
+    // the theme installed in the same frame leaves it so, and the exit's
+    // next tick, before the restore, ends it.
+    await tester.tap(find.byTooltip("Next week"));
+    await installTheme(tester, api, sentinelB);
+    expect(controller.animationStyle, same(BoardAnimationStyle.disabled));
+    await tester.pump();
+    expect(block, findsNothing);
+    expectBoardMotion(
+      controller,
+      const Duration(milliseconds: 600),
+      Curves.easeIn,
+    );
+  });
+
+  testWidgets("C7 the grid's, Month's and Agenda's painters keep their "
+      "paints across a rebuild that keeps the theme, and take B's", (
+    tester,
+  ) async {
+    final api = await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Week");
+    Paint fillIn(RecordingCanvas canvas, Color colour) {
+      return canvas.records.firstWhere((record) {
+        return !record.isLine && record.isIn(colour);
+      }).paint;
+    }
+
+    Paint lineIn(RecordingCanvas canvas, Color colour) {
+      return canvas.lines.firstWhere((record) {
+        return record.isIn(colour);
+      }).paint;
+    }
+
+    var background = paintGridBackground(tester);
+    final body = fillIn(background, sentinelA.surface);
+    final line = lineIn(background, sentinelA.outline);
+    final now = lineIn(paintGridForeground(tester), sentinelA.error);
+    await tester.tap(find.byKey(dayHeaderKey(april(23))));
+    await tester.pumpAndSettle();
+    background = paintGridBackground(tester);
+    expect(identical(fillIn(background, sentinelA.surface), body), isTrue);
+    expect(identical(lineIn(background, sentinelA.outline), line), isTrue);
+    expect(
+      identical(lineIn(paintGridForeground(tester), sentinelA.error), now),
+      isTrue,
+    );
+    await installTheme(tester, api, sentinelB);
+    background = paintGridBackground(tester);
+    final bodyB = fillIn(background, sentinelB.surface);
+    expect(identical(bodyB, body), isFalse);
+    expect(identical(lineIn(background, sentinelB.outline), line), isFalse);
+    expect(
+      identical(lineIn(paintGridForeground(tester), sentinelB.error), now),
+      isFalse,
+    );
+    await installTheme(tester, api, sentinelA);
+    await tester.pumpAndSettle();
+
+    // Month's background, around a rebuild of an equal theme.
+    await pickMode(tester, "Month");
+    final month = paintGridBackground(tester);
+    final outside = fillIn(month, sentinelA.background);
+    final monthLine = lineIn(month, sentinelA.outline);
+    await installTheme(tester, api, sentinelA.copyWith());
+    await tester.pumpAndSettle();
+    expect(
+      identical(
+        fillIn(paintGridBackground(tester), sentinelA.background),
+        outside,
+      ),
+      isTrue,
+    );
+    expect(
+      identical(
+        lineIn(paintGridBackground(tester), sentinelA.outline),
+        monthLine,
+      ),
+      isTrue,
+    );
+    await installTheme(tester, api, sentinelB);
+    expect(
+      identical(
+        lineIn(paintGridBackground(tester), sentinelB.outline),
+        monthLine,
+      ),
+      isFalse,
+    );
+    await installTheme(tester, api, sentinelA);
+    await tester.pumpAndSettle();
+
+    // Agenda's dashed line, around a rebuild of its rows.
+    await pickMode(tester, "Agenda");
+    Paint dashed() {
+      final paint = tester.widget<CustomPaint>(
+        find.byWidgetPredicate((widget) {
+          return widget is CustomPaint &&
+              widget.painter.runtimeType.toString() == "_DashedLinePainter";
+        }).first,
+      );
+      final canvas = RecordingCanvas();
+      paint.painter!.paint(canvas, const Size(40.0, 24.0));
+      return canvas.lines.first.paint;
+    }
+
+    final dash = dashed();
+    expect(dash.color.toARGB32(), sentinelA.outline.toARGB32());
+    modelOf(tester).requestDelete("item-13");
+    await tester.pump();
+    expect(identical(dashed(), dash), isTrue);
+    await tester.pumpAndSettle();
+    await installTheme(tester, api, sentinelB);
+    final dashB = dashed();
+    expect(identical(dashB, dash), isFalse);
+    expect(dashB.color.toARGB32(), sentinelB.outline.toARGB32());
+  });
+
+  testWidgets("C8 the first hour label's paragraph is kept across a rebuild "
+      "that keeps the theme, and laid out again for B", (tester) async {
+    final api = await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Week");
+    final first = paintGridForeground(tester).paragraphs.first.paragraph;
+    await tester.tap(find.byKey(dayHeaderKey(april(23))));
+    await tester.pumpAndSettle();
+    expect(
+      identical(paintGridForeground(tester).paragraphs.first.paragraph, first),
+      isTrue,
+    );
+    await installTheme(tester, api, sentinelB);
+    expect(
+      identical(paintGridForeground(tester).paragraphs.first.paragraph, first),
+      isFalse,
+    );
+  });
+
+  testWidgets("C9 blocks, chips, cards and strip days share their prepared "
+      "styles, and a rebuild that mounts nothing keeps them and the prepared "
+      "widgets", (tester) async {
+    await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Week");
+    await pickHours(tester, 8, 18);
+    final planning = blockTitleOf(tester, "item-1", "Planning").style!;
+    expect(
+      identical(blockTitleOf(tester, "item-6", "Slot 1").style, planning),
+      isTrue,
+    );
+    final gutter = gutterCells(tester);
+    expect(gutter.length, greaterThan(4));
+    Widget cutArrow() {
+      return tester.widget(
+        find.descendant(
+          of: blockFinder("item-2"),
+          matching: find.byType(Positioned),
+        ),
+      );
+    }
+
+    final arrow = cutArrow();
+    final element = tester.element(blockFinder("item-1"));
+    final widget = element.widget;
+    // A write's sync rebuilds the board's delegate, which mounts nothing.
+    modelOf(tester).requestDelete("item-12");
+    await tester.pump();
+    expect(identical(tester.element(blockFinder("item-1")), element), isTrue);
+    expect(
+      identical(tester.element(blockFinder("item-1")).widget, widget),
+      isFalse,
+    );
+    expect(
+      identical(blockTitleOf(tester, "item-1", "Planning").style, planning),
+      isTrue,
+    );
+    final gutterAfter = gutterCells(tester);
+    expect(gutterAfter, hasLength(gutter.length));
+    for (var i = 0; i < gutter.length; i++) {
+      expect(identical(gutterAfter[i], gutter[i]), isTrue, reason: "gutter $i");
+    }
+    expect(identical(cutArrow(), arrow), isTrue);
+    await tester.pumpAndSettle();
+
+    // Month's chips.
+    await pickMode(tester, "Month");
+    TextStyle chipTitle(String id, String title) {
+      return tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(monthChipKey(monthSegmentKey(id, april(20)))),
+              matching: find.text(title),
+            ),
+          )
+          .style!;
+    }
+
+    expect(
+      identical(
+        chipTitle("item-1", "Planning"),
+        chipTitle("item-2", "Early sync"),
+      ),
+      isTrue,
+    );
+
+    // Agenda's cards and prepared widgets, across a rebuild of its rows.
+    await pickMode(tester, "Agenda");
+    TextStyle cardTitle(String id, String title) {
+      return tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(itemCardKey(id)),
+              matching: find.text(title),
+            ),
+          )
+          .style!;
+    }
+
+    await revealDay(tester, april(21));
+    final cards = cardTitle("item-2", "Early sync");
+    expect(identical(cardTitle("item-3", "Late sync"), cards), isTrue);
+    List<Widget> prepared() {
+      final themed = iconsOf(sentinelA);
+      final icons = tester
+          .widgetList<Icon>(
+            find.descendant(
+              of: find.byType(DayList),
+              matching: find.byType(Icon),
+            ),
+          )
+          .where((icon) {
+            return themed.contains(icon.icon);
+          })
+          .toList();
+      final lines = tester
+          .widgetList(
+            find.descendant(
+              of: find.byType(DayList),
+              matching: find.byWidgetPredicate((widget) {
+                if (widget is! Expanded) {
+                  return false;
+                }
+                final child = widget.child;
+                return child is CustomPaint ||
+                    child is SizedBox && child.child is CustomPaint;
+              }),
+            ),
+          )
+          .toList();
+      return <Widget>[...icons, ...lines];
+    }
+
+    final widgets = prepared();
+    // Setup sanity: the prepared widgets include the current-time line and
+    // a gap's dashed line.
+    expect(
+      widgets.whereType<Expanded>().map((line) {
+        return line.child.runtimeType;
+      }).toSet(),
+      <Type>{CustomPaint, SizedBox},
+    );
+    final card = tester.element(find.byKey(itemCardKey("item-2")));
+    final cardWidget = card.widget;
+    modelOf(tester).requestDelete("item-13");
+    await tester.pump();
+    expect(
+      identical(tester.element(find.byKey(itemCardKey("item-2"))), card),
+      isTrue,
+    );
+    expect(
+      identical(
+        tester.element(find.byKey(itemCardKey("item-2"))).widget,
+        cardWidget,
+      ),
+      isFalse,
+    );
+    final after = prepared();
+    expect(after, hasLength(widgets.length));
+    for (var i = 0; i < widgets.length; i++) {
+      expect(identical(after[i], widgets[i]), isTrue, reason: "${widgets[i]}");
+    }
+    expect(identical(cardTitle("item-2", "Early sync"), cards), isTrue);
+    await tester.pumpAndSettle();
+
+    // Strip days' weekday names, across the rebuild a tap makes.
+    await pickMode(tester, "Day");
+    TextStyle weekday(DateTime day, String name) {
+      return tester
+          .widget<Text>(
+            find.descendant(of: stripCellOf(day), matching: find.text(name)),
+          )
+          .style!;
+    }
+
+    final name = weekday(april(22), "Wed");
+    expect(identical(weekday(april(23), "Thu"), name), isTrue);
+    await tester.tap(find.byKey(weekStripDayKey(april(24))));
+    await tester.pumpAndSettle();
+    expect(identical(weekday(april(22), "Wed"), name), isTrue);
+  });
+
+  testWidgets("C6 a hot reload makes the grid's styles anew", (tester) async {
+    await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Week");
+    final title = blockTitleOf(tester, "item-1", "Planning").style!;
+    hotReload(tester);
+    await tester.pump();
+    final remade = blockTitleOf(tester, "item-1", "Planning").style!;
+    expect(remade, title);
+    expect(identical(remade, title), isFalse);
+  });
+
+  testWidgets("C15 bold text lays the hour labels out again, merged over "
+      "the theme's hour label style", (tester) async {
+    await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Week");
+    await labelsOf(tester, sentinelA);
+    final first = paintGridForeground(tester).paragraphs.first.paragraph;
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(boldText: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await tester.pump();
+    expect(
+      identical(paintGridForeground(tester).paragraphs.first.paragraph, first),
+      isFalse,
+    );
+    await labelsOf(tester, sentinelA);
     expect(tester.takeException(), isNull);
   });
 

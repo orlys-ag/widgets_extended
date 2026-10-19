@@ -14,6 +14,7 @@ import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 /// A Tuesday. April 2026 starts on a Wednesday and has 30 days, so its
@@ -241,6 +242,14 @@ Future<void> selectBlock(WidgetTester tester, String id) async {
   await tester.pumpAndSettle();
 }
 
+/// The style the timed grid animates with: [timedGridAnimationStyleOf]
+/// the theme above it.
+BoardAnimationStyle gridAnimationStyle(WidgetTester tester) {
+  return timedGridAnimationStyleOf(
+    CalendarTheme.of(tester.element(find.byType(TimedGrid))),
+  );
+}
+
 /// Long-presses [block] and drops it so its top-left corner lands on
 /// [target], then pumps the frame that starts the drop-settle glide and
 /// the glide itself, which ends before any mock answer a test sets at
@@ -253,7 +262,7 @@ Future<void> moveBlock(WidgetTester tester, Finder block, Offset target) async {
   await tester.pump();
   await gesture.up();
   await tester.pump();
-  await tester.pump(timedGridAnimationStyle.effectiveDropSettle.duration);
+  await tester.pump(gridAnimationStyle(tester).effectiveDropSettle.duration);
 }
 
 /// What [api]'s `list` returns for [first] to [last], pumped through its
