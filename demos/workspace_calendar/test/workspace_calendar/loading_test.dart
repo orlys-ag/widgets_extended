@@ -248,4 +248,65 @@ void main() {
     expect(overlayShowing(find.text("Reading failed.")), findsNothing);
     expect(blockFinder(teamOffsiteId), findsOneWidget);
   });
+
+  testWidgets("F4 a day past the shown month whose read failed says it "
+      "could not be read, while the shown month is ready", (tester) async {
+    final api = await pumpCalendar(
+      tester,
+      api: MockCalendarApi.seeded(today, latency: latency),
+    );
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    // May 4 is the first day past April's month grid.
+    final may4 = DateTime(2026, 5, 4);
+    List<CalendarRequest> lists() {
+      return <CalendarRequest>[
+        for (final request in api.requests)
+          if (request.method == CalendarMethod.list) request,
+      ];
+    }
+
+    bool listedMay4() {
+      return lists().any((request) {
+        return request.first == may4;
+      });
+    }
+
+    for (var drag = 0; drag < 100 && !listedMay4(); drag++) {
+      await tester.drag(find.byType(DayList), const Offset(0.0, -80.0));
+      await tester.pump();
+    }
+    expect(listedMay4(), isTrue);
+    await tester.pump(latency);
+    await tester.pump();
+    final failed = find.byKey(dayListFailedKey(may4));
+    for (var drag = 0; drag < 100 && failed.evaluate().isEmpty; drag++) {
+      await tester.drag(find.byType(DayList), const Offset(0.0, -40.0));
+      await tester.pump();
+    }
+    expect(failed, findsOneWidget);
+
+    // Each read covered April's grid or May 4's week, so the list's top
+    // day stayed in April and the shown range ready.
+    for (final request in lists()) {
+      expect(
+        (request.first, request.last),
+        anyOf(
+          (DateTime(2026, 3, 30), DateTime(2026, 5, 3)),
+          (may4, DateTime(2026, 5, 10)),
+        ),
+      );
+    }
+    expect(
+      find.descendant(
+        of: failed,
+        matching: find.text("This day could not be read."),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text("Reading failed."), findsNothing);
+    await tester.pump(latency);
+    await tester.pumpAndSettle();
+  });
 }

@@ -4,8 +4,8 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
-import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 

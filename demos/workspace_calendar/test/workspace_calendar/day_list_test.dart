@@ -4,9 +4,8 @@ library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -53,7 +52,7 @@ Finder dayFinder(DateTime day) {
 /// as the calendar shows it.
 ShownItem entryAt(String id, int start, int end) {
   return ShownItem(
-    CalendarItem.fromJson(<String, Object?>{
+    itemFromJson(<String, Object?>{
       ...taskJson(id, DateTime(2026, 4, 22), start, end),
       "id": id,
     }),
@@ -1227,7 +1226,7 @@ void main() {
 
   testWidgets("L26 a pending card's progress indicator stays 8 px down its "
       "title row under a strip stating its start", (tester) async {
-    final item = CalendarItem.fromJson(<String, Object?>{
+    final item = itemFromJson(<String, Object?>{
       ...taskJson("Early", DateTime(2026, 4, 22), 7 * 60, 9 * 60),
       "id": "early",
     });
@@ -1260,7 +1259,7 @@ void main() {
   ) async {
     tester.platformDispatcher.textScaleFactorTestValue = 2.0;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    final item = CalendarItem.fromJson(<String, Object?>{
+    final item = itemFromJson(<String, Object?>{
       ...taskJson("Early", DateTime(2026, 4, 22), 7 * 60, 9 * 60),
       "id": "early",
     });

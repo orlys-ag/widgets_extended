@@ -1,4 +1,5 @@
-/// Dates, labels and the month layout for the workspace calendar example.
+/// Civil dates on the local wall clock: day steps, day numbers, weekday
+/// sets, month grids and the hours of a day.
 ///
 /// Every date here is local midnight, built from its year, month and day
 /// fields, so two dates for the same day compare equal and can key a map.
@@ -8,72 +9,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-const List<String> monthNames = <String>[
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
+import 'calendar_labels.dart';
 
-/// The first three letters of each of [monthNames].
-const List<String> monthShortNames = <String>[
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
+/// The length of one slot, and the step every entry time is a multiple of.
+const int minutesPerSlot = 15;
 
-/// Indexed by [weekdayColumn], so Monday first.
-const List<String> weekdayNames = <String>[
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
-];
-
-/// Indexed by [weekdayColumn].
-const List<String> weekdayShortNames = <String>[
-  "Mo",
-  "Tu",
-  "We",
-  "Th",
-  "Fr",
-  "Sa",
-  "Su",
-];
-
-/// Indexed by [weekdayColumn].
-const List<String> weekdayAbbreviations = <String>[
-  "Mon",
-  "Tue",
-  "Wed",
-  "Thu",
-  "Fri",
-  "Sat",
-  "Sun",
-];
-
-/// Indexed by [weekdayColumn].
-const List<String> weekdayLetters = <String>["M", "T", "W", "T", "F", "S", "S"];
+const int minutesPerDay = 1440;
 
 DateTime dateOnly(DateTime date) {
   return DateTime(date.year, date.month, date.day);
@@ -329,65 +270,6 @@ DateTime? parseIsoDate(String text) {
   return date;
 }
 
-/// "09:30" for [minute] minutes after midnight; 1440 reads "24:00".
-String clockLabel(int minute) {
-  final hours = (minute ~/ 60).toString().padLeft(2, "0");
-  final minutes = (minute % 60).toString().padLeft(2, "0");
-  return "$hours:$minutes";
-}
-
-/// "45m", "1h" or "1h 30m": [minutes] as the day list writes an item's
-/// length.
-String durationLabel(int minutes) {
-  assert(minutes >= 0);
-  final hours = minutes ~/ 60;
-  final rest = minutes % 60;
-  if (hours == 0) {
-    return "${rest}m";
-  }
-  if (rest == 0) {
-    return "${hours}h";
-  }
-  return "${hours}h ${rest}m";
-}
-
-/// "Today, April 21", "Monday, April 27", or with the year appended when
-/// [day] is not in [today]'s year.
-String dayTitle(DateTime day, DateTime today) {
-  var date = "${monthNames[day.month - 1]} ${day.day}";
-  if (day.year != today.year) {
-    date = "$date, ${day.year}";
-  }
-  final offset = daysBetween(today, day);
-  final String name;
-  if (offset == 0) {
-    name = "Today";
-  } else if (offset == 1) {
-    name = "Tomorrow";
-  } else if (offset == -1) {
-    name = "Yesterday";
-  } else {
-    name = weekdayNames[weekdayColumn(day)];
-  }
-  return "$name, $date";
-}
-
-/// "1 more item" or "N more items".
-String moreItemsLabel(int count) {
-  return count == 1 ? "1 more item" : "$count more items";
-}
-
-/// "No items", "1 item" or "N items".
-String itemCountLabel(int count) {
-  if (count == 0) {
-    return "No items";
-  }
-  if (count == 1) {
-    return "1 item";
-  }
-  return "$count items";
-}
-
 /// The weeks one month occupies, each starting on [weekdays]' first
 /// weekday, with a column for each weekday [weekdays] holds, in its
 /// order. Row 0 is the first week holding a shown day
@@ -501,5 +383,63 @@ class MonthGrid {
       row: index ~/ DateTime.daysPerWeek - _firstWeek,
       col: _columns.indexOf(index % DateTime.daysPerWeek),
     );
+  }
+}
+
+/// The part of each day a calendar shows and schedules in: from [start]
+/// to [end] minutes after midnight, in whole slots.
+@immutable
+class DayHours {
+  /// The hours from [start] to [end] minutes after midnight, each a whole
+  /// number of slots, with [start] before [end], inside one day.
+  const DayHours(this.start, this.end)
+    : assert(start >= 0 && start % minutesPerSlot == 0),
+      assert(end <= minutesPerDay && end % minutesPerSlot == 0),
+      assert(start < end);
+
+  /// The whole day, 00:00 to 24:00.
+  static const DayHours allDay = DayHours(0, minutesPerDay);
+
+  /// Minutes after midnight.
+  final int start;
+
+  /// Minutes after midnight.
+  final int end;
+
+  /// The slots from [start] to [end].
+  int get slotCount {
+    return (end - start) ~/ minutesPerSlot;
+  }
+
+  /// Whether the minutes [from] to [to] lie inside these hours.
+  bool contains(int from, int to) {
+    return from >= start && to <= end;
+  }
+
+  /// Whether [minute] begins a slot inside these hours: from [start] to
+  /// the start of the last slot.
+  bool holdsStart(int minute) {
+    return start <= minute && minute <= end - minutesPerSlot;
+  }
+
+  /// Whether [minute] ends a slot inside these hours: from the end of the
+  /// first slot to [end].
+  bool holdsEnd(int minute) {
+    return start + minutesPerSlot <= minute && minute <= end;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is DayHours && other.start == start && other.end == end;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(start, end);
+  }
+
+  @override
+  String toString() {
+    return "DayHours(${clockLabel(start)}-${clockLabel(end)})";
   }
 }

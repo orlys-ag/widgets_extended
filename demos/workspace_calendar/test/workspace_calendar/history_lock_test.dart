@@ -5,8 +5,8 @@ library;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
@@ -49,14 +49,8 @@ const CalendarSettings nowLocked = CalendarSettings(
   lockEarlierToday: true,
 );
 
-ItemShape shape(DateTime day, int start, int end, {int dayCount = 1}) {
-  return (
-    type: CalendarItemType.task,
-    firstDay: dayNumber(day),
-    dayCount: dayCount,
-    start: start,
-    end: end,
-  );
+CalendarEntryTime shape(DateTime day, int start, int end, {int dayCount = 1}) {
+  return (firstDay: dayNumber(day), dayCount: dayCount, start: start, end: end);
 }
 
 /// The calendar over [seed] in edit mode, its clock reading [clock], or

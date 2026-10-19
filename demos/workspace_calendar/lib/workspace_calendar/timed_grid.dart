@@ -12,12 +12,13 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_data.dart';
 import 'calendar_item.dart';
-import 'calendar_model.dart';
-import 'calendar_schema.dart';
+import 'calendar_schema.dart' hide maxDayCount;
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 import 'history_lock.dart';
@@ -412,7 +413,7 @@ const String noLandingLabel = "No free time near here";
 /// What the landing label says for a drag that would give an item
 /// [shape]: its first day, as [dayTitle] names it against [today], its
 /// times, and its day count when it covers more than one day.
-String landingLabel(ItemShape shape, DateTime today) {
+String landingLabel(CalendarEntryTime shape, DateTime today) {
   final day = dayTitle(dateOfDayNumber(shape.firstDay), today);
   final times = "${clockLabel(shape.start)}-${clockLabel(shape.end)}";
   if (shape.dayCount == 1) {
@@ -619,7 +620,7 @@ class GridTracks {
 /// days of it the grid has no column for and its minutes outside the
 /// grid's hours are clipped off; null when no shown day or no minute of it
 /// is left.
-BoardSpan? gridSpanOf(ItemShape shape, GridTracks tracks) {
+BoardSpan? gridSpanOf(CalendarEntryTime shape, GridTracks tracks) {
   final firstColumn = tracks.firstColumnFrom(shape.firstDay);
   final lastColumn = tracks.lastColumnUpTo(shape.firstDay + shape.dayCount - 1);
   final hours = tracks.hours;
@@ -647,8 +648,8 @@ BoardSpan? gridSpanOf(ItemShape shape, GridTracks tracks) {
 /// the only column edge the grid resizes, which keeps the start: the item
 /// keeps its first day and ends on the day of [to]'s last column, whatever
 /// the grid clipped of it.
-ItemShape shapeFromSpan(
-  ItemShape shape,
+CalendarEntryTime shapeFromSpan(
+  CalendarEntryTime shape,
   BoardSpan from,
   BoardSpan to,
   GridTracks tracks,
@@ -658,7 +659,6 @@ ItemShape shapeFromSpan(
   if (to.colSpan == from.colSpan) {
     final shift = tracks.dayAt(to.colStart) - tracks.dayAt(from.colStart);
     return (
-      type: shape.type,
       firstDay: shape.firstDay + shift,
       dayCount: shape.dayCount,
       start: start,
@@ -667,7 +667,6 @@ ItemShape shapeFromSpan(
   }
   final lastDay = tracks.dayAt(to.colStart + to.colSpan - 1);
   return (
-    type: shape.type,
     firstDay: shape.firstDay,
     dayCount: lastDay - shape.firstDay + 1,
     start: start,
@@ -683,7 +682,7 @@ CalendarItem itemFromSpan(
   BoardSpan to,
   GridTracks tracks,
 ) {
-  final shape = shapeFromSpan(item.shape, from, to, tracks);
+  final shape = shapeFromSpan(item.time, from, to, tracks);
   return item.copyWith(
     day: dateOfDayNumber(shape.firstDay),
     dayCount: shape.dayCount,
@@ -724,8 +723,8 @@ CreateRange createRangeOver(
 }
 
 /// The days of the [dayCount] from [firstDay] whose weekday [settings]
-/// show, on the board, over the hours they choose, showing what [model]
-/// shows for them once the model's shown range holds them all, read. A
+/// show, on the board, over the hours they choose, showing what [store]
+/// shows for them once the store's shown range holds them all, read. A
 /// tap on a block that is not pending reports [onOpenItem]; a tap on a
 /// day header reports [onSelectDay]. On a grid of one day column each
 /// block uses the width to show its times and its summaries.
@@ -789,7 +788,7 @@ CreateRange createRangeOver(
 class TimedGrid extends StatefulWidget {
   const TimedGrid({
     super.key,
-    required this.model,
+    required this.store,
     required this.settings,
     required this.firstDay,
     required this.dayCount,
@@ -800,10 +799,11 @@ class TimedGrid extends StatefulWidget {
     required this.onOpenItem,
     required this.onCreate,
     this.onZoom,
+    this.maxDayCount,
     this.showsDayHeader = true,
   }) : assert(dayCount >= 1);
 
-  final CalendarModel model;
+  final CalendarStore<ItemPayload> store;
 
   /// Whether row 0 is a frozen header naming each column's day, whose
   /// corner over the gutter holds the pill counting the items on no shown
@@ -842,6 +842,10 @@ class TimedGrid extends StatefulWidget {
   /// the grid shows once [settings] bring them; null for a grid no pinch
   /// zooms.
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
+
+  /// The most days a drop may give an item, which it refuses past them;
+  /// null for no limit.
+  final int? maxDayCount;
 
   @override
   State<TimedGrid> createState() {
@@ -1120,7 +1124,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       // The first sync disables it and schedules the theme's.
       animationStyle: BoardAnimationStyle.disabled,
     );
-    widget.model.addListener(_handleModel);
+    widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _sync();
     SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -1145,10 +1149,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   @override
   void didUpdateWidget(TimedGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final modelChanged = widget.model != oldWidget.model;
-    if (modelChanged) {
-      oldWidget.model.removeListener(_handleModel);
-      widget.model.addListener(_handleModel);
+    final storeChanged = widget.store != oldWidget.store;
+    if (storeChanged) {
+      oldWidget.store.removeListener(_handleStore);
+      widget.store.addListener(_handleStore);
     }
     final nowChanged = widget.now != oldWidget.now;
     if (nowChanged) {
@@ -1191,7 +1195,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         (tracksChanged || widget.settings != oldWidget.settings)) {
       _fitAxes(size);
     }
-    if (modelChanged || tracksChanged) {
+    if (storeChanged || tracksChanged) {
       // New days are not ready yet, so they do not animate in either way;
       // new hours move every block at once.
       _sync(animate: !tracksChanged);
@@ -1262,7 +1266,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     _immediateRange.dispose();
     _delayedRange.dispose();
     _range?.detach();
-    widget.model.removeListener(_handleModel);
+    widget.store.removeListener(_handleStore);
     _header.dispose();
     _hiddenCount.dispose();
     _selectedBlock.dispose();
@@ -1497,7 +1501,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return extent / count;
   }
 
-  void _handleModel() {
+  void _handleStore() {
     _sync();
     setState(() {});
   }
@@ -1506,14 +1510,14 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return dateOfDayNumber(_tracks.lastDay);
   }
 
-  /// Whether the model's shown range holds every one of this grid's days,
+  /// Whether the store's shown range holds every one of this grid's days,
   /// all of them read. The range may be wider than the grid, as a range
   /// holding the grid's whole week is. False for a sync that runs between
-  /// the model taking a range without this grid's days and this grid
+  /// the store taking a range without this grid's days and this grid
   /// getting new ones.
   bool get _daysReady {
-    return widget.model.status == CalendarLoadStatus.ready &&
-        widget.model.isWithinShown(widget.firstDay, _lastDay);
+    return widget.store.status == CalendarLoadStatus.ready &&
+        widget.store.isWithinShown(widget.firstDay, _lastDay);
   }
 
   /// Sets the board's items to the days' shown items when the days are
@@ -1530,7 +1534,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   void _sync({bool animate = true}) {
     final ready = _daysReady;
     final shown = ready
-        ? widget.model.itemsBetween(widget.firstDay, _lastDay)
+        ? widget.store.entriesBetween(widget.firstDay, _lastDay)
         : const <ShownItem>[];
     final hidden = _hiddenOf(shown);
     final relaid = _layOutNotices((
@@ -1539,7 +1543,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     ));
     final placements = <BoardPlacement<ShownItem>>[];
     for (final entry in shown) {
-      final span = gridSpanOf(entry.item.shape, _tracks);
+      final span = gridSpanOf(entry.entry.time, _tracks);
       if (span != null) {
         placements.add(BoardPlacement<ShownItem>(entry, span));
       }
@@ -1569,7 +1573,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     final below = List<int>.filled(_tracks.columnCount, 0);
     var offDays = 0;
     for (final entry in shown) {
-      final shape = entry.item.shape;
+      final shape = entry.entry.time;
       if (gridSpanOf(shape, _tracks) != null) {
         continue;
       }
@@ -1580,7 +1584,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         continue;
       }
       // On a shown day, so wholly outside the hours, on each of its days
-      // alike: an item's minutes are the same on each, as itemsConflict
+      // alike: an item's minutes are the same on each, as timesOverlap
       // reads them.
       final counts = shape.start < _tracks.hours.start ? above : below;
       for (var column = first; column <= last; column++) {
@@ -1635,11 +1639,11 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// not when it reaches past the hours, whose cut-off minutes a drop
   /// would lose.
   bool _canDrag(String id) {
-    if (widget.model.isLocked(id)) {
+    if (widget.store.isPending(id)) {
       return false;
     }
     final entry = _board.itemOf(id);
-    return entry != null && !_reachesPastHours(entry.item);
+    return entry != null && !_reachesPastHours(entry.entry);
   }
 
   /// Whether [item] starts before the grid's hours or ends after them.
@@ -1664,9 +1668,12 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (from == span) {
       return true;
     }
-    final converted = shapeFromSpan(entry.item.shape, from, span, _tracks);
-    if (!isAllowedDayCount(converted.dayCount) ||
-        !_lock.value.admits(entry.item.shape, converted)) {
+    final time = entry.entry.time;
+    final converted = shapeFromSpan(time, from, span, _tracks);
+    final maxDays = widget.maxDayCount;
+    if (converted.dayCount < 1 ||
+        (maxDays != null && converted.dayCount > maxDays) ||
+        !_lock.value.admits(time, converted)) {
       return false;
     }
     // The converted shape's own span, not the candidate's: an item clipped
@@ -1686,7 +1693,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         continue;
       }
       final occupant = _board.itemOf(other);
-      if (occupant != null && itemsConflict(converted, occupant.item.shape)) {
+      if (occupant != null && timesOverlap(converted, occupant.entry.time)) {
         return false;
       }
     }
@@ -1698,11 +1705,11 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   /// the item locked after its host last built, for one reaching past the
   /// hours, and when the item would not change.
   void _commit(String id, BoardSpan to) {
-    if (widget.model.isLocked(id)) {
+    if (widget.store.isPending(id)) {
       return;
     }
     final from = _board.spanOf(id);
-    final stored = widget.model.storedItem(id);
+    final stored = widget.store.storedEntry(id);
     if (from == null || stored == null || _reachesPastHours(stored)) {
       return;
     }
@@ -1710,7 +1717,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (requested == stored) {
       return;
     }
-    widget.model.requestMove(requested);
+    widget.store.requestMove(requested);
   }
 
   void _handleDragStart(String id, BoardDragKind kind) {
@@ -1792,7 +1799,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       return null;
     }
     return landingLabel(
-      shapeFromSpan(entry.item.shape, from, target, _tracks),
+      shapeFromSpan(entry.entry.time, from, target, _tracks),
       widget.today,
     );
   }
@@ -2066,7 +2073,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
   ) {
-    final items = widget.model.itemsBetween(
+    final items = widget.store.entriesBetween(
       _tracks.dateAt(math.min(anchor.col, focus.col)),
       _tracks.dateAt(math.max(anchor.col, focus.col)),
     );
@@ -2086,7 +2093,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   /// Whether the range from [anchor] to [focus] starts where the history
-  /// lock admits a start and shares no time, under [itemsConflict], with
+  /// lock admits a start and shares no time, under [timesOverlap], with
   /// any of [items].
   bool _admitsRange(
     ({int row, int col}) anchor,
@@ -2097,16 +2104,14 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (!_lock.value.admitsStart(range.day, range.startMinute)) {
       return false;
     }
-    final ItemShape shape = (
-      // itemsConflict reads no type.
-      type: CalendarItemType.task,
+    final CalendarEntryTime time = (
       firstDay: dayNumber(range.day),
       dayCount: range.dayCount,
       start: range.startMinute,
       end: range.endMinute,
     );
     for (final item in items) {
-      if (itemsConflict(shape, item.item.shape)) {
+      if (timesOverlap(time, item.entry.time)) {
         return false;
       }
     }
@@ -2204,8 +2209,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       entry: entry,
       detailed: _tracks.columnCount == 1,
       showsSummary: view.span.rowSpan >= 3,
-      cutAtStart: entry.item.startMinute < hours.start,
-      cutAtEnd: entry.item.endMinute > hours.end,
+      cutAtStart: entry.entry.startMinute < hours.start,
+      cutAtEnd: entry.entry.endMinute > hours.end,
       selection: _selectedBlock,
       lock: _lock,
       onSelect: () {
@@ -2223,7 +2228,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final model = widget.model;
+    final store = widget.store;
     final range = _range;
     final drag = _drag;
     final styles = _styles;
@@ -2301,10 +2306,10 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
             if (!_daysReady)
               Positioned.fill(
                 child: _LoadOverlay(
-                  error: model.status == CalendarLoadStatus.failed
-                      ? model.error
+                  error: store.status == CalendarLoadStatus.failed
+                      ? "${store.loadError}"
                       : null,
-                  onRetry: model.retry,
+                  onRetry: store.retry,
                 ),
               ),
           ],
@@ -2508,7 +2513,7 @@ class _Block extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final styles = _GridStyles.of(context);
-    final item = entry.item;
+    final item = entry.entry;
     final style = harborTypeStyleOf(item.type);
     Widget content = DecoratedBox(
       decoration: BoxDecoration(
@@ -2549,7 +2554,7 @@ class _Block extends StatelessWidget {
       listenable: Listenable.merge(<Listenable>[selection, lock]),
       child: content,
       builder: (context, child) {
-        final hold = lock.value.holdOf(entry.item.shape);
+        final hold = lock.value.holdOf(entry.entry.time);
         return Stack(
           fit: StackFit.passthrough,
           children: <Widget>[

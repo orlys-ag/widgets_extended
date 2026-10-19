@@ -175,7 +175,7 @@ class ItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final styles = _CardStyles.of(context);
-    final item = entry.item;
+    final item = entry.entry;
     final style = harborTypeStyleOf(item.type);
     final summaries = summariesOf(item);
     final pending = entry.pending;

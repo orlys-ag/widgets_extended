@@ -57,8 +57,9 @@
 /// the day as a tap does. Its keys and chevrons move the selected
 /// day as Agenda's do.
 ///
-/// The calendar reads the range it shows through a [CalendarModel], which
-/// caches the days it has read and writes one change per item at a time.
+/// The calendar reads the range it shows through a [CachingCalendarStore]
+/// over a [CalendarApiSource], which caches the days it has read and
+/// writes one change per item at a time.
 ///
 /// The app bar's chevron opens a bar under it, and closes it again, the
 /// bar sliding down from under the app bar, or back up, over
@@ -106,12 +107,14 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';
+import 'workspace_calendar/calendar_api_source.dart';
 import 'workspace_calendar/calendar_bar.dart';
-import 'workspace_calendar/calendar_data.dart';
-import 'workspace_calendar/calendar_model.dart';
+import 'workspace_calendar/calendar_item.dart';
 import 'workspace_calendar/calendar_schema.dart';
 import 'workspace_calendar/calendar_settings.dart';
 import 'workspace_calendar/day_cell.dart';
@@ -252,7 +255,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// The history lock the settings choose, at the minute [_now] holds.
   late HistoryLock _lock = _lockAt(_now.value);
 
-  late final CalendarModel _model;
+  late final CachingCalendarStore<ItemPayload> _store;
 
   late DateTime _selected = _today.value;
 
@@ -326,8 +329,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   @override
   void initState() {
     super.initState();
-    _model = CalendarModel(
-      api: widget.api ?? MockCalendarApi.seeded(_today.value),
+    _store = CachingCalendarStore<ItemPayload>(
+      dataSource: CalendarApiSource(
+        widget.api ?? MockCalendarApi.seeded(_today.value),
+      ),
       onWriteFailed: _handleWriteFailed,
     );
     // The month board holds no items, so its key and payload types are
@@ -377,7 +382,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   @override
   void dispose() {
     _minuteTimer?.cancel();
-    _model.dispose();
+    _store.dispose();
     _board.dispose();
     _collapseController.dispose();
     _pickerShown.dispose();
@@ -461,13 +466,13 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     switch (_mode) {
       case _CalendarMode.agenda:
       case _CalendarMode.month:
-        _model.show(_grid.firstDay, _grid.lastDay);
+        _store.show(_grid.firstDay, _grid.lastDay);
       case _CalendarMode.week:
         final days = _timedDays!;
-        _model.show(days.first, addDays(days.first, days.count - 1));
+        _store.show(days.first, addDays(days.first, days.count - 1));
       case _CalendarMode.day:
         final days = shownDaysOfWeek(_selected, _settings.weekdays);
-        _model.show(days.first, days.last);
+        _store.show(days.first, days.last);
     }
   }
 
@@ -594,14 +599,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       _showMessage("Past times are locked.");
       return;
     }
-    final free = _model.firstFreeRange(
+    final free = _store.firstFreeRange(
       day,
       from: earliest == 0 ? null : earliest,
     );
     final start = math.max(free.start, earliest);
     showCreateFlow(
       context,
-      model: _model,
+      store: _store,
       range: CreateRange(
         day: day,
         startMinute: start,
@@ -818,7 +823,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         _grid = MonthGrid.of(_selected, weekdays: settings.weekdays);
       }
     });
-    _model.hours = settings.hours;
+    _store.hours = settings.hours;
     if (weekdaysChanged) {
       _board.rows = _rowsFor(_grid);
       _fitColumns(_columnsWidth);
@@ -834,29 +839,29 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   /// A grid write or a delete failed, whatever shows now.
-  void _handleWriteFailed(String message) {
+  void _handleWriteFailed(CalendarWriteFailure failure) {
     if (mounted) {
-      _showMessage(message);
+      _showMessage(writeFailureMessage(failure.error));
     }
   }
 
   /// The form of the item [id]: editable in edit mode, unless the history
   /// lock holds the item [ItemHold.locked], and read-only otherwise.
   void _openItem(String id) {
-    final item = _model.storedItem(id);
+    final item = _store.storedEntry(id);
     if (_settings.editing &&
         item != null &&
-        _lock.holdOf(item.shape) != ItemHold.locked) {
-      showEditForm(context, model: _model, id: id, lock: _currentLock);
+        _lock.holdOf(item.time) != ItemHold.locked) {
+      showEditForm(context, store: _store, id: id, lock: _currentLock);
     } else {
-      showItemDetails(context, model: _model, id: id);
+      showItemDetails(context, store: _store, id: id);
     }
   }
 
   Future<void> _deleteFromCard(String id) async {
     final confirmed = await confirmDelete(context);
     if (confirmed && mounted) {
-      _model.requestDelete(id);
+      _store.requestDelete(id);
     }
   }
 
@@ -871,7 +876,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     final inMonth = _grid.contains(day);
     final isSelected = cell.isSelected;
     return DayMarkerListener(
-      model: _model,
+      store: _store,
       day: day,
       builder: (context, hasItems) {
         return ValueListenableBuilder<DateTime>(
@@ -1070,7 +1075,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                   _mode,
                   days.count > 1 && _settings.weekdays.columns.length > 1,
                 )),
-                model: _model,
+                store: _store,
                 settings: _settings,
                 firstDay: days.first,
                 dayCount: days.count,
@@ -1082,7 +1087,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 onCreate: (range) {
                   return showCreateFlow(
                     context,
-                    model: _model,
+                    store: _store,
                     range: range,
                     lock: _currentLock,
                   );
@@ -1095,6 +1100,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                     ),
                   );
                 },
+                maxDayCount: maxDayCount,
                 // The week strip names Day's one day.
                 showsDayHeader: _mode != _CalendarMode.day,
               ),
@@ -1110,14 +1116,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 0.0),
           child: _buildCalendarCard(),
         ),
-        // A list of its own: it follows the model itself, and the month
+        // A list of its own: it follows the store itself, and the month
         // board's cells follow it through their own marker listeners.
         Expanded(
           child: NotificationListener<ScrollNotification>(
             onNotification: _handleListScroll,
             child: DayList(
               key: const ValueKey<String>("day-list"),
-              model: _model,
+              store: _store,
               weekdays: _settings.weekdays,
               format: _settings.hourLabelFormat,
               hours: _settings.hours,
@@ -1130,7 +1136,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               onCreateIn: (day, startMinute, endMinute) {
                 showCreateFlow(
                   context,
-                  model: _model,
+                  store: _store,
                   range: CreateRange(
                     day: day,
                     startMinute: startMinute,
@@ -1143,7 +1149,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               onEdit: (id) {
                 showEditForm(
                   context,
-                  model: _model,
+                  store: _store,
                   id: id,
                   lock: _currentLock,
                 );
@@ -1169,7 +1175,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
             color: HarborColors.surface,
             child: MonthBoard(
               key: const ValueKey<String>("month-board"),
-              model: _model,
+              store: _store,
               grid: _grid,
               layout: _settings.monthLayout,
               minDayWidth: _settings.minDayWidth,
@@ -1315,7 +1321,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   Widget _buildStrip() {
     return WeekStrip(
       key: ValueKey<WeekdaySet>(_settings.weekdays),
-      model: _model,
+      store: _store,
       selectedDay: _selected,
       today: _today.value,
       weekdays: _settings.weekdays,

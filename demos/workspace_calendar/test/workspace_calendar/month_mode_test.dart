@@ -1,6 +1,6 @@
 /// The calendar's Month mode: the month board's weeks, chips and days, its
 /// taps, keys and chevrons, its load overlay, and its syncs with the
-/// model.
+/// store.
 library;
 
 import 'dart:math' as math;
@@ -15,7 +15,7 @@ import 'package:widgets_extended/board/board_controller.dart'
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
@@ -395,7 +395,7 @@ void main() {
       // Sanity: the seed holds items across the month.
       expect(listed.length, greaterThan(10));
       for (final json in listed) {
-        final item = CalendarItem.fromJson(json);
+        final item = itemFromJson(json);
         final itemLast = addDays(item.day, item.dayCount - 1);
         for (var row = 0; row < grid.weekCount; row++) {
           final monday = grid.dateAt(row, 0);
@@ -907,7 +907,7 @@ void main() {
   );
 
   testWidgets(
-    "M16 a model change that alters one item builds that item's chips only",
+    "M16 a store change that alters one item builds that item's chips only",
     (tester) async {
       await pumpMonth(
         tester,
@@ -962,7 +962,7 @@ void main() {
   );
 
   testWidgets(
-    "M16b a model change while another item's chip shrinks out builds the "
+    "M16b a store change while another item's chip shrinks out builds the "
     "changed item's chips only",
     (tester) async {
       await pumpMonth(
@@ -975,9 +975,9 @@ void main() {
       final monday = april(20);
       final a = chipFinder("item-1", monday);
       final bKey = "month-chip-item-2@${isoDate(monday)}";
-      final model = tester.widget<MonthBoard>(find.byType(MonthBoard)).model;
+      final store = tester.widget<MonthBoard>(find.byType(MonthBoard)).store;
 
-      model.requestDelete("item-1");
+      store.requestDelete("item-1");
       await tester.pump(harnessLatency);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
@@ -996,15 +996,15 @@ void main() {
           reported.add(key.value);
         }
       };
-      final b = model.storedItem("item-2")!;
-      model.requestMove(b.copyWith(startMinute: 8 * 60, endMinute: 9 * 60));
+      final b = store.storedEntry("item-2")!;
+      store.requestMove(b.copyWith(startMinute: 8 * 60, endMinute: 9 * 60));
       await tester.pump();
       // A's exit still runs at the sync of B's pending move and at the sync
       // of its answer.
       expect(a, findsOneWidget);
       await tester.pump(harnessLatency);
       expect(a, findsOneWidget);
-      expect(model.isLocked("item-2"), isFalse);
+      expect(store.isPending("item-2"), isFalse);
       await tester.pumpAndSettle();
       debugOnRebuildDirtyWidget = null;
 

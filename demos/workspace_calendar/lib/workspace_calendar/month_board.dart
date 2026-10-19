@@ -9,11 +9,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_data.dart';
 import 'calendar_item.dart';
-import 'calendar_model.dart';
 import 'calendar_settings.dart';
 import 'day_cell.dart';
 import 'harbor_theme.dart';
@@ -274,7 +274,7 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
   }
   final placements = <BoardPlacement<MonthChip>>[];
   for (final entry in shown) {
-    final item = entry.item;
+    final item = entry.entry;
     final first = dayNumber(item.day);
     final last = first + item.dayCount - 1;
     for (var row = 0; row < weeks; row++) {
@@ -321,8 +321,8 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
 /// first, and a bar continuing from the week before stacks above a chip
 /// starting on its first shown day.
 int compareMonthChips(MonthChip a, MonthChip b) {
-  final x = a.entry.item;
-  final y = b.entry.item;
+  final x = a.entry.entry;
+  final y = b.entry.entry;
   // `day` is the first day at local midnight, so this compares days and
   // allocates nothing.
   final byDay = x.day.compareTo(y.day);
@@ -452,7 +452,7 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 }
 
 /// The month of [grid] on the board, under the letters of its weekdays,
-/// showing what [model] shows for its days.
+/// showing what [store] shows for its days.
 ///
 /// The days share the board's width, and are never narrower than
 /// [minDayWidth]: past the width, the board scrolls across, the letters
@@ -484,7 +484,7 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 /// keys move the selected day and report it through [onSelectDay]. While
 /// the days load, a progress indicator covers the board, and after a
 /// failed read the error and a Retry that reads again. A change of the
-/// model animates over the theme's motion; a new month or a new set of
+/// store animates over the theme's motion; a new month or a new set of
 /// weekdays does not, and
 /// settles at once whatever chip was still growing in or shrinking out. A
 /// new size alone refits the weeks at once and leaves the chips' motion
@@ -503,7 +503,7 @@ int compareMonthChips(MonthChip a, MonthChip b) {
 class MonthBoard extends StatefulWidget {
   const MonthBoard({
     super.key,
-    required this.model,
+    required this.store,
     required this.grid,
     this.layout = MonthLayout.showAll,
     this.minDayWidth = minDayWidthLow,
@@ -517,7 +517,7 @@ class MonthBoard extends StatefulWidget {
     this.onZoom,
   });
 
-  final CalendarModel model;
+  final CalendarStore<ItemPayload> store;
 
   /// The month the board shows.
   final MonthGrid grid;
@@ -669,7 +669,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   int? _syncedLanes;
 
   /// Whether the next layout sets the board's items: set at the start, by
-  /// the model and by a new grid.
+  /// the store and by a new grid.
   bool _syncPending = true;
 
   /// Whether the last sync found its days ready.
@@ -749,7 +749,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     // Before the board subscribes, so it starts on the selected day and a
     // key moves from there.
     _writeSelection();
-    widget.model.addListener(_handleModel);
+    widget.store.addListener(_handleStore);
     widget.today.addListener(_handleToday);
     _pinch.holding.addListener(_handleHolding);
   }
@@ -785,9 +785,9 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   @override
   void didUpdateWidget(MonthBoard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.model != oldWidget.model) {
-      oldWidget.model.removeListener(_handleModel);
-      widget.model.addListener(_handleModel);
+    if (widget.store != oldWidget.store) {
+      oldWidget.store.removeListener(_handleStore);
+      widget.store.addListener(_handleStore);
       _syncPending = true;
     }
     if (widget.today != oldWidget.today) {
@@ -819,7 +819,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    widget.model.removeListener(_handleModel);
+    widget.store.removeListener(_handleStore);
     widget.today.removeListener(_handleToday);
     _pinch.dispose();
     _scrollHold.release();
@@ -859,7 +859,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     );
   }
 
-  void _handleModel() {
+  void _handleStore() {
     setState(() {
       _syncPending = true;
     });
@@ -869,14 +869,14 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
     _today.value = widget.today.value;
   }
 
-  /// Whether the model shows exactly this grid's days, every one of them
+  /// Whether the store shows exactly this grid's days, every one of them
   /// read. False for a build between the calendar taking a new month and
-  /// the model showing it.
+  /// the store showing it.
   bool get _daysReady {
-    final model = widget.model;
+    final store = widget.store;
     final grid = widget.grid;
-    return model.status == CalendarLoadStatus.ready &&
-        model.isShown(grid.firstDay, grid.lastDay);
+    return store.status == CalendarLoadStatus.ready &&
+        store.isShown(grid.firstDay, grid.lastDay);
   }
 
   /// Selects the selected day's cell on the board. The board reports the
@@ -1017,13 +1017,13 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
   /// large enough for cards ([monthShowsCards]) and,
   /// when a sync is pending, the days turned from chips to cards or back,
   /// or the lanes a week holds under [MonthLayout.fitScreen] changed, the
-  /// bars of the items the model shows on the grid's days, none while
+  /// bars of the items the store shows on the grid's days, none while
   /// they are not ready, all in one batch and so one structural
   /// notification; the sync also tells each day what it hides
   /// ([_writeHidden]). Called from the layout callback, so the first frame
   /// lays the board out at its size.
   ///
-  /// A sync animates only when it follows the model alone, its days are
+  /// A sync animates only when it follows the store alone, its days are
   /// ready and the last sync's were. Any other sync runs under
   /// [BoardAnimationStyle.disabled], which [_scheduleStyleRestore] lifts,
   /// and settles in its batch every enter and exit in flight
@@ -1073,7 +1073,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
       placements = const <BoardPlacement<MonthChip>>[];
     } else if (sync) {
       final all = monthPlacementsOf(
-        widget.model.itemsBetween(grid.firstDay, grid.lastDay),
+        widget.store.entriesBetween(grid.firstDay, grid.lastDay),
         grid,
       );
       if (lanes == null) {
@@ -1348,7 +1348,7 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
         _layoutBoard(
           Size(size.width, math.max(0.0, size.height - weekdayHeaderHeight)),
         );
-        final model = widget.model;
+        final store = widget.store;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -1389,10 +1389,10 @@ class _MonthBoardState extends State<MonthBoard> with TickerProviderStateMixin {
                   if (!_daysReady)
                     Positioned.fill(
                       child: _MonthLoadOverlay(
-                        error: model.status == CalendarLoadStatus.failed
-                            ? model.error
+                        error: store.status == CalendarLoadStatus.failed
+                            ? "${store.loadError}"
                             : null,
-                        onRetry: model.retry,
+                        onRetry: store.retry,
                       ),
                     ),
                 ],
@@ -1472,7 +1472,7 @@ String _dayLabel(DateTime day) {
 /// What a screen reader says for [entry]'s chip: its title, type, days
 /// and times, and that it is pending while it is.
 String _chipLabel(ShownItem entry) {
-  final item = entry.item;
+  final item = entry.entry;
   final times =
       "${clockLabel(item.startMinute)} to ${clockLabel(item.endMinute)}";
   final String when;
@@ -1656,7 +1656,7 @@ class _MonthChipBox extends StatelessWidget {
   Widget build(BuildContext context) {
     final styles = _MonthStyles.of(context);
     final entry = chip.entry;
-    final item = entry.item;
+    final item = entry.entry;
     final pending = entry.pending;
     final style = harborTypeStyleOf(item.type);
     final extent = card ? monthCardExtent : monthLaneExtent;

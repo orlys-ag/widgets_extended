@@ -1,0 +1,737 @@
+/// What every calendar store answers and writes, the refusals and failures
+/// its writes report, and the index of entries by day both stores keep.
+library;
+
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+
+import '../dates/calendar_dates.dart';
+import '../entries/calendar_entry.dart';
+import '../policy/overlap.dart';
+
+/// Whether every day of the range a store shows is read, or the read it
+/// waits on failed.
+enum CalendarLoadStatus { loading, failed, ready }
+
+/// An entry as a view shows it: [pending] while a write on it runs.
+@immutable
+class CalendarShownEntry<T> {
+  /// The [entry] a view shows, and whether a write on it runs.
+  const CalendarShownEntry(this.entry, {required this.pending});
+
+  /// The entry to draw: a pending move's requested entry, else the stored
+  /// one.
+  final CalendarEntry<T> entry;
+
+  /// Whether a write on the entry runs.
+  final bool pending;
+
+  /// The entry's id. A shown entry is always a stored one, so it has one.
+  String get id {
+    return entry.id!;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is CalendarShownEntry<T> &&
+        other.entry == entry &&
+        other.pending == pending;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(entry, pending);
+  }
+
+  @override
+  String toString() {
+    return "CalendarShownEntry($id, pending: $pending)";
+  }
+}
+
+/// A move, a resize or a delete that failed or that the store refused,
+/// as a store's [CalendarStore.onWriteFailed] receives it.
+@immutable
+class CalendarWriteFailure {
+  /// The failure of the write on the entry [id], with [error].
+  const CalendarWriteFailure({
+    required this.id,
+    required this.error,
+    this.stackTrace,
+  });
+
+  /// The id of the entry the write was on.
+  final String id;
+
+  /// The data source's error, unchanged, or the [CalendarStoreException]
+  /// the store refused the write with.
+  final Object error;
+
+  /// Where the data source's error was thrown; null for a refusal the
+  /// store makes itself.
+  final StackTrace? stackTrace;
+
+  @override
+  String toString() {
+    return "CalendarWriteFailure($id, $error)";
+  }
+}
+
+/// Receives each move, resize or delete that fails or that the store
+/// refuses.
+typedef CalendarWriteFailed = void Function(CalendarWriteFailure failure);
+
+/// A write the store refuses itself, sending nothing to a data source.
+sealed class CalendarStoreException implements Exception {
+  const CalendarStoreException();
+}
+
+/// The write changes an entry's days or minutes, or creates one, outside
+/// the store's [CalendarStore.hours].
+final class CalendarHoursException extends CalendarStoreException {
+  /// The refusal of an entry from [startMinute] to [endMinute] under
+  /// [hours].
+  const CalendarHoursException({
+    required this.hours,
+    required this.startMinute,
+    required this.endMinute,
+  });
+
+  /// The store's hours when it refused the write.
+  final DayHours hours;
+
+  /// The refused entry's start, in minutes after midnight.
+  final int startMinute;
+
+  /// The refused entry's end, in minutes after midnight.
+  final int endMinute;
+
+  /// Whether [startMinute] does not begin a slot inside [hours].
+  bool get startOutside {
+    return !hours.holdsStart(startMinute);
+  }
+
+  /// Whether [endMinute] does not end a slot inside [hours].
+  bool get endOutside {
+    return !hours.holdsEnd(endMinute);
+  }
+
+  @override
+  String toString() {
+    return "CalendarHoursException($startMinute to $endMinute outside "
+        "$hours)";
+  }
+}
+
+/// The move would share time with the shown entries [conflictingIds].
+final class CalendarEntryOverlapException extends CalendarStoreException {
+  /// The refusal of a move onto the time of [conflictingIds].
+  const CalendarEntryOverlapException(this.conflictingIds);
+
+  /// The ids of the entries the move would share time with.
+  final List<String> conflictingIds;
+
+  @override
+  String toString() {
+    return "CalendarEntryOverlapException(${conflictingIds.join(", ")})";
+  }
+}
+
+/// The entry [id] has a write in flight, so the store sends no other.
+final class CalendarWritePendingException extends CalendarStoreException {
+  /// The refusal of a write on [id], which has one in flight.
+  const CalendarWritePendingException(this.id);
+
+  /// The id of the entry whose write is in flight.
+  final String id;
+
+  @override
+  String toString() {
+    return "CalendarWritePendingException($id)";
+  }
+}
+
+/// The entries a calendar shows, the load state of the range it shows, and
+/// its writes.
+///
+/// A store notifies its listeners whenever what it answers changes. An
+/// entry has one write in flight at most: while it runs the entry shows
+/// [CalendarShownEntry.pending], and a write on it sends nothing and fails
+/// with a [CalendarWritePendingException]. A move, a resize or a delete
+/// reports its failure through [onWriteFailed]; a create or an update
+/// fails to its caller.
+abstract class CalendarStore<T> extends ChangeNotifier {
+  /// A store holding writes to [hours], reporting a failed move, resize or
+  /// delete to [onWriteFailed].
+  CalendarStore({this.hours = DayHours.allDay, this.onWriteFailed});
+
+  /// The hours a new entry, and a write that changes an entry's days or
+  /// minutes, must lie in. A write that keeps the stored days and minutes
+  /// is not held to them, so an entry that lay outside them when they
+  /// changed can still be edited. Setting it notifies nothing: what shows
+  /// does not depend on it.
+  DayHours hours;
+
+  /// Receives each move, resize or delete that fails or that the store
+  /// refuses; null drops them.
+  final CalendarWriteFailed? onWriteFailed;
+
+  /// Whether every day of the shown range is read, or the read it waits
+  /// on failed.
+  CalendarLoadStatus get status;
+
+  /// The error the read the shown range waited on failed with, while
+  /// [status] is [CalendarLoadStatus.failed]; null otherwise.
+  Object? get loadError;
+
+  /// Shows [first] to [last], both inclusive, reading the days not read
+  /// yet.
+  void show(DateTime first, DateTime last);
+
+  /// Reads again the shown range's unread days after its read failed.
+  void retry();
+
+  /// Reads the unread days from [first] to [last], both inclusive,
+  /// without showing them.
+  void prefetch(DateTime first, DateTime last);
+
+  /// Whether [day] is read.
+  bool isRead(DateTime day);
+
+  /// Whether the last read of [day], which is unread, failed.
+  bool readFailed(DateTime day);
+
+  /// Whether the shown range is exactly [first] to [last].
+  bool isShown(DateTime first, DateTime last);
+
+  /// Whether the shown range holds every day from [first] to [last].
+  bool isWithinShown(DateTime first, DateTime last);
+
+  /// The entries shown on [day], sorted by start, end, title and id; a new
+  /// list.
+  List<CalendarShownEntry<T>> entriesOn(DateTime day);
+
+  /// The entries shown on any day from [first] to [last], each once,
+  /// sorted as [entriesOn] sorts; a new list.
+  List<CalendarShownEntry<T>> entriesBetween(DateTime first, DateTime last);
+
+  /// Whether [day] shows a marker for the entries on it.
+  bool dayHasShownEntries(DateTime day);
+
+  /// Whether a write on the entry [id] runs.
+  bool isPending(String id);
+
+  /// The entry [id] as stored, without a pending move's requested time.
+  CalendarEntry<T>? storedEntry(String id);
+
+  /// Stores [draft]; completes with the stored entry, which has an id, or
+  /// fails with the error that kept it from being stored. A draft outside
+  /// [hours] fails with a [CalendarHoursException].
+  Future<CalendarEntry<T>> create(CalendarEntry<T> draft);
+
+  /// Writes [entry] over the stored entry its id names; completes with the
+  /// stored entry, or fails with the error that kept it from being
+  /// stored. An entry with no id fails with an [ArgumentError], and one
+  /// [hoursRefusalOf] refuses with a [CalendarHoursException].
+  Future<CalendarEntry<T>> update(CalendarEntry<T> entry);
+
+  /// Writes a grid move or resize to [requested], whose id names a stored
+  /// entry. A failure, or a refusal for the hours, for an overlap with
+  /// another shown entry or for a write in flight, reaches
+  /// [onWriteFailed]. Throws an [ArgumentError] for an entry with no id.
+  void requestMove(CalendarEntry<T> requested);
+
+  /// Deletes the entry [id]. A failure, or a refusal for a write in
+  /// flight, reaches [onWriteFailed].
+  void requestDelete(String id);
+
+  /// The first free slot of [day] inside [hours]: for each start from the
+  /// hours' start on the [minutesPerSlot] grid, the slot from it, the
+  /// first one that shares no time with an entry [entriesOn] lists for
+  /// [day], pending ones where they show. With [from], the starts begin at
+  /// the later of it, rounded up to the grid, and the hours' start, and
+  /// only with none free from there at the hours' start. With none free,
+  /// the hours' first slot.
+  ({int start, int end}) firstFreeRange(DateTime day, {int? from}) {
+    final shown = entriesOn(day);
+    final number = dayNumber(day);
+    if (from != null) {
+      final slot = (from + minutesPerSlot - 1) ~/ minutesPerSlot;
+      final later = _firstFreeFrom(
+        math.max(hours.start, slot * minutesPerSlot),
+        number,
+        shown,
+      );
+      if (later != null) {
+        return later;
+      }
+    }
+    return _firstFreeFrom(hours.start, number, shown) ??
+        (start: hours.start, end: hours.start + minutesPerSlot);
+  }
+
+  /// The first free range of [firstFreeRange]'s search on the [dayNumber]
+  /// [day], starting at [first], or null when none from there is free.
+  ({int start, int end})? _firstFreeFrom(
+    int first,
+    int day,
+    List<CalendarShownEntry<T>> shown,
+  ) {
+    for (
+      var start = first;
+      start <= hours.end - minutesPerSlot;
+      start += minutesPerSlot
+    ) {
+      final end = start + minutesPerSlot;
+      final CalendarEntryTime time = (
+        firstDay: day,
+        dayCount: 1,
+        start: start,
+        end: end,
+      );
+      var free = true;
+      for (final other in shown) {
+        if (timesOverlap(time, other.entry.time)) {
+          free = false;
+          break;
+        }
+      }
+      if (free) {
+        return (start: start, end: end);
+      }
+    }
+    return null;
+  }
+
+  /// The refusal of [entry] for [hours], or null when the hours hold its
+  /// start and its end, or when it keeps the days and minutes of the
+  /// stored entry its id names.
+  @protected
+  CalendarHoursException? hoursRefusalOf(CalendarEntry<T> entry) {
+    final id = entry.id;
+    final stored = id == null ? null : storedEntry(id);
+    if (stored != null &&
+        stored.day == entry.day &&
+        stored.dayCount == entry.dayCount &&
+        stored.startMinute == entry.startMinute &&
+        stored.endMinute == entry.endMinute) {
+      return null;
+    }
+    if (hours.holdsStart(entry.startMinute) &&
+        hours.holdsEnd(entry.endMinute)) {
+      return null;
+    }
+    return CalendarHoursException(
+      hours: hours,
+      startMinute: entry.startMinute,
+      endMinute: entry.endMinute,
+    );
+  }
+
+  /// The ids of the shown entries on [requested]'s days, other than
+  /// [requested] itself, whose times overlap its time.
+  @protected
+  List<String> overlapsOf(CalendarEntry<T> requested) {
+    final time = requested.time;
+    final overlaps = <String>[];
+    final last = addDays(requested.day, requested.dayCount - 1);
+    for (final other in entriesBetween(requested.day, last)) {
+      if (other.id != requested.id && timesOverlap(time, other.entry.time)) {
+        overlaps.add(other.id);
+      }
+    }
+    return overlaps;
+  }
+
+  /// Calls [onWriteFailed], when set, with the failure of the write on
+  /// [id].
+  @protected
+  void reportWriteFailure(String id, Object error, [StackTrace? stackTrace]) {
+    onWriteFailed?.call(
+      CalendarWriteFailure(id: id, error: error, stackTrace: stackTrace),
+    );
+  }
+}
+
+/// The entries a store holds, by id and by day, and its pending writes,
+/// answering the reads of [CalendarStore].
+///
+/// Each open day keeps the stored entries covering it in one list, sorted
+/// by start, end, title and id, which is a total order since ids are
+/// distinct. Each pending write keeps the entry its id shows, the
+/// requested entry of a move or else the stored one, in one more list in
+/// that order. A read takes each open day's list less its pending ids as
+/// one sorted run and the pending list as another, and merges them, so it
+/// costs the entries it answers and a log of the runs, with no sort.
+///
+/// Days are [dayNumber]s.
+class CalendarEntryIndex<T> {
+  /// An empty index. With [opensEveryDay], [put] opens every day an entry
+  /// covers, and a day [put] or [forget] empties closes; otherwise only
+  /// [open] opens a day, and an open day stays open until [clear].
+  CalendarEntryIndex({required this.opensEveryDay});
+
+  /// Whether every day a stored entry covers is open, and only those.
+  final bool opensEveryDay;
+
+  final Map<String, CalendarEntry<T>> _stored = <String, CalendarEntry<T>>{};
+
+  /// Each open day's stored entries, in [_compare]'s order.
+  final Map<int, List<CalendarEntry<T>>> _byDay =
+      <int, List<CalendarEntry<T>>>{};
+
+  /// An entry per pending id: the entry it files in [_pendingList], or
+  /// null when it files none.
+  final Map<String, CalendarEntry<T>?> _pending = <String, CalendarEntry<T>?>{};
+
+  /// The entries the pending ids show, in [_compare]'s order.
+  final List<CalendarEntry<T>> _pendingList = <CalendarEntry<T>>[];
+
+  /// The entry [id] as stored.
+  CalendarEntry<T>? stored(String id) {
+    return _stored[id];
+  }
+
+  /// Every stored entry, in no set order.
+  Iterable<CalendarEntry<T>> get storedEntries {
+    return _stored.values;
+  }
+
+  /// Whether [day] is open.
+  bool isOpen(int day) {
+    return _byDay.containsKey(day);
+  }
+
+  /// Stores [entry], whose id no stored entry has, without filing it under
+  /// any day; false, changing nothing, when one has. A pending id that
+  /// shows no entry shows this one.
+  bool addIfAbsent(CalendarEntry<T> entry) {
+    final id = entry.id!;
+    if (_stored.containsKey(id)) {
+      return false;
+    }
+    _stored[id] = entry;
+    if (_pending.containsKey(id) && _pending[id] == null) {
+      _pending[id] = entry;
+      _insert(_pendingList, entry);
+    }
+    return true;
+  }
+
+  /// Opens each of [days] that is not open, or, given none, every day a
+  /// stored entry covers that is not open, and files under the days it
+  /// opens every stored entry covering them.
+  ///
+  /// One pass over the stored entries files each under the opened days it
+  /// covers, and one sort per opened day orders its list.
+  void open([Iterable<int>? days]) {
+    final opened = <int, List<CalendarEntry<T>>>{};
+    if (days == null) {
+      for (final entry in _stored.values) {
+        for (final day in entry.dayNumbers) {
+          if (_byDay.containsKey(day)) {
+            continue;
+          }
+          (opened[day] ??= <CalendarEntry<T>>[]).add(entry);
+        }
+      }
+    } else {
+      int? first;
+      int? last;
+      for (final day in days) {
+        if (!_byDay.containsKey(day) && !opened.containsKey(day)) {
+          opened[day] = <CalendarEntry<T>>[];
+          first = first == null ? day : math.min(first, day);
+          last = last == null ? day : math.max(last, day);
+        }
+      }
+      if (first == null || last == null) {
+        return;
+      }
+      for (final entry in _stored.values) {
+        final entryFirst = dayNumber(entry.day);
+        final from = math.max(entryFirst, first);
+        final to = math.min(entryFirst + entry.dayCount - 1, last);
+        for (var day = from; day <= to; day++) {
+          opened[day]?.add(entry);
+        }
+      }
+    }
+    for (final MapEntry(key: day, value: list) in opened.entries) {
+      list.sort(_compare);
+      _byDay[day] = list;
+    }
+  }
+
+  /// Stores [entry] in place of the entry its id names, if any: unfiles
+  /// the old one and files the new one under the days it covers, every one
+  /// with [opensEveryDay], otherwise the open ones.
+  void put(CalendarEntry<T> entry) {
+    forget(entry.id!);
+    _stored[entry.id!] = entry;
+    for (final day in entry.dayNumbers) {
+      var list = _byDay[day];
+      if (list == null) {
+        if (!opensEveryDay) {
+          continue;
+        }
+        list = _byDay[day] = <CalendarEntry<T>>[];
+      }
+      _insert(list, entry);
+    }
+  }
+
+  /// Removes the entry [id] and unfiles it; answers it, or null when none
+  /// is stored.
+  CalendarEntry<T>? forget(String id) {
+    final old = _stored.remove(id);
+    if (old == null) {
+      return null;
+    }
+    for (final day in old.dayNumbers) {
+      final list = _byDay[day];
+      if (list == null) {
+        continue;
+      }
+      _remove(list, old);
+      if (opensEveryDay && list.isEmpty) {
+        _byDay.remove(day);
+      }
+    }
+    return old;
+  }
+
+  /// Removes every entry, day and pending write.
+  void clear() {
+    _stored.clear();
+    _byDay.clear();
+    _pending.clear();
+    _pendingList.clear();
+  }
+
+  /// Whether a write on [id] runs.
+  bool isPending(String id) {
+    return _pending.containsKey(id);
+  }
+
+  /// Marks [id] pending, showing [shown] or, when null, the stored entry
+  /// if there is one. False, changing nothing, when [id] is pending
+  /// already.
+  bool lock(String id, CalendarEntry<T>? shown) {
+    if (_pending.containsKey(id)) {
+      return false;
+    }
+    final filed = shown ?? _stored[id];
+    _pending[id] = filed;
+    if (filed != null) {
+      _insert(_pendingList, filed);
+    }
+    return true;
+  }
+
+  /// Ends the pending write on [id], if any.
+  void release(String id) {
+    if (!_pending.containsKey(id)) {
+      return;
+    }
+    final filed = _pending.remove(id);
+    if (filed != null) {
+      _remove(_pendingList, filed);
+    }
+  }
+
+  /// The entries shown on [day]: its stored entries whose ids are not
+  /// pending, and the pending entries covering it, merged in order.
+  List<CalendarShownEntry<T>> entriesOn(int day) {
+    final stored = _byDay[day] ?? const <Never>[];
+    final anyPending = _pending.isNotEmpty;
+    final shown = <CalendarShownEntry<T>>[];
+    var i = 0;
+    var j = 0;
+    while (true) {
+      while (anyPending &&
+          i < stored.length &&
+          _pending.containsKey(stored[i].id)) {
+        i++;
+      }
+      while (j < _pendingList.length && !_pendingList[j].coversDay(day)) {
+        j++;
+      }
+      if (i == stored.length && j == _pendingList.length) {
+        return shown;
+      }
+      if (j == _pendingList.length ||
+          (i < stored.length && _compare(stored[i], _pendingList[j]) < 0)) {
+        shown.add(CalendarShownEntry<T>(stored[i], pending: false));
+        i++;
+      } else {
+        shown.add(CalendarShownEntry<T>(_pendingList[j], pending: true));
+        j++;
+      }
+    }
+  }
+
+  /// The entries shown on any day from [first] to [last], each once.
+  ///
+  /// Each open day of the range adds its stored entries whose ids are not
+  /// pending as one run, and the pending entries meeting the range add one
+  /// more. The runs are merged in rounds through one scratch list; two
+  /// entries comparing equal are one entry filed under two days, and the
+  /// merge keeps one of them.
+  List<CalendarShownEntry<T>> entriesBetween(int first, int last) {
+    final anyPending = _pending.isNotEmpty;
+    var runs = <CalendarShownEntry<T>>[];
+    for (var day = first; day <= last; day++) {
+      final list = _byDay[day];
+      if (list == null) {
+        continue;
+      }
+      for (final entry in list) {
+        if (!anyPending || !_pending.containsKey(entry.id)) {
+          runs.add(CalendarShownEntry<T>(entry, pending: false));
+        }
+      }
+    }
+    for (final entry in _pendingList) {
+      final entryFirst = dayNumber(entry.day);
+      if (entryFirst <= last && entryFirst + entry.dayCount - 1 >= first) {
+        runs.add(CalendarShownEntry<T>(entry, pending: true));
+      }
+    }
+    // A run is a stretch in strictly ascending order, so every day's list
+    // and the pending list are each one, or part of one.
+    List<CalendarShownEntry<T>>? scratch;
+    while (_runEnd(runs, 0) < runs.length) {
+      final merged = scratch ?? <CalendarShownEntry<T>>[];
+      merged.clear();
+      var start = 0;
+      while (start < runs.length) {
+        final middle = _runEnd(runs, start);
+        final end = middle == runs.length ? middle : _runEnd(runs, middle);
+        _mergeRuns(runs, start, middle, end, merged);
+        start = end;
+      }
+      scratch = runs;
+      runs = merged;
+    }
+    return runs;
+  }
+
+  /// Whether [day] shows an entry: a stored one whose id is not pending, or
+  /// a pending one covering it.
+  bool hasShownOn(int day) {
+    final stored = _byDay[day];
+    if (stored != null) {
+      if (stored.isNotEmpty && _pending.isEmpty) {
+        return true;
+      }
+      for (final entry in stored) {
+        if (!_pending.containsKey(entry.id)) {
+          return true;
+        }
+      }
+    }
+    for (final entry in _pendingList) {
+      if (entry.coversDay(day)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// The end of the strictly ascending run of [shown] that starts at
+  /// [start]: [shown]'s length when [start] is past its last entry.
+  int _runEnd(List<CalendarShownEntry<T>> shown, int start) {
+    if (start >= shown.length) {
+      return shown.length;
+    }
+    var end = start + 1;
+    while (end < shown.length &&
+        _compare(shown[end - 1].entry, shown[end].entry) < 0) {
+      end++;
+    }
+    return end;
+  }
+
+  /// Appends to [into] the runs of [from] from [start] to [middle] and from
+  /// [middle] to [end], merged, keeping one of two entries that compare
+  /// equal.
+  void _mergeRuns(
+    List<CalendarShownEntry<T>> from,
+    int start,
+    int middle,
+    int end,
+    List<CalendarShownEntry<T>> into,
+  ) {
+    var i = start;
+    var j = middle;
+    while (i < middle && j < end) {
+      final order = _compare(from[i].entry, from[j].entry);
+      if (order < 0) {
+        into.add(from[i]);
+        i++;
+      } else if (order > 0) {
+        into.add(from[j]);
+        j++;
+      } else {
+        into.add(from[i]);
+        i++;
+        j++;
+      }
+    }
+    while (i < middle) {
+      into.add(from[i]);
+      i++;
+    }
+    while (j < end) {
+      into.add(from[j]);
+      j++;
+    }
+  }
+
+  /// Files [entry] in [list] at its place in [_compare]'s order.
+  void _insert(List<CalendarEntry<T>> list, CalendarEntry<T> entry) {
+    list.insert(_lowerBound(list, entry), entry);
+  }
+
+  /// Takes [entry], which [list] holds, out of [list].
+  void _remove(List<CalendarEntry<T>> list, CalendarEntry<T> entry) {
+    final index = _lowerBound(list, entry);
+    if (index < list.length && list[index].id == entry.id) {
+      list.removeAt(index);
+    }
+  }
+
+  /// The first index of [list] whose entry does not sort before [entry].
+  int _lowerBound(List<CalendarEntry<T>> list, CalendarEntry<T> entry) {
+    var low = 0;
+    var high = list.length;
+    while (low < high) {
+      final middle = (low + high) >> 1;
+      if (_compare(list[middle], entry) < 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low;
+  }
+}
+
+/// By start, end, title and id.
+int _compare<T>(CalendarEntry<T> a, CalendarEntry<T> b) {
+  final byStart = a.startMinute.compareTo(b.startMinute);
+  if (byStart != 0) {
+    return byStart;
+  }
+  final byEnd = a.endMinute.compareTo(b.endMinute);
+  if (byEnd != 0) {
+    return byEnd;
+  }
+  final byTitle = a.title.compareTo(b.title);
+  if (byTitle != 0) {
+    return byTitle;
+  }
+  return a.id!.compareTo(b.id!);
+}

@@ -6,9 +6,10 @@ import 'dart:ui' as ui;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_api_source.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
@@ -118,7 +119,7 @@ Future<CalendarItem> stored(
     json = value;
   });
   await tester.pump(api.latency);
-  return CalendarItem.fromJson(json!);
+  return itemFromJson(json!);
 }
 
 int listCalls(MockCalendarApi api) {
@@ -174,31 +175,34 @@ Future<int> pixelAt(WidgetTester tester, Offset point) async {
 }
 
 /// Pumps a timed grid of [today] alone under [settings] and the Harbor
-/// calendar theme, with no day header, over an empty store, at [size], its
-/// clock at 09:00 on [today], and lets its read complete.
+/// calendar theme, with no day header, over [store], or a caching store
+/// over an empty mock API, at [size], its clock at 09:00 on [today], and
+/// lets its read complete.
 Future<void> pumpGrid(
   WidgetTester tester,
   CalendarSettings settings, {
   Size size = const Size(390.0, 844.0),
+  CalendarStore<ItemPayload>? store,
 }) async {
   tester.view.devicePixelRatio = 1.0;
   tester.view.physicalSize = size;
   addTearDown(tester.view.reset);
-  final model = CalendarModel(
-    api: MockCalendarApi(latency: harnessLatency),
-    onWriteFailed: (message) {},
-  );
-  addTearDown(model.dispose);
+  final shown =
+      store ??
+      CachingCalendarStore<ItemPayload>(
+        dataSource: CalendarApiSource(MockCalendarApi(latency: harnessLatency)),
+      );
+  addTearDown(shown.dispose);
   final now = ValueNotifier<DateTime>(DateTime(2026, 4, 21, 9));
   addTearDown(now.dispose);
-  model.show(today, today);
+  shown.show(today, today);
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
         body: CalendarTheme(
           data: harborCalendarTheme,
           child: TimedGrid(
-            model: model,
+            store: shown,
             settings: settings,
             firstDay: today,
             dayCount: 1,
@@ -1098,5 +1102,46 @@ void main() {
     await tester.drag(find.byType(TimedGrid), const Offset(0.0, -200.0));
     await tester.pumpAndSettle();
     expect(find.byType(WeekStrip), findsOneWidget);
+  });
+
+  testWidgets("D20 over an in-memory store a drop applies within the drop, "
+      "the block landing where it was dropped", (tester) async {
+    final item = calendarItem(
+      id: "item-1",
+      type: CalendarItemType.task,
+      title: "Write",
+      day: today,
+      startMinute: 10 * 60,
+      endMinute: 11 * 60,
+      fields: const <String, Object?>{"status": "toDo"},
+    );
+    final changes = <(CalendarItem?, CalendarItem?)>[];
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[item],
+      onChanged: (old, entry) {
+        changes.add((old, entry));
+      },
+    );
+    final heard = <(CalendarItem?, bool)>[];
+    store.addListener(() {
+      heard.add((store.storedEntry("item-1"), store.isPending("item-1")));
+    });
+    await pumpGrid(
+      tester,
+      const CalendarSettings(editing: true),
+      size: tall,
+      store: store,
+    );
+
+    final noon = cellRect(tester, dayRowOf(12 * 60), dayColumn);
+    await moveBlock(tester, blockFinder("item-1"), noon.topLeft);
+    final moved = item.copyWith(startMinute: 12 * 60, endMinute: 13 * 60);
+    expect(heard, <(CalendarItem?, bool)>[(moved, false)]);
+    expect(changes, <(CalendarItem?, CalendarItem?)>[(item, moved)]);
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(blockFinder("item-1")).top,
+      near(cellRect(tester, dayRowOf(12 * 60), dayColumn).top),
+    );
   });
 }

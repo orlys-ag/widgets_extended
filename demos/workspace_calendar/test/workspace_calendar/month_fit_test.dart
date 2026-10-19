@@ -7,7 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 
@@ -27,7 +27,7 @@ ShownItem task(String id, DateTime day, int start, {int dayCount = 1}) {
     ...taskJson(id, day, start * 60, (start + 1) * 60, dayCount: dayCount),
     "id": id,
   };
-  return ShownItem(CalendarItem.fromJson(json), pending: false);
+  return ShownItem(itemFromJson(json), pending: false);
 }
 
 /// The index of [day]'s cell in [grid], as the hidden counts are indexed.

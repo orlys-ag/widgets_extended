@@ -7,8 +7,9 @@ library;
 import 'dart:ui' show Tristate;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_api_source.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -234,11 +235,10 @@ void main() {
   testWidgets("WS5 a selected day weeks away slides the strip there from a "
       "week short of it, and reports nothing, nor does a slide a new "
       "selected day stops", (tester) async {
-    final model = CalendarModel(
-      api: MockCalendarApi(latency: harnessLatency),
-      onWriteFailed: (message) {},
+    final store = CachingCalendarStore<ItemPayload>(
+      dataSource: CalendarApiSource(MockCalendarApi(latency: harnessLatency)),
     );
-    addTearDown(model.dispose);
+    addTearDown(store.dispose);
     final reported = <DateTime>[];
     final browsed = <DateTime>[];
     var selected = today;
@@ -252,7 +252,7 @@ void main() {
               return CalendarTheme(
                 data: harborCalendarTheme,
                 child: WeekStrip(
-                  model: model,
+                  store: store,
                   selectedDay: selected,
                   today: today,
                   weekdays: WeekdaySet.all,
@@ -538,11 +538,10 @@ void main() {
       "day's name over its circle, and nothing overflows", (tester) async {
     tester.platformDispatcher.textScaleFactorTestValue = 1.3;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    final model = CalendarModel(
-      api: MockCalendarApi(latency: harnessLatency),
-      onWriteFailed: (message) {},
+    final store = CachingCalendarStore<ItemPayload>(
+      dataSource: CalendarApiSource(MockCalendarApi(latency: harnessLatency)),
     );
-    addTearDown(model.dispose);
+    addTearDown(store.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -551,7 +550,7 @@ void main() {
               CalendarTheme(
                 data: harborCalendarTheme,
                 child: WeekStrip(
-                  model: model,
+                  store: store,
                   selectedDay: april(21),
                   today: april(21),
                   weekdays: WeekdaySet.all,

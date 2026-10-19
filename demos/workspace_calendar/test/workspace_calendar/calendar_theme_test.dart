@@ -13,9 +13,9 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_model.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
@@ -1088,18 +1088,18 @@ void expectBlockTitles(WidgetTester tester, CalendarThemeData theme) {
   expect(seen, greaterThan(0));
 }
 
-/// The calendar's [CalendarModel], read from the view that shows, which a
+/// The calendar's [CalendarStore], read from the view that shows, which a
 /// test writes through as the calendar does.
-CalendarModel modelOf(WidgetTester tester) {
+CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
   final grid = find.byType(TimedGrid);
   if (grid.evaluate().isNotEmpty) {
-    return tester.widget<TimedGrid>(grid).model;
+    return tester.widget<TimedGrid>(grid).store;
   }
   final list = find.byType(DayList);
   if (list.evaluate().isNotEmpty) {
-    return tester.widget<DayList>(list).model;
+    return tester.widget<DayList>(list).store;
   }
-  return tester.widget<MonthBoard>(find.byType(MonthBoard)).model;
+  return tester.widget<MonthBoard>(find.byType(MonthBoard)).store;
 }
 
 /// The gutter cells the grid has built, in tree order.
@@ -2213,7 +2213,7 @@ void main() {
       "back the new theme's", (tester) async {
     final api = await pumpThemed(tester, sentinelA);
     await pickMode(tester, "Week");
-    modelOf(tester).requestDelete("item-6");
+    storeOf(tester).requestDelete("item-6");
     await tester.pump();
     await tester.pump(api.latency);
     await tester.pump(const Duration(milliseconds: 16));
@@ -2332,7 +2332,7 @@ void main() {
 
     final dash = dashed();
     expect(dash.color.toARGB32(), sentinelA.outline.toARGB32());
-    modelOf(tester).requestDelete("item-13");
+    storeOf(tester).requestDelete("item-13");
     await tester.pump();
     expect(identical(dashed(), dash), isTrue);
     await tester.pumpAndSettle();
@@ -2386,7 +2386,7 @@ void main() {
     final element = tester.element(blockFinder("item-1"));
     final widget = element.widget;
     // A write's sync rebuilds the board's delegate, which mounts nothing.
-    modelOf(tester).requestDelete("item-12");
+    storeOf(tester).requestDelete("item-12");
     await tester.pump();
     expect(identical(tester.element(blockFinder("item-1")), element), isTrue);
     expect(
@@ -2484,7 +2484,7 @@ void main() {
     );
     final card = tester.element(find.byKey(itemCardKey("item-2")));
     final cardWidget = card.widget;
-    modelOf(tester).requestDelete("item-13");
+    storeOf(tester).requestDelete("item-13");
     await tester.pump();
     expect(
       identical(tester.element(find.byKey(itemCardKey("item-2"))), card),
@@ -3633,7 +3633,7 @@ void main() {
     final api = await pumpThemed(tester, sentinelA);
     await pickMode(tester, "Week");
     Future<double> midExit(String id) async {
-      modelOf(tester).requestDelete(id);
+      storeOf(tester).requestDelete(id);
       await tester.pump();
       await tester.pump(api.latency);
       await tester.pump(const Duration(milliseconds: 16));
@@ -3725,7 +3725,7 @@ void main() {
     expect(stored["startMinute"], 12 * 60);
 
     // An exit runs on through the frames of a theme moving back to A.
-    modelOf(tester).requestDelete("item-7");
+    storeOf(tester).requestDelete("item-7");
     await tester.pump();
     await tester.pump(api.latency);
     await tester.pump(const Duration(milliseconds: 16));

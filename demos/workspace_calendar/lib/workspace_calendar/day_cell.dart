@@ -4,30 +4,31 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
-import 'calendar_data.dart';
-import 'calendar_model.dart';
+import 'calendar_item.dart';
 
 /// The key of the cell showing [day].
 ValueKey<String> dayCellKey(DateTime day) {
   return ValueKey<String>("day-${day.year}-${day.month}-${day.day}");
 }
 
-/// Builds [builder] with whether [model] shows a marker for [day], and
+/// Builds [builder] with whether [store] shows a marker for [day], and
 /// builds it again only when that answer changes.
 ///
-/// A model change reaches no cell of the month board, whose cell builder
+/// A store change reaches no cell of the month board, whose cell builder
 /// re-runs only when an axis or a cell's selection changes; this listener
-/// is how a cell follows the model, rebuilding only itself.
+/// is how a cell follows the store, rebuilding only itself.
 class DayMarkerListener extends StatefulWidget {
   const DayMarkerListener({
     super.key,
-    required this.model,
+    required this.store,
     required this.day,
     required this.builder,
   });
 
-  final CalendarModel model;
+  final CalendarStore<ItemPayload> store;
   final DateTime day;
   final Widget Function(BuildContext context, bool hasItems) builder;
 
@@ -38,34 +39,34 @@ class DayMarkerListener extends StatefulWidget {
 }
 
 class _DayMarkerListenerState extends State<DayMarkerListener> {
-  late bool _hasItems = widget.model.dayHasShownItems(widget.day);
+  late bool _hasItems = widget.store.dayHasShownEntries(widget.day);
 
   @override
   void initState() {
     super.initState();
-    widget.model.addListener(_handleModel);
+    widget.store.addListener(_handleStore);
   }
 
   @override
   void didUpdateWidget(DayMarkerListener oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.model != oldWidget.model) {
-      oldWidget.model.removeListener(_handleModel);
-      widget.model.addListener(_handleModel);
+    if (widget.store != oldWidget.store) {
+      oldWidget.store.removeListener(_handleStore);
+      widget.store.addListener(_handleStore);
     }
-    if (widget.model != oldWidget.model || widget.day != oldWidget.day) {
-      _hasItems = widget.model.dayHasShownItems(widget.day);
+    if (widget.store != oldWidget.store || widget.day != oldWidget.day) {
+      _hasItems = widget.store.dayHasShownEntries(widget.day);
     }
   }
 
   @override
   void dispose() {
-    widget.model.removeListener(_handleModel);
+    widget.store.removeListener(_handleStore);
     super.dispose();
   }
 
-  void _handleModel() {
-    final hasItems = widget.model.dayHasShownItems(widget.day);
+  void _handleStore() {
+    final hasItems = widget.store.dayHasShownEntries(widget.day);
     if (hasItems == _hasItems) {
       return;
     }
