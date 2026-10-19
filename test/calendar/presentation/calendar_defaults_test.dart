@@ -284,12 +284,23 @@ void main() {
     expect(unread.error, isNull);
   });
 
-  testWidgets("BD2 the block default draws the tint, the edge and the title "
-      "in the block style", (tester) async {
+  testWidgets("BD2 each default has its builder's signature, and the block "
+      "default draws the tint, the edge and the title in the block style", (
+    tester,
+  ) async {
+    // Each default as a value of its signature, which takes the context,
+    // the shown entry and its details, or the context and one value.
+    const CalendarBlockBuilder<String> block = defaultCalendarBlockBuilder;
+    const CalendarChipBuilder<String> chip = defaultCalendarChipBuilder;
+    const CalendarCardBuilder<String> card = defaultCalendarCardBuilder;
+    const CalendarAddButtonBuilder add = defaultCalendarAddButtonBuilder;
+    const CalendarLoadingBuilder loading = defaultCalendarLoadingBuilder;
+    const CalendarFailureBuilder failure = defaultCalendarFailureBuilder;
+    expect(<Object>[chip, card, add, loading, failure], hasLength(5));
     final entry = shown();
     await tester.pumpWidget(
       host((context) {
-        return defaultCalendarBlockBuilder(
+        return block(
           context,
           entry,
           const CalendarBlockDetails(
