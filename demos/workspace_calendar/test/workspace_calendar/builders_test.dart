@@ -1,0 +1,970 @@
+/// The views draw their entries and their loading and failure states only
+/// through the builders the composition hands them, the module's defaults
+/// where it hands none, and call each builder no more often than the base
+/// built the widget it replaces.
+library;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
+import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
+import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
+import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
+import 'package:workspace_calendar/workspace_calendar_example.dart';
+
+import 'calendar_harness.dart';
+
+const Duration second = Duration(seconds: 1);
+const Duration oneFrame = Duration(milliseconds: 16);
+
+/// 09:00 on [today].
+DateTime nineOClock() {
+  return DateTime(2026, 4, 21, 9);
+}
+
+/// The Sunday of [today]'s week.
+final DateTime sunday = DateTime(2026, 4, 26);
+
+/// The key of the mark a marking builder draws for [form] and [name], an
+/// entry's id or a state's site.
+ValueKey<String> markKey(String form, String name) {
+  return ValueKey<String>("mark-$form-$name");
+}
+
+/// Every mark of [form] in the tree.
+Finder marksOf(String form) {
+  return find.byWidgetPredicate((widget) {
+    final key = widget.key;
+    return key is ValueKey<String> && key.value.startsWith("mark-$form-");
+  });
+}
+
+/// One call of a block builder.
+typedef BlockCall = ({ShownItem entry, CalendarBlockDetails details});
+
+/// Builders that mark what they draw: each returns a [ColoredBox] keyed by
+/// [markKey], kept in [marks], and records its arguments.
+class MarkingBuilders {
+  final List<BlockCall> blocks = <BlockCall>[];
+  final List<CalendarLoadingState> loadings = <CalendarLoadingState>[];
+  final List<CalendarFailureState> failures = <CalendarFailureState>[];
+
+  /// Every mark these builders returned, by identity.
+  final Set<Widget> marks = Set<Widget>.identity();
+
+  late final ItemBuilders builders = ItemBuilders(
+    block: block,
+    loading: loading,
+    failure: failure,
+  );
+
+  Widget _mark(String form, String name) {
+    final mark = ColoredBox(
+      key: markKey(form, name),
+      color: Color(0xFF00C853 + marks.length % 2),
+    );
+    marks.add(mark);
+    return mark;
+  }
+
+  Widget block(
+    BuildContext context,
+    ShownItem entry,
+    CalendarBlockDetails details,
+  ) {
+    blocks.add((entry: entry, details: details));
+    return _mark("block", entry.id);
+  }
+
+  Widget loading(BuildContext context, CalendarLoadingState state) {
+    loadings.add(state);
+    return _mark("loading", state.site.name);
+  }
+
+  Widget failure(BuildContext context, CalendarFailureState state) {
+    failures.add(state);
+    return _mark("failure", state.site.name);
+  }
+
+  /// The last block call for the entry [id].
+  BlockCall lastBlock(String id) {
+    return blocks.lastWhere((call) {
+      return call.entry.id == id;
+    });
+  }
+
+  /// Whether the mark under [slot] is one of these builders'.
+  bool marked(WidgetTester tester, Finder slot, String form, String id) {
+    final mark = find.descendant(
+      of: slot,
+      matching: find.byKey(markKey(form, id)),
+    );
+    if (mark.evaluate().length != 1) {
+      return false;
+    }
+    return marks.contains(tester.widget(mark));
+  }
+}
+
+/// Builders that count their calls, by entry id, and return Harbor's
+/// builders' output.
+class CountingBuilders {
+  final Map<String, int> blockCalls = <String, int>{};
+
+  late final ItemBuilders builders = ItemBuilders(
+    block: block,
+    loading: harborLoadingBuilder,
+    failure: harborFailureBuilder,
+  );
+
+  Widget block(
+    BuildContext context,
+    ShownItem entry,
+    CalendarBlockDetails details,
+  ) {
+    blockCalls.update(entry.id, (count) => count + 1, ifAbsent: () => 1);
+    return harborBlockBuilder(context, entry, details);
+  }
+
+  int get blocks {
+    return blockCalls.values.fold(0, (sum, count) => sum + count);
+  }
+
+  void clear() {
+    blockCalls.clear();
+  }
+}
+
+/// The ids of the items [api] lists for [today]'s week.
+Future<List<String>> weekIds(WidgetTester tester, MockCalendarApi api) async {
+  return <String>[
+    for (final json in await listAll(tester, api, monday, sunday))
+      json["id"]! as String,
+  ];
+}
+
+/// The block slots the grid shows of [ids], each expected to hold its own
+/// mark of [marks]; returns how many there are.
+int expectBlockMarks(
+  WidgetTester tester,
+  MarkingBuilders marks,
+  List<String> ids,
+) {
+  var slots = 0;
+  for (final id in ids) {
+    final slot = blockFinder(id);
+    if (slot.evaluate().isEmpty) {
+      continue;
+    }
+    slots++;
+    expect(marks.marked(tester, slot, "block", id), isTrue, reason: id);
+  }
+  return slots;
+}
+
+/// Sets the open calendar bar's hours to [start] to [end] o'clock through
+/// its slider's own callback, as a drag of it does, and closes the bar.
+Future<void> pickHours(WidgetTester tester, int start, int end) async {
+  await openBar(tester);
+  tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
+    RangeValues(start.toDouble(), end.toDouble()),
+  );
+  await tester.pumpAndSettle();
+  await closeBar(tester);
+}
+
+/// Shows or hides the weekends through the calendar bar.
+Future<void> toggleWeekends(WidgetTester tester) async {
+  await openBar(tester);
+  flipWeekends(tester);
+  await tester.pumpAndSettle();
+  await closeBar(tester);
+}
+
+/// Two touches [spread] apart up and down around [focal], each moved
+/// [step] further from the other on each of [steps] frames, lifted, then
+/// settled.
+Future<void> pinch(
+  WidgetTester tester,
+  Offset focal, {
+  double spread = 60.0,
+  double step = 6.0,
+  int steps = 6,
+}) async {
+  const unit = Offset(0.0, 1.0);
+  final first = await tester.startGesture(focal - unit * (spread / 2.0));
+  final second = await tester.startGesture(focal + unit * (spread / 2.0));
+  await tester.pump();
+  for (var i = 0; i < steps; i++) {
+    await first.moveBy(-unit * step);
+    await second.moveBy(unit * step);
+    await tester.pump();
+  }
+  await first.up();
+  await second.up();
+  await tester.pumpAndSettle();
+}
+
+/// The calendar over [api] with [builders] and [theme], editing, at 09:00
+/// on [today]: [calendarApp]'s app with a theme of its own.
+Widget themedApp(
+  MockCalendarApi api,
+  ItemBuilders builders,
+  CalendarThemeData theme,
+) {
+  return MaterialApp(
+    theme: ThemeData(splashFactory: NoSplash.splashFactory),
+    home: WorkspaceCalendarExample(
+      today: today,
+      api: api,
+      clock: nineOClock,
+      editing: true,
+      calendarTheme: theme,
+      builders: builders,
+    ),
+  );
+}
+
+/// Pumps the frames of [duration] in 16 ms steps, for a view whose
+/// activity indicator never settles.
+Future<void> pumpFor(WidgetTester tester, Duration duration) async {
+  final frames = duration.inMilliseconds ~/ oneFrame.inMilliseconds + 1;
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(oneFrame);
+  }
+}
+
+/// Whether [node] lies below [ancestor] in the render tree.
+bool isBelow(RenderObject node, RenderObject ancestor) {
+  var current = node.parent;
+  while (current != null) {
+    if (identical(current, ancestor)) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+/// The grid.
+final Finder grid = find.byType(TimedGrid<ItemPayload>);
+
+void main() {
+  testWidgets("BW1 Week draws each block through its builder, its pending "
+      "state and its cut ends included", (tester) async {
+    final marks = MarkingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: marks.builders,
+    );
+    await pickMode(tester, "Week");
+    final ids = await weekIds(tester, api);
+    final slots = expectBlockMarks(tester, marks, ids);
+    expect(slots, greaterThan(4));
+    expect(marksOf("block"), findsNWidgets(slots));
+
+    final brainstorm = blockFinder(brainstormId);
+    await moveBlock(
+      tester,
+      brainstorm,
+      cellRect(tester, rowOf(14 * 60), colOf(5)).topLeft,
+    );
+    expect(marks.lastBlock(brainstormId).entry.pending, isTrue);
+    for (final type in <Type>[Opacity, Icon, CircularProgressIndicator]) {
+      expect(
+        find.descendant(of: brainstorm, matching: find.byType(type)),
+        findsNothing,
+        reason: "$type",
+      );
+    }
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(marks.lastBlock(brainstormId).entry.pending, isTrue);
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+    expect(marks.lastBlock(brainstormId).entry.pending, isFalse);
+
+    // A block the hours cut at both ends: on Saturday, which holds no other
+    // item, so the mock stores it, in a calendar of its own.
+    await tester.pumpWidget(const SizedBox());
+    final cut = MarkingBuilders();
+    final cutApi = MockCalendarApi.seeded(today, latency: harnessLatency);
+    await createBeforePump(
+      tester,
+      cutApi,
+      taskJson("Long day", DateTime(2026, 4, 25), 7 * 60, 19 * 60),
+    );
+    final longDay =
+        (await listAll(
+              tester,
+              cutApi,
+              DateTime(2026, 4, 25),
+              DateTime(2026, 4, 25),
+            )).single["id"]!
+            as String;
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      api: cutApi,
+      builders: cut.builders,
+    );
+    await pickMode(tester, "Week");
+    await pickHours(tester, 8, 18);
+    final details = cut.lastBlock(longDay).details;
+    expect(details.cutAtStart, isTrue);
+    expect(details.cutAtEnd, isTrue);
+    expect(
+      find.descendant(of: blockFinder(longDay), matching: find.byType(Icon)),
+      findsNothing,
+    );
+  });
+
+  testWidgets("BW2 Day draws each block of its one day through its builder, "
+      "detailed, its pending state included", (tester) async {
+    final marks = MarkingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: marks.builders,
+    );
+    await pickMode(tester, "Day");
+    final ids = <String>[
+      for (final json in await listAll(tester, api, today, today))
+        json["id"]! as String,
+    ];
+    final slots = expectBlockMarks(tester, marks, ids);
+    expect(slots, greaterThanOrEqualTo(2));
+    expect(marksOf("block"), findsNWidgets(slots));
+    expect(marks.blocks, isNotEmpty);
+    for (final call in marks.blocks) {
+      expect(call.details.detailed, isTrue, reason: call.entry.id);
+    }
+
+    await moveBlock(
+      tester,
+      blockFinder(brainstormId),
+      cellRect(tester, dayRowOf(16 * 60), 1).topLeft,
+    );
+    expect(marks.lastBlock(brainstormId).entry.pending, isTrue);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(marks.lastBlock(brainstormId).entry.pending, isTrue);
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+    expect(marks.lastBlock(brainstormId).entry.pending, isFalse);
+  });
+
+  testWidgets("BW3 the cover draws the loading and failure builders' "
+      "content for the grid's days, the failure with the store's error and "
+      "its retry", (tester) async {
+    final marks = MarkingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: marks.builders,
+    );
+    await pickMode(tester, "Week");
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pump();
+    await tester.pump(oneFrame);
+    expect(
+      find.descendant(
+        of: grid,
+        matching: find.byKey(markKey("loading", "cover")),
+      ),
+      findsOneWidget,
+    );
+    final loading = marks.loadings.last;
+    expect(loading.site, CalendarStateSite.cover);
+    expect(loading.first, DateTime(2026, 5, 4));
+    expect(loading.last, DateTime(2026, 5, 10));
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pump();
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: grid,
+        matching: find.byKey(markKey("failure", "cover")),
+      ),
+      findsOneWidget,
+    );
+    final failure = marks.failures.last;
+    expect(failure.site, CalendarStateSite.cover);
+    expect(failure.first, DateTime(2026, 5, 18));
+    expect(failure.last, DateTime(2026, 5, 24));
+    expect(
+      failure.error,
+      isA<CalendarFailureException>().having(
+        (error) => error.message,
+        "message",
+        "Reading failed.",
+      ),
+    );
+    final lists = api.requests.where((request) {
+      return request.method == CalendarMethod.list;
+    }).length;
+    failure.retry();
+    expect(
+      api.requests.where((request) {
+        return request.method == CalendarMethod.list;
+      }),
+      hasLength(lists + 1),
+    );
+    api.failurePolicy = null;
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("BW4 given no builders the grid draws the module's defaults", (
+    tester,
+  ) async {
+    final api = await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: const ItemBuilders(),
+    );
+    await pickMode(tester, "Week");
+    expect(find.byType(HarborBlock), findsNothing);
+    final task = harborTypeStyleOf(CalendarItemType.task).edge;
+    final boxes = tester
+        .widgetList<DecoratedBox>(
+          find.descendant(
+            of: blockFinder(brainstormId),
+            matching: find.byType(DecoratedBox),
+          ),
+        )
+        .map((box) {
+          return box.decoration;
+        })
+        .whereType<BoxDecoration>()
+        .where((decoration) {
+          return decoration.color != null;
+        });
+    final first = boxes.first;
+    expect(
+      first.color,
+      Color.alphaBlend(
+        task.withValues(alpha: harborCalendarTheme.entryTintOpacity),
+        harborCalendarTheme.surface,
+      ),
+    );
+    expect(first.border, Border(left: BorderSide(color: task, width: 4.0)));
+
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pump();
+    await tester.pump(oneFrame);
+    expect(
+      find.descendant(
+        of: grid,
+        matching: find.byType(CalendarActivityIndicator),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: grid,
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsNothing,
+    );
+    await pumpFor(tester, second);
+
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    await tester.tap(find.byTooltip("Next week"));
+    await pumpFor(tester, const Duration(milliseconds: 400));
+    await tester.tap(find.byTooltip("Next week"));
+    await pumpFor(tester, const Duration(milliseconds: 1400));
+    expect(
+      find.descendant(of: grid, matching: find.text(readFailedLabel)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: grid, matching: find.text(retryLabel)),
+      findsOneWidget,
+    );
+    expect(find.text("Reading failed."), findsNothing);
+    api.failurePolicy = null;
+    await tester.tap(find.text(retryLabel));
+    await pumpFor(tester, const Duration(milliseconds: 1400));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("BW5 the hidden-count pill's tooltip is the grid node's label, "
+      "with no tooltip under the grid", (tester) async {
+    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    await createBeforePump(
+      tester,
+      api,
+      taskJson("Weekend", DateTime(2026, 4, 25), 10 * 60, 11 * 60),
+    );
+    await pumpCalendar(tester, api: api, clock: nineOClock);
+    await pickMode(tester, "Week");
+    await toggleWeekends(tester);
+    expect(find.bySemanticsLabel("${hiddenItemsLabel(1)}\n+1"), findsOneWidget);
+    expect(find.byTooltip(hiddenItemsLabel(1)), findsNothing);
+    expect(
+      find.descendant(of: grid, matching: find.byType(Tooltip)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: grid, matching: find.byType(RawTooltip)),
+      findsNothing,
+    );
+  });
+
+  testWidgets("BW6 a drag, a scroll and a pinch call the block builder no "
+      "more often than the base built blocks, and the pinch calls none for "
+      "a block it keeps", (tester) async {
+    final counts = CountingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: counts.builders,
+    );
+    await pickMode(tester, "Week");
+    expect(counts.blocks, greaterThan(4));
+    counts.clear();
+
+    // The drag of a block, with its settle slide and the API's answer.
+    final requests = api.requests.length;
+    await moveBlock(
+      tester,
+      blockFinder(brainstormId),
+      cellRect(tester, rowOf(14 * 60), colOf(5)).topLeft,
+    );
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    expect(api.requests, hasLength(requests + 1));
+    expect(counts.blocks, greaterThan(0));
+    expect(counts.blocks, lessThanOrEqualTo(23));
+    expect(counts.blockCalls.keys, <String>[brainstormId]);
+    counts.clear();
+
+    // A scroll of the grid.
+    final vertical = gridViewport(tester).verticalPosition!;
+    final before = vertical.pixels;
+    await tester.drag(grid, const Offset(0.0, -300.0));
+    await tester.pumpAndSettle();
+    expect(vertical.pixels - before, greaterThan(200.0));
+    expect(counts.blocks, 0);
+    counts.clear();
+
+    // A pinch up and down the slots.
+    final cell = cellRect(tester, rowOf(12 * 60), colOf(2));
+    final kept = <String, Element>{
+      for (final element in find.byWidgetPredicate((widget) {
+        final key = widget.key;
+        return key is ValueKey<String> && key.value.startsWith("block-");
+      }).evaluate())
+        (element.widget.key! as ValueKey<String>).value: element,
+    };
+    await pinch(tester, cell.center);
+    expect(
+      cellRect(tester, rowOf(12 * 60), colOf(2)).height,
+      greaterThan(cell.height),
+    );
+    expect(counts.blocks, lessThanOrEqualTo(42));
+    var stayed = 0;
+    for (final entry in kept.entries) {
+      final id = entry.key.substring("block-".length);
+      final now = find.byKey(blockKey(id));
+      if (now.evaluate().length == 1 &&
+          identical(now.evaluate().single, entry.value)) {
+        stayed++;
+        expect(counts.blockCalls[id] ?? 0, 0, reason: id);
+      }
+    }
+    expect(stayed, greaterThan(4));
+    for (final entry in counts.blockCalls.entries) {
+      expect(entry.value, lessThanOrEqualTo(1), reason: entry.key);
+    }
+  });
+
+  testWidgets("BW7 new builders draw every block, a block exiting and a "
+      "drag held included, the proxy keeping the builder of its lift", (
+    tester,
+  ) async {
+    final a = MarkingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: a.builders,
+    );
+    await pickMode(tester, "Week");
+    final ids = await weekIds(tester, api);
+    expect(expectBlockMarks(tester, a, ids), greaterThan(4));
+
+    final b = MarkingBuilders();
+    await tester.pumpWidget(
+      calendarApp(
+        api: api,
+        today: today,
+        clock: nineOClock,
+        editing: true,
+        builders: b.builders,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(expectBlockMarks(tester, b, ids), greaterThan(4));
+    for (final id in ids) {
+      final slot = blockFinder(id);
+      if (slot.evaluate().isNotEmpty) {
+        expect(a.marked(tester, slot, "block", id), isFalse, reason: id);
+      }
+    }
+
+    // A swap while a deleted block exits.
+    final c = MarkingBuilders();
+    final standup = blockFinder(standupId);
+    // The exit ramp scales a block across its day, the grid's lane axis.
+    final width = tester.getSize(standup).width;
+    await tester.tap(standup);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete").last);
+    await tester.pump();
+    await tester.pump(harnessLatency);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getSize(standup).width, lessThan(width));
+    await tester.pumpWidget(
+      calendarApp(
+        api: api,
+        today: today,
+        clock: nineOClock,
+        editing: true,
+        builders: c.builders,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(c.marked(tester, standup, "block", standupId), isTrue);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(standup, findsNothing);
+
+    // A swap while a drag is held.
+    final d = MarkingBuilders();
+    final brainstorm = blockFinder(brainstormId);
+    final rect = tester.getRect(brainstorm);
+    final requests = api.requests.length;
+    final gesture = await tester.startGesture(rect.center);
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await gesture.moveBy(const Offset(0.0, 40.0));
+    await tester.pump();
+    final proxy = find.descendant(
+      of: find.byKey(liftedBlockKey),
+      matching: find.byKey(markKey("block", brainstormId)),
+    );
+    expect(proxy, findsOneWidget);
+    expect(c.marks.contains(tester.widget(proxy)), isTrue);
+    await tester.pumpWidget(
+      calendarApp(
+        api: api,
+        today: today,
+        clock: nineOClock,
+        editing: true,
+        builders: d.builders,
+      ),
+    );
+    await gesture.moveBy(const Offset(0.0, 40.0));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(c.marks.contains(tester.widget(proxy)), isTrue);
+    final inPlace = find.descendant(
+      of: brainstorm,
+      matching: find.byKey(markKey("block", brainstormId)),
+    );
+    expect(tester.widgetList(inPlace).where(d.marks.contains), hasLength(1));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(api.requests, hasLength(requests + 1));
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("BW8 a block takes its tap and long press anywhere in its "
+      "box, whatever its builder paints", (tester) async {
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: ItemBuilders(
+        block: (context, entry, details) {
+          return Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Text(entry.entry.title),
+          );
+        },
+      ),
+    );
+    await pickMode(tester, "Week");
+    final point =
+        tester.getRect(blockFinder(brainstormId)).bottomLeft +
+        const Offset(2.0, -2.0);
+    final path = tester.hitTestOnBinding(point).path;
+    expect(
+      path.map((entry) {
+        return entry.target;
+      }).whereType<RenderParagraph>(),
+      isEmpty,
+    );
+    await tester.tapAt(point);
+    await tester.pumpAndSettle();
+    expect(find.text("Edit Task"), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, "Cancel"));
+    await tester.pumpAndSettle();
+    expect(find.text("Edit Task"), findsNothing);
+
+    final gesture = await tester.startGesture(point);
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await tester.pump();
+    expect(find.text("Brainstorm with the team"), findsNWidgets(2));
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("BW9 a block builder that throws loses its own output alone: "
+      "the block still opens on a tap", (tester) async {
+    final marks = MarkingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: marks.builders,
+    );
+    await pickMode(tester, "Week");
+    final thrown = StateError("A builder that fails for Brainstorm.");
+    await tester.pumpWidget(
+      calendarApp(
+        api: api,
+        today: today,
+        clock: nineOClock,
+        editing: true,
+        builders: ItemBuilders(
+          block: (context, entry, details) {
+            if (entry.id == brainstormId) {
+              throw thrown;
+            }
+            return marks.block(context, entry, details);
+          },
+        ),
+      ),
+    );
+    expect(tester.takeException(), same(thrown));
+    expect(
+      find.descendant(
+        of: blockFinder(brainstormId),
+        matching: find.byType(ErrorWidget),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: blockFinder(standupId),
+        matching: find.byKey(markKey("block", standupId)),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(blockFinder(brainstormId));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text("Edit Task"), findsOneWidget);
+    expect(find.text("Brainstorm with the team"), findsOneWidget);
+  });
+
+  testWidgets("BW10 a pending default block's indicator repaints its own "
+      "layer alone, and nothing under the grid builds", (tester) async {
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: const ItemBuilders(),
+    );
+    await pickMode(tester, "Week");
+    await moveBlock(
+      tester,
+      blockFinder(brainstormId),
+      cellRect(tester, rowOf(14 * 60), colOf(5)).topLeft,
+    );
+    await tester.pump(oneFrame);
+    final indicator = find.descendant(
+      of: blockFinder(brainstormId),
+      matching: find.byType(CalendarActivityIndicator),
+    );
+    expect(indicator, findsOneWidget);
+    final boundary = tester.renderObject<RenderRepaintBoundary>(
+      find.descendant(of: indicator, matching: find.byType(RepaintBoundary)),
+    );
+    final arc = tester.renderObject<RenderCustomPaint>(
+      find.descendant(of: indicator, matching: find.byType(CustomPaint)),
+    );
+    final top = tester.element(grid);
+    final rebuilt = <Element>[];
+    final painted = <RenderObject>[];
+    debugOnRebuildDirtyWidget = (element, builtOnce) {
+      var under = identical(element, top);
+      element.visitAncestorElements((ancestor) {
+        under = under || identical(ancestor, top);
+        return !under;
+      });
+      if (under) {
+        rebuilt.add(element);
+      }
+    };
+    debugOnProfilePaint = painted.add;
+    try {
+      for (var frame = 0; frame < 10; frame++) {
+        await tester.pump(oneFrame);
+      }
+    } finally {
+      debugOnRebuildDirtyWidget = null;
+      debugOnProfilePaint = null;
+    }
+    expect(rebuilt, isEmpty);
+    expect(painted, contains(arc));
+    for (final object in painted) {
+      expect(isBelow(object, boundary), isTrue, reason: "$object");
+    }
+    await pumpFor(tester, second);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("BW11 a block builder runs again when an inherited widget it "
+      "read notifies, and on a hot reload", (tester) async {
+    final calls = <String, int>{};
+    final builders = ItemBuilders(
+      block: (context, entry, details) {
+        CalendarTheme.of(context);
+        calls.update(entry.id, (count) => count + 1, ifAbsent: () => 1);
+        return harborBlockBuilder(context, entry, details);
+      },
+    );
+    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(390.0, 844.0);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(themedApp(api, builders, harborCalendarTheme));
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    await pickMode(tester, "Week");
+    expect(calls[brainstormId], greaterThan(0));
+
+    calls.clear();
+    await tester.pumpWidget(themedApp(api, builders, harborCalendarTheme));
+    await tester.pumpAndSettle();
+    expect(calls[brainstormId], isNull);
+
+    await tester.pumpWidget(
+      themedApp(
+        api,
+        builders,
+        harborCalendarTheme.copyWith(text: const Color(0xFF202020)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(calls[brainstormId], 1);
+
+    calls.clear();
+    final reassembled = tester.binding.reassembleApplication();
+    await tester.pump();
+    await reassembled;
+    await tester.pumpAndSettle();
+    expect(calls[brainstormId], 1);
+  });
+
+  testWidgets("BW12 a write that changes only an entry's payload runs its "
+      "block builder again, which draws the new payload", (tester) async {
+    final day = DateTime(2026, 4, 21);
+    final note = CalendarEntry<String>(
+      id: "note-1",
+      day: day,
+      startMinute: 10 * 60,
+      endMinute: 11 * 60,
+      title: "Note",
+      color: const Color(0xFF336699),
+      payload: "first",
+    );
+    // The in-memory store applies a write within the call, so the payload
+    // changes with no pending state between.
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[note],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<DateTime>(nineOClock());
+    addTearDown(now.dispose);
+    final calls = <CalendarShownEntry<String>>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimedGrid<String>(
+          store: store,
+          settings: const CalendarSettings(),
+          firstDay: day,
+          dayCount: 1,
+          selectedDay: day,
+          today: day,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenItem: (id) {},
+          onCreate: (range) async {},
+          blockBuilder: (context, entry, details) {
+            calls.add(entry);
+            return Text(entry.entry.payload);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final block = blockFinder("note-1");
+    expect(
+      find.descendant(of: block, matching: find.text("first")),
+      findsOneWidget,
+    );
+    final before = calls.length;
+    expect(calls.last.pending, isFalse);
+
+    await store.update(note.copyWith(payload: "second"));
+    await tester.pumpAndSettle();
+    expect(calls.length, before + 1);
+    expect(calls.last.pending, isFalse);
+    expect(calls.last.entry.payload, "second");
+    expect(
+      find.descendant(of: block, matching: find.text("second")),
+      findsOneWidget,
+    );
+  });
+}

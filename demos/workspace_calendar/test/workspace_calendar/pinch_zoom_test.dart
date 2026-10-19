@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
@@ -197,7 +198,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(gridViewport(tester).verticalPosition!.pixels, pixels);
 
-    await tester.drag(find.byType(TimedGrid), const Offset(0.0, -100.0));
+    await tester.drag(
+      find.byType(TimedGrid<ItemPayload>),
+      const Offset(0.0, -100.0),
+    );
     await tester.pumpAndSettle();
     expect(
       gridViewport(tester).verticalPosition!.pixels,
@@ -279,7 +283,7 @@ void main() {
     expect(find.text("Edit Task"), findsNothing);
 
     await pinchFrom(tester, monthDayRect(tester, day).center);
-    expect(find.byType(TimedGrid), findsNothing);
+    expect(find.byType(TimedGrid<ItemPayload>), findsNothing);
 
     await pinchFrom(
       tester,

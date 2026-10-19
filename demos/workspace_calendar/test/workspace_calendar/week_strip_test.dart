@@ -73,7 +73,7 @@ List<DateTime> stripDays(WidgetTester tester) {
 
 /// The progress indicator the timed grid shows while its days load.
 final Finder loadOverlay = find.descendant(
-  of: find.byType(TimedGrid),
+  of: find.byType(TimedGrid<ItemPayload>),
   matching: find.byType(CircularProgressIndicator),
 );
 

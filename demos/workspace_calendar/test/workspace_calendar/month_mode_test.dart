@@ -1685,7 +1685,7 @@ void main() {
     (tester) async {
       await pumpCalendar(tester);
       await pickMode(tester, "Week");
-      final week = tester.getRect(find.byType(TimedGrid));
+      final week = tester.getRect(find.byType(TimedGrid<ItemPayload>));
 
       await pickMode(tester, "Month");
       final letters = tester.getRect(

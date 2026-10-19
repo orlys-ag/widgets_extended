@@ -437,7 +437,7 @@ void main() {
     expect(read.first, monday);
     expect(read.last, addDays(monday, 6));
     final overlay = find.descendant(
-      of: find.byType(TimedGrid),
+      of: find.byType(TimedGrid<ItemPayload>),
       matching: find.byType(CircularProgressIndicator),
     );
     expect(overlay, findsOneWidget);
@@ -1099,7 +1099,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(gridDay(tester), thursday);
 
-    await tester.drag(find.byType(TimedGrid), const Offset(0.0, -200.0));
+    await tester.drag(
+      find.byType(TimedGrid<ItemPayload>),
+      const Offset(0.0, -200.0),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(WeekStrip), findsOneWidget);
   });

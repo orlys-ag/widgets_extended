@@ -9,18 +9,15 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_item.dart';
-import 'calendar_schema.dart' hide maxDayCount;
 import 'calendar_settings.dart';
-import 'harbor_theme.dart';
 import 'history_lock.dart';
 import 'pinch_zoom.dart';
 
@@ -90,32 +87,6 @@ class _GridStyles {
         border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
         borderRadius: BorderRadius.circular(10.0),
       ),
-      blockTitle = theme.blockTitleStyle.copyWith(color: theme.text),
-      blockSummary = theme.blockSummaryStyle.copyWith(
-        color: theme.textSecondary,
-      ),
-      detailedTitle = theme.detailedBlockTitleStyle.copyWith(color: theme.text),
-      detail = theme.detailedBlockDetailStyle.copyWith(
-        color: theme.textSecondary,
-      ),
-      cutStart = Positioned(
-        top: 0.0,
-        right: 0.0,
-        child: Icon(
-          theme.beforeHoursIcon,
-          size: 14.0,
-          color: theme.textSecondary,
-        ),
-      ),
-      cutEnd = Positioned(
-        bottom: 0.0,
-        right: 0.0,
-        child: Icon(
-          theme.afterHoursIcon,
-          size: 14.0,
-          color: theme.textSecondary,
-        ),
-      ),
       hiddenPill = BoxDecoration(
         color: theme.primaryTint,
         borderRadius: BorderRadius.circular(10.0),
@@ -139,7 +110,6 @@ class _GridStyles {
       ),
       landingLabel = theme.landingLabelStyle.copyWith(color: theme.onPrimary),
       scrim = theme.background.withValues(alpha: 0.85),
-      message = theme.messageStyle.copyWith(color: theme.error),
       selectionOutline = Positioned.fill(
         child: IgnorePointer(
           child: DecoratedBox(
@@ -253,15 +223,6 @@ class _GridStyles {
   final TextStyle headerToday;
   final BoxDecoration headerRing;
 
-  /// A block's text, on a grid of several days and on a grid of one, and
-  /// the arrows at the ends the hours cut.
-  final TextStyle blockTitle;
-  final TextStyle blockSummary;
-  final TextStyle detailedTitle;
-  final TextStyle detail;
-  final Widget cutStart;
-  final Widget cutEnd;
-
   /// The pill counting the items on no shown day.
   final BoxDecoration hiddenPill;
   final TextStyle hiddenLabel;
@@ -278,7 +239,6 @@ class _GridStyles {
 
   /// The overlay while the days are not ready.
   final Color scrim;
-  final TextStyle message;
 
   /// The selected block's outline, and its grips.
   final Widget selectionOutline;
@@ -318,8 +278,8 @@ ValueKey<String> blockGripKey(String id, AxisDirection side) {
 /// column for.
 const ValueKey<String> hiddenCountKey = ValueKey<String>("grid-hidden-count");
 
-/// What the tooltip of the pill counting [count] items on no day the grid
-/// has a column for says.
+/// What a screen reader hears for the pill counting [count] items on no
+/// day the grid has a column for, before the pill's own "+N".
 String hiddenItemsLabel(int count) {
   if (count == 1) {
     return "1 item is on a day not shown";
@@ -676,8 +636,8 @@ CalendarEntryTime shapeFromSpan(
 
 /// [item] with the day, minutes and day count [shapeFromSpan] gives for
 /// its shape.
-CalendarItem itemFromSpan(
-  CalendarItem item,
+CalendarEntry<T> itemFromSpan<T>(
+  CalendarEntry<T> item,
   BoardSpan from,
   BoardSpan to,
   GridTracks tracks,
@@ -726,8 +686,9 @@ CreateRange createRangeOver(
 /// show, on the board, over the hours they choose, showing what [store]
 /// shows for them once the store's shown range holds them all, read. A
 /// tap on a block that is not pending reports [onOpenItem]; a tap on a
-/// day header reports [onSelectDay]. On a grid of one day column each
-/// block uses the width to show its times and its summaries.
+/// day header reports [onSelectDay]. Each block's content is what
+/// [blockBuilder] draws, told on a grid of one day column that the block
+/// is detailed.
 ///
 /// In edit mode, which [settings] choose, a long press on an item lifts it
 /// to move and selects its block; a tap anywhere but on the selected
@@ -756,8 +717,9 @@ CreateRange createRangeOver(
 /// has a label centred on its line in the hour gutter, in the format [settings]
 /// choose, which a room above the first slot and below the last, or the gutter
 /// beside a row counting items outside the hours, keeps whole. An
-/// item reaching past the hours shows the part inside them, with an arrow where
-/// it is cut, and takes no move or resize: its form changes it. An item wholly
+/// item reaching past the hours shows the part inside them, its block's details
+/// telling its builder which ends the hours cut, and takes no move or resize:
+/// its form changes it. An item wholly
 /// outside them has no block. While some are before the hours, a yellow row
 /// frozen against the first slot, in place of the room above it, says "+N
 /// more" in the column of each day with N of them, and while some are after
@@ -783,9 +745,15 @@ CreateRange createRangeOver(
 /// block. No pinch starts while a block moves or resizes or a create range
 /// runs.
 ///
-/// The grid draws in the [CalendarTheme] above it, its blocks' tints and
-/// edges in their types' styles, and animates on the theme's motion.
-class TimedGrid extends StatefulWidget {
+/// While its days are not ready a cover over the grid takes every press,
+/// centring what [loadingBuilder] draws while they are read, and what
+/// [failureBuilder] draws when the read failed.
+///
+/// The grid draws in the [CalendarTheme] above it and animates on the
+/// theme's motion; a block's content, the loading and the failure state
+/// are what their builders draw, the module's defaults where they are
+/// null.
+class TimedGrid<T> extends StatefulWidget {
   const TimedGrid({
     super.key,
     required this.store,
@@ -801,9 +769,12 @@ class TimedGrid extends StatefulWidget {
     this.onZoom,
     this.maxDayCount,
     this.showsDayHeader = true,
+    this.blockBuilder,
+    this.loadingBuilder,
+    this.failureBuilder,
   }) : assert(dayCount >= 1);
 
-  final CalendarStore<ItemPayload> store;
+  final CalendarStore<T> store;
 
   /// Whether row 0 is a frozen header naming each column's day, whose
   /// corner over the gutter holds the pill counting the items on no shown
@@ -847,9 +818,22 @@ class TimedGrid extends StatefulWidget {
   /// null for no limit.
   final int? maxDayCount;
 
+  /// Draws each block's content inside the box the grid gives it; null
+  /// for [defaultCalendarBlockBuilder]. A new one, not `==` to the last,
+  /// draws every block again.
+  final CalendarBlockBuilder<T>? blockBuilder;
+
+  /// Draws the cover's content while the grid's days are read; null for
+  /// [defaultCalendarLoadingBuilder].
+  final CalendarLoadingBuilder? loadingBuilder;
+
+  /// Draws the cover's content when the read of the grid's days failed;
+  /// null for [defaultCalendarFailureBuilder].
+  final CalendarFailureBuilder? failureBuilder;
+
   @override
-  State<TimedGrid> createState() {
-    return _TimedGridState();
+  State<TimedGrid<T>> createState() {
+    return _TimedGridState<T>();
   }
 }
 
@@ -873,8 +857,9 @@ typedef _GridDrag = ({
 /// and its minute after midnight.
 typedef _NowMark = ({int column, int minute});
 
-class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
-  late final BoardController<String, ShownItem> _board;
+class _TimedGridState<T> extends State<TimedGrid<T>>
+    with TickerProviderStateMixin {
+  late final BoardController<String, CalendarShownEntry<T>> _board;
 
   late final PinchTracker _pinch = PinchTracker(
     onStart: _startPinch,
@@ -902,9 +887,19 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   /// Held in fields because `Board` replaces its delegate, and so rebuilds
   /// every cell and item, whenever a builder it gets is not identical to
-  /// the previous one.
-  late final BoardCellBuilder<String, ShownItem> _cellBuilder = _buildCell;
-  late final BoardItemBuilder<String, ShownItem> _itemBuilder = _buildItem;
+  /// the previous one. [didUpdateWidget] gives the board a new item
+  /// builder for a new [TimedGrid.blockBuilder], so every block finds it.
+  late final BoardCellBuilder<String, CalendarShownEntry<T>> _cellBuilder =
+      _buildCell;
+  late BoardItemBuilder<String, CalendarShownEntry<T>> _itemBuilder =
+      _buildItem;
+
+  /// [TimedGrid.blockBuilder], or the module's default where it is null.
+  late CalendarBlockBuilder<T> _blockBuilder = _blockBuilderOf(widget);
+
+  static CalendarBlockBuilder<T> _blockBuilderOf<T>(TimedGrid<T> widget) {
+    return widget.blockBuilder ?? defaultCalendarBlockBuilder<T>;
+  }
 
   /// One instance in edit mode and one out of it, so a rebuild of this
   /// state hands the board the config it already has. Out of edit mode the
@@ -971,7 +966,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     _lockOf(widget),
   );
 
-  static HistoryLock _lockOf(TimedGrid widget) {
+  static HistoryLock _lockOf<T>(TimedGrid<T> widget) {
     if (!widget.settings.editing) {
       return HistoryLock.none;
     }
@@ -1067,7 +1062,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   late final DelayedMultiDragGestureRecognizer _delayedRange;
 
   /// The range being dragged, which the background paints.
-  _RangeDrag? _range;
+  _RangeDrag<T>? _range;
 
   /// Set when the grid's scroll ends and cleared by the next microtask. A
   /// touch down on a flinging grid ends the fling before the listener
@@ -1114,7 +1109,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         PointerDeviceKind.unknown,
       },
     )..onStart = _beginRange;
-    _board = BoardController<String, ShownItem>(
+    _board = BoardController<String, CalendarShownEntry<T>>(
       vsync: this,
       rows: _rowsConfig(),
       columns: _columnsConfig(),
@@ -1147,8 +1142,14 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   @override
-  void didUpdateWidget(TimedGrid oldWidget) {
+  void didUpdateWidget(TimedGrid<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.blockBuilder != oldWidget.blockBuilder) {
+      _blockBuilder = _blockBuilderOf(widget);
+      _itemBuilder = (context, view) {
+        return _buildItem(context, view);
+      };
+    }
     final storeChanged = widget.store != oldWidget.store;
     if (storeChanged) {
       oldWidget.store.removeListener(_handleStore);
@@ -1202,7 +1203,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     }
   }
 
-  static GridTracks _tracksOf(TimedGrid widget) {
+  static GridTracks _tracksOf<T>(TimedGrid<T> widget) {
     final tracks = GridTracks(
       firstDay: dayNumber(widget.firstDay),
       dayCount: widget.dayCount,
@@ -1535,17 +1536,17 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     final ready = _daysReady;
     final shown = ready
         ? widget.store.entriesBetween(widget.firstDay, _lastDay)
-        : const <ShownItem>[];
+        : <CalendarShownEntry<T>>[];
     final hidden = _hiddenOf(shown);
     final relaid = _layOutNotices((
       above: hidden.rowAbove,
       below: hidden.rowBelow,
     ));
-    final placements = <BoardPlacement<ShownItem>>[];
+    final placements = <BoardPlacement<CalendarShownEntry<T>>>[];
     for (final entry in shown) {
       final span = gridSpanOf(entry.entry.time, _tracks);
       if (span != null) {
-        placements.add(BoardPlacement<ShownItem>(entry, span));
+        placements.add(BoardPlacement<CalendarShownEntry<T>>(entry, span));
       }
     }
     final animated = animate && ready && _syncedReady && !relaid;
@@ -1568,7 +1569,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   /// The items of [shown] that [_tracks] has no block for, counted.
-  _Hidden _hiddenOf(List<ShownItem> shown) {
+  _Hidden _hiddenOf(List<CalendarShownEntry<T>> shown) {
     final above = List<int>.filled(_tracks.columnCount, 0);
     final below = List<int>.filled(_tracks.columnCount, 0);
     var offDays = 0;
@@ -1647,7 +1648,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   /// Whether [item] starts before the grid's hours or ends after them.
-  bool _reachesPastHours(CalendarItem item) {
+  bool _reachesPastHours(CalendarEntry<T> item) {
     final hours = _tracks.hours;
     return item.startMinute < hours.start || item.endMinute > hours.end;
   }
@@ -2043,7 +2044,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (anchor == null) {
       return null;
     }
-    final range = _RangeDrag(this, viewport, anchor, point);
+    final range = _RangeDrag<T>(this, viewport, anchor, point);
     setState(() {
       _range = range;
     });
@@ -2051,7 +2052,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   }
 
   /// Moves [range]'s focus toward [focus], as far as [_reach] takes it.
-  void _moveRange(_RangeDrag range, ({int row, int col}) focus) {
+  void _moveRange(_RangeDrag<T> range, ({int row, int col}) focus) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
@@ -2098,7 +2099,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
   bool _admitsRange(
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
-    List<ShownItem> items,
+    List<CalendarShownEntry<T>> items,
   ) {
     final range = createRangeOver(_tracks, anchor, focus);
     if (!_lock.value.admitsStart(range.day, range.startMinute)) {
@@ -2118,7 +2119,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     return true;
   }
 
-  void _endRange(_RangeDrag range) {
+  void _endRange(_RangeDrag<T> range) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
@@ -2130,7 +2131,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     _create(range.anchor, hold ? null : range.focus, created);
   }
 
-  void _clearRange(_RangeDrag range) {
+  void _clearRange(_RangeDrag<T> range) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
@@ -2141,7 +2142,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   Widget? _buildCell(
     BuildContext context,
-    BoardCellView<String, ShownItem> cell,
+    BoardCellView<String, CalendarShownEntry<T>> cell,
   ) {
     if (widget.showsDayHeader && cell.row == 0) {
       if (cell.col == 0) {
@@ -2200,17 +2201,20 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 
   Widget _buildItem(
     BuildContext context,
-    BoardItemView<String, ShownItem> view,
+    BoardItemView<String, CalendarShownEntry<T>> view,
   ) {
     final entry = view.item;
     final hours = _tracks.hours;
-    return _Block(
+    return _Block<T>(
       key: blockKey(entry.id),
       entry: entry,
-      detailed: _tracks.columnCount == 1,
-      showsSummary: view.span.rowSpan >= 3,
-      cutAtStart: entry.entry.startMinute < hours.start,
-      cutAtEnd: entry.entry.endMinute > hours.end,
+      details: CalendarBlockDetails(
+        detailed: _tracks.columnCount == 1,
+        tall: view.span.rowSpan >= 3,
+        cutAtStart: entry.entry.startMinute < hours.start,
+        cutAtEnd: entry.entry.endMinute > hours.end,
+      ),
+      builder: _blockBuilder,
       selection: _selectedBlock,
       lock: _lock,
       onSelect: () {
@@ -2223,6 +2227,36 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
           : () {
               widget.onOpenItem(entry.id);
             },
+    );
+  }
+
+  /// The cover's content: what the failure builder draws for the grid's
+  /// days when the read the store waits on failed, with the store's load
+  /// error as it holds it, and what the loading builder draws otherwise.
+  Widget _buildCover(BuildContext context, CalendarStore<T> store) {
+    final first = dateOfDayNumber(_tracks.firstDay);
+    final last = _lastDay;
+    if (store.status == CalendarLoadStatus.failed) {
+      final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
+      return failure(
+        context,
+        CalendarFailureState(
+          site: CalendarStateSite.cover,
+          first: first,
+          last: last,
+          error: store.loadError,
+          retry: store.retry,
+        ),
+      );
+    }
+    final loading = widget.loadingBuilder ?? defaultCalendarLoadingBuilder;
+    return loading(
+      context,
+      CalendarLoadingState(
+        site: CalendarStateSite.cover,
+        first: first,
+        last: last,
+      ),
     );
   }
 
@@ -2252,7 +2286,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       onPointerCancel: _handlePointerCancel,
       child: NotificationListener<ScrollNotification>(
         onNotification: _handleScrollNotification,
-        child: Board<String, ShownItem>(
+        child: Board<String, CalendarShownEntry<T>>(
           key: _boardKey,
           controller: _board,
           cellBuilder: _cellBuilder,
@@ -2306,10 +2340,11 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
             if (!_daysReady)
               Positioned.fill(
                 child: _LoadOverlay(
-                  error: store.status == CalendarLoadStatus.failed
-                      ? "${store.loadError}"
-                      : null,
-                  onRetry: store.retry,
+                  child: Builder(
+                    builder: (context) {
+                      return _buildCover(context, store);
+                    },
+                  ),
                 ),
               ),
           ],
@@ -2328,7 +2363,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
 /// press's own position. The range listens to both scroll positions for
 /// its length, so the focus stays the cell under the pointer while content
 /// scrolls beneath it.
-class _RangeDrag extends Drag {
+class _RangeDrag<T> extends Drag {
   _RangeDrag(this._grid, this._viewport, this.anchor, this._point)
     : focus = anchor,
       _vertical = _viewport.verticalPosition,
@@ -2337,7 +2372,7 @@ class _RangeDrag extends Drag {
     _horizontal?.addListener(_refocus);
   }
 
-  final _TimedGridState _grid;
+  final _TimedGridState<T> _grid;
   final RenderBoardViewport<String> _viewport;
   final ScrollPosition? _vertical;
   final ScrollPosition? _horizontal;
@@ -2445,27 +2480,21 @@ class _DayHeaderCell extends StatelessWidget {
   }
 }
 
-/// One item on the grid: its type's tint with a 4 px edge, its text, and
-/// an arrow at each end the grid's hours cut. Dimmed with a progress
-/// indicator while [ShownItem.pending]. A long press on it moves it while
-/// the history [lock] holds it [ItemHold.free], and reports [onSelect]
-/// while it holds it [ItemHold.started], and while [selection] names its
-/// item, an outline and the resize handles lie over it ([_BlockHandles]),
-/// the top one only while it is free.
-///
-/// A [detailed] block, which a grid of one day column shows, has its title
-/// and its times on its first line, the times wrapping under a title too
-/// long for both, and a line for each of its type's summaries under them;
-/// it shows the lines that fit whole below the first. Any other block
-/// shows its title, and its first summary when [showsSummary].
-class _Block extends StatelessWidget {
+/// One item on the grid: the box the board places it in, inset 1 px, which
+/// [_BlockContent] fills with what [builder] draws for [entry] and
+/// [details]; the block draws nothing of the entry itself. A long press on
+/// it moves it while the history [lock] holds it [ItemHold.free], and
+/// reports [onSelect] while it holds it [ItemHold.started], and while
+/// [selection] names its item, an outline and the resize handles lie over
+/// it ([_BlockHandles]), the top one only while it is free. Its tap, long
+/// press and move take a press anywhere in the box, whatever the builder
+/// paints there.
+class _Block<T> extends StatelessWidget {
   const _Block({
     super.key,
     required this.entry,
-    required this.detailed,
-    required this.showsSummary,
-    required this.cutAtStart,
-    required this.cutAtEnd,
+    required this.details,
+    required this.builder,
     required this.selection,
     required this.lock,
     required this.onSelect,
@@ -2474,7 +2503,13 @@ class _Block extends StatelessWidget {
     required this.onOpen,
   });
 
-  final ShownItem entry;
+  final CalendarShownEntry<T> entry;
+
+  /// What the grid decides about the block's appearance, which [builder]
+  /// draws from.
+  final CalendarBlockDetails details;
+
+  final CalendarBlockBuilder<T> builder;
 
   /// The id of the item whose block is selected, or null.
   final ValueListenable<String?> selection;
@@ -2491,63 +2526,16 @@ class _Block extends StatelessWidget {
   /// drags its day count: on a grid of more than one day column.
   final bool resizesDays;
 
-  final bool detailed;
-
-  /// Whether the block's span covers enough rows for a second line, on a
-  /// block that is not [detailed]. Read from the span rather than
-  /// measured, so a block laid out at a new extent on each animation frame
-  /// does not rebuild for it.
-  final bool showsSummary;
-
-  /// Whether the item starts before the grid's hours, which an arrow at
-  /// the block's top marks.
-  final bool cutAtStart;
-
-  /// Whether the item ends after the grid's hours, which an arrow at the
-  /// block's bottom marks.
-  final bool cutAtEnd;
-
   /// Null while the item is pending, so a tap opens nothing.
   final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final styles = _GridStyles.of(context);
-    final item = entry.entry;
-    final style = harborTypeStyleOf(item.type);
-    Widget content = DecoratedBox(
-      decoration: BoxDecoration(
-        color: style.tint,
-        border: Border(left: BorderSide(color: style.edge, width: 4.0)),
-      ),
-      child: detailed ? _buildLines(item, styles) : _buildCompact(item, styles),
+    final content = _BlockContent<T>(
+      entry: entry,
+      details: details,
+      builder: builder,
     );
-    if (cutAtStart || cutAtEnd) {
-      content = Stack(
-        fit: StackFit.passthrough,
-        children: <Widget>[
-          content,
-          if (cutAtStart) styles.cutStart,
-          if (cutAtEnd) styles.cutEnd,
-        ],
-      );
-    }
-    if (entry.pending) {
-      content = Stack(
-        fit: StackFit.passthrough,
-        children: <Widget>[
-          Opacity(opacity: 0.5, child: content),
-          const Positioned(
-            top: 2.0,
-            right: 2.0,
-            child: SizedBox.square(
-              dimension: 12.0,
-              child: CircularProgressIndicator(strokeWidth: 2.0),
-            ),
-          ),
-        ],
-      );
-    }
     // One shape selected or not, and held or not, so neither change drops
     // the block's State.
     return ListenableBuilder(
@@ -2563,6 +2551,10 @@ class _Block extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(1.0),
                 child: GestureDetector(
+                  // Opaque, so the box takes a press wherever the builder
+                  // paints nothing, and the drag handle deferring to it
+                  // does too.
+                  behavior: HitTestBehavior.opaque,
                   onTap: onOpen,
                   onLongPress: hold == ItemHold.started ? onSelect : null,
                   child: child,
@@ -2584,127 +2576,69 @@ class _Block extends StatelessWidget {
       },
     );
   }
+}
 
-  /// The title and, when [showsSummary], the first summary, laid out at
-  /// their natural height and clipped to the block, so a block shorter
-  /// than its text does not overflow.
-  Widget _buildCompact(CalendarItem item, _GridStyles styles) {
-    final schema = schemaOf(item.type);
-    String? summary;
-    if (showsSummary && schema.summaryKeys.isNotEmpty) {
-      final key = schema.summaryKeys.first;
-      summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
-    }
-    return ClipRect(
-      child: OverflowBox(
-        alignment: Alignment.topLeft,
-        minHeight: 0.0,
-        maxHeight: double.infinity,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(4.0, 2.0, 4.0, 2.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                item.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: styles.blockTitle,
-              ),
-              if (summary != null)
-                Text(
-                  summary,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: styles.blockSummary,
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+/// A block's content: what [builder] last returned for [entry] and
+/// [details], called again only once one of the three is not `==` to the
+/// last, an inherited widget the builder read through this widget's
+/// context notifies, or a hot reload reassembles it. The board rebuilds
+/// every block it has built on each pinch move and each write, with the
+/// identical entry and an equal details value for a block neither
+/// changes, so such a rebuild calls no builder.
+class _BlockContent<T> extends StatefulWidget {
+  const _BlockContent({
+    required this.entry,
+    required this.details,
+    required this.builder,
+  });
 
-  /// The title and the times, then each summary the item has, one per
-  /// line, as [_BlockLinesDelegate] paints them.
-  Widget _buildLines(CalendarItem item, _GridStyles styles) {
-    final schema = schemaOf(item.type);
-    final summaries = <String>[];
-    for (final key in schema.summaryKeys) {
-      final summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
-      if (summary != null) {
-        summaries.add(summary);
-      }
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(6.0, 3.0, 6.0, 3.0),
-      child: Flow(
-        delegate: const _BlockLinesDelegate(),
-        children: <Widget>[
-          Wrap(
-            spacing: 8.0,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              Text(
-                item.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: styles.detailedTitle,
-              ),
-              Text(
-                "${clockLabel(item.startMinute)}-${clockLabel(item.endMinute)}",
-                maxLines: 1,
-                style: styles.detail,
-              ),
-            ],
-          ),
-          for (final summary in summaries)
-            Text(
-              summary,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: styles.detail,
-            ),
-        ],
-      ),
-    );
+  final CalendarShownEntry<T> entry;
+  final CalendarBlockDetails details;
+  final CalendarBlockBuilder<T> builder;
+
+  @override
+  State<_BlockContent<T>> createState() {
+    return _BlockContentState<T>();
   }
 }
 
-/// Lays a detailed block's lines out down its width, each at its natural
-/// height, and paints the first line, clipped to the block when it is
-/// taller, and each line after it while the lines down to its bottom fit,
-/// so no line shows cut in half. The lines are laid out with the block,
-/// so a block resized on each animation frame keeps the lines that fit
-/// without a rebuild.
-class _BlockLinesDelegate extends FlowDelegate {
-  const _BlockLinesDelegate();
+class _BlockContentState<T> extends State<_BlockContent<T>> {
+  /// What the builder last returned, which the element under this one then
+  /// neither updates nor rebuilds; null until the next build calls it.
+  Widget? _built;
 
   @override
-  BoxConstraints getConstraintsForChild(int i, BoxConstraints constraints) {
-    return BoxConstraints(maxWidth: constraints.maxWidth);
-  }
-
-  @override
-  void paintChildren(FlowPaintingContext context) {
-    var top = 0.0;
-    for (var i = 0; i < context.childCount; i++) {
-      final height = context.getChildSize(i)!.height;
-      if (i > 0 && top + height > context.size.height) {
-        return;
-      }
-      context.paintChild(
-        i,
-        transform: Matrix4.translationValues(0.0, top, 0.0),
-      );
-      top += height;
+  void didUpdateWidget(_BlockContent<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Identity first: an unchanged block's entry is the board's stored
+    // instance, and its builder the grid's one field, so the deep
+    // comparison of the payload runs only for an entry that was replaced.
+    if (!_same(widget.entry, oldWidget.entry) ||
+        !_same(widget.details, oldWidget.details) ||
+        !_same(widget.builder, oldWidget.builder)) {
+      _built = null;
     }
   }
 
+  static bool _same(Object a, Object b) {
+    return identical(a, b) || a == b;
+  }
+
   @override
-  bool shouldRepaint(_BlockLinesDelegate oldDelegate) {
-    return false;
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _built = null;
+  }
+
+  @override
+  void reassemble() {
+    super.reassemble();
+    _built = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _built ??= widget.builder(context, widget.entry, widget.details);
   }
 }
 
@@ -2721,7 +2655,7 @@ class _GutterCell extends StatelessWidget {
 
 /// The day header's corner over the gutter, on the surface colour: nothing,
 /// or a pill counting the shown items on no day the grid has a column for,
-/// whose tooltip says why.
+/// which a screen reader hears with [hiddenItemsLabel] before the count.
 class _HiddenCount extends StatelessWidget {
   const _HiddenCount({required this.count});
 
@@ -2740,8 +2674,8 @@ class _HiddenCount extends StatelessWidget {
             if (value == 0) {
               return const SizedBox.shrink();
             }
-            return Tooltip(
-              message: hiddenItemsLabel(value),
+            return Semantics(
+              label: hiddenItemsLabel(value),
               child: DecoratedBox(
                 key: hiddenCountKey,
                 decoration: styles.hiddenPill,
@@ -2906,41 +2840,21 @@ class _LandingLabel extends StatelessWidget {
   }
 }
 
-/// Covers the grid while its days are not ready, taking every press: a
-/// progress indicator while it loads, the error and Retry when the read
-/// failed.
+/// Covers the grid while its days are not ready, taking every press,
+/// whatever [child] paints: the scrim, with [child], the loading or the
+/// failure builder's content, centred on it.
 class _LoadOverlay extends StatelessWidget {
-  const _LoadOverlay({required this.error, required this.onRetry});
+  const _LoadOverlay({required this.child});
 
-  final String? error;
-  final VoidCallback onRetry;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final styles = _GridStyles.of(context);
-    final message = error;
     // A ColoredBox hit-tests as opaque, so no press reaches the board.
     return ColoredBox(
       color: styles.scrim,
-      child: Center(
-        child: message == null
-            ? const CircularProgressIndicator()
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                    child: Text(
-                      message,
-                      textAlign: TextAlign.center,
-                      style: styles.message,
-                    ),
-                  ),
-                  const SizedBox(height: 12.0),
-                  TextButton(onPressed: onRetry, child: const Text("Retry")),
-                ],
-              ),
-      ),
+      child: Center(child: child),
     );
   }
 }
@@ -3547,7 +3461,7 @@ class _ResizeHandle extends StatelessWidget {
 
 /// A resize handle's grip: a pill filled with the primary colour, as the
 /// outline it lies across is, ringed in the surface colour, which parts it
-/// from the outline and the block's tint, over a soft shadow. Takes no
+/// from the outline and the block's content, over a soft shadow. Takes no
 /// press: the strip under it and the grid's listener take them.
 class _Grip extends StatelessWidget {
   const _Grip({super.key});

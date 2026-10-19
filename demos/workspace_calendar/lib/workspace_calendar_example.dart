@@ -121,6 +121,7 @@ import 'workspace_calendar/day_cell.dart';
 import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
 import 'workspace_calendar/history_lock.dart';
+import 'workspace_calendar/item_builders.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/month_board.dart';
@@ -164,6 +165,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
     this.clock,
     this.editing = false,
     this.calendarTheme = harborCalendarTheme,
+    this.builders = harborItemBuilders,
   });
 
   /// The day the calendar opens on and marks as today. Null opens on the
@@ -189,6 +191,10 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// given. It shadows any [CalendarTheme] of the host's.
   final CalendarThemeData calendarTheme;
 
+  /// What the views draw their items and states with, [harborItemBuilders]
+  /// unless given; a null field gives the view's default.
+  final ItemBuilders builders;
+
   static final ThemeData _theme = buildHarborTheme();
 
   @override
@@ -204,6 +210,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
           api: api,
           clock: clock ?? DateTime.now,
           editing: editing,
+          builders: builders,
         ),
       ),
     );
@@ -216,12 +223,14 @@ class _WorkspaceCalendar extends StatefulWidget {
     required this.api,
     required this.clock,
     required this.editing,
+    required this.builders,
   });
 
   final DateTime? today;
   final CalendarApi? api;
   final DateTime Function() clock;
   final bool editing;
+  final ItemBuilders builders;
 
   @override
   State<_WorkspaceCalendar> createState() {
@@ -1067,7 +1076,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           Expanded(
             child: NotificationListener<ScrollNotification>(
               onNotification: _handleBoardScroll,
-              child: TimedGrid(
+              child: TimedGrid<ItemPayload>(
                 // Each mode builds its own grid, which opens scrolled to its
                 // opening time, and so does a week of one shown weekday, as a
                 // grid keeps one day column or more than one.
@@ -1103,6 +1112,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 maxDayCount: maxDayCount,
                 // The week strip names Day's one day.
                 showsDayHeader: _mode != _CalendarMode.day,
+                blockBuilder: widget.builders.block,
+                loadingBuilder: widget.builders.loading,
+                failureBuilder: widget.builders.failure,
               ),
             ),
           ),

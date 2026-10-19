@@ -160,7 +160,9 @@ Future<String> idOn(
 
 /// The store the week grid shows.
 CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
-  return tester.widget<TimedGrid>(find.byType(TimedGrid)).store;
+  return tester
+      .widget<TimedGrid<ItemPayload>>(find.byType(TimedGrid<ItemPayload>))
+      .store;
 }
 
 /// The block whose title is [title].
@@ -1280,7 +1282,7 @@ void main() {
     }
     expect(
       find.descendant(
-        of: find.byType(TimedGrid),
+        of: find.byType(TimedGrid<ItemPayload>),
         matching: find.byType(CircularProgressIndicator),
       ),
       findsOneWidget,

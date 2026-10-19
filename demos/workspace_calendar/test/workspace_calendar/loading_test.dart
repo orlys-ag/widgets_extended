@@ -4,6 +4,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/item_card.dart';
@@ -41,7 +42,10 @@ bool hasMarker(WidgetTester tester, DateTime day) {
 /// The week grid's overlay: what covers the grid while its week is not
 /// ready.
 Finder overlayShowing(Finder content) {
-  return find.descendant(of: find.byType(TimedGrid), matching: content);
+  return find.descendant(
+    of: find.byType(TimedGrid<ItemPayload>),
+    matching: content,
+  );
 }
 
 /// Pumps 400 ms of frames, in which the list scrolls to a newly

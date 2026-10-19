@@ -8,6 +8,8 @@ import 'dart:ui' as ui;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
@@ -69,7 +71,9 @@ double labelRoom(WidgetTester tester) {
 
 /// The first day the timed grid shows, which in Day mode is its one day.
 DateTime gridDay(WidgetTester tester) {
-  return tester.widget<TimedGrid>(find.byType(TimedGrid)).firstDay;
+  return tester
+      .widget<TimedGrid<ItemPayload>>(find.byType(TimedGrid<ItemPayload>))
+      .firstDay;
 }
 
 /// The week grid's column of the day [weekday] days after [monday]:
@@ -129,12 +133,14 @@ Map<String, Object?> taskJson(
 }
 
 /// The app [pumpCalendar] pumps: the calendar over [api], given [today]
-/// and [clock], opening in edit mode when [editing].
+/// and [clock], opening in edit mode when [editing], its views drawing
+/// with [builders].
 Widget calendarApp({
   required MockCalendarApi api,
   DateTime? today,
   DateTime Function()? clock,
   bool editing = false,
+  ItemBuilders builders = harborItemBuilders,
 }) {
   return MaterialApp(
     // The M3 ink sparkle shader cannot load under the test binding.
@@ -147,8 +153,14 @@ Widget calendarApp({
             api: api,
             clock: clock,
             editing: true,
+            builders: builders,
           )
-        : WorkspaceCalendarExample(today: today, api: api, clock: clock),
+        : WorkspaceCalendarExample(
+            today: today,
+            api: api,
+            clock: clock,
+            builders: builders,
+          ),
   );
 }
 
@@ -157,7 +169,8 @@ Widget calendarApp({
 /// reading the time from [clock], by default the real clock, and lets its
 /// first read complete. Returns the mock. With [pinsToday] false the
 /// calendar is given no day, so it opens on the day [clock] reads and
-/// marks that day as today. With [editing] it opens in edit mode.
+/// marks that day as today. With [editing] it opens in edit mode. Its
+/// views draw with [builders].
 Future<MockCalendarApi> pumpCalendar(
   WidgetTester tester, {
   MockCalendarApi? api,
@@ -165,6 +178,7 @@ Future<MockCalendarApi> pumpCalendar(
   DateTime Function()? clock,
   bool pinsToday = true,
   bool editing = false,
+  ItemBuilders builders = harborItemBuilders,
 }) async {
   final mock = api ?? MockCalendarApi.seeded(today, latency: harnessLatency);
   tester.view.devicePixelRatio = 1.0;
@@ -176,6 +190,7 @@ Future<MockCalendarApi> pumpCalendar(
       today: pinsToday ? today : null,
       clock: clock,
       editing: editing,
+      builders: builders,
     ),
   );
   await tester.pump(mock.latency);
@@ -246,7 +261,7 @@ Future<void> selectBlock(WidgetTester tester, String id) async {
 /// the theme above it.
 BoardAnimationStyle gridAnimationStyle(WidgetTester tester) {
   return timedGridAnimationStyleOf(
-    CalendarTheme.of(tester.element(find.byType(TimedGrid))),
+    CalendarTheme.of(tester.element(find.byType(TimedGrid<ItemPayload>))),
   );
 }
 

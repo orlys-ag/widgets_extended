@@ -625,7 +625,10 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byTooltip("1 item is on a day not shown"), findsOneWidget);
+    expect(
+      find.bySemanticsLabel("1 item is on a day not shown\n+1"),
+      findsOneWidget,
+    );
     expect(
       tester.getRect(find.byKey(hiddenCountKey)).center.dy,
       near(grid.localToGlobal(Offset.zero).dy + 20.0),

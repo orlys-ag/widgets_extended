@@ -1,6 +1,8 @@
-/// The calendar views draw what [CalendarTheme] holds: two sentinel themes,
+/// The calendar views, and Harbor's builders they draw their items and
+/// states with, draw what [CalendarTheme] holds: two sentinel themes,
 /// whose every value differs from Harbor's, from the built-in ones and from
-/// each other, and a probe that reads what each view paints.
+/// each other in each field the views and Harbor's builders read, and a
+/// probe that reads what each view paints.
 library;
 
 import 'dart:ui' as ui;
@@ -57,7 +59,8 @@ const List<String> iconNames = <String>[
   "addEntryIcon",
 ];
 
-/// The thirty-one text style fields, numbered from 1 in this order.
+/// The thirty-one text style fields the views and Harbor's builders read,
+/// numbered from 1 in this order.
 const List<String> styleNames = <String>[
   "hourLabelStyle",
   "dayHeaderWeekdayStyle",
@@ -779,7 +782,7 @@ Future<Set<String>> labelsOf(
   CalendarThemeData theme,
 ) async {
   final viewport = gridViewport(tester);
-  final context = tester.element(find.byType(TimedGrid));
+  final context = tester.element(find.byType(TimedGrid<ItemPayload>));
   final painter = TextPainter(
     text: TextSpan(
       text: "00:00",
@@ -1091,9 +1094,9 @@ void expectBlockTitles(WidgetTester tester, CalendarThemeData theme) {
 /// The calendar's [CalendarStore], read from the view that shows, which a
 /// test writes through as the calendar does.
 CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
-  final grid = find.byType(TimedGrid);
+  final grid = find.byType(TimedGrid<ItemPayload>);
   if (grid.evaluate().isNotEmpty) {
-    return tester.widget<TimedGrid>(grid).store;
+    return tester.widget<TimedGrid<ItemPayload>>(grid).store;
   }
   final list = find.byType(DayList);
   if (list.evaluate().isNotEmpty) {
@@ -1117,7 +1120,7 @@ List<Widget> gutterCells(WidgetTester tester) {
 List<Finder> viewRoots() {
   return <Finder>[
     for (final type in <Type>[
-      TimedGrid,
+      TimedGrid<ItemPayload>,
       MonthBoard,
       DayList,
       DayCell,
@@ -1333,7 +1336,9 @@ void main() {
   ) async {
     final api = await pumpThemed(tester, harborCalendarTheme);
     await pickMode(tester, "Week");
-    final drawn = drawnUnder(tester, <Finder>[find.byType(TimedGrid)]);
+    final drawn = drawnUnder(tester, <Finder>[
+      find.byType(TimedGrid<ItemPayload>),
+    ]);
     for (final colour in <Color>[
       HarborColors.surface,
       HarborColors.outline,
@@ -1349,16 +1354,18 @@ void main() {
 
     await failNextRead(tester, api, "Next week");
     final message = find.descendant(
-      of: find.byType(TimedGrid),
+      of: find.byType(TimedGrid<ItemPayload>),
       matching: find.text("Reading failed."),
     );
     final retry = find.descendant(
-      of: find.byType(TimedGrid),
+      of: find.byType(TimedGrid<ItemPayload>),
       matching: find.text("Retry"),
     );
     expect(message, findsOneWidget);
     expect(retry, findsOneWidget);
-    final failed = drawnUnder(tester, <Finder>[find.byType(TimedGrid)]);
+    final failed = drawnUnder(tester, <Finder>[
+      find.byType(TimedGrid<ItemPayload>),
+    ]);
     final retryLabel = tester.renderObject<RenderParagraph>(retry);
     expect(failed.paragraphs.contains(tester.renderObject(message)), isTrue);
     expect(failed.paragraphs.contains(retryLabel), isFalse);
@@ -2051,7 +2058,7 @@ void main() {
     final api = await pumpThemed(tester, sentinelA);
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
-    final roots = <Finder>[find.byType(TimedGrid)];
+    final roots = <Finder>[find.byType(TimedGrid<ItemPayload>)];
     final fields = <String>{};
     void probe(String where, {CalendarThemeData? theme}) {
       final drawn = drawnUnder(tester, roots);
@@ -2166,7 +2173,7 @@ void main() {
     await failNextRead(tester, api, "Next week");
     expect(
       find.descendant(
-        of: find.byType(TimedGrid),
+        of: find.byType(TimedGrid<ItemPayload>),
         matching: find.text("Reading failed."),
       ),
       findsOneWidget,
@@ -2925,7 +2932,7 @@ void main() {
     await failNextRead(tester, api, "Next week");
     expectText(
       tester,
-      textIn(find.byType(TimedGrid), "Reading failed."),
+      textIn(find.byType(TimedGrid<ItemPayload>), "Reading failed."),
       theme,
       "messageStyle",
       theme.error,
@@ -3279,7 +3286,10 @@ void main() {
         .widget<ColoredBox>(
           find
               .ancestor(
-                of: textIn(find.byType(TimedGrid), "Reading failed."),
+                of: textIn(
+                  find.byType(TimedGrid<ItemPayload>),
+                  "Reading failed.",
+                ),
                 matching: find.byType(ColoredBox),
               )
               .first,
@@ -3582,7 +3592,9 @@ void main() {
           await tester.pump();
           expect(gridBoard(tester).drag!.draggedItemOpacity, 0.3);
           expect(
-            drawnUnder(tester, <Finder>[find.byType(TimedGrid)]).alphas,
+            drawnUnder(tester, <Finder>[
+              find.byType(TimedGrid<ItemPayload>),
+            ]).alphas,
             contains(Color.getAlphaFromOpacity(0.3)),
           );
           await gesture.cancel();
@@ -3704,7 +3716,7 @@ void main() {
     }
     expect(gridBoard(tester).drag!.draggedItemOpacity, 0.3);
     expectOnly(
-      drawnUnder(tester, <Finder>[find.byType(TimedGrid)]),
+      drawnUnder(tester, <Finder>[find.byType(TimedGrid<ItemPayload>)]),
       sentinelB,
       forbidden: <CalendarThemeData>[sentinelA],
       reason: "the lerp's end",
