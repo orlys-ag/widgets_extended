@@ -5,10 +5,10 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 
 import 'calendar_data.dart';
 import 'day_cell.dart';
-import 'harbor_theme.dart';
 
 /// The key of the month picker's cell showing [month].
 ValueKey<String> monthPickerMonthKey(DateTime month) {
@@ -17,6 +17,73 @@ ValueKey<String> monthPickerMonthKey(DateTime month) {
 
 /// How many months a row of the [MonthPicker] holds.
 const int monthPickerColumns = 3;
+
+/// What a [MonthPicker] and its [MonthCell]s draw and run with, made from
+/// one [CalendarThemeData] by [forTheme] and never changed.
+@immutable
+class _PickerStyles {
+  _PickerStyles._(this.theme)
+    : name = theme.monthNameStyle.copyWith(color: theme.text),
+      selectedName = theme.monthNameMarkedStyle.copyWith(
+        color: theme.onPrimary,
+      ),
+      currentName = theme.monthNameMarkedStyle.copyWith(color: theme.primary),
+      pill = BoxDecoration(
+        color: theme.background,
+        borderRadius: BorderRadius.circular(dayCircleSize / 2.0),
+      ),
+      selectedPill = BoxDecoration(
+        color: theme.primary,
+        borderRadius: BorderRadius.circular(dayCircleSize / 2.0),
+      ),
+      ring = BoxDecoration(
+        border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
+        borderRadius: BorderRadius.circular(dayCircleSize / 2.0),
+      );
+
+  /// The styles of [theme]: those made for it before, or for a theme `==`
+  /// to it last, so an equal theme makes none.
+  static _PickerStyles forTheme(CalendarThemeData theme) {
+    final kept = _memo[theme];
+    if (kept != null) {
+      return kept;
+    }
+    final last = _last;
+    final styles = last != null && last.theme == theme
+        ? last
+        : _PickerStyles._(theme);
+    _memo[theme] = styles;
+    _last = styles;
+    return styles;
+  }
+
+  /// The styles of the theme above [context], which [context] then depends
+  /// on.
+  static _PickerStyles of(BuildContext context) {
+    return forTheme(CalendarTheme.of(context));
+  }
+
+  static Expando<_PickerStyles> _memo = Expando<_PickerStyles>();
+  static _PickerStyles? _last;
+
+  /// Drops the styles made so far, which keep the code that made them
+  /// across a hot reload, so the next read makes them again.
+  static void _reset() {
+    _memo = Expando<_PickerStyles>();
+    _last = null;
+  }
+
+  final CalendarThemeData theme;
+  final TextStyle name;
+
+  /// The selected month's name, which the picker also measures names in.
+  final TextStyle selectedName;
+
+  final TextStyle currentName;
+  final BoxDecoration pill;
+  final BoxDecoration selectedPill;
+  final BoxDecoration ring;
+}
 
 /// [year]'s months in rows of [monthPickerColumns], January first, each
 /// month a [MonthCell] on an equal share of the picker's width,
@@ -82,6 +149,9 @@ class _MonthPickerState extends State<MonthPicker>
   /// given, or the last year reported through [MonthPicker.onBrowse] since.
   late int _year;
 
+  /// What the picker measures names in and slides with.
+  late _PickerStyles _styles;
+
   @override
   void initState() {
     super.initState();
@@ -89,12 +159,29 @@ class _MonthPickerState extends State<MonthPicker>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _styles = _PickerStyles.of(context);
+  }
+
+  @override
   void didUpdateWidget(MonthPicker oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // A frame that brings a new theme with the new year calls this before
+    // the rebuild that calls didChangeDependencies, so the slide below
+    // reads the theme here.
+    _styles = _PickerStyles.of(context);
     if (widget.year != _year) {
       _year = widget.year;
       _slideTo(widget.year);
     }
+  }
+
+  @override
+  void reassemble() {
+    _PickerStyles._reset();
+    super.reassemble();
+    _styles = _PickerStyles.of(context);
   }
 
   @override
@@ -103,11 +190,14 @@ class _MonthPickerState extends State<MonthPicker>
     super.dispose();
   }
 
+  /// Slides to [year] over the theme's motion, or at a zero duration, in
+  /// this call.
   void _slideTo(int year) {
+    final theme = _styles.theme;
     _position.animateTo(
       year.toDouble(),
-      duration: harborMotionDuration,
-      curve: harborMotionCurve,
+      duration: theme.motionDuration,
+      curve: theme.motionCurve,
     );
   }
 
@@ -148,7 +238,7 @@ class _MonthPickerState extends State<MonthPicker>
   /// The text scaler of the names on cells [cellWidth] wide: the
   /// context's, or where the widest name, as a selected cell's [Text] lays
   /// it out, would not fit a pill at it, a smaller one that fits it.
-  static TextScaler _nameScaler(BuildContext context, double cellWidth) {
+  TextScaler _nameScaler(BuildContext context, double cellWidth) {
     var scaler = MediaQuery.textScalerOf(context);
     final room = math.max(
       0.0,
@@ -156,12 +246,8 @@ class _MonthPickerState extends State<MonthPicker>
           MonthCell.pillMargin.horizontal -
           MonthCell.pillPadding.horizontal,
     );
-    var style = DefaultTextStyle.of(context).style.merge(
-      const TextStyle(
-        fontSize: MonthCell.nameSize,
-        fontWeight: FontWeight.w600,
-      ),
-    );
+    var style = DefaultTextStyle.of(context).style.merge(_styles.selectedName);
+    final fontSize = style.fontSize ?? kDefaultFontSize;
     if (MediaQuery.boldTextOf(context)) {
       style = style.merge(const TextStyle(fontWeight: FontWeight.bold));
     }
@@ -183,8 +269,8 @@ class _MonthPickerState extends State<MonthPicker>
       if (widest <= room) {
         break;
       }
-      final size = scaler.scale(MonthCell.nameSize) * (room - 0.5) / widest;
-      scaler = TextScaler.linear(math.max(0.0, size) / MonthCell.nameSize);
+      final size = scaler.scale(fontSize) * (room - 0.5) / widest;
+      scaler = TextScaler.linear(math.max(0.0, size) / fontSize);
     }
     painter.dispose();
     return scaler;
@@ -269,8 +355,9 @@ class _MonthPickerState extends State<MonthPicker>
 /// One month of the [MonthPicker]: its full name, scaled by [nameScaler],
 /// on a pill across the cell, at least as tall as a [DayCell]'s circle and
 /// otherwise as tall as the name, filled with the primary colour when
-/// [isSelected] and ringed as today's number is when [isCurrent]. A screen
-/// reader hears the cell as a button named by the month and the year.
+/// [isSelected] and ringed as today's number is when [isCurrent], in the
+/// [CalendarTheme] above it. A screen reader hears the cell as a button
+/// named by the month and the year.
 class MonthCell extends StatelessWidget {
   const MonthCell({
     super.key,
@@ -289,9 +376,6 @@ class MonthCell extends StatelessWidget {
   /// The text scaler of the name.
   final TextScaler nameScaler;
 
-  /// The name's font size before [nameScaler].
-  static const double nameSize = 15.0;
-
   /// The space around the pill, which makes a row of pills at the default
   /// text size as tall as a row of the month's days.
   static const EdgeInsets pillMargin = EdgeInsets.symmetric(
@@ -304,13 +388,14 @@ class MonthCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color nameColor;
+    final styles = _PickerStyles.of(context);
+    final TextStyle nameStyle;
     if (isSelected) {
-      nameColor = HarborColors.onPrimary;
+      nameStyle = styles.selectedName;
     } else if (isCurrent) {
-      nameColor = HarborColors.primary;
+      nameStyle = styles.currentName;
     } else {
-      nameColor = HarborColors.text;
+      nameStyle = styles.name;
     }
     return Semantics(
       button: true,
@@ -322,25 +407,14 @@ class MonthCell extends StatelessWidget {
         constraints: const BoxConstraints(minHeight: dayCircleSize),
         padding: pillPadding,
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: isSelected ? HarborColors.primary : HarborColors.background,
-          borderRadius: BorderRadius.circular(dayCircleSize / 2.0),
-        ),
-        foregroundDecoration: isCurrent
-            ? harborTodayRing(dayCircleSize / 2.0)
-            : null,
+        decoration: isSelected ? styles.selectedPill : styles.pill,
+        foregroundDecoration: isCurrent ? styles.ring : null,
         child: Text(
           monthNames[month.month - 1],
           maxLines: 1,
           softWrap: false,
           textScaler: nameScaler,
-          style: TextStyle(
-            fontSize: nameSize,
-            fontWeight: isSelected || isCurrent
-                ? FontWeight.w600
-                : FontWeight.w400,
-            color: nameColor,
-          ),
+          style: nameStyle,
         ),
       ),
     );

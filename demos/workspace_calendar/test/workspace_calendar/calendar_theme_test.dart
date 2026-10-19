@@ -12,9 +12,12 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/month_picker.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
+import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 
 import 'calendar_harness.dart';
@@ -818,6 +821,114 @@ Future<void> failNextRead(
   }
 }
 
+DateTime april(int day) {
+  return DateTime(2026, 4, day);
+}
+
+DateTime may(int day) {
+  return DateTime(2026, 5, day);
+}
+
+/// Agenda's cell of [day] in the calendar card's month.
+Finder cellOf(DateTime day) {
+  return find.byKey(dayCellKey(day));
+}
+
+/// The week strip's cell of [day].
+Finder stripCellOf(DateTime day) {
+  return find.descendant(
+    of: find.byKey(weekStripDayKey(day)),
+    matching: find.byType(DayCell),
+  );
+}
+
+/// The style of the number [cell] draws for [day].
+TextStyle numberStyleOf(WidgetTester tester, Finder cell, DateTime day) {
+  return tester
+      .widget<Text>(find.descendant(of: cell, matching: find.text("${day.day}")))
+      .style!;
+}
+
+/// How far the week strip has scrolled.
+double stripOffset(WidgetTester tester) {
+  return tester
+      .state<ScrollableState>(
+        find.descendant(
+          of: find.byType(WeekStrip),
+          matching: find.byType(Scrollable),
+        ),
+      )
+      .position
+      .pixels;
+}
+
+/// The picker's position: the year whose months it shows, fractional
+/// while it slides, read from where it shows [year]'s months.
+double pickerPosition(WidgetTester tester, int year) {
+  final shown = tester.widget<FractionalTranslation>(
+    find.descendant(
+      of: find.byType(MonthPicker),
+      matching: find.byKey(ValueKey<int>(year)),
+    ),
+  );
+  return year - shown.translation.dx;
+}
+
+/// A line of [style] over the ambient text style at [context], as Text
+/// lays it out there.
+double lineHeightAt(BuildContext context, TextStyle style) {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: "Mon",
+      style: DefaultTextStyle.of(context).style.merge(style),
+    ),
+    textDirection: TextDirection.ltr,
+    textScaler: MediaQuery.textScalerOf(context),
+    maxLines: 1,
+  )..layout();
+  final height = painter.height;
+  painter.dispose();
+  return height;
+}
+
+/// [theme]'s unmarked number at either end of the fold: unfolded in the
+/// shown month and in another, and folded.
+({TextStyle from, TextStyle fromMuted, TextStyle to}) foldStylesOf(
+  CalendarThemeData theme,
+) {
+  return (
+    from: theme.dayNumberStyle.copyWith(color: theme.text),
+    fromMuted: theme.dayNumberStyle.copyWith(color: theme.textMuted),
+    to: theme.dayNumberMarkedStyle.copyWith(color: theme.text),
+  );
+}
+
+/// [sentinelA] with its marked day number its unmarked one at w800, so the
+/// two differ in weight alone.
+final CalendarThemeData sentinelA2 = sentinelA.copyWith(
+  dayNumberMarkedStyle: sentinelA.dayNumberStyle.copyWith(
+    fontWeight: FontWeight.w800,
+  ),
+);
+
+/// Rebuilds every element as a hot reload does, through
+/// [BuildOwner.reassemble]; the next pump builds them.
+void hotReload(WidgetTester tester) {
+  tester.binding.buildOwner!.reassemble(tester.binding.rootElement!);
+}
+
+/// Starts a drag on the calendar card's pull tab and moves it [distance]
+/// up, folding the month that far; returns the gesture, still down.
+Future<TestGesture> foldBy(WidgetTester tester, double distance) async {
+  final gesture = await tester.startGesture(
+    tester.getCenter(find.byKey(calendarPullTabKey)),
+  );
+  await gesture.moveBy(const Offset(0.0, -20.0));
+  await gesture.moveBy(Offset(0.0, -distance));
+  await tester.pump();
+  return gesture;
+}
+
 void main() {
   test("the sentinels' values differ from Harbor's, the built-in ones and "
       "each other's", () {
@@ -926,5 +1037,314 @@ void main() {
     );
     expect(failed.paragraphs.contains(retryLabel), isFalse);
     expect(failed.styles.contains(retryLabel.text.style), isFalse);
+  });
+
+  testWidgets("C3 day cells, weekday headers, the strip and the picker draw "
+      "and run on A, and on B from the frame that installs it", (
+    tester,
+  ) async {
+    final api = await pumpThemed(tester, sentinelA);
+    final fields = <String>{};
+    final agendaRoots = <Finder>[
+      find.byType(DayCell),
+      find.byType(WeekdayHeader),
+    ];
+
+    // Agenda's month, unfolded.
+    var drawn = drawnUnder(tester, agendaRoots);
+    expectOnly(drawn, sentinelA, forbidden: const [], reason: "Agenda");
+    fields.addAll(fieldsOf(drawn, sentinelA));
+    await installTheme(tester, api, sentinelB);
+    expectOnly(
+      drawnUnder(tester, agendaRoots),
+      sentinelB,
+      forbidden: <CalendarThemeData>[sentinelA],
+      reason: "Agenda under B",
+    );
+    await installTheme(tester, api, sentinelA);
+    await tester.pumpAndSettle();
+
+    // Day's strip, and its slide to the next week on A's motion.
+    await pickMode(tester, "Day");
+    final stripRoots = <Finder>[find.byType(DayCell)];
+    drawn = drawnUnder(tester, stripRoots);
+    expectOnly(drawn, sentinelA, forbidden: const [], reason: "Day");
+    fields.addAll(fieldsOf(drawn, sentinelA));
+    final week = tester.getSize(find.byType(WeekStrip)).width;
+    await tester.tap(find.byKey(weekStripDayKey(april(26))));
+    await tester.pumpAndSettle();
+    var from = stripOffset(tester);
+    await tester.tap(find.byTooltip("Next day"));
+    // The frame that rebuilds the strip starts the slide after it; the
+    // slide's first tick is the next frame.
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(stripOffset(tester) - from, moreOrLessEquals(week / 2, epsilon: 1.0));
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(stripOffset(tester) - from, moreOrLessEquals(week, epsilon: 0.01));
+    await tester.pumpAndSettle();
+
+    // B from the frame that installs it, the strip as tall as B's weekday
+    // line makes it, and its next slide on B's motion.
+    await installTheme(tester, api, sentinelB);
+    expectOnly(
+      drawnUnder(tester, stripRoots),
+      sentinelB,
+      forbidden: <CalendarThemeData>[sentinelA],
+      reason: "Day under B",
+    );
+    final strip = tester.element(find.byType(WeekStrip));
+    expect(
+      tester.getSize(find.byType(WeekStrip)).height,
+      moreOrLessEquals(
+        lineHeightAt(strip, sentinelB.stripWeekdayStyle) +
+            stripLabelGap +
+            dayCircleSize,
+      ),
+    );
+    // Setup sanity: B's weekday line is not A's, which the strip had.
+    expect(
+      lineHeightAt(strip, sentinelB.stripWeekdayStyle),
+      isNot(lineHeightAt(strip, sentinelA.stripWeekdayStyle)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(weekStripDayKey(may(3))));
+    await tester.pumpAndSettle();
+    from = stripOffset(tester);
+    await tester.tap(find.byTooltip("Next day"));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      stripOffset(tester) - from,
+      moreOrLessEquals(week * Curves.easeIn.transform(0.5), epsilon: 1.0),
+    );
+    await tester.pumpAndSettle();
+    await installTheme(tester, api, sentinelA);
+    await tester.pumpAndSettle();
+
+    // Month's letters with the picker open, and the picker's slide to the
+    // next year on A's motion.
+    await pickMode(tester, "Month");
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    final pickerRoots = <Finder>[
+      find.byType(WeekdayHeader),
+      find.byType(MonthPicker),
+    ];
+    drawn = drawnUnder(tester, pickerRoots);
+    expectOnly(drawn, sentinelA, forbidden: const [], reason: "Month");
+    fields.addAll(fieldsOf(drawn, sentinelA));
+    await tester.tap(find.byTooltip("Next year"));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(pickerPosition(tester, 2026), moreOrLessEquals(2026.5));
+    await tester.pumpAndSettle();
+
+    // B from the frame that installs it, and the picker's names scaled by
+    // a measure of B's marked month name, the widest fitting its pill.
+    await installTheme(tester, api, sentinelB);
+    expectOnly(
+      drawnUnder(tester, pickerRoots),
+      sentinelB,
+      forbidden: <CalendarThemeData>[sentinelA],
+      reason: "Month under B",
+    );
+    final picker = tester.element(find.byType(MonthPicker));
+    final scaler = tester.widget<MonthCell>(find.byType(MonthCell).first)
+        .nameScaler;
+    final room =
+        tester.getSize(find.byType(MonthPicker)).width / monthPickerColumns -
+        MonthCell.pillMargin.horizontal -
+        MonthCell.pillPadding.horizontal;
+    var widest = 0.0;
+    for (final name in monthNames) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: name,
+          style: DefaultTextStyle.of(
+            picker,
+          ).style.merge(sentinelB.monthNameMarkedStyle),
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      if (painter.width > widest) {
+        widest = painter.width;
+      }
+      painter.dispose();
+    }
+    expect(widest, lessThanOrEqualTo(room));
+    expect(widest, greaterThan(room - 1.0));
+
+    expect(
+      fields,
+      containsAll(<String>[
+        "primary",
+        "onPrimary",
+        "background",
+        "surface",
+        "text",
+        "textMuted",
+        "todayRing",
+        "todayRingWidth",
+        ...styleNames.sublist(24),
+      ]),
+    );
+  });
+
+  testWidgets("C3 as the month folds an unmarked number draws the lerp of "
+      "the theme's prepared styles, the folded strip their marked one, and "
+      "the prepared styles are kept across frames and rebuilds", (
+    tester,
+  ) async {
+    final api = await pumpThemed(tester, sentinelA);
+    final a = foldStylesOf(sentinelA);
+    // Today, April 21, apart from the selected day.
+    await tester.tap(cellOf(april(23)));
+    await tester.pumpAndSettle();
+
+    // Unfolded, an unmarked number is A's prepared style itself, kept by a
+    // cell the next tap rebuilds.
+    final unmarked = numberStyleOf(tester, cellOf(april(22)), april(22));
+    expect(unmarked, a.from);
+    await tester.tap(cellOf(april(24)));
+    await tester.pumpAndSettle();
+    expect(
+      identical(numberStyleOf(tester, cellOf(april(23)), april(23)), unmarked),
+      isTrue,
+    );
+
+    var gesture = await foldBy(tester, 90.0);
+    final t = tester.widget<DayCell>(cellOf(april(22))).collapse.value;
+    expect(t, inExclusiveRange(0.0, 1.0));
+    expect(
+      numberStyleOf(tester, cellOf(april(22)), april(22)),
+      TextStyle.lerp(a.from, a.to, t),
+    );
+    expect(
+      numberStyleOf(tester, cellOf(may(1)), may(1)),
+      TextStyle.lerp(a.fromMuted, a.to, t),
+    );
+    final selected = numberStyleOf(tester, cellOf(april(24)), april(24));
+    final todays = numberStyleOf(tester, cellOf(april(21)), april(21));
+    await gesture.moveBy(const Offset(0.0, -10.0));
+    await tester.pump();
+    expect(
+      tester.widget<DayCell>(cellOf(april(22))).collapse.value,
+      isNot(t),
+    );
+    expect(
+      identical(numberStyleOf(tester, cellOf(april(24)), april(24)), selected),
+      isTrue,
+    );
+    expect(
+      identical(numberStyleOf(tester, cellOf(april(21)), april(21)), todays),
+      isTrue,
+    );
+    await gesture.moveBy(const Offset(0.0, -400.0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    // Folded, every number carries the marked style's tag, and an unmarked
+    // one is A's prepared folded style, kept across the rebuild a tap
+    // makes.
+    final numbers = tester.widgetList<Text>(
+      find.descendant(
+        of: find.byType(DayCell),
+        matching: find.byWidgetPredicate((widget) {
+          return widget is Text &&
+              widget.data != null &&
+              int.tryParse(widget.data!) != null;
+        }),
+      ),
+    );
+    expect(numbers, isNotEmpty);
+    for (final number in numbers) {
+      expect(number.style!.letterSpacing, tagOf(26, 0));
+    }
+    final folded = numberStyleOf(tester, stripCellOf(april(22)), april(22));
+    expect(folded, a.to);
+    await tester.tap(find.byKey(weekStripDayKey(april(25))));
+    await tester.pumpAndSettle();
+    expect(
+      identical(
+        numberStyleOf(tester, stripCellOf(april(22)), april(22)),
+        folded,
+      ),
+      isTrue,
+    );
+
+    // Under A2, whose two number styles differ in weight alone, a number
+    // of another month draws the lerp of A2's styles, and one of the shown
+    // month that lerp in A2's own text colour.
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
+    await installTheme(tester, api, sentinelA2);
+    await tester.pumpAndSettle();
+    final a2 = foldStylesOf(sentinelA2);
+    gesture = await foldBy(tester, 90.0);
+    final t2 = tester.widget<DayCell>(cellOf(april(22))).collapse.value;
+    expect(t2, inExclusiveRange(0.0, 1.0));
+    expect(
+      numberStyleOf(tester, cellOf(may(1)), may(1)),
+      TextStyle.lerp(a2.fromMuted, a2.to, t2),
+    );
+    final inMonth = numberStyleOf(tester, cellOf(april(22)), april(22));
+    expect(
+      inMonth,
+      TextStyle.lerp(a2.from, a2.to, t2)!.copyWith(color: sentinelA2.text),
+    );
+    expect(identical(inMonth.color, sentinelA2.text), isTrue);
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("C3 a hot reload makes the day cells' and the picker's styles "
+      "anew", (tester) async {
+    await pumpThemed(tester, sentinelA);
+    final number = numberStyleOf(tester, cellOf(april(21)), april(21));
+    final letter = tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byType(WeekdayHeader),
+            matching: find.text("Mon"),
+          ),
+        )
+        .style!;
+    hotReload(tester);
+    await tester.pump();
+    final remade = numberStyleOf(tester, cellOf(april(21)), april(21));
+    expect(remade, number);
+    expect(identical(remade, number), isFalse);
+    final remadeLetter = tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byType(WeekdayHeader),
+            matching: find.text("Mon"),
+          ),
+        )
+        .style!;
+    expect(remadeLetter, letter);
+    expect(identical(remadeLetter, letter), isFalse);
+
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    Finder april2026() {
+      return find.descendant(
+        of: find.byKey(monthPickerMonthKey(DateTime(2026, 4))),
+        matching: find.text("April"),
+      );
+    }
+
+    final name = tester.widget<Text>(april2026()).style!;
+    hotReload(tester);
+    await tester.pump();
+    final remadeName = tester.widget<Text>(april2026()).style!;
+    expect(remadeName, name);
+    expect(identical(remadeName, name), isFalse);
   });
 }
