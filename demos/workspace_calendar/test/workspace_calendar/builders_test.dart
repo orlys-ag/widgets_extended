@@ -519,6 +519,91 @@ String barIdOf(String slotKey) {
   return segment.substring(0, segment.indexOf("@"));
 }
 
+/// The tint the module's defaults draw a Task entry on under Harbor's
+/// theme.
+Color taskTint() {
+  return Color.alphaBlend(
+    harborTypeStyleOf(
+      CalendarItemType.task,
+    ).edge.withValues(alpha: harborCalendarTheme.entryTintOpacity),
+    harborCalendarTheme.surface,
+  );
+}
+
+/// Expects the block slot of the Task [id] to hold the module's default
+/// block: its first coloured box the Task tint, with a 4 px left edge of
+/// the Task colour.
+void expectDefaultTaskBlock(WidgetTester tester, String id) {
+  final task = harborTypeStyleOf(CalendarItemType.task).edge;
+  final boxes = tester
+      .widgetList<DecoratedBox>(
+        find.descendant(
+          of: blockFinder(id),
+          matching: find.byType(DecoratedBox),
+        ),
+      )
+      .map((box) {
+        return box.decoration;
+      })
+      .whereType<BoxDecoration>()
+      .where((decoration) {
+        return decoration.color != null;
+      });
+  final first = boxes.first;
+  expect(first.color, taskTint(), reason: id);
+  expect(
+    first.border,
+    Border(left: BorderSide(color: task, width: 4.0)),
+    reason: id,
+  );
+}
+
+/// Expects [bar], the slot of a Task's bar, to hold the module's default
+/// bar: one box of the Task tint and one 4 px wide box of the Task colour.
+void expectDefaultTaskBar(WidgetTester tester, Finder bar) {
+  final task = harborTypeStyleOf(CalendarItemType.task).edge;
+  final boxes = tester
+      .widgetList<ColoredBox>(
+        find.descendant(of: bar, matching: find.byType(ColoredBox)),
+      )
+      .toList();
+  expect(
+    boxes.where((box) {
+      return box.color == taskTint();
+    }),
+    hasLength(1),
+  );
+  final edges = boxes.where((box) {
+    return box.color == task;
+  }).toList();
+  expect(edges, hasLength(1));
+  expect(tester.getSize(find.byWidget(edges.single)).width, 4.0);
+}
+
+/// The last day [api] has been asked to list: the end of the days the store
+/// has read, or [today] before any read.
+DateTime lastDayListed(MockCalendarApi api) {
+  var last = today;
+  for (final request in api.requests) {
+    final end = request.last;
+    if (request.method == CalendarMethod.list &&
+        end != null &&
+        end.isAfter(last)) {
+      last = end;
+    }
+  }
+  return last;
+}
+
+/// Steps Day forward with its chevron, settling after each step, until its
+/// grid would show [day], every weekday shown.
+Future<void> stepDayTo(WidgetTester tester, DateTime day) async {
+  for (var i = daysBetween(gridDay(tester), day); i > 0; i--) {
+    await tester.tap(find.byTooltip("Next day"));
+    await tester.pumpAndSettle();
+  }
+}
+
 /// Taps [tooltip]'s chevron, settling, until [shown] finds something, at
 /// most three times; reads fail meanwhile while [api]'s policy says so.
 Future<void> stepUntil(
@@ -609,7 +694,8 @@ void main() {
   });
 
   testWidgets("BW2 Day draws each block of its one day through its builder, "
-      "detailed, its pending state included", (tester) async {
+      "detailed, its pending state included, and its cover through the "
+      "loading and failure builders for its day", (tester) async {
     final marks = MarkingBuilders();
     final api = await pumpCalendar(
       tester,
@@ -642,6 +728,60 @@ void main() {
     await tester.pump(second);
     await tester.pumpAndSettle();
     expect(marks.lastBlock(brainstormId).entry.pending, isFalse);
+
+    // A step to the first day past those read, whose week the store reads
+    // then.
+    final readTo = lastDayListed(api);
+    await stepDayTo(tester, readTo);
+    expect(gridDay(tester), readTo);
+    final unread = addDays(readTo, 1);
+    await tester.tap(find.byTooltip("Next day"));
+    await tester.pump();
+    await tester.pump(oneFrame);
+    expect(
+      find.descendant(of: grid, matching: marksOf("loading")),
+      findsOneWidget,
+    );
+    final loading = marks.loadings.last;
+    expect(loading.site, CalendarStateSite.cover);
+    expect(loading.first, unread);
+    expect(loading.last, unread);
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+
+    // A step past that week, whose read fails.
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    final weekEnd = lastDayListed(api);
+    await stepDayTo(tester, weekEnd);
+    final failedDay = addDays(weekEnd, 1);
+    await tester.tap(find.byTooltip("Next day"));
+    await tester.pump();
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: grid, matching: marksOf("failure")),
+      findsOneWidget,
+    );
+    final failure = marks.failures.last;
+    expect(failure.site, CalendarStateSite.cover);
+    expect(failure.first, failedDay);
+    expect(failure.last, failedDay);
+    expect(
+      failure.error,
+      isA<CalendarFailureException>().having(
+        (error) => error.message,
+        "message",
+        "Reading failed.",
+      ),
+    );
+    final lists = listCalls(api);
+    failure.retry();
+    expect(listCalls(api), lists + 1);
+    api.failurePolicy = null;
+    await tester.pump(second);
+    await tester.pumpAndSettle();
   });
 
   testWidgets("BW3 the cover draws the loading and failure builders' "
@@ -717,9 +857,8 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets("BW4 given no builders the grid draws the module's defaults", (
-    tester,
-  ) async {
+  testWidgets("BW4 given no builders the grid draws the module's defaults, "
+      "in Week and in Day", (tester) async {
     final api = await pumpCalendar(
       tester,
       clock: nineOClock,
@@ -728,30 +867,7 @@ void main() {
     );
     await pickMode(tester, "Week");
     expect(find.byType(HarborBlock), findsNothing);
-    final task = harborTypeStyleOf(CalendarItemType.task).edge;
-    final boxes = tester
-        .widgetList<DecoratedBox>(
-          find.descendant(
-            of: blockFinder(brainstormId),
-            matching: find.byType(DecoratedBox),
-          ),
-        )
-        .map((box) {
-          return box.decoration;
-        })
-        .whereType<BoxDecoration>()
-        .where((decoration) {
-          return decoration.color != null;
-        });
-    final first = boxes.first;
-    expect(
-      first.color,
-      Color.alphaBlend(
-        task.withValues(alpha: harborCalendarTheme.entryTintOpacity),
-        harborCalendarTheme.surface,
-      ),
-    );
-    expect(first.border, Border(left: BorderSide(color: task, width: 4.0)));
+    expectDefaultTaskBlock(tester, brainstormId);
 
     await tester.tap(find.byTooltip("Next week"));
     await tester.pumpAndSettle();
@@ -791,6 +907,69 @@ void main() {
     );
     expect(find.text("Reading failed."), findsNothing);
     api.failurePolicy = null;
+    await tester.tap(find.text(retryLabel));
+    await pumpFor(tester, const Duration(milliseconds: 1400));
+    await tester.pumpAndSettle();
+
+    // Day, in a calendar of its own: the detailed default block, then the
+    // cover on the first day past those read and on the first day past the
+    // week that read added, whose read fails.
+    await tester.pumpWidget(const SizedBox());
+    final dayApi = await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: const ItemBuilders(),
+    );
+    await pickMode(tester, "Day");
+    expect(find.byType(HarborBlock), findsNothing);
+    expectDefaultTaskBlock(tester, brainstormId);
+    expect(
+      find.descendant(
+        of: blockFinder(brainstormId),
+        matching: find.text(clockRangeLabel(14 * 60, 15 * 60)),
+      ),
+      findsOneWidget,
+    );
+
+    final readTo = lastDayListed(dayApi);
+    await stepDayTo(tester, readTo);
+    expect(gridDay(tester), readTo);
+    await tester.tap(find.byTooltip("Next day"));
+    await tester.pump();
+    await tester.pump(oneFrame);
+    expect(
+      find.descendant(
+        of: grid,
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: grid,
+        matching: find.byType(CalendarActivityIndicator),
+      ),
+      findsOneWidget,
+    );
+    await pumpFor(tester, second);
+
+    dayApi.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    await stepDayTo(tester, lastDayListed(dayApi));
+    await tester.tap(find.byTooltip("Next day"));
+    await pumpFor(tester, const Duration(milliseconds: 1400));
+    expect(find.text("Reading failed."), findsNothing);
+    expect(
+      find.descendant(of: grid, matching: find.text(readFailedLabel)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: grid, matching: find.text(retryLabel)),
+      findsOneWidget,
+    );
+    dayApi.failurePolicy = null;
     await tester.tap(find.text(retryLabel));
     await pumpFor(tester, const Duration(milliseconds: 1400));
     await tester.pumpAndSettle();
@@ -1294,12 +1473,14 @@ void main() {
   });
 
   testWidgets("BM2 days large enough for cards draw each bar through the "
-      "chip builder's card form", (tester) async {
+      "chip builder's card form, its pending state included", (tester) async {
     final marks = MarkingBuilders();
     await pumpCalendar(
       tester,
+      editing: true,
       clock: nineOClock,
       size: const Size(1200.0, 1600.0),
+      api: MockCalendarApi.seeded(today, latency: second),
       builders: marks.builders,
     );
     await pickMode(tester, "Month");
@@ -1312,6 +1493,24 @@ void main() {
       expect(marks.marked(tester, slot.value, "chip", id), isTrue, reason: id);
       expect(marks.lastChip(id).details.card, isTrue, reason: id);
     }
+
+    final slot = find.byKey(
+      monthChipKey(monthSegmentKey(brainstormId, monday)),
+    );
+    await tester.tap(slot);
+    await tester.pumpAndSettle();
+    expect(find.text("Edit Task"), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete").last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    final pending = marks.lastChip(brainstormId);
+    expect(pending.entry.pending, isTrue);
+    expect(pending.details.card, isTrue);
+    expect(marks.marked(tester, slot, "chip", brainstormId), isTrue);
+    await tester.pump(second);
+    await tester.pumpAndSettle();
   });
 
   testWidgets("BM3 the month board's cover draws the loading and failure "
@@ -1375,7 +1574,7 @@ void main() {
   });
 
   testWidgets("BM4 given no builders the month board draws the module's "
-      "defaults", (tester) async {
+      "defaults, in the chip and the card form", (tester) async {
     final api = await pumpCalendar(
       tester,
       clock: nineOClock,
@@ -1384,29 +1583,9 @@ void main() {
     );
     await pickMode(tester, "Month");
     expect(find.byType(HarborChip), findsNothing);
-    final task = harborTypeStyleOf(CalendarItemType.task).edge;
     final bar = find.byKey(monthChipKey(monthSegmentKey(brainstormId, monday)));
     expect(bar, findsOneWidget);
-    final boxes = tester
-        .widgetList<ColoredBox>(
-          find.descendant(of: bar, matching: find.byType(ColoredBox)),
-        )
-        .toList();
-    expect(
-      boxes.where((box) {
-        return box.color ==
-            Color.alphaBlend(
-              task.withValues(alpha: harborCalendarTheme.entryTintOpacity),
-              harborCalendarTheme.surface,
-            );
-      }),
-      hasLength(1),
-    );
-    final edges = boxes.where((box) {
-      return box.color == task;
-    }).toList();
-    expect(edges, hasLength(1));
-    expect(tester.getSize(find.byWidget(edges.single)).width, 4.0);
+    expectDefaultTaskBar(tester, bar);
 
     await tester.tap(find.byTooltip("Next month"));
     await tester.pump();
@@ -1445,6 +1624,29 @@ void main() {
     await tester.tap(failed);
     await pumpFor(tester, const Duration(milliseconds: 1400));
     await tester.pumpAndSettle();
+
+    // Days large enough for cards, in a calendar of its own: the default
+    // bar in its card form, the times under the title.
+    await tester.pumpWidget(const SizedBox());
+    await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      size: const Size(1200.0, 1600.0),
+      builders: const ItemBuilders(),
+    );
+    await pickMode(tester, "Month");
+    final cell = gridViewport(tester).rectOfCell(0, 0)!;
+    expect(monthShowsCards(cell.width, cell.height), isTrue);
+    expect(find.byType(HarborChip), findsNothing);
+    expect(bar, findsOneWidget);
+    expectDefaultTaskBar(tester, bar);
+    expect(
+      find.descendant(
+        of: bar,
+        matching: find.text(clockRangeLabel(14 * 60, 15 * 60)),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets("BM5 a pinch and a scroll call the chip builder no more often "
