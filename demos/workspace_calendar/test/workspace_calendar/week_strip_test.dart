@@ -52,10 +52,10 @@ List<DateTime> run(DateTime first, int count) {
 /// The days whose cells' middles the strip shows, left to right. The strip
 /// builds a few days past either edge as well.
 List<DateTime> stripDays(WidgetTester tester) {
-  final strip = tester.getRect(find.byType(WeekStrip));
+  final strip = tester.getRect(find.byType(WeekStrip<ItemPayload>));
   final cells = <({double left, DateTime day})>[];
   final found = find.descendant(
-    of: find.byType(WeekStrip),
+    of: find.byType(WeekStrip<ItemPayload>),
     matching: find.byType(DayCell),
   );
   for (final element in found.evaluate()) {
@@ -105,7 +105,7 @@ Future<void> moveStrip(
   TestGesture gesture,
   int days,
 ) async {
-  final strip = tester.getRect(find.byType(WeekStrip));
+  final strip = tester.getRect(find.byType(WeekStrip<ItemPayload>));
   final width = strip.width / stripDays(tester).length;
   await gesture.moveBy(Offset(-days.sign * (kTouchSlop + 1.0), 0.0));
   await tester.pump();
@@ -120,7 +120,7 @@ Future<void> moveStrip(
 /// rest.
 Future<void> slideStrip(WidgetTester tester, int days) async {
   final gesture = await tester.startGesture(
-    tester.getCenter(find.byType(WeekStrip)),
+    tester.getCenter(find.byType(WeekStrip<ItemPayload>)),
   );
   await moveStrip(tester, gesture, days);
   await tester.pump(const Duration(milliseconds: 200));
@@ -366,7 +366,7 @@ void main() {
 
     // Held a day further, before it rests, May 1 is at the middle.
     final gesture = await tester.startGesture(
-      tester.getCenter(find.byType(WeekStrip)),
+      tester.getCenter(find.byType(WeekStrip<ItemPayload>)),
     );
     await moveStrip(tester, gesture, 1);
     expect(find.text("May 2026"), findsOneWidget);
@@ -402,10 +402,14 @@ void main() {
   testWidgets("WS10 a fling carries the strip on past the drag and rests "
       "on a whole day", (tester) async {
     await pumpDay(tester);
-    final strip = tester.getRect(find.byType(WeekStrip));
+    final strip = tester.getRect(find.byType(WeekStrip<ItemPayload>));
     final width = strip.width / 7;
 
-    await tester.fling(find.byType(WeekStrip), Offset(-2 * width, 0.0), 1500.0);
+    await tester.fling(
+      find.byType(WeekStrip<ItemPayload>),
+      Offset(-2 * width, 0.0),
+      1500.0,
+    );
     await tester.pumpAndSettle();
     final days = stripDays(tester);
     expect(daysBetween(april(20), days.first), greaterThan(2));
@@ -426,7 +430,7 @@ void main() {
 
     tester.view.physicalSize = const Size(600.0, 844.0);
     await tester.pumpAndSettle();
-    final strip = tester.getRect(find.byType(WeekStrip));
+    final strip = tester.getRect(find.byType(WeekStrip<ItemPayload>));
     expect(stripDays(tester), run(april(23), 7));
     expect(
       tester.getRect(stripDay(april(23))).left,
@@ -439,14 +443,17 @@ void main() {
       "again", (tester) async {
     final api = MockCalendarApi(seed: seed, latency: harnessLatency);
     await pumpCalendar(tester, api: api);
-    expect(find.byType(WeekStrip), findsNothing);
+    expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
 
-    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -120.0),
+    );
     await tester.pumpAndSettle();
     final grid = tester.getRect(
       find.byKey(const ValueKey<String>("calendar-grid")),
     );
-    expect(tester.getRect(find.byType(WeekStrip)), grid);
+    expect(tester.getRect(find.byType(WeekStrip<ItemPayload>)), grid);
     expect(stripDays(tester), run(april(20), 7));
 
     // May 1 to May 7, whose middle is May 4.
@@ -455,13 +462,19 @@ void main() {
     expect(find.text("Today, April 21"), findsOneWidget);
     expect(find.text("May 2026"), findsOneWidget);
 
-    await tester.drag(find.byType(WeekStrip), const Offset(0.0, 120.0));
+    await tester.drag(
+      find.byType(WeekStrip<ItemPayload>),
+      const Offset(0.0, 120.0),
+    );
     await tester.pumpAndSettle();
     expect(find.text("Apr 2026"), findsOneWidget);
 
     // Folded again, the strip opens on the selected week, and a tap on
     // one of its days selects it.
-    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -120.0),
+    );
     await tester.pumpAndSettle();
     expect(stripDays(tester), run(april(20), 7));
     await tester.tap(stripDay(april(23)));
@@ -568,7 +581,7 @@ void main() {
       matching: find.text("Tue"),
     );
     expect(
-      tester.getSize(find.byType(WeekStrip)).height,
+      tester.getSize(find.byType(WeekStrip<ItemPayload>)).height,
       moreOrLessEquals(
         tester.getSize(name).height + stripLabelGap + dayCircleSize,
       ),
@@ -585,7 +598,7 @@ void main() {
     await tester.tap(find.byKey(calendarPullTabKey));
     await tester.pumpAndSettle();
     // Setup sanity: the month folded into the strip.
-    expect(find.byType(WeekStrip), findsOneWidget);
+    expect(find.byType(WeekStrip<ItemPayload>), findsOneWidget);
     final name = find.descendant(
       of: stripDay(april(21)),
       matching: find.text("Tue"),

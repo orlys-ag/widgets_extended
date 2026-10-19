@@ -9,16 +9,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
+import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
+import 'package:workspace_calendar/workspace_calendar/day_list.dart';
+import 'package:workspace_calendar/workspace_calendar/history_lock.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/month_board.dart';
+import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 
@@ -55,11 +60,21 @@ typedef BlockCall = ({ShownItem entry, CalendarBlockDetails details});
 /// One call of a chip builder.
 typedef ChipCall = ({ShownItem entry, CalendarChipDetails details});
 
+/// One call of a card builder.
+typedef CardCall = ({ShownItem entry, CalendarCardDetails details});
+
+/// The name an add button's mark and count go by: its day and minute.
+String addNameOf(CalendarAddButtonDetails details) {
+  return "${isoDate(details.day)}@${details.startMinute}";
+}
+
 /// Builders that mark what they draw: each returns a [ColoredBox] keyed by
 /// [markKey], kept in [marks], and records its arguments.
 class MarkingBuilders {
   final List<BlockCall> blocks = <BlockCall>[];
   final List<ChipCall> chips = <ChipCall>[];
+  final List<CardCall> cards = <CardCall>[];
+  final List<CalendarAddButtonDetails> adds = <CalendarAddButtonDetails>[];
   final List<CalendarLoadingState> loadings = <CalendarLoadingState>[];
   final List<CalendarFailureState> failures = <CalendarFailureState>[];
 
@@ -69,6 +84,8 @@ class MarkingBuilders {
   late final ItemBuilders builders = ItemBuilders(
     block: block,
     chip: chip,
+    card: card,
+    addButton: addButton,
     loading: loading,
     failure: failure,
   );
@@ -100,6 +117,20 @@ class MarkingBuilders {
     return _mark("chip", entry.id);
   }
 
+  Widget card(
+    BuildContext context,
+    ShownItem entry,
+    CalendarCardDetails details,
+  ) {
+    cards.add((entry: entry, details: details));
+    return _mark("card", entry.id);
+  }
+
+  Widget addButton(BuildContext context, CalendarAddButtonDetails details) {
+    adds.add(details);
+    return _mark("add", addNameOf(details));
+  }
+
   Widget loading(BuildContext context, CalendarLoadingState state) {
     loadings.add(state);
     return _mark("loading", state.site.name);
@@ -124,6 +155,13 @@ class MarkingBuilders {
     });
   }
 
+  /// The last card call for the entry [id].
+  CardCall lastCard(String id) {
+    return cards.lastWhere((call) {
+      return call.entry.id == id;
+    });
+  }
+
   /// Whether the mark under [slot] is one of these builders'.
   bool marked(WidgetTester tester, Finder slot, String form, String id) {
     final mark = find.descendant(
@@ -142,13 +180,44 @@ class MarkingBuilders {
 class CountingBuilders {
   final Map<String, int> blockCalls = <String, int>{};
   final Map<String, int> chipCalls = <String, int>{};
+  final Map<String, int> cardCalls = <String, int>{};
+  final Map<String, int> addCalls = <String, int>{};
 
   late final ItemBuilders builders = ItemBuilders(
     block: block,
     chip: chip,
+    card: card,
+    cardExtent: ItemCard.extentOf,
+    addButton: addButton,
     loading: harborLoadingBuilder,
     failure: harborFailureBuilder,
   );
+
+  Widget card(
+    BuildContext context,
+    ShownItem entry,
+    CalendarCardDetails details,
+  ) {
+    cardCalls.update(entry.id, (count) => count + 1, ifAbsent: () => 1);
+    return harborCardBuilder(context, entry, details);
+  }
+
+  Widget addButton(BuildContext context, CalendarAddButtonDetails details) {
+    addCalls.update(
+      addNameOf(details),
+      (count) => count + 1,
+      ifAbsent: () => 1,
+    );
+    return harborAddButtonBuilder(context, details);
+  }
+
+  int get cards {
+    return cardCalls.values.fold(0, (sum, count) => sum + count);
+  }
+
+  int get adds {
+    return addCalls.values.fold(0, (sum, count) => sum + count);
+  }
 
   Widget chip(
     BuildContext context,
@@ -179,6 +248,8 @@ class CountingBuilders {
   void clear() {
     blockCalls.clear();
     chipCalls.clear();
+    cardCalls.clear();
+    addCalls.clear();
   }
 }
 
@@ -298,6 +369,136 @@ final Finder grid = find.byType(TimedGrid<ItemPayload>);
 
 /// The month board.
 final Finder month = find.byType(MonthBoard<ItemPayload>);
+
+/// Agenda's day list.
+final Finder agenda = find.byType(DayList<ItemPayload>);
+
+/// Every widget keyed with a [ValueKey] of a string starting [prefix], by
+/// that string.
+Map<String, Finder> keyedSlots(String prefix) {
+  return <String, Finder>{
+    for (final element in find.byWidgetPredicate((widget) {
+      final key = widget.key;
+      return key is ValueKey<String> && key.value.startsWith(prefix);
+    }).evaluate())
+      (element.widget.key! as ValueKey<String>).value: find.byKey(
+        element.widget.key!,
+      ),
+  };
+}
+
+/// How far Agenda's list has scrolled.
+double listOffset(WidgetTester tester) {
+  return tester
+      .state<ScrollableState>(
+        find.descendant(of: agenda, matching: find.byType(Scrollable)),
+      )
+      .position
+      .pixels;
+}
+
+/// The label nodes of the add buttons under [of].
+Finder addLabelsUnder(Finder of) {
+  return find.descendant(
+    of: of,
+    matching: find.bySemanticsLabel(RegExp("^Add an item at ")),
+  );
+}
+
+/// The list requests [api] has had.
+int listCalls(MockCalendarApi api) {
+  return api.requests.where((request) {
+    return request.method == CalendarMethod.list;
+  }).length;
+}
+
+/// The text of the form's field labelled [label].
+String fieldText(WidgetTester tester, String label) {
+  return tester
+      .widget<TextField>(find.widgetWithText(TextField, label))
+      .controller!
+      .text;
+}
+
+/// 11:07 on [today]: after [endedId] ends, while [runningId] runs and
+/// before [laterId] starts.
+DateTime midMorning() {
+  return DateTime(2026, 4, 21, 11, 7);
+}
+
+const String endedId = "item-2";
+const String runningId = "item-3";
+const String laterId = "item-4";
+
+/// A day before [today]'s, then today's ended, running and later items.
+final List<Map<String, Object?>> lockSeed = <Map<String, Object?>>[
+  taskJson("Past", monday, 9 * 60, 10 * 60),
+  taskJson("Ended", today, 8 * 60, 9 * 60),
+  taskJson("Running", today, 10 * 60, 12 * 60),
+  taskJson("Later", today, 14 * 60, 15 * 60),
+];
+
+/// The calendar over [lockSeed] with [builders], in edit mode when
+/// [editing], its clock reading [clock], and where [editing] the history
+/// lock on to now through the settings sheet.
+Future<MockCalendarApi> pumpLocked(
+  WidgetTester tester,
+  ItemBuilders builders, {
+  DateTime Function() clock = midMorning,
+  bool editing = true,
+}) async {
+  final api = MockCalendarApi(seed: lockSeed, latency: harnessLatency);
+  await pumpCalendar(
+    tester,
+    api: api,
+    size: const Size(390.0, 1400.0),
+    editing: editing,
+    clock: clock,
+    builders: builders,
+  );
+  if (editing) {
+    await openSettings(tester);
+    await tester.tap(find.byKey(lockPastKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(lockEarlierTodayKey));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(195.0, 20.0));
+    await tester.pumpAndSettle();
+  }
+  return api;
+}
+
+/// Pumps the calendar over a mock seeded around [today] at a 1 s latency
+/// with [builders] at [size], and steps it to the next month, pumping into
+/// the read of its unread days.
+Future<MockCalendarApi> stepToUnread(
+  WidgetTester tester,
+  ItemBuilders builders, {
+  Size size = const Size(390.0, 844.0),
+}) async {
+  final api = await pumpCalendar(
+    tester,
+    editing: true,
+    clock: nineOClock,
+    size: size,
+    api: MockCalendarApi.seeded(today, latency: second),
+    builders: builders,
+  );
+  await tester.tap(find.byTooltip("Next month"));
+  await pumpFor(tester, const Duration(milliseconds: 500));
+  return api;
+}
+
+/// Lets [api]'s reads fail and steps to the month after, pumping through
+/// the failed read.
+Future<void> stepToFailed(WidgetTester tester, MockCalendarApi api) async {
+  await pumpFor(tester, second);
+  api.failurePolicy = (request) {
+    return request.method == CalendarMethod.list ? "Reading failed." : null;
+  };
+  await tester.tap(find.byTooltip("Next month"));
+  await pumpFor(tester, const Duration(milliseconds: 1500));
+}
 
 /// Every bar slot of the month board, by the key [monthChipKey] gives it.
 Map<String, Finder> barSlots(WidgetTester tester) {
@@ -646,6 +847,8 @@ void main() {
     expect(counts.blocks, lessThanOrEqualTo(23));
     expect(counts.blockCalls.keys, <String>[brainstormId]);
     expect(counts.chips, 0);
+    expect(counts.cards, 0);
+    expect(counts.adds, 0);
     counts.clear();
 
     // A scroll of the grid.
@@ -656,6 +859,8 @@ void main() {
     expect(vertical.pixels - before, greaterThan(200.0));
     expect(counts.blocks, 0);
     expect(counts.chips, 0);
+    expect(counts.cards, 0);
+    expect(counts.adds, 0);
     counts.clear();
 
     // A pinch up and down the slots.
@@ -674,6 +879,8 @@ void main() {
     );
     expect(counts.blocks, lessThanOrEqualTo(42));
     expect(counts.chips, 0);
+    expect(counts.cards, 0);
+    expect(counts.adds, 0);
     var stayed = 0;
     for (final entry in kept.entries) {
       final id = entry.key.substring("block-".length);
@@ -1256,6 +1463,8 @@ void main() {
     );
     expect(counts.chips, lessThanOrEqualTo(3));
     expect(counts.blocks, 0);
+    expect(counts.cards, 0);
+    expect(counts.adds, 0);
     counts.clear();
 
     final vertical = gridViewport(tester).verticalPosition!;
@@ -1265,6 +1474,8 @@ void main() {
     expect(vertical.pixels - before, greaterThan(100.0));
     expect(counts.chips, 0);
     expect(counts.blocks, 0);
+    expect(counts.cards, 0);
+    expect(counts.adds, 0);
   });
 
   testWidgets("BM6 new builders reach a chip while it exits", (tester) async {
@@ -1337,5 +1548,695 @@ void main() {
       }
     }
     expect(stayed, greaterThan(4));
+  });
+
+  testWidgets("BA1 Agenda draws each card and add button through its "
+      "builder, the pending state and the strips included", (tester) async {
+    final marks = MarkingBuilders();
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: marks.builders,
+    );
+    final cards = keyedSlots("card-");
+    expect(cards.length, greaterThan(4));
+    for (final card in cards.entries) {
+      final id = card.key.substring("card-".length);
+      expect(marks.marked(tester, card.value, "card", id), isTrue, reason: id);
+    }
+    var gapsWithButton = 0;
+    for (final gap in keyedSlots("day-list-gap-").values) {
+      final adds = find.descendant(
+        of: gap,
+        matching: find.byWidgetPredicate((widget) {
+          final key = widget.key;
+          return key is ValueKey<String> &&
+              key.value.startsWith("mark-add-") &&
+              marks.marks.contains(widget);
+        }),
+      );
+      if (addLabelsUnder(gap).evaluate().isEmpty) {
+        expect(adds, findsNothing);
+      } else {
+        gapsWithButton++;
+        expect(adds, findsOneWidget);
+      }
+    }
+    expect(gapsWithButton, greaterThan(2));
+
+    marks.lastCard(brainstormId).details.onDelete!();
+    await tester.pumpAndSettle();
+    expect(find.text("Delete item?"), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(marks.lastCard(brainstormId).entry.pending, isTrue);
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+    expect(find.byKey(itemCardKey(brainstormId)), findsNothing);
+
+    // A card whose item the hours cut at both ends, on Saturday, which
+    // holds no other item, in a calendar of its own.
+    await tester.pumpWidget(const SizedBox());
+    final cut = MarkingBuilders();
+    final cutApi = MockCalendarApi.seeded(today, latency: harnessLatency);
+    final saturday = DateTime(2026, 4, 25);
+    await createBeforePump(
+      tester,
+      cutApi,
+      taskJson("Long day", saturday, 7 * 60, 19 * 60),
+    );
+    final longDay =
+        (await listAll(tester, cutApi, saturday, saturday)).single["id"]!
+            as String;
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      api: cutApi,
+      builders: cut.builders,
+    );
+    await pickHours(tester, 8, 18);
+    await tester.tap(find.byKey(dayCellKey(saturday)));
+    await tester.pumpAndSettle();
+    final details = cut.lastCard(longDay).details;
+    expect(details.startsAt, isNotNull);
+    expect(details.endsAt, isNotNull);
+    final slot = find.byKey(itemCardKey(longDay));
+    expect(slot, findsOneWidget);
+    for (final strip in <Finder>[
+      find.byKey(itemCardStartsAtKey(longDay)),
+      find.byKey(itemCardEndsAtKey(longDay)),
+      find.byType(Text),
+    ]) {
+      expect(find.descendant(of: slot, matching: strip), findsNothing);
+    }
+  });
+
+  testWidgets("BA2 a day row draws the loading and failure builders' "
+      "content for its day, the failure with the store's error or none", (
+    tester,
+  ) async {
+    final marks = MarkingBuilders();
+    final api = await stepToUnread(tester, marks.builders);
+    final loadings = keyedSlots("day-list-loading-");
+    expect(loadings, isNotEmpty);
+    for (final row in loadings.entries) {
+      final day = DateTime.parse(row.key.substring("day-list-loading-".length));
+      expect(
+        find.descendant(
+          of: row.value,
+          matching: find.byKey(markKey("loading", "dayRow")),
+        ),
+        findsOneWidget,
+        reason: row.key,
+      );
+      final state = marks.loadings.lastWhere((state) {
+        return state.first == day;
+      });
+      expect(state.site, CalendarStateSite.dayRow);
+      expect(state.last, day);
+    }
+
+    await stepToFailed(tester, api);
+    final failed = keyedSlots("day-list-failed-");
+    expect(failed, isNotEmpty);
+    for (final row in failed.entries) {
+      expect(
+        find.descendant(
+          of: row.value,
+          matching: find.byKey(markKey("failure", "dayRow")),
+        ),
+        findsOneWidget,
+        reason: row.key,
+      );
+    }
+    final failure = marks.failures.last;
+    expect(failure.site, CalendarStateSite.dayRow);
+    expect(failure.first, failure.last);
+    expect(
+      failure.error,
+      isA<CalendarFailureException>().having(
+        (error) => error.message,
+        "message",
+        "Reading failed.",
+      ),
+    );
+    final lists = listCalls(api);
+    failure.retry();
+    expect(listCalls(api), lists + 1);
+    api.failurePolicy = null;
+    await pumpFor(tester, const Duration(milliseconds: 1500));
+
+    // A prefetch failure while the shown month is ready: May 4, the first
+    // day past April's month grid, leaves no error.
+    await tester.pumpWidget(const SizedBox());
+    final prefetch = MarkingBuilders();
+    final prefetchApi = await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      api: MockCalendarApi.seeded(today, latency: second),
+      builders: prefetch.builders,
+    );
+    prefetchApi.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    final may4 = DateTime(2026, 5, 4);
+    bool listedMay4() {
+      return prefetchApi.requests.any((request) {
+        return request.method == CalendarMethod.list && request.first == may4;
+      });
+    }
+
+    for (var drag = 0; drag < 100 && !listedMay4(); drag++) {
+      await tester.drag(agenda, const Offset(0.0, -80.0));
+      await tester.pump();
+    }
+    expect(listedMay4(), isTrue);
+    await tester.pump(second);
+    await tester.pump();
+    final unread = find.byKey(dayListFailedKey(may4));
+    for (var drag = 0; drag < 100 && unread.evaluate().isEmpty; drag++) {
+      await tester.drag(agenda, const Offset(0.0, -40.0));
+      await tester.pump();
+    }
+    expect(unread, findsOneWidget);
+    final none = prefetch.failures.lastWhere((state) {
+      return state.first == may4;
+    });
+    expect(none.error, isNull);
+    await tester.pump(second);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("BA3 given no builders Agenda draws the module's defaults", (
+    tester,
+  ) async {
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: const ItemBuilders(),
+    );
+    for (final card in keyedSlots("card-").values) {
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.byWidgetPredicate((widget) {
+            return widget is PopupMenuButton;
+          }),
+        ),
+        findsNothing,
+      );
+    }
+    expect(find.byType(ItemCard), findsNothing);
+    final task = harborTypeStyleOf(CalendarItemType.task).edge;
+    final decorations = tester
+        .widgetList<DecoratedBox>(
+          find.descendant(
+            of: find.byKey(itemCardKey(brainstormId)),
+            matching: find.byType(DecoratedBox),
+          ),
+        )
+        .map((box) {
+          return box.decoration;
+        })
+        .whereType<BoxDecoration>()
+        .toList();
+    expect(
+      decorations.where((decoration) {
+        return decoration.color ==
+                Color.alphaBlend(
+                  task.withValues(alpha: harborCalendarTheme.entryTintOpacity),
+                  harborCalendarTheme.surface,
+                ) &&
+            decoration.border ==
+                Border(left: BorderSide(color: task, width: 4.0));
+      }),
+      hasLength(1),
+    );
+    var labels = 0;
+    for (final gap in keyedSlots("day-list-gap-").values) {
+      expect(
+        find.descendant(of: gap, matching: find.byType(InkWell)),
+        findsNothing,
+      );
+      for (final label in addLabelsUnder(gap).evaluate()) {
+        labels++;
+        final circles = tester
+            .widgetList<DecoratedBox>(
+              find.descendant(
+                of: find.byWidget(label.widget),
+                matching: find.byType(DecoratedBox),
+              ),
+            )
+            .where((box) {
+              final decoration = box.decoration;
+              return decoration is BoxDecoration &&
+                  decoration.shape == BoxShape.circle &&
+                  decoration.color == harborCalendarTheme.primaryTint;
+            })
+            .toList();
+        expect(circles, hasLength(1));
+        expect(
+          tester
+              .widgetList<Icon>(
+                find.descendant(
+                  of: find.byWidget(circles.single),
+                  matching: find.byType(Icon),
+                ),
+              )
+              .single
+              .icon,
+          harborCalendarTheme.addEntryIcon,
+        );
+      }
+    }
+    expect(labels, greaterThan(0));
+
+    await tester.pumpWidget(const SizedBox());
+    final api = await stepToUnread(tester, const ItemBuilders());
+    final loadings = keyedSlots("day-list-loading-");
+    expect(loadings, isNotEmpty);
+    for (final row in loadings.values) {
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.byType(CalendarActivityIndicator),
+        ),
+        findsOneWidget,
+      );
+    }
+    await stepToFailed(tester, api);
+    final failed = keyedSlots("day-list-failed-");
+    expect(failed, isNotEmpty);
+    for (final row in failed.values) {
+      expect(
+        find.descendant(of: row, matching: find.text(readFailedLabel)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: row, matching: find.text(retryLabel)),
+        findsOneWidget,
+      );
+    }
+    api.failurePolicy = null;
+    await pumpFor(tester, second);
+  });
+
+  testWidgets("BA4 a card is handed Edit and Delete as the history lock and "
+      "edit mode allow, each requesting its action for its own entry", (
+    tester,
+  ) async {
+    final marks = MarkingBuilders();
+    final api = await pumpLocked(tester, marks.builders);
+    final ended = marks.lastCard(endedId).details;
+    expect(ended.onEdit, isNull);
+    expect(ended.onDelete, isNull);
+    final running = marks.lastCard(runningId).details;
+    expect(running.onEdit, isNotNull);
+    expect(running.onDelete, isNull);
+    final later = marks.lastCard(laterId).details;
+    expect(later.onEdit, isNotNull);
+    expect(later.onDelete, isNotNull);
+
+    for (final (details, title) in <(CalendarCardDetails, String)>[
+      (running, "Running"),
+      (later, "Later"),
+    ]) {
+      details.onEdit!();
+      await tester.pumpAndSettle();
+      expect(find.text("Edit Task"), findsOneWidget, reason: title);
+      expect(fieldText(tester, "Title"), title);
+      await tester.tap(find.widgetWithText(TextButton, "Cancel"));
+      await tester.pumpAndSettle();
+    }
+    marks.lastCard(laterId).details.onDelete!();
+    await tester.pumpAndSettle();
+    expect(find.text("Delete item?"), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pump();
+    expect(
+      api.requests.last,
+      isA<CalendarRequest>()
+          .having((request) => request.method, "method", CalendarMethod.delete)
+          .having((request) => request.id, "id", laterId),
+    );
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(const SizedBox());
+    final viewing = MarkingBuilders();
+    await pumpLocked(tester, viewing.builders, editing: false);
+    expect(viewing.cards.length, greaterThan(4));
+    for (final call in viewing.cards) {
+      expect(call.details.onEdit, isNull, reason: call.entry.id);
+      expect(call.details.onDelete, isNull, reason: call.entry.id);
+    }
+  });
+
+  testWidgets("BA5 the add button and the card menu are heard by their "
+      "labels, with no tooltip under the list", (tester) async {
+    await pumpLocked(
+      tester,
+      harborItemBuilders,
+      clock: () {
+        return DateTime(2026, 4, 21, 9, 37);
+      },
+    );
+    final add = find.descendant(
+      of: find.byKey(dayListGapKey(today, 9 * 60)),
+      matching: find.bySemanticsLabel("Add an item at 09:45"),
+    );
+    expect(add, findsOneWidget);
+    expect(tester.getSemantics(add), isSemantics(hasTapAction: true));
+    final menu = find.descendant(
+      of: find.byKey(itemCardKey(laterId)),
+      matching: find.bySemanticsLabel(itemActionsLabel),
+    );
+    expect(menu, findsOneWidget);
+    expect(
+      tester.getSemantics(menu),
+      isSemantics(isButton: true, hasTapAction: true),
+    );
+    expect(find.byTooltip("Add an item at 09:45"), findsNothing);
+    expect(find.byTooltip(itemActionsLabel), findsNothing);
+    expect(
+      find.descendant(of: agenda, matching: find.byType(RawTooltip)),
+      findsNothing,
+    );
+    final tooltips = tester
+        .widgetList<Tooltip>(
+          find.descendant(of: agenda, matching: find.byType(Tooltip)),
+        )
+        .toList();
+    for (final tooltip in tooltips) {
+      expect(tooltip.message, "");
+    }
+    for (final id in <String>[runningId, laterId]) {
+      expect(
+        find.descendant(
+          of: find.byKey(itemCardKey(id)),
+          matching: find.byType(Tooltip),
+        ),
+        findsOneWidget,
+        reason: id,
+      );
+    }
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    expect(find.text("Edit"), findsOneWidget);
+    expect(find.text("Delete"), findsOneWidget);
+    await tester.tapAt(const Offset(10.0, 10.0));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(const SizedBox());
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      api: MockCalendarApi(latency: harnessLatency),
+      builders: const ItemBuilders(),
+    );
+    final labels = addLabelsUnder(agenda);
+    expect(labels.evaluate().length, greaterThan(0));
+    for (final element in labels.evaluate()) {
+      final node = tester.getSemantics(find.byWidget(element.widget));
+      expect(node.label, startsWith("Add an item at "));
+      expect(node.label.contains("\n"), isFalse, reason: node.label);
+      expect(node, isSemantics(hasTapAction: true));
+    }
+    expect(
+      find.descendant(of: agenda, matching: find.byType(Tooltip)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: agenda, matching: find.byType(RawTooltip)),
+      findsNothing,
+    );
+  });
+
+  testWidgets("BA6 a scroll of Agenda calls the card and add button "
+      "builders no more often than the base built cards and add buttons", (
+    tester,
+  ) async {
+    final counts = CountingBuilders();
+    await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: counts.builders,
+    );
+    expect(counts.cards, greaterThan(4));
+    counts.clear();
+    final before = listOffset(tester);
+    await tester.drag(agenda, const Offset(0.0, -400.0));
+    await tester.pumpAndSettle();
+    expect(listOffset(tester) - before, greaterThan(300.0));
+    expect(counts.cards, greaterThan(0));
+    expect(counts.cards, lessThanOrEqualTo(18));
+    expect(counts.adds, lessThanOrEqualTo(24));
+    expect(counts.blocks, 0);
+    expect(counts.chips, 0);
+  });
+
+  testWidgets("BA7 new builders draw every card, a card leaving included", (
+    tester,
+  ) async {
+    final a = MarkingBuilders();
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      clock: nineOClock,
+      builders: a.builders,
+    );
+    final b = MarkingBuilders();
+    await tester.pumpWidget(
+      calendarApp(
+        api: api,
+        today: today,
+        clock: nineOClock,
+        editing: true,
+        builders: b.builders,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final cards = keyedSlots("card-");
+    expect(cards.length, greaterThan(4));
+    for (final card in cards.entries) {
+      final id = card.key.substring("card-".length);
+      expect(b.marked(tester, card.value, "card", id), isTrue, reason: id);
+      expect(a.marked(tester, card.value, "card", id), isFalse, reason: id);
+    }
+
+    final slot = find.byKey(itemCardKey(brainstormId));
+    final row = find.ancestor(of: slot, matching: find.byType(SizeTransition));
+    final height = tester.getSize(row.first).height;
+    b.lastCard(brainstormId).details.onDelete!();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pump();
+    await tester.pump(api.latency);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getSize(row.first).height, lessThan(height));
+    final c = MarkingBuilders();
+    await tester.pumpWidget(
+      calendarApp(
+        api: api,
+        today: today,
+        clock: nineOClock,
+        editing: true,
+        builders: c.builders,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(c.marked(tester, slot, "card", brainstormId), isTrue);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(slot, findsNothing);
+  });
+
+  testWidgets("BA8 a reveal predicts the cards it passes by the card "
+      "builder's extent", (tester) async {
+    final offsets = <double>[];
+    for (final extent in <double>[40.0, 400.0]) {
+      await tester.pumpWidget(const SizedBox());
+      await pumpCalendar(
+        tester,
+        clock: nineOClock,
+        builders: ItemBuilders(
+          block: harborBlockBuilder,
+          chip: harborChipBuilder,
+          card: harborCardBuilder,
+          cardExtent: (entry) {
+            return extent;
+          },
+          addButton: harborAddButtonBuilder,
+          loading: harborLoadingBuilder,
+          failure: harborFailureBuilder,
+        ),
+      );
+      // The next month's day, a reveal past the cards of days the list
+      // has not laid out, which it predicts.
+      final may21 = DateTime(2026, 5, 21);
+      expect(find.byKey(dayListHeaderKey(may21)), findsNothing);
+      await tester.tap(find.byTooltip("Next month"));
+      for (var frame = 0; frame < 5; frame++) {
+        await tester.pump(oneFrame);
+      }
+      offsets.add(listOffset(tester));
+      await tester.pumpAndSettle();
+    }
+    expect(offsets.first, isNot(moreOrLessEquals(offsets.last)));
+  });
+
+  testWidgets("BA9 a day row's states take the heights the list predicts", (
+    tester,
+  ) async {
+    for (final builders in <ItemBuilders>[
+      const ItemBuilders(),
+      harborItemBuilders,
+    ]) {
+      await tester.pumpWidget(const SizedBox());
+      final api = await stepToUnread(
+        tester,
+        builders,
+        size: const Size(1200.0, 844.0),
+      );
+      final loadings = keyedSlots("day-list-loading-");
+      expect(loadings, isNotEmpty);
+      for (final row in loadings.values) {
+        expect(tester.getSize(row).height, 24.0);
+      }
+      await stepToFailed(tester, api);
+      final failed = keyedSlots("day-list-failed-");
+      expect(failed, isNotEmpty);
+      for (final row in failed.values) {
+        expect(tester.getSize(row).height, 48.0);
+      }
+      api.failurePolicy = null;
+      await pumpFor(tester, second);
+    }
+  });
+
+  testWidgets("BM8 a write that changes only an entry's payload runs its "
+      "chip builder again, which draws the new payload", (tester) async {
+    final day = DateTime(2026, 4, 21);
+    final note = CalendarEntry<String>(
+      id: "note-1",
+      day: day,
+      startMinute: 10 * 60,
+      endMinute: 11 * 60,
+      title: "Note",
+      color: const Color(0xFF336699),
+      payload: "first",
+    );
+    // The in-memory store applies a write within the call, so the payload
+    // changes with no pending state between.
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[note],
+    );
+    addTearDown(store.dispose);
+    final todayNotifier = ValueNotifier<DateTime>(day);
+    addTearDown(todayNotifier.dispose);
+    final calls = <CalendarShownEntry<String>>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MonthBoard<String>(
+          store: store,
+          grid: MonthGrid.of(day),
+          selectedDay: day,
+          today: todayNotifier,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: null,
+          onOpenItem: (id) {},
+          chipBuilder: (context, entry, details) {
+            calls.add(entry);
+            return Text(entry.entry.payload);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final bar = find.byKey(monthChipKey(monthSegmentKey("note-1", monday)));
+    expect(
+      find.descendant(of: bar, matching: find.text("first")),
+      findsOneWidget,
+    );
+    final before = calls.length;
+
+    await store.update(note.copyWith(payload: "second"));
+    await tester.pumpAndSettle();
+    expect(calls.length, before + 1);
+    expect(calls.last.pending, isFalse);
+    expect(calls.last.entry.payload, "second");
+    expect(
+      find.descendant(of: bar, matching: find.text("second")),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets("BA10 a write that changes only an entry's payload runs its "
+      "card builder again, which draws the new payload", (tester) async {
+    final day = DateTime(2026, 4, 21);
+    final note = CalendarEntry<String>(
+      id: "note-1",
+      day: day,
+      startMinute: 10 * 60,
+      endMinute: 11 * 60,
+      title: "Note",
+      color: const Color(0xFF336699),
+      payload: "first",
+    );
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[note],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<DateTime>(nineOClock());
+    addTearDown(now.dispose);
+    final calls = <CalendarShownEntry<String>>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DayList<String>(
+          store: store,
+          weekdays: WeekdaySet.all,
+          format: HourLabelFormat.twentyFourHour,
+          hours: DayHours.allDay,
+          editable: false,
+          lock: HistoryLock.none,
+          selectedDay: day,
+          today: day,
+          now: now,
+          onTopDay: (day) {},
+          onCreateIn: (day, startMinute, endMinute) {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+          cardBuilder: (context, entry, details) {
+            calls.add(entry);
+            return Text(entry.entry.payload);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final card = find.byKey(itemCardKey("note-1"));
+    expect(
+      find.descendant(of: card, matching: find.text("first")),
+      findsOneWidget,
+    );
+    final before = calls.length;
+
+    await store.update(note.copyWith(payload: "second"));
+    await tester.pumpAndSettle();
+    expect(calls.length, greaterThan(before));
+    expect(calls.last.pending, isFalse);
+    expect(calls.last.entry.payload, "second");
+    expect(
+      find.descendant(of: card, matching: find.text("second")),
+      findsOneWidget,
+    );
   });
 }

@@ -2,12 +2,10 @@
 /// three-letter names of the weekdays over the grid.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-
-import 'calendar_item.dart';
 
 /// The key of the cell showing [day].
 ValueKey<String> dayCellKey(DateTime day) {
@@ -20,7 +18,7 @@ ValueKey<String> dayCellKey(DateTime day) {
 /// A store change reaches no cell of the month board, whose cell builder
 /// re-runs only when an axis or a cell's selection changes; this listener
 /// is how a cell follows the store, rebuilding only itself.
-class DayMarkerListener extends StatefulWidget {
+class DayMarkerListener<T> extends StatefulWidget {
   const DayMarkerListener({
     super.key,
     required this.store,
@@ -28,17 +26,17 @@ class DayMarkerListener extends StatefulWidget {
     required this.builder,
   });
 
-  final CalendarStore<ItemPayload> store;
+  final CalendarStore<T> store;
   final DateTime day;
   final Widget Function(BuildContext context, bool hasItems) builder;
 
   @override
-  State<DayMarkerListener> createState() {
-    return _DayMarkerListenerState();
+  State<DayMarkerListener<T>> createState() {
+    return _DayMarkerListenerState<T>();
   }
 }
 
-class _DayMarkerListenerState extends State<DayMarkerListener> {
+class _DayMarkerListenerState<T> extends State<DayMarkerListener<T>> {
   late bool _hasItems = widget.store.dayHasShownEntries(widget.day);
 
   @override
@@ -48,7 +46,7 @@ class _DayMarkerListenerState extends State<DayMarkerListener> {
   }
 
   @override
-  void didUpdateWidget(DayMarkerListener oldWidget) {
+  void didUpdateWidget(DayMarkerListener<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.store != oldWidget.store) {
       oldWidget.store.removeListener(_handleStore);

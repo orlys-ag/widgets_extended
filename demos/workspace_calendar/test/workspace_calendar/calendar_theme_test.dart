@@ -22,7 +22,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:workspace_calendar/workspace_calendar/item_card.dart';
+import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/month_picker.dart';
@@ -876,7 +876,7 @@ double stripOffset(WidgetTester tester) {
   return tester
       .state<ScrollableState>(
         find.descendant(
-          of: find.byType(WeekStrip),
+          of: find.byType(WeekStrip<ItemPayload>),
           matching: find.byType(Scrollable),
         ),
       )
@@ -968,7 +968,7 @@ double listOffset(WidgetTester tester) {
   return tester
       .state<ScrollableState>(
         find.descendant(
-          of: find.byType(DayList),
+          of: find.byType(DayList<ItemPayload>),
           matching: find.byType(Scrollable),
         ),
       )
@@ -1102,9 +1102,9 @@ CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
   if (grid.evaluate().isNotEmpty) {
     return tester.widget<TimedGrid<ItemPayload>>(grid).store;
   }
-  final list = find.byType(DayList);
+  final list = find.byType(DayList<ItemPayload>);
   if (list.evaluate().isNotEmpty) {
-    return tester.widget<DayList>(list).store;
+    return tester.widget<DayList<ItemPayload>>(list).store;
   }
   return tester
       .widget<MonthBoard<ItemPayload>>(find.byType(MonthBoard<ItemPayload>))
@@ -1128,7 +1128,7 @@ List<Finder> viewRoots() {
     for (final type in <Type>[
       TimedGrid<ItemPayload>,
       MonthBoard<ItemPayload>,
-      DayList,
+      DayList<ItemPayload>,
       DayCell,
       WeekdayHeader,
       MonthPicker,
@@ -1407,7 +1407,7 @@ void main() {
     drawn = drawnUnder(tester, stripRoots);
     expectOnly(drawn, sentinelA, forbidden: const [], reason: "Day");
     fields.addAll(fieldsOf(drawn, sentinelA));
-    final week = tester.getSize(find.byType(WeekStrip)).width;
+    final week = tester.getSize(find.byType(WeekStrip<ItemPayload>)).width;
     await tester.tap(find.byKey(weekStripDayKey(april(26))));
     await tester.pumpAndSettle();
     var from = stripOffset(tester);
@@ -1434,9 +1434,9 @@ void main() {
       forbidden: <CalendarThemeData>[sentinelA],
       reason: "Day under B",
     );
-    final strip = tester.element(find.byType(WeekStrip));
+    final strip = tester.element(find.byType(WeekStrip<ItemPayload>));
     expect(
-      tester.getSize(find.byType(WeekStrip)).height,
+      tester.getSize(find.byType(WeekStrip<ItemPayload>)).height,
       moreOrLessEquals(
         lineHeightAt(strip, sentinelB.stripWeekdayStyle) +
             stripLabelGap +
@@ -1690,7 +1690,7 @@ void main() {
       "that installs it", (tester) async {
     final api = await pumpThemed(tester, sentinelA);
     await pickHours(tester, 8, 18);
-    final roots = <Finder>[find.byType(DayList)];
+    final roots = <Finder>[find.byType(DayList<ItemPayload>)];
     final fields = <String>{};
     void probe(String where) {
       final drawn = drawnUnder(tester, roots);
@@ -1748,7 +1748,7 @@ void main() {
     await failNextRead(tester, api, "Next month");
     expect(
       find.descendant(
-        of: find.byType(DayList),
+        of: find.byType(DayList<ItemPayload>),
         matching: find.text("Reading failed."),
       ),
       findsWidgets,
@@ -1813,7 +1813,7 @@ void main() {
     final api = await pumpThemed(tester, sentinelA);
     await pickHours(tester, 8, 18);
     await revealDay(tester, april(24));
-    final list = find.byType(DayList);
+    final list = find.byType(DayList<ItemPayload>);
     await tester.drag(list, const Offset(0.0, -420.0));
     await tester.pumpAndSettle();
     final header = find.byKey(dayListHeaderKey(april(24)));
@@ -2460,7 +2460,7 @@ void main() {
       final icons = tester
           .widgetList<Icon>(
             find.descendant(
-              of: find.byType(DayList),
+              of: find.byType(DayList<ItemPayload>),
               matching: find.byType(Icon),
             ),
           )
@@ -2471,7 +2471,7 @@ void main() {
       final lines = tester
           .widgetList(
             find.descendant(
-              of: find.byType(DayList),
+              of: find.byType(DayList<ItemPayload>),
               matching: find.byWidgetPredicate((widget) {
                 if (widget is! Expanded) {
                   return false;
@@ -3432,7 +3432,7 @@ void main() {
 
     // A strip slide.
     await pickMode(tester, "Day");
-    final week = tester.getSize(find.byType(WeekStrip)).width;
+    final week = tester.getSize(find.byType(WeekStrip<ItemPayload>)).width;
     await tester.tap(find.byKey(weekStripDayKey(april(26))));
     await tester.pumpAndSettle();
     final strip = stripOffset(tester);
@@ -3577,7 +3577,9 @@ void main() {
           await closeBar(tester);
         case "Day":
           // A strip slide on B's motion.
-          final week = tester.getSize(find.byType(WeekStrip)).width;
+          final week = tester
+              .getSize(find.byType(WeekStrip<ItemPayload>))
+              .width;
           await tester.tap(find.byKey(weekStripDayKey(april(26))));
           await tester.pumpAndSettle();
           final from = stripOffset(tester);
@@ -3633,9 +3635,9 @@ void main() {
     expect(tester.takeException(), isNull);
     await gesture.up();
     await tester.pumpAndSettle();
-    final strip = tester.element(find.byType(WeekStrip));
+    final strip = tester.element(find.byType(WeekStrip<ItemPayload>));
     expect(
-      tester.getSize(find.byType(WeekStrip)).height,
+      tester.getSize(find.byType(WeekStrip<ItemPayload>)).height,
       moreOrLessEquals(
         lineHeightAt(strip, sentinelB.stripWeekdayStyle) +
             stripLabelGap +
@@ -3784,14 +3786,17 @@ void main() {
     await tester.pump();
     expect(
       tester.getRect(find.byKey(dayListHeaderKey(april(23)))).top,
-      moreOrLessEquals(tester.getRect(find.byType(DayList)).top, epsilon: 0.5),
+      moreOrLessEquals(
+        tester.getRect(find.byType(DayList<ItemPayload>)).top,
+        epsilon: 0.5,
+      ),
     );
     await tester.pumpAndSettle();
 
     // A strip slide, then a drag of the strip into the next month, which
     // the header names.
     await pickMode(tester, "Day");
-    final week = tester.getSize(find.byType(WeekStrip)).width;
+    final week = tester.getSize(find.byType(WeekStrip<ItemPayload>)).width;
     await tester.tap(find.byKey(weekStripDayKey(april(26))));
     await tester.pumpAndSettle();
     final from = stripOffset(tester);
@@ -3800,7 +3805,7 @@ void main() {
     expect(stripOffset(tester) - from, moreOrLessEquals(week));
     await tester.pumpAndSettle();
     final drag = await tester.startGesture(
-      tester.getCenter(find.byType(WeekStrip)),
+      tester.getCenter(find.byType(WeekStrip<ItemPayload>)),
     );
     await drag.moveBy(const Offset(-(kTouchSlop + 1.0), 0.0));
     await tester.pump();
@@ -3877,7 +3882,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.getRect(find.byKey(dayListHeaderKey(target))).top,
-      moreOrLessEquals(tester.getRect(find.byType(DayList)).top, epsilon: 0.5),
+      moreOrLessEquals(
+        tester.getRect(find.byType(DayList<ItemPayload>)).top,
+        epsilon: 0.5,
+      ),
     );
     expect(tester.takeException(), isNull);
   });

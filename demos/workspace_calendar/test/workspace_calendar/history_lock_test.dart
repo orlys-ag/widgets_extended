@@ -11,7 +11,6 @@ import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/history_lock.dart';
-import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
@@ -148,7 +147,7 @@ Future<void> mouseDrag(
 Finder menuOf(String id) {
   return find.descendant(
     of: find.byKey(itemCardKey(id)),
-    matching: find.byTooltip("Item actions"),
+    matching: find.bySemanticsLabel("Item actions"),
   );
 }
 
@@ -167,7 +166,10 @@ Future<List<String>> menuEntriesOf(WidgetTester tester, String id) async {
 
 /// The add buttons of the Agenda row [key] names.
 Finder addButtonsOf(Key key) {
-  return find.descendant(of: find.byKey(key), matching: find.byType(Tooltip));
+  return find.descendant(
+    of: find.byKey(key),
+    matching: find.bySemanticsLabel(RegExp("^Add an item at ")),
+  );
 }
 
 void main() {
@@ -524,7 +526,7 @@ void main() {
         return DateTime(2026, 4, 21, 9, 37);
       },
     );
-    await tester.tap(find.byTooltip("Add an item at 09:45"));
+    await tester.tap(find.bySemanticsLabel("Add an item at 09:45"));
     await tester.pumpAndSettle();
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();

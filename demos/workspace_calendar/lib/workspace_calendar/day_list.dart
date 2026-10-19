@@ -11,18 +11,17 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_item.dart';
 import 'calendar_settings.dart';
 import 'history_lock.dart';
-import 'item_card.dart';
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
@@ -69,7 +68,6 @@ class _ListStyles {
         color: theme.onNotice,
       ),
       afterIcon = Icon(theme.afterHoursIcon, size: 16.0, color: theme.onNotice),
-      message = theme.messageStyle.copyWith(color: theme.error),
       dashedLine = Expanded(
         child: CustomPaint(
           painter: _DashedLinePainter(
@@ -96,10 +94,6 @@ class _ListStyles {
             ),
           ),
         ),
-      ),
-      addIcon = SizedBox.square(
-        dimension: _AddButton.size,
-        child: Icon(theme.addEntryIcon, size: 16.0, color: theme.primary),
       );
 
   /// The styles of [theme]: those made for it before, or for a theme `==`
@@ -160,9 +154,6 @@ class _ListStyles {
   final Widget beforeIcon;
   final Widget afterIcon;
 
-  /// A failed read's message.
-  final TextStyle message;
-
   /// The dashed line of a gap row.
   final Widget dashedLine;
 
@@ -170,9 +161,6 @@ class _ListStyles {
   final BoxDecoration nowPill;
   final TextStyle nowLabel;
   final Widget nowLine;
-
-  /// The add button's plus, at the button's size.
-  final Widget addIcon;
 }
 
 /// The room between the list's sides and its rows' content.
@@ -185,6 +173,14 @@ const double dayListTimeWidth = 64.0;
 /// The room between the end of the times, which the time column aligns
 /// right, and the cards or the dashed lines.
 const double dayListTimeGap = 8.0;
+
+/// The width and height of the square a gap row gives its add button.
+const double dayListAddButtonSize = 24.0;
+
+/// The key of the slot that holds the card of the item [id].
+ValueKey<String> itemCardKey(String id) {
+  return ValueKey<String>("card-$id");
+}
 
 /// The days the list holds on either side of the day it was built or last
 /// centred on.
@@ -316,10 +312,10 @@ final class DayListBody extends DayListRow {
 }
 
 /// The row of the item [entry] on [day].
-final class DayListItem extends DayListRow {
+final class DayListItem<T> extends DayListRow {
   const DayListItem(super.day, this.entry);
 
-  final ShownItem entry;
+  final CalendarShownEntry<T> entry;
 
   @override
   String get key {
@@ -328,7 +324,7 @@ final class DayListItem extends DayListRow {
 
   @override
   bool operator ==(Object other) {
-    return other is DayListItem && other.day == day && other.entry == entry;
+    return other is DayListItem<T> && other.day == day && other.entry == entry;
   }
 
   @override
@@ -459,9 +455,9 @@ final class DayListFailed extends DayListRow {
 /// end, before the item that ends the run or after the last item. So items
 /// that touch have no gap between them, and a day with no item inside the
 /// hours has one gap row across them.
-List<DayListRow> dayListRowsOf(
+List<DayListRow> dayListRowsOf<T>(
   DateTime day,
-  List<ShownItem> entries,
+  List<CalendarShownEntry<T>> entries,
   DayHours hours, {
   required bool editable,
 }) {
@@ -484,7 +480,7 @@ List<DayListRow> dayListRowsOf(
     if (editable && item.startMinute > covered) {
       rows.add(DayListGap(day, covered, item.startMinute));
     }
-    rows.add(DayListItem(day, entry));
+    rows.add(DayListItem<T>(day, entry));
     covered = math.max(covered, item.endMinute);
   }
   if (editable && hours.end > covered) {
@@ -501,20 +497,23 @@ List<DayListRow> dayListRowsOf(
 /// [selectedDay] to as many after, on a [SyncedSliverTree] whose roots are
 /// the days' headers, which stick at the list's top and count all the
 /// day's items, each over one block ([DayListBody]) holding the day's rows
-/// ([dayListRowsOf]): each card right of its start time over a chip of its
-/// length, both aligned right; for the items wholly before [hours], a soft
-/// yellow banner above the cards that counts them with an arrow pointing
-/// up, and for those wholly after, one below the cards pointing down; and
-/// a dashed row for each gap in [hours] that no item covers, an empty
-/// day's across the hours, with a button that reports [onCreateIn]; a
-/// progress indicator while the day is unread; and after a failed read,
-/// the failure and a Retry that reads the shown days again. Times read in
-/// [format]. Unless [editable], the list has no dashed rows and the cards
-/// no menu, so a day without items shows its header alone. Under the
-/// history [lock] a card has Edit only while its item is not
-/// [ItemHold.locked], and Delete only while it is [ItemHold.free], and a
-/// dashed row's button adds from the first time the lock leaves free in
-/// its gap, and is gone where the lock leaves none. A row that comes or
+/// ([dayListRowsOf]): each card, which [cardBuilder] draws, right of its
+/// start time over a chip of its length, both aligned right; for the items
+/// wholly before [hours], a soft yellow banner above the cards that counts
+/// them with an arrow pointing up, and for those wholly after, one below
+/// the cards pointing down; and a dashed row for each gap in [hours] that
+/// no item covers, an empty day's across the hours, with a button, which
+/// [addButtonBuilder] draws and a screen reader hears as adding an item at
+/// its time, that reports [onCreateIn]; what [loadingBuilder] draws while
+/// the day is unread; and after a failed read, what [failureBuilder] draws,
+/// with a retry that reads the shown days again. Times read in [format].
+/// Unless [editable], the list has no dashed rows and hands the card
+/// builder no Edit or Delete, so a day without items shows its header
+/// alone. Under the history [lock] a card is handed Edit only while its
+/// item is not [ItemHold.locked], and Delete only while it is
+/// [ItemHold.free], and a dashed row's button adds from the first time the
+/// lock leaves free in its gap, and is gone where the lock leaves none. A
+/// row that comes or
 /// goes in a block grows in and fades in, or fades out and shrinks away,
 /// so the block grows or shrinks smoothly; a block above the list's top
 /// that changes height moves nothing the list shows.
@@ -525,7 +524,8 @@ List<DayListRow> dayListRowsOf(
 /// at its start and the time at the end of a red pill across the time
 /// column, from 8 px in from the list's left edge. It crosses
 /// an item that started by [now] and has not ended at the share of the
-/// card that share of the item has run, and otherwise lies in the gap
+/// card, between its strips, [calendarCardStripExtent] tall, that share of
+/// the item has run, and otherwise lies in the gap
 /// under the last row that starts by [now], or above the first row where
 /// none does. A banner of the items before the hours starts before any
 /// minute, and one of those after them after every minute.
@@ -542,9 +542,14 @@ List<DayListRow> dayListRowsOf(
 /// Every state stays inside one always-scrollable scroll view, so a drag
 /// on it reports the scroll an ancestor's listener reads.
 ///
-/// The list draws and animates in the [CalendarTheme] above it, its
-/// cards' tints, edges and icons in their types' styles.
-class DayList extends StatefulWidget {
+/// A reveal predicts a row it scrolls past without building it: a card
+/// as [cardExtentOf] answers, and a loading or a failed row at the
+/// heights the list gives their builders.
+///
+/// The list draws and animates in the [CalendarTheme] above it; a card,
+/// an add button, the loading and the failure state are what their
+/// builders draw, the module's defaults where they are null.
+class DayList<T> extends StatefulWidget {
   const DayList({
     super.key,
     required this.store,
@@ -560,9 +565,14 @@ class DayList extends StatefulWidget {
     required this.onCreateIn,
     required this.onEdit,
     required this.onDelete,
+    this.cardBuilder,
+    this.cardExtentOf,
+    this.addButtonBuilder,
+    this.loadingBuilder,
+    this.failureBuilder,
   });
 
-  final CalendarStore<ItemPayload> store;
+  final CalendarStore<T> store;
 
   /// The days the list shows.
   final WeekdaySet weekdays;
@@ -576,7 +586,7 @@ class DayList extends StatefulWidget {
   final DayHours hours;
 
   /// Whether the calendar is in edit mode, where the list has its dashed
-  /// rows and each card its menu of Edit and Delete.
+  /// rows and hands each card its Edit and Delete.
   final bool editable;
 
   final HistoryLock lock;
@@ -601,13 +611,34 @@ class DayList extends StatefulWidget {
   final void Function(String id) onEdit;
   final void Function(String id) onDelete;
 
+  /// Draws each card inside the slot the list gives it, keyed
+  /// [itemCardKey]; null for [defaultCalendarCardBuilder].
+  final CalendarCardBuilder<T>? cardBuilder;
+
+  /// The height of [cardBuilder]'s card of an entry, its strips left out,
+  /// which a reveal predicts a card it does not build by; null for the
+  /// default card's, [defaultCalendarCardExtent].
+  final double Function(CalendarShownEntry<T> entry)? cardExtentOf;
+
+  /// Draws a gap row's add button inside the [dayListAddButtonSize] square
+  /// the list gives it; null for [defaultCalendarAddButtonBuilder].
+  final CalendarAddButtonBuilder? addButtonBuilder;
+
+  /// Draws an unread day's row, 24 tall; null for
+  /// [defaultCalendarLoadingBuilder].
+  final CalendarLoadingBuilder? loadingBuilder;
+
+  /// Draws a failed day's row, at least 48 tall; null for
+  /// [defaultCalendarFailureBuilder].
+  final CalendarFailureBuilder? failureBuilder;
+
   @override
-  State<DayList> createState() {
-    return _DayListState();
+  State<DayList<T>> createState() {
+    return _DayListState<T>();
   }
 }
 
-class _DayListState extends State<DayList> {
+class _DayListState<T> extends State<DayList<T>> {
   /// How far below the list's top a row must reach to make its day the
   /// top day.
   static const double _probe = 1.0;
@@ -687,7 +718,7 @@ class _DayListState extends State<DayList> {
   }
 
   @override
-  void didUpdateWidget(DayList oldWidget) {
+  void didUpdateWidget(DayList<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.store != oldWidget.store) {
       oldWidget.store.removeListener(_handleStore);
@@ -947,7 +978,7 @@ class _DayListState extends State<DayList> {
       case DayListBody(:final rows):
         var extent = 0.0;
         for (final shown in rows) {
-          extent += _blockRowExtent(shown, widget.hours);
+          extent += _blockRowExtent(shown);
         }
         return extent;
       default:
@@ -958,33 +989,44 @@ class _DayListState extends State<DayList> {
   /// The height of a header: its padding and one line of its title.
   static const double _headerExtent = 16.0 + 19.0 + 12.0;
 
-  /// The predicted height of [row] in a day's block in [hours], its
-  /// padding included: for an item, the taller of its card (its top and
-  /// bottom padding, the row of its title and menu button, a line of
-  /// summaries where it has some, and a strip for each end it has outside
-  /// the hours) and its time column (a line and the duration chip); a
-  /// banner's padding and arrow; or a dashed or loading row; or a failed
-  /// row's button.
-  static double _blockRowExtent(DayListRow row, DayHours hours) {
+  /// The predicted height of [row] in a day's block, its padding included:
+  /// for an item, the taller of its card (as [DayList.cardExtentOf]
+  /// answers, or [defaultCalendarCardExtent] where it is null, and a strip
+  /// [calendarCardStripExtent] tall for each end it has outside the
+  /// hours) and its time column (a line and the duration chip); a banner's
+  /// padding and arrow; a failed row, 48 tall, the least the list gives
+  /// its builder; or a dashed or loading row, 24 tall.
+  double _blockRowExtent(DayListRow row) {
     const padding = _rowGap;
+    final hours = widget.hours;
     switch (row) {
-      case DayListItem(:final entry):
+      case DayListItem<T>(:final entry):
         final item = entry.entry;
-        final summaries = ItemCard.summariesOf(item).isEmpty ? 0.0 : 17.0;
+        final cardExtentOf = widget.cardExtentOf;
         final strips =
-            (item.startMinute < hours.start ? ItemCard.stripHeight : 0.0) +
-            (item.endMinute > hours.end ? ItemCard.stripHeight : 0.0);
-        final card = 6.0 + 40.0 + summaries + 8.0 + strips;
+            (item.startMinute < hours.start ? calendarCardStripExtent : 0.0) +
+            (item.endMinute > hours.end ? calendarCardStripExtent : 0.0);
+        final card =
+            (cardExtentOf == null
+                ? defaultCalendarCardExtent(_styles.theme)
+                : cardExtentOf(entry)) +
+            strips;
         const times = 16.0 + 6.0 + 17.0;
         return math.max(card, times) + padding;
       case DayListHidden():
         return 5.0 + 16.0 + 5.0 + padding;
       case DayListFailed():
-        return 48.0 + padding;
+        return _failedRowExtent + padding;
       default:
-        return 24.0 + padding;
+        return _lineRowExtent + padding;
     }
   }
+
+  /// The height of a loading row and of a dashed row.
+  static const double _lineRowExtent = 24.0;
+
+  /// The least height of a failed row, which its builder may fill.
+  static const double _failedRowExtent = 48.0;
 
   /// Reports a new top day while a drag, or the fling after it, scrolls
   /// the list, and reads the days near those it shows once it rests. A
@@ -1198,15 +1240,19 @@ class _DayListState extends State<DayList> {
       case DayListHeader():
       case DayListBody():
         throw ArgumentError.value(row, "row", "not a row of a block");
-      case DayListItem(:final entry):
+      case DayListItem<T>(:final entry):
         return _padded(_buildItem(entry));
+      case DayListItem():
+        throw ArgumentError.value(row, "row", "an item of another payload");
       case DayListGap(:final day, :final start, :final end):
         final from = math.max(start, widget.lock.earliestStartOn(day));
         return _padded(
           _buildDashed(
             key: dayListGapKey(day, start),
             label: hourLabel(start, widget.format),
-            addTooltip: "Add an item at ${hourLabel(from, widget.format)}",
+            day: day,
+            addMinute: from,
+            addLabel: "Add an item at ${hourLabel(from, widget.format)}",
             onAdd: from < end
                 ? () {
                     widget.onCreateIn(day, from, from + minutesPerSlot);
@@ -1217,37 +1263,47 @@ class _DayListState extends State<DayList> {
       case DayListHidden(:final day, :final count, :final above):
         return _padded(_buildHidden(day, count, above: above));
       case DayListLoading(:final day):
+        final loading = widget.loadingBuilder ?? defaultCalendarLoadingBuilder;
         return _padded(
           SizedBox(
             key: dayListLoadingKey(day),
-            height: 24.0,
-            child: const Align(
-              alignment: Alignment.centerLeft,
-              child: SizedBox.square(
-                dimension: 16.0,
-                child: CircularProgressIndicator(strokeWidth: 2.0),
-              ),
+            height: _lineRowExtent,
+            child: Builder(
+              builder: (context) {
+                return loading(
+                  context,
+                  CalendarLoadingState(
+                    site: CalendarStateSite.dayRow,
+                    first: day,
+                    last: day,
+                  ),
+                );
+              },
             ),
           ),
         );
       case DayListFailed(:final day):
-        // A day a prefetch failed to read, while the shown range is ready,
-        // has no load error to show.
-        final loadError = widget.store.loadError;
+        final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
         return _padded(
-          Row(
+          ConstrainedBox(
             key: dayListFailedKey(day),
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  loadError == null
-                      ? "This day could not be read."
-                      : "$loadError",
-                  style: _styles.message,
-                ),
-              ),
-              TextButton(onPressed: _retry, child: const Text("Retry")),
-            ],
+            constraints: const BoxConstraints(minHeight: _failedRowExtent),
+            child: Builder(
+              builder: (context) {
+                // A day a prefetch failed to read, while the shown range is
+                // ready, has no load error.
+                return failure(
+                  context,
+                  CalendarFailureState(
+                    site: CalendarStateSite.dayRow,
+                    first: day,
+                    last: day,
+                    error: widget.store.loadError,
+                    retry: _retry,
+                  ),
+                );
+              },
+            ),
           ),
         );
     }
@@ -1312,12 +1368,13 @@ class _DayListState extends State<DayList> {
 
   /// The later of the item's start and the hours', its whole length on a
   /// chip under that behind an hourglass, scaled down where the chip would
-  /// not fit the time column, and its card. The card of an item that
-  /// starts before the hours states its own start in a strip across its
-  /// top, and that of one that ends after them its own end in a strip
+  /// not fit the time column, and its card's slot. The card of an item that
+  /// starts before the hours is handed its own start, for a strip across
+  /// its top, and that of one that ends after them its own end, for a strip
   /// across its bottom. A row leaving for a banner, whose item has no
-  /// minute inside the hours, shows the item's own start and no strip.
-  Widget _buildItem(ShownItem entry) {
+  /// minute inside the hours, shows the item's own start and is handed
+  /// neither.
+  Widget _buildItem(CalendarShownEntry<T> entry) {
     final item = entry.entry;
     final hours = widget.hours;
     var start = math.max(item.startMinute, hours.start);
@@ -1371,9 +1428,10 @@ class _DayListState extends State<DayList> {
           ),
         ),
         Expanded(
-          child: ItemCard(
+          child: _CardSlot<T>(
             key: itemCardKey(entry.id),
             entry: entry,
+            builder: widget.cardBuilder ?? defaultCalendarCardBuilder<T>,
             startsAt: inside && item.startMinute < hours.start
                 ? hourLabel(item.startMinute, widget.format)
                 : null,
@@ -1449,17 +1507,21 @@ class _DayListState extends State<DayList> {
   }
 
   /// [label] at the end of the time column, a dashed line across the
-  /// cards' width, and at its end a button that adds an item there through
-  /// [onAdd], or the button's room where [onAdd] is null.
+  /// cards' width, and at its end a [dayListAddButtonSize] square, which a
+  /// screen reader hears as [addLabel], holding what the add button builder
+  /// draws for a press that adds an item at [addMinute] on [day] through
+  /// [onAdd], or the square's room where [onAdd] is null.
   Widget _buildDashed({
     required Key key,
     required String label,
-    required String addTooltip,
+    required DateTime day,
+    required int addMinute,
+    required String addLabel,
     required VoidCallback? onAdd,
   }) {
     return SizedBox(
       key: key,
-      height: 24.0,
+      height: _lineRowExtent,
       child: Row(
         children: <Widget>[
           Container(
@@ -1476,9 +1538,30 @@ class _DayListState extends State<DayList> {
           _styles.dashedLine,
           const SizedBox(width: 8.0),
           if (onAdd == null)
-            const SizedBox(width: _AddButton.size)
+            const SizedBox(width: dayListAddButtonSize)
           else
-            _AddButton(tooltip: addTooltip, onPressed: onAdd),
+            Semantics(
+              container: true,
+              label: addLabel,
+              child: SizedBox.square(
+                dimension: dayListAddButtonSize,
+                child: Builder(
+                  builder: (context) {
+                    final add =
+                        widget.addButtonBuilder ??
+                        defaultCalendarAddButtonBuilder;
+                    return add(
+                      context,
+                      CalendarAddButtonDetails(
+                        day: day,
+                        startMinute: addMinute,
+                        onPressed: onAdd,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1878,8 +1961,12 @@ class _NowMarker extends StatelessWidget {
               delegate: _NowLayout(
                 place.side,
                 place.fraction,
-                top: item != null && item.before ? ItemCard.stripHeight : 0.0,
-                bottom: item != null && item.after ? ItemCard.stripHeight : 0.0,
+                top: item != null && item.before
+                    ? calendarCardStripExtent
+                    : 0.0,
+                bottom: item != null && item.after
+                    ? calendarCardStripExtent
+                    : 0.0,
               ),
               child: _NowLine(label: hourLabel(minute, format)),
             ),
@@ -1997,30 +2084,39 @@ class _NowLinePainter extends CustomPainter {
   }
 }
 
-/// A small round button with a plus in the primary colour on the primary
-/// tint, which [tooltip] names.
-class _AddButton extends StatelessWidget {
-  const _AddButton({required this.tooltip, required this.onPressed});
+/// The slot of an entry's card in its row, keyed [itemCardKey]: what
+/// [builder] draws for [entry] and the details this slot makes of
+/// [startsAt], [endsAt], [onEdit] and [onDelete] on each of its builds,
+/// called below the row, so a builder that throws loses its own output
+/// alone.
+class _CardSlot<T> extends StatelessWidget {
+  const _CardSlot({
+    super.key,
+    required this.entry,
+    required this.builder,
+    required this.startsAt,
+    required this.endsAt,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
-  /// The button's width and height.
-  static const double size = 24.0;
-
-  final String tooltip;
-  final VoidCallback onPressed;
+  final CalendarShownEntry<T> entry;
+  final CalendarCardBuilder<T> builder;
+  final String? startsAt;
+  final String? endsAt;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
-    final styles = _ListStyles.of(context);
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: styles.theme.primaryTint,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onPressed,
-          child: styles.addIcon,
-        ),
+    return builder(
+      context,
+      entry,
+      CalendarCardDetails(
+        startsAt: startsAt,
+        endsAt: endsAt,
+        onEdit: onEdit,
+        onDelete: onDelete,
       ),
     );
   }

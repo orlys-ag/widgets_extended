@@ -7,7 +7,6 @@ import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
-import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
@@ -106,10 +105,16 @@ void main() {
     );
     expect(retry, findsOneWidget);
     final row = rowHeight(tester);
-    await tester.drag(find.byType(DayList), const Offset(0.0, -120.0));
+    await tester.drag(
+      find.byType(DayList<ItemPayload>),
+      const Offset(0.0, -120.0),
+    );
     await tester.pumpAndSettle();
     expect(tester.getSize(gridFinder()).height, row);
-    await tester.drag(find.byType(WeekStrip), const Offset(0.0, 120.0));
+    await tester.drag(
+      find.byType(WeekStrip<ItemPayload>),
+      const Offset(0.0, 120.0),
+    );
     await tester.pumpAndSettle();
     expect(tester.getSize(gridFinder()).height, 5 * row);
     expect(
@@ -278,7 +283,10 @@ void main() {
     }
 
     for (var drag = 0; drag < 100 && !listedMay4(); drag++) {
-      await tester.drag(find.byType(DayList), const Offset(0.0, -80.0));
+      await tester.drag(
+        find.byType(DayList<ItemPayload>),
+        const Offset(0.0, -80.0),
+      );
       await tester.pump();
     }
     expect(listedMay4(), isTrue);
@@ -286,7 +294,10 @@ void main() {
     await tester.pump();
     final failed = find.byKey(dayListFailedKey(may4));
     for (var drag = 0; drag < 100 && failed.evaluate().isEmpty; drag++) {
-      await tester.drag(find.byType(DayList), const Offset(0.0, -40.0));
+      await tester.drag(
+        find.byType(DayList<ItemPayload>),
+        const Offset(0.0, -40.0),
+      );
       await tester.pump();
     }
     expect(failed, findsOneWidget);

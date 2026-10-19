@@ -364,7 +364,7 @@ void main() {
     (tester) async {
       await pumpCalendar(tester);
       expect(find.text("Agenda"), findsOneWidget);
-      expect(find.byType(DayList), findsOneWidget);
+      expect(find.byType(DayList<ItemPayload>), findsOneWidget);
       expect(find.byType(DayCell), findsNWidgets(35));
 
       await tester.tap(find.byTooltip("Calendar view"));
@@ -415,7 +415,7 @@ void main() {
           expect(rect.top, greaterThanOrEqualTo(firstCell.top + strip - 0.5));
         }
       }
-      expect(find.byType(DayList), findsNothing);
+      expect(find.byType(DayList<ItemPayload>), findsNothing);
     },
   );
 

@@ -884,7 +884,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     final day = _grid.dateAt(cell.row, cell.col);
     final inMonth = _grid.contains(day);
     final isSelected = cell.isSelected;
-    return DayMarkerListener(
+    return DayMarkerListener<ItemPayload>(
       store: _store,
       day: day,
       builder: (context, hasItems) {
@@ -1133,7 +1133,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         Expanded(
           child: NotificationListener<ScrollNotification>(
             onNotification: _handleListScroll,
-            child: DayList(
+            child: DayList<ItemPayload>(
               key: const ValueKey<String>("day-list"),
               store: _store,
               weekdays: _settings.weekdays,
@@ -1167,6 +1167,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 );
               },
               onDelete: _deleteFromCard,
+              cardBuilder: widget.builders.card,
+              cardExtentOf: widget.builders.cardExtent,
+              addButtonBuilder: widget.builders.addButton,
+              loadingBuilder: widget.builders.loading,
+              failureBuilder: widget.builders.failure,
             ),
           ),
         ),
@@ -1336,7 +1341,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// and Day. Its weekdays are fixed for its life, so new ones build a new
   /// strip.
   Widget _buildStrip() {
-    return WeekStrip(
+    return WeekStrip<ItemPayload>(
       key: ValueKey<WeekdaySet>(_settings.weekdays),
       store: _store,
       selectedDay: _selected,

@@ -10,7 +10,6 @@ import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:flutter/gestures.dart';
@@ -263,7 +262,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.byType(DayCell), findsNothing);
-    expect(find.byType(DayList), findsNothing);
+    expect(find.byType(DayList<ItemPayload>), findsNothing);
 
     // Settled, each block that shows spans its day's column from its start
     // slot to its end slot.

@@ -235,7 +235,7 @@ void main() {
     expect(find.text("Day"), findsOneWidget);
     expect(gridDay(tester), today);
     expect(find.byKey(dayCellKey(today)), findsNothing);
-    expect(find.byType(DayList), findsNothing);
+    expect(find.byType(DayList<ItemPayload>), findsNothing);
     expect(find.byTooltip("Add item"), findsNothing);
     expect(find.byTooltip("Previous day"), findsOneWidget);
     expect(find.byTooltip("Next day"), findsOneWidget);
@@ -1089,11 +1089,11 @@ void main() {
       "the board folds it again", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Day");
-    expect(find.byType(WeekStrip), findsOneWidget);
+    expect(find.byType(WeekStrip<ItemPayload>), findsOneWidget);
 
     await tester.drag(find.byKey(calendarPullTabKey), const Offset(0.0, 300.0));
     await tester.pumpAndSettle();
-    expect(find.byType(WeekStrip), findsNothing);
+    expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
     final thursday = DateTime(2026, 4, 23);
     await tester.tap(find.byKey(dayCellKey(thursday)));
     await tester.pumpAndSettle();
@@ -1104,7 +1104,7 @@ void main() {
       const Offset(0.0, -200.0),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(WeekStrip), findsOneWidget);
+    expect(find.byType(WeekStrip<ItemPayload>), findsOneWidget);
   });
 
   testWidgets("D20 over an in-memory store a drop applies within the drop, "

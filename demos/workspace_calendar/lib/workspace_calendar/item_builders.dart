@@ -1,6 +1,6 @@
-/// The demo's builders: what the calendar's views draw for its items and
-/// for their loading and failure states, in Harbor's look, and the bundle
-/// the composition hands them to the views in.
+/// The demo's builders: what the calendar's views draw for its items, the
+/// day list's add button and the loading and failure states, in Harbor's
+/// look, and the bundle the composition hands them to the views in.
 library;
 
 import 'package:flutter/material.dart';
@@ -16,13 +16,31 @@ import 'harbor_theme.dart';
 /// view's default.
 @immutable
 class ItemBuilders {
-  const ItemBuilders({this.block, this.chip, this.loading, this.failure});
+  const ItemBuilders({
+    this.block,
+    this.chip,
+    this.card,
+    this.cardExtent,
+    this.addButton,
+    this.loading,
+    this.failure,
+  });
 
   /// Week's and Day's blocks.
   final CalendarBlockBuilder<ItemPayload>? block;
 
   /// Month's bars, in their chip and card forms.
   final CalendarChipBuilder<ItemPayload>? chip;
+
+  /// Agenda's cards.
+  final CalendarCardBuilder<ItemPayload>? card;
+
+  /// The height of [card]'s card of an entry, its strips left out, which
+  /// Agenda predicts a card it has not built by.
+  final double Function(ShownItem entry)? cardExtent;
+
+  /// The add button of each of Agenda's gaps.
+  final CalendarAddButtonBuilder? addButton;
 
   /// What each view shows while its days are read.
   final CalendarLoadingBuilder? loading;
@@ -35,6 +53,9 @@ class ItemBuilders {
 const ItemBuilders harborItemBuilders = ItemBuilders(
   block: harborBlockBuilder,
   chip: harborChipBuilder,
+  card: harborCardBuilder,
+  cardExtent: ItemCard.extentOf,
+  addButton: harborAddButtonBuilder,
   loading: harborLoadingBuilder,
   failure: harborFailureBuilder,
 );
@@ -55,6 +76,30 @@ Widget harborChipBuilder(
   CalendarChipDetails details,
 ) {
   return HarborChip(entry: entry, details: details);
+}
+
+/// An [ItemCard] of [entry] with its strips and the actions [details]
+/// hands it.
+Widget harborCardBuilder(
+  BuildContext context,
+  ShownItem entry,
+  CalendarCardDetails details,
+) {
+  return ItemCard(
+    entry: entry,
+    onEdit: details.onEdit,
+    onDelete: details.onDelete,
+    startsAt: details.startsAt,
+    endsAt: details.endsAt,
+  );
+}
+
+/// A [HarborAddButton] of [details].
+Widget harborAddButtonBuilder(
+  BuildContext context,
+  CalendarAddButtonDetails details,
+) {
+  return HarborAddButton(details: details);
 }
 
 /// The label of [entry]'s type, which names its kind to a screen reader on
@@ -120,6 +165,31 @@ class _HarborStyles {
       chipTitle = theme.chipTitleStyle.copyWith(color: theme.text),
       cardTitle = theme.monthCardTitleStyle.copyWith(color: theme.text),
       cardTime = theme.monthCardTimeStyle.copyWith(color: theme.textSecondary),
+      cardTitleText = theme.entryCardTitleStyle.copyWith(color: theme.text),
+      cardSummary = theme.entryCardSummaryStyle.copyWith(
+        color: theme.textSecondary,
+      ),
+      stripLabel = theme.noticeStyle.copyWith(color: theme.onNotice),
+      topStrip = BoxDecoration(
+        color: theme.notice,
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(ItemCard._radius),
+        ),
+      ),
+      bottomStrip = BoxDecoration(
+        color: theme.notice,
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(ItemCard._radius),
+        ),
+      ),
+      menuIcon = Icon(
+        theme.entryMenuIcon,
+        color: theme.textMuted,
+        semanticLabel: itemActionsLabel,
+      ),
+      addIcon = SizedBox.expand(
+        child: Icon(theme.addEntryIcon, size: 16.0, color: theme.primary),
+      ),
       message = theme.messageStyle.copyWith(color: theme.error);
 
   /// The styles of [theme]: those made for it before, or for a theme `==`
@@ -170,8 +240,34 @@ class _HarborStyles {
   final TextStyle cardTitle;
   final TextStyle cardTime;
 
+  /// An [ItemCard]'s title, summaries, strips and menu icon.
+  final TextStyle cardTitleText;
+  final TextStyle cardSummary;
+  final TextStyle stripLabel;
+  final BoxDecoration topStrip;
+  final BoxDecoration bottomStrip;
+  final Widget menuIcon;
+
+  /// A [HarborAddButton]'s plus, filling the button.
+  final Widget addIcon;
+
   /// A failed read's sentence.
   final TextStyle message;
+}
+
+/// What a screen reader hears for an [ItemCard]'s menu button.
+const String itemActionsLabel = "Item actions";
+
+/// The key of the strip across the top of the card showing the item [id]
+/// that states its start, [ItemCard.startsAt].
+ValueKey<String> itemCardStartsAtKey(String id) {
+  return ValueKey<String>("card-starts-$id");
+}
+
+/// The key of the strip across the bottom of the card showing the item
+/// [id] that states its end, [ItemCard.endsAt].
+ValueKey<String> itemCardEndsAtKey(String id) {
+  return ValueKey<String>("card-ends-$id");
 }
 
 /// The element of each of Harbor's widgets, which drops the styles made so
@@ -461,6 +557,270 @@ class HarborChip extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+enum _CardAction { edit, delete }
+
+/// An item's card: a rounded box in its type's tint holding the type's
+/// icon and the title, beside them a compact menu of Edit, for [onEdit],
+/// and Delete, for [onDelete], holding those of the two given, and the
+/// schema's summaries under them. With neither given the card has no menu,
+/// and the title's row keeps the menu button's height, so the card's
+/// height stays the same. The menu button shows no tooltip; a screen
+/// reader hears it as [itemActionsLabel]. While [ShownItem.pending] the
+/// card is dimmed with a progress indicator and its menu is disabled. A
+/// yellow strip [calendarCardStripExtent] tall across the card's top
+/// states [startsAt], and one across its bottom [endsAt], where given. Its
+/// text, strips and menu draw in the [CalendarTheme] above it, its tint,
+/// edge and icon in its type's [HarborTypeStyle].
+class ItemCard extends StatelessWidget {
+  const ItemCard({
+    super.key,
+    required this.entry,
+    required this.onEdit,
+    required this.onDelete,
+    this.startsAt,
+    this.endsAt,
+  });
+
+  final ShownItem entry;
+
+  /// The time the item starts at, for one that starts before the hours
+  /// its list shows; null for one that starts inside them.
+  final String? startsAt;
+
+  /// The time the item ends at, for one that ends after the hours its list
+  /// shows; null for one that ends inside them.
+  final String? endsAt;
+
+  /// The height of the strip stating [startsAt] or [endsAt]: the
+  /// [calendarCardStripExtent] the day list places its current-time marker
+  /// between and predicts a card by, a line of its text at the default
+  /// text size and 4 px above and below it.
+  static const double stripHeight = calendarCardStripExtent;
+
+  /// The radius of the card's corners.
+  static const double _radius = 16.0;
+
+  /// The summaries [item]'s schema gives it, in the schema's order, which
+  /// the card shows under its title.
+  static List<String> summariesOf(CalendarItem item) {
+    final schema = schemaOf(item.type);
+    final summaries = <String>[];
+    for (final key in schema.summaryKeys) {
+      final summary = schema.fieldOf(key)?.summaryOf(item.fields[key]);
+      if (summary != null) {
+        summaries.add(summary);
+      }
+    }
+    return summaries;
+  }
+
+  /// The height of [entry]'s card, its strips left out: its top and bottom
+  /// padding, the row of its title and menu button, and a line of
+  /// summaries where it has some.
+  static double extentOf(ShownItem entry) {
+    final summaries = summariesOf(entry.entry).isEmpty ? 0.0 : 17.0;
+    return 6.0 + _titleRowHeight + summaries + 8.0;
+  }
+
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+
+  /// The width of the icon column and the gap after it, which the lines
+  /// under the title are indented by.
+  static const double _iconIndent = 26.0;
+
+  /// The height of the title's row: the menu button's, at its compact
+  /// size.
+  static const double _titleRowHeight = 40.0;
+
+  @override
+  StatelessElement createElement() {
+    return _HarborElement(this);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final styles = _HarborStyles.of(context);
+    final item = entry.entry;
+    final style = harborTypeStyleOf(item.type);
+    final summaries = summariesOf(item);
+    final pending = entry.pending;
+    final onEdit = this.onEdit;
+    final onDelete = this.onDelete;
+    final startsAt = this.startsAt;
+    final endsAt = this.endsAt;
+    Widget card = DecoratedBox(
+      decoration: BoxDecoration(
+        color: style.tint,
+        borderRadius: BorderRadius.circular(_radius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (startsAt != null)
+            _strip(
+              itemCardStartsAtKey(entry.id),
+              startsAtLabel(startsAt),
+              styles,
+              top: true,
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(style.icon, size: 18.0, color: style.edge),
+                    const SizedBox(width: _iconIndent - 18.0),
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: styles.cardTitleText,
+                      ),
+                    ),
+                    if (onEdit == null && onDelete == null)
+                      const SizedBox(height: _titleRowHeight)
+                    else
+                      PopupMenuButton<_CardAction>(
+                        // No tooltip: its icon's label names the button.
+                        tooltip: "",
+                        enabled: !pending,
+                        style: const ButtonStyle(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: styles.menuIcon,
+                        color: styles.theme.surface,
+                        onSelected: (action) {
+                          switch (action) {
+                            case _CardAction.edit:
+                              onEdit?.call();
+                            case _CardAction.delete:
+                              onDelete?.call();
+                          }
+                        },
+                        itemBuilder: (context) {
+                          return <PopupMenuEntry<_CardAction>>[
+                            if (onEdit != null)
+                              const PopupMenuItem<_CardAction>(
+                                value: _CardAction.edit,
+                                child: Text("Edit"),
+                              ),
+                            if (onDelete != null)
+                              const PopupMenuItem<_CardAction>(
+                                value: _CardAction.delete,
+                                child: Text("Delete"),
+                              ),
+                          ];
+                        },
+                      ),
+                  ],
+                ),
+                if (summaries.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _iconIndent,
+                      0.0,
+                      8.0,
+                      0.0,
+                    ),
+                    child: Text(
+                      summaries.join(", "),
+                      style: styles.cardSummary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (endsAt != null)
+            _strip(
+              itemCardEndsAtKey(entry.id),
+              endsAtLabel(endsAt),
+              styles,
+              top: false,
+            ),
+        ],
+      ),
+    );
+    if (pending) {
+      card = Stack(
+        children: <Widget>[
+          Opacity(opacity: 0.5, child: card),
+          Positioned(
+            top: startsAt == null ? 8.0 : 8.0 + stripHeight,
+            right: 48.0,
+            child: const SizedBox.square(
+              dimension: 12.0,
+              child: CircularProgressIndicator(strokeWidth: 2.0),
+            ),
+          ),
+        ],
+      );
+    }
+    return card;
+  }
+
+  /// A strip in the soft yellow of the list's banners across the card's
+  /// top, or its bottom where not [top], rounded as the card's corners
+  /// there, holding [label] in its middle, [stripHeight] tall at any text
+  /// size.
+  static Widget _strip(
+    Key key,
+    String label,
+    _HarborStyles styles, {
+    required bool top,
+  }) {
+    return DecoratedBox(
+      key: key,
+      decoration: top ? styles.topStrip : styles.bottomStrip,
+      child: SizedBox(
+        height: stripHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0),
+          child: Align(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: styles.stripLabel,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A gap's round add button, filling the square the list gives it: a plus
+/// in the primary colour on the primary tint, with ink, which calls
+/// [CalendarAddButtonDetails.onPressed] for a press.
+class HarborAddButton extends StatelessWidget {
+  const HarborAddButton({super.key, required this.details});
+
+  final CalendarAddButtonDetails details;
+
+  @override
+  StatelessElement createElement() {
+    return _HarborElement(this);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final styles = _HarborStyles.of(context);
+    return Material(
+      color: styles.theme.primaryTint,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: details.onPressed,
+        child: styles.addIcon,
+      ),
     );
   }
 }

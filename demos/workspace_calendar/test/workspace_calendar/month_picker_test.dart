@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/month_board.dart';
@@ -212,11 +213,11 @@ void main() {
     await tester.tap(find.byKey(calendarPullTabKey));
     await tester.pumpAndSettle();
     await openPicker(tester);
-    expect(find.byType(WeekStrip), findsNothing);
+    expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
     await tester.tap(find.byTooltip("Close the months"));
     await tester.pumpAndSettle();
     expect(find.byType(MonthPicker), findsNothing);
-    expect(find.byType(WeekStrip), findsOneWidget);
+    expect(find.byType(WeekStrip<ItemPayload>), findsOneWidget);
   });
 
   testWidgets("P3 a drag slides the picker with the finger, the next year "
@@ -281,12 +282,12 @@ void main() {
     await pickMode(tester, "Day");
     await openPicker(tester);
     expect(find.byType(MonthPicker), findsOneWidget);
-    expect(find.byType(WeekStrip), findsNothing);
+    expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
     await pickMonth(tester, 2026, 5);
     expect(find.byType(MonthPicker), findsOneWidget);
     expect(gridDay(tester), DateTime(2026, 5, 21));
     await closePicker(tester);
-    expect(find.byType(WeekStrip), findsOneWidget);
+    expect(find.byType(WeekStrip<ItemPayload>), findsOneWidget);
     expect(stripCell(tester, DateTime(2026, 5, 21)).isSelected, isTrue);
   });
 
