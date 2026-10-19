@@ -275,7 +275,7 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
   }
   final placements = <BoardPlacement<MonthChip>>[];
   for (final entry in shown) {
-    final item = entry.item;
+    final item = entry.entry;
     final first = dayNumber(item.day);
     final last = first + item.dayCount - 1;
     for (var row = 0; row < weeks; row++) {
@@ -322,8 +322,8 @@ List<BoardPlacement<MonthChip>> monthPlacementsOf(
 /// first, and a bar continuing from the week before stacks above a chip
 /// starting on its first shown day.
 int compareMonthChips(MonthChip a, MonthChip b) {
-  final x = a.entry.item;
-  final y = b.entry.item;
+  final x = a.entry.entry;
+  final y = b.entry.entry;
   // `day` is the first day at local midnight, so this compares days and
   // allocates nothing.
   final byDay = x.day.compareTo(y.day);
@@ -1473,7 +1473,7 @@ String _dayLabel(DateTime day) {
 /// What a screen reader says for [entry]'s chip: its title, type, days
 /// and times, and that it is pending while it is.
 String _chipLabel(ShownItem entry) {
-  final item = entry.item;
+  final item = entry.entry;
   final times =
       "${clockLabel(item.startMinute)} to ${clockLabel(item.endMinute)}";
   final String when;
@@ -1657,7 +1657,7 @@ class _MonthChipBox extends StatelessWidget {
   Widget build(BuildContext context) {
     final styles = _MonthStyles.of(context);
     final entry = chip.entry;
-    final item = entry.item;
+    final item = entry.entry;
     final pending = entry.pending;
     final style = harborTypeStyleOf(item.type);
     final extent = card ? monthCardExtent : monthLaneExtent;

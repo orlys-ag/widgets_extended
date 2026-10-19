@@ -1,5 +1,6 @@
-/// The calendar's item value, read from and written to the API's JSON
-/// envelope, and the item as a view shows it.
+/// The calendar's item: a [CalendarEntry] whose payload is the item's
+/// type and fields, read from and written to the API's JSON envelope, and
+/// the item as a view shows it.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -7,79 +8,61 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 import 'calendar_schema.dart';
+import 'harbor_theme.dart';
 
-/// One calendar item. Immutable: its payload is an unmodifiable deep copy
-/// of the map it was built from, so no map the caller holds can change it
-/// and no map it hands out can change the API's store.
+/// One calendar item: an entry whose payload is its [ItemPayload].
+typedef CalendarItem = CalendarEntry<ItemPayload>;
+
+/// An item as a view shows it: [CalendarShownEntry.pending] while a write
+/// on it runs.
+typedef ShownItem = CalendarShownEntry<ItemPayload>;
+
+/// An item's type and the type's fields. Immutable: [fields] is an
+/// unmodifiable deep copy of the map it was built from, so no map the
+/// caller holds can change it and no map it hands out can change the API's
+/// store. Two payloads are equal when their types are and their fields are
+/// deeply.
 @immutable
-class CalendarItem {
-  CalendarItem({
-    this.id,
-    required this.type,
-    required this.title,
-    required DateTime day,
-    required this.startMinute,
-    required this.endMinute,
-    this.dayCount = 1,
+class ItemPayload {
+  ItemPayload(
+    this.type, [
     Map<String, Object?> fields = const <String, Object?>{},
-  }) : day = dateOnly(day),
-       fields = _frozenCopy(fields);
-
-  /// Reads a valid envelope. Throws a [FormatException] when a key is
-  /// missing or of the wrong kind.
-  factory CalendarItem.fromJson(Map<String, Object?> json) {
-    final typeId = json["type"];
-    final type = typeId is String ? CalendarItemType.fromId(typeId) : null;
-    final dayText = json["day"];
-    final day = dayText is String ? parseIsoDate(dayText) : null;
-    final title = json["title"];
-    final start = json["startMinute"];
-    final end = json["endMinute"];
-    final dayCount = json["dayCount"];
-    final fields = json["fields"];
-    final id = json["id"];
-    if (type == null ||
-        day == null ||
-        title is! String ||
-        start is! int ||
-        end is! int ||
-        dayCount is! int ||
-        fields is! Map<String, Object?> ||
-        (id != null && id is! String)) {
-      throw FormatException("Not a calendar item envelope: $json");
-    }
-    return CalendarItem(
-      id: id as String?,
-      type: type,
-      title: title,
-      day: day,
-      startMinute: start,
-      endMinute: end,
-      dayCount: dayCount,
-      fields: fields,
-    );
-  }
-
-  /// The API's id, or null for a draft the API has not stored.
-  final String? id;
+  ]) : fields = _frozenCopy(fields);
 
   final CalendarItemType type;
-  final String title;
-
-  /// The first day, at local midnight.
-  final DateTime day;
-
-  /// Minutes after midnight, on each day the item covers.
-  final int startMinute;
-
-  /// Minutes after midnight, on each day the item covers.
-  final int endMinute;
-
-  /// The consecutive days, from [day], that carry the same hours.
-  final int dayCount;
 
   /// The type's payload. Unmodifiable, its lists too.
   final Map<String, Object?> fields;
+
+  @override
+  bool operator ==(Object other) {
+    return other is ItemPayload &&
+        other.type == type &&
+        _jsonEquals(other.fields, fields);
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(type, _jsonHash(fields));
+  }
+
+  @override
+  String toString() {
+    return "ItemPayload(${type.id}, $fields)";
+  }
+}
+
+/// An item's payload read as the item's own: its type, its fields and its
+/// envelope.
+extension CalendarItemFields on CalendarEntry<ItemPayload> {
+  CalendarItemType get type {
+    return payload.type;
+  }
+
+  /// The type's payload. Unmodifiable, its lists too.
+  Map<String, Object?> get fields {
+    return payload.fields;
+  }
 
   /// The envelope, a new map each call. A draft carries no `id` key.
   Map<String, Object?> toJson() {
@@ -94,111 +77,65 @@ class CalendarItem {
       "fields": _modifiableCopy(fields),
     };
   }
-
-  CalendarItem copyWith({
-    String? title,
-    DateTime? day,
-    int? startMinute,
-    int? endMinute,
-    int? dayCount,
-    Map<String, Object?>? fields,
-  }) {
-    return CalendarItem(
-      id: id,
-      type: type,
-      title: title ?? this.title,
-      day: day ?? this.day,
-      startMinute: startMinute ?? this.startMinute,
-      endMinute: endMinute ?? this.endMinute,
-      dayCount: dayCount ?? this.dayCount,
-      fields: fields ?? this.fields,
-    );
-  }
-
-  /// The item's days and minutes, as the overlap rule reads them.
-  CalendarEntryTime get time {
-    return (
-      firstDay: dayNumber(day),
-      dayCount: dayCount,
-      start: startMinute,
-      end: endMinute,
-    );
-  }
-
-  /// Whether the [dayNumber] [day] is one this item covers.
-  bool coversDay(int day) {
-    final first = dayNumber(this.day);
-    return day >= first && day < first + dayCount;
-  }
-
-  /// The [dayNumber]s of the days this item covers, in order.
-  Iterable<int> get dayNumbers {
-    final first = dayNumber(day);
-    return Iterable<int>.generate(dayCount, (index) {
-      return first + index;
-    });
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is CalendarItem &&
-        other.id == id &&
-        other.type == type &&
-        other.title == title &&
-        other.day == day &&
-        other.startMinute == startMinute &&
-        other.endMinute == endMinute &&
-        other.dayCount == dayCount &&
-        _jsonEquals(other.fields, fields);
-  }
-
-  @override
-  int get hashCode {
-    return Object.hash(
-      id,
-      type,
-      title,
-      day,
-      startMinute,
-      endMinute,
-      dayCount,
-      _jsonHash(fields),
-    );
-  }
-
-  @override
-  String toString() {
-    return "CalendarItem(${toJson()})";
-  }
 }
 
-/// An item as a view shows it: [pending] while a write on it runs.
-@immutable
-class ShownItem {
-  const ShownItem(this.item, {required this.pending});
+/// An item of [type] with [fields], coloured by its type's Harbor edge;
+/// [id] null for a draft the API has not stored.
+CalendarItem calendarItem({
+  String? id,
+  required CalendarItemType type,
+  required String title,
+  required DateTime day,
+  required int startMinute,
+  required int endMinute,
+  int dayCount = 1,
+  Map<String, Object?> fields = const <String, Object?>{},
+}) {
+  return CalendarItem(
+    id: id,
+    day: day,
+    startMinute: startMinute,
+    endMinute: endMinute,
+    dayCount: dayCount,
+    title: title,
+    color: harborTypeStyleOf(type).edge,
+    payload: ItemPayload(type, fields),
+  );
+}
 
-  final CalendarItem item;
-  final bool pending;
-
-  /// The item's id. A shown item is always a stored one.
-  String get id {
-    return item.id!;
+/// Reads a valid envelope. Throws a [FormatException] when a key is
+/// missing or of the wrong kind.
+CalendarItem itemFromJson(Map<String, Object?> json) {
+  final typeId = json["type"];
+  final type = typeId is String ? CalendarItemType.fromId(typeId) : null;
+  final dayText = json["day"];
+  final day = dayText is String ? parseIsoDate(dayText) : null;
+  final title = json["title"];
+  final start = json["startMinute"];
+  final end = json["endMinute"];
+  final dayCount = json["dayCount"];
+  final fields = json["fields"];
+  final id = json["id"];
+  if (type == null ||
+      day == null ||
+      title is! String ||
+      start is! int ||
+      end is! int ||
+      dayCount is! int ||
+      fields is! Map<String, Object?> ||
+      (id != null && id is! String)) {
+    throw FormatException("Not a calendar item envelope: $json");
   }
-
-  @override
-  bool operator ==(Object other) {
-    return other is ShownItem && other.item == item && other.pending == pending;
-  }
-
-  @override
-  int get hashCode {
-    return Object.hash(item, pending);
-  }
-
-  @override
-  String toString() {
-    return "ShownItem($id, pending: $pending)";
-  }
+  return calendarItem(
+    id: id as String?,
+    type: type,
+    title: title,
+    day: day,
+    startMinute: start,
+    endMinute: end,
+    dayCount: dayCount,
+    fields: fields,
+  );
 }
 
 Map<String, Object?> _frozenCopy(Map<String, Object?> map) {

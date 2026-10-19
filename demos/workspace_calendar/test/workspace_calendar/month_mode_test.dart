@@ -395,7 +395,7 @@ void main() {
       // Sanity: the seed holds items across the month.
       expect(listed.length, greaterThan(10));
       for (final json in listed) {
-        final item = CalendarItem.fromJson(json);
+        final item = itemFromJson(json);
         final itemLast = addDays(item.day, item.dayCount - 1);
         for (var row = 0; row < grid.weekCount; row++) {
           final monday = grid.dateAt(row, 0);

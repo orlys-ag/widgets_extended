@@ -118,7 +118,7 @@ Future<CalendarItem> stored(
     json = value;
   });
   await tester.pump(api.latency);
-  return CalendarItem.fromJson(json!);
+  return itemFromJson(json!);
 }
 
 int listCalls(MockCalendarApi api) {

@@ -112,7 +112,7 @@ CalendarItem task(
   int dayCount = 1,
   String title = "Task",
 }) {
-  return CalendarItem(
+  return calendarItem(
     id: id,
     type: CalendarItemType.task,
     title: title,
@@ -199,7 +199,7 @@ void main() {
     model.requestMove(multiMoved);
     harness.lastCall.succeed(multiMoved.toJson());
     await settle();
-    final draft = CalendarItem(
+    final draft = calendarItem(
       type: CalendarItemType.task,
       title: "Created",
       day: DateTime(2026, 4, 25),
@@ -222,7 +222,7 @@ void main() {
     expect(
       <CalendarItem>[
         for (final entry in onWednesday)
-          if (entry.id == "item-1") entry.item,
+          if (entry.id == "item-1") entry.entry,
       ],
       <CalendarItem>[moved],
     );
@@ -338,7 +338,7 @@ void main() {
     expect(harness.failures, hasLength(failuresBefore));
 
     // A confirmed create and delete add and remove.
-    final draft = CalendarItem(
+    final draft = calendarItem(
       type: CalendarItemType.meeting,
       title: "Created",
       day: DateTime(2026, 4, 24),
@@ -516,7 +516,7 @@ void main() {
 
     final created = errorOf(
       model.create(
-        CalendarItem(
+        calendarItem(
           type: CalendarItemType.task,
           title: "Late",
           day: DateTime(2026, 4, 22),

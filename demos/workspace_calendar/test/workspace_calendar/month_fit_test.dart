@@ -27,7 +27,7 @@ ShownItem task(String id, DateTime day, int start, {int dayCount = 1}) {
     ...taskJson(id, day, start * 60, (start + 1) * 60, dayCount: dayCount),
     "id": id,
   };
-  return ShownItem(CalendarItem.fromJson(json), pending: false);
+  return ShownItem(itemFromJson(json), pending: false);
 }
 
 /// The index of [day]'s cell in [grid], as the hidden counts are indexed.

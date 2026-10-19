@@ -223,7 +223,7 @@ class MockCalendarApi implements CalendarApi {
   /// The stored ids, other than [ownId], that the valid [body] may not
   /// share time with, read from the index of the days it covers.
   List<String> _conflictsOf(Map<String, Object?> body, String? ownId) {
-    final time = CalendarItem.fromJson(body).time;
+    final time = itemFromJson(body).time;
     final seen = <String>{};
     final conflicts = <String>[];
     for (var day = time.firstDay; day < time.firstDay + time.dayCount; day++) {
@@ -231,7 +231,7 @@ class MockCalendarApi implements CalendarApi {
         if (id == ownId || !seen.add(id)) {
           continue;
         }
-        final other = CalendarItem.fromJson(_items[id]!).time;
+        final other = itemFromJson(_items[id]!).time;
         if (timesOverlap(time, other)) {
           conflicts.add(id);
         }
@@ -244,7 +244,7 @@ class MockCalendarApi implements CalendarApi {
   Map<String, Object?> _store(String id, Map<String, Object?> body) {
     final stored = <String, Object?>{...body, "id": id};
     _items[id] = stored;
-    for (final day in CalendarItem.fromJson(stored).dayNumbers) {
+    for (final day in itemFromJson(stored).dayNumbers) {
       _idsByDay
           .putIfAbsent(day, () {
             return <String>{};
@@ -259,7 +259,7 @@ class MockCalendarApi implements CalendarApi {
     if (stored == null) {
       return;
     }
-    for (final day in CalendarItem.fromJson(stored).dayNumbers) {
+    for (final day in itemFromJson(stored).dayNumbers) {
       final ids = _idsByDay[day];
       if (ids == null) {
         continue;

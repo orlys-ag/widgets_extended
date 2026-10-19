@@ -472,7 +472,7 @@ List<DayListRow> dayListRowsOf(
   // The latest end among the items so far, or the hours' start.
   var covered = hours.start;
   for (final entry in entries) {
-    final item = entry.item;
+    final item = entry.entry;
     if (math.min(item.endMinute, hours.end) <=
         math.max(item.startMinute, hours.start)) {
       if (item.startMinute < hours.start) {
@@ -970,7 +970,7 @@ class _DayListState extends State<DayList> {
     const padding = _rowGap;
     switch (row) {
       case DayListItem(:final entry):
-        final item = entry.item;
+        final item = entry.entry;
         final summaries = ItemCard.summariesOf(item).isEmpty ? 0.0 : 17.0;
         final strips =
             (item.startMinute < hours.start ? ItemCard.stripHeight : 0.0) +
@@ -1314,7 +1314,7 @@ class _DayListState extends State<DayList> {
   /// across its bottom. A row leaving for a banner, whose item has no
   /// minute inside the hours, shows the item's own start and no strip.
   Widget _buildItem(ShownItem entry) {
-    final item = entry.item;
+    final item = entry.entry;
     final hours = widget.hours;
     var start = math.max(item.startMinute, hours.start);
     final inside = math.min(item.endMinute, hours.end) > start;
@@ -1773,7 +1773,7 @@ class _NowSpan {
       final start = switch (row) {
         DayListHidden(above: true) => -1,
         DayListHidden(above: false) => minutesPerDay + 1,
-        DayListItem(:final entry) => entry.item.startMinute,
+        DayListItem(:final entry) => entry.entry.startMinute,
         DayListGap(:final start) => start,
         _ => null,
       };
@@ -1789,10 +1789,10 @@ class _NowSpan {
           first: i == 0,
           item: switch (starts[i].$1) {
             DayListItem(:final entry) => (
-              start: math.max(entry.item.startMinute, hours.start),
-              end: math.min(entry.item.endMinute, hours.end),
-              before: entry.item.startMinute < hours.start,
-              after: entry.item.endMinute > hours.end,
+              start: math.max(entry.entry.startMinute, hours.start),
+              end: math.min(entry.entry.endMinute, hours.end),
+              before: entry.entry.startMinute < hours.start,
+              after: entry.entry.endMinute > hours.end,
             ),
             _ => null,
           },

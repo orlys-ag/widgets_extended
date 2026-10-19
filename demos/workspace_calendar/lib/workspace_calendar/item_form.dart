@@ -59,7 +59,7 @@ Future<void> showCreateFlow(
   if (type == null || !context.mounted) {
     return;
   }
-  final draft = CalendarItem(
+  final draft = calendarItem(
     type: type,
     title: "",
     day: range.day,
@@ -318,7 +318,7 @@ class _ItemFormState extends State<_ItemForm> {
     if (errors.isEmpty) {
       errors = widget.lock().errorsOf(
         _isDraft ? null : widget.item.time,
-        CalendarItem.fromJson(json).time,
+        itemFromJson(json).time,
       );
     }
     if (errors.isNotEmpty) {
@@ -333,7 +333,7 @@ class _ItemFormState extends State<_ItemForm> {
       _errors = const <String, String>{};
       _message = null;
     });
-    final item = CalendarItem.fromJson(json);
+    final item = itemFromJson(json);
     try {
       if (_isDraft) {
         await widget.model.create(item);

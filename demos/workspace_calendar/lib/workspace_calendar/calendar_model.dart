@@ -319,7 +319,7 @@ class CalendarModel extends ChangeNotifier {
       }
     }
     for (final json in items) {
-      final returned = CalendarItem.fromJson(json);
+      final returned = itemFromJson(json);
       _items.putIfAbsent(returned.id!, () {
         return returned;
       });
@@ -345,7 +345,7 @@ class CalendarModel extends ChangeNotifier {
     final shown = <ShownItem>[];
     for (final id in _candidatesOn(number, number)) {
       final entry = _shownOf(id);
-      if (entry != null && entry.item.coversDay(number)) {
+      if (entry != null && entry.entry.coversDay(number)) {
         shown.add(entry);
       }
     }
@@ -363,8 +363,8 @@ class CalendarModel extends ChangeNotifier {
       if (entry == null) {
         continue;
       }
-      final itemFirst = dayNumber(entry.item.day);
-      final itemLast = itemFirst + entry.item.dayCount - 1;
+      final itemFirst = dayNumber(entry.entry.day);
+      final itemLast = itemFirst + entry.entry.dayCount - 1;
       if (itemFirst <= lastDay && itemLast >= firstDay) {
         shown.add(entry);
       }
@@ -386,7 +386,7 @@ class CalendarModel extends ChangeNotifier {
     }
     for (final id in _candidatesOn(number, number)) {
       final entry = _shownOf(id);
-      if (entry != null && entry.item.coversDay(number)) {
+      if (entry != null && entry.entry.coversDay(number)) {
         return true;
       }
     }
@@ -441,7 +441,7 @@ class CalendarModel extends ChangeNotifier {
       );
       var free = true;
       for (final entry in shown) {
-        if (timesOverlap(time, entry.item.time)) {
+        if (timesOverlap(time, entry.entry.time)) {
           free = false;
           break;
         }
@@ -491,7 +491,7 @@ class CalendarModel extends ChangeNotifier {
       throw CalendarValidationException(errors);
     }
     final json = await _api.create(draft.toJson());
-    final created = CalendarItem.fromJson(json);
+    final created = itemFromJson(json);
     if (!_disposed) {
       _applyConfirmed(created);
       notifyListeners();
@@ -517,7 +517,7 @@ class CalendarModel extends ChangeNotifier {
     }
     try {
       final json = await _api.update(id, item.toJson());
-      final updated = CalendarItem.fromJson(json);
+      final updated = itemFromJson(json);
       if (!_disposed) {
         _applyConfirmed(updated);
         notifyListeners();
@@ -564,7 +564,7 @@ class CalendarModel extends ChangeNotifier {
             if (_disposed) {
               return;
             }
-            _applyConfirmed(CalendarItem.fromJson(json));
+            _applyConfirmed(itemFromJson(json));
             notifyListeners();
           },
           onError: (Object error) {
@@ -580,7 +580,7 @@ class CalendarModel extends ChangeNotifier {
     final conflicts = <String>[];
     final last = addDays(requested.day, requested.dayCount - 1);
     for (final other in itemsBetween(requested.day, last)) {
-      if (other.id != requested.id && timesOverlap(time, other.item.time)) {
+      if (other.id != requested.id && timesOverlap(time, other.entry.time)) {
         conflicts.add(other.id);
       }
     }
@@ -670,8 +670,8 @@ String _messageOf(Object? error) {
 }
 
 int _compareShown(ShownItem a, ShownItem b) {
-  final x = a.item;
-  final y = b.item;
+  final x = a.entry;
+  final y = b.entry;
   final byStart = x.startMinute.compareTo(y.startMinute);
   if (byStart != 0) {
     return byStart;

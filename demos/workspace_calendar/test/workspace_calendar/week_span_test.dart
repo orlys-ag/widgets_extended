@@ -142,7 +142,7 @@ void main() {
 
     test("itemFromSpan keeps the item and takes shapeFromSpan's days and "
         "minutes", () {
-      final item = CalendarItem(
+      final item = calendarItem(
         id: "item-9",
         type: CalendarItemType.meeting,
         title: "Planning",

@@ -144,7 +144,7 @@ Future<CalendarItem> stored(
     json = value;
   });
   await tester.pump(api.latency);
-  return CalendarItem.fromJson(json!);
+  return itemFromJson(json!);
 }
 
 /// The id of the item titled [title] that [api] holds on [day].

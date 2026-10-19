@@ -1544,7 +1544,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     ));
     final placements = <BoardPlacement<ShownItem>>[];
     for (final entry in shown) {
-      final span = gridSpanOf(entry.item.time, _tracks);
+      final span = gridSpanOf(entry.entry.time, _tracks);
       if (span != null) {
         placements.add(BoardPlacement<ShownItem>(entry, span));
       }
@@ -1574,7 +1574,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     final below = List<int>.filled(_tracks.columnCount, 0);
     var offDays = 0;
     for (final entry in shown) {
-      final shape = entry.item.time;
+      final shape = entry.entry.time;
       if (gridSpanOf(shape, _tracks) != null) {
         continue;
       }
@@ -1644,7 +1644,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       return false;
     }
     final entry = _board.itemOf(id);
-    return entry != null && !_reachesPastHours(entry.item);
+    return entry != null && !_reachesPastHours(entry.entry);
   }
 
   /// Whether [item] starts before the grid's hours or ends after them.
@@ -1669,7 +1669,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
     if (from == span) {
       return true;
     }
-    final time = entry.item.time;
+    final time = entry.entry.time;
     final converted = shapeFromSpan(time, from, span, _tracks);
     final maxDays = widget.maxDayCount;
     if (converted.dayCount < 1 ||
@@ -1694,7 +1694,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
         continue;
       }
       final occupant = _board.itemOf(other);
-      if (occupant != null && timesOverlap(converted, occupant.item.time)) {
+      if (occupant != null && timesOverlap(converted, occupant.entry.time)) {
         return false;
       }
     }
@@ -1800,7 +1800,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       return null;
     }
     return landingLabel(
-      shapeFromSpan(entry.item.time, from, target, _tracks),
+      shapeFromSpan(entry.entry.time, from, target, _tracks),
       widget.today,
     );
   }
@@ -2112,7 +2112,7 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       end: range.endMinute,
     );
     for (final item in items) {
-      if (timesOverlap(time, item.item.time)) {
+      if (timesOverlap(time, item.entry.time)) {
         return false;
       }
     }
@@ -2210,8 +2210,8 @@ class _TimedGridState extends State<TimedGrid> with TickerProviderStateMixin {
       entry: entry,
       detailed: _tracks.columnCount == 1,
       showsSummary: view.span.rowSpan >= 3,
-      cutAtStart: entry.item.startMinute < hours.start,
-      cutAtEnd: entry.item.endMinute > hours.end,
+      cutAtStart: entry.entry.startMinute < hours.start,
+      cutAtEnd: entry.entry.endMinute > hours.end,
       selection: _selectedBlock,
       lock: _lock,
       onSelect: () {
@@ -2514,7 +2514,7 @@ class _Block extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final styles = _GridStyles.of(context);
-    final item = entry.item;
+    final item = entry.entry;
     final style = harborTypeStyleOf(item.type);
     Widget content = DecoratedBox(
       decoration: BoxDecoration(
@@ -2555,7 +2555,7 @@ class _Block extends StatelessWidget {
       listenable: Listenable.merge(<Listenable>[selection, lock]),
       child: content,
       builder: (context, child) {
-        final hold = lock.value.holdOf(entry.item.time);
+        final hold = lock.value.holdOf(entry.entry.time);
         return Stack(
           fit: StackFit.passthrough,
           children: <Widget>[
