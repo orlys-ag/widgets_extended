@@ -673,11 +673,7 @@ class CalendarThemeData with Diagnosticable {
         b.dayHeaderNumberStyle,
         t,
       )!,
-      blockTitleStyle: TextStyle.lerp(
-        a.blockTitleStyle,
-        b.blockTitleStyle,
-        t,
-      )!,
+      blockTitleStyle: TextStyle.lerp(a.blockTitleStyle, b.blockTitleStyle, t)!,
       blockSummaryStyle: TextStyle.lerp(
         a.blockSummaryStyle,
         b.blockSummaryStyle,
@@ -743,11 +739,7 @@ class CalendarThemeData with Diagnosticable {
         b.agendaHeaderEmptyCountStyle,
         t,
       )!,
-      agendaTimeStyle: TextStyle.lerp(
-        a.agendaTimeStyle,
-        b.agendaTimeStyle,
-        t,
-      )!,
+      agendaTimeStyle: TextStyle.lerp(a.agendaTimeStyle, b.agendaTimeStyle, t)!,
       entryCardTitleStyle: TextStyle.lerp(
         a.entryCardTitleStyle,
         b.entryCardTitleStyle,
@@ -1029,11 +1021,7 @@ class CalendarThemeData with Diagnosticable {
     addStyle("badgeStyle", badgeStyle, _badgeStyle);
     addStyle("noticeStyle", noticeStyle, _noticeStyle);
     addStyle("messageStyle", messageStyle, _messageStyle);
-    addStyle(
-      "monthDayNumberStyle",
-      monthDayNumberStyle,
-      _monthDayNumberStyle,
-    );
+    addStyle("monthDayNumberStyle", monthDayNumberStyle, _monthDayNumberStyle);
     addStyle(
       "monthDayNumberMarkedStyle",
       monthDayNumberMarkedStyle,
@@ -1041,11 +1029,7 @@ class CalendarThemeData with Diagnosticable {
     );
     addStyle("monthMoreStyle", monthMoreStyle, _monthMoreStyle);
     addStyle("chipTitleStyle", chipTitleStyle, _chipTitleStyle);
-    addStyle(
-      "monthCardTitleStyle",
-      monthCardTitleStyle,
-      _monthCardTitleStyle,
-    );
+    addStyle("monthCardTitleStyle", monthCardTitleStyle, _monthCardTitleStyle);
     addStyle("monthCardTimeStyle", monthCardTimeStyle, _monthCardTimeStyle);
     addStyle(
       "agendaHeaderTitleStyle",
@@ -1068,11 +1052,7 @@ class CalendarThemeData with Diagnosticable {
       _agendaHeaderEmptyCountStyle,
     );
     addStyle("agendaTimeStyle", agendaTimeStyle, _agendaTimeStyle);
-    addStyle(
-      "entryCardTitleStyle",
-      entryCardTitleStyle,
-      _entryCardTitleStyle,
-    );
+    addStyle("entryCardTitleStyle", entryCardTitleStyle, _entryCardTitleStyle);
     addStyle(
       "entryCardSummaryStyle",
       entryCardSummaryStyle,

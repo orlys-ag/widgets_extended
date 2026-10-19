@@ -1599,11 +1599,7 @@ class _MonthDayCell extends StatelessWidget {
           child: FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text(
-              "+$count more",
-              maxLines: 1,
-              style: styles.moreLabel,
-            ),
+            child: Text("+$count more", maxLines: 1, style: styles.moreLabel),
           ),
         ),
       ),

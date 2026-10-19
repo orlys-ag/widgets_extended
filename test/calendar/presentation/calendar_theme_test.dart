@@ -321,63 +321,88 @@ CalendarThemeData withValue(
 
 /// The built-in size, weight and height of each text style.
 const Map<String, ({double? size, FontWeight? weight, double? height})>
-builtInTypography = <String, ({double? size, FontWeight? weight, double? height})>{
-  "hourLabelStyle": (size: 11.0, weight: null, height: 1.0),
-  "dayHeaderWeekdayStyle": (size: 11.0, weight: null, height: null),
-  "dayHeaderNumberStyle": (size: 14.0, weight: FontWeight.w700, height: null),
-  "blockTitleStyle": (size: 11.0, weight: FontWeight.w600, height: null),
-  "blockSummaryStyle": (size: 10.0, weight: null, height: null),
-  "detailedBlockTitleStyle": (
-    size: 13.0,
-    weight: FontWeight.w600,
-    height: null,
-  ),
-  "detailedBlockDetailStyle": (size: 12.0, weight: null, height: null),
-  "landingLabelStyle": (size: 13.0, weight: FontWeight.w600, height: null),
-  "badgeStyle": (size: 11.0, weight: FontWeight.w600, height: null),
-  "noticeStyle": (size: 12.0, weight: FontWeight.w600, height: null),
-  "messageStyle": (size: null, weight: null, height: null),
-  "monthDayNumberStyle": (size: 13.0, weight: FontWeight.w400, height: null),
-  "monthDayNumberMarkedStyle": (
-    size: 13.0,
-    weight: FontWeight.w600,
-    height: null,
-  ),
-  "monthMoreStyle": (size: 11.0, weight: FontWeight.w600, height: null),
-  "chipTitleStyle": (size: 11.0, weight: FontWeight.w600, height: null),
-  "monthCardTitleStyle": (size: 12.0, weight: FontWeight.w600, height: null),
-  "monthCardTimeStyle": (size: 11.0, weight: null, height: null),
-  "agendaHeaderTitleStyle": (
-    size: 16.0,
-    weight: FontWeight.w700,
-    height: null,
-  ),
-  "agendaHeaderEmptyTitleStyle": (
-    size: 13.0,
-    weight: FontWeight.w700,
-    height: null,
-  ),
-  "agendaHeaderCountStyle": (
-    size: 15.0,
-    weight: FontWeight.w600,
-    height: null,
-  ),
-  "agendaHeaderEmptyCountStyle": (
-    size: 12.0,
-    weight: FontWeight.w600,
-    height: null,
-  ),
-  "agendaTimeStyle": (size: 12.0, weight: FontWeight.w600, height: null),
-  "entryCardTitleStyle": (size: 14.0, weight: FontWeight.w600, height: null),
-  "entryCardSummaryStyle": (size: 14.0, weight: null, height: null),
-  "dayNumberStyle": (size: 15.0, weight: FontWeight.w400, height: null),
-  "dayNumberMarkedStyle": (size: 15.0, weight: FontWeight.w600, height: null),
-  "stripWeekdayStyle": (size: 12.0, weight: null, height: 1.2),
-  "weekdayHeaderStyle": (size: 12.0, weight: null, height: null),
-  "weekdayLetterStyle": (size: 15.0, weight: FontWeight.w600, height: null),
-  "monthNameStyle": (size: 15.0, weight: FontWeight.w400, height: null),
-  "monthNameMarkedStyle": (size: 15.0, weight: FontWeight.w600, height: null),
-};
+builtInTypography =
+    <String, ({double? size, FontWeight? weight, double? height})>{
+      "hourLabelStyle": (size: 11.0, weight: null, height: 1.0),
+      "dayHeaderWeekdayStyle": (size: 11.0, weight: null, height: null),
+      "dayHeaderNumberStyle": (
+        size: 14.0,
+        weight: FontWeight.w700,
+        height: null,
+      ),
+      "blockTitleStyle": (size: 11.0, weight: FontWeight.w600, height: null),
+      "blockSummaryStyle": (size: 10.0, weight: null, height: null),
+      "detailedBlockTitleStyle": (
+        size: 13.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
+      "detailedBlockDetailStyle": (size: 12.0, weight: null, height: null),
+      "landingLabelStyle": (size: 13.0, weight: FontWeight.w600, height: null),
+      "badgeStyle": (size: 11.0, weight: FontWeight.w600, height: null),
+      "noticeStyle": (size: 12.0, weight: FontWeight.w600, height: null),
+      "messageStyle": (size: null, weight: null, height: null),
+      "monthDayNumberStyle": (
+        size: 13.0,
+        weight: FontWeight.w400,
+        height: null,
+      ),
+      "monthDayNumberMarkedStyle": (
+        size: 13.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
+      "monthMoreStyle": (size: 11.0, weight: FontWeight.w600, height: null),
+      "chipTitleStyle": (size: 11.0, weight: FontWeight.w600, height: null),
+      "monthCardTitleStyle": (
+        size: 12.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
+      "monthCardTimeStyle": (size: 11.0, weight: null, height: null),
+      "agendaHeaderTitleStyle": (
+        size: 16.0,
+        weight: FontWeight.w700,
+        height: null,
+      ),
+      "agendaHeaderEmptyTitleStyle": (
+        size: 13.0,
+        weight: FontWeight.w700,
+        height: null,
+      ),
+      "agendaHeaderCountStyle": (
+        size: 15.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
+      "agendaHeaderEmptyCountStyle": (
+        size: 12.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
+      "agendaTimeStyle": (size: 12.0, weight: FontWeight.w600, height: null),
+      "entryCardTitleStyle": (
+        size: 14.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
+      "entryCardSummaryStyle": (size: 14.0, weight: null, height: null),
+      "dayNumberStyle": (size: 15.0, weight: FontWeight.w400, height: null),
+      "dayNumberMarkedStyle": (
+        size: 15.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
+      "stripWeekdayStyle": (size: 12.0, weight: null, height: 1.2),
+      "weekdayHeaderStyle": (size: 12.0, weight: null, height: null),
+      "weekdayLetterStyle": (size: 15.0, weight: FontWeight.w600, height: null),
+      "monthNameStyle": (size: 15.0, weight: FontWeight.w400, height: null),
+      "monthNameMarkedStyle": (
+        size: 15.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
+    };
 
 /// A value for the field [name] unlike its built-in one: for a text style,
 /// the built-in with a field it already sets changed, or, for one that sets

@@ -259,10 +259,7 @@ class ItemCard extends StatelessWidget {
                       8.0,
                       0.0,
                     ),
-                    child: Text(
-                      summaries.join(", "),
-                      style: styles.summary,
-                    ),
+                    child: Text(summaries.join(", "), style: styles.summary),
                   ),
               ],
             ),
