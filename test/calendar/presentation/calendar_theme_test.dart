@@ -1,6 +1,7 @@
-/// [CalendarThemeData]'s fields, built-in values, value semantics, domains
-/// and diagnostics, and [CalendarTheme]'s lookup, notification and capture
-/// into a route.
+/// [CalendarThemeData]'s fields, among them the entry tint and pending
+/// opacities and the action label style the default builders read, its
+/// built-in values, value semantics, domains and diagnostics, and
+/// [CalendarTheme]'s lookup, notification and capture into a route.
 library;
 
 import 'dart:math' as math;
@@ -37,7 +38,7 @@ const List<String> iconNames = <String>[
   "addEntryIcon",
 ];
 
-/// The thirty-one text style fields, in the order the theme declares them.
+/// The thirty-two text style fields, in the order the theme declares them.
 const List<String> styleNames = <String>[
   "hourLabelStyle",
   "dayHeaderWeekdayStyle",
@@ -70,14 +71,18 @@ const List<String> styleNames = <String>[
   "weekdayLetterStyle",
   "monthNameStyle",
   "monthNameMarkedStyle",
+  "actionLabelStyle",
 ];
 
-/// Every field: the colours, the ring width, the dragged block's opacity,
-/// the motion, the icons and the text styles.
+/// Every field: the colours, the ring width, the dragged block's, the entry
+/// tint's and the pending entry's opacities, the motion, the icons and the
+/// text styles.
 const List<String> fieldNames = <String>[
   ...colourNames,
   "todayRingWidth",
   "draggedBlockOpacity",
+  "entryTintOpacity",
+  "pendingEntryOpacity",
   "motionDuration",
   "motionCurve",
   ...iconNames,
@@ -119,6 +124,10 @@ Object valueOf(CalendarThemeData theme, String name) {
       return theme.todayRingWidth;
     case "draggedBlockOpacity":
       return theme.draggedBlockOpacity;
+    case "entryTintOpacity":
+      return theme.entryTintOpacity;
+    case "pendingEntryOpacity":
+      return theme.pendingEntryOpacity;
     case "motionDuration":
       return theme.motionDuration;
     case "motionCurve":
@@ -195,6 +204,8 @@ Object valueOf(CalendarThemeData theme, String name) {
       return theme.monthNameStyle;
     case "monthNameMarkedStyle":
       return theme.monthNameMarkedStyle;
+    case "actionLabelStyle":
+      return theme.actionLabelStyle;
   }
   throw ArgumentError.value(name, "name", "no such field");
 }
@@ -239,6 +250,10 @@ CalendarThemeData withValue(
       return theme.copyWith(todayRingWidth: value as double);
     case "draggedBlockOpacity":
       return theme.copyWith(draggedBlockOpacity: value as double);
+    case "entryTintOpacity":
+      return theme.copyWith(entryTintOpacity: value as double);
+    case "pendingEntryOpacity":
+      return theme.copyWith(pendingEntryOpacity: value as double);
     case "motionDuration":
       return theme.copyWith(motionDuration: value as Duration);
     case "motionCurve":
@@ -315,6 +330,8 @@ CalendarThemeData withValue(
       return theme.copyWith(monthNameStyle: value as TextStyle);
     case "monthNameMarkedStyle":
       return theme.copyWith(monthNameMarkedStyle: value as TextStyle);
+    case "actionLabelStyle":
+      return theme.copyWith(actionLabelStyle: value as TextStyle);
   }
   throw ArgumentError.value(name, "name", "no such field");
 }
@@ -402,6 +419,7 @@ builtInTypography =
         weight: FontWeight.w600,
         height: null,
       ),
+      "actionLabelStyle": (size: 14.0, weight: FontWeight.w600, height: null),
     };
 
 /// A value for the field [name] unlike its built-in one: for a text style,
@@ -429,6 +447,10 @@ Object fullValueOf(String name, int index) {
       return 3.5;
     case "draggedBlockOpacity":
       return 0.5;
+    case "entryTintOpacity":
+      return 0.3;
+    case "pendingEntryOpacity":
+      return 0.7;
     case "motionDuration":
       return const Duration(milliseconds: 450);
     case "motionCurve":
@@ -466,6 +488,8 @@ CalendarThemeData fullTheme() {
     todayRing: full("todayRing"),
     todayRingWidth: full("todayRingWidth"),
     draggedBlockOpacity: full("draggedBlockOpacity"),
+    entryTintOpacity: full("entryTintOpacity"),
+    pendingEntryOpacity: full("pendingEntryOpacity"),
     motionDuration: full("motionDuration"),
     motionCurve: full("motionCurve"),
     beforeHoursIcon: full("beforeHoursIcon"),
@@ -504,6 +528,7 @@ CalendarThemeData fullTheme() {
     weekdayLetterStyle: full("weekdayLetterStyle"),
     monthNameStyle: full("monthNameStyle"),
     monthNameMarkedStyle: full("monthNameMarkedStyle"),
+    actionLabelStyle: full("actionLabelStyle"),
   );
 }
 
@@ -552,10 +577,10 @@ Widget themed(CalendarThemeData? data, Widget child) {
 void main() {
   const builtIn = CalendarThemeData();
 
-  test("the field lists name 54 distinct fields", () {
-    expect(fieldNames.toSet(), hasLength(54));
+  test("the field lists name 57 distinct fields, 32 of them text styles", () {
+    expect(fieldNames.toSet(), hasLength(57));
     expect(colourNames, hasLength(14));
-    expect(styleNames, hasLength(31));
+    expect(styleNames, hasLength(32));
     final full = fullTheme();
     for (final name in fieldNames) {
       expect(valueOf(full, name), isNot(valueOf(builtIn, name)), reason: name);
@@ -664,6 +689,14 @@ void main() {
       half.draggedBlockOpacity,
       moreOrLessEquals((a.draggedBlockOpacity + b.draggedBlockOpacity) / 2.0),
     );
+    expect(
+      half.entryTintOpacity,
+      moreOrLessEquals((a.entryTintOpacity + b.entryTintOpacity) / 2.0),
+    );
+    expect(
+      half.pendingEntryOpacity,
+      moreOrLessEquals((a.pendingEntryOpacity + b.pendingEntryOpacity) / 2.0),
+    );
     expect(half.motionCurve, b.motionCurve);
     for (final name in iconNames) {
       expect(valueOf(half, name), valueOf(b, name), reason: name);
@@ -756,7 +789,7 @@ void main() {
   });
 
   test("CT7 the built-in values: the palette's contrast, the typography, "
-      "the motion, the ring and the opacity", () {
+      "the motion, the ring and the opacities", () {
     for (final surface in <Color>[
       builtIn.surface,
       builtIn.background,
@@ -790,6 +823,8 @@ void main() {
     expect(builtIn.motionCurve, Curves.fastOutSlowIn);
     expect(builtIn.todayRingWidth, 2.0);
     expect(builtIn.draggedBlockOpacity, 0.66);
+    expect(builtIn.entryTintOpacity, 0.14);
+    expect(builtIn.pendingEntryOpacity, 0.5);
   });
 
   test("CT8 the built-in icons are MaterialIcons code points", () {
@@ -818,6 +853,18 @@ void main() {
     }, throwsAssertionError);
     expect(() {
       return CalendarThemeData(todayRingWidth: -1.0);
+    }, throwsAssertionError);
+    expect(() {
+      return CalendarThemeData(entryTintOpacity: 1.5);
+    }, throwsAssertionError);
+    expect(() {
+      return CalendarThemeData(entryTintOpacity: -0.1);
+    }, throwsAssertionError);
+    expect(() {
+      return CalendarThemeData(pendingEntryOpacity: 1.5);
+    }, throwsAssertionError);
+    expect(() {
+      return CalendarThemeData(pendingEntryOpacity: -0.1);
     }, throwsAssertionError);
 
     final reader = Builder(
@@ -848,19 +895,27 @@ void main() {
     const low = CalendarThemeData(
       motionDuration: Duration(milliseconds: 100),
       draggedBlockOpacity: 0.2,
+      entryTintOpacity: 0.2,
+      pendingEntryOpacity: 0.2,
       todayRingWidth: 1.0,
     );
     const high = CalendarThemeData(
       motionDuration: Duration(milliseconds: 900),
       draggedBlockOpacity: 0.9,
+      entryTintOpacity: 0.9,
+      pendingEntryOpacity: 0.9,
       todayRingWidth: 3.0,
     );
     final under = CalendarThemeData.lerp(low, high, -1.0);
     expect(under.motionDuration, Duration.zero);
     expect(under.draggedBlockOpacity, 0.0);
+    expect(under.entryTintOpacity, 0.0);
+    expect(under.pendingEntryOpacity, 0.0);
     expect(under.todayRingWidth, 0.0);
     final over = CalendarThemeData.lerp(low, high, 2.0);
     expect(over.draggedBlockOpacity, 1.0);
+    expect(over.entryTintOpacity, 1.0);
+    expect(over.pendingEntryOpacity, 1.0);
     expect(over.motionDuration, const Duration(milliseconds: 1700));
     expect(over.todayRingWidth, moreOrLessEquals(5.0));
   });
