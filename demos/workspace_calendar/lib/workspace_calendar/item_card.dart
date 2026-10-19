@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
@@ -26,6 +27,83 @@ ValueKey<String> itemCardEndsAtKey(String id) {
 
 enum _CardAction { edit, delete }
 
+/// What an [ItemCard] draws with, made from one [CalendarThemeData] by
+/// [forTheme] and never changed.
+@immutable
+class _CardStyles {
+  _CardStyles._(this.theme)
+    : title = theme.entryCardTitleStyle.copyWith(color: theme.text),
+      summary = theme.entryCardSummaryStyle.copyWith(
+        color: theme.textSecondary,
+      ),
+      stripLabel = theme.noticeStyle.copyWith(color: theme.onNotice),
+      topStrip = BoxDecoration(
+        color: theme.notice,
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(ItemCard._radius),
+        ),
+      ),
+      bottomStrip = BoxDecoration(
+        color: theme.notice,
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(ItemCard._radius),
+        ),
+      ),
+      menuIcon = Icon(theme.entryMenuIcon, color: theme.textMuted);
+
+  /// The styles of [theme]: those made for it before, or for a theme `==`
+  /// to it last, so an equal theme makes none.
+  static _CardStyles forTheme(CalendarThemeData theme) {
+    final kept = _memo[theme];
+    if (kept != null) {
+      return kept;
+    }
+    final last = _last;
+    final styles = last != null && last.theme == theme
+        ? last
+        : _CardStyles._(theme);
+    _memo[theme] = styles;
+    _last = styles;
+    return styles;
+  }
+
+  /// The styles of the theme above [context], which [context] then depends
+  /// on.
+  static _CardStyles of(BuildContext context) {
+    return forTheme(CalendarTheme.of(context));
+  }
+
+  static Expando<_CardStyles> _memo = Expando<_CardStyles>();
+  static _CardStyles? _last;
+
+  /// Drops the styles made so far, which keep the code that made them
+  /// across a hot reload, so the next read makes them again.
+  static void _reset() {
+    _memo = Expando<_CardStyles>();
+    _last = null;
+  }
+
+  final CalendarThemeData theme;
+  final TextStyle title;
+  final TextStyle summary;
+  final TextStyle stripLabel;
+  final BoxDecoration topStrip;
+  final BoxDecoration bottomStrip;
+  final Widget menuIcon;
+}
+
+/// The element of an [ItemCard], which drops the card styles made so far
+/// on a hot reload, before its widget builds again.
+class _CardElement extends StatelessElement {
+  _CardElement(super.widget);
+
+  @override
+  void reassemble() {
+    _CardStyles._reset();
+    super.reassemble();
+  }
+}
+
 /// An item's card: a rounded box in its type's tint holding the type's
 /// icon and the title, beside them a compact menu of Edit, for [onEdit],
 /// and Delete, for [onDelete], holding those of the two given, and the
@@ -34,7 +112,9 @@ enum _CardAction { edit, delete }
 /// height stays the same. While [ShownItem.pending] the card is dimmed
 /// with a progress indicator and its menu is disabled. A yellow strip
 /// across the card's top states [startsAt], and one across its bottom
-/// [endsAt], where given.
+/// [endsAt], where given. Its text, strips and menu draw in the
+/// [CalendarTheme] above it, its tint, edge and icon in its type's
+/// [HarborTypeStyle].
 class ItemCard extends StatelessWidget {
   const ItemCard({
     super.key,
@@ -88,7 +168,13 @@ class ItemCard extends StatelessWidget {
   static const double _titleRowHeight = 40.0;
 
   @override
+  StatelessElement createElement() {
+    return _CardElement(this);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final styles = _CardStyles.of(context);
     final item = entry.item;
     final style = harborTypeStyleOf(item.type);
     final summaries = summariesOf(item);
@@ -109,6 +195,7 @@ class ItemCard extends StatelessWidget {
             _strip(
               itemCardStartsAtKey(entry.id),
               "Starts at $startsAt",
+              styles,
               top: true,
             ),
           Padding(
@@ -125,11 +212,7 @@ class ItemCard extends StatelessWidget {
                         item.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14.0,
-                          fontWeight: FontWeight.w600,
-                          color: HarborColors.text,
-                        ),
+                        style: styles.title,
                       ),
                     ),
                     if (onEdit == null && onDelete == null)
@@ -141,11 +224,8 @@ class ItemCard extends StatelessWidget {
                         style: const ButtonStyle(
                           visualDensity: VisualDensity.compact,
                         ),
-                        icon: const Icon(
-                          Icons.more_horiz,
-                          color: HarborColors.textMuted,
-                        ),
-                        color: HarborColors.surface,
+                        icon: styles.menuIcon,
+                        color: styles.theme.surface,
                         onSelected: (action) {
                           switch (action) {
                             case _CardAction.edit:
@@ -181,17 +261,19 @@ class ItemCard extends StatelessWidget {
                     ),
                     child: Text(
                       summaries.join(", "),
-                      style: const TextStyle(
-                        fontSize: 14.0,
-                        color: HarborColors.textSecondary,
-                      ),
+                      style: styles.summary,
                     ),
                   ),
               ],
             ),
           ),
           if (endsAt != null)
-            _strip(itemCardEndsAtKey(entry.id), "Ends at $endsAt", top: false),
+            _strip(
+              itemCardEndsAtKey(entry.id),
+              "Ends at $endsAt",
+              styles,
+              top: false,
+            ),
         ],
       ),
     );
@@ -217,16 +299,15 @@ class ItemCard extends StatelessWidget {
   /// top, or its bottom where not [top], rounded as the card's corners
   /// there, holding [label] in its middle, [stripHeight] tall at any text
   /// size.
-  static Widget _strip(Key key, String label, {required bool top}) {
-    const corner = Radius.circular(_radius);
+  static Widget _strip(
+    Key key,
+    String label,
+    _CardStyles styles, {
+    required bool top,
+  }) {
     return DecoratedBox(
       key: key,
-      decoration: BoxDecoration(
-        color: HarborColors.notice,
-        borderRadius: top
-            ? const BorderRadius.vertical(top: corner)
-            : const BorderRadius.vertical(bottom: corner),
-      ),
+      decoration: top ? styles.topStrip : styles.bottomStrip,
       child: SizedBox(
         height: stripHeight,
         child: Padding(
@@ -236,11 +317,7 @@ class ItemCard extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 12.0,
-                fontWeight: FontWeight.w600,
-                color: HarborColors.onNotice,
-              ),
+              style: styles.stripLabel,
             ),
           ),
         ),

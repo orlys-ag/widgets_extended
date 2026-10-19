@@ -9,11 +9,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_data.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
+import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
+import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/month_picker.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
@@ -917,6 +921,76 @@ void hotReload(WidgetTester tester) {
   tester.binding.buildOwner!.reassemble(tester.binding.rootElement!);
 }
 
+/// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
+/// closes it.
+Future<void> pickHours(WidgetTester tester, int start, int end) async {
+  await openBar(tester);
+  setHours(tester, start, end);
+  await tester.pumpAndSettle();
+  await closeBar(tester);
+}
+
+/// Sets the hours of the open calendar bar to [start] to [end] o'clock
+/// through its slider's own callback. Pumps nothing.
+void setHours(WidgetTester tester, int start, int end) {
+  tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
+    RangeValues(start.toDouble(), end.toDouble()),
+  );
+}
+
+/// Agenda's tree, whose controller holds the list's animation style.
+SliverTree<String, DayListRow> agendaTree(WidgetTester tester) {
+  return tester.widget<SliverTree<String, DayListRow>>(
+    find.byType(SliverTree<String, DayListRow>),
+  );
+}
+
+/// How far Agenda's list has scrolled.
+double listOffset(WidgetTester tester) {
+  return tester
+      .state<ScrollableState>(
+        find.descendant(
+          of: find.byType(DayList),
+          matching: find.byType(Scrollable),
+        ),
+      )
+      .position
+      .pixels;
+}
+
+/// Expects every family of Agenda's tree style to run [duration] on
+/// [curve].
+void expectListMotion(WidgetTester tester, Duration duration, Curve curve) {
+  final style = agendaTree(tester).controller.animationStyle;
+  for (final family in TreeAnimationFamily.values) {
+    final spec = style.specFor(family);
+    expect(spec.duration, duration, reason: family.name);
+    expect(spec.curve, curve, reason: family.name);
+  }
+}
+
+/// The size factor of the row under [key] as it grows in or shrinks away.
+double sizeFactorOf(WidgetTester tester, Key key) {
+  return tester
+      .widget<SizeTransition>(
+        find
+            .ancestor(of: find.byKey(key), matching: find.byType(SizeTransition))
+            .first,
+      )
+      .sizeFactor
+      .value;
+}
+
+/// Taps [day]'s cell in Agenda's month, or in its strip where the month is
+/// folded, and settles, which brings its header to the list's top.
+Future<void> revealDay(WidgetTester tester, DateTime day) async {
+  final cell = cellOf(day);
+  await tester.tap(
+    cell.evaluate().isEmpty ? find.byKey(weekStripDayKey(day)) : cell,
+  );
+  await tester.pumpAndSettle();
+}
+
 /// Starts a drag on the calendar card's pull tab and moves it [distance]
 /// up, folding the month that far; returns the gesture, still down.
 Future<TestGesture> foldBy(WidgetTester tester, double distance) async {
@@ -1346,5 +1420,256 @@ void main() {
     final remadeName = tester.widget<Text>(april2026()).style!;
     expect(remadeName, name);
     expect(identical(remadeName, name), isFalse);
+  });
+
+  testWidgets("C4 Agenda's list draws and runs on A, and on B from the frame "
+      "that installs it", (tester) async {
+    final api = await pumpThemed(tester, sentinelA);
+    await pickHours(tester, 8, 18);
+    final roots = <Finder>[find.byType(DayList)];
+    final fields = <String>{};
+    void probe(String where) {
+      final drawn = drawnUnder(tester, roots);
+      expectOnly(drawn, sentinelA, forbidden: const [], reason: where);
+      fields.addAll(fieldsOf(drawn, sentinelA));
+    }
+
+    // Tuesday's marker of the current time, Wednesday's strips, Thursday's
+    // banners, Sunday's empty header and a failed read of the next month.
+    probe("Tuesday");
+    await revealDay(tester, april(22));
+    probe("Wednesday");
+    await revealDay(tester, april(23));
+    probe("Thursday");
+    await revealDay(tester, april(26));
+    probe("Sunday");
+    expectListMotion(tester, const Duration(milliseconds: 900), Curves.linear);
+
+    // A gap row coming in on new hours grows on A's motion.
+    await revealDay(tester, april(21));
+    await openBar(tester);
+    setHours(tester, 7, 18);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(
+      sizeFactorOf(tester, dayListGapKey(april(21), 7 * 60)),
+      moreOrLessEquals(0.5),
+    );
+    await tester.pumpAndSettle();
+    setHours(tester, 8, 18);
+    await tester.pumpAndSettle();
+    await closeBar(tester);
+
+    // A reveal from rest scrolls on A's motion: linear, its two middle
+    // quarters each a quarter of the way, and done at 900 ms.
+    final from = listOffset(tester);
+    await tester.tap(cellOf(april(23)));
+    await tester.pump();
+    await tester.pump();
+    final at = <double>[listOffset(tester)];
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 225));
+      at.add(listOffset(tester));
+    }
+    await tester.pumpAndSettle();
+    final to = listOffset(tester);
+    final distance = to - from;
+    expect(distance.abs(), greaterThan(100.0));
+    for (final step in <double>[at[2] - at[1], at[3] - at[2]]) {
+      expect(step / distance, inInclusiveRange(0.2, 0.3));
+    }
+    expect(at[4], moreOrLessEquals(to, epsilon: 0.5));
+
+    await failNextRead(tester, api, "Next month");
+    expect(
+      find.descendant(
+        of: find.byType(DayList),
+        matching: find.text("Reading failed."),
+      ),
+      findsWidgets,
+    );
+    probe("a failed read");
+    expect(
+      fields,
+      containsAll(<String>[
+        "background",
+        "primaryTint",
+        "primary",
+        "onPrimary",
+        "error",
+        "outline",
+        "notice",
+        "noticeOutline",
+        "onNotice",
+        "surface",
+        ...iconNames,
+        "badgeStyle",
+        "noticeStyle",
+        "messageStyle",
+        ...styleNames.sublist(17, 24),
+      ]),
+    );
+
+    await installTheme(tester, api, sentinelB);
+    expectOnly(
+      drawnUnder(tester, roots),
+      sentinelB,
+      forbidden: <CalendarThemeData>[sentinelA],
+      reason: "B",
+    );
+    expectListMotion(tester, const Duration(milliseconds: 600), Curves.easeIn);
+  });
+
+  testWidgets("C4 under B an empty day's header keeps the height of a busy "
+      "day's, measured in B's day title", (tester) async {
+    await pumpThemed(tester, sentinelB);
+    await revealDay(tester, april(25));
+    final busy = tester.getSize(find.byKey(dayListHeaderKey(april(25)))).height;
+    final empty = tester
+        .getSize(find.byKey(dayListHeaderKey(april(26))))
+        .height;
+    expect(empty, busy);
+    // Setup sanity: April 26 shows no item, and B's day title lays out
+    // apart from the built-in one.
+    final header = tester.element(find.byKey(dayListHeaderKey(april(26))));
+    expect(find.text("No items"), findsWidgets);
+    expect(
+      lineHeightAt(header, sentinelB.agendaHeaderTitleStyle),
+      isNot(lineHeightAt(header, const CalendarThemeData().agendaHeaderTitleStyle)),
+    );
+  });
+
+  testWidgets("C4 a pinned day header whose row the list no longer builds, "
+      "and a row growing in, draw B from the frame that installs it", (
+    tester,
+  ) async {
+    final api = await pumpThemed(tester, sentinelA);
+    await pickHours(tester, 8, 18);
+    await revealDay(tester, april(24));
+    final list = find.byType(DayList);
+    await tester.drag(list, const Offset(0.0, -420.0));
+    await tester.pumpAndSettle();
+    final header = find.byKey(dayListHeaderKey(april(24)));
+    // Setup sanity: Friday's header is pinned at the list's top, over a
+    // block scrolled further than the list builds rows above its top.
+    expect(tester.getRect(header).top, tester.getRect(list).top);
+    final headerRow = agendaTree(
+      tester,
+    ).controller.scrollOffsetOf(DayListHeader.headerKeyOf(april(24)))!;
+    expect(
+      listOffset(tester) - headerRow - tester.getSize(header).height,
+      greaterThan(RenderAbstractViewport.defaultCacheExtent),
+    );
+    await installTheme(tester, api, sentinelB);
+    final title = tester.widget<Text>(
+      find.descendant(of: header, matching: find.byType(Text)).first,
+    );
+    expect(title.style!.letterSpacing, tagOf(18, 40));
+    expect(title.style!.color, sentinelB.text);
+    expect(
+      tester.widget<ColoredBox>(header).color,
+      sentinelB.background,
+    );
+    expectOnly(
+      drawnUnder(tester, <Finder>[list]),
+      sentinelB,
+      forbidden: <CalendarThemeData>[sentinelA],
+      reason: "pinned",
+    );
+    await tester.pumpAndSettle();
+
+    // A gap row growing in on new hours draws B from the frame that
+    // installs it, and runs on to its end.
+    await installTheme(tester, api, sentinelA);
+    await tester.pumpAndSettle();
+    await revealDay(tester, april(21));
+    await openBar(tester);
+    setHours(tester, 7, 18);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final gap = dayListGapKey(april(21), 7 * 60);
+    expect(sizeFactorOf(tester, gap), inExclusiveRange(0.0, 1.0));
+    await installTheme(tester, api, sentinelB);
+    final time = tester.widget<Text>(
+      find.descendant(of: find.byKey(gap), matching: find.byType(Text)),
+    );
+    expect(time.style!.letterSpacing, tagOf(22, 40));
+    expect(time.style!.color, sentinelB.textMuted);
+    expectOnly(
+      drawnUnder(tester, <Finder>[find.byKey(gap)]),
+      sentinelB,
+      forbidden: <CalendarThemeData>[sentinelA],
+      reason: "entering row",
+    );
+    await tester.pumpAndSettle();
+    expect(sizeFactorOf(tester, gap), 1.0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("C4 a hot reload makes the list's and the cards' styles anew", (
+    tester,
+  ) async {
+    await pumpThemed(tester, sentinelA);
+    TextStyle headerTitle() {
+      return tester
+          .widget<Text>(
+            find
+                .descendant(
+                  of: find.byKey(dayListHeaderKey(april(21))),
+                  matching: find.byType(Text),
+                )
+                .first,
+          )
+          .style!;
+    }
+
+    TextStyle cardTitle() {
+      return tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(itemCardKey("item-1")),
+              matching: find.text("Planning"),
+            ),
+          )
+          .style!;
+    }
+
+    final header = headerTitle();
+    final card = cardTitle();
+    hotReload(tester);
+    await tester.pump();
+    expect(headerTitle(), header);
+    expect(identical(headerTitle(), header), isFalse);
+    expect(cardTitle(), card);
+    expect(identical(cardTitle(), card), isFalse);
+  });
+
+  testWidgets("C14 under larger Agenda text a reveal past rows the list has "
+      "not laid out lands its day's header at the list's top", (tester) async {
+    TextStyle larger(TextStyle style) {
+      return style.copyWith(fontSize: style.fontSize! + 6.0);
+    }
+
+    await pumpThemed(
+      tester,
+      sentinelA.copyWith(
+        agendaHeaderTitleStyle: larger(sentinelA.agendaHeaderTitleStyle),
+        agendaHeaderCountStyle: larger(sentinelA.agendaHeaderCountStyle),
+        entryCardTitleStyle: larger(sentinelA.entryCardTitleStyle),
+        entryCardSummaryStyle: larger(sentinelA.entryCardSummaryStyle),
+      ),
+    );
+    final target = april(29);
+    // Setup sanity: the list has not laid out the day eight days ahead.
+    expect(find.byKey(dayListHeaderKey(target)), findsNothing);
+    await tester.tap(cellOf(target));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(find.byKey(dayListHeaderKey(target))).top,
+      moreOrLessEquals(tester.getRect(find.byType(DayList)).top, epsilon: 0.5),
+    );
+    expect(tester.takeException(), isNull);
   });
 }

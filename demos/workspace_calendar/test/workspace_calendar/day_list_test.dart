@@ -15,6 +15,7 @@ import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_harness.dart';
@@ -1235,11 +1236,14 @@ void main() {
         home: Center(
           child: SizedBox(
             width: 300.0,
-            child: ItemCard(
-              entry: ShownItem(item, pending: true),
-              onEdit: null,
-              onDelete: null,
-              startsAt: "07:00",
+            child: CalendarTheme(
+              data: harborCalendarTheme,
+              child: ItemCard(
+                entry: ShownItem(item, pending: true),
+                onEdit: null,
+                onDelete: null,
+                startsAt: "07:00",
+              ),
             ),
           ),
         ),
@@ -1265,11 +1269,14 @@ void main() {
         home: Center(
           child: SizedBox(
             width: 300.0,
-            child: ItemCard(
-              entry: ShownItem(item, pending: false),
-              onEdit: null,
-              onDelete: null,
-              startsAt: "07:00",
+            child: CalendarTheme(
+              data: harborCalendarTheme,
+              child: ItemCard(
+                entry: ShownItem(item, pending: false),
+                onEdit: null,
+                onDelete: null,
+                startsAt: "07:00",
+              ),
             ),
           ),
         ),
