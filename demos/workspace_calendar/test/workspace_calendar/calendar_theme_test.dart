@@ -19,6 +19,7 @@ import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_card.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/month_picker.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
@@ -450,6 +451,9 @@ Future<MockCalendarApi> pumpThemed(
     latency: harnessLatency,
     failurePolicy: failurePolicy,
   );
+  // A calendar pumped before in the same test goes, so this one starts
+  // anew over [api].
+  await tester.pumpWidget(const SizedBox.shrink());
   await tester.pumpWidget(themedApp(api, theme));
   await tester.pump(api.latency);
   await tester.pumpAndSettle();
@@ -807,21 +811,24 @@ Future<Set<String>> labelsOf(
 }
 
 /// Fails every read [api] answers from here on, and taps [tooltip]'s
-/// chevron [taps] times, the last one onto days no read has prefetched.
+/// chevron until a read fails, onto days no read has prefetched, at most
+/// three times.
 Future<void> failNextRead(
   WidgetTester tester,
   MockCalendarApi api,
-  String tooltip, {
-  int taps = 1,
-}) async {
+  String tooltip,
+) async {
   api.failurePolicy = (request) {
     return request.method == CalendarMethod.list ? "Reading failed." : null;
   };
-  for (var i = 0; i < taps; i++) {
+  for (var i = 0; i < 3; i++) {
     await tester.tap(find.byTooltip(tooltip));
     await tester.pump();
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
+    if (find.text("Reading failed.").evaluate().isNotEmpty) {
+      return;
+    }
   }
 }
 
@@ -991,6 +998,28 @@ Future<void> revealDay(WidgetTester tester, DateTime day) async {
   await tester.pumpAndSettle();
 }
 
+/// Expects every family of [board]'s animation style to run [duration]
+/// on [curve].
+void expectBoardMotion(
+  BoardController<String, Object?> board,
+  Duration duration,
+  Curve curve,
+) {
+  final style = board.animationStyle;
+  for (final family in BoardAnimationFamily.values) {
+    final spec = style.specFor(family);
+    expect(spec.duration, duration, reason: family.name);
+    expect(spec.curve, curve, reason: family.name);
+  }
+}
+
+/// Month's board controller.
+BoardController<String, MonthChip> monthController(WidgetTester tester) {
+  return tester
+      .widget<Board<String, MonthChip>>(find.byType(Board<String, MonthChip>))
+      .controller;
+}
+
 /// Starts a drag on the calendar card's pull tab and moves it [distance]
 /// up, folding the month that far; returns the gesture, still down.
 Future<TestGesture> foldBy(WidgetTester tester, double distance) async {
@@ -1092,7 +1121,7 @@ void main() {
     };
     expect(drawn.spacings.intersection(tags), isEmpty);
 
-    await failNextRead(tester, api, "Next week", taps: 2);
+    await failNextRead(tester, api, "Next week");
     final message = find.descendant(
       of: find.byType(TimedGrid),
       matching: find.text("Reading failed."),
@@ -1644,6 +1673,152 @@ void main() {
     expect(identical(headerTitle(), header), isFalse);
     expect(cardTitle(), card);
     expect(identical(cardTitle(), card), isFalse);
+  });
+
+  testWidgets("C5 Month's board draws and runs on A at both sizes, and on "
+      "B from the frame that installs it", (tester) async {
+    final fields = <String>{};
+    final roots = <Finder>[find.byType(MonthBoard)];
+    for (final size in const <Size>[Size(390.0, 844.0), Size(1100.0, 900.0)]) {
+      final api = await pumpThemed(tester, sentinelA, size: size);
+      await pickMode(tester, "Month");
+      var drawn = drawnUnder(tester, roots);
+      expectOnly(drawn, sentinelA, forbidden: const [], reason: "$size");
+      fields.addAll(fieldsOf(drawn, sentinelA));
+      expectBoardMotion(
+        monthController(tester),
+        const Duration(milliseconds: 900),
+        Curves.linear,
+      );
+      if (size.width < 400.0) {
+        // Friday's seven meetings take more lanes than a week holds.
+        expect(
+          find.descendant(
+            of: find.byType(MonthBoard),
+            matching: find.textContaining("more"),
+          ),
+          findsWidgets,
+        );
+      }
+
+      await installTheme(tester, api, sentinelB);
+      drawn = drawnUnder(tester, roots);
+      expectOnly(
+        drawn,
+        sentinelB,
+        forbidden: <CalendarThemeData>[sentinelA],
+        reason: "$size under B",
+      );
+      expect(
+        fieldsOf(drawn, sentinelB),
+        containsAll(<String>[
+          "monthDayNumberStyle",
+          "monthDayNumberMarkedStyle",
+          "weekdayLetterStyle",
+          "background",
+          "outline",
+          "text",
+          "textMuted",
+          "primary",
+          "onPrimary",
+          "todayRing",
+          "todayRingWidth",
+        ]),
+      );
+      expectBoardMotion(
+        monthController(tester),
+        const Duration(milliseconds: 600),
+        Curves.easeIn,
+      );
+      await tester.pumpAndSettle();
+      await installTheme(tester, api, sentinelA);
+      await tester.pumpAndSettle();
+
+      await failNextRead(tester, api, "Next month");
+      expect(
+        find.descendant(
+          of: find.byType(MonthBoard),
+          matching: find.text("Reading failed."),
+        ),
+        findsOneWidget,
+      );
+      drawn = drawnUnder(tester, roots);
+      expectOnly(
+        drawn,
+        sentinelA,
+        forbidden: const [],
+        reason: "$size, a failed read",
+      );
+      fields.addAll(fieldsOf(drawn, sentinelA));
+    }
+    expect(
+      fields,
+      containsAll(<String>[
+        ...styleNames.sublist(10, 17),
+        "weekdayLetterStyle",
+        "background",
+        "outline",
+        "text",
+        "textSecondary",
+        "textMuted",
+        "primary",
+        "onPrimary",
+        "error",
+        "notice",
+        "onNotice",
+        "todayRing",
+        "todayRingWidth",
+      ]),
+    );
+  });
+
+  testWidgets("C5 a chip still shrinking away draws B from the frame that "
+      "installs it, and a hot reload makes Month's styles anew", (
+    tester,
+  ) async {
+    final api = await pumpThemed(tester, sentinelA);
+    await pickMode(tester, "Month");
+    final chip = find.byKey(monthChipKey(monthSegmentKey("item-1", april(20))));
+    TextStyle chipTitle() {
+      return tester
+          .widget<Text>(find.descendant(of: chip, matching: find.text("Planning")))
+          .style!;
+    }
+
+    final title = chipTitle();
+    hotReload(tester);
+    await tester.pump();
+    expect(chipTitle(), title);
+    expect(identical(chipTitle(), title), isFalse);
+
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete").last);
+    await tester.pump();
+    await tester.pump(api.latency);
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 300));
+    // Setup sanity: the chip is shrinking away.
+    expect(chip, findsOneWidget);
+    final height = tester.getSize(chip).height;
+    expect(height, greaterThan(0.0));
+    expect(height, lessThan(monthLaneExtent));
+
+    await installTheme(tester, api, sentinelB);
+    final leaving = chipTitle();
+    expect(leaving.letterSpacing, tagOf(15, 40));
+    expect(leaving.color, sentinelB.text);
+    expectOnly(
+      drawnUnder(tester, <Finder>[chip]),
+      sentinelB,
+      forbidden: <CalendarThemeData>[sentinelA],
+      reason: "a leaving chip",
+    );
+    await tester.pumpAndSettle();
+    expect(chip, findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets("C14 under larger Agenda text a reveal past rows the list has "
