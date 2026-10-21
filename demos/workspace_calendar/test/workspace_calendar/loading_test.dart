@@ -70,7 +70,7 @@ void main() {
       api: MockCalendarApi.seeded(today, latency: latency),
     );
 
-    await tester.tap(find.byTooltip("Next month"));
+    await selectNextMonth(tester);
     await revealFrames(tester);
     await tester.pump(const Duration(milliseconds: 500));
     expect(loading, findsOneWidget);
@@ -90,7 +90,7 @@ void main() {
     api.failurePolicy = (request) {
       return request.method == CalendarMethod.list ? "Reading failed." : null;
     };
-    await tester.tap(find.byTooltip("Next month"));
+    await selectNextMonth(tester);
     await tester.pump();
     await tester.pump(latency);
     await tester.pumpAndSettle();
@@ -159,22 +159,24 @@ void main() {
   });
 
   testWidgets("F2 markers while the shown range loads", (tester) async {
-    await pumpCalendar(
+    final api = MockCalendarApi.seeded(today, latency: latency);
+    await createBeforePump(
       tester,
-      editing: true,
-      api: MockCalendarApi.seeded(today, latency: latency),
+      api,
+      taskJson("Planning", DateTime(2026, 5, 2), 600, 660),
     );
+    await pumpCalendar(tester, editing: true, api: api);
 
-    await tester.tap(find.byTooltip("Next month"));
+    await selectNextMonth(tester);
     await revealFrames(tester);
     expect(loading, findsOneWidget);
-    // Read with April before May showed.
-    expect(hasMarker(tester, DateTime(2026, 4, 27)), isTrue);
+    // Read with April's grid, which ends on May 3, before May showed.
+    expect(hasMarker(tester, DateTime(2026, 5, 2)), isTrue);
     // Read with May, which the shown range waits on.
     expect(hasMarker(tester, DateTime(2026, 5, 21)), isFalse);
     await tester.pump(latency);
     await tester.pumpAndSettle();
-    expect(hasMarker(tester, DateTime(2026, 4, 27)), isTrue);
+    expect(hasMarker(tester, DateTime(2026, 5, 2)), isTrue);
     expect(hasMarker(tester, DateTime(2026, 5, 21)), isTrue);
   });
 

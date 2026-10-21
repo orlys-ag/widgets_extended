@@ -819,6 +819,27 @@ Future<Set<String>> labelsOf(
   return <String>{"hourLabelStyle"};
 }
 
+/// Fails every read [api] answers from here on, and selects in Agenda the
+/// day a month on ([selectNextMonth]) until a read fails, at most three
+/// times.
+Future<void> failNextMonthRead(
+  WidgetTester tester,
+  MockCalendarApi api,
+) async {
+  api.failurePolicy = (request) {
+    return request.method == CalendarMethod.list ? "Reading failed." : null;
+  };
+  for (var i = 0; i < 3; i++) {
+    await selectNextMonth(tester);
+    await tester.pump();
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    if (find.text("Reading failed.").evaluate().isNotEmpty) {
+      return;
+    }
+  }
+}
+
 /// Fails every read [api] answers from here on, and taps [tooltip]'s
 /// chevron until a read fails, onto days no read has prefetched, at most
 /// three times.
@@ -852,6 +873,14 @@ DateTime may(int day) {
 /// Agenda's cell of [day] in the calendar card's month.
 Finder cellOf(DateTime day) {
   return find.byKey(dayCellKey(day));
+}
+
+/// The cell of [day] in a blank cell of Agenda's month, which shows only
+/// while the month folds, and has no key.
+Finder neighbourCellOf(DateTime day) {
+  return find.byWidgetPredicate((widget) {
+    return widget is DayCell && widget.day == day && widget.key == null;
+  });
 }
 
 /// The week strip's cell of [day].
@@ -1567,7 +1596,7 @@ void main() {
       TextStyle.lerp(a.from, a.to, t),
     );
     expect(
-      numberStyleOf(tester, cellOf(may(1)), may(1)),
+      numberStyleOf(tester, neighbourCellOf(may(1)), may(1)),
       TextStyle.lerp(a.fromMuted, a.to, t),
     );
     final selected = numberStyleOf(tester, cellOf(april(24)), april(24));
@@ -1628,7 +1657,7 @@ void main() {
     final t2 = tester.widget<DayCell>(cellOf(april(22))).collapse.value;
     expect(t2, inExclusiveRange(0.0, 1.0));
     expect(
-      numberStyleOf(tester, cellOf(may(1)), may(1)),
+      numberStyleOf(tester, neighbourCellOf(may(1)), may(1)),
       TextStyle.lerp(a2.fromMuted, a2.to, t2),
     );
     final inMonth = numberStyleOf(tester, cellOf(april(22)), april(22));
@@ -1745,7 +1774,7 @@ void main() {
     }
     expect(at[4], moreOrLessEquals(to, epsilon: 0.5));
 
-    await failNextRead(tester, api, "Next month");
+    await failNextMonthRead(tester, api);
     expect(
       find.descendant(
         of: find.byType(DayList<ItemPayload>),
@@ -2612,13 +2641,6 @@ void main() {
       theme,
       "dayNumberStyle",
       theme.text,
-    );
-    expectText(
-      tester,
-      textIn(cellOf(may(1)), "1"),
-      theme,
-      "dayNumberStyle",
-      theme.textMuted,
     );
     expectText(
       tester,

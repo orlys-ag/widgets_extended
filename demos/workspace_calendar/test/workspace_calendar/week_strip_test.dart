@@ -439,8 +439,10 @@ void main() {
   });
 
   testWidgets("WS12 Agenda's folded month becomes the strip, which slides "
-      "and selects as Day's does; unfolding names the selected day's month "
-      "again", (tester) async {
+      "and selects as Day's does; unfolding shows the strip's month, and "
+      "folding it again opens the strip on that month's first week", (
+    tester,
+  ) async {
     final api = MockCalendarApi(seed: seed, latency: harnessLatency);
     await pumpCalendar(tester, api: api);
     expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
@@ -467,20 +469,19 @@ void main() {
       const Offset(0.0, 120.0),
     );
     await tester.pumpAndSettle();
-    expect(find.text("Apr 2026"), findsOneWidget);
+    expect(find.text("May 2026"), findsOneWidget);
+    expect(find.text("Today, April 21"), findsOneWidget);
 
-    // Folded again, the strip opens on the selected week, and a tap on
-    // one of its days selects it.
-    await tester.drag(
-      find.byType(DayList<ItemPayload>),
-      const Offset(0.0, -120.0),
-    );
+    // Folded again by the pull tab, which selects nothing, May holding
+    // neither the selected day nor today, the strip opens on May's first
+    // week, and a tap on one of its days selects it.
+    await tester.tap(find.byKey(calendarPullTabKey));
     await tester.pumpAndSettle();
-    expect(stripDays(tester), run(april(20), 7));
-    await tester.tap(stripDay(april(23)));
+    expect(stripDays(tester), run(april(27), 7));
+    await tester.tap(stripDay(may(1)));
     await tester.pumpAndSettle();
-    expect(find.text("Thursday, April 23"), findsOneWidget);
-    expect(stripCell(tester, april(23)).isSelected, isTrue);
+    expect(find.text("Friday, May 1"), findsOneWidget);
+    expect(stripCell(tester, may(1)).isSelected, isTrue);
   });
 
   testWidgets("WS13 a day's name sits above its number on a circle, the "

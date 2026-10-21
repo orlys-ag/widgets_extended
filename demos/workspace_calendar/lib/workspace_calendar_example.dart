@@ -17,11 +17,16 @@
 /// a drag up Day's grid folds it again. Day's grid has no day header, the
 /// strip naming its day, and its blocks show their times and summaries.
 ///
-/// Agenda's month grid is a [Board] with no items, under the weekdays'
-/// three-letter names. Each day is a cell, its number on a circle as the strip
-/// shows it, with a badge when it has items; a tap selects it through the
-/// board's cell selection, and the arrow keys move that selection once the
-/// board has focus. The list under it ([DayList]) runs both ways from the
+/// Agenda's month grid is a [MonthStrip] under the weekdays' three-letter
+/// names: one month at a time, each of its days a cell, its number on a
+/// circle as the strip shows it, with a badge when it has items, and blank
+/// cells before the month's first day and after its last. A tap selects a
+/// day, and the arrow keys move the selection once a tap has given the
+/// grid focus. A horizontal drag slides the next or the previous month in
+/// with the finger, the card's height following, and a fling carries it
+/// past several months; the chevrons slide it a month at a time. None of
+/// them selects: the header names the month the card shows, and Today
+/// brings it back to today's. The list under it ([DayList]) runs both ways from the
 /// selected day: a selected day scrolls to its top, animating, and a drag
 /// or a fling of the list selects each day it brings to the top. Each
 /// day's header sticks at the top while its items scroll under it. Each
@@ -38,12 +43,13 @@
 /// of it a day without items shows its header alone. A drag of the list
 /// folds the month, and the pull tab under the card folds or unfolds it as far
 /// as a drag on it moves, a tap on it switching; a downward drag on the
-/// folded strip unfolds it too. The board always holds
-/// the whole month of the selected day; while it folds, it is clipped to
-/// a shrinking window shifted so the selected week shows, and once folded,
-/// Day's strip takes the window's place, opening on that week. Selecting a
-/// day in another month, by a tap on a muted day, the chevrons or a key,
-/// switches the board to that month.
+/// folded strip unfolds it too. The month folds into the week of the
+/// selected day where it holds that day, of today where it holds today,
+/// and otherwise into its first week ([monthFoldDay]), the days of the
+/// months beside it fading into that week's blank cells; once folded,
+/// Day's strip takes its place, opening on that week, and the month that
+/// unfolds is the one the header names. Selecting a day in another month,
+/// by a key or the list, slides the card to that month.
 ///
 /// Month's grid is a [MonthBoard], whose weeks fill the screen. Under the
 /// settings' Fit to screen, the layout the calendar starts on, they keep
@@ -54,8 +60,9 @@
 /// and a tap anywhere else on a day opens that day in Day. In edit mode a
 /// long press on a day creates an item there at the day's first free slot,
 /// selecting the day when it is in the month; out of it a long press opens
-/// the day as a tap does. Its keys and chevrons move the selected
-/// day as Agenda's do.
+/// the day as a tap does. Its keys move the selected day as Agenda's do,
+/// and its chevrons step it a month, keeping its day of the month where
+/// that month has it.
 ///
 /// The calendar reads the range it shows through a [CachingCalendarStore]
 /// over a [CalendarApiSource], which caches the days it has read and
@@ -109,7 +116,6 @@ import 'package:flutter/rendering.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_api_source.dart';
@@ -126,6 +132,7 @@ import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/month_board.dart';
 import 'workspace_calendar/month_picker.dart';
+import 'workspace_calendar/month_strip.dart';
 import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
 import 'workspace_calendar/week_strip.dart';
@@ -268,10 +275,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   late DateTime _selected = _today.value;
 
-  /// The day at the middle of the strip since it was last moved other than
-  /// to follow the selection, whose month the header names; null until it
-  /// is.
-  DateTime? _stripDay;
+  /// A day of the month the calendar card shows and the header names
+  /// since a slide of the month strip, a chevron or a drag of the week
+  /// strip moved the card off the selected day's month or week: the first
+  /// day of the month the month strip rests on, or the day at the middle
+  /// of the week strip. Null while the card shows the selected day.
+  DateTime? _browsedDay;
 
   /// The month of [_selected], which is the lattice the board shows.
   late MonthGrid _grid = MonthGrid.of(_selected, weekdays: _settings.weekdays);
@@ -307,9 +316,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// they choose, the defaults with the edit mode the calendar was given.
   late CalendarSettings _settings = CalendarSettings(editing: widget.editing);
 
-  /// The width the column axis was last fitted to.
-  double _columnsWidth = 0.0;
-
   /// Whether the calendar bar is open, or opening.
   bool _barOpen = false;
 
@@ -328,13 +334,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     duration: harborMotionDuration,
   );
 
-  late final BoardController<Object, Object> _board;
-
-  /// Held in a field because `Board` replaces its delegate, and so
-  /// rebuilds every cell, whenever the builder it gets is not identical
-  /// to the previous one.
-  late final BoardCellBuilder<Object, Object> _cellBuilder = _buildDay;
-
   @override
   void initState() {
     super.initState();
@@ -344,20 +343,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       ),
       onWriteFailed: _handleWriteFailed,
     );
-    // The month board holds no items, so its key and payload types are
-    // unused.
-    _board = BoardController<Object, Object>(
-      vsync: this,
-      rows: _rowsFor(_grid),
-      // Replaced by the first layout, which knows the width.
-      columns: BoardAxisConfig(
-        axis: UniformAxis(_grid.columnCount, _rowHeight),
-      ),
-      keyOf: (item) {
-        return item;
-      },
-    );
-    _board.setSelection(_selectionOf(_selected));
     _showRange();
     _scheduleMinute(_now.value);
   }
@@ -365,11 +350,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final height = stripCellHeight(context);
-    if (height != _rowHeight) {
-      _rowHeight = height;
-      _board.rows = _rowsFor(_grid);
-    }
+    _rowHeight = stripCellHeight(context);
   }
 
   @override
@@ -392,7 +373,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   void dispose() {
     _minuteTimer?.cancel();
     _store.dispose();
-    _board.dispose();
     _collapseController.dispose();
     _pickerShown.dispose();
     _barController.dispose();
@@ -443,15 +423,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     });
   }
 
-  BoardAxisConfig _rowsFor(MonthGrid grid) {
-    return BoardAxisConfig(axis: UniformAxis(grid.weekCount, _rowHeight));
-  }
-
-  BoardSelection _selectionOf(DateTime day) {
-    final cell = _grid.cellOf(day);
-    return BoardSelection(anchor: cell, focus: cell);
-  }
-
   /// The days the timed grid shows: the selected day's week, from the
   /// settings' first weekday, in the week mode, the selected day alone in
   /// the day mode, and null in Agenda and Month.
@@ -485,18 +456,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  /// The month grid's columns, equal, across [width]. Called from the
-  /// grid's layout callback, so the first frame already lays the board out
-  /// at its width, and when the shown weekdays change.
-  void _fitColumns(double width) {
-    final count = _grid.columnCount;
-    if (width == _columnsWidth && count == _board.columns.axis.trackCount) {
-      return;
-    }
-    _columnsWidth = width;
-    _board.columns = BoardAxisConfig(axis: UniformAxis(count, width / count));
-  }
-
   void _select(DateTime day) {
     if (day == _selected) {
       return;
@@ -504,28 +463,36 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     final monthChanged = !_grid.contains(day);
     setState(() {
       _selected = day;
-      _stripDay = null;
+      _browsedDay = null;
       if (monthChanged) {
         _grid = MonthGrid.of(day, weekdays: _settings.weekdays);
       }
     });
-    if (monthChanged) {
-      // A new axis instance refreshes every cell, which is what re-dates
-      // them, even when the new month has as many weeks as the old one.
-      _board.rows = _rowsFor(_grid);
-    }
-    // Reports back through [_handleBoardSelection], which finds the day
-    // already selected.
-    _board.setSelection(_selectionOf(day));
     _showRange();
   }
 
-  void _handleBoardSelection(BoardSelection selection) {
-    final focus = selection.focus;
-    if (focus == null) {
-      return;
-    }
-    _select(_grid.dateAt(focus.row, focus.col));
+  /// The first day of the month the calendar card shows: [_browsedDay]'s,
+  /// or the selected day's.
+  DateTime get _cardMonth {
+    final day = _browsedDay ?? _selected;
+    return DateTime(day.year, day.month);
+  }
+
+  /// The day whose week the calendar card folds into.
+  DateTime get _foldDay {
+    return monthFoldDay(
+      _cardMonth,
+      selectedDay: _selected,
+      today: _today.value,
+      weekdays: _settings.weekdays,
+    );
+  }
+
+  /// Moves the calendar card to the month of [day], selecting nothing.
+  void _browse(DateTime day) {
+    setState(() {
+      _browsedDay = DateTime(day.year, day.month);
+    });
   }
 
   /// A year while the month picker shows; otherwise a day in the day
@@ -550,7 +517,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// Steps by [_stepUnit] over the shown weekdays: a day step skips the
   /// hidden ones, and a month step keeps the day of the month where it can
   /// and takes the nearest shown day of that month where it lands on a
-  /// hidden one. A year step moves the month picker alone.
+  /// hidden one. A year step moves the month picker alone, and a month step
+  /// in Agenda the calendar card alone.
   void _step(int direction) {
     final weekdays = _settings.weekdays;
     switch (_stepUnit) {
@@ -563,7 +531,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       case _StepUnit.week:
         _select(addDays(_selected, 7 * direction));
       case _StepUnit.month:
-        _select(shownDayNear(addMonths(_selected, direction), weekdays));
+        if (_mode == _CalendarMode.agenda) {
+          _browse(addMonths(_cardMonth, direction));
+        } else {
+          _select(shownDayNear(addMonths(_selected, direction), weekdays));
+        }
     }
   }
 
@@ -573,7 +545,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     setState(() {
       _mode = mode;
       _collapsed = mode == _CalendarMode.day;
-      _stripDay = null;
+      _browsedDay = null;
       _picksMonth = false;
     });
     _collapseController.value = _collapsed ? 1.0 : 0.0;
@@ -626,8 +598,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// Folds or unfolds Agenda's month. The month that unfolds is the
-  /// selected day's, so the header names it again.
+  /// Folds or unfolds Agenda's month. The month that unfolds is the one
+  /// the header names.
   void _setCollapsed(bool collapsed) {
     if (collapsed == _collapsed || !_showsCalendarCard) {
       return;
@@ -641,13 +613,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   /// Folds or unfolds the calendar card from however far it has folded,
-  /// a drag on the pull tab having moved it, and names the selected day's
-  /// month again once it changes. Unfolding closes the month picker.
+  /// a drag on the pull tab having moved it. Unfolding closes the month
+  /// picker.
   void _settleCollapse(bool collapsed) {
     if (collapsed != _collapsed || (!collapsed && _picksMonth)) {
       setState(() {
         _collapsed = collapsed;
-        _stripDay = null;
         if (!collapsed) {
           _picksMonth = false;
         }
@@ -663,10 +634,16 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// The height the calendar card loses as the month folds into its week:
-  /// every week but the selected one, and the weekday header.
+  /// The height the calendar card loses as the month it shows folds into
+  /// a week: every other week, and the weekday header.
   double get _foldDistance {
-    return (_grid.weekCount - 1) * _rowHeight + weekdayHeaderHeight;
+    final month = _cardMonth;
+    final grid = MonthGrid(
+      month.year,
+      month.month,
+      weekdays: _settings.weekdays,
+    );
+    return (grid.weekCount - 1) * _rowHeight + weekdayHeaderHeight;
   }
 
   /// The speed, in logical pixels per second, past which a release of the
@@ -734,14 +711,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// How far down the drag on the folded strip has gone.
   double _unfoldDrag = 0.0;
 
-  /// Selects [day], a shown day, which brings Agenda's list and Day's
-  /// strip to it; when it is selected already, the strip slides back to it
-  /// from where a drag moved it.
+  /// Selects [day], a shown day, which brings Agenda's list and the
+  /// calendar card to it; when it is selected already, the card slides
+  /// back to it from where a drag or a chevron moved it.
   void _goTo(DateTime day) {
     if (day == _selected) {
-      if (_stripDay != null) {
+      if (_browsedDay != null) {
         setState(() {
-          _stripDay = null;
+          _browsedDay = null;
           _stripRecalls++;
         });
       }
@@ -820,8 +797,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   /// New weekdays, or a new first weekday, move a selected day they hide
-  /// to the nearest shown one and rebuild the month board's lattice, whose
-  /// cells they change.
+  /// to the nearest shown one and give the month grids new columns.
   void _applySettings(CalendarSettings settings) {
     final weekdaysChanged = settings.weekdays != _settings.weekdays;
     setState(() {
@@ -834,9 +810,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     });
     _store.hours = settings.hours;
     if (weekdaysChanged) {
-      _board.rows = _rowsFor(_grid);
-      _fitColumns(_columnsWidth);
-      _board.setSelection(_selectionOf(_selected));
       _showRange();
     }
   }
@@ -874,38 +847,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  Widget _buildDay(BuildContext context, BoardCellView<Object, Object> cell) {
-    // A new grid reaches the board in the build that moves the selection,
-    // so the cell of a row or column the grid no longer has rebuilds once
-    // for it before the board's next layout drops that cell.
-    if (cell.row >= _grid.weekCount || cell.col >= _grid.columnCount) {
-      return const SizedBox.shrink();
-    }
-    final day = _grid.dateAt(cell.row, cell.col);
-    final inMonth = _grid.contains(day);
-    final isSelected = cell.isSelected;
-    return DayMarkerListener<ItemPayload>(
-      store: _store,
-      day: day,
-      builder: (context, hasItems) {
-        return ValueListenableBuilder<DateTime>(
-          valueListenable: _today,
-          builder: (context, today, child) {
-            return DayCell(
-              key: dayCellKey(day),
-              day: day,
-              inMonth: inMonth,
-              isSelected: isSelected,
-              isToday: day == today,
-              hasItems: hasItems,
-              collapse: _collapseController,
-            );
-          },
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final month = _mode == _CalendarMode.month;
@@ -935,7 +876,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               turns: _barOpen ? 0.5 : 0.0,
               duration: harborMotionDuration,
               curve: harborMotionCurve,
-              child: const Icon(Icons.keyboard_arrow_down),
+              child: const Icon(Icons.settings),
             ),
           ),
           PopupMenuButton<_MoreAction>(
@@ -1005,7 +946,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   _CalendarHeader _buildCalendarHeader() {
     return _CalendarHeader(
-      day: _stripDay ?? _selected,
+      day: _browsedDay ?? _selected,
       mode: _mode,
       stepUnit: _stepUnit,
       onPrevious: () {
@@ -1197,6 +1138,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               layout: _settings.monthLayout,
               minDayWidth: _settings.minDayWidth,
               weekScale: _settings.monthWeekScale,
+              hours: _settings.hours,
+              hourLabelFormat: _settings.hourLabelFormat,
               selectedDay: _selected,
               today: _today,
               onSelectDay: _select,
@@ -1224,24 +1167,20 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   Widget _buildCalendarCard() {
     // Built once per build of this state and handed to the collapse
-    // builder as its child, so the animation does not rebuild the board.
-    final board = Board<Object, Object>(
-      controller: _board,
-      cellBuilder: _cellBuilder,
-      selection: BoardSelectionConfig(
-        mode: BoardSelectionMode.cell,
-        onChanged: _handleBoardSelection,
-      ),
-      // The board is exactly as large as its lattice, so it never
-      // scrolls, and it must not attach to the primary scroll controller
-      // the day list uses.
-      primary: false,
-      verticalDetails: const ScrollableDetails.vertical(
-        physics: NeverScrollableScrollPhysics(),
-      ),
-      horizontalDetails: const ScrollableDetails.horizontal(
-        physics: NeverScrollableScrollPhysics(),
-      ),
+    // builder as its child, so the animation does not rebuild the strip,
+    // which follows the fold itself. Its weekdays are fixed for its life,
+    // so new ones build a new strip.
+    final months = MonthStrip<ItemPayload>(
+      key: ValueKey<WeekdaySet>(_settings.weekdays),
+      store: _store,
+      month: _cardMonth,
+      selectedDay: _selected,
+      today: _today.value,
+      weekdays: _settings.weekdays,
+      rowHeight: _rowHeight,
+      collapse: _collapseController,
+      onSelectDay: _select,
+      onBrowse: _browse,
     );
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1264,7 +1203,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                 children: <Widget>[
                   AnimatedBuilder(
                     animation: _collapseController,
-                    child: board,
+                    child: months,
                     builder: (context, child) {
                       return _buildGrid(_collapseController.value, child!);
                     },
@@ -1338,8 +1277,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   /// The strip of days the calendar card's folded month becomes, in Agenda
-  /// and Day. Its weekdays are fixed for its life, so new ones build a new
-  /// strip.
+  /// and Day, opening on the week the month folded into. Its weekdays are
+  /// fixed for its life, so new ones build a new strip.
   Widget _buildStrip() {
     return WeekStrip<ItemPayload>(
       key: ValueKey<WeekdaySet>(_settings.weekdays),
@@ -1348,25 +1287,21 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       today: _today.value,
       weekdays: _settings.weekdays,
       recalls: _stripRecalls,
+      initialDay: _foldDay,
       onSelectDay: _select,
       onBrowse: (day) {
         setState(() {
-          _stripDay = day;
+          _browsedDay = day;
         });
       },
     );
   }
 
-  /// The weekday header and the board at collapse [t]. The board keeps
-  /// the height of the whole month; the window over it shrinks from the
-  /// month to one row while the board moves up by the rows above the
-  /// selected week, so that week slides to the top of the window. Once
-  /// folded, at a [t] of 1, Day's strip takes the window's place, as tall
-  /// as a row, opening on the selected week as the window shows it.
-  Widget _buildGrid(double t, Widget board) {
-    final weeks = _grid.weekCount;
-    final monthHeight = weeks * _rowHeight;
-    final selectedRow = _grid.cellOf(_selected).row;
+  /// The weekday header and the month strip, [months], at collapse [t],
+  /// the strip folding itself into a week. Once folded, at a [t] of 1,
+  /// Day's strip takes its place, as tall as a row, opening on the week it
+  /// showed.
+  Widget _buildGrid(double t, Widget months) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1384,38 +1319,23 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
             ),
           ),
         ),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            _fitColumns(constraints.maxWidth);
-            return SizedBox(
-              key: const ValueKey<String>("calendar-grid"),
-              height: lerpDouble(monthHeight, _rowHeight, t),
-              child: t == 1.0
-                  ? GestureDetector(
-                      onVerticalDragStart: (details) {
-                        _unfoldDrag = 0.0;
-                      },
-                      onVerticalDragUpdate: (details) {
-                        _unfoldDrag += details.delta.dy;
-                        if (_unfoldDrag >= _unfoldDistance) {
-                          _setCollapsed(false);
-                        }
-                      },
-                      child: _buildStrip(),
-                    )
-                  : ClipRect(
-                      child: OverflowBox(
-                        alignment: Alignment.topCenter,
-                        minHeight: monthHeight,
-                        maxHeight: monthHeight,
-                        child: Transform.translate(
-                          offset: Offset(0.0, -t * selectedRow * _rowHeight),
-                          child: board,
-                        ),
-                      ),
-                    ),
-            );
-          },
+        SizedBox(
+          key: const ValueKey<String>("calendar-grid"),
+          height: t == 1.0 ? _rowHeight : null,
+          child: t == 1.0
+              ? GestureDetector(
+                  onVerticalDragStart: (details) {
+                    _unfoldDrag = 0.0;
+                  },
+                  onVerticalDragUpdate: (details) {
+                    _unfoldDrag += details.delta.dy;
+                    if (_unfoldDrag >= _unfoldDistance) {
+                      _setCollapsed(false);
+                    }
+                  },
+                  child: _buildStrip(),
+                )
+              : months,
         ),
       ],
     );

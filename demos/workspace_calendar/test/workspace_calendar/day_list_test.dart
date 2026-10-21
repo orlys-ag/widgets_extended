@@ -134,15 +134,6 @@ double fadeOf(WidgetTester tester, Finder finder) {
   return fades.isEmpty ? 1.0 : fades.first.opacity;
 }
 
-/// The month board's viewport: the one board keyed by plain objects.
-RenderBoardViewport<Object> monthViewport(WidgetTester tester) {
-  return tester.allRenderObjects
-      .whereType<RenderBoardViewport<Object>>()
-      .singleWhere((viewport) {
-        return viewport is! RenderBoardViewport<String>;
-      });
-}
-
 /// Picks [option] in the dropdown labelled [label], scrolling its menu by
 /// [delta] until the option shows.
 Future<void> chooseOption(
@@ -202,7 +193,7 @@ void main() {
     await pickMode(tester, "Agenda");
 
     // The last item of a day takes its marker with it, and the change
-    // rebuilds no other cell and lays the month board out again nowhere.
+    // rebuilds no other cell.
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
     expect(
@@ -214,7 +205,6 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     final neighbour = tester.widget(dayFinder(DateTime(2026, 4, 22)));
-    final layouts = monthViewport(tester).debugPerformLayoutCount;
     await tester.pump(latency);
     await tester.pumpAndSettle();
     expect(
@@ -225,7 +215,6 @@ void main() {
       identical(tester.widget(dayFinder(DateTime(2026, 4, 22))), neighbour),
       isTrue,
     );
-    expect(monthViewport(tester).debugPerformLayoutCount, layouts);
   });
 
   for (final edit in <bool>[false, true]) {
@@ -589,7 +578,7 @@ void main() {
     await pumpCalendar(tester);
     // November 21 lies 214 days on, past the 180 the list held.
     for (var i = 0; i < 7; i++) {
-      await tester.tap(find.byTooltip("Next month"));
+      await selectNextMonth(tester);
       await tester.pumpAndSettle();
     }
     final november = DateTime(2026, 11, 21);

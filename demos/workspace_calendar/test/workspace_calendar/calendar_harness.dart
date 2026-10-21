@@ -9,8 +9,10 @@ import 'dart:ui' as ui;
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/month_strip.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/gestures.dart';
@@ -239,6 +241,34 @@ Finder todayButtonFinder() {
 Future<void> tapToday(WidgetTester tester) async {
   await openBar(tester);
   await tester.tap(todayButtonFinder());
+}
+
+/// Selects in Agenda the day a month after the selected one, keeping its
+/// day of the month where the next month has it: "Next month" slides the
+/// unfolded calendar card on, selecting nothing, and a tap on that day of
+/// the month it shows selects it. Pumps through the slide, over the
+/// motion of the [CalendarTheme] above the card, and nothing after the
+/// tap.
+Future<void> selectNextMonth(WidgetTester tester) async {
+  final motion = CalendarTheme.of(
+    tester.element(find.byType(MonthStrip<ItemPayload>)),
+  ).motionDuration;
+  final selected = tester
+      .widgetList<DayCell>(find.byType(DayCell))
+      .singleWhere((cell) {
+        return cell.isSelected;
+      })
+      .day;
+  await tester.tap(find.byTooltip("Next month"));
+  // The frame that starts the slide after the build, the frame its
+  // motion's clock starts on, its motion, and a frame past it: the slide
+  // ends, and its scroll view takes pointers again, only once more than
+  // its duration has passed.
+  await tester.pump();
+  await tester.pump();
+  await tester.pump(motion);
+  await tester.pump(const Duration(milliseconds: 16));
+  await tester.tap(find.byKey(dayCellKey(addMonths(selected, 1))));
 }
 
 /// The timed grid's viewport: the one board keyed by item id strings.

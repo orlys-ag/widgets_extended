@@ -669,6 +669,8 @@ void main() {
     expect(dayFinder(2026, 7, 31), findsNothing);
     expect(dayFinder(2026, 8, 3), findsOneWidget);
     expect(tester.getRect(monthGridFinder()).height, near(5 * 48.0));
+    // The read of the month the card rests on.
+    await tester.pump(harnessLatency);
   });
 
   testWidgets("W3 hiding the weekends moves a selected Saturday to Monday", (
@@ -707,8 +709,13 @@ void main() {
     await tester.tap(dayFinder(2026, 4, 30));
     await tester.pumpAndSettle();
 
-    // May 30 2026 is a Saturday, and June 1 is in the next month.
+    // May 30 2026 is a Saturday, and June 1 is in the next month. Month's
+    // chevrons step the selected day; Agenda's list names it.
+    await pickMode(tester, "Month");
     await tester.tap(find.byTooltip("Next month"));
+    await tester.pumpAndSettle();
+    await pickMode(tester, "Agenda");
+    await tester.pump(harnessLatency);
     await tester.pumpAndSettle();
     expect(find.text("Friday, May 29"), findsOneWidget);
   });
@@ -742,7 +749,7 @@ void main() {
       "Sat",
     ]);
     expect(
-      tester.getRect(dayFinder(2026, 3, 29)).left,
+      tester.getRect(dayFinder(2026, 4, 5)).left,
       near(tester.getRect(monthGridFinder()).left),
     );
 

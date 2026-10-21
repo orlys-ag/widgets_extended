@@ -15,8 +15,8 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 }
 
 /// As many days side by side as [weekdays] holds of a week, opening on the
-/// shown days of [selectedDay]'s week, which starts on [weekdays]' first
-/// weekday. Each is a [DayCell]
+/// shown days of [initialDay]'s week, or where it is null [selectedDay]'s,
+/// which starts on [weekdays]' first weekday. Each is a [DayCell]
 /// as Agenda's folded month shows it: its weekday's three-letter name
 /// over its number on a circle, the selected day's in the primary colour,
 /// today's ringed, and a badge on a day with items once the store has read
@@ -49,6 +49,7 @@ class WeekStrip<T> extends StatefulWidget {
     required this.onSelectDay,
     required this.onBrowse,
     this.recalls = 0,
+    this.initialDay,
   });
 
   final CalendarStore<T> store;
@@ -70,6 +71,10 @@ class WeekStrip<T> extends StatefulWidget {
   /// from wherever a drag left it, even where it shows [selectedDay].
   final int recalls;
 
+  /// A day of the week the strip opens on; null opens it on
+  /// [selectedDay]'s.
+  final DateTime? initialDay;
+
   @override
   State<WeekStrip<T>> createState() {
     return _WeekStripState<T>();
@@ -85,10 +90,12 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   /// view centres on, so the days before index 0 lie at negative offsets.
   static const Key _forwardKey = ValueKey<String>("strip-forward");
 
-  /// The first day of [WeekStrip.selectedDay]'s week when the strip was
-  /// first built. Index 0 is that week's first shown day, and each index
-  /// after or before it the next or the previous shown day.
-  late final DateTime _origin = widget.weekdays.weekStartOf(widget.selectedDay);
+  /// The first day of the week the strip opened on. Index 0 is that week's
+  /// first shown day, and each index after or before it the next or the
+  /// previous shown day.
+  late final DateTime _origin = widget.weekdays.weekStartOf(
+    widget.initialDay ?? widget.selectedDay,
+  );
 
   /// The days from a week's first day to each weekday [WeekStrip.weekdays]
   /// holds, ascending.

@@ -40,6 +40,10 @@ const Duration oneFrame = Duration(milliseconds: 16);
 const double strip = 28.0;
 const double lane = 18.0;
 
+/// The height of a day's banner counting its items before or after the
+/// hours.
+const double band = 18.0;
+
 /// A phone a little shorter than the harness's, whose weeks rest at
 /// 135 px: five chip lanes, and short of a card week.
 const Size shortPhone = Size(390.0, 839.0);
@@ -289,6 +293,27 @@ int lanesOf(WidgetTester tester, DateTime day) {
   return ((tester.getSize(dayFinder(day)).height - strip) / lane).floor();
 }
 
+/// Opens the calendar bar, moves its hours slider to [start] to [end]
+/// o'clock through its own callback, and closes the bar.
+Future<void> pickHours(WidgetTester tester, int start, int end) async {
+  await openBar(tester);
+  tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
+    RangeValues(start.toDouble(), end.toDouble()),
+  );
+  await tester.pumpAndSettle();
+  await closeBar(tester);
+}
+
+/// The texts under [finder], in tree order.
+List<String> textsIn(WidgetTester tester, Finder finder) {
+  return <String>[
+    for (final text in tester.widgetList<Text>(
+      find.descendant(of: finder, matching: find.byType(Text)),
+    ))
+      text.data!,
+  ];
+}
+
 /// Any day's "+N more".
 Finder moreFinder() {
   return find.textContaining(RegExp(r"^\+\d+ more$"));
@@ -365,7 +390,7 @@ void main() {
       await pumpCalendar(tester);
       expect(find.text("Agenda"), findsOneWidget);
       expect(find.byType(DayList<ItemPayload>), findsOneWidget);
-      expect(find.byType(DayCell), findsNWidgets(35));
+      expect(find.byType(DayCell), findsNWidgets(30));
 
       await tester.tap(find.byTooltip("Calendar view"));
       await tester.pumpAndSettle();
@@ -2082,6 +2107,146 @@ void main() {
       await tapToday(tester);
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(22)]);
+    },
+  );
+
+  testWidgets(
+    "M43 under hours an item wholly outside has no chip, each day counts "
+    "its items before the hours on a yellow banner under its number and "
+    "those after them on one stacked under its chips, the chips start "
+    "under the top banners, and all-day hours bring the chips back",
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpMonth(
+        tester,
+        seed: <Map<String, Object?>>[
+          taskJson("Run", april(23), 6 * 60, 7 * 60),
+          // 05:00 to 06:00 on Wednesday and Thursday.
+          taskJson("Trip", april(22), 5 * 60, 6 * 60, dayCount: 2),
+          taskJson("Late", april(21), 19 * 60, 20 * 60),
+          // Partly inside the hours, so it keeps its chip.
+          taskJson("Early start", april(24), 7 * 60, 9 * 60),
+          taskJson("Mid", april(24), 10 * 60, 11 * 60),
+        ],
+      );
+      const run = "item-1";
+      const trip = "item-2";
+      const late = "item-3";
+      const early = "item-4";
+      const mid = "item-5";
+      for (final id in <String>[run, trip, late, early, mid]) {
+        expect(chipFinder(id, april(20)), findsOneWidget);
+      }
+      expect(find.byKey(monthEarlierKey(april(23))), findsNothing);
+      expect(find.byKey(monthLaterKey(april(21))), findsNothing);
+
+      await pickHours(tester, 8, 18);
+      expect(chipFinder(run, april(20)), findsNothing);
+      expect(chipFinder(trip, april(20)), findsNothing);
+      expect(chipFinder(late, april(20)), findsNothing);
+      expect(chipFinder(early, april(20)), findsOneWidget);
+      expect(chipFinder(mid, april(20)), findsOneWidget);
+      expect(textsIn(tester, find.byKey(monthEarlierKey(april(22)))), <String>[
+        "+1 earlier",
+      ]);
+      expect(textsIn(tester, find.byKey(monthEarlierKey(april(23)))), <String>[
+        "+2 earlier",
+      ]);
+      expect(textsIn(tester, find.byKey(monthLaterKey(april(21)))), <String>[
+        "+1 later",
+      ]);
+      expect(find.byKey(monthEarlierKey(april(21))), findsNothing);
+      expect(find.byKey(monthEarlierKey(april(24))), findsNothing);
+      expect(find.byKey(monthLaterKey(april(22))), findsNothing);
+      expect(
+        tester.getSemantics(dayFinder(april(23))).label,
+        "Thursday, April 23, 2 more items before 08:00",
+      );
+      expect(
+        tester.getSemantics(dayFinder(april(21))).label,
+        "Tuesday, April 21, today, 1 more item after 18:00",
+      );
+
+      final thursday = tester.getRect(dayFinder(april(23)));
+      final earlier = tester.getRect(find.byKey(monthEarlierKey(april(23))));
+      expect(earlier.top, near(thursday.top + strip + 1.0));
+      expect(earlier.height, near(band - 2.0));
+      expect(earlier.left, near(thursday.left + 1.0));
+      expect(earlier.right, near(thursday.right - 1.0));
+      final tuesday = tester.getRect(dayFinder(april(21)));
+      final later = tester.getRect(find.byKey(monthLaterKey(april(21))));
+      // Tuesday has no chip, so its banner sits under the top band.
+      expect(later.top, near(tuesday.top + strip + band + 1.0));
+      expect(later.height, near(band - 2.0));
+      expect(
+        tester.getRect(chipFinder(early, april(20))).top,
+        near(thursday.top + strip + band),
+      );
+
+      await pickHours(tester, 0, 24);
+      expect(find.byKey(monthEarlierKey(april(23))), findsNothing);
+      expect(find.byKey(monthLaterKey(april(21))), findsNothing);
+      for (final id in <String>[run, trip, late, early, mid]) {
+        expect(chipFinder(id, april(20)), findsOneWidget);
+      }
+      final friday = tester.getRect(dayFinder(april(24)));
+      expect(
+        tester.getRect(chipFinder(early, april(20))).top,
+        near(friday.top + strip),
+      );
+      semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    "M44 a day's banner after the hours stacks right under its last chip, "
+    "not at the bottom of a week another day makes taller: under Show all "
+    "items the week grows to hold the deepest banner, and under Fit to "
+    "screen the banner stacks under a day's \"+N more\"",
+    (tester) async {
+      await pumpMonth(
+        tester,
+        showAll: true,
+        seed: <Map<String, Object?>>[
+          for (var i = 0; i < 8; i++)
+            taskJson("Busy $i", april(24), (9 + i) * 60, (9 + i) * 60 + 30),
+          taskJson("Late", april(24), 19 * 60, 20 * 60),
+          taskJson("Short", april(23), 10 * 60, 11 * 60),
+          taskJson("Late too", april(23), 19 * 60, 20 * 60),
+        ],
+      );
+      await pickHours(tester, 8, 18);
+      final friday = tester.getRect(dayFinder(april(24)));
+      final later = tester.getRect(find.byKey(monthLaterKey(april(24))));
+      final last = tester.getRect(chipFinder("item-8", april(20)));
+      expect(last.top, near(friday.top + strip + 7 * lane));
+      expect(later.top, near(last.bottom + 1.0));
+      expect(friday.height, near(strip + 8 * lane + band));
+
+      final thursday = tester.getRect(dayFinder(april(23)));
+      final short = tester.getRect(chipFinder("item-10", april(20)));
+      final shortLater = tester.getRect(find.byKey(monthLaterKey(april(23))));
+      expect(thursday.height, near(friday.height));
+      expect(short.top, near(thursday.top + strip));
+      expect(shortLater.top, near(short.bottom + 1.0));
+      expect(shortLater.bottom, lessThan(thursday.bottom - lane));
+
+      await pickMonthLayout(tester, "Fit to screen");
+      final more = tester.getRect(find.byKey(monthMoreKey(april(24))));
+      final fitLater = tester.getRect(find.byKey(monthLaterKey(april(24))));
+      expect(fitLater.top, near(more.bottom + 2.0));
+      expect(
+        fitLater.bottom,
+        lessThanOrEqualTo(tester.getRect(dayFinder(april(24))).bottom),
+      );
+      expect(textsIn(tester, find.byKey(monthLaterKey(april(24)))), <String>[
+        "+1 later",
+      ]);
+      final fitShort = tester.getRect(chipFinder("item-10", april(20)));
+      expect(
+        tester.getRect(find.byKey(monthLaterKey(april(23)))).top,
+        near(fitShort.bottom + 1.0),
+      );
     },
   );
 }

@@ -484,7 +484,7 @@ Future<MockCalendarApi> stepToUnread(
     api: MockCalendarApi.seeded(today, latency: second),
     builders: builders,
   );
-  await tester.tap(find.byTooltip("Next month"));
+  await selectNextMonth(tester);
   await pumpFor(tester, const Duration(milliseconds: 500));
   return api;
 }
@@ -496,7 +496,7 @@ Future<void> stepToFailed(WidgetTester tester, MockCalendarApi api) async {
   api.failurePolicy = (request) {
     return request.method == CalendarMethod.list ? "Reading failed." : null;
   };
-  await tester.tap(find.byTooltip("Next month"));
+  await selectNextMonth(tester);
   await pumpFor(tester, const Duration(milliseconds: 1500));
 }
 
@@ -2284,7 +2284,7 @@ void main() {
       // has not laid out, which it predicts.
       final may21 = DateTime(2026, 5, 21);
       expect(find.byKey(dayListHeaderKey(may21)), findsNothing);
-      await tester.tap(find.byTooltip("Next month"));
+      await selectNextMonth(tester);
       for (var frame = 0; frame < 5; frame++) {
         await tester.pump(oneFrame);
       }

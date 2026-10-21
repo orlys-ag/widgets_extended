@@ -1,7 +1,4 @@
-/// Runs the workspace calendar demo, on today's date and the seeded mock
-/// API, from this package's directory:
-///
-///     flutter run
+/// CALENDAR EXAMPLE
 library;
 
 import 'package:flutter/material.dart';
@@ -15,7 +12,10 @@ void main() {
 /// The workspace calendar as a whole app.
 class WorkspaceCalendarApp extends StatelessWidget {
   const WorkspaceCalendarApp({super.key});
-
+  // Missing features:
+  // - Show badge/pip per event type
+  // - Handle multi-day with indicator(s), etc.
+  // - Scrolling through months vertically (see Apple calendar).
   @override
   Widget build(BuildContext context) {
     return const MaterialApp(
