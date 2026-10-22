@@ -732,7 +732,7 @@ const REVISE_SCHEMA = obj({
   premises: arr(PREMISE_ITEM),
   scope_questions: arr(SCOPE_ITEM),
 })
-const PROBE_SCHEMA = obj({ precondition: str, branch: str, premises: arr(obj({ id: str, outcome: { type: 'string', enum: Object.keys(PREMISE_OUTCOMES) }, observed: str })) })
+const PROBE_SCHEMA = obj({ stopped: bool, precondition: str, branch: str, premises: arr(obj({ id: str, outcome: { type: 'string', enum: Object.keys(PREMISE_OUTCOMES) }, observed: str })) })
 const STEPS_SCHEMA = obj({
   decisions: DECISION_LIST,
   repros: arr(str),
@@ -743,6 +743,7 @@ const STEPS_SCHEMA = obj({
   gaps: arr(obj({ title: str, location: str, why: str })),
 })
 const BUILD_SCHEMA = obj({
+  stopped: bool,
   precondition: str,
   branch: str,
   approval_recorded: bool,
@@ -766,12 +767,20 @@ const BUILD_SCHEMA = obj({
   discoveries: arr(str),
 })
 const FIX_SCHEMA = obj({
+  stopped: bool,
   precondition: str,
   fixed: arr(str),
   needs_plan_change: arr(obj({ id: str, why: str })),
   gates: arr(GATE_RUN),
   changed_files: arr(str),
 })
+// Why an agent stopped at its precondition check, or null when it did not:
+// only stopped ends the run, since precondition may describe a check that
+// passed.
+const stopReason = (who, r) => r.stopped
+  ? `${who} stopped on a precondition: ${nonEmpty(r.precondition) ? r.precondition : 'it gave no description'}`
+  : null
+
 const ACCEPTANCE_SCHEMA = obj({
   criteria: arr(obj({ number: int, status: { type: 'string', enum: ['met', 'partial', 'unmet'] }, evidence: str })),
   findings: arr(BASE_FINDING),
@@ -1103,12 +1112,12 @@ function probePrompt(open) {
     `Premises to settle (method section 8.2):`,
     JSON.stringify(open.map(({ id, decision, claim, experiment }) => ({ id, decision, claim, experiment })), null, 2),
     ``,
-    `1. Run git status --porcelain -- ${codePathsList}. If anything there is modified, staged or untracked, stop: describe it in precondition and change nothing. It is someone else's work.`,
+    `1. Run git status --porcelain -- ${codePathsList}. If anything there is modified, staged or untracked, stop: report stopped true, describe it in precondition and change nothing. It is someone else's work.`,
     `2. Create ${probeBranch} from the base commit (git switch -c ${probeBranch} ${baseRef}), or ${probeBranch}-2, -3 when that name is taken (git rev-parse --verify --quiet). Report the name in branch.`,
     `3. For each premise, write the smallest code that settles it, not the feature, and run only the commands its experiment needs.`,
     `4. Commit the scratch code on that branch, staging by path, then switch back to the branch you started on.`,
     `5. Append a "## Probe" record to ${auditPath}: one line per premise, giving its id, its outcome and what you observed.`,
-    `Report via StructuredOutput: precondition ('' unless you stopped), branch, and premises (one per premise: id, outcome, one of ${Object.keys(PREMISE_OUTCOMES).join(', ')} as method section 8.2 defines them, and observed: the output that decides it).`,
+    `Report via StructuredOutput: stopped (true only if that check stopped you), precondition (what that check found), branch, and premises (one per premise: id, outcome, one of ${Object.keys(PREMISE_OUTCOMES).join(', ')} as method section 8.2 defines them, and observed: the output that decides it).`,
   ].filter(Boolean).join('\n')
 }
 
@@ -1123,8 +1132,9 @@ async function probe(at) {
   if (r === null) {
     return { failure: 'The probe returned nothing: it was skipped or died.' }
   }
-  if (nonEmpty(r.precondition)) {
-    return { failure: `The probe stopped on a precondition: ${r.precondition}` }
+  const stop = stopReason('The probe', r)
+  if (stop) {
+    return { failure: stop }
   }
   const unreported = open.filter(p => !r.premises.some(x => x.id === p.id))
   if (unreported.length > 0) {
@@ -1564,7 +1574,7 @@ function buildPrompt(problems) {
     conventionsLine,
     worktreeLine,
     ``,
-    `First run git status --porcelain -- ${codePathsList}. If anything there is modified, staged or untracked on any branch but ${buildBranch}, stop: describe it in precondition and change nothing. It is someone else's work.`,
+    `First run git status --porcelain -- ${codePathsList}. If anything there is modified, staged or untracked on any branch but ${buildBranch}, stop: report stopped true, describe it in precondition and change nothing. It is someone else's work.`,
     `Then git switch ${buildBranch} when it exists, since it holds this run's committed steps; otherwise git switch -c ${buildBranch} ${baseRef}.`,
     approval && !approval.recorded ? `Append this Approval record to ${auditPath} verbatim, creating the file with a one-line title if it does not exist, and report approval_recorded true:\n${approval.text}` : `The Approval record is already in ${auditPath}; report approval_recorded true.`,
     ``,
@@ -1600,7 +1610,7 @@ function buildPrompt(problems) {
     `3. After the last step, one mutation per pin listed to mutate: record the code site file's SHA-256, break the rule there, run the pin's test and observe it fail, restore the file, record the SHA-256 again. A test that stays green is a blocking finding: the rule is unpinned.`,
     `4. Then run every final-scope gate whose condition matches the files changed since the base commit.`,
     `A failure that shows the plan wrong stops you: report it in blocking_findings, with your last committed step in last_step. A minor slip you fix within its step and list in discoveries.`,
-    `Report via StructuredOutput: precondition ('' unless you stopped); branch; approval_recorded; plan_checks (each plan check by name, with passed and a note); repros (each repro you ran on the base commit: test, failed_on_base); steps (EVERY step of the list: n, status built or kept, signal_passed, gates you ran with name and passed, changed_files, commit); carried (each carried finding listed to address: id, addressed, and evidence, the test or check that shows it, or the confirmed reason it is obsolete); mutations (each mutation you made: decision, test, test_failed, sha_before, sha_after); final_gates; changed_files (git diff --name-only ${baseRef}..${buildBranch}); complete (true only after the final gates); last_step; blocking_findings; discoveries.`,
+    `Report via StructuredOutput: stopped (true only if that check stopped you); precondition (what that check found); branch; approval_recorded; plan_checks (each plan check by name, with passed and a note); repros (each repro you ran on the base commit: test, failed_on_base); steps (EVERY step of the list: n, status built or kept, signal_passed, gates you ran with name and passed, changed_files, commit); carried (each carried finding listed to address: id, addressed, and evidence, the test or check that shows it, or the confirmed reason it is obsolete); mutations (each mutation you made: decision, test, test_failed, sha_before, sha_after); final_gates; changed_files (git diff --name-only ${baseRef}..${buildBranch}); complete (true only after the final gates); last_step; blocking_findings; discoveries.`,
   ].filter(Boolean).join('\n')
 }
 
@@ -1719,8 +1729,9 @@ async function buildPhase() {
     const verifiedBefore = [...build.verified]
     const settledBefore = settled()
     mergeBuild(r)
-    if (nonEmpty(r.precondition)) {
-      failed('build', `The builder stopped on a precondition: ${r.precondition}`)
+    const stop = stopReason('The builder', r)
+    if (stop) {
+      failed('build', stop)
     }
     if (r.blocking_findings.length > 0) {
       return r.blocking_findings.map((f, i) => ({ ...f, id: `build-r${revisions}-${i + 1}`, lens: 'build' }))
@@ -1731,7 +1742,7 @@ async function buildPhase() {
       log(`The builder handed over after step ${r.last_step}; a fresh builder continues.`)
       continue
     }
-    problems = r.complete ? buildProblems(r, verifiedBefore) : ['you stopped before the final gates with no blocking finding and no precondition: continue from your last committed step']
+    problems = r.complete ? buildProblems(r, verifiedBefore) : ['you stopped before the final gates with no blocking finding and no stop at the precondition check: continue from your last committed step']
     if (problems.length === 0) {
       build.rework = null
       log(`Build complete on ${build.branch}.`)
@@ -1822,7 +1833,7 @@ function fixPrompt(loop, gaps) {
     conventionsLine,
     worktreeLine,
     ``,
-    `First run git status --porcelain -- ${codePathsList}. If anything there is modified, staged or untracked on any branch but ${branch}, stop: describe it in precondition and change nothing.`,
+    `First run git status --porcelain -- ${codePathsList}. If anything there is modified, staged or untracked on any branch but ${branch}, stop: report stopped true, describe it in precondition and change nothing.`,
     `Then git switch ${branch}.`,
     `The acceptance reviewer, who never reads the plan, reported these gaps:`,
     JSON.stringify(gaps, null, 2),
@@ -1831,7 +1842,7 @@ function fixPrompt(loop, gaps) {
     hotPathBlock ? `On a hot path, a fix adds none of the costs these rules name; a gap that cannot be fixed without one needs the plan changed.` : ``,
     gatesBlock,
     `Run every gate, of either scope, whose condition matches the files you changed, and report each. Then switch back to the branch you started on.`,
-    `Report via StructuredOutput: precondition ('' unless you stopped), fixed (the ids of the gaps you fixed), needs_plan_change, gates, changed_files.`,
+    `Report via StructuredOutput: stopped (true only if that check stopped you), precondition (what that check found), fixed (the ids of the gaps you fixed), needs_plan_change, gates, changed_files.`,
   ].filter(Boolean).join('\n')
 }
 
@@ -1845,8 +1856,9 @@ async function fix(loop, gaps) {
     if (r === null) {
       failed('accept', 'The fixer returned nothing: it was skipped or died. Its commits, if any, are on the branch; resuming reviews it again.')
     }
-    if (nonEmpty(r.precondition)) {
-      failed('accept', `The fixer stopped on a precondition: ${r.precondition}`)
+    const stop = stopReason('The fixer', r)
+    if (stop) {
+      failed('accept', stop)
     }
     build.changedFiles = unique([...build.changedFiles, ...r.changed_files.map(normalisePath)])
     if (r.needs_plan_change.length > 0) {

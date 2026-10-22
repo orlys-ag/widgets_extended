@@ -221,6 +221,7 @@ function buildResult(ctx, over = {}) {
   const profile = ctx.profile
   const stepGates = profile.gates.filter(g => g.scope === 'step').map(g => ({ name: g.name, passed: true }))
   return {
+    stopped: false,
     precondition: '',
     branch: SLUG,
     approval_recorded: true,
@@ -257,7 +258,7 @@ function defaultFor(label, prompt, ctx) {
     return critic(label.split(':')[1])
   }
   if (label.startsWith('probe:')) {
-    return { precondition: '', branch: `${SLUG}-probe`, premises: idsIn(between(prompt, 'Premises to settle', '1. Run')).map(id => ({ id, outcome: 'held', observed: 'It held.' })) }
+    return { stopped: false, precondition: '', branch: `${SLUG}-probe`, premises: idsIn(between(prompt, 'Premises to settle', '1. Run')).map(id => ({ id, outcome: 'held', observed: 'It held.' })) }
   }
   if (/^steps(-\d+)?$/.test(label)) {
     return extraction(prompt, ctx)
@@ -266,7 +267,7 @@ function defaultFor(label, prompt, ctx) {
     return buildResult(ctx)
   }
   if (/^fix/.test(label)) {
-    return { precondition: '', fixed: idsIn(prompt), needs_plan_change: [], gates: ctx.profile.gates.map(g => ({ name: g.name, passed: true })), changed_files: ['src/core/widget.ts'] }
+    return { stopped: false, precondition: '', fixed: idsIn(prompt), needs_plan_change: [], gates: ctx.profile.gates.map(g => ({ name: g.name, passed: true })), changed_files: ['src/core/widget.ts'] }
   }
   if (/^accept(-\d+)?$/.test(label)) {
     return review(prompt)
@@ -528,7 +529,7 @@ const T1 = [
     expect(/Premises: p1 held\./.test(held.prompt('build')), 'the Approval record does not record the premise')
 
     const notHeld = await run({
-      respond: respondWith({ ...drafted, 'probe:r1': { precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'not-held', observed: 'They ran out of order.' }] } }),
+      respond: respondWith({ ...drafted, 'probe:r1': { stopped: false, precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'not-held', observed: 'They ran out of order.' }] } }),
     })
     expect(notHeld.prompt('plan:revise-1').includes('premise-p1') && notHeld.prompt('plan:revise-1').includes('They ran out of order.'), 'the failed premise did not reach the revision')
     expect(round(notHeld.labels, 2) === 'consistency', `the round after it ran ${round(notHeld.labels, 2)}`)
@@ -540,8 +541,10 @@ const T1 = [
       'the worktree isolation is not exactly the probe, the builder and the reviewer')
     expect(worktree.prompt('build').includes('You run in a git worktree of your own'), 'the builder is not told where the run files are')
 
-    const dirty = await run({ respond: respondWith({ ...drafted, 'probe:r1': { precondition: 'src/core/a.ts is modified', branch: '', premises: [] } }) })
+    const dirty = await run({ respond: respondWith({ ...drafted, 'probe:r1': { stopped: true, precondition: 'src/core/a.ts is modified', branch: '', premises: [] } }) })
     expect(dirty.result?.status === 'failed' && dirty.result?.phase === 'critique' && !dirty.labels.some(l => l.startsWith('critic:')), `a dirty probe: ${dirty.result?.status}, ${dirty.labels.join(' ')}`)
+    const noted = await run({ respond: respondWith({ ...drafted, 'probe:r1': { ...defaultFor('probe:r1', held.prompt('probe:r1')), precondition: 'The clean-tree check printed nothing.' } }) })
+    expect(noted.result?.status === 'accepted', `a probe that described its check without stopping: ${noted.result?.status}, ${noted.result?.reason}`)
 
     const added = await run({
       respond: respondWith({
@@ -647,8 +650,15 @@ const T1 = [
     expect(twice.result?.status === 'failed' && twice.result?.phase === 'build' && /io-tests/.test(twice.result?.reason ?? ''), `twice: ${twice.result?.status}, ${twice.result?.reason}`)
   }],
 
-  ['T1l', 'a failed precondition ends the run at the build, and the resumed run continues it', async ({ expect }) => {
-    const r = await run({ respond: respondWith({ build: (n, p, ctx) => buildResult(ctx, { precondition: 'src/core/a.ts is modified', complete: false, approval_recorded: false, steps: [], repros: [], mutations: [] }) }) })
+  ['T1l', 'a stop on a precondition ends the run at the build, a described check without a stop does not, and the resumed run continues it', async ({ expect }) => {
+    const note = 'The clean-tree check printed nothing.'
+    const noted = await run({ respond: respondWith({ build: (n, p, ctx) => buildResult(ctx, { precondition: note }), accept: (n, prompt) => review(prompt, 'partial'), fix: (n, p, ctx) => ({ ...defaultFor('fix', p, ctx), precondition: note }) }) })
+    expect(noted.result?.status === 'accepted' && noted.labels.includes('fix'), `a builder and a fixer that described their check without stopping: ${noted.result?.status}, ${noted.result?.reason}`)
+    const bare = await run({ respond: respondWith({ build: (n, p, ctx) => buildResult(ctx, { stopped: true, complete: false, steps: [], repros: [], mutations: [] }) }) })
+    expect(bare.result?.status === 'failed' && /gave no description/.test(bare.result?.reason ?? ''), `a stop with no description: ${bare.result?.status}, ${bare.result?.reason}`)
+    const fixStop = await run({ respond: respondWith({ accept: (n, prompt) => review(prompt, 'partial'), fix: (n, p, ctx) => ({ ...defaultFor('fix', p, ctx), stopped: true, precondition: 'src/core/a.ts is modified' }) }) })
+    expect(fixStop.result?.status === 'failed' && fixStop.result?.state?.phase === 'accept' && /src\/core\/a\.ts is modified/.test(fixStop.result?.reason ?? ''), `a fixer's stop: ${fixStop.result?.status}, ${fixStop.result?.reason}`)
+    const r = await run({ respond: respondWith({ build: (n, p, ctx) => buildResult(ctx, { stopped: true, precondition: 'src/core/a.ts is modified', complete: false, approval_recorded: false, steps: [], repros: [], mutations: [] }) }) })
     const st = r.result?.state ?? {}
     expect(r.result?.status === 'failed' && st.phase === 'build' && /src\/core\/a\.ts is modified/.test(r.result?.reason ?? ''), `status ${r.result?.status}, phase ${st.phase}`)
     const resumed = await run({ args: baseArgs({ resume: st }) })
@@ -695,7 +705,7 @@ const T1 = [
     const stubborn = await run({ respond: (label, n, prompt) => /^accept/.test(label) ? review(prompt, 'met', [{ ...BASE_ITEM, id: 'rv-1' }]) : undefined })
     expect(stubborn.result?.status === 'acceptance-gaps' && stubborn.labels.filter(l => /^accept/.test(l)).length === 2, `gaps after the budget: ${stubborn.result?.status}`)
 
-    const planChange = await run({ respond: respondWith({ accept: (n, prompt) => review(prompt, 'unmet'), fix: { precondition: '', fixed: [], needs_plan_change: [{ id: 'criterion-1', why: 'The format is decided by d1.' }], gates: [], changed_files: [] } }) })
+    const planChange = await run({ respond: respondWith({ accept: (n, prompt) => review(prompt, 'unmet'), fix: { stopped: false, precondition: '', fixed: [], needs_plan_change: [{ id: 'criterion-1', why: 'The format is decided by d1.' }], gates: [], changed_files: [] } }) })
     expect(planChange.result?.status === 'acceptance-gaps' && (planChange.result?.needsPlanChange ?? []).length === 1 && !planChange.labels.includes('accept-2'), `a plan change: ${planChange.result?.status}`)
 
     const ungated = await run({ respond: respondWith({ accept: (n, prompt) => review(prompt, 'partial'), fix: (n, prompt, ctx) => ({ ...defaultFor('fix', prompt, ctx), gates: [] }) }) })
@@ -964,7 +974,7 @@ const T2 = [
     const r = await run({
       respond: respondWith({
         'plan:draft': { aborted: '', decisions: ['d1', 'd2'], premises: [premise], scope_questions: [] },
-        'probe:r1': { precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'not-held', observed: 'Out of order.' }] },
+        'probe:r1': { stopped: false, precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'not-held', observed: 'Out of order.' }] },
         'critic:runtime:r1': null,
       }),
     })
@@ -1139,7 +1149,7 @@ const T2 = [
     const p1 = { id: 'p1', decision: 'd1', claim: 'Jobs run in order.', experiment: 'Log two jobs.' }
     const p2 = { id: 'p2', decision: 'd2', claim: 'The cache survives a reload.', experiment: 'Reload and read the cache.' }
     const drafted = { 'plan:draft': { aborted: '', decisions: ['d1', 'd2'], premises: [p1, p2], scope_questions: [] } }
-    const blocked = await run({ respond: respondWith({ ...drafted, 'probe:r1': { precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'not-held', observed: 'Out of order.' }, { id: 'p2', outcome: 'not-run', observed: 'The gate reported it could not run.' }] } }) })
+    const blocked = await run({ respond: respondWith({ ...drafted, 'probe:r1': { stopped: false, precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'not-held', observed: 'Out of order.' }, { id: 'p2', outcome: 'not-run', observed: 'The gate reported it could not run.' }] } }) })
     const st = blocked.result?.state
     expect(blocked.schemaErrors.length === 0, `the probe's honest outcomes were refused: ${JSON.stringify(blocked.schemaErrors)}`)
     expect(blocked.result?.status === 'failed' && blocked.result?.phase === 'critique' && /p2 \(The gate reported it could not run\.\)/.test(blocked.result?.reason ?? '') && !blocked.labels.some(l => l.startsWith('critic:')),
@@ -1150,7 +1160,7 @@ const T2 = [
     expect(/"id": "p2"/.test(resumed.prompt('probe:r1')) && !/"id": "p1"/.test(resumed.prompt('probe:r1')) && resumed.prompt('plan:revise-1').includes('premise-p1'),
       'the resumed round did not probe only the open premise, or lost the settled one\'s finding')
 
-    const undecided = await run({ respond: respondWith({ ...drafted, 'probe:r1': { precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'held', observed: 'In order.' }, { id: 'p2', outcome: 'undecided', observed: 'Within noise.' }] } }) })
+    const undecided = await run({ respond: respondWith({ ...drafted, 'probe:r1': { stopped: false, precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'held', observed: 'In order.' }, { id: 'p2', outcome: 'undecided', observed: 'Within noise.' }] } }) })
     const sent = receivedIn(undecided.prompt('plan:revise-1')).find(f => f.id === 'premise-p2')
     expect(sent?.kind === 'consistency' && sent?.severity === 'major' && sent?.why === 'Within noise.', `the undecided premise reached the revision as ${JSON.stringify(sent)}`)
     expect(JSON.stringify(undecided.result?.state?.rankFailRounds) === '{}' && undecided.result?.state?.premises?.find(p => p.id === 'p2')?.status === 'undecided', 'an undecided premise was recorded as a rank failure, or left open')
