@@ -4,7 +4,7 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/policy/history_lock.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
+import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);

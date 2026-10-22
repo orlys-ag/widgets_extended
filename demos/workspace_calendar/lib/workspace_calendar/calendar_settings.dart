@@ -6,8 +6,7 @@
 /// least height of the timed grid's slots, which also scales the height
 /// of Month's weeks. Beside them: the field errors, keyed as
 /// `validateItemJson` keys them, of an item outside the calendar's hours,
-/// [hoursErrorsOf], and of one the history lock refuses, [lockErrorsOf];
-/// and the names of Month's layouts in the settings sheet,
+/// [hoursErrorsOf]; and the names of Month's layouts in the settings sheet,
 /// [MonthLayoutLabel].
 library;
 
@@ -17,7 +16,6 @@ import 'package:flutter/foundation.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
 
 /// The field errors of an item from [start] to [end] minutes that does not
 /// lie in [hours], keyed as `validateItemJson` keys them: the start when it
@@ -33,40 +31,6 @@ Map<String, String> hoursErrorsOf(int start, int end, DayHours hours) {
       "endMinute":
           "The end is ${clockLabel(hours.start + minutesPerSlot)} to "
           "${clockLabel(hours.end)}, inside the calendar's hours.",
-  };
-}
-
-/// The item form's errors for [to], a change of the stored [from] or,
-/// where [from] is null, a new item, which [lock] refuses, keyed as
-/// `validateItemJson` keys them; empty where [lock] admits it.
-Map<String, String> lockErrorsOf(
-  HistoryLock lock,
-  CalendarEntryTime? from,
-  CalendarEntryTime to,
-) {
-  final boundary = lock.boundary;
-  if (boundary == null || (from != null && lock.admits(from, to))) {
-    return const <String, String>{};
-  }
-  if (from == null || lock.holdOf(from) == ItemHold.free) {
-    if (HistoryLock.startOf(to) >= boundary) {
-      return const <String, String>{};
-    }
-    if (to.firstDay < boundary ~/ minutesPerDay) {
-      return const <String, String>{"day": "Past days are locked."};
-    }
-    return const <String, String>{
-      "startMinute": "The start can't be in the past.",
-    };
-  }
-  if (lock.holdOf(from) == ItemHold.locked) {
-    return const <String, String>{"day": "Past items are locked."};
-  }
-  return <String, String>{
-    if (HistoryLock.startOf(to) != HistoryLock.startOf(from))
-      "startMinute": "An item in progress keeps its start.",
-    if (HistoryLock.endOf(to) <= boundary)
-      "endMinute": "The end can't be in the past.",
   };
 }
 

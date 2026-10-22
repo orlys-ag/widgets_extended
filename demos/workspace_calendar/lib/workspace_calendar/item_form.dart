@@ -3,7 +3,8 @@
 ///
 /// The form is generated from the item type's schema and checks its input
 /// with the same validator the API runs, and against the history lock,
-/// before it sends anything; the
+/// whose refusals [lockErrorsOf] keys as the form's fields, before it sends
+/// anything; the
 /// store holds its days and minutes to the calendar's hours, and the time
 /// fields offer the minutes inside them.
 library;
@@ -18,7 +19,6 @@ import 'calendar_api.dart';
 import 'calendar_api_source.dart';
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
-import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
 /// Asks for a type, then opens the form for a new item of it over the
@@ -129,6 +129,40 @@ Future<bool> confirmDelete(BuildContext context) async {
     },
   );
   return confirmed ?? false;
+}
+
+/// The item form's errors for [to], a change of the stored [from] or,
+/// where [from] is null, a new item, which [lock] refuses, keyed as
+/// `validateItemJson` keys them; empty where [lock] admits it.
+Map<String, String> lockErrorsOf(
+  HistoryLock lock,
+  CalendarEntryTime? from,
+  CalendarEntryTime to,
+) {
+  final boundary = lock.boundary;
+  if (boundary == null || (from != null && lock.admits(from, to))) {
+    return const <String, String>{};
+  }
+  if (from == null || lock.holdOf(from) == ItemHold.free) {
+    if (HistoryLock.startOf(to) >= boundary) {
+      return const <String, String>{};
+    }
+    if (to.firstDay < boundary ~/ minutesPerDay) {
+      return const <String, String>{"day": "Past days are locked."};
+    }
+    return const <String, String>{
+      "startMinute": "The start can't be in the past.",
+    };
+  }
+  if (lock.holdOf(from) == ItemHold.locked) {
+    return const <String, String>{"day": "Past items are locked."};
+  }
+  return <String, String>{
+    if (HistoryLock.startOf(to) != HistoryLock.startOf(from))
+      "startMinute": "An item in progress keeps its start.",
+    if (HistoryLock.endOf(to) <= boundary)
+      "endMinute": "The end can't be in the past.",
+  };
 }
 
 Future<void> _showForm(
