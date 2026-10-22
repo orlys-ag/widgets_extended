@@ -4,6 +4,7 @@ library;
 
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';

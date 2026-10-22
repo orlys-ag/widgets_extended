@@ -13,6 +13,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/policy/history_lock.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
@@ -21,7 +22,6 @@ import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
@@ -2319,64 +2319,6 @@ void main() {
       api.failurePolicy = null;
       await pumpFor(tester, second);
     }
-  });
-
-  testWidgets("BM8 a write that changes only an entry's payload runs its "
-      "chip builder again, which draws the new payload", (tester) async {
-    final day = DateTime(2026, 4, 21);
-    final note = CalendarEntry<String>(
-      id: "note-1",
-      day: day,
-      startMinute: 10 * 60,
-      endMinute: 11 * 60,
-      title: "Note",
-      color: const Color(0xFF336699),
-      payload: "first",
-    );
-    // The in-memory store applies a write within the call, so the payload
-    // changes with no pending state between.
-    final store = MemoryCalendarStore<String>(
-      entries: <CalendarEntry<String>>[note],
-    );
-    addTearDown(store.dispose);
-    final todayNotifier = ValueNotifier<DateTime>(day);
-    addTearDown(todayNotifier.dispose);
-    final calls = <CalendarShownEntry<String>>[];
-    await tester.pumpWidget(
-      MaterialApp(
-        home: MonthBoard<String>(
-          store: store,
-          grid: MonthGrid.of(day),
-          selectedDay: day,
-          today: todayNotifier,
-          onSelectDay: (day) {},
-          onOpenDay: (day) {},
-          onCreateOnDay: null,
-          onOpenItem: (id) {},
-          chipBuilder: (context, entry, details) {
-            calls.add(entry);
-            return Text(entry.entry.payload);
-          },
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    final bar = find.byKey(monthChipKey(monthSegmentKey("note-1", monday)));
-    expect(
-      find.descendant(of: bar, matching: find.text("first")),
-      findsOneWidget,
-    );
-    final before = calls.length;
-
-    await store.update(note.copyWith(payload: "second"));
-    await tester.pumpAndSettle();
-    expect(calls.length, before + 1);
-    expect(calls.last.pending, isFalse);
-    expect(calls.last.entry.payload, "second");
-    expect(
-      find.descendant(of: bar, matching: find.text("second")),
-      findsOneWidget,
-    );
   });
 
   testWidgets("BA10 a write that changes only an entry's payload runs its "

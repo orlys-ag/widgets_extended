@@ -14,6 +14,7 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/policy/history_lock.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 
 /// The field errors of an item from [start] to [end] minutes that does not
@@ -67,20 +68,17 @@ Map<String, String> lockErrorsOf(
   };
 }
 
-/// How Month lays out a week whose chips need more lanes than its share
-/// of the board's height holds.
-enum MonthLayout {
-  /// The week grows to hold every chip, and the month scrolls.
-  showAll("Show all items"),
-
-  /// Every week keeps its share of the board's height, so the month fits
-  /// on the screen; a day shows the chips that fit and how many it hides.
-  fitScreen("Fit to screen");
-
-  const MonthLayout(this.label);
-
+/// The names of Month's layouts in the settings sheet.
+extension MonthLayoutLabel on MonthLayout {
   /// The layout's name in the settings sheet.
-  final String label;
+  String get label {
+    switch (this) {
+      case MonthLayout.showAll:
+        return "Show all items";
+      case MonthLayout.fitScreen:
+        return "Fit to screen";
+    }
+  }
 }
 
 /// What the calendar bar and the settings sheet choose: whether the

@@ -118,6 +118,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/policy/history_lock.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/month_picker.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
@@ -133,7 +134,6 @@ import 'workspace_calendar/harbor_theme.dart';
 import 'workspace_calendar/item_builders.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
-import 'workspace_calendar/month_board.dart';
 import 'workspace_calendar/settings_sheet.dart';
 import 'workspace_calendar/timed_grid.dart';
 
