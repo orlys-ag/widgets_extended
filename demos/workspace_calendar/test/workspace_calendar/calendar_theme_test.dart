@@ -28,6 +28,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:widgets_extended/calendar/composition/calendar_card.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 
 import 'calendar_harness.dart';
