@@ -1,6 +1,7 @@
 /// A two-finger pinch on one of the calendar's grids, read from the raw
-/// pointer events, and the scroll offset that keeps the point between the
-/// fingers in its place as the board's tracks grow or shrink under it.
+/// pointer events, the limits of the sizes it zooms to, and the scroll
+/// offset that keeps the point between the fingers in its place as the
+/// board's tracks grow or shrink under it.
 library;
 
 import 'dart:async';
@@ -8,7 +9,28 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
-import 'package:widgets_extended/widgets_extended.dart';
+
+import '../../board/board.dart';
+
+/// The least day width a pinch zooms to, and a timed grid's and a month
+/// board's default least day width.
+const double minDayWidthLow = 44.0;
+
+/// The most day width a pinch zooms to.
+const double minDayWidthHigh = 240.0;
+
+/// The least slot height a pinch zooms a timed grid to.
+const double minSlotHeightLow = 8.0;
+
+/// The most slot height a pinch zooms a timed grid to.
+const double minSlotHeightHigh = 48.0;
+
+/// A timed grid's default least slot height.
+const double defaultMinSlotHeight = 16.0;
+
+/// The most week scale a pinch zooms a month board to: the most slot
+/// height a pinch zooms a timed grid to over its default.
+const double maxMonthWeekScale = minSlotHeightHigh / defaultMinSlotHeight;
 
 /// The axis a pinch zooms.
 enum PinchAxis { vertical, horizontal }

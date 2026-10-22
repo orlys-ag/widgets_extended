@@ -11,11 +11,11 @@ import 'package:flutter/widgets.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_settings.dart';
 import 'day_cell.dart';
-import 'pinch_zoom.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
 /// below: the row axis's lane padding.

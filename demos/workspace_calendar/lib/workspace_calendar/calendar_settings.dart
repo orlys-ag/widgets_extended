@@ -14,7 +14,7 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/policy/history_lock.dart';
-
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 
 /// The field errors of an item from [start] to [end] minutes that does not
 /// lie in [hours], keyed as `validateItemJson` keys them: the start when it
@@ -66,25 +66,6 @@ Map<String, String> lockErrorsOf(
       "endMinute": "The end can't be in the past.",
   };
 }
-
-/// The least day width the settings offer, which is the grid's default.
-const double minDayWidthLow = 44.0;
-
-/// The most day width the settings offer.
-const double minDayWidthHigh = 240.0;
-
-/// The least slot height the settings offer.
-const double minSlotHeightLow = 8.0;
-
-/// The most slot height the settings offer.
-const double minSlotHeightHigh = 48.0;
-
-/// The slot height the grid has before the settings change it.
-const double defaultMinSlotHeight = 16.0;
-
-/// The most [CalendarSettings.monthWeekScale] the settings offer: the
-/// most slot height over its default.
-const double maxMonthWeekScale = minSlotHeightHigh / defaultMinSlotHeight;
 
 /// How Month lays out a week whose chips need more lanes than its share
 /// of the board's height holds.
