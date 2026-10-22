@@ -1,5 +1,16 @@
+export 'composition/calendar_header.dart'
+    show
+        CalendarHeaderBuilder,
+        CalendarHeaderDetails,
+        CalendarStepUnit,
+        CalendarViewKind,
+        defaultCalendarHeaderBuilder;
+export 'composition/calendar_theme_extension.dart' show CalendarThemeExtension;
+export 'composition/calendar_view.dart'
+    show CalendarController, CalendarEntryTapDetails, CalendarView;
 export 'dates/calendar_dates.dart'
     show DayHours, WeekdaySet, dateOfDayNumber, dayNumber;
+export 'dates/calendar_labels.dart' show HourLabelFormat;
 export 'entries/calendar_data_source.dart' show CalendarDataSource;
 export 'entries/calendar_entry.dart' show CalendarEntry, CalendarEntryTime;
 export 'presentation/calendar_activity_indicator.dart'
@@ -43,3 +54,13 @@ export 'store/calendar_store.dart'
         CalendarWritePendingException;
 export 'store/memory_calendar_store.dart'
     show CalendarEntryChanged, MemoryCalendarStore;
+export 'views/month_board.dart' show MonthLayout;
+export 'views/pinch_zoom.dart'
+    show
+        defaultMinSlotHeight,
+        maxMonthWeekScale,
+        minDayWidthHigh,
+        minDayWidthLow,
+        minSlotHeightHigh,
+        minSlotHeightLow;
+export 'views/timed_grid.dart' show CreateRange;

@@ -13,7 +13,6 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/policy/history_lock.dart';
-import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
 import 'calendar_api.dart';
 import 'calendar_api_source.dart';

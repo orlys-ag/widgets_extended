@@ -1,5 +1,5 @@
-/// The calendar's theme: every colour, text style, motion and icon its
-/// views draw, and the inherited widget that hands it down.
+/// The calendar's theme: every colour, shadow, text style, motion and icon
+/// its views draw, and the inherited widget that hands it down.
 library;
 
 import 'dart:ui' show lerpDouble;
@@ -7,11 +7,13 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-/// The colours, text styles, motion and icons the calendar's views draw.
+/// The colours, shadows, text styles, motion and icons the calendar's views
+/// draw.
 ///
 /// Every field is set: a parameter left out takes its built-in value, a
-/// neutral light palette with the typography, motion and icons the views
-/// are designed around, so `const CalendarThemeData()` is a whole theme.
+/// neutral light palette with the shadows, typography, motion and icons
+/// the views are designed around, so `const CalendarThemeData()` is a
+/// whole theme.
 ///
 /// The text styles are partial (`inherit: true`): a view merges each over
 /// the ambient [DefaultTextStyle], as [Text] does, so the host's font and
@@ -53,6 +55,8 @@ class CalendarThemeData with Diagnosticable {
     this.draggedBlockOpacity = _draggedBlockOpacity,
     this.entryTintOpacity = _entryTintOpacity,
     this.pendingEntryOpacity = _pendingEntryOpacity,
+    this.gripShadows = _gripShadows,
+    this.liftedBlockShadows = _liftedBlockShadows,
     this.motionDuration = _motionDuration,
     this.motionCurve = _motionCurve,
     this.beforeHoursIcon = _beforeHoursIcon,
@@ -124,6 +128,27 @@ class CalendarThemeData with Diagnosticable {
   static const double _draggedBlockOpacity = 0.66;
   static const double _entryTintOpacity = 0.14;
   static const double _pendingEntryOpacity = 0.5;
+  static const List<BoxShadow> _gripShadows = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x33000000),
+      blurRadius: 2.0,
+      offset: Offset(0.0, 1.0),
+    ),
+  ];
+  static const List<BoxShadow> _liftedBlockShadows = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x33000000),
+      offset: Offset(0.0, 4.0),
+      blurRadius: 8.0,
+      spreadRadius: -1.0,
+    ),
+    BoxShadow(
+      color: Color(0x1F000000),
+      offset: Offset(0.0, 1.0),
+      blurRadius: 3.0,
+      spreadRadius: -1.0,
+    ),
+  ];
   static const Duration _motionDuration = Duration(milliseconds: 300);
   static const Curve _motionCurve = Curves.fastOutSlowIn;
 
@@ -332,6 +357,17 @@ class CalendarThemeData with Diagnosticable {
   /// The opacity the default builders draw a pending entry at; from 0 to
   /// 1.
   final double pendingEntryOpacity;
+
+  /// The shadows under each grip of the selected block on the timed grid,
+  /// their offsets and radii in logical pixels of the grip's own space.
+  final List<BoxShadow> gripShadows;
+
+  /// The shadows under the block a move carries on the timed grid, which
+  /// ease in from none over [motionDuration] as it lifts, their offsets
+  /// and radii in logical pixels of the block's own space. The built-in
+  /// ones spread in by the 1 px margin the grid leaves round each block,
+  /// so they fall from its painted edge.
+  final List<BoxShadow> liftedBlockShadows;
 
   /// How long each animation the views run takes; zero or more. Zero turns
   /// the views' motion off: every change shows at once, and the activity
@@ -546,6 +582,8 @@ class CalendarThemeData with Diagnosticable {
     double? draggedBlockOpacity,
     double? entryTintOpacity,
     double? pendingEntryOpacity,
+    List<BoxShadow>? gripShadows,
+    List<BoxShadow>? liftedBlockShadows,
     Duration? motionDuration,
     Curve? motionCurve,
     IconData? beforeHoursIcon,
@@ -605,6 +643,8 @@ class CalendarThemeData with Diagnosticable {
       draggedBlockOpacity: draggedBlockOpacity ?? this.draggedBlockOpacity,
       entryTintOpacity: entryTintOpacity ?? this.entryTintOpacity,
       pendingEntryOpacity: pendingEntryOpacity ?? this.pendingEntryOpacity,
+      gripShadows: gripShadows ?? this.gripShadows,
+      liftedBlockShadows: liftedBlockShadows ?? this.liftedBlockShadows,
       motionDuration: motionDuration ?? this.motionDuration,
       motionCurve: motionCurve ?? this.motionCurve,
       beforeHoursIcon: beforeHoursIcon ?? this.beforeHoursIcon,
@@ -660,9 +700,9 @@ class CalendarThemeData with Diagnosticable {
   /// [b] are the same instance.
   ///
   /// Colours interpolate with [Color.lerp], text styles with
-  /// [TextStyle.lerp], the duration with [lerpDuration] and the four
-  /// doubles with [lerpDouble]; the icons and the curve are [a]'s below 0.5
-  /// and [b]'s from it. A [t] outside 0 to 1, as an overshooting curve
+  /// [TextStyle.lerp], the shadows with [BoxShadow.lerpList], the duration
+  /// with [lerpDuration] and the four doubles with [lerpDouble]; the icons
+  /// and the curve are [a]'s below 0.5 and [b]'s from it. A [t] outside 0 to 1, as an overshooting curve
   /// gives, may take the duration, [todayRingWidth], [draggedBlockOpacity],
   /// [entryTintOpacity] or [pendingEntryOpacity] out of its domain, so each
   /// is clamped into it.
@@ -711,6 +751,12 @@ class CalendarThemeData with Diagnosticable {
         0.0,
         1.0,
       ),
+      gripShadows: BoxShadow.lerpList(a.gripShadows, b.gripShadows, t)!,
+      liftedBlockShadows: BoxShadow.lerpList(
+        a.liftedBlockShadows,
+        b.liftedBlockShadows,
+        t,
+      )!,
       motionDuration: duration.isNegative ? Duration.zero : duration,
       motionCurve: switched.motionCurve,
       beforeHoursIcon: switched.beforeHoursIcon,
@@ -886,6 +932,8 @@ class CalendarThemeData with Diagnosticable {
         other.draggedBlockOpacity == draggedBlockOpacity &&
         other.entryTintOpacity == entryTintOpacity &&
         other.pendingEntryOpacity == pendingEntryOpacity &&
+        listEquals(other.gripShadows, gripShadows) &&
+        listEquals(other.liftedBlockShadows, liftedBlockShadows) &&
         other.motionDuration == motionDuration &&
         other.motionCurve == motionCurve &&
         other.beforeHoursIcon == beforeHoursIcon &&
@@ -948,6 +996,8 @@ class CalendarThemeData with Diagnosticable {
       draggedBlockOpacity,
       entryTintOpacity,
       pendingEntryOpacity,
+      Object.hashAll(gripShadows),
+      Object.hashAll(liftedBlockShadows),
       motionDuration,
       motionCurve,
       beforeHoursIcon,
@@ -1017,6 +1067,20 @@ class CalendarThemeData with Diagnosticable {
           "pendingEntryOpacity",
           pendingEntryOpacity,
           defaultValue: _pendingEntryOpacity,
+        ),
+      )
+      ..add(
+        IterableProperty<BoxShadow>(
+          "gripShadows",
+          gripShadows,
+          defaultValue: _gripShadows,
+        ),
+      )
+      ..add(
+        IterableProperty<BoxShadow>(
+          "liftedBlockShadows",
+          liftedBlockShadows,
+          defaultValue: _liftedBlockShadows,
         ),
       )
       ..add(

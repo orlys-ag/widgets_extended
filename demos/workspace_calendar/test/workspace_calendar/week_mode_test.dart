@@ -2302,13 +2302,14 @@ void main() {
     await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
 
-    /// [liftedBlockShadows] at the share of the lift [elapsed] reaches.
+    /// The built-in [CalendarThemeData.liftedBlockShadows] at the share of
+    /// the lift [elapsed] reaches.
     List<BoxShadow> liftedAt(Duration elapsed) {
       final lift = Curves.fastOutSlowIn.transform(
         elapsed.inMicroseconds / 300000,
       );
       return <BoxShadow>[
-        for (final shadow in liftedBlockShadows)
+        for (final shadow in const CalendarThemeData().liftedBlockShadows)
           shadow.copyWith(
             color: shadow.color.withValues(alpha: shadow.color.a * lift),
           ),
@@ -2334,7 +2335,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 150));
     expect(shadows(), liftedAt(const Duration(milliseconds: 150)));
     await tester.pump(const Duration(milliseconds: 150));
-    expect(shadows(), liftedBlockShadows);
+    expect(shadows(), const CalendarThemeData().liftedBlockShadows);
 
     await gesture.up();
     await tester.pumpAndSettle();

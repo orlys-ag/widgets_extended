@@ -18,8 +18,6 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/policy/history_lock.dart';
-import 'package:widgets_extended/calendar/views/month_board.dart';
-import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 
 /// The field errors of an item from [start] to [end] minutes that does not
 /// lie in [hours], keyed as `validateItemJson` keys them: the start when it

@@ -137,13 +137,7 @@ class _GridStyles {
             borderRadius: const BorderRadius.all(
               Radius.circular(_BlockHandles.gripThickness / 2),
             ),
-            boxShadow: const <BoxShadow>[
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 2.0,
-                offset: Offset(0.0, 1.0),
-              ),
-            ],
+            boxShadow: theme.gripShadows,
           ),
         ),
       );
@@ -387,24 +381,6 @@ String landingLabel(CalendarEntryTime shape, DateTime today) {
 
 /// The key of the shadow under the block a move carries.
 const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
-
-/// The shadow under the block a move carries once it has lifted. Spread
-/// in by the 1 px margin round each block, so it falls from the block's
-/// painted edge.
-const List<BoxShadow> liftedBlockShadows = <BoxShadow>[
-  BoxShadow(
-    color: Color(0x33000000),
-    offset: Offset(0.0, 4.0),
-    blurRadius: 8.0,
-    spreadRadius: -1.0,
-  ),
-  BoxShadow(
-    color: Color(0x1F000000),
-    offset: Offset(0.0, 1.0),
-    blurRadius: 3.0,
-    spreadRadius: -1.0,
-  ),
-];
 
 /// The slots a create gesture picked: [dayCount] days from [day], each
 /// from [startMinute] to [endMinute].
@@ -687,7 +663,7 @@ CreateRange createRangeOver(
 
 /// The days of the [dayCount] from [firstDay] whose weekday [weekdays]
 /// holds, on the board, over its [hours], showing what [store] shows for
-/// them once the store's shown range holds them all, read. A
+/// them once they are ready. A
 /// tap on a block that is not pending reports [onOpenItem]; a tap on a
 /// day header reports [onSelectDay]. Each block's content is what
 /// [blockBuilder] draws, told on a grid of one day column that the block
@@ -748,11 +724,20 @@ CreateRange createRangeOver(
 /// [minDayWidthHigh]. While two fingers are down the grid does not scroll,
 /// and a finger that pinched clears no selection when it lifts off the
 /// selected block. No pinch starts while a block moves or resizes or a
-/// create range runs.
+/// create range runs. New days, which a new [firstDay], [dayCount] or
+/// [weekdays] gives, end a create range in flight, which then creates
+/// nothing.
 ///
-/// While its days are not ready a cover over the grid takes every press,
-/// centring what [loadingBuilder] draws while they are read, and what
-/// [failureBuilder] draws when the read failed.
+/// With no [storeRange], the days are ready while the store's shown range
+/// holds every one of them and its status is ready. With one, they are
+/// ready while the store shows exactly [storeRange] and its status is
+/// ready, or, while it shows another range, once it has read every day of
+/// [storeRange]; a store notify that moves the store off [storeRange]
+/// clears the selection. While its days are not ready a cover over the
+/// grid takes every press, centring what [loadingBuilder] draws while they
+/// are read, and what [failureBuilder] draws when the read the store waits
+/// on failed, where that read is of the grid's own range: [storeRange],
+/// or with none the store's shown range.
 ///
 /// The grid draws in the [CalendarTheme] above it and animates on the
 /// theme's motion; a block's content, the loading and the failure state
@@ -780,6 +765,7 @@ class TimedGrid<T> extends StatefulWidget {
     this.minSlotHeight = defaultMinSlotHeight,
     this.onZoom,
     this.maxDayCount,
+    this.storeRange,
     this.showsDayHeader = true,
     this.blockBuilder,
     this.loadingBuilder,
@@ -877,6 +863,13 @@ class TimedGrid<T> extends StatefulWidget {
   /// The most days a drop may give an item, which it refuses past them;
   /// null for no limit.
   final int? maxDayCount;
+
+  /// The range, both days inclusive, that the grid's owner asks [store] to
+  /// show for it, which holds the grid's days; null where the grid reads
+  /// the store's shown range alone. Where the store shows another range,
+  /// as it does in the frame before the owner's ask reaches it, the grid
+  /// is ready once the store has read every day of this one.
+  final ({DateTime first, DateTime last})? storeRange;
 
   /// Draws each block's content inside the box the grid gives it; null
   /// for [defaultCalendarBlockBuilder]. A new one, not `==` to the last,
@@ -1134,6 +1127,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Whether the last [_sync] found its days ready.
   bool _syncedReady = false;
 
+  /// Whether the store has read every day of [TimedGrid.storeRange], and
+  /// whether it shows exactly that range, as [_noteRange] last found them;
+  /// both false with no range.
+  bool _rangeRead = false;
+  bool _showsRange = false;
+
   /// Whether a frame callback will put the styles' animation back.
   bool _restoreScheduled = false;
 
@@ -1182,6 +1181,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
+    _noteRange();
     _sync();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -1234,6 +1234,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       "that changes it its own key.",
     );
     _tracks = tracks;
+    final range = _range;
+    if (tracksChanged && range != null) {
+      // Its cells are rows and columns of the tracks it began on.
+      range.detach();
+      _range = null;
+    }
     if (!widget.editable) {
       _selectedBlock.value = null;
     }
@@ -1265,7 +1271,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             widget.minSlotHeight != oldWidget.minSlotHeight)) {
       _fitAxes(size);
     }
-    if (storeChanged || tracksChanged) {
+    final rangeChanged = widget.storeRange != oldWidget.storeRange;
+    if (storeChanged || rangeChanged) {
+      _noteRange();
+    }
+    if (storeChanged || tracksChanged || rangeChanged) {
       // New days are not ready yet, so they do not animate in either way;
       // new hours move every block at once.
       _sync(animate: !tracksChanged);
@@ -1571,23 +1581,71 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return extent / count;
   }
 
+  /// Follows the store. A notify that moves it off the range it showed
+  /// for this grid clears the selection: the grid's owner, which moved it,
+  /// builds the grid on the days of its new range next.
   void _handleStore() {
+    final showedRange = _showsRange;
+    _noteRange();
+    if (showedRange && !_showsRange) {
+      _selectedBlock.value = null;
+    }
     _sync();
     setState(() {});
+  }
+
+  /// Notes whether the store has read every day of [TimedGrid.storeRange]
+  /// and whether it shows exactly that range, which [_daysReady] and
+  /// [_handleStore] read, so a layout reads fields rather than the store's
+  /// days.
+  void _noteRange() {
+    final range = widget.storeRange;
+    final store = widget.store;
+    if (range == null) {
+      _rangeRead = false;
+      _showsRange = false;
+      return;
+    }
+    _showsRange = store.isShown(range.first, range.last);
+    _rangeRead = _everyDayRead(store, range.first, range.last);
+  }
+
+  static bool _everyDayRead<T>(
+    CalendarStore<T> store,
+    DateTime first,
+    DateTime last,
+  ) {
+    for (var day = first; !day.isAfter(last); day = addDays(day, 1)) {
+      if (!store.isRead(day)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   DateTime get _lastDay {
     return dateOfDayNumber(_tracks.lastDay);
   }
 
-  /// Whether the store's shown range holds every one of this grid's days,
-  /// all of them read. The range may be wider than the grid, as a range
-  /// holding the grid's whole week is. False for a sync that runs between
-  /// the store taking a range without this grid's days and this grid
-  /// getting new ones.
+  /// Whether this grid's days are ready. With no [TimedGrid.storeRange],
+  /// while the store's shown range holds every one of them, all read: the
+  /// range may be wider than the grid, as a range holding the grid's whole
+  /// week is, and a sync that runs between the store taking a range
+  /// without this grid's days and this grid getting new ones finds them
+  /// not ready. With one, while the store shows exactly that range, ready,
+  /// and while it shows another, once every day of that range is read,
+  /// which is the status the store takes when it shows it.
   bool get _daysReady {
-    return widget.store.status == CalendarLoadStatus.ready &&
-        widget.store.isWithinShown(widget.firstDay, _lastDay);
+    final store = widget.store;
+    final range = widget.storeRange;
+    if (range == null) {
+      return store.status == CalendarLoadStatus.ready &&
+          store.isWithinShown(widget.firstDay, _lastDay);
+    }
+    if (store.isShown(range.first, range.last)) {
+      return store.status == CalendarLoadStatus.ready;
+    }
+    return _rangeRead;
   }
 
   /// Sets the board's items to the days' shown items when the days are
@@ -1823,12 +1881,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     });
   }
 
-  /// The block a move carries, [proxy], over [liftedBlockShadows], which
-  /// ease in from none over the theme's motion. The board calls this on
-  /// every pointer move with a tree of the same shape, so the lift runs
-  /// once a drag, from the frame the block lifts.
+  /// The block a move carries, [proxy], over the theme's
+  /// [CalendarThemeData.liftedBlockShadows], which ease in from none over
+  /// the theme's motion. The board calls this on every pointer move with a
+  /// tree of the same shape, so the lift runs once a drag, from the frame
+  /// the block lifts.
   Widget _buildLiftedBlock(BuildContext context, String id, Widget proxy) {
     final theme = _styles.theme;
+    final shadows = theme.liftedBlockShadows;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0.0, end: 1.0),
       duration: theme.motionDuration,
@@ -1839,7 +1899,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           key: liftedBlockKey,
           decoration: BoxDecoration(
             boxShadow: <BoxShadow>[
-              for (final shadow in liftedBlockShadows)
+              for (final shadow in shadows)
                 shadow.copyWith(
                   color: shadow.color.withValues(alpha: shadow.color.a * lift),
                 ),
@@ -2300,12 +2360,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The cover's content: what the failure builder draws for the grid's
-  /// days when the read the store waits on failed, with the store's load
-  /// error as it holds it, and what the loading builder draws otherwise.
+  /// days when the read the store waits on for [TimedGrid.storeRange], or
+  /// with none for its shown range, failed, with the store's load error as
+  /// it holds it, and what the loading builder draws otherwise.
   Widget _buildCover(BuildContext context, CalendarStore<T> store) {
     final first = dateOfDayNumber(_tracks.firstDay);
     final last = _lastDay;
-    if (store.status == CalendarLoadStatus.failed) {
+    final range = widget.storeRange;
+    if (store.status == CalendarLoadStatus.failed &&
+        (range == null || store.isShown(range.first, range.last))) {
       final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
       return failure(
         context,

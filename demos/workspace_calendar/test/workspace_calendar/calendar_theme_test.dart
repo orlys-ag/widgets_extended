@@ -2133,7 +2133,10 @@ void main() {
     final shadow = tester.widget<DecoratedBox>(find.byKey(liftedBlockKey));
     expect(
       (shadow.decoration as BoxDecoration).boxShadow!.first.color.a,
-      moreOrLessEquals(liftedBlockShadows.first.color.a * 0.5, epsilon: 0.01),
+      moreOrLessEquals(
+        const CalendarThemeData().liftedBlockShadows.first.color.a * 0.5,
+        epsilon: 0.01,
+      ),
     );
     await gesture.moveBy(Offset(0.0, slot.height * 2.0));
     await tester.pump();
@@ -3484,7 +3487,10 @@ void main() {
     final shadow = tester.widget<DecoratedBox>(find.byKey(liftedBlockKey));
     expect(
       (shadow.decoration as BoxDecoration).boxShadow!.first.color.a,
-      moreOrLessEquals(liftedBlockShadows.first.color.a * 0.5, epsilon: 0.01),
+      moreOrLessEquals(
+        const CalendarThemeData().liftedBlockShadows.first.color.a * 0.5,
+        epsilon: 0.01,
+      ),
     );
     await gesture.cancel();
     await tester.pumpAndSettle();
@@ -3849,7 +3855,9 @@ void main() {
     final shadow = tester.widget<DecoratedBox>(find.byKey(liftedBlockKey));
     expect(
       (shadow.decoration as BoxDecoration).boxShadow!.first.color.a,
-      moreOrLessEquals(liftedBlockShadows.first.color.a),
+      moreOrLessEquals(
+        const CalendarThemeData().liftedBlockShadows.first.color.a,
+      ),
     );
     await gesture.cancel();
     await tester.pumpAndSettle();
