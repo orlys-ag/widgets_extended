@@ -102,52 +102,6 @@ enum MonthLayout {
   final String label;
 }
 
-/// How the timed grid's hour gutter names the times it labels.
-enum HourLabelFormat {
-  /// "13:00", as [clockLabel] writes it.
-  twentyFourHour,
-
-  /// "1 PM", as [hourLabel] writes it.
-  twelveHour,
-}
-
-/// What the hour gutter names [minute] minutes after midnight with in
-/// [format]: [clockLabel]'s "13:00" in 24-hour, and in AM/PM the hour,
-/// its minutes where it has some, and the half of the day, as "1 PM" or
-/// "8:15 AM". Midnight, 1440 included, reads "12 AM" and noon "12 PM".
-String hourLabel(int minute, HourLabelFormat format) {
-  if (format == HourLabelFormat.twentyFourHour) {
-    return clockLabel(minute);
-  }
-  final ofDay = minute % minutesPerDay;
-  final hour = ofDay ~/ 60;
-  final half = hour < 12 ? "AM" : "PM";
-  final shown = hour % 12 == 0 ? 12 : hour % 12;
-  final minutes = ofDay % 60;
-  if (minutes == 0) {
-    return "$shown $half";
-  }
-  return "$shown:${minutes.toString().padLeft(2, "0")} $half";
-}
-
-/// What a screen reader says for a count of [count] of [day]'s items
-/// before [minute], or after it when [above] is false, naming the minute
-/// in [format]: the timed grid's rows and Agenda's banners outside the
-/// hours alike.
-String hiddenRowLabel(
-  DateTime day,
-  int count,
-  int minute, {
-  required bool above,
-  required HourLabelFormat format,
-}) {
-  final date =
-      "${weekdayNames[weekdayColumn(day)]}, "
-      "${monthNames[day.month - 1]} ${day.day}";
-  final side = above ? "before" : "after";
-  return "$date, ${moreItemsLabel(count)} $side ${hourLabel(minute, format)}";
-}
-
 /// What the calendar bar and the settings sheet choose: whether the
 /// calendar is in [editing] mode, whether the history lock holds past days, [lockPast], and earlier
 /// today too, [lockEarlierToday], the [weekdays] it shows and the one its

@@ -6,8 +6,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);

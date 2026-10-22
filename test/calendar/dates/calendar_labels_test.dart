@@ -1,6 +1,6 @@
-/// The calendar's English labels: lengths, clock times, day titles, counts,
-/// the names of months and weekdays, and the sentences and labels of the
-/// default builders.
+/// The calendar's English labels: lengths, clock times, hour labels, day
+/// titles, counts, the names of months and weekdays, and the sentences and
+/// labels of the default builders.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -52,5 +52,30 @@ void main() {
     expect(startsAtLabel("07:30"), "Starts at 07:30");
     expect(endsAtLabel("19:30"), "Ends at 19:30");
     expect(clockRangeLabel(540, 600), "09:00-10:00");
+  });
+
+  group("C7 hourLabel", () {
+    test("names a minute as clockLabel does in 24-hour", () {
+      const format = HourLabelFormat.twentyFourHour;
+      expect(hourLabel(0, format), "00:00");
+      expect(hourLabel(13 * 60, format), "13:00");
+      expect(hourLabel(8 * 60 + 15, format), "08:15");
+      expect(hourLabel(24 * 60, format), "24:00");
+    });
+
+    test("names the hour and the half of the day in AM/PM, with minutes "
+        "where there are some", () {
+      const format = HourLabelFormat.twelveHour;
+      expect(hourLabel(0, format), "12 AM");
+      expect(hourLabel(60, format), "1 AM");
+      expect(hourLabel(9 * 60, format), "9 AM");
+      expect(hourLabel(11 * 60, format), "11 AM");
+      expect(hourLabel(12 * 60, format), "12 PM");
+      expect(hourLabel(13 * 60, format), "1 PM");
+      expect(hourLabel(22 * 60, format), "10 PM");
+      expect(hourLabel(24 * 60, format), "12 AM");
+      expect(hourLabel(8 * 60 + 15, format), "8:15 AM");
+      expect(hourLabel(12 * 60 + 5, format), "12:05 PM");
+    });
   });
 }

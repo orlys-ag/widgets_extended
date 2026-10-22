@@ -20,7 +20,6 @@ import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_settings.dart';
 import 'history_lock.dart';
 
 /// The style the day list animates its rows with under [theme]: every

@@ -1,5 +1,6 @@
 /// The calendar's English strings: the names and labels of its dates, times
-/// and counts, and the sentences and labels its default builders show.
+/// and counts, the formats of its hour labels, and the sentences and labels
+/// its default builders show.
 library;
 
 import 'calendar_dates.dart';
@@ -82,6 +83,52 @@ String clockLabel(int minute) {
 /// midnight.
 String clockRangeLabel(int start, int end) {
   return "${clockLabel(start)}-${clockLabel(end)}";
+}
+
+/// How the timed grid's hour gutter names the times it labels.
+enum HourLabelFormat {
+  /// "13:00", as [clockLabel] writes it.
+  twentyFourHour,
+
+  /// "1 PM", as [hourLabel] writes it.
+  twelveHour,
+}
+
+/// What the hour gutter names [minute] minutes after midnight with in
+/// [format]: [clockLabel]'s "13:00" in 24-hour, and in AM/PM the hour,
+/// its minutes where it has some, and the half of the day, as "1 PM" or
+/// "8:15 AM". Midnight, 1440 included, reads "12 AM" and noon "12 PM".
+String hourLabel(int minute, HourLabelFormat format) {
+  if (format == HourLabelFormat.twentyFourHour) {
+    return clockLabel(minute);
+  }
+  final ofDay = minute % minutesPerDay;
+  final hour = ofDay ~/ 60;
+  final half = hour < 12 ? "AM" : "PM";
+  final shown = hour % 12 == 0 ? 12 : hour % 12;
+  final minutes = ofDay % 60;
+  if (minutes == 0) {
+    return "$shown $half";
+  }
+  return "$shown:${minutes.toString().padLeft(2, "0")} $half";
+}
+
+/// What a screen reader says for a count of [count] of [day]'s items
+/// before [minute], or after it when [above] is false, naming the minute
+/// in [format]: the timed grid's rows and Agenda's banners outside the
+/// hours alike.
+String hiddenRowLabel(
+  DateTime day,
+  int count,
+  int minute, {
+  required bool above,
+  required HourLabelFormat format,
+}) {
+  final date =
+      "${weekdayNames[weekdayColumn(day)]}, "
+      "${monthNames[day.month - 1]} ${day.day}";
+  final side = above ? "before" : "after";
+  return "$date, ${moreItemsLabel(count)} $side ${hourLabel(minute, format)}";
 }
 
 /// The sentence the default failure builder shows for a read that failed.
