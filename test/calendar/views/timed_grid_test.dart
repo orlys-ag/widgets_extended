@@ -772,4 +772,38 @@ void main() {
     );
     expect(handlesEnabled(), <String, bool>{"past": false, "ended": true});
   });
+
+  test("TG4 a timed grid asserts that its least day width and least slot "
+      "height are positive and finite", () {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<DateTime>(DateTime(2026, 4, 21, 9));
+    addTearDown(now.dispose);
+    TimedGrid<String> grid({
+      double minDayWidth = minDayWidthLow,
+      double minSlotHeight = defaultMinSlotHeight,
+    }) {
+      return TimedGrid<String>(
+        store: store,
+        firstDay: monday,
+        dayCount: 7,
+        selectedDay: tuesday,
+        today: tuesday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenItem: (id) {},
+        onCreate: (range) async {},
+        minDayWidth: minDayWidth,
+        minSlotHeight: minSlotHeight,
+      );
+    }
+
+    // The other arguments pass the constructor's asserts, so each failure
+    // below is the size's own.
+    expect(grid, returnsNormally);
+    expect(() => grid(minDayWidth: 0.0), throwsAssertionError);
+    expect(() => grid(minDayWidth: double.infinity), throwsAssertionError);
+    expect(() => grid(minSlotHeight: 0.0), throwsAssertionError);
+    expect(() => grid(minSlotHeight: double.infinity), throwsAssertionError);
+  });
 }
