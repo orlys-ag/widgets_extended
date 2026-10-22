@@ -3,8 +3,9 @@
 library;
 
 import 'package:flutter/foundation.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+
+import '../dates/calendar_dates.dart';
+import '../entries/calendar_entry.dart';
 
 /// How the history lock holds an item.
 enum ItemHold {

@@ -1,5 +1,6 @@
-/// The history lock: its rules, its switches in the settings sheet, and
-/// what it keeps as it is in Week, Agenda and Month and in the item form.
+/// The history lock in the app: its switches in the settings sheet, the
+/// item form's errors, and what it keeps as it is in Week, Agenda and Month
+/// and in the item form.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -7,10 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/policy/history_lock.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/day_list.dart';
-import 'package:workspace_calendar/workspace_calendar/history_lock.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
@@ -168,114 +169,6 @@ Finder addButtonsOf(Key key) {
 
 void main() {
   group("HistoryLock", () {
-    test("K1 holds nothing without Lock past days, even with earlier "
-        "today; the start of today with it; and with both today's time, "
-        "rounded up to a whole minute", () {
-      expect(
-        HistoryLock.of(
-          lockPast: false,
-          lockEarlierToday: true,
-          today: today,
-          now: midMorning,
-        ),
-        HistoryLock.none,
-      );
-      expect(
-        HistoryLock.of(
-          lockPast: true,
-          lockEarlierToday: false,
-          today: today,
-          now: midMorning,
-        ).boundary,
-        dayNumber(today) * minutesPerDay,
-      );
-      expect(
-        HistoryLock.of(
-          lockPast: true,
-          lockEarlierToday: true,
-          today: today,
-          now: midMorning,
-        ).boundary,
-        dayNumber(today) * minutesPerDay + 11 * 60 + 7,
-      );
-      // A minute part of which has passed is past.
-      expect(
-        HistoryLock.of(
-          lockPast: true,
-          lockEarlierToday: true,
-          today: today,
-          now: DateTime(2026, 4, 21, 11, 7, 30),
-        ).boundary,
-        dayNumber(today) * minutesPerDay + 11 * 60 + 8,
-      );
-    });
-
-    test("K2 an item starting at the boundary is free, one ending after it "
-        "started, and one ending at it locked, across days too", () {
-      final lock = HistoryLock.of(
-        lockPast: true,
-        lockEarlierToday: true,
-        today: today,
-        now: midMorning,
-      );
-      expect(lock.holdOf(shape(today, 11 * 60 + 7, 12 * 60)), ItemHold.free);
-      expect(lock.holdOf(shape(today, 10 * 60, 11 * 60 + 8)), ItemHold.started);
-      expect(lock.holdOf(shape(today, 10 * 60, 11 * 60 + 7)), ItemHold.locked);
-      expect(
-        lock.holdOf(shape(monday, 9 * 60, 10 * 60, dayCount: 3)),
-        ItemHold.started,
-      );
-      expect(HistoryLock.none.holdOf(shape(monday, 0, 60)), ItemHold.free);
-    });
-
-    test("K3 a free item may not start before the boundary, a started one "
-        "keeps its start and ends after it, a locked one keeps its "
-        "times", () {
-      final lock = HistoryLock.of(
-        lockPast: true,
-        lockEarlierToday: true,
-        today: today,
-        now: midMorning,
-      );
-      final later = shape(today, 14 * 60, 15 * 60);
-      final running = shape(today, 10 * 60, 12 * 60);
-      final ended = shape(today, 8 * 60, 9 * 60);
-      expect(lock.admits(later, shape(today, 11 * 60 + 15, 12 * 60)), isTrue);
-      expect(lock.admits(later, shape(today, 11 * 60, 12 * 60)), isFalse);
-      expect(lock.admits(running, shape(today, 10 * 60, 11 * 60 + 15)), isTrue);
-      expect(lock.admits(running, shape(today, 10 * 60, 11 * 60)), isFalse);
-      expect(
-        lock.admits(running, shape(today, 10 * 60 + 15, 12 * 60)),
-        isFalse,
-      );
-      expect(lock.admits(ended, ended), isTrue);
-      expect(lock.admits(ended, shape(today, 8 * 60, 9 * 60 + 15)), isFalse);
-    });
-
-    test("K4 a new item starts on the slot grid from the boundary on its "
-        "day, anywhere on a later day and nowhere on an earlier one", () {
-      final lock = HistoryLock.of(
-        lockPast: true,
-        lockEarlierToday: true,
-        today: today,
-        now: midMorning,
-      );
-      expect(lock.earliestStartOn(today), 11 * 60 + 15);
-      expect(lock.earliestStartOn(wednesday), 0);
-      expect(lock.earliestStartOn(monday), minutesPerDay);
-      expect(lock.admitsStart(today, 11 * 60 + 7), isTrue);
-      expect(lock.admitsStart(today, 11 * 60), isFalse);
-      expect(
-        HistoryLock.of(
-          lockPast: true,
-          lockEarlierToday: false,
-          today: today,
-          now: midMorning,
-        ).earliestStartOn(today),
-        0,
-      );
-    });
-
     test("K5 the form's errors name the day of a new item on a past day, "
         "the start of one before now, a started item's moved start and "
         "past end, and nothing the lock admits", () {

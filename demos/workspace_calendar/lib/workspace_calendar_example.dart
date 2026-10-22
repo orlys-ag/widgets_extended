@@ -116,6 +116,7 @@ import 'package:flutter/rendering.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/policy/history_lock.dart';
 
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_api_source.dart';
@@ -126,7 +127,6 @@ import 'workspace_calendar/calendar_settings.dart';
 import 'workspace_calendar/day_cell.dart';
 import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
-import 'workspace_calendar/history_lock.dart';
 import 'workspace_calendar/item_builders.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';

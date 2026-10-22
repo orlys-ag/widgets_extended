@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/policy/history_lock.dart';
 
 import 'calendar_api.dart';
 import 'calendar_api_source.dart';
@@ -19,7 +20,6 @@ import 'calendar_item.dart';
 import 'calendar_schema.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
-import 'history_lock.dart';
 import 'timed_grid.dart';
 
 /// Asks for a type, then opens the form for a new item of it over the
