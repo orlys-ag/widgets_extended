@@ -4,7 +4,11 @@
 /// and schedules in, how the timed grid labels its hours, how Month fits
 /// its weeks, the least width of a day in Week, Day and Month, and the
 /// least height of the timed grid's slots, which also scales the height
-/// of Month's weeks.
+/// of Month's weeks. Beside them: the field errors, keyed as
+/// `validateItemJson` keys them, of an item outside the calendar's hours,
+/// [hoursErrorsOf], and of one the history lock refuses, [lockErrorsOf];
+/// and the names of Month's layouts in the settings sheet,
+/// [MonthLayoutLabel].
 library;
 
 import 'dart:math' as math;
