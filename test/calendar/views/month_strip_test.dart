@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
-import 'package:workspace_calendar/workspace_calendar/month_strip.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/month_strip.dart';
 
 /// Pumps a strip on April 2026 under [snap], 350 px wide, and returns the
 /// months it reports through [MonthStrip.onBrowse].

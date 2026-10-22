@@ -3,13 +3,13 @@
 /// moves with it.
 library;
 
-import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
-import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import 'calendar_harness.dart';
 

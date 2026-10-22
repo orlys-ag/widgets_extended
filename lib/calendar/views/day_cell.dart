@@ -1,11 +1,13 @@
-/// One day of the workspace calendar grid, and the letters or the
+/// One day of the calendar's month grid, and the letters or the
 /// three-letter names of the weekdays over the grid.
 library;
 
 import 'package:flutter/widgets.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+
+import '../dates/calendar_dates.dart';
+import '../dates/calendar_labels.dart';
+import '../presentation/calendar_theme.dart';
+import '../store/calendar_store.dart';
 
 /// The key of the cell showing [day].
 ValueKey<String> dayCellKey(DateTime day) {

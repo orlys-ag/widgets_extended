@@ -9,10 +9,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 
 import 'calendar_harness.dart';

@@ -8,9 +8,10 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
+import '../dates/calendar_dates.dart';
+import '../presentation/calendar_theme.dart';
+import '../store/calendar_store.dart';
 import 'day_cell.dart';
 import 'week_strip.dart';
 
