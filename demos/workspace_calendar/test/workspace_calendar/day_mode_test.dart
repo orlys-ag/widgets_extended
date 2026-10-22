@@ -11,7 +11,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api_source.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
-import 'package:workspace_calendar/workspace_calendar_example.dart';
+import 'package:widgets_extended/calendar/composition/calendar_card.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
@@ -175,12 +175,13 @@ Future<int> pixelAt(WidgetTester tester, Offset point) async {
 }
 
 /// Pumps a timed grid of [today] alone under [settings] and the Harbor
-/// calendar theme, with no day header, over [store], or a caching store
-/// over an empty mock API, at [size], its clock at 09:00 on [today], and
-/// lets its read complete.
+/// calendar theme, with no day header, its slots at least [minSlotHeight]
+/// tall, over [store], or a caching store over an empty mock API, at
+/// [size], its clock at 09:00 on [today], and lets its read complete.
 Future<void> pumpGrid(
   WidgetTester tester,
   CalendarSettings settings, {
+  double minSlotHeight = defaultMinSlotHeight,
   Size size = const Size(390.0, 844.0),
   CalendarStore<ItemPayload>? store,
 }) async {
@@ -217,8 +218,8 @@ Future<void> pumpGrid(
             weekdays: settings.weekdays,
             hours: settings.hours,
             hourLabelFormat: settings.hourLabelFormat,
-            minDayWidth: settings.minDayWidth,
-            minSlotHeight: settings.minSlotHeight,
+            minDayWidth: minDayWidthLow,
+            minSlotHeight: minSlotHeight,
             showsDayHeader: false,
           ),
         ),
@@ -694,7 +695,8 @@ void main() {
     // The rooms and 96 slots of 8 px overflow a 600 px grid, which scrolls.
     await pumpGrid(
       tester,
-      const CalendarSettings(minSlotHeight: 8.0),
+      const CalendarSettings(),
+      minSlotHeight: 8.0,
       size: const Size(390.0, 600.0),
     );
     final grid = gridViewport(tester);

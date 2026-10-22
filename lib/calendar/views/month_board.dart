@@ -598,10 +598,14 @@ enum MonthLayout {
 /// [onOpenDay], and a long press on a day outside its chips
 /// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
 /// last two give the board the keyboard, whose arrow
-/// keys move the selected day and report it through [onSelectDay]. While
-/// the days are not ready a cover over the board takes every press,
-/// centring what [loadingBuilder] draws while they are read, and what
-/// [failureBuilder] draws when the read failed. A change of the
+/// keys move the selected day and report it through [onSelectDay]. The
+/// days are ready while the store shows exactly [grid]'s days and its
+/// status is ready, or, while it shows another range, as it does in the
+/// frame before the board's owner asks it for [grid]'s, once it has read
+/// every one of them. While they are not ready a cover over the board
+/// takes every press, centring what [loadingBuilder] draws while they are
+/// read, and what [failureBuilder] draws when the read the store waits on
+/// for [grid]'s days failed. A change of the
 /// store animates over the theme's motion; a new month or a new set of
 /// weekdays does not, and
 /// settles at once whatever chip was still growing in or shrinking out. A
@@ -882,6 +886,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// Whether the last sync found its days ready.
   bool _syncedReady = false;
 
+  /// Whether the store has read every day of [MonthBoard.grid], as
+  /// [_noteRange] last found it.
+  bool _rangeRead = false;
+
   /// Whether a layout still owes a reveal of the selected day: set at the
   /// start, by a new grid and by a new [MonthBoard.minDayWidth] or
   /// [MonthBoard.weekScale], cleared by the first layout after it that
@@ -960,6 +968,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     widget.store.addListener(_handleStore);
     widget.today.addListener(_handleToday);
     _pinch.holding.addListener(_handleHolding);
+    _noteRange();
   }
 
   @override
@@ -1026,6 +1035,9 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       _days = _emptyDays(widget.grid);
       _background = _MonthGridPainter(widget.grid, _styles);
     }
+    if (gridChanged || widget.store != oldWidget.store) {
+      _noteRange();
+    }
     if ((widget.minDayWidth != oldWidget.minDayWidth ||
             widget.weekScale != oldWidget.weekScale) &&
         _pinchFocal == null) {
@@ -1085,6 +1097,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   }
 
   void _handleStore() {
+    _noteRange();
     setState(() {
       _syncPending = true;
     });
@@ -1094,14 +1107,33 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     _today.value = widget.today.value;
   }
 
-  /// Whether the store shows exactly this grid's days, every one of them
-  /// read. False for a build between the calendar taking a new month and
-  /// the store showing it.
+  /// Notes whether the store has read every day of [MonthBoard.grid],
+  /// which [_daysReady] reads, so a layout reads a field rather than the
+  /// store's days.
+  void _noteRange() {
+    _rangeRead = _everyDayRead(widget.store, widget.grid);
+  }
+
+  static bool _everyDayRead<T>(CalendarStore<T> store, MonthGrid grid) {
+    final last = grid.lastDay;
+    for (var day = grid.firstDay; !day.isAfter(last); day = addDays(day, 1)) {
+      if (!store.isRead(day)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Whether this grid's days are ready: while the store shows exactly
+  /// them, ready, and while it shows another range, once every one of them
+  /// is read, which is the status the store takes when it shows them.
   bool get _daysReady {
     final store = widget.store;
     final grid = widget.grid;
-    return store.status == CalendarLoadStatus.ready &&
-        store.isShown(grid.firstDay, grid.lastDay);
+    if (store.isShown(grid.firstDay, grid.lastDay)) {
+      return store.status == CalendarLoadStatus.ready;
+    }
+    return _rangeRead;
   }
 
   /// Selects the selected day's cell on the board. The board reports the
@@ -1656,11 +1688,13 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   }
 
   /// The cover's content: what the failure builder draws for the grid's
-  /// days when the read the store waits on failed, with the store's load
-  /// error as it holds it, and what the loading builder draws otherwise.
+  /// days when the read the store waits on for them failed, with the
+  /// store's load error as it holds it, and what the loading builder draws
+  /// otherwise, as it does for a failed read of another range.
   Widget _buildCover(BuildContext context, CalendarStore<T> store) {
     final grid = widget.grid;
-    if (store.status == CalendarLoadStatus.failed) {
+    if (store.status == CalendarLoadStatus.failed &&
+        store.isShown(grid.firstDay, grid.lastDay)) {
       final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
       return failure(
         context,

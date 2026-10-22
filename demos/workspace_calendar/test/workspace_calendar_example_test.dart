@@ -8,6 +8,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
+import 'package:widgets_extended/calendar/composition/calendar_card.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';

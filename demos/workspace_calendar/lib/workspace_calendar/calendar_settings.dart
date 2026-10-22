@@ -1,25 +1,17 @@
 /// What the calendar's settings choose: whether it is in edit mode, how far
 /// the history lock keeps the past as it is, the weekdays it shows and the
 /// one its weeks start on, the hours it shows
-/// and schedules in, how the timed grid labels its hours, how Month fits
-/// its weeks, the least width of a day in Week, Day and Month, and the
-/// least height of the timed grid's slots, which also scales the height
-/// of Month's weeks. Beside them: the field errors, keyed as
+/// and schedules in, how the timed grid labels its hours, and how Month
+/// fits its weeks. Beside them: the field errors, keyed as
 /// `validateItemJson` keys them, of an item outside the calendar's hours,
-/// [hoursErrorsOf], and of one the history lock refuses, [lockErrorsOf];
-/// and the names of Month's layouts in the settings sheet,
+/// [hoursErrorsOf]; and the names of Month's layouts in the settings sheet,
 /// [MonthLayoutLabel].
 library;
-
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
-import 'package:widgets_extended/calendar/views/month_board.dart';
-import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 
 /// The field errors of an item from [start] to [end] minutes that does not
 /// lie in [hours], keyed as `validateItemJson` keys them: the start when it
@@ -35,40 +27,6 @@ Map<String, String> hoursErrorsOf(int start, int end, DayHours hours) {
       "endMinute":
           "The end is ${clockLabel(hours.start + minutesPerSlot)} to "
           "${clockLabel(hours.end)}, inside the calendar's hours.",
-  };
-}
-
-/// The item form's errors for [to], a change of the stored [from] or,
-/// where [from] is null, a new item, which [lock] refuses, keyed as
-/// `validateItemJson` keys them; empty where [lock] admits it.
-Map<String, String> lockErrorsOf(
-  HistoryLock lock,
-  CalendarEntryTime? from,
-  CalendarEntryTime to,
-) {
-  final boundary = lock.boundary;
-  if (boundary == null || (from != null && lock.admits(from, to))) {
-    return const <String, String>{};
-  }
-  if (from == null || lock.holdOf(from) == ItemHold.free) {
-    if (HistoryLock.startOf(to) >= boundary) {
-      return const <String, String>{};
-    }
-    if (to.firstDay < boundary ~/ minutesPerDay) {
-      return const <String, String>{"day": "Past days are locked."};
-    }
-    return const <String, String>{
-      "startMinute": "The start can't be in the past.",
-    };
-  }
-  if (lock.holdOf(from) == ItemHold.locked) {
-    return const <String, String>{"day": "Past items are locked."};
-  }
-  return <String, String>{
-    if (HistoryLock.startOf(to) != HistoryLock.startOf(from))
-      "startMinute": "An item in progress keeps its start.",
-    if (HistoryLock.endOf(to) <= boundary)
-      "endMinute": "The end can't be in the past.",
   };
 }
 
@@ -90,10 +48,7 @@ extension MonthLayoutLabel on MonthLayout {
 /// today too, [lockEarlierToday], the [weekdays] it shows and the one its
 /// weeks start on, the
 /// [hours] it shows and schedules in, the [hourLabelFormat] the timed grid
-/// labels them in, Month's [monthLayout], the least width of a day in
-/// Week, Day and Month, and the least height of the timed grid's slots,
-/// which stretch past them to fill the screen, and through it the height
-/// of Month's weeks.
+/// labels them in, and Month's [monthLayout].
 @immutable
 class CalendarSettings {
   const CalendarSettings({
@@ -104,8 +59,6 @@ class CalendarSettings {
     this.hours = DayHours.allDay,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.monthLayout = MonthLayout.fitScreen,
-    this.minDayWidth = minDayWidthLow,
-    this.minSlotHeight = defaultMinSlotHeight,
   });
 
   /// Whether the calendar's items can be moved, resized, created, edited
@@ -136,31 +89,6 @@ class CalendarSettings {
 
   final MonthLayout monthLayout;
 
-  /// The least width of a day column, in logical pixels.
-  final double minDayWidth;
-
-  /// The least height of one slot, in logical pixels.
-  final double minSlotHeight;
-
-  /// How many times its share of Month's height a week rests at:
-  /// [minSlotHeight] over [defaultMinSlotHeight], and never less than 1, so
-  /// at the default slot height and under it the weeks fit the screen.
-  double get monthWeekScale {
-    return math.max(1.0, minSlotHeight / defaultMinSlotHeight);
-  }
-
-  /// These settings with [monthWeekScale] at [scale], at least 1: the slot
-  /// height [scale] times its default above 1, and at 1 the slot height
-  /// as it is where that is at most its default, and its default where it
-  /// is over it.
-  CalendarSettings withMonthWeekScale(double scale) {
-    return copyWith(
-      minSlotHeight: scale > 1.0
-          ? defaultMinSlotHeight * scale
-          : math.min(minSlotHeight, defaultMinSlotHeight),
-    );
-  }
-
   CalendarSettings copyWith({
     bool? editing,
     bool? lockPast,
@@ -169,8 +97,6 @@ class CalendarSettings {
     DayHours? hours,
     HourLabelFormat? hourLabelFormat,
     MonthLayout? monthLayout,
-    double? minDayWidth,
-    double? minSlotHeight,
   }) {
     return CalendarSettings(
       editing: editing ?? this.editing,
@@ -180,8 +106,6 @@ class CalendarSettings {
       hours: hours ?? this.hours,
       hourLabelFormat: hourLabelFormat ?? this.hourLabelFormat,
       monthLayout: monthLayout ?? this.monthLayout,
-      minDayWidth: minDayWidth ?? this.minDayWidth,
-      minSlotHeight: minSlotHeight ?? this.minSlotHeight,
     );
   }
 
@@ -194,9 +118,7 @@ class CalendarSettings {
         other.weekdays == weekdays &&
         other.hours == hours &&
         other.hourLabelFormat == hourLabelFormat &&
-        other.monthLayout == monthLayout &&
-        other.minDayWidth == minDayWidth &&
-        other.minSlotHeight == minSlotHeight;
+        other.monthLayout == monthLayout;
   }
 
   @override
@@ -209,8 +131,6 @@ class CalendarSettings {
       hours,
       hourLabelFormat,
       monthLayout,
-      minDayWidth,
-      minSlotHeight,
     );
   }
 
@@ -219,7 +139,6 @@ class CalendarSettings {
     return "CalendarSettings(${editing ? "editing" : "viewing"}, "
         "${lockPast ? "past locked${lockEarlierToday ? " to now" : ""}, " : ""}"
         "$weekdays, $hours, ${hourLabelFormat.name}, "
-        "${monthLayout.name}, day width $minDayWidth, "
-        "slot height $minSlotHeight)";
+        "${monthLayout.name})";
   }
 }

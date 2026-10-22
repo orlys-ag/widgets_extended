@@ -13,6 +13,7 @@ import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
+import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 
@@ -211,7 +212,7 @@ void main() {
       expect(settings.lockPast, isFalse);
       expect(settings.lockEarlierToday, isFalse);
       final locked = settings.copyWith(lockPast: true, lockEarlierToday: true);
-      final kept = locked.copyWith(minSlotHeight: 20.0);
+      final kept = locked.copyWith(hours: const DayHours(8 * 60, 18 * 60));
       expect(kept.lockPast, isTrue);
       expect(kept.lockEarlierToday, isTrue);
       final pastOnly = settings.copyWith(lockPast: true);
@@ -225,11 +226,14 @@ void main() {
   testWidgets("K7 the sheet's Lock earlier today takes input only while "
       "Lock past days is on, and each switch sets its setting", (tester) async {
     CalendarSettings? reported;
+    final controller = CalendarController();
+    addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: CalendarSettingsSheet(
             settings: const CalendarSettings(),
+            controller: controller,
             onChanged: (settings) {
               reported = settings;
             },

@@ -13,7 +13,7 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:workspace_calendar/workspace_calendar_example.dart';
+import 'package:widgets_extended/calendar/composition/calendar_card.dart';
 
 import 'calendar_harness.dart';
 

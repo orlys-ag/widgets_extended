@@ -5,7 +5,6 @@ library;
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
-import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -45,43 +44,27 @@ void main() {
   });
 
   group("C4 CalendarSettings", () {
-    test("starts on the whole day and the grid's own sizes", () {
+    test("starts on the whole day", () {
       const settings = CalendarSettings();
       expect(settings.hours, DayHours.allDay);
-      expect(settings.minDayWidth, 44.0);
-      expect(settings.minSlotHeight, 16.0);
     });
 
-    test("copyWith replaces what it is given and keeps the rest", () {
+    test("copyWith replaces the hours it is given", () {
       const settings = CalendarSettings();
       const office = DayHours(8 * 60, 18 * 60);
       final copy = settings.copyWith(hours: office);
       expect(copy.hours, office);
-      expect(copy.minDayWidth, settings.minDayWidth);
-      expect(copy.minSlotHeight, settings.minSlotHeight);
-      expect(settings.copyWith(minDayWidth: 60.0).minDayWidth, 60.0);
-      expect(settings.copyWith(minSlotHeight: 24.0).minSlotHeight, 24.0);
     });
 
-    test("compares by its values", () {
+    test("compares by its hours", () {
       // Built at run time, as DayHours' own comparison test explains.
-      CalendarSettings settings({
-        int start = 0,
-        double width = 44.0,
-        double height = 16.0,
-      }) {
-        return CalendarSettings(
-          hours: DayHours(start, 24 * 60),
-          minDayWidth: width,
-          minSlotHeight: height,
-        );
+      CalendarSettings settings({int start = 0}) {
+        return CalendarSettings(hours: DayHours(start, 24 * 60));
       }
 
       expect(settings(), settings());
       expect(settings().hashCode, settings().hashCode);
       expect(settings() == settings(start: 60), isFalse);
-      expect(settings() == settings(width: 48.0), isFalse);
-      expect(settings() == settings(height: 18.0), isFalse);
     });
   });
 
@@ -92,7 +75,7 @@ void main() {
       final workweek = settings.copyWith(weekdays: WeekdaySet.workweek);
       expect(workweek.weekdays, WeekdaySet.workweek);
       expect(
-        workweek.copyWith(minSlotHeight: 20.0).weekdays,
+        workweek.copyWith(hours: const DayHours(8 * 60, 18 * 60)).weekdays,
         WeekdaySet.workweek,
       );
       expect(workweek == settings, isFalse);
@@ -109,7 +92,7 @@ void main() {
       final all = settings.copyWith(monthLayout: MonthLayout.showAll);
       expect(all.monthLayout, MonthLayout.showAll);
       expect(
-        all.copyWith(minSlotHeight: 20.0).monthLayout,
+        all.copyWith(hours: const DayHours(8 * 60, 18 * 60)).monthLayout,
         MonthLayout.showAll,
       );
       expect(all == settings, isFalse);
@@ -133,7 +116,7 @@ void main() {
       );
       expect(twelve.hourLabelFormat, HourLabelFormat.twelveHour);
       expect(
-        twelve.copyWith(minSlotHeight: 20.0).hourLabelFormat,
+        twelve.copyWith(hours: const DayHours(8 * 60, 18 * 60)).hourLabelFormat,
         HourLabelFormat.twelveHour,
       );
       expect(twelve == settings, isFalse);
@@ -145,51 +128,16 @@ void main() {
     });
   });
 
-  group("C9 CalendarSettings month week scale", () {
-    test("is 1 at the default slot height and under it, and above it the "
-        "slot height over the default", () {
-      const settings = CalendarSettings();
-      expect(settings.monthWeekScale, 1.0);
-      expect(
-        settings.copyWith(minSlotHeight: minSlotHeightLow).monthWeekScale,
-        1.0,
-      );
-      expect(settings.copyWith(minSlotHeight: 24.0).monthWeekScale, 1.5);
-      expect(
-        settings.copyWith(minSlotHeight: minSlotHeightHigh).monthWeekScale,
-        3.0,
-      );
-    });
-
-    test("withMonthWeekScale sets the slot height the scale reads, and at 1 "
-        "keeps one at or under the default and lowers one over it to the "
-        "default", () {
-      const settings = CalendarSettings();
-      expect(settings.withMonthWeekScale(2.5).minSlotHeight, 40.0);
-      expect(
-        settings
-            .copyWith(minSlotHeight: 10.0)
-            .withMonthWeekScale(1.0)
-            .minSlotHeight,
-        10.0,
-      );
-      expect(
-        settings
-            .copyWith(minSlotHeight: 30.0)
-            .withMonthWeekScale(1.0)
-            .minSlotHeight,
-        defaultMinSlotHeight,
-      );
-    });
-  });
-
   group("C10 CalendarSettings edit mode", () {
     test("starts out of edit mode and takes part in copyWith and ==", () {
       const settings = CalendarSettings();
       expect(settings.editing, isFalse);
       final editing = settings.copyWith(editing: true);
       expect(editing.editing, isTrue);
-      expect(editing.copyWith(minSlotHeight: 20.0).editing, isTrue);
+      expect(
+        editing.copyWith(hours: const DayHours(8 * 60, 18 * 60)).editing,
+        isTrue,
+      );
       expect(editing == settings, isFalse);
       expect(editing == settings.copyWith(editing: true), isTrue);
       expect(editing.hashCode == settings.hashCode, isFalse);

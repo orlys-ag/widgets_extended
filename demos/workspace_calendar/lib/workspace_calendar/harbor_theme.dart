@@ -94,7 +94,7 @@ const Curve harborMotionCurve = Curves.fastOutSlowIn;
 /// [HarborColors] value of its name, the notice outline [HarborColors.noticeEdge],
 /// [harborDraggedItemOpacity], [harborMotionDuration] on
 /// [harborMotionCurve], and the Material icons the views draw, over the
-/// built-in text styles.
+/// built-in text styles and shadows.
 const CalendarThemeData harborCalendarTheme = CalendarThemeData(
   primary: HarborColors.primary,
   onPrimary: HarborColors.onPrimary,

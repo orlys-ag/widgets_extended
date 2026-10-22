@@ -1,12 +1,11 @@
 /// The calendar's settings sheet: the history lock, how Month fits its
-/// weeks, the least width of a day in Week, Day and Month, and the least
-/// height of the timed grid's slots.
+/// weeks, and on the calendar's controller the least width of a day in
+/// Week, Day and Month and the least height of the timed grid's slots.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/views/month_board.dart';
-import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
@@ -35,13 +34,15 @@ const ValueKey<String> slotHeightSliderKey = ValueKey<String>(
   "settings-slot-height",
 );
 
-/// Opens the settings sheet on [settings], at most nine tenths of the
-/// screen's height, scrolling past it. Each change applies at once
-/// through [onChanged], so the calendar behind the sheet shows it while
-/// the sheet is open. Completes when the sheet closes.
+/// Opens the settings sheet on [settings] and the sizes of [controller],
+/// at most nine tenths of the screen's height, scrolling past it. Each
+/// change applies at once, a setting through [onChanged] and a size on
+/// [controller], so the calendar behind the sheet shows it while the
+/// sheet is open. Completes when the sheet closes.
 Future<void> showCalendarSettings(
   BuildContext context, {
   required CalendarSettings settings,
+  required CalendarController controller,
   required ValueChanged<CalendarSettings> onChanged,
 }) {
   return showModalBottomSheet<void>(
@@ -54,7 +55,11 @@ Future<void> showCalendarSettings(
     // Light, so the calendar the changes apply to shows through.
     barrierColor: Colors.black12,
     builder: (context) {
-      return CalendarSettingsSheet(settings: settings, onChanged: onChanged);
+      return CalendarSettingsSheet(
+        settings: settings,
+        controller: controller,
+        onChanged: onChanged,
+      );
     },
   );
 }
@@ -62,16 +67,21 @@ Future<void> showCalendarSettings(
 /// The sheet [showCalendarSettings] opens: a switch for the history lock of
 /// past days and, under it, one that extends the lock to earlier today,
 /// which takes input only while the first is on, a segmented button for
-/// Month's layout, and a slider for each least size.
+/// Month's layout, and a slider for each least size of [controller].
 class CalendarSettingsSheet extends StatefulWidget {
   const CalendarSettingsSheet({
     super.key,
     required this.settings,
+    required this.controller,
     required this.onChanged,
   });
 
   /// The settings the sheet opens on.
   final CalendarSettings settings;
+
+  /// The calendar's controller, whose least day width and slot height the
+  /// sliders show and set, following a pinch on a grid as well.
+  final CalendarController controller;
 
   /// Reports each change, once per new value.
   final ValueChanged<CalendarSettings> onChanged;
@@ -165,34 +175,48 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               "shows +N more.",
             ),
             const SizedBox(height: 16.0),
-            _Heading(
-              label: "Day width",
-              value: "At least ${_settings.minDayWidth.round()} px",
-            ),
-            Slider(
-              key: dayWidthSliderKey,
-              value: _settings.minDayWidth,
-              min: minDayWidthLow,
-              max: minDayWidthHigh,
-              divisions: ((minDayWidthHigh - minDayWidthLow) / 4.0).round(),
-              onChanged: (value) {
-                _set(_settings.copyWith(minDayWidth: value.roundToDouble()));
-              },
-            ),
-            _Heading(
-              label: "Slot height",
-              value:
-                  "At least ${_settings.minSlotHeight.round()} px per "
-                  "$minutesPerSlot minutes",
-            ),
-            Slider(
-              key: slotHeightSliderKey,
-              value: _settings.minSlotHeight,
-              min: minSlotHeightLow,
-              max: minSlotHeightHigh,
-              divisions: ((minSlotHeightHigh - minSlotHeightLow) / 2.0).round(),
-              onChanged: (value) {
-                _set(_settings.copyWith(minSlotHeight: value.roundToDouble()));
+            ListenableBuilder(
+              listenable: widget.controller,
+              builder: (context, child) {
+                final controller = widget.controller;
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    _Heading(
+                      label: "Day width",
+                      value: "At least ${controller.minDayWidth.round()} px",
+                    ),
+                    Slider(
+                      key: dayWidthSliderKey,
+                      value: controller.minDayWidth,
+                      min: minDayWidthLow,
+                      max: minDayWidthHigh,
+                      divisions: ((minDayWidthHigh - minDayWidthLow) / 4.0)
+                          .round(),
+                      onChanged: (value) {
+                        controller.minDayWidth = value.roundToDouble();
+                      },
+                    ),
+                    _Heading(
+                      label: "Slot height",
+                      value:
+                          "At least ${controller.minSlotHeight.round()} px "
+                          "per $minutesPerSlot minutes",
+                    ),
+                    Slider(
+                      key: slotHeightSliderKey,
+                      value: controller.minSlotHeight,
+                      min: minSlotHeightLow,
+                      max: minSlotHeightHigh,
+                      divisions: ((minSlotHeightHigh - minSlotHeightLow) / 2.0)
+                          .round(),
+                      onChanged: (value) {
+                        controller.minSlotHeight = value.roundToDouble();
+                      },
+                    ),
+                  ],
+                );
               },
             ),
             const _Note(
