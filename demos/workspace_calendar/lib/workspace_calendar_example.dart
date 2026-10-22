@@ -122,6 +122,7 @@ import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/month_picker.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import 'workspace_calendar/calendar_api.dart';
@@ -135,7 +136,6 @@ import 'workspace_calendar/item_builders.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/settings_sheet.dart';
-import 'workspace_calendar/timed_grid.dart';
 
 enum _CalendarMode {
   agenda("Agenda"),

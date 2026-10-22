@@ -11,13 +11,18 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
-import 'package:widgets_extended/calendar/policy/overlap.dart';
-import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
-import 'package:widgets_extended/widgets_extended.dart';
+
+import '../../board/board.dart';
+import '../dates/calendar_dates.dart';
+import '../dates/calendar_labels.dart';
+import '../entries/calendar_entry.dart';
+import '../policy/history_lock.dart';
+import '../policy/overlap.dart';
+import '../presentation/calendar_builders.dart';
+import '../presentation/calendar_defaults.dart';
+import '../presentation/calendar_theme.dart';
+import '../store/calendar_store.dart';
+import 'pinch_zoom.dart';
 
 const double _headerHeight = 40.0;
 const double _gutterWidth = 56.0;
