@@ -2,8 +2,8 @@
 /// and back from the span a drop reports, over some of the weekdays and
 /// part of the day, the create ranges its gestures pick, the weekdays,
 /// hours, hour format and least sizes it lays out from, the edit mode and
-/// lock choices its drags follow, and a block drawn again for a new
-/// payload.
+/// lock choices its drags follow, what each of those defaults to, and a
+/// block drawn again for a new payload.
 library;
 
 import 'package:flutter/material.dart';
@@ -14,6 +14,7 @@ import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
 /// The Monday of the week shown.
@@ -640,5 +641,135 @@ void main() {
       "running": true,
       "later": true,
     });
+  });
+
+  testWidgets("TG3 a timed grid given none of its eight layout and edit "
+      "parameters shows every weekday and hour, labels the hours in 24-hour "
+      "time, sizes its cells from minDayWidthLow and defaultMinSlotHeight, "
+      "takes no drag, and made editable holds nothing until lockPast and "
+      "then only the days before today", (tester) async {
+    // Seven day columns' shares of 244 px across, and 96 slots' of the
+    // height, are below both default least sizes.
+    const size = Size(300.0, 800.0);
+    CalendarEntry<String> entry(String id, DateTime day, int start, int end) {
+      return CalendarEntry<String>(
+        id: id,
+        day: day,
+        startMinute: start,
+        endMinute: end,
+        title: id,
+        color: const Color(0xFF336699),
+        payload: id,
+      );
+    }
+
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entry("past", monday, 9 * 60, 10 * 60),
+        entry("ended", tuesday, 8 * 60, 9 * 60),
+      ],
+    );
+    addTearDown(store.dispose);
+    // After ended ends, so a lock to now holds it; the grid opens scrolled
+    // to 08:00, the hour before.
+    final now = ValueNotifier<DateTime>(DateTime(2026, 4, 21, 9, 7));
+    addTearDown(now.dispose);
+
+    bool dragEnabled() {
+      return tester
+          .widget<Board<String, CalendarShownEntry<String>>>(
+            find.byType(Board<String, CalendarShownEntry<String>>),
+          )
+          .drag!
+          .enabled;
+    }
+
+    Finder handleOf(String id) {
+      return find.descendant(
+        of: find.byKey(blockKey(id)),
+        matching: find.byType(BoardDelayedDragHandle),
+      );
+    }
+
+    const ids = <String>["past", "ended"];
+    Map<String, bool> handlesEnabled() {
+      return <String, bool>{
+        for (final id in ids)
+          id: tester.widget<BoardDelayedDragHandle>(handleOf(id)).enabled,
+      };
+    }
+
+    await pumpBoxed(
+      tester,
+      size,
+      TimedGrid<String>(
+        store: store,
+        firstDay: monday,
+        dayCount: 7,
+        selectedDay: tuesday,
+        today: tuesday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenItem: (id) {},
+        onCreate: (range) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+    final viewport = viewportOf(tester);
+    for (final id in ids) {
+      expect(handleOf(id), findsOneWidget, reason: id);
+    }
+    // The gutter and all seven days.
+    expect(viewport.rectOfCell(2, 7), isNotNull);
+    // The day header, the room above, the 96 slots of the whole day and the
+    // room below.
+    expect(viewport.rectOfCell(98, 1), isNotNull);
+    expect(
+      viewport.rectOfCell(2, 1)!.size,
+      const Size(minDayWidthLow, defaultMinSlotHeight),
+    );
+    expect(find.bySemanticsLabel("08:00"), findsOneWidget);
+    expect(find.bySemanticsLabel("8 AM"), findsNothing);
+    expect(dragEnabled(), isFalse);
+
+    await tester.pumpWidget(
+      boxed(
+        size,
+        TimedGrid<String>(
+          store: store,
+          firstDay: monday,
+          dayCount: 7,
+          selectedDay: tuesday,
+          today: tuesday,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenItem: (id) {},
+          onCreate: (range) async {},
+          editable: true,
+        ),
+      ),
+    );
+    expect(dragEnabled(), isTrue);
+    expect(handlesEnabled(), <String, bool>{"past": true, "ended": true});
+
+    await tester.pumpWidget(
+      boxed(
+        size,
+        TimedGrid<String>(
+          store: store,
+          firstDay: monday,
+          dayCount: 7,
+          selectedDay: tuesday,
+          today: tuesday,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenItem: (id) {},
+          onCreate: (range) async {},
+          editable: true,
+          lockPast: true,
+        ),
+      ),
+    );
+    expect(handlesEnabled(), <String, bool>{"past": false, "ended": true});
   });
 }
