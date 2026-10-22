@@ -12,11 +12,12 @@ A Flutter package (`widgets_extended`) providing rich utility widgets, in these 
 
 The barrel file `lib/widgets_extended.dart` re-exports each of them.
 
-A fourth module, calendar, does not exist yet: `lib/calendar/` is reserved for
-it, a calendar widget (`CalendarView`) with Agenda, Day, Week and Month views on
-the board and sliver_tree modules, whose rules are in
-`.claude/rules/calendar.md`. No package release ships while `lib/calendar/`
-exists and `lib/widgets_extended.dart` does not export it.
+A fourth module, calendar, is in progress in `lib/calendar/`: a calendar widget
+(`CalendarView`) with Agenda, Day, Week and Month views on the board and
+sliver_tree modules, whose rules are in `.claude/rules/calendar.md`. Its barrel
+is `lib/calendar/calendar.dart`; `lib/widgets_extended.dart` does not export it
+yet, and no package release ships while `lib/calendar/` exists and
+`lib/widgets_extended.dart` does not export it.
 
 `demos/workspace_calendar/` is a tracked demo app, a month, week and day
 calendar on the board and the synced sliver tree. It depends on the library by
