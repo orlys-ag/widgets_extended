@@ -116,41 +116,25 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 // profile adds a project addendum and reading list per lens, switches a core
 // lens off, or adds a project lens. The flags say what a lens's prompt carries.
 const CONSISTENCY = 'consistency'
-const EXECUTABILITY = 'executability'
+const SURFACE = 'surface'
 const LENS_DEFINITIONS = {
-  correctness: {
-    summary: 'Mechanism, failure paths, lifecycle and re-entrancy',
-    focus: 'Will each decision do what the goals say? Logical gaps where something reads state nothing writes, ordering violations, re-entrancy. Lifecycle: creation, teardown, and every site that destroys the thing. Degradation: what happens when a precondition is not met, on empty and single-element cases. Judge at decision level: an edge case or a missing test is kind implementation.',
-  },
-  performance: {
-    summary: 'Bounds, hot paths, and the evidence behind each performance rank',
+  runtime: {
+    summary: 'Mechanism, failure paths, lifecycle and re-entrancy; crossings with other components and timing risks; bounds, hot paths and the evidence behind each performance rank',
     ranking: true,
-    focus: 'What is O(what), and is the stated bound the one that can blow up? Anything that turns a targeted lookup into a full scan, and allocation on a hot path. Does each measured or computed evidence cell in a decision table support its rank (method section 3), and does each counted contract name its check and expected value?',
+    focus: 'Three angles; sweep each in full, and report a defect once, under the angle it fails worst. Mechanism: will each decision do what the goals say? Logical gaps where something reads state nothing writes, ordering violations, re-entrancy. Lifecycle: creation, teardown, and every site that destroys the thing. Degradation: what happens when a precondition is not met, on empty and single-element cases. Judge at decision level: an edge case or a missing test is kind implementation. Crossings: the feature crossed with every other component, layer and entry point; look for the crossings the plan does not mention at all rather than the ones it handles badly. Then timing: which of the plan\'s ordering, settle or visibility risks can only running code close, and is each turned into a named test rather than an argument that it is fine? A crossing or timing risk whose handling would change a decision is kind rank or surface; a missing named test is kind implementation. Performance: what is O(what), and is the stated bound the one that can blow up? Anything that turns a targeted lookup into a full scan, and allocation on a hot path. Does each measured or computed evidence cell in a decision table support its rank (method section 3), and does each counted contract name its check and expected value?',
   },
-  surface: {
-    summary: 'The public surface, every consumer verified in code, agreement with the documents the plan depends on, house conventions and the plan rules',
-    planRules: true,
-    focus: 'Signatures, types, naming and exports. Every consumer of a changed interface verified per method section 5 (derive, check in code, read; a search only locates). Does the plan contradict a document it depends on, or change a documented contract without saying so? Does it follow the house conventions and the project plan rules below, and declare every artifact the builder creates (method section 2.5)?',
-  },
-  claims: {
-    summary: 'Each decision table against the ranking rule and its missing options; every citation, count and framework claim against the source; the plan checks',
+  evidence: {
+    summary: 'Each decision table against the ranking rule and its missing options; every citation, count and framework claim against the source; the plan checks; each criterion traced to a named check that fails on the base commit; missing, ambiguous or conflicting requirements',
     ranking: true,
     planChecks: true,
-    focus: 'Does each decision table follow method section 3, and does it lack a valid option? Run every plan check below (a non-zero exit is itself a finding) and read that each cited line says what the plan says. Run the command behind every count and universal (method section 2.4), and verify every framework or engine claim against its source: recall is a hypothesis.',
-  },
-  acceptance: {
-    summary: 'Each criterion traced to a named check that fails on the base commit; missing, ambiguous or conflicting requirements',
     requirements: true,
-    focus: 'Is each acceptance criterion below traced to a named check in the Testing Plan that fails on the base commit, and can each check fail in the direction it claims? Is each new test seam justified against an existing one? Is a requirement missing, ambiguous or in conflict with another? That, or a criterion the plan cannot meet, is kind scope.',
+    focus: 'Two angles; sweep each in full, and report a defect once, under the angle it fails worst. Claims: does each decision table follow method section 3, and does it lack a valid option? Run every plan check below (a non-zero exit is itself a finding) and read that each cited line says what the plan says. Run the command behind every count and universal (method section 2.4), and verify every framework or engine claim against its source: recall is a hypothesis. Acceptance: is each acceptance criterion below traced to a named check in the Testing Plan that fails on the base commit, and can each check fail in the direction it claims? Is each new test seam justified against an existing one? Is a requirement missing, ambiguous or in conflict with another? That, or a criterion the plan cannot meet, is kind scope.',
   },
-  executability: {
-    summary: 'Each landing step done and committed from the base commit as written: its gates pass, its documents stay true, its commands run, its test seams exist',
+  surface: {
+    summary: 'The public surface, every consumer verified in code, agreement with the documents the plan depends on, house conventions and the plan rules; each landing step done and committed from the base commit as written: its gates pass, its documents stay true, its commands run, its test seams exist',
+    planRules: true,
     gates: true,
-    focus: 'Can each landing step be done and committed from the base commit as written (method section 2.7)? Its files exist or are declared, its commands run, its test seams exist, its signal can pass at that step and not before, the gates below that its files trigger pass at its commit, and every document and comment is true at its commit. Read the code each step touches at the base commit. A step that cannot be done or committed as written is kind consistency; one whose fix changes a decision is kind rank.',
-  },
-  integration: {
-    summary: 'Crossings with other components the plan never mentions, and timing risks only running code settles, each turned into a named test',
-    focus: 'The feature crossed with every other component, layer and entry point: look for the crossings the plan does not mention at all rather than the ones it handles badly. Then timing: which of the plan\'s ordering, settle or visibility risks can only running code close, and is each turned into a named test rather than an argument that it is fine? A crossing or timing risk whose handling would change a decision is kind rank or surface; a missing named test is kind implementation.',
+    focus: 'Two angles; sweep each in full, and report a defect once, under the angle it fails worst. Surface: signatures, types, naming and exports. Every consumer of a changed interface verified per method section 5 (derive, check in code, read; a search only locates). Does the plan contradict a document it depends on, or change a documented contract without saying so? Does it follow the house conventions and the project plan rules below, and declare every artifact the builder creates (method section 2.5)? Steps: can each landing step be done and committed from the base commit as written (method section 2.7)? Its files exist or are declared, its commands run, its test seams exist, its signal can pass at that step and not before, the gates below that its files trigger pass at its commit, and every document and comment is true at its commit. Read the code each step touches at the base commit. A step that cannot be done or committed as written is kind consistency; one whose fix changes a decision is kind rank.',
   },
   consistency: {
     summary: 'The last revision against its snapshot, the findings it received and their outcomes, and its obligations; runs only after a revision',
@@ -171,7 +155,7 @@ const PROFILE_KEYS = {
   conventionDocs: { required: false, about: 'The house convention documents the planner, the builder and the reviewer read.' },
   modules: { required: false, about: 'Each with `paths` (regular expressions over repository paths), `guidance` (its architecture rules) and `vocabulary`. A run reads the guidance of every module its files match.' },
   gates: { required: true, about: 'Each with `name`, `command` (in which `{base}` stands for the base commit), `pass` (its pass condition), `when` (`"always"`, or `{"paths": [...]}`, regular expressions matched against the changed files) and `scope` (`step`: at each step\'s commit; `final`: once, after the mutations).' },
-  lenses: { required: false, about: 'Per lens, optional `reads` (the files it reads; `moduleGuidance` and `conventionDocs` expand to those lists; default `moduleGuidance`), `addendum` (project text appended to its focus) and `enabled` (false switches a core lens off; never `consistency`). Any other key adds a project lens, which needs a `focus`. The planner receives every enabled lens\'s reads and addendum, and a project lens\'s focus; the builder and the reviewer receive the `performance` lens\'s addendum and the `hotPaths`.' },
+  lenses: { required: false, about: 'Per lens, optional `reads` (the files it reads; `moduleGuidance` and `conventionDocs` expand to those lists; default `moduleGuidance`), `addendum` (project text appended to its focus) and `enabled` (false switches a core lens off; never `consistency`). Any other key adds a project lens, which needs a `focus`. The planner receives every enabled lens\'s reads and addendum, and a project lens\'s focus; the builder and the reviewer receive the `runtime` lens\'s addendum and the `hotPaths`.' },
   ranking: { required: true, about: 'The ranking criteria, in order (section 3).' },
   hotPaths: { required: false, about: 'Where the hot-path performance criterion applies.' },
   planRules: { required: false, about: 'The project\'s own requirements for a plan: the planner writes to them and the surface lens checks them.' },
@@ -693,7 +677,7 @@ const POOL = [
 ].map(lensFrom)
 const SWEEP = POOL.filter(l => l.key !== CONSISTENCY)
 const CONSISTENCY_LENS = POOL.find(l => l.key === CONSISTENCY)
-const EXECUTABILITY_LENS = POOL.find(l => l.key === EXECUTABILITY) ?? null
+const SURFACE_LENS = POOL.find(l => l.key === SURFACE) ?? null
 const lensByKey = k => POOL.find(l => l.key === k) ?? null
 if (SWEEP.length === 0) {
   throw new Error('args.profile switches off every lens but consistency; a round needs at least one sweeping lens')
@@ -711,11 +695,11 @@ const reviewedAgainstBlock = [
 ].filter(Boolean).join('\n')
 
 // The builder and the reviewer judge code rather than a plan, so they are told
-// the hot paths and the project's performance rules, the performance lens's
+// the hot paths and the project's runtime rules, the runtime lens's
 // addendum; with no addendum there are no rules to tell.
-const performanceRules = lensByKey('performance')?.addendum ?? ''
-const hotPathBlock = nonEmpty(performanceRules)
-  ? `${(profile.hotPaths ?? []).length > 0 ? `Hot paths: ${profile.hotPaths.join(', ')}. ` : ''}The project's performance rules: ${performanceRules}`
+const runtimeRules = lensByKey('runtime')?.addendum ?? ''
+const hotPathBlock = nonEmpty(runtimeRules)
+  ? `${(profile.hotPaths ?? []).length > 0 ? `Hot paths: ${profile.hotPaths.join(', ')}. ` : ''}The project's runtime rules: ${runtimeRules}`
   : ``
 
 // ---- schemas -------------------------------------------------------------
@@ -1762,12 +1746,12 @@ async function buildPhase() {
 }
 
 // A revision after approval: the planner revises, then a re-round of the
-// consistency and executability lenses (and any lens that fails) converges,
+// consistency and surface lenses (and any lens that fails) converges,
 // and the plan is approved again. The builder later reworks the committed
 // steps that carry a changed decision.
 async function implementationRevision(findings, origin) {
   received = received.concat(findings)
-  pendingLenses = EXECUTABILITY_LENS ? [EXECUTABILITY] : null
+  pendingLenses = SURFACE_LENS ? [SURFACE] : null
   if (spent.implementationRevisions >= BUDGET.implementationRevisions) {
     stop('budget-spent', 'revise', {
       budget: 'implementationRevisions',
@@ -1779,7 +1763,7 @@ async function implementationRevision(findings, origin) {
   metrics.implementationRevisions += 1
   await revise(origin, [])
   pendingLenses = null
-  await converge([CONSISTENCY_LENS, EXECUTABILITY_LENS].filter(Boolean))
+  await converge([CONSISTENCY_LENS, SURFACE_LENS].filter(Boolean))
   approve(`converged after implementation revision ${revisions}: the last round raised no failing finding.`)
   steps = null
 }

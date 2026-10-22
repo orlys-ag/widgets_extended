@@ -194,10 +194,10 @@ the planner adopts each as its starting table and may add options.
 Cite each claim about existing code where it is made, in the form the profile's
 plan checks read. The profile's `planChecks` keep a plan's claims honest: the
 draft runs each check's `stamp` command, a revision its `rebase` command, and
-the claims lens and the builder its `verify` command. A check that exits
+the evidence lens and the builder its `verify` command. A check that exits
 non-zero is a finding, which its `note` says how to read.
 
-The claims lens sweeps the claims on every version of the plan:
+The evidence lens sweeps the claims on every version of the plan:
 
 1. Run the plan checks and re-read each citation they flag.
 2. Run the command behind every count and universal (section 2.4).
@@ -235,13 +235,9 @@ no memory of an earlier round.
 <!-- generated: lenses -->
 | Lens | Sweeps |
 |---|---|
-| `correctness` | Mechanism, failure paths, lifecycle and re-entrancy |
-| `performance` | Bounds, hot paths, and the evidence behind each performance rank |
-| `surface` | The public surface, every consumer verified in code, agreement with the documents the plan depends on, house conventions and the plan rules |
-| `claims` | Each decision table against the ranking rule and its missing options; every citation, count and framework claim against the source; the plan checks |
-| `acceptance` | Each criterion traced to a named check that fails on the base commit; missing, ambiguous or conflicting requirements |
-| `executability` | Each landing step done and committed from the base commit as written: its gates pass, its documents stay true, its commands run, its test seams exist |
-| `integration` | Crossings with other components the plan never mentions, and timing risks only running code settles, each turned into a named test |
+| `runtime` | Mechanism, failure paths, lifecycle and re-entrancy; crossings with other components and timing risks; bounds, hot paths and the evidence behind each performance rank |
+| `evidence` | Each decision table against the ranking rule and its missing options; every citation, count and framework claim against the source; the plan checks; each criterion traced to a named check that fails on the base commit; missing, ambiguous or conflicting requirements |
+| `surface` | The public surface, every consumer verified in code, agreement with the documents the plan depends on, house conventions and the plan rules; each landing step done and committed from the base commit as written: its gates pass, its documents stay true, its commands run, its test seams exist |
 | `consistency` | The last revision against its snapshot, the findings it received and their outcomes, and its obligations; runs only after a revision |
 <!-- end generated -->
 
@@ -254,7 +250,7 @@ switch a core lens off, or add a project lens with its own focus.
 - After a revision, the next round runs each lens that raised a failing
   finding, the `consistency` lens, any lens that has not yet reported, and,
   when the revision changed a decision, the lenses that grade a decision's
-  rank, `performance` and `claims`. A re-run lens receives the decisions the
+  rank, `runtime` and `evidence`. A re-run lens receives the decisions the
   revision changed, the diff that shows every edit, and its own earlier
   findings with their recorded outcomes: it reviews the changed decisions, what
   depends on them and the sites of its findings, and may report anything else.
@@ -467,8 +463,8 @@ with no blocking finding, having verified a step or mutated a pin that no
 earlier report of this build had, is no breach, and a fresh builder continues
 the build.
 
-The builder receives the profile's `hotPaths` and the `performance` lens's
-addendum as the project's performance rules. On a hot path it adds none of
+The builder receives the profile's `hotPaths` and the `runtime` lens's
+addendum as the project's runtime rules. On a hot path it adds none of
 the costs they name unless the plan's decision for that code accepts it; a
 step that cannot be built without one shows the plan wrong.
 
@@ -482,7 +478,7 @@ A blocking finding from the extractor or the builder starts a revision inside
 the run, bounded by the profile's `budget.implementationRevisions` per launch:
 
 1. The planner revises (section 7).
-2. A round of the `consistency` and `executability` lenses, and of those
+2. A round of the `consistency` and `surface` lenses, and of those
    section 6.2 adds after a revision, follows; the rounds continue as in
    section 6.2 until the plan is approved again.
 3. The steps are extracted again.
@@ -502,7 +498,7 @@ A spent budget ends the run `budget-spent`.
 A reviewer who never reads the plan closes the run. It receives the request and
 the acceptance criteria verbatim, the owner's user-visible behaviour,
 constraints and non-goals, the base commit, the build branch, the files the
-builder changed, and the hot paths and performance rules the builder received;
+builder changed, and the hot paths and runtime rules the builder received;
 reads every changed file in full; runs the tests the criteria name; and writes
 the acceptance document: each criterion quoted and marked met, partial or unmet
 with its evidence, then its findings about the code. A cost the performance
@@ -587,11 +583,11 @@ is chained into the next revision: the next consistency lens diffs from the
 earlier snapshot and is told both revisions' changes and outcomes.
 
 <!-- generated: cost -->
-A clean run is 11 agents: the draft, the 7 lenses of round 1, the extractor, the builder and the reviewer.
+A clean run is 7 agents: the draft, the 3 lenses of round 1, the extractor, the builder and the reviewer.
 <!-- end generated -->
 
 A revision adds the planner, each lens that raised a failing finding and the
-consistency lens, plus the `performance` and `claims` lenses when it changes a
+consistency lens, plus the `runtime` and `evidence` lenses when it changes a
 decision; open premises add the probe; an agent dispatched again adds
 one. The state's `round` and `revisions` count the rounds and revisions, and
 its `metrics` count the launches, the statuses returned, the agents by role,
@@ -631,7 +627,7 @@ cannot read files. Every key has a reader:
 - `conventionDocs` (optional): The house convention documents the planner, the builder and the reviewer read.
 - `modules` (optional): Each with `paths` (regular expressions over repository paths), `guidance` (its architecture rules) and `vocabulary`. A run reads the guidance of every module its files match.
 - `gates` (required): Each with `name`, `command` (in which `{base}` stands for the base commit), `pass` (its pass condition), `when` (`"always"`, or `{"paths": [...]}`, regular expressions matched against the changed files) and `scope` (`step`: at each step's commit; `final`: once, after the mutations).
-- `lenses` (optional): Per lens, optional `reads` (the files it reads; `moduleGuidance` and `conventionDocs` expand to those lists; default `moduleGuidance`), `addendum` (project text appended to its focus) and `enabled` (false switches a core lens off; never `consistency`). Any other key adds a project lens, which needs a `focus`. The planner receives every enabled lens's reads and addendum, and a project lens's focus; the builder and the reviewer receive the `performance` lens's addendum and the `hotPaths`.
+- `lenses` (optional): Per lens, optional `reads` (the files it reads; `moduleGuidance` and `conventionDocs` expand to those lists; default `moduleGuidance`), `addendum` (project text appended to its focus) and `enabled` (false switches a core lens off; never `consistency`). Any other key adds a project lens, which needs a `focus`. The planner receives every enabled lens's reads and addendum, and a project lens's focus; the builder and the reviewer receive the `runtime` lens's addendum and the `hotPaths`.
 - `ranking` (required): The ranking criteria, in order (section 3).
 - `hotPaths` (optional): Where the hot-path performance criterion applies.
 - `planRules` (optional): The project's own requirements for a plan: the planner writes to them and the surface lens checks them.

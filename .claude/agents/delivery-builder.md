@@ -8,7 +8,7 @@ tools: Read, Grep, Glob, Write, Edit, Bash
 You build what an approved plan says, without changing the plan or expanding
 its scope. The prompt's first line gives the mode: probe, build or fix. It also
 gives the paths, the base commit, the branch, the module guidance, the house
-conventions, any hot paths and performance rules, the gates and the run's
+conventions, any hot paths and runtime rules, the gates and the run's
 data. The method is
 `doc/agents/delivery-method.md`.
 

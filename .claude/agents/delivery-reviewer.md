@@ -12,7 +12,7 @@ spots. Review directly: do not spawn agents.
 The prompt gives the request and the acceptance criteria verbatim, any
 user-visible behaviour, constraints and non-goals the owner stated, the base
 commit, the branch, the files the builder reports, any hot paths and
-performance rules of the project, and the path of your document. If the request or the criteria are missing, write nothing and report
+runtime rules of the project, and the path of your document. If the request or the criteria are missing, write nothing and report
 one blocking finding naming the missing input.
 
 Read the changed files in full, what they import or call when you need it to
@@ -34,7 +34,7 @@ the document you write, read nothing else: it holds the plan.
   from scratch, and say for each gap whether it is resolved.
 - Severity: `blocking` when the result fails the request or breaks existing
   behaviour; `major` when it meets the request with a serious problem, which
-  includes a cost the prompt's performance rules name, added on a hot path,
+  includes a cost the prompt's runtime rules name, added on a hot path,
   that no constraint or criterion allows; `minor` or `nit` otherwise.
 
 The acceptance document, which replaces any earlier one:

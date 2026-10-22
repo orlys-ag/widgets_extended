@@ -118,8 +118,8 @@ const FIXTURE = {
     { name: 'full', command: 'make all', pass: '0 failed', when: 'always', scope: 'final' },
   ],
   lenses: {
-    correctness: { addendum: 'Correctness addendum.' },
-    performance: { reads: ['moduleGuidance', 'docs/perf.md'] },
+    runtime: { addendum: 'Correctness addendum.' },
+    evidence: { reads: ['moduleGuidance', 'docs/perf.md'] },
   },
   ranking: ['user-visible-behaviour', 'architecture-fit'],
   hotPaths: ['per request'],
@@ -137,7 +137,7 @@ const AUDIT = `${DIR}/${DATE}-${SLUG}-audit.md`
 const ACCEPTANCE = `${DIR}/${DATE}-${SLUG}-acceptance.md`
 const CRITERIA = ['Exporting an empty list writes only the header row, verified by tests/core/widget_test.ts']
 const REQUEST = 'Make an export of an empty list write its header row.'
-const SWEEP = ['correctness', 'performance', 'surface', 'claims', 'acceptance', 'executability', 'integration']
+const SWEEP = ['runtime', 'evidence', 'surface']
 const ROUND1 = SWEEP.map(k => `critic:${k}:r1`)
 const CLEAN_RUN = ['plan:draft', ...ROUND1, 'steps', 'build', 'accept']
 
@@ -374,24 +374,24 @@ const T1 = [
     expect(r.schemaErrors.length === 0, `schema errors ${JSON.stringify(r.schemaErrors)}`)
     expect(r.opts('plan:draft').agentType === 'delivery-planner' && r.opts('plan:draft').effort === 'xhigh' && !('model' in r.opts('plan:draft')), 'the planner does not run with its profile role')
     expect(r.opts('steps').model === 'small' && r.opts('steps').effort === 'low', 'the extractor does not run with its profile role')
-    expect(!('effort' in r.opts('critic:claims:r1')) && r.opts('critic:claims:r1').agentType === 'delivery-critic', 'a critic without a profile role got an effort')
-    expect(r.result?.state?.metrics?.agents?.critic === 7 && r.result?.state?.metrics?.launches === 1, `metrics ${JSON.stringify(r.result?.state?.metrics)}`)
-    expect(!['plan:draft', 'steps', 'build', 'accept', 'critic:correctness:r1'].some(l => 'isolation' in r.opts(l)), 'a checkout run isolated an agent')
+    expect(!('effort' in r.opts('critic:evidence:r1')) && r.opts('critic:evidence:r1').agentType === 'delivery-critic', 'a critic without a profile role got an effort')
+    expect(r.result?.state?.metrics?.agents?.critic === SWEEP.length && r.result?.state?.metrics?.launches === 1, `metrics ${JSON.stringify(r.result?.state?.metrics)}`)
+    expect(!['plan:draft', 'steps', 'build', 'accept', 'critic:runtime:r1'].some(l => 'isolation' in r.opts(l)), 'a checkout run isolated an agent')
   }],
 
   ['T1b', 'only design-level findings at blocking or major fail a round, and the re-round runs the failing lenses and consistency', async ({ expect }) => {
     const notFailing = await run({
       respond: respondWith({
-        'critic:claims:r1': critic('claims', [finding({ severity: 'blocking', kind: 'implementation' }), finding({ severity: 'minor', kind: 'rank', decision: 'd2' })]),
+        'critic:evidence:r1': critic('evidence', [finding({ severity: 'blocking', kind: 'implementation' }), finding({ severity: 'minor', kind: 'rank', decision: 'd2' })]),
       }),
     })
     expect(!notFailing.labels.some(l => l.startsWith('plan:revise')), 'a non-failing finding spawned a revision')
     expect(notFailing.result?.status === 'accepted', `status ${notFailing.result?.status}`)
 
     for (const kind of ['rank', 'surface', 'consistency']) {
-      const failing = await run({ respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1', { kind })]) }) })
+      const failing = await run({ respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1', { kind })]) }) })
       expect(failing.labels.includes('plan:revise-1'), `a major ${kind} finding spawned no revision`)
-      expect(round(failing.labels, 2) === 'consistency correctness', `${kind}: round 2 ran ${round(failing.labels, 2)}`)
+      expect(round(failing.labels, 2) === 'consistency runtime', `${kind}: round 2 ran ${round(failing.labels, 2)}`)
       expect(failing.result?.status === 'accepted', `${kind}: status ${failing.result?.status}`)
     }
   }],
@@ -399,7 +399,7 @@ const T1 = [
   ['T1c', 'a re-run lens is told what changed and its earlier findings; consistency gets the snapshot and every outcome', async ({ expect }) => {
     const r = await run({
       respond: respondWith({
-        'critic:correctness:r1': critic('correctness', [failingOn('d3', { title: 'Ordering A' }), finding({ title: 'Ordering B' })]),
+        'critic:runtime:r1': critic('runtime', [failingOn('d3', { title: 'Ordering A' }), finding({ title: 'Ordering B' })]),
         'plan:revise-1': (n, p) => ({
           snapshot: `${PLAN}.r1`, changed_decisions: ['d3'], decisions: ['d1', 'd2', 'd3'], premises: [], scope_questions: [],
           outcomes: receivedIn(p).filter(f => f.title === 'Ordering A').map(f => ({ id: f.id, outcome: 'fixed', note: 'S d3' })),
@@ -410,18 +410,18 @@ const T1 = [
     expect(c.includes(`Snapshot: ${PLAN}.r1`) && c.includes(`git diff --no-index ${PLAN}.r1 ${PLAN}`), 'the consistency prompt lacks the snapshot diff')
     expect(/reports it changed: d3\./.test(c), 'the consistency prompt lacks the changed decisions')
     expect(/Ordering A -> fixed: S d3/.test(c) && /Ordering B -> no outcome recorded/.test(c), 'the consistency prompt lacks an outcome, or hides a missing one')
-    const again = r.prompt('critic:correctness:r2')
+    const again = r.prompt('critic:runtime:r2')
     expect(/Revision 1 changed: d3\./.test(again) && again.includes('Ordering A') && again.includes('Ordering B'), 'the re-run lens is not told what changed and its earlier findings')
     expect(!again.includes('Snapshot:'), 'a non-consistency lens received the consistency context')
-    expect(!/Revision \d+ changed/.test(r.prompt('critic:correctness:r1')), 'a first-round lens was told of a revision')
+    expect(!/Revision \d+ changed/.test(r.prompt('critic:runtime:r1')), 'a first-round lens was told of a revision')
   }],
 
   ['T1d', 'R1 re-ranks a decision whose ranking keeps failing, or that the last revision changed', async ({ expect }) => {
     const rank = (d, over = {}) => finding({ severity: 'major', kind: 'rank', decision: d, ...over })
     const twice = await run({
       respond: respondWith({
-        'critic:claims:r1': critic('claims', [rank('d2')]),
-        'critic:claims:r2': critic('claims', [rank('d2')]),
+        'critic:evidence:r1': critic('evidence', [rank('d2')]),
+        'critic:evidence:r2': critic('evidence', [rank('d2')]),
       }),
     })
     expect(!/Re-rank these decisions/.test(twice.prompt('plan:revise-1')), 'R1 fired on a first failure')
@@ -429,9 +429,9 @@ const T1 = [
 
     const changed = await run({
       respond: respondWith({
-        'critic:claims:r1': critic('claims', [rank('d1')]),
+        'critic:evidence:r1': critic('evidence', [rank('d1')]),
         'plan:revise-1': { snapshot: `${PLAN}.r1`, changed_decisions: ['d1', 'd4'], decisions: ['d1', 'd4', 'd5'], outcomes: [], premises: [], scope_questions: [] },
-        'critic:claims:r2': critic('claims', [rank('d4'), rank('d5'), failingOn('d1')]),
+        'critic:evidence:r2': critic('evidence', [rank('d4'), rank('d5'), failingOn('d1')]),
       }),
     })
     const line = (changed.prompt('plan:revise-2').match(/do not patch them: ([^.]*)\./) ?? [])[1] ?? ''
@@ -440,9 +440,9 @@ const T1 = [
 
     const dead = await run({
       respond: respondWith({
-        'critic:claims:r1': critic('claims', [rank('d1')]),
+        'critic:evidence:r1': critic('evidence', [rank('d1')]),
         'plan:revise-1': { snapshot: `${PLAN}.r1`, changed_decisions: ['d1'], decisions: ['d1', 'd2'], outcomes: [], premises: [], scope_questions: [] },
-        'critic:claims:r2': critic('claims', [rank('d1', { title: 'Owed finding' })]),
+        'critic:evidence:r2': critic('evidence', [rank('d1', { title: 'Owed finding' })]),
         'plan:revise-2': null,
       }),
     })
@@ -458,16 +458,16 @@ const T1 = [
   ['T1e', 'a failing scope finding or a scope question ends the run; the next revision is told they were settled', async ({ expect }) => {
     const r = await run({
       respond: respondWith({
-        'critic:acceptance:r1': critic('acceptance', [finding({ title: 'Scope one', severity: 'major', kind: 'scope' }), finding({ title: 'Scope two', kind: 'scope' }), finding({ title: 'Other one' })]),
+        'critic:evidence:r1': critic('evidence', [finding({ title: 'Scope one', severity: 'major', kind: 'scope' }), finding({ title: 'Scope two', kind: 'scope' }), finding({ title: 'Other one' })]),
       }),
     })
     expect(r.result?.status === 'needs-scope' && r.result?.phase === 'revise', `status ${r.result?.status}, phase ${r.result?.phase}`)
     expect(titles(r.result?.scopeFindings ?? []) === 'Scope one,Scope two', `scopeFindings ${titles(r.result?.scopeFindings ?? [])}`)
     expect(titles(r.result?.state?.received ?? []) === 'Other one,Scope one,Scope two', 'the findings owed to the revision are wrong')
-    expect(JSON.stringify(r.result?.state?.pendingLenses) === '["acceptance"]', `pendingLenses ${JSON.stringify(r.result?.state?.pendingLenses)}`)
+    expect(JSON.stringify(r.result?.state?.pendingLenses) === '["evidence"]', `pendingLenses ${JSON.stringify(r.result?.state?.pendingLenses)}`)
     const resumed = await run({ args: baseArgs({ resume: r.result.state }) })
     expect(resumed.labels[0] === 'plan:revise-1' && resumed.prompt('plan:revise-1').includes('Scope one'), 'the resumed revision did not receive the scope findings')
-    expect(round(resumed.labels, 2) === 'acceptance consistency', `the round after it ran ${round(resumed.labels, 2)}`)
+    expect(round(resumed.labels, 2) === 'consistency evidence', `the round after it ran ${round(resumed.labels, 2)}`)
 
     const asked = await run({
       respond: respondWith({ 'plan:draft': { aborted: '', decisions: ['d1'], premises: [], scope_questions: [{ question: 'Keep the old format?', options: ['yes', 'no'], recommendation: 'no' }] } }),
@@ -481,13 +481,13 @@ const T1 = [
 
   ['T1f', 'a lens that cannot review is dispatched once more, one that returns nothing is not, and the round is failed and runs again whole', async ({ expect }) => {
     const lost = await run({
-      respond: respondWith({ 'critic:correctness:r1': null, 'critic:claims:r1': critic('claims', [finding({ title: 'Kept finding' })]) }),
+      respond: respondWith({ 'critic:runtime:r1': null, 'critic:evidence:r1': critic('evidence', [finding({ title: 'Kept finding' })]) }),
     })
     const st = lost.result?.state ?? {}
-    expect(lost.labels.filter(l => l === 'critic:correctness:r1').length === 1, 'a lens that returned nothing was dispatched again')
+    expect(lost.labels.filter(l => l === 'critic:runtime:r1').length === 1, 'a lens that returned nothing was dispatched again')
     expect(lost.result?.status === 'failed' && st.phase === 'critique', `status ${lost.result?.status}, phase ${st.phase}`)
-    expect((lost.result?.lensesMissing ?? []).join() === 'correctness', `lensesMissing ${lost.result?.lensesMissing}`)
-    expect(st.round === 0 && (st.pendingLenses ?? []).length === 7, `round ${st.round}, pendingLenses ${st.pendingLenses}`)
+    expect((lost.result?.lensesMissing ?? []).join() === 'runtime', `lensesMissing ${lost.result?.lensesMissing}`)
+    expect(st.round === 0 && (st.pendingLenses ?? []).length === SWEEP.length, `round ${st.round}, pendingLenses ${st.pendingLenses}`)
     expect(!(st.received ?? []).some(f => f.title === 'Kept finding') && !(st.carried ?? []).some(f => f.title === 'Kept finding'), 'the findings of a round that runs again were kept')
     const again = await run({ args: baseArgs({ resume: st }) })
     expect(round(again.labels, 1) === [...SWEEP].sort().join(' '), `the round ran again as ${round(again.labels, 1)}`)
@@ -499,7 +499,7 @@ const T1 = [
 
   ['T1g', 'a spent round budget returns the diagnosis; resuming gets a fresh budget, or the owner approves', async ({ expect }) => {
     const rank = () => finding({ id: 'stuck', severity: 'major', kind: 'rank', decision: 'd2' })
-    const always = label => /^critic:claims:r[1-4]$/.test(label) ? critic('claims', [rank()]) : undefined
+    const always = label => /^critic:evidence:r[1-4]$/.test(label) ? critic('evidence', [rank()]) : undefined
     const r = await run({ respond: always })
     expect(r.result?.status === 'budget-spent' && r.result?.phase === 'revise' && r.result?.budget === 'rounds', `status ${r.result?.status}, budget ${r.result?.budget}`)
     expect(r.labels.filter(l => l.startsWith('plan:revise')).length === FIXTURE.budget.rounds, `revisions ${r.labels.filter(l => l.startsWith('plan:revise')).join(' ')}`)
@@ -508,14 +508,14 @@ const T1 = [
     const st = r.result?.state
 
     const fresh = await run({ args: baseArgs({ resume: st }) })
-    expect(fresh.labels[0] === 'plan:revise-4' && fresh.labels.includes('critic:claims:r5'), `the resumed run: ${fresh.labels.slice(0, 3).join(' ')}`)
+    expect(fresh.labels[0] === 'plan:revise-4' && fresh.labels.includes('critic:evidence:r5'), `the resumed run: ${fresh.labels.slice(0, 3).join(' ')}`)
     expect(fresh.result?.status === 'accepted', `with a fresh budget: ${fresh.result?.status}`)
 
     const unapproved = await run({ args: baseArgs({ resume: st, start: 'steps' }) })
     expect(unapproved.error && unapproved.calls.length === 0, 'a start past failing findings without the owner did not throw')
     const owner = await run({ args: baseArgs({ resume: st, start: 'steps', ownerApproval: 'The owner accepts d2 as ranked.' }) })
     expect(owner.labels[0] === 'steps' && owner.result?.status === 'accepted', `the owner's approval: ${owner.labels[0]}, ${owner.result?.status}`)
-    expect(/Basis: the owner's approval: The owner accepts d2 as ranked\./.test(owner.prompt('build')) && /claims-r4-1, claims, rank, major: not revised, by the owner's approval/.test(owner.prompt('build')),
+    expect(/Basis: the owner's approval: The owner accepts d2 as ranked\./.test(owner.prompt('build')) && /evidence-r4-1, evidence, rank, major: not revised, by the owner's approval/.test(owner.prompt('build')),
       'the Approval record does not carry the owner\'s basis and the finding it skips')
   }],
 
@@ -535,8 +535,8 @@ const T1 = [
     expect(JSON.stringify(notHeld.result?.state?.rankFailRounds) === '{"d1":[1]}', `rankFailRounds ${JSON.stringify(notHeld.result?.state?.rankFailRounds)}`)
 
     const worktree = await run({ args: withProfile({ isolation: 'worktree' }), respond: respondWith(drafted) })
-    expect(worktree.labels.indexOf('probe:r1') > worktree.labels.indexOf('critic:integration:r1'), 'in a worktree the probe did not run beside the critics')
-    expect(['probe:r1', 'build', 'accept'].every(l => worktree.opts(l).isolation === 'worktree') && !('isolation' in worktree.opts('critic:claims:r1')) && !('isolation' in worktree.opts('plan:draft')),
+    expect(worktree.labels.indexOf('probe:r1') > worktree.labels.indexOf('critic:evidence:r1'), 'in a worktree the probe did not run beside the critics')
+    expect(['probe:r1', 'build', 'accept'].every(l => worktree.opts(l).isolation === 'worktree') && !('isolation' in worktree.opts('critic:evidence:r1')) && !('isolation' in worktree.opts('plan:draft')),
       'the worktree isolation is not exactly the probe, the builder and the reviewer')
     expect(worktree.prompt('build').includes('You run in a git worktree of your own'), 'the builder is not told where the run files are')
 
@@ -545,7 +545,7 @@ const T1 = [
 
     const added = await run({
       respond: respondWith({
-        'critic:correctness:r1': critic('correctness', [failingOn('d1')]),
+        'critic:runtime:r1': critic('runtime', [failingOn('d1')]),
         'plan:revise-1': { snapshot: `${PLAN}.r1`, changed_decisions: ['d1'], decisions: ['d1', 'd2'], outcomes: [], premises: [{ ...premise, id: 'p2' }], scope_questions: [] },
       }),
     })
@@ -556,7 +556,7 @@ const T1 = [
     const gapped = (n, p, ctx) => ({ ...extraction(p, ctx), gaps: [{ title: 'Step 2 names no signal', location: 'landing-order', why: 'No test.' }] })
     const gap = await run({ respond: respondWith({ steps: gapped, 'steps-2': gapped }) })
     const after = gap.labels.slice(gap.labels.indexOf('steps'))
-    expect(after.join(' ') === 'steps steps-2 plan:revise-1 critic:consistency:r2 critic:executability:r2 steps-3 build accept', `after the gap: ${after.join(' ')}`)
+    expect(after.join(' ') === 'steps steps-2 plan:revise-1 critic:consistency:r2 critic:surface:r2 steps-3 build accept', `after the gap: ${after.join(' ')}`)
     expect(/revision 1 \(steps\)/.test(gap.prompt('plan:revise-1')) && gap.prompt('plan:revise-1').includes('Step 2 names no signal'), 'the revision did not receive the gap')
     expect(gap.result?.status === 'accepted' && gap.result?.state?.metrics?.implementationRevisions === 1, `status ${gap.result?.status}`)
 
@@ -609,7 +609,7 @@ const T1 = [
       }),
     })
     const after = r.labels.slice(r.labels.indexOf('build'))
-    expect(after.join(' ') === 'build plan:revise-1 critic:consistency:r2 critic:executability:r2 critic:performance:r2 critic:claims:r2 steps-2 build-2 accept', `after the blocking finding: ${after.join(' ')}`)
+    expect(after.join(' ') === 'build plan:revise-1 critic:consistency:r2 critic:surface:r2 critic:runtime:r2 critic:evidence:r2 steps-2 build-2 accept', `after the blocking finding: ${after.join(' ')}`)
     expect(/committed steps through 1 on harness-run/.test(r.prompt('plan:revise-1')), 'the revision is not told what the builder committed')
     expect(/a decision each carries changed \(d1\)[^\n]*\n- Core \(c1\), carrying d1/.test(r.prompt('build-2')), 'the builder is not told what to rework')
     expect(r.result?.status === 'accepted' && r.result?.state?.build?.rework === null, `status ${r.result?.status}, rework ${JSON.stringify(r.result?.state?.build?.rework)}`)
@@ -617,9 +617,9 @@ const T1 = [
     const again = await run({ respond: respondWith({ build: firstBuild, 'build-2': (n, p, ctx) => buildResult(ctx, { complete: false, blocking_findings: [{ ...BASE_ITEM, id: 'b2' }] }) }) })
     const st = again.result?.state ?? {}
     expect(again.result?.status === 'budget-spent' && again.result?.budget === 'implementationRevisions' && st.phase === 'revise', `a second blocking finding: ${again.result?.status}`)
-    expect((st.received ?? []).some(f => f.lens === 'build') && JSON.stringify(st.pendingLenses) === '["executability"]', `the owed finding or the re-round is lost: ${JSON.stringify(st.pendingLenses)}`)
+    expect((st.received ?? []).some(f => f.lens === 'build') && JSON.stringify(st.pendingLenses) === '["surface"]', `the owed finding or the re-round is lost: ${JSON.stringify(st.pendingLenses)}`)
     const resumed = await run({ args: baseArgs({ resume: st }) })
-    expect(resumed.labels[0] === 'plan:revise-2' && round(resumed.labels, 3) === 'consistency executability', `the resumed run: ${resumed.labels.slice(0, 3).join(' ')}`)
+    expect(resumed.labels[0] === 'plan:revise-2' && round(resumed.labels, 3) === 'consistency surface', `the resumed run: ${resumed.labels.slice(0, 3).join(' ')}`)
   }],
 
   ['T1k', 'the build report is checked against the steps, the gates, the pins and the repros', async ({ expect }) => {
@@ -669,7 +669,7 @@ const T1 = [
     const resumedBuild = await run({ args: baseArgs({ resume: buildDead.result?.state }) })
     expect(resumedBuild.labels.join(' ') === 'build accept' && resumedBuild.result?.status === 'accepted', `a resumed build: ${resumedBuild.labels.join(' ')}`)
     expect(/a commit whose message says its step is unfinished holds partial work/.test(resumedBuild.prompt('build')), 'the builder is not told how to recognise the partial work of a builder that died')
-    const revised = await run({ respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1')]) }) })
+    const revised = await run({ respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1')]) }) })
     const rp = revised.prompt('plan:revise-1')
     expect(rp.includes(`copy the plan to ${PLAN}.r1 and report`) && rp.includes(`If ${PLAN}.r1 already exists, a dispatch of this revision that did not finish made it`),
       'a revision is not told its own snapshot, or how to finish one a dead dispatch began')
@@ -748,7 +748,7 @@ const T1 = [
   }],
 
   ['T1p', 'every field of the run state survives a resume', async ({ expect }) => {
-    const st = (await run({ respond: respondWith({ 'critic:correctness:r1': critic('correctness', [finding({ id: 'carry-1' })]), accept: null }) })).result?.state
+    const st = (await run({ respond: respondWith({ 'critic:runtime:r1': critic('runtime', [finding({ id: 'carry-1' })]), accept: null }) })).result?.state
     const again = await run({ args: baseArgs({ resume: st }), respond: respondWith({ accept: null }) })
     const back = again.result?.state ?? {}
     const canon = v => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x)) ? Object.fromEntries(Object.entries(x).sort()) : x)
@@ -759,7 +759,7 @@ const T1 = [
 
   ['T1q', 'a run reads the guidance of every module its files match', async ({ expect }) => {
     const both = await run({ args: baseArgs({ requirements: { ...baseArgs().requirements, modules_touched: ['src/core/widget.ts', 'src/io/reader.ts'] } }) })
-    expect(/Also read: docs\/core\.md, docs\/io\.md\./.test(both.prompt('critic:correctness:r1')), `reads ${(both.prompt('critic:correctness:r1').match(/Also read: .*/) ?? [])[0]}`)
+    expect(/Also read: docs\/core\.md, docs\/io\.md\./.test(both.prompt('critic:runtime:r1')), `reads ${(both.prompt('critic:runtime:r1').match(/Also read: .*/) ?? [])[0]}`)
     expect(/Modules: core, io\. .*Core vocabulary\. IO vocabulary\./.test(both.prompt('plan:draft')), 'the draft lacks a module or its vocabulary')
     expect(both.result?.modules?.join() === 'core,io', `modules ${both.result?.modules}`)
     const { modules, ...bare } = FIXTURE
@@ -768,25 +768,25 @@ const T1 = [
   }],
 
   ['T1r', 'the profile switches a core lens off and adds a project lens', async ({ expect }) => {
-    const r = await run({ args: withProfile({ lenses: { ...FIXTURE.lenses, performance: { enabled: false }, security: { focus: 'Security focus.', reads: ['docs/sec.md'] } } }) })
-    expect(round(r.labels, 1) === [...SWEEP.filter(k => k !== 'performance'), 'security'].sort().join(' '), `round 1 ran ${round(r.labels, 1)}`)
+    const r = await run({ args: withProfile({ lenses: { ...FIXTURE.lenses, evidence: { enabled: false }, security: { focus: 'Security focus.', reads: ['docs/sec.md'] } } }) })
+    expect(round(r.labels, 1) === [...SWEEP.filter(k => k !== 'evidence'), 'security'].sort().join(' '), `round 1 ran ${round(r.labels, 1)}`)
     expect(r.prompt('critic:security:r1').includes('Focus: Security focus.') && r.prompt('critic:security:r1').includes('Also read: docs/sec.md.'), 'the project lens lacks its focus or reads')
-    expect(/Correctness addendum\.\n/.test(r.prompt('critic:correctness:r1')), 'the addendum is not appended to its lens focus')
-    expect(/Also read: docs\/core\.md\./.test(r.prompt('critic:claims:r1')), 'a lens without reads does not default to the module guidance')
+    expect(/Correctness addendum\.\n/.test(r.prompt('critic:runtime:r1')), 'the addendum is not appended to its lens focus')
+    expect(/Also read: docs\/core\.md\./.test(r.prompt('critic:surface:r1')), 'a lens without reads does not default to the module guidance')
     expect(r.result?.status === 'accepted', `status ${r.result?.status}`)
   }],
 
   ['T1s', 'each lens prompt carries exactly the blocks its flags name', async ({ expect }) => {
     const r = await run()
     const has = (label, text) => r.prompt(label).includes(text)
-    expect(has('critic:acceptance:r1', '### Acceptance Criteria') && !SWEEP.filter(k => k !== 'acceptance').some(k => has(`critic:${k}:r1`, '### Acceptance Criteria')), 'the requirements block is not exactly the acceptance lens\'s')
+    expect(has('critic:evidence:r1', '### Acceptance Criteria') && !SWEEP.filter(k => k !== 'evidence').some(k => has(`critic:${k}:r1`, '### Acceptance Criteria')), 'the requirements block is not exactly the acceptance lens\'s')
     const rule = FIXTURE.planRules[0]
-    expect(has('critic:surface:r1', rule) && has('plan:draft', rule) && !has('critic:correctness:r1', rule), 'the plan rules are not exactly the surface lens\'s and the planner\'s')
-    expect(has('critic:claims:r1', `check ${PLAN}\``) && !has('critic:surface:r1', `check ${PLAN}`), 'the plan check is not the claims lens\'s')
+    expect(has('critic:surface:r1', rule) && has('plan:draft', rule) && !has('critic:runtime:r1', rule), 'the plan rules are not exactly the surface lens\'s and the planner\'s')
+    expect(has('critic:evidence:r1', `check ${PLAN}\``) && !has('critic:surface:r1', `check ${PLAN}`), 'the plan check is not the evidence lens\'s')
     expect(has('plan:draft', `check ${PLAN} --stamp\``) && has('build', `check ${PLAN}\``), 'the draft does not stamp or the builder does not verify')
-    expect(has('critic:executability:r1', 'Gates (method section 8.3)') && has('build', '- io-tests (step scope, when a changed file matches `^src/io/`)') && !has('critic:correctness:r1', 'Gates ('), 'the gates are not the executability lens\'s alone among the lenses, or the builder lacks them')
-    expect(has('critic:performance:r1', 'Ranking criteria, in order: user-visible-behaviour') && has('critic:claims:r1', 'Ranking criteria') && !has('critic:surface:r1', 'Ranking criteria'), 'the ranking line is not exactly the ranking lenses\'')
-    const revised = await run({ respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1')]) }) })
+    expect(has('critic:surface:r1', 'Gates (method section 8.3)') && has('build', '- io-tests (step scope, when a changed file matches `^src/io/`)') && !has('critic:runtime:r1', 'Gates ('), 'the gates are not the surface lens\'s alone among the lenses, or the builder lacks them')
+    expect(has('critic:runtime:r1', 'Ranking criteria, in order: user-visible-behaviour') && has('critic:evidence:r1', 'Ranking criteria') && !has('critic:surface:r1', 'Ranking criteria'), 'the ranking line is not exactly the ranking lenses\'')
+    const revised = await run({ respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1')]) }) })
     expect(revised.prompt('plan:revise-1').includes(`check ${PLAN} --rebase`), 'the revision does not rebase')
   }],
 
@@ -829,16 +829,16 @@ const T1 = [
     const decision = 'D1. The owner fixed the export format.'
     const r = await run({
       args: baseArgs({ requirements: { ...baseArgs().requirements, decisions: [decision] } }),
-      respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1', { id: 'gate-1' }), finding({ id: 'carry-1', title: 'No test pins the header row' })]) }),
+      respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1', { id: 'gate-1' }), finding({ id: 'carry-1', title: 'No test pins the header row' })]) }),
     })
-    const carriedLine = /- correctness-r1-2 \(correctness, round 1, d1\): No test pins the header row/
-    for (const label of ['critic:correctness:r2', 'critic:consistency:r2']) {
+    const carriedLine = /- runtime-r1-2 \(runtime, round 1, d1\): No test pins the header row/
+    for (const label of ['critic:runtime:r2', 'critic:consistency:r2']) {
       expect(carriedLine.test(r.prompt(label)) && /only when the plan now contradicts it/.test(r.prompt(label)), `${label} was not told the carried finding`)
     }
-    expect(!/- correctness-r1-1 \(/.test(r.prompt('critic:correctness:r2').split('Already settled')[1] ?? ''), 'a failing finding was listed as carried')
-    expect(r.prompt('critic:correctness:r1').includes(`- ${decision}`) && r.prompt('critic:acceptance:r1').split(decision).length === 2, 'the owner decisions reach a lens twice or not at all')
-    expect(r.prompt('steps').includes('"correctness-r1-2"'), 'the extractor is not given the carried finding to place')
-    expect(!/Already settled/.test((await run()).prompt('critic:correctness:r1')), 'a critic was given an empty settled list')
+    expect(!/- runtime-r1-1 \(/.test(r.prompt('critic:runtime:r2').split('Already settled')[1] ?? ''), 'a failing finding was listed as carried')
+    expect(r.prompt('critic:runtime:r1').includes(`- ${decision}`) && r.prompt('critic:evidence:r1').split(decision).length === 2, 'the owner decisions reach a lens twice or not at all')
+    expect(r.prompt('steps').includes('"runtime-r1-2"'), 'the extractor is not given the carried finding to place')
+    expect(!/Already settled/.test((await run()).prompt('critic:runtime:r1')), 'a critic was given an empty settled list')
   }],
 ]
 
@@ -855,7 +855,7 @@ function receivedIn(prompt) {
 const T2 = [
   ['T2a', 'the builder is given each carried finding\'s text, and reports each one addressed', async ({ expect }) => {
     const carry = finding({ id: 'c1', title: 'Empty list header untested', why: 'No test reads the file back.', suggested_direction: 'Add a read-back test.' })
-    const raised = { 'critic:correctness:r1': critic('correctness', [carry]) }
+    const raised = { 'critic:runtime:r1': critic('runtime', [carry]) }
     const r = await run({ respond: respondWith(raised) })
     const b = r.prompt('build')
     expect(['Empty list header untested', 'No test reads the file back.', 'Add a read-back test.'].every(t => b.includes(t)), 'the builder is not given the carried finding\'s text')
@@ -867,8 +867,8 @@ const T2 = [
   ['T2b', 'finding ids are unique per source, so outcomes and placements never merge', async ({ expect }) => {
     const r = await run({
       respond: respondWith({
-        'critic:correctness:r1': critic('correctness', [failingOn('d1', { id: 'F1', title: 'Correctness defect' })]),
-        'critic:integration:r1': critic('integration', [finding({ id: 'F1', title: 'Integration gap' })]),
+        'critic:runtime:r1': critic('runtime', [failingOn('d1', { id: 'F1', title: 'Correctness defect' })]),
+        'critic:evidence:r1': critic('evidence', [finding({ id: 'F1', title: 'Integration gap' })]),
         'plan:revise-1': (n, p) => ({
           ...defaultFor('plan:revise-1', p, {}),
           outcomes: receivedIn(p).map(f => ({ id: f.id, outcome: f.kind === 'implementation' ? 'carried' : 'fixed', note: f.title })),
@@ -883,7 +883,7 @@ const T2 = [
   ['T2c', 'a revision no round has checked is chained into the next one', async ({ expect }) => {
     const stopped = await run({
       respond: respondWith({
-        'critic:correctness:r1': critic('correctness', [failingOn('d1', { id: 'cor-a', title: 'Ordering defect' })]),
+        'critic:runtime:r1': critic('runtime', [failingOn('d1', { id: 'cor-a', title: 'Ordering defect' })]),
         'plan:revise-1': (n, p) => ({
           snapshot: `${PLAN}.r1`, changed_decisions: ['d1'], decisions: ['d1', 'd2'], premises: [],
           outcomes: receivedIn(p).map(f => ({ id: f.id, outcome: 'fixed', note: 'S d1' })),
@@ -903,8 +903,8 @@ const T2 = [
 
     const checked = await run({
       respond: respondWith({
-        'critic:correctness:r1': critic('correctness', [failingOn('d1')]),
-        'critic:correctness:r2': critic('correctness', [failingOn('d1')]),
+        'critic:runtime:r1': critic('runtime', [failingOn('d1')]),
+        'critic:runtime:r2': critic('runtime', [failingOn('d1')]),
       }),
     })
     const third = checked.prompt('critic:consistency:r3')
@@ -946,7 +946,7 @@ const T2 = [
     const clean = await run()
     const basis = (clean.prompt('build').match(/Basis: [^\n]*/) ?? [''])[0]
     expect(!basis.includes('consistency') && SWEEP.every(k => basis.includes(k)), `a clean run's basis: ${basis}`)
-    const revised = await run({ respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1')]) }) })
+    const revised = await run({ respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1')]) }) })
     expect(/Basis: [^\n]*consistency/.test(revised.prompt('build')), 'a revised run\'s basis omits the consistency lens')
   }],
 
@@ -965,11 +965,11 @@ const T2 = [
       respond: respondWith({
         'plan:draft': { aborted: '', decisions: ['d1', 'd2'], premises: [premise], scope_questions: [] },
         'probe:r1': { precondition: '', branch: `${SLUG}-probe`, premises: [{ id: 'p1', outcome: 'not-held', observed: 'Out of order.' }] },
-        'critic:correctness:r1': null,
+        'critic:runtime:r1': null,
       }),
     })
     expect(r.result?.status === 'failed' && JSON.stringify(r.result?.state?.rankFailRounds) === '{"d1":[1]}', `rankFailRounds ${JSON.stringify(r.result?.state?.rankFailRounds)}`)
-    const revised = await run({ respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1')]) }) })
+    const revised = await run({ respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1')]) }) })
     expect(!/without a kind \(from the probe/.test(revised.prompt('plan:revise-1')), 'the revision prompt calls a probe finding kindless')
   }],
 
@@ -981,7 +981,7 @@ const T2 = [
   }],
 
   ['T2j', 'a carried finding the extractor calls obsolete is confirmed by the builder', async ({ expect }) => {
-    const raised = { 'critic:correctness:r1': critic('correctness', [finding({ title: 'Moot finding' })]) }
+    const raised = { 'critic:runtime:r1': critic('runtime', [finding({ title: 'Moot finding' })]) }
     const obsolete = (n, p, ctx) => {
       const e = extraction(p, ctx)
       return { ...e, carried: e.carried.map(c => ({ ...c, step: -1, obsolete: 'd1 removed the path.' })) }
@@ -994,15 +994,15 @@ const T2 = [
   }],
 
   ['T2k', 'a critic reports findings only, and a serious defect outside its lens is a finding', async ({ expect }) => {
-    const r = await run({ respond: respondWith({ 'critic:correctness:r1': { findings: [] } }) })
+    const r = await run({ respond: respondWith({ 'critic:runtime:r1': { findings: [] } }) })
     expect(r.schemaErrors.length === 0 && r.result?.status === 'accepted', `a findings-only report: ${JSON.stringify(r.schemaErrors)}`)
     const file = read(ROOT, '.claude/agents/delivery-critic.md').replace(/\s+/g, ' ')
     expect(!/summary only/.test(file) && /outside your lens is still a finding/.test(file), 'the critic file still sends a defect outside the lens to an unread summary')
   }],
 
   ['T2l', 'a re-run lens is given the diff of the revision', async ({ expect }) => {
-    const r = await run({ respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1')]) }) })
-    expect(r.prompt('critic:correctness:r2').includes(`git diff --no-index ${PLAN}.r1 ${PLAN}`), 'the re-run lens is not given the diff')
+    const r = await run({ respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1')]) }) })
+    expect(r.prompt('critic:runtime:r2').includes(`git diff --no-index ${PLAN}.r1 ${PLAN}`), 'the re-run lens is not given the diff')
   }],
 
   ['T2m', 'each step carries the gates its files trigger, and the build the final gates', async ({ expect }) => {
@@ -1024,19 +1024,19 @@ const T2 = [
     const second = r.calls.filter(c => c.label === 'critic:surface:r1')[1]?.prompt ?? ''
     expect(/reported it could not review: The plan file is missing/.test(second), 'the retry is not told the stated cause')
     expect(/The plan file is missing/.test(r.result?.reason ?? ''), `the failure does not carry the cause: ${r.result?.reason}`)
-    expect(/coverage only when you could not review the plan at all, never for missing tests/.test(r.prompt('critic:correctness:r1')), 'the kinds line does not define coverage')
+    expect(/coverage only when you could not review the plan at all, never for missing tests/.test(r.prompt('critic:runtime:r1')), 'the kinds line does not define coverage')
   }],
 
   ['T2o', 'the consistency lens is told which lenses did not re-run', async ({ expect }) => {
-    const r = await run({ respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1')]) }) })
+    const r = await run({ respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1')]) }) })
     const c = r.prompt('critic:consistency:r2')
-    expect(/did not re-run this round[^]*- performance: Bounds, hot paths/.test(c), 'the consistency lens is not told the lenses that did not re-run')
-    expect(!/did not re-run this round[^]*- correctness:/.test(c), 'a lens that re-ran is listed as not re-run')
+    expect(/did not re-run this round[^]*- surface: The public surface/.test(c), 'the consistency lens is not told the lenses that did not re-run')
+    expect(!/did not re-run this round[^]*- runtime:/.test(c), 'a lens that re-ran is listed as not re-run')
   }],
 
   ['T2p', 'a critic reads only its reading list; the reviewer judges against the conventions', async ({ expect }) => {
-    const r = await run({ args: withProfile({ lenses: { ...FIXTURE.lenses, acceptance: { reads: [] } } }) })
-    expect(!r.prompt('critic:acceptance:r1').includes('docs/core.md'), 'a critic is pointed at module rules its reading list leaves out')
+    const r = await run({ args: withProfile({ lenses: { ...FIXTURE.lenses, evidence: { reads: [] } } }) })
+    expect(!r.prompt('critic:evidence:r1').includes('docs/core.md'), 'a critic is pointed at module rules its reading list leaves out')
     expect(r.prompt('plan:draft').includes('docs/core.md') && r.prompt('build').includes('docs/core.md'), 'the planner or the builder lost the module rules')
     expect(/House conventions to judge the code against: docs\/testing\.md\./.test(r.prompt('accept')), 'the reviewer is told to read the conventions before writing code')
   }],
@@ -1068,13 +1068,13 @@ const T2 = [
   ['T2t', 'the planner is given what the critics review the plan against: the gates, the documents they read and the lenses\' project text', async ({ expect }) => {
     const r = await run({
       args: withProfile({ lenses: { ...FIXTURE.lenses, security: { focus: 'Security focus.', reads: ['docs/sec.md'] } } }),
-      respond: respondWith({ 'critic:correctness:r1': critic('correctness', [failingOn('d1')]) }),
+      respond: respondWith({ 'critic:runtime:r1': critic('runtime', [failingOn('d1')]) }),
     })
     for (const label of ['plan:draft', 'plan:revise-1']) {
       const p = r.prompt(label)
       expect(p.includes('- io-tests (step scope, when a changed file matches `^src/io/`)'), `${label} lacks the gates`)
       expect(['docs/testing.md', 'docs/perf.md', 'docs/sec.md'].every(d => p.includes(d)), `${label} lacks a house convention or a document a lens reads`)
-      expect(p.includes('- correctness: Correctness addendum.') && p.includes('- security: Security focus.'), `${label} lacks a lens addendum or a project lens's focus`)
+      expect(p.includes('- runtime: Correctness addendum.') && p.includes('- security: Security focus.'), `${label} lacks a lens addendum or a project lens's focus`)
     }
   }],
 
@@ -1129,7 +1129,7 @@ const T2 = [
   ['T2y', 'a gate command\'s {base} is the base commit in every prompt that lists the gates', async ({ expect }) => {
     const gates = FIXTURE.gates.map(g => g.name === 'docs' ? { ...g, command: 'make docs BASE={base}' } : g)
     const r = await run({ args: withProfile({ gates }), respond: respondWith({ accept: (n, prompt) => review(prompt, 'partial') }) })
-    for (const label of ['plan:draft', 'critic:executability:r1', 'build', 'fix']) {
+    for (const label of ['plan:draft', 'critic:surface:r1', 'build', 'fix']) {
       expect(r.prompt(label).includes('`make docs BASE=abc1234`'), `${label} is not given the gate command with the base commit`)
     }
     expect(!r.calls.some(c => c.prompt.includes('{base}')), 'a prompt still holds {base}')
@@ -1176,13 +1176,13 @@ const T2 = [
   }],
 
   ['T2zc', 'a builder dispatched again is told the repros, mutations and carried findings already settled; a reworked step\'s carried finding is owed again', async ({ expect }) => {
-    const raised = { 'critic:correctness:r1': critic('correctness', [finding({ title: 'Empty list header untested', why: 'No test reads the file back.' })]) }
+    const raised = { 'critic:runtime:r1': critic('runtime', [finding({ title: 'Empty list header untested', why: 'No test reads the file back.' })]) }
     const stepsOnly = (k, p, ctx) => ({ ...buildResult(ctx), complete: false, mutations: [], final_gates: [] })
     const pinsToo = (k, p, ctx) => ({ ...buildResult(ctx), complete: false, final_gates: [] })
     const r = await run({ respond: respondWith({ ...raised, build: stepsOnly, 'build-2': pinsToo }) })
     const [b2, b3] = [r.prompt('build-2'), r.prompt('build-3')]
     expect(!/Commit them first/.test(b2) && /which you do not run again: test_repro\./.test(b2), 'a builder after a handover is sent to run step 0 again')
-    expect(!b2.includes('No test reads the file back.') && /which you do not address again: correctness-r1-1\./.test(b2), 'a builder after a handover is sent to address a carried finding again')
+    expect(!b2.includes('No test reads the file back.') && /which you do not address again: runtime-r1-1\./.test(b2), 'a builder after a handover is sent to address a carried finding again')
     expect(/Pins, one mutation each/.test(b2) && !/Pins, one mutation each/.test(b3) && /which you do not mutate again: d1 \(test_d1\), d2 \(test_d2\)\./.test(b3),
       'a builder after a handover is sent to mutate a pin again, or not sent to mutate one still owed')
     expect(r.result?.status === 'accepted', `status ${r.result?.status}`)
@@ -1197,7 +1197,7 @@ const T2 = [
       }),
     })
     expect(reworked.prompt('build-2').includes('No test reads the file back.'), 'a carried finding placed in a reworked step is not owed again')
-    expect(/carried finding correctness-r1-1 is not reported addressed/.test(reworked.prompt('build-3')), 'a reworked step\'s carried finding was accepted without being addressed again')
+    expect(/carried finding runtime-r1-1 is not reported addressed/.test(reworked.prompt('build-3')), 'a reworked step\'s carried finding was accepted without being addressed again')
   }],
 
   ['T2zd', 'every path a gate or a module matches lies under the code paths, which the probe and the builder keep clean', async ({ expect }) => {
@@ -1223,27 +1223,27 @@ const T2 = [
   }],
 
   ['T2zf', 'a revision that changes a decision re-runs the lenses that grade a decision\'s rank, told what changed; one that changes none does not', async ({ expect }) => {
-    const failing = { 'critic:correctness:r1': critic('correctness', [failingOn('d1')]) }
+    const failing = { 'critic:runtime:r1': critic('runtime', [failingOn('d1')]) }
     const round2 = r => r.labels.filter(l => l.endsWith(':r2')).sort().join(' ')
     const changed = await run({ respond: respondWith({ ...failing, 'plan:revise-1': (n, p) => ({ ...defaultFor('plan:revise-1', p, {}), changed_decisions: ['d1'] }) }) })
-    expect(round2(changed) === 'critic:claims:r2 critic:consistency:r2 critic:correctness:r2 critic:performance:r2', `after a changed decision, round 2 ran: ${round2(changed)}`)
-    expect(/Revision 1 changed: d1\. See every edit/.test(changed.prompt('critic:performance:r2')), 'the re-run performance lens is not told the changed decision')
+    expect(round2(changed) === 'critic:consistency:r2 critic:evidence:r2 critic:runtime:r2', `after a changed decision, round 2 ran: ${round2(changed)}`)
+    expect(/Revision 1 changed: d1\. See every edit/.test(changed.prompt('critic:runtime:r2')), 'the re-run runtime lens is not told the changed decision')
     const unchanged = await run({ respond: respondWith(failing) })
-    expect(round2(unchanged) === 'critic:consistency:r2 critic:correctness:r2', `after no changed decision, round 2 ran: ${round2(unchanged)}`)
+    expect(round2(unchanged) === 'critic:consistency:r2 critic:runtime:r2', `after no changed decision, round 2 ran: ${round2(unchanged)}`)
   }],
 
-  ['T2zg', 'the builder, the fixer and the reviewer are told the hot paths and the performance lens\'s addendum as the performance rules', async ({ expect }) => {
+  ['T2zg', 'the builder, the fixer and the reviewer are told the hot paths and the runtime lens\'s addendum as the runtime rules', async ({ expect }) => {
     const rules = 'No allocation in a request.'
-    const lenses = { ...FIXTURE.lenses, performance: { ...FIXTURE.lenses.performance, addendum: rules } }
+    const lenses = { ...FIXTURE.lenses, runtime: { ...FIXTURE.lenses.runtime, addendum: rules } }
     const respond = respondWith({ accept: (n, prompt) => review(prompt, n === 1 ? 'partial' : 'met') })
     const r = await run({ args: withProfile({ lenses }), respond })
     for (const label of ['build', 'fix', 'accept', 'accept-2']) {
-      expect(r.prompt(label).includes(`Hot paths: per request. The project's performance rules: ${rules}`), `${label} is not told the hot paths and the performance rules`)
+      expect(r.prompt(label).includes(`Hot paths: per request. The project's runtime rules: ${rules}`), `${label} is not told the hot paths and the runtime rules`)
     }
     expect(/On a hot path, add none of the costs these rules name unless the plan's decision/.test(r.prompt('build')), 'the builder is not told to add none of the costs')
     expect(/On a hot path, a fix adds none of the costs these rules name/.test(r.prompt('fix')), 'the fixer is not told to add none of the costs')
-    const none = await run({ respond })
-    expect(['build', 'fix', 'accept'].every(l => !/performance rules|On a hot path/.test(none.prompt(l))), 'a profile with no performance addendum was told rules')
+    const none = await run({ args: withProfile({ lenses: { ...FIXTURE.lenses, runtime: {} } }), respond })
+    expect(['build', 'fix', 'accept'].every(l => !/runtime rules|On a hot path/.test(none.prompt(l))), 'a profile with no runtime addendum was told rules')
   }],
 ]
 
