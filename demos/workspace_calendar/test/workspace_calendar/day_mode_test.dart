@@ -11,19 +11,19 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api_source.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
-import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
-import 'package:workspace_calendar/workspace_calendar/week_strip.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
-import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
-import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/day_list.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_harness.dart';
@@ -203,7 +203,6 @@ Future<void> pumpGrid(
           data: harborCalendarTheme,
           child: TimedGrid(
             store: shown,
-            settings: settings,
             firstDay: today,
             dayCount: 1,
             selectedDay: today,
@@ -212,6 +211,14 @@ Future<void> pumpGrid(
             onSelectDay: (day) {},
             onOpenItem: (id) {},
             onCreate: (range) async {},
+            editable: settings.editing,
+            lockPast: settings.lockPast,
+            lockEarlierToday: settings.lockEarlierToday,
+            weekdays: settings.weekdays,
+            hours: settings.hours,
+            hourLabelFormat: settings.hourLabelFormat,
+            minDayWidth: settings.minDayWidth,
+            minSlotHeight: settings.minSlotHeight,
             showsDayHeader: false,
           ),
         ),

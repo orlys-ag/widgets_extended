@@ -8,12 +8,15 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_settings.dart';
+import '../../board/board.dart';
+import '../dates/calendar_dates.dart';
+import '../dates/calendar_labels.dart';
+import '../entries/calendar_entry.dart';
+import '../presentation/calendar_builders.dart';
+import '../presentation/calendar_defaults.dart';
+import '../presentation/calendar_theme.dart';
+import '../store/calendar_store.dart';
 import 'day_cell.dart';
 import 'pinch_zoom.dart';
 
@@ -544,6 +547,17 @@ Int32List monthDayLanesOf<T>(
   return days;
 }
 
+/// How Month lays out a week whose chips need more lanes than its share
+/// of the board's height holds.
+enum MonthLayout {
+  /// The week grows to hold every chip, and the month scrolls.
+  showAll,
+
+  /// Every week keeps its share of the board's height, so the month fits
+  /// on the screen; a day shows the chips that fit and how many it hides.
+  fitScreen,
+}
+
 /// The month of [grid] on the board, under the letters of its weekdays,
 /// showing what [store] shows for its days.
 ///
@@ -601,10 +615,10 @@ Int32List monthDayLanesOf<T>(
 /// reporting through [onZoom] the week scale and the least day width it
 /// zooms to, from the scale and the width the board shows: a pinch up and
 /// down the week scale, from 1 to [maxMonthWeekScale], and one across the
-/// day width, within the widths the settings offer. A new scale or width
-/// a pinch brings does not scroll to the selected day. While two fingers
-/// are down the board does not scroll, and a tap or a long press of
-/// fingers that pinched does nothing.
+/// day width, from [minDayWidthLow] to [minDayWidthHigh]. A new scale or
+/// width a pinch brings does not scroll to the selected day. While two
+/// fingers are down the board does not scroll, and a tap or a long press
+/// of fingers that pinched does nothing.
 ///
 /// A bar's content, the loading and the failure state are what their
 /// builders draw, the module's defaults where they are null.

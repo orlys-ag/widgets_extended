@@ -11,14 +11,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/calendar/policy/overlap.dart';
-import 'package:widgets_extended/widgets_extended.dart';
 
-import 'calendar_settings.dart';
-import 'history_lock.dart';
+import '../../board/board.dart';
+import '../dates/calendar_dates.dart';
+import '../dates/calendar_labels.dart';
+import '../entries/calendar_entry.dart';
+import '../policy/history_lock.dart';
+import '../policy/overlap.dart';
+import '../presentation/calendar_builders.dart';
+import '../presentation/calendar_defaults.dart';
+import '../presentation/calendar_theme.dart';
+import '../store/calendar_store.dart';
 import 'pinch_zoom.dart';
 
 const double _headerHeight = 40.0;
@@ -682,15 +685,15 @@ CreateRange createRangeOver(
   );
 }
 
-/// The days of the [dayCount] from [firstDay] whose weekday [settings]
-/// show, on the board, over the hours they choose, showing what [store]
-/// shows for them once the store's shown range holds them all, read. A
+/// The days of the [dayCount] from [firstDay] whose weekday [weekdays]
+/// holds, on the board, over its [hours], showing what [store] shows for
+/// them once the store's shown range holds them all, read. A
 /// tap on a block that is not pending reports [onOpenItem]; a tap on a
 /// day header reports [onSelectDay]. Each block's content is what
 /// [blockBuilder] draws, told on a grid of one day column that the block
 /// is detailed.
 ///
-/// In edit mode, which [settings] choose, a long press on an item lifts it
+/// In edit mode, which [editable] turns on, a long press on an item lifts it
 /// to move and selects its block; a tap anywhere but on the selected
 /// block, its item leaving the grid, or edit mode ending clears the
 /// selection. Only the selected block has resize handles, over an outline:
@@ -699,9 +702,10 @@ CreateRange createRangeOver(
 /// side of the edge, where a pill lies across it. A touch drag from
 /// another block's edge scrolls the grid as one anywhere else does. Out of
 /// edit mode the grid is read-only: no block moves or resizes, and an
-/// empty slot creates nothing. In it the history lock [settings] choose
-/// holds too ([HistoryLock]): a block whose item ended before the lock's
-/// boundary takes no drag, one in progress neither moves nor has a top
+/// empty slot creates nothing. In it the history lock [lockPast] and
+/// [lockEarlierToday] choose holds too ([HistoryLock]): a block whose item
+/// ended before the lock's boundary takes no drag, one in progress neither
+/// moves nor has a top
 /// handle, a long press selecting it, no move or resize lands an item, and
 /// no create gesture starts or reaches, before the boundary.
 /// A move dropped onto another item's time lands at the nearest free time
@@ -714,12 +718,12 @@ CreateRange createRangeOver(
 /// holds in its day's column, and the grid opens scrolled to the hour before it
 /// when it shows that day, at 08:00 otherwise, with that hour's label whole
 /// below the top edge. Each whole hour, and the start and the end of the hours,
-/// has a label centred on its line in the hour gutter, in the format [settings]
-/// choose, which a room above the first slot and below the last, or the gutter
+/// has a label centred on its line in the hour gutter, in [hourLabelFormat],
+/// which a room above the first slot and below the last, or the gutter
 /// beside a row counting items outside the hours, keeps whole. An
 /// item reaching past the hours shows the part inside them, its block's details
 /// telling its builder which ends the hours cut, and takes no move or resize:
-/// its form changes it. An item wholly
+/// only an edit outside the grid changes it. An item wholly
 /// outside them has no block. While some are before the hours, a yellow row
 /// frozen against the first slot, in place of the room above it, says "+N
 /// more" in the column of each day with N of them, and while some are after
@@ -735,15 +739,16 @@ CreateRange createRangeOver(
 /// [onCreate] opens closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
-/// smaller than the least sizes [settings] choose; past those, it scrolls.
+/// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
 /// A pinch of two fingers zooms the grid around the point between them,
 /// reporting through [onZoom] the least sizes it zooms to, from the sizes
-/// the grid shows, within the sizes the settings offer: a pinch up and
-/// down the slot height, and one across, on more than one day column, the
-/// day width. While two fingers are down the grid does not scroll, and a
-/// finger that pinched clears no selection when it lifts off the selected
-/// block. No pinch starts while a block moves or resizes or a create range
-/// runs.
+/// the grid shows: a pinch up and down the slot height, from
+/// [minSlotHeightLow] to [minSlotHeightHigh], and one across, on more than
+/// one day column, the day width, from [minDayWidthLow] to
+/// [minDayWidthHigh]. While two fingers are down the grid does not scroll,
+/// and a finger that pinched clears no selection when it lifts off the
+/// selected block. No pinch starts while a block moves or resizes or a
+/// create range runs.
 ///
 /// While its days are not ready a cover over the grid takes every press,
 /// centring what [loadingBuilder] draws while they are read, and what
@@ -757,7 +762,6 @@ class TimedGrid<T> extends StatefulWidget {
   const TimedGrid({
     super.key,
     required this.store,
-    required this.settings,
     required this.firstDay,
     required this.dayCount,
     required this.selectedDay,
@@ -766,13 +770,29 @@ class TimedGrid<T> extends StatefulWidget {
     required this.onSelectDay,
     required this.onOpenItem,
     required this.onCreate,
+    this.editable = false,
+    this.lockPast = false,
+    this.lockEarlierToday = false,
+    this.weekdays = WeekdaySet.all,
+    this.hours = DayHours.allDay,
+    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
+    this.minDayWidth = minDayWidthLow,
+    this.minSlotHeight = defaultMinSlotHeight,
     this.onZoom,
     this.maxDayCount,
     this.showsDayHeader = true,
     this.blockBuilder,
     this.loadingBuilder,
     this.failureBuilder,
-  }) : assert(dayCount >= 1);
+  }) : assert(dayCount >= 1),
+       assert(
+         minDayWidth > 0.0 && minDayWidth < double.infinity,
+         "A TimedGrid's minDayWidth must be positive and finite.",
+       ),
+       assert(
+         minSlotHeight > 0.0 && minSlotHeight < double.infinity,
+         "A TimedGrid's minSlotHeight must be positive and finite.",
+       );
 
   final CalendarStore<T> store;
 
@@ -781,16 +801,12 @@ class TimedGrid<T> extends StatefulWidget {
   /// day. Fixed for the grid's life.
   final bool showsDayHeader;
 
-  /// Whether the grid is in edit mode, how far its history lock holds, the
-  /// weekdays and the hours it shows, the format of its hour labels and the
-  /// least size of its cells. At least one day of the range must fall on a
-  /// shown weekday.
-  final CalendarSettings settings;
-
   /// The first day of the range the grid shows.
   final DateTime firstDay;
 
-  /// How many days the range holds.
+  /// How many days the range holds. With [weekdays] it decides whether the
+  /// grid shows one day column or more than one, which is fixed for the
+  /// grid's life: give a grid that changes between them its own key.
   final int dayCount;
 
   final DateTime selectedDay;
@@ -799,7 +815,8 @@ class TimedGrid<T> extends StatefulWidget {
   final DateTime today;
 
   /// The current time, which its owner sets again at the start of each
-  /// minute. The grid follows it without a rebuild from above.
+  /// minute. The line marking it follows it without a rebuild from above;
+  /// the history lock does not ([lockEarlierToday]).
   final ValueListenable<DateTime> now;
 
   final ValueChanged<DateTime> onSelectDay;
@@ -809,9 +826,52 @@ class TimedGrid<T> extends StatefulWidget {
   /// picked, and completes when it closes.
   final Future<void> Function(CreateRange range) onCreate;
 
+  /// Whether the grid is in edit mode: its blocks move and resize, and its
+  /// empty slots take a create gesture. Out of it the grid is read-only,
+  /// and no history lock holds.
+  final bool editable;
+
+  /// Whether, in edit mode, the history lock holds the days before
+  /// [today] ([HistoryLock.of]).
+  final bool lockPast;
+
+  /// Whether, in edit mode and under [lockPast], the history lock holds
+  /// [today] up to the minute [now] holds too ([HistoryLock.of]). The grid
+  /// makes its lock only when it is built, so the lock's boundary moves
+  /// with [now] only when the grid is built again: its owner builds it
+  /// again each minute the boundary moves.
+  final bool lockEarlierToday;
+
+  /// The weekdays whose days the grid shows. At least one day of the range
+  /// must fall on a shown weekday. With [dayCount] it decides whether the
+  /// grid shows one day column or more than one, which is fixed for the
+  /// grid's life: give a grid that changes between them its own key.
+  final WeekdaySet weekdays;
+
+  /// The hours the grid shows and its gestures schedule in, one row per
+  /// slot.
+  final DayHours hours;
+
+  /// The format the hour gutter labels the times in.
+  final HourLabelFormat hourLabelFormat;
+
+  /// The least width of a day column, in logical pixels, positive and
+  /// finite; the columns stretch past it to fill the grid. A pinch across
+  /// reports through [onZoom] a width from [minDayWidthLow] to
+  /// [minDayWidthHigh], so it moves a value outside them into them at its
+  /// first report.
+  final double minDayWidth;
+
+  /// The least height of one slot, in logical pixels, positive and finite;
+  /// the slots stretch past it to fill the grid. A pinch up and down
+  /// reports through [onZoom] a height from [minSlotHeightLow] to
+  /// [minSlotHeightHigh], so it moves a value outside them into them at
+  /// its first report.
+  final double minSlotHeight;
+
   /// Reports the least slot height and day width a pinch zooms to, which
-  /// the grid shows once [settings] bring them; null for a grid no pinch
-  /// zooms.
+  /// the grid shows once its owner builds it with them as [minSlotHeight]
+  /// and [minDayWidth]; null for a grid no pinch zooms.
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
 
   /// The most days a drop may give an item, which it refuses past them;
@@ -967,11 +1027,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   );
 
   static HistoryLock _lockOf<T>(TimedGrid<T> widget) {
-    if (!widget.settings.editing) {
+    if (!widget.editable) {
       return HistoryLock.none;
     }
     return HistoryLock.of(
-      widget.settings,
+      lockPast: widget.lockPast,
+      lockEarlierToday: widget.lockEarlierToday,
       today: widget.today,
       now: widget.now.value,
     );
@@ -1015,13 +1076,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The extents the axes were last given and the tracks they were given
   /// for. [_fitAxes] replaces an axis only when one of these changes.
-  late double _dayWidth = widget.settings.minDayWidth;
-  late double _slotHeight = widget.settings.minSlotHeight;
+  late double _dayWidth = widget.minDayWidth;
+  late double _slotHeight = widget.minSlotHeight;
   late int _columnCount = _tracks.columnCount;
   late DayHours _rowHours = _tracks.hours;
   double _rowRoom = _initialLabelRoom;
   late _Notices _rowNotices = _notices;
-  late HourLabelFormat _rowFormat = widget.settings.hourLabelFormat;
+  late HourLabelFormat _rowFormat = widget.hourLabelFormat;
 
   /// The room above the first slot and below the last: half an hour label
   /// and the gap beside it, so the labels centred on the first and the
@@ -1173,7 +1234,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       "that changes it its own key.",
     );
     _tracks = tracks;
-    if (!widget.settings.editing) {
+    if (!widget.editable) {
       _selectedBlock.value = null;
     }
     _lock.value = _lockOf(widget);
@@ -1193,7 +1254,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     // land on.
     final size = _size;
     if (size != null &&
-        (tracksChanged || widget.settings != oldWidget.settings)) {
+        (tracksChanged ||
+            widget.editable != oldWidget.editable ||
+            widget.lockPast != oldWidget.lockPast ||
+            widget.lockEarlierToday != oldWidget.lockEarlierToday ||
+            widget.weekdays != oldWidget.weekdays ||
+            widget.hours != oldWidget.hours ||
+            widget.hourLabelFormat != oldWidget.hourLabelFormat ||
+            widget.minDayWidth != oldWidget.minDayWidth ||
+            widget.minSlotHeight != oldWidget.minSlotHeight)) {
       _fitAxes(size);
     }
     if (storeChanged || tracksChanged) {
@@ -1207,8 +1276,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final tracks = GridTracks(
       firstDay: dayNumber(widget.firstDay),
       dayCount: widget.dayCount,
-      weekdays: widget.settings.weekdays,
-      hours: widget.settings.hours,
+      weekdays: widget.weekdays,
+      hours: widget.hours,
       // The day header, then the room above the first slot or the row
       // counting the items before the hours.
       firstSlotRow: (widget.showsDayHeader ? 1 : 0) + 1,
@@ -1314,7 +1383,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _rowHours = _tracks.hours;
     _rowRoom = _labelRoom;
     _rowNotices = _notices;
-    _rowFormat = widget.settings.hourLabelFormat;
+    _rowFormat = widget.hourLabelFormat;
     _board.rows = _rowsConfig();
   }
 
@@ -1344,7 +1413,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [_tracks] shows. The `laneExtent` makes the day axis the
   /// lane axis, so items sharing a day's time sit side by side. No two
   /// stored items do, but a failed move can return an item under another
-  /// item's pending move until the API refuses that one.
+  /// item's pending move until the store refuses that one.
   BoardAxisConfig _columnsConfig() {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
@@ -1357,8 +1426,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The day columns across [size]'s width and the slot rows down its
-  /// height, each stretched to fill it and never smaller than the least
-  /// size the settings choose. Called from the layout callback, so the
+  /// height, each stretched to fill it and never smaller than
+  /// [TimedGrid.minDayWidth] and [TimedGrid.minSlotHeight]. Called from the
+  /// layout callback, so the
   /// first frame lays the board out at its size, and from
   /// [didUpdateWidget] at the last size, so new tracks reach the board in
   /// the build that places items on them.
@@ -1371,13 +1441,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _size = size;
     final oldRows = _board.rows;
     final oldColumns = _board.columns;
-    final settings = widget.settings;
     final dayWidth = math.max(
-      settings.minDayWidth,
+      widget.minDayWidth,
       _share(size.width - _gutterWidth, _tracks.columnCount),
     );
     final slotHeight = math.max(
-      settings.minSlotHeight,
+      widget.minSlotHeight,
       _share(
         size.height - _headerExtent - _edgeAbove - _edgeBelow,
         _tracks.rowCount,
@@ -1392,7 +1461,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _tracks.hours != _rowHours ||
         _labelRoom != _rowRoom ||
         _notices != _rowNotices ||
-        settings.hourLabelFormat != _rowFormat) {
+        widget.hourLabelFormat != _rowFormat) {
       _slotHeight = slotHeight;
       _replaceRows();
     }
@@ -1443,9 +1512,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Reports through [TimedGrid.onZoom] the least size the pinch zooms its
-  /// axis to, its scale times the size shown at its start, within the
-  /// sizes the settings offer, and notes where its fingers meet for the
-  /// fit that follows. On one day column a pinch across zooms nothing.
+  /// axis to, its scale times the size shown at its start, from
+  /// [minSlotHeightLow] to [minSlotHeightHigh] or from [minDayWidthLow] to
+  /// [minDayWidthHigh], and notes where its fingers meet for the fit that
+  /// follows. On one day column a pinch across zooms nothing.
   void _pinchTo(PinchUpdate update) {
     final from = _pinchFrom;
     final onZoom = widget.onZoom;
@@ -1453,9 +1523,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (from == null || onZoom == null || viewport == null) {
       return;
     }
-    final settings = widget.settings;
-    var slot = settings.minSlotHeight;
-    var day = settings.minDayWidth;
+    var slot = widget.minSlotHeight;
+    var day = widget.minDayWidth;
     switch (update.axis) {
       case PinchAxis.vertical:
         slot = (from.slot * update.scale).clamp(
@@ -1468,7 +1537,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         }
         day = (from.day * update.scale).clamp(minDayWidthLow, minDayWidthHigh);
     }
-    if (slot == settings.minSlotHeight && day == settings.minDayWidth) {
+    if (slot == widget.minSlotHeight && day == widget.minDayWidth) {
       return;
     }
     _pinchFocal = viewport.globalToLocal(update.focal);
@@ -1936,7 +2005,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _pressesOff[event.pointer] = (at: event.position, id: selected);
       }
     }
-    if (!widget.settings.editing || !_admits(event.position)) {
+    if (!widget.editable || !_admits(event.position)) {
       return;
     }
     _tap.addPointer(event);
@@ -2164,7 +2233,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         hidden: _hiddenCount,
         column: cell.col,
         above: above,
-        format: widget.settings.hourLabelFormat,
+        format: widget.hourLabelFormat,
       );
     }
     if (cell.col == 0) {
@@ -2190,7 +2259,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// the foreground paints on its top and bottom lines, or null where it
   /// paints none.
   String? _gutterLabelOf(int row) {
-    final format = widget.settings.hourLabelFormat;
+    final format = widget.hourLabelFormat;
     final labels = <String>[
       if (_GridForegroundPainter.labelsRow(_tracks, row))
         hourLabel(_tracks.minuteAt(row), format),
@@ -2275,7 +2344,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _hourLabels.update(
       labelStyle,
       MediaQuery.textScalerOf(context),
-      widget.settings.hourLabelFormat,
+      widget.hourLabelFormat,
     );
     _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
     final landingText = _landingText();
@@ -2310,7 +2379,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             reachAbove: _notices.above ? _noticeHeight : 0.0,
             reachBelow: _notices.below ? _noticeHeight : 0.0,
           ),
-          drag: widget.settings.editing ? _editConfig : _viewConfig,
+          drag: widget.editable ? _editConfig : _viewConfig,
           // The grid scrolls on its own, not with the screen's primary
           // scroll controller.
           primary: false,

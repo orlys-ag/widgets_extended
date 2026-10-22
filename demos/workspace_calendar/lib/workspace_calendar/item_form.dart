@@ -12,14 +12,15 @@ import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/policy/history_lock.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
 import 'calendar_api.dart';
 import 'calendar_api_source.dart';
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
+import 'calendar_settings.dart';
 import 'harbor_theme.dart';
-import 'history_lock.dart';
-import 'timed_grid.dart';
 
 /// Asks for a type, then opens the form for a new item of it over the
 /// slots [range] picked, whose Save the history [lock] that holds then
@@ -317,7 +318,8 @@ class _ItemFormState extends State<_ItemForm> {
     final json = _envelope();
     var errors = validateItemJson(json);
     if (errors.isEmpty) {
-      errors = widget.lock().errorsOf(
+      errors = lockErrorsOf(
+        widget.lock(),
         _isDraft ? null : widget.item.time,
         itemFromJson(json).time,
       );

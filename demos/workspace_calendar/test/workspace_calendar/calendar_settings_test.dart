@@ -3,6 +3,9 @@
 library;
 
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -121,31 +124,6 @@ void main() {
     });
   });
 
-  group("C7 hourLabel", () {
-    test("names a minute as clockLabel does in 24-hour", () {
-      const format = HourLabelFormat.twentyFourHour;
-      expect(hourLabel(0, format), "00:00");
-      expect(hourLabel(13 * 60, format), "13:00");
-      expect(hourLabel(8 * 60 + 15, format), "08:15");
-      expect(hourLabel(24 * 60, format), "24:00");
-    });
-
-    test("names the hour and the half of the day in AM/PM, with minutes "
-        "where there are some", () {
-      const format = HourLabelFormat.twelveHour;
-      expect(hourLabel(0, format), "12 AM");
-      expect(hourLabel(60, format), "1 AM");
-      expect(hourLabel(9 * 60, format), "9 AM");
-      expect(hourLabel(11 * 60, format), "11 AM");
-      expect(hourLabel(12 * 60, format), "12 PM");
-      expect(hourLabel(13 * 60, format), "1 PM");
-      expect(hourLabel(22 * 60, format), "10 PM");
-      expect(hourLabel(24 * 60, format), "12 AM");
-      expect(hourLabel(8 * 60 + 15, format), "8:15 AM");
-      expect(hourLabel(12 * 60 + 5, format), "12:05 PM");
-    });
-  });
-
   group("C8 CalendarSettings hour label format", () {
     test("starts on 24-hour and takes part in copyWith and ==", () {
       const settings = CalendarSettings();
@@ -181,11 +159,6 @@ void main() {
         settings.copyWith(minSlotHeight: minSlotHeightHigh).monthWeekScale,
         3.0,
       );
-    });
-
-    test("is at most maxMonthWeekScale, the most slot height over the "
-        "default", () {
-      expect(maxMonthWeekScale, 3.0);
     });
 
     test("withMonthWeekScale sets the slot height the scale reads, and at 1 "

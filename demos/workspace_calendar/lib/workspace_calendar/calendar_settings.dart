@@ -4,14 +4,22 @@
 /// and schedules in, how the timed grid labels its hours, how Month fits
 /// its weeks, the least width of a day in Week, Day and Month, and the
 /// least height of the timed grid's slots, which also scales the height
-/// of Month's weeks.
+/// of Month's weeks. Beside them: the field errors, keyed as
+/// `validateItemJson` keys them, of an item outside the calendar's hours,
+/// [hoursErrorsOf], and of one the history lock refuses, [lockErrorsOf];
+/// and the names of Month's layouts in the settings sheet,
+/// [MonthLayoutLabel].
 library;
 
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/policy/history_lock.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 
 /// The field errors of an item from [start] to [end] minutes that does not
 /// lie in [hours], keyed as `validateItemJson` keys them: the start when it
@@ -30,85 +38,51 @@ Map<String, String> hoursErrorsOf(int start, int end, DayHours hours) {
   };
 }
 
-/// The least day width the settings offer, which is the grid's default.
-const double minDayWidthLow = 44.0;
+/// The item form's errors for [to], a change of the stored [from] or,
+/// where [from] is null, a new item, which [lock] refuses, keyed as
+/// `validateItemJson` keys them; empty where [lock] admits it.
+Map<String, String> lockErrorsOf(
+  HistoryLock lock,
+  CalendarEntryTime? from,
+  CalendarEntryTime to,
+) {
+  final boundary = lock.boundary;
+  if (boundary == null || (from != null && lock.admits(from, to))) {
+    return const <String, String>{};
+  }
+  if (from == null || lock.holdOf(from) == ItemHold.free) {
+    if (HistoryLock.startOf(to) >= boundary) {
+      return const <String, String>{};
+    }
+    if (to.firstDay < boundary ~/ minutesPerDay) {
+      return const <String, String>{"day": "Past days are locked."};
+    }
+    return const <String, String>{
+      "startMinute": "The start can't be in the past.",
+    };
+  }
+  if (lock.holdOf(from) == ItemHold.locked) {
+    return const <String, String>{"day": "Past items are locked."};
+  }
+  return <String, String>{
+    if (HistoryLock.startOf(to) != HistoryLock.startOf(from))
+      "startMinute": "An item in progress keeps its start.",
+    if (HistoryLock.endOf(to) <= boundary)
+      "endMinute": "The end can't be in the past.",
+  };
+}
 
-/// The most day width the settings offer.
-const double minDayWidthHigh = 240.0;
-
-/// The least slot height the settings offer.
-const double minSlotHeightLow = 8.0;
-
-/// The most slot height the settings offer.
-const double minSlotHeightHigh = 48.0;
-
-/// The slot height the grid has before the settings change it.
-const double defaultMinSlotHeight = 16.0;
-
-/// The most [CalendarSettings.monthWeekScale] the settings offer: the
-/// most slot height over its default.
-const double maxMonthWeekScale = minSlotHeightHigh / defaultMinSlotHeight;
-
-/// How Month lays out a week whose chips need more lanes than its share
-/// of the board's height holds.
-enum MonthLayout {
-  /// The week grows to hold every chip, and the month scrolls.
-  showAll("Show all items"),
-
-  /// Every week keeps its share of the board's height, so the month fits
-  /// on the screen; a day shows the chips that fit and how many it hides.
-  fitScreen("Fit to screen");
-
-  const MonthLayout(this.label);
-
+/// The names of Month's layouts in the settings sheet.
+extension MonthLayoutLabel on MonthLayout {
   /// The layout's name in the settings sheet.
-  final String label;
-}
-
-/// How the timed grid's hour gutter names the times it labels.
-enum HourLabelFormat {
-  /// "13:00", as [clockLabel] writes it.
-  twentyFourHour,
-
-  /// "1 PM", as [hourLabel] writes it.
-  twelveHour,
-}
-
-/// What the hour gutter names [minute] minutes after midnight with in
-/// [format]: [clockLabel]'s "13:00" in 24-hour, and in AM/PM the hour,
-/// its minutes where it has some, and the half of the day, as "1 PM" or
-/// "8:15 AM". Midnight, 1440 included, reads "12 AM" and noon "12 PM".
-String hourLabel(int minute, HourLabelFormat format) {
-  if (format == HourLabelFormat.twentyFourHour) {
-    return clockLabel(minute);
+  String get label {
+    switch (this) {
+      case MonthLayout.showAll:
+        return "Show all items";
+      case MonthLayout.fitScreen:
+        return "Fit to screen";
+    }
   }
-  final ofDay = minute % minutesPerDay;
-  final hour = ofDay ~/ 60;
-  final half = hour < 12 ? "AM" : "PM";
-  final shown = hour % 12 == 0 ? 12 : hour % 12;
-  final minutes = ofDay % 60;
-  if (minutes == 0) {
-    return "$shown $half";
-  }
-  return "$shown:${minutes.toString().padLeft(2, "0")} $half";
-}
-
-/// What a screen reader says for a count of [count] of [day]'s items
-/// before [minute], or after it when [above] is false, naming the minute
-/// in [format]: the timed grid's rows and Agenda's banners outside the
-/// hours alike.
-String hiddenRowLabel(
-  DateTime day,
-  int count,
-  int minute, {
-  required bool above,
-  required HourLabelFormat format,
-}) {
-  final date =
-      "${weekdayNames[weekdayColumn(day)]}, "
-      "${monthNames[day.month - 1]} ${day.day}";
-  final side = above ? "before" : "after";
-  return "$date, ${moreItemsLabel(count)} $side ${hourLabel(minute, format)}";
 }
 
 /// What the calendar bar and the settings sheet choose: whether the

@@ -5,6 +5,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';

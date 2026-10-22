@@ -6,11 +6,11 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
-import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
-import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 
 import 'calendar_harness.dart';
 

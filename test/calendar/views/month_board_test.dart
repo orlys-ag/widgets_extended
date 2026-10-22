@@ -1,33 +1,48 @@
-/// What Month's Fit to screen layout keeps of each week: how many lanes a
-/// week holds, which chips it shows, and how many chips each day hides.
+/// The month board: what its fit-to-screen layout keeps of each week (how
+/// many lanes a week holds, which chips it shows, and how many chips each
+/// day hides), the height a week rests at, the days that show cards, the
+/// bars an entry splits into, and a chip drawn again for a new payload.
 library;
 
 import 'dart:math' as math;
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/widgets_extended.dart';
+import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/month_board.dart';
+import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/store/calendar_store.dart';
+import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
 
-import 'calendar_harness.dart';
+typedef ShownItem = CalendarShownEntry<String>;
 
 /// April 2026, whose weeks start on March 30 and April 6, 13, 20 and 27.
 final MonthGrid grid = MonthGrid(2026, 4);
+
+/// The Monday of April 21 2026's week.
+final DateTime monday = DateTime(2026, 4, 20);
 
 DateTime april(int day) {
   return DateTime(2026, 4, day);
 }
 
-/// A task with the id [id] from [day] for [dayCount] days, an hour from
-/// [start] o'clock, as the calendar shows it.
+/// An entry with the id and title [id] from [day] for [dayCount] days, an
+/// hour from [start] o'clock, as the calendar shows it.
 ShownItem task(String id, DateTime day, int start, {int dayCount = 1}) {
-  final json = <String, Object?>{
-    ...taskJson(id, day, start * 60, (start + 1) * 60, dayCount: dayCount),
-    "id": id,
-  };
-  return ShownItem(itemFromJson(json), pending: false);
+  return ShownItem(
+    CalendarEntry<String>(
+      id: id,
+      day: day,
+      startMinute: start * 60,
+      endMinute: (start + 1) * 60,
+      dayCount: dayCount,
+      title: id,
+      color: const Color(0xFF336699),
+      payload: id,
+    ),
+    pending: false,
+  );
 }
 
 /// The index of [day]'s cell in [grid], as the hidden counts are indexed.
@@ -257,6 +272,64 @@ void main() {
           (placement.item.continuesBefore, placement.item.continuesAfter),
       ],
       <(bool, bool)>[(false, true), (true, false)],
+    );
+  });
+
+  testWidgets("BM8 a write that changes only an entry's payload runs its "
+      "chip builder again, which draws the new payload", (tester) async {
+    final day = DateTime(2026, 4, 21);
+    final note = CalendarEntry<String>(
+      id: "note-1",
+      day: day,
+      startMinute: 10 * 60,
+      endMinute: 11 * 60,
+      title: "Note",
+      color: const Color(0xFF336699),
+      payload: "first",
+    );
+    // The in-memory store applies a write within the call, so the payload
+    // changes with no pending state between.
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[note],
+    );
+    addTearDown(store.dispose);
+    final todayNotifier = ValueNotifier<DateTime>(day);
+    addTearDown(todayNotifier.dispose);
+    final calls = <CalendarShownEntry<String>>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MonthBoard<String>(
+          store: store,
+          grid: MonthGrid.of(day),
+          selectedDay: day,
+          today: todayNotifier,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: null,
+          onOpenItem: (id) {},
+          chipBuilder: (context, entry, details) {
+            calls.add(entry);
+            return Text(entry.entry.payload);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final bar = find.byKey(monthChipKey(monthSegmentKey("note-1", monday)));
+    expect(
+      find.descendant(of: bar, matching: find.text("first")),
+      findsOneWidget,
+    );
+    final before = calls.length;
+
+    await store.update(note.copyWith(payload: "second"));
+    await tester.pumpAndSettle();
+    expect(calls.length, before + 1);
+    expect(calls.last.pending, isFalse);
+    expect(calls.last.entry.payload, "second");
+    expect(
+      find.descendant(of: bar, matching: find.text("second")),
+      findsOneWidget,
     );
   });
 }

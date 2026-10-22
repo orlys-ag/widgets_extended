@@ -116,6 +116,14 @@ import 'package:flutter/rendering.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/policy/history_lock.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/day_list.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/month_picker.dart';
+import 'package:widgets_extended/calendar/views/month_strip.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_api_source.dart';
@@ -123,19 +131,11 @@ import 'workspace_calendar/calendar_bar.dart';
 import 'workspace_calendar/calendar_item.dart';
 import 'workspace_calendar/calendar_schema.dart';
 import 'workspace_calendar/calendar_settings.dart';
-import 'workspace_calendar/day_cell.dart';
-import 'workspace_calendar/day_list.dart';
 import 'workspace_calendar/harbor_theme.dart';
-import 'workspace_calendar/history_lock.dart';
 import 'workspace_calendar/item_builders.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
-import 'workspace_calendar/month_board.dart';
-import 'workspace_calendar/month_picker.dart';
-import 'workspace_calendar/month_strip.dart';
 import 'workspace_calendar/settings_sheet.dart';
-import 'workspace_calendar/timed_grid.dart';
-import 'workspace_calendar/week_strip.dart';
 
 enum _CalendarMode {
   agenda("Agenda"),
@@ -390,7 +390,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The history lock the settings choose when the clock reads [now].
   HistoryLock _lockAt(DateTime now) {
-    return HistoryLock.of(_settings, today: _todayAt(now), now: now);
+    return HistoryLock.of(
+      lockPast: _settings.lockPast,
+      lockEarlierToday: _settings.lockEarlierToday,
+      today: _todayAt(now),
+      now: now,
+    );
   }
 
   /// The history lock as it holds when called, which a form reads at Save.
@@ -1026,7 +1031,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                   days.count > 1 && _settings.weekdays.columns.length > 1,
                 )),
                 store: _store,
-                settings: _settings,
                 firstDay: days.first,
                 dayCount: days.count,
                 selectedDay: _selected,
@@ -1050,6 +1054,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                     ),
                   );
                 },
+                editable: _settings.editing,
+                lockPast: _settings.lockPast,
+                lockEarlierToday: _settings.lockEarlierToday,
+                weekdays: _settings.weekdays,
+                hours: _settings.hours,
+                hourLabelFormat: _settings.hourLabelFormat,
+                minDayWidth: _settings.minDayWidth,
+                minSlotHeight: _settings.minSlotHeight,
                 maxDayCount: maxDayCount,
                 // The week strip names Day's one day.
                 showsDayHeader: _mode != _CalendarMode.day,

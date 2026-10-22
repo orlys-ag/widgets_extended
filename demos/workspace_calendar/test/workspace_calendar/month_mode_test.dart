@@ -16,16 +16,16 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/day_list.dart';
+import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
-import 'package:workspace_calendar/workspace_calendar/day_cell.dart';
-import 'package:workspace_calendar/workspace_calendar/day_list.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
-import 'package:workspace_calendar/workspace_calendar/timed_grid.dart';
 
 import 'calendar_harness.dart';
 
