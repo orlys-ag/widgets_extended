@@ -14,13 +14,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
-import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
-import 'package:widgets_extended/widgets_extended.dart';
 
+import '../../sliver_tree/sliver_tree.dart';
+import '../dates/calendar_dates.dart';
+import '../dates/calendar_labels.dart';
+import '../policy/history_lock.dart';
+import '../presentation/calendar_builders.dart';
+import '../presentation/calendar_defaults.dart';
+import '../presentation/calendar_theme.dart';
+import '../store/calendar_store.dart';
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
