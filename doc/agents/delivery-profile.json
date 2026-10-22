@@ -75,7 +75,7 @@
         "^demos/workspace_calendar/"
       ],
       "guidance": [],
-      "vocabulary": "Demo vocabulary: demos/workspace_calendar is demo code on the library by path, never part of it: a CachingCalendarStore of the module over a CalendarApiSource, the demo's data source over a CalendarApi (the seeded MockCalendarApi), that shows a write pending until the API answers, a month grid of DayCell widgets, a DayList on a SyncedSliverTree, and a TimedGrid, a board of one row per 15-minute slot and one column per day with a frozen header and hour gutter, whose blocks move and resize through the board's drag."
+      "vocabulary": "Demo vocabulary: demos/workspace_calendar is demo code on the library by path, never part of it: an app that imports the calendar module's files directly and composes its views (MonthBoard, DayList, TimedGrid, the week and month strips and the month picker, all in lib/calendar/views/) in workspace_calendar_example.dart, with its own header, view switching, folding calendar card and Scaffold, over a CachingCalendarStore of the module on a CalendarApiSource, the demo's data source over a CalendarApi (the seeded MockCalendarApi). The demo owns its item types and schema, the JSON envelope and its validation, the item form, the entry builders (item_builders.dart), the Harbor theme values, CalendarSettings and the settings sheet, and the calendar bar."
     }
   },
   "gates": [
