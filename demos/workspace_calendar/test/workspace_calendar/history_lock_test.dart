@@ -42,12 +42,6 @@ final List<Map<String, Object?>> seed = <Map<String, Object?>>[
   taskJson("Later", today, 14 * 60, 15 * 60),
 ];
 
-const CalendarSettings pastLocked = CalendarSettings(lockPast: true);
-const CalendarSettings nowLocked = CalendarSettings(
-  lockPast: true,
-  lockEarlierToday: true,
-);
-
 CalendarEntryTime shape(DateTime day, int start, int end, {int dayCount = 1}) {
   return (firstDay: dayNumber(day), dayCount: dayCount, start: start, end: end);
 }
@@ -179,24 +173,36 @@ void main() {
         "rounded up to a whole minute", () {
       expect(
         HistoryLock.of(
-          const CalendarSettings(lockEarlierToday: true),
+          lockPast: false,
+          lockEarlierToday: true,
           today: today,
           now: midMorning,
         ),
         HistoryLock.none,
       );
       expect(
-        HistoryLock.of(pastLocked, today: today, now: midMorning).boundary,
+        HistoryLock.of(
+          lockPast: true,
+          lockEarlierToday: false,
+          today: today,
+          now: midMorning,
+        ).boundary,
         dayNumber(today) * minutesPerDay,
       );
       expect(
-        HistoryLock.of(nowLocked, today: today, now: midMorning).boundary,
+        HistoryLock.of(
+          lockPast: true,
+          lockEarlierToday: true,
+          today: today,
+          now: midMorning,
+        ).boundary,
         dayNumber(today) * minutesPerDay + 11 * 60 + 7,
       );
       // A minute part of which has passed is past.
       expect(
         HistoryLock.of(
-          nowLocked,
+          lockPast: true,
+          lockEarlierToday: true,
           today: today,
           now: DateTime(2026, 4, 21, 11, 7, 30),
         ).boundary,
@@ -206,7 +212,12 @@ void main() {
 
     test("K2 an item starting at the boundary is free, one ending after it "
         "started, and one ending at it locked, across days too", () {
-      final lock = HistoryLock.of(nowLocked, today: today, now: midMorning);
+      final lock = HistoryLock.of(
+        lockPast: true,
+        lockEarlierToday: true,
+        today: today,
+        now: midMorning,
+      );
       expect(lock.holdOf(shape(today, 11 * 60 + 7, 12 * 60)), ItemHold.free);
       expect(lock.holdOf(shape(today, 10 * 60, 11 * 60 + 8)), ItemHold.started);
       expect(lock.holdOf(shape(today, 10 * 60, 11 * 60 + 7)), ItemHold.locked);
@@ -220,7 +231,12 @@ void main() {
     test("K3 a free item may not start before the boundary, a started one "
         "keeps its start and ends after it, a locked one keeps its "
         "times", () {
-      final lock = HistoryLock.of(nowLocked, today: today, now: midMorning);
+      final lock = HistoryLock.of(
+        lockPast: true,
+        lockEarlierToday: true,
+        today: today,
+        now: midMorning,
+      );
       final later = shape(today, 14 * 60, 15 * 60);
       final running = shape(today, 10 * 60, 12 * 60);
       final ended = shape(today, 8 * 60, 9 * 60);
@@ -238,7 +254,12 @@ void main() {
 
     test("K4 a new item starts on the slot grid from the boundary on its "
         "day, anywhere on a later day and nowhere on an earlier one", () {
-      final lock = HistoryLock.of(nowLocked, today: today, now: midMorning);
+      final lock = HistoryLock.of(
+        lockPast: true,
+        lockEarlierToday: true,
+        today: today,
+        now: midMorning,
+      );
       expect(lock.earliestStartOn(today), 11 * 60 + 15);
       expect(lock.earliestStartOn(wednesday), 0);
       expect(lock.earliestStartOn(monday), minutesPerDay);
@@ -246,7 +267,8 @@ void main() {
       expect(lock.admitsStart(today, 11 * 60), isFalse);
       expect(
         HistoryLock.of(
-          pastLocked,
+          lockPast: true,
+          lockEarlierToday: false,
           today: today,
           now: midMorning,
         ).earliestStartOn(today),
@@ -257,26 +279,35 @@ void main() {
     test("K5 the form's errors name the day of a new item on a past day, "
         "the start of one before now, a started item's moved start and "
         "past end, and nothing the lock admits", () {
-      final lock = HistoryLock.of(nowLocked, today: today, now: midMorning);
+      final lock = HistoryLock.of(
+        lockPast: true,
+        lockEarlierToday: true,
+        today: today,
+        now: midMorning,
+      );
       final running = shape(today, 10 * 60, 12 * 60);
-      expect(lock.errorsOf(null, shape(monday, 9 * 60, 10 * 60)).keys, <String>[
-        "day",
-      ]);
-      expect(lock.errorsOf(null, shape(today, 9 * 60, 10 * 60)).keys, <String>[
-        "startMinute",
-      ]);
       expect(
-        lock.errorsOf(running, shape(today, 10 * 60 + 15, 11 * 60)).keys,
+        lockErrorsOf(lock, null, shape(monday, 9 * 60, 10 * 60)).keys,
+        <String>["day"],
+      );
+      expect(
+        lockErrorsOf(lock, null, shape(today, 9 * 60, 10 * 60)).keys,
+        <String>["startMinute"],
+      );
+      expect(
+        lockErrorsOf(lock, running, shape(today, 10 * 60 + 15, 11 * 60)).keys,
         <String>["startMinute", "endMinute"],
       );
-      expect(lock.errorsOf(running, shape(today, 10 * 60, 13 * 60)), isEmpty);
       expect(
-        lock
-            .errorsOf(
-              shape(today, 8 * 60, 9 * 60),
-              shape(today, 8 * 60, 9 * 60 + 15),
-            )
-            .keys,
+        lockErrorsOf(lock, running, shape(today, 10 * 60, 13 * 60)),
+        isEmpty,
+      );
+      expect(
+        lockErrorsOf(
+          lock,
+          shape(today, 8 * 60, 9 * 60),
+          shape(today, 8 * 60, 9 * 60 + 15),
+        ).keys,
         <String>["day"],
       );
     });

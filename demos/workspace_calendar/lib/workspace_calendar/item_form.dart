@@ -17,6 +17,7 @@ import 'calendar_api.dart';
 import 'calendar_api_source.dart';
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
+import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 import 'history_lock.dart';
 import 'timed_grid.dart';
@@ -317,7 +318,8 @@ class _ItemFormState extends State<_ItemForm> {
     final json = _envelope();
     var errors = validateItemJson(json);
     if (errors.isEmpty) {
-      errors = widget.lock().errorsOf(
+      errors = lockErrorsOf(
+        widget.lock(),
         _isDraft ? null : widget.item.time,
         itemFromJson(json).time,
       );

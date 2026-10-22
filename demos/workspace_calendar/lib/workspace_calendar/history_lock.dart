@@ -1,12 +1,10 @@
-/// The history lock the settings choose: what may change of the items
-/// before its boundary, the start of today, or the current minute of it.
+/// The history lock: what may change of the entries before its boundary,
+/// the start of today, or the current minute of it.
 library;
 
 import 'package:flutter/foundation.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-
-import 'calendar_settings.dart';
 
 /// How the history lock holds an item.
 enum ItemHold {
@@ -23,10 +21,9 @@ enum ItemHold {
   locked,
 }
 
-/// What [CalendarSettings.lockPast] and [CalendarSettings.lockEarlierToday]
-/// keep as it is: the items, and the time for new ones, before a boundary
-/// counted in minutes, a [dayNumber] times [minutesPerDay] plus the
-/// minutes into that day.
+/// What a history lock keeps as it is: the items, and the time for new
+/// ones, before a boundary counted in minutes, a [dayNumber] times
+/// [minutesPerDay] plus the minutes into that day.
 @immutable
 class HistoryLock {
   const HistoryLock._(this.boundary);
@@ -34,21 +31,21 @@ class HistoryLock {
   /// No lock: every item is free.
   static const HistoryLock none = HistoryLock._(null);
 
-  /// The lock [settings] choose on [today] at [now]: none without
-  /// [CalendarSettings.lockPast]; with it, the start of [today], or with
-  /// [CalendarSettings.lockEarlierToday] too, [now]'s time of day on
-  /// [today], rounded up to a whole minute, since a minute any part of
+  /// The lock on [today] at [now]: none without [lockPast]; with it, the
+  /// start of [today], or with [lockEarlierToday] too, [now]'s time of day
+  /// on [today], rounded up to a whole minute, since a minute any part of
   /// which has passed is past.
-  factory HistoryLock.of(
-    CalendarSettings settings, {
+  factory HistoryLock.of({
+    required bool lockPast,
+    required bool lockEarlierToday,
     required DateTime today,
     required DateTime now,
   }) {
-    if (!settings.lockPast) {
+    if (!lockPast) {
       return none;
     }
     var minute = 0;
-    if (settings.lockEarlierToday) {
+    if (lockEarlierToday) {
       final into = Duration(
         seconds: now.second,
         milliseconds: now.millisecond,
@@ -62,20 +59,22 @@ class HistoryLock {
   /// The minute before which items are held, or null without a lock.
   final int? boundary;
 
-  static int _startOf(CalendarEntryTime shape) {
-    return shape.firstDay * minutesPerDay + shape.start;
+  /// The minute [time] starts at, counted as [boundary] is.
+  static int startOf(CalendarEntryTime time) {
+    return time.firstDay * minutesPerDay + time.start;
   }
 
-  static int _endOf(CalendarEntryTime shape) {
-    return (shape.firstDay + shape.dayCount - 1) * minutesPerDay + shape.end;
+  /// The minute [time] ends at, counted as [boundary] is.
+  static int endOf(CalendarEntryTime time) {
+    return (time.firstDay + time.dayCount - 1) * minutesPerDay + time.end;
   }
 
   ItemHold holdOf(CalendarEntryTime shape) {
     final boundary = this.boundary;
-    if (boundary == null || _startOf(shape) >= boundary) {
+    if (boundary == null || startOf(shape) >= boundary) {
       return ItemHold.free;
     }
-    return _endOf(shape) > boundary ? ItemHold.started : ItemHold.locked;
+    return endOf(shape) > boundary ? ItemHold.started : ItemHold.locked;
   }
 
   /// Whether the item [from] may become [to]: a free one may not start
@@ -88,11 +87,11 @@ class HistoryLock {
     }
     switch (holdOf(from)) {
       case ItemHold.free:
-        return _startOf(to) >= boundary;
+        return startOf(to) >= boundary;
       case ItemHold.started:
-        return _startOf(to) == _startOf(from) && _endOf(to) > boundary;
+        return startOf(to) == startOf(from) && endOf(to) > boundary;
       case ItemHold.locked:
-        return _startOf(to) == _startOf(from) && _endOf(to) == _endOf(from);
+        return startOf(to) == startOf(from) && endOf(to) == endOf(from);
     }
   }
 
@@ -119,35 +118,6 @@ class HistoryLock {
       return minutesPerDay;
     }
     return (into + minutesPerSlot - 1) ~/ minutesPerSlot * minutesPerSlot;
-  }
-
-  /// The item form's errors for [to], a change of the stored [from] or,
-  /// where [from] is null, a new item, which the lock refuses, keyed as
-  /// `validateItemJson` keys them; empty where the lock admits it.
-  Map<String, String> errorsOf(CalendarEntryTime? from, CalendarEntryTime to) {
-    final boundary = this.boundary;
-    if (boundary == null || (from != null && admits(from, to))) {
-      return const <String, String>{};
-    }
-    if (from == null || holdOf(from) == ItemHold.free) {
-      if (_startOf(to) >= boundary) {
-        return const <String, String>{};
-      }
-      if (to.firstDay < boundary ~/ minutesPerDay) {
-        return const <String, String>{"day": "Past days are locked."};
-      }
-      return const <String, String>{
-        "startMinute": "The start can't be in the past.",
-      };
-    }
-    if (holdOf(from) == ItemHold.locked) {
-      return const <String, String>{"day": "Past items are locked."};
-    }
-    return <String, String>{
-      if (_startOf(to) != _startOf(from))
-        "startMinute": "An item in progress keeps its start.",
-      if (_endOf(to) <= boundary) "endMinute": "The end can't be in the past.",
-    };
   }
 
   @override

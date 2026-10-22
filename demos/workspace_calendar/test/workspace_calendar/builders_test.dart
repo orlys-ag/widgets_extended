@@ -1397,7 +1397,6 @@ void main() {
       MaterialApp(
         home: TimedGrid<String>(
           store: store,
-          settings: const CalendarSettings(),
           firstDay: day,
           dayCount: 1,
           selectedDay: day,

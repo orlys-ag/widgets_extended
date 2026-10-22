@@ -390,7 +390,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The history lock the settings choose when the clock reads [now].
   HistoryLock _lockAt(DateTime now) {
-    return HistoryLock.of(_settings, today: _todayAt(now), now: now);
+    return HistoryLock.of(
+      lockPast: _settings.lockPast,
+      lockEarlierToday: _settings.lockEarlierToday,
+      today: _todayAt(now),
+      now: now,
+    );
   }
 
   /// The history lock as it holds when called, which a form reads at Save.
@@ -1026,7 +1031,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                   days.count > 1 && _settings.weekdays.columns.length > 1,
                 )),
                 store: _store,
-                settings: _settings,
                 firstDay: days.first,
                 dayCount: days.count,
                 selectedDay: _selected,
@@ -1050,6 +1054,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
                     ),
                   );
                 },
+                editable: _settings.editing,
+                lockPast: _settings.lockPast,
+                lockEarlierToday: _settings.lockEarlierToday,
+                weekdays: _settings.weekdays,
+                hours: _settings.hours,
+                hourLabelFormat: _settings.hourLabelFormat,
+                minDayWidth: _settings.minDayWidth,
+                minSlotHeight: _settings.minSlotHeight,
                 maxDayCount: maxDayCount,
                 // The week strip names Day's one day.
                 showsDayHeader: _mode != _CalendarMode.day,
