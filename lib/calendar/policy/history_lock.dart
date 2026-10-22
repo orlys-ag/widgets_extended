@@ -7,29 +7,29 @@ import 'package:flutter/foundation.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 
-/// How the history lock holds an item.
+/// How the history lock holds an entry.
 enum ItemHold {
-  /// The item starts at the boundary or after it: it changes freely, but
+  /// The entry starts at the boundary or after it: it changes freely, but
   /// never to start before the boundary.
   free,
 
-  /// The item starts before the boundary and ends after it: only its end
+  /// The entry starts before the boundary and ends after it: only its end
   /// changes, never to the boundary or before it, and it is not deleted.
   started,
 
-  /// The item ends at the boundary or before it: nothing of it changes,
+  /// The entry ends at the boundary or before it: nothing of it changes,
   /// and it is not deleted.
   locked,
 }
 
-/// What a history lock keeps as it is: the items, and the time for new
+/// What a history lock keeps as it is: the entries, and the time for new
 /// ones, before a boundary counted in minutes, a [dayNumber] times
 /// [minutesPerDay] plus the minutes into that day.
 @immutable
 class HistoryLock {
   const HistoryLock._(this.boundary);
 
-  /// No lock: every item is free.
+  /// No lock: every entry is free.
   static const HistoryLock none = HistoryLock._(null);
 
   /// The lock on [today] at [now]: none without [lockPast]; with it, the
@@ -57,7 +57,7 @@ class HistoryLock {
     return HistoryLock._(dayNumber(today) * minutesPerDay + minute);
   }
 
-  /// The minute before which items are held, or null without a lock.
+  /// The minute before which entries are held, or null without a lock.
   final int? boundary;
 
   /// The minute [time] starts at, counted as [boundary] is.
@@ -78,7 +78,7 @@ class HistoryLock {
     return endOf(shape) > boundary ? ItemHold.started : ItemHold.locked;
   }
 
-  /// Whether the item [from] may become [to]: a free one may not start
+  /// Whether the entry [from] may become [to]: a free one may not start
   /// before the boundary, a started one keeps its start and ends after the
   /// boundary, and a locked one keeps its times.
   bool admits(CalendarEntryTime from, CalendarEntryTime to) {
@@ -96,14 +96,14 @@ class HistoryLock {
     }
   }
 
-  /// Whether a new item may start on [day] at [minute].
+  /// Whether a new entry may start on [day] at [minute].
   bool admitsStart(DateTime day, int minute) {
     final boundary = this.boundary;
     return boundary == null ||
         dayNumber(day) * minutesPerDay + minute >= boundary;
   }
 
-  /// The first minute of [day] on the [minutesPerSlot] grid a new item may
+  /// The first minute of [day] on the [minutesPerSlot] grid a new entry may
   /// start at: 0 on a day after the boundary's, and [minutesPerDay] on one
   /// before it, where none may.
   int earliestStartOn(DateTime day) {
