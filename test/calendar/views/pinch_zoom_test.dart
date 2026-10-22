@@ -275,6 +275,15 @@ void main() {
     expect(position.pixels, 300.0);
   });
 
+  test("PZ7 the size limits hold their values: day widths of 44 and 240, "
+      "slot heights of 8 and 48, and a default slot height of 16", () {
+    expect(minDayWidthLow, 44.0);
+    expect(minDayWidthHigh, 240.0);
+    expect(minSlotHeightLow, 8.0);
+    expect(minSlotHeightHigh, 48.0);
+    expect(defaultMinSlotHeight, 16.0);
+  });
+
   test("C9 maxMonthWeekScale is the most slot height over the default", () {
     expect(maxMonthWeekScale, 3.0);
   });
