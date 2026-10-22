@@ -1,7 +1,8 @@
 /// [CalendarThemeData]'s fields, among them the entry tint and pending
-/// opacities and the action label style the default builders read, its
-/// built-in values, value semantics, domains and diagnostics, and
-/// [CalendarTheme]'s lookup, notification and capture into a route.
+/// opacities and the action label style the default builders read and the
+/// timed grid's two shadows, its built-in values, value semantics, domains
+/// and diagnostics, and [CalendarTheme]'s lookup, notification and capture
+/// into a route.
 library;
 
 import 'dart:math' as math;
@@ -74,15 +75,19 @@ const List<String> styleNames = <String>[
   "actionLabelStyle",
 ];
 
+/// The two shadow fields, in the order the theme declares them.
+const List<String> shadowNames = <String>["gripShadows", "liftedBlockShadows"];
+
 /// Every field: the colours, the ring width, the dragged block's, the entry
-/// tint's and the pending entry's opacities, the motion, the icons and the
-/// text styles.
+/// tint's and the pending entry's opacities, the shadows, the motion, the
+/// icons and the text styles.
 const List<String> fieldNames = <String>[
   ...colourNames,
   "todayRingWidth",
   "draggedBlockOpacity",
   "entryTintOpacity",
   "pendingEntryOpacity",
+  ...shadowNames,
   "motionDuration",
   "motionCurve",
   ...iconNames,
@@ -128,6 +133,10 @@ Object valueOf(CalendarThemeData theme, String name) {
       return theme.entryTintOpacity;
     case "pendingEntryOpacity":
       return theme.pendingEntryOpacity;
+    case "gripShadows":
+      return theme.gripShadows;
+    case "liftedBlockShadows":
+      return theme.liftedBlockShadows;
     case "motionDuration":
       return theme.motionDuration;
     case "motionCurve":
@@ -254,6 +263,10 @@ CalendarThemeData withValue(
       return theme.copyWith(entryTintOpacity: value as double);
     case "pendingEntryOpacity":
       return theme.copyWith(pendingEntryOpacity: value as double);
+    case "gripShadows":
+      return theme.copyWith(gripShadows: value as List<BoxShadow>);
+    case "liftedBlockShadows":
+      return theme.copyWith(liftedBlockShadows: value as List<BoxShadow>);
     case "motionDuration":
       return theme.copyWith(motionDuration: value as Duration);
     case "motionCurve":
@@ -451,6 +464,29 @@ Object fullValueOf(String name, int index) {
       return 0.3;
     case "pendingEntryOpacity":
       return 0.7;
+    case "gripShadows":
+      return const <BoxShadow>[
+        BoxShadow(
+          color: Color(0x40102030),
+          blurRadius: 3.0,
+          offset: Offset(1.0, 2.0),
+        ),
+      ];
+    case "liftedBlockShadows":
+      return const <BoxShadow>[
+        BoxShadow(
+          color: Color(0x40203040),
+          offset: Offset(2.0, 6.0),
+          blurRadius: 10.0,
+          spreadRadius: -2.0,
+        ),
+        BoxShadow(
+          color: Color(0x28304050),
+          offset: Offset(1.0, 2.0),
+          blurRadius: 4.0,
+          spreadRadius: 0.5,
+        ),
+      ];
     case "motionDuration":
       return const Duration(milliseconds: 450);
     case "motionCurve":
@@ -490,6 +526,8 @@ CalendarThemeData fullTheme() {
     draggedBlockOpacity: full("draggedBlockOpacity"),
     entryTintOpacity: full("entryTintOpacity"),
     pendingEntryOpacity: full("pendingEntryOpacity"),
+    gripShadows: full("gripShadows"),
+    liftedBlockShadows: full("liftedBlockShadows"),
     motionDuration: full("motionDuration"),
     motionCurve: full("motionCurve"),
     beforeHoursIcon: full("beforeHoursIcon"),
@@ -577,8 +615,8 @@ Widget themed(CalendarThemeData? data, Widget child) {
 void main() {
   const builtIn = CalendarThemeData();
 
-  test("the field lists name 57 distinct fields, 32 of them text styles", () {
-    expect(fieldNames.toSet(), hasLength(57));
+  test("the field lists name 59 distinct fields, 32 of them text styles", () {
+    expect(fieldNames.toSet(), hasLength(59));
     expect(colourNames, hasLength(14));
     expect(styleNames, hasLength(32));
     final full = fullTheme();
@@ -650,8 +688,8 @@ void main() {
     expect(full.copyWith(), full);
   });
 
-  test("CT4 lerp interpolates colours, styles, the duration and the "
-      "doubles, and switches the icons and the curve at 0.5", () {
+  test("CT4 lerp interpolates colours, styles, shadows, the duration and "
+      "the doubles, and switches the icons and the curve at 0.5", () {
     final a = fullTheme();
     const b = builtIn;
     expect(CalendarThemeData.lerp(a, b, 0.0), a);
@@ -672,6 +710,17 @@ void main() {
         TextStyle.lerp(
           valueOf(a, name) as TextStyle,
           valueOf(b, name) as TextStyle,
+          0.5,
+        ),
+        reason: name,
+      );
+    }
+    for (final name in shadowNames) {
+      expect(
+        valueOf(half, name),
+        BoxShadow.lerpList(
+          valueOf(a, name) as List<BoxShadow>,
+          valueOf(b, name) as List<BoxShadow>,
           0.5,
         ),
         reason: name,
@@ -789,7 +838,7 @@ void main() {
   });
 
   test("CT7 the built-in values: the palette's contrast, the typography, "
-      "the motion, the ring and the opacities", () {
+      "the motion, the ring, the opacities and the shadows", () {
     for (final surface in <Color>[
       builtIn.surface,
       builtIn.background,
@@ -825,6 +874,27 @@ void main() {
     expect(builtIn.draggedBlockOpacity, 0.66);
     expect(builtIn.entryTintOpacity, 0.14);
     expect(builtIn.pendingEntryOpacity, 0.5);
+    expect(builtIn.gripShadows, const <BoxShadow>[
+      BoxShadow(
+        color: Color(0x33000000),
+        blurRadius: 2.0,
+        offset: Offset(0.0, 1.0),
+      ),
+    ]);
+    expect(builtIn.liftedBlockShadows, const <BoxShadow>[
+      BoxShadow(
+        color: Color(0x33000000),
+        offset: Offset(0.0, 4.0),
+        blurRadius: 8.0,
+        spreadRadius: -1.0,
+      ),
+      BoxShadow(
+        color: Color(0x1F000000),
+        offset: Offset(0.0, 1.0),
+        blurRadius: 3.0,
+        spreadRadius: -1.0,
+      ),
+    ]);
   });
 
   test("CT8 the built-in icons are MaterialIcons code points", () {

@@ -1,16 +1,20 @@
 /// The month board: what its fit-to-screen layout keeps of each week (how
 /// many lanes a week holds, which chips it shows, and how many chips each
 /// day hides), the height a week rests at, the days that show cards, the
-/// bars an entry splits into, and a chip drawn again for a new payload.
+/// bars an entry splits into, a chip drawn again for a new payload, and
+/// when its days are ready while the store shows another range.
 library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -96,6 +100,66 @@ bool covers(BoardPlacement<MonthChip> placement, int row, int col) {
   return span.rowStart == row &&
       col >= span.colStart &&
       col < span.colStart + span.colSpan;
+}
+
+/// A data source that answers each read within the call, through a
+/// [SynchronousFuture], with the entries covering its days, and once
+/// [fails] is set fails each read sent.
+class ReadSource implements CalendarDataSource<String> {
+  ReadSource(this.entries);
+
+  final List<CalendarEntry<String>> entries;
+
+  bool fails = false;
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    if (fails) {
+      return Future<List<CalendarEntry<String>>>.error(
+        StateError("The read failed."),
+      );
+    }
+    final from = dayNumber(first);
+    final to = dayNumber(last);
+    return SynchronousFuture<List<CalendarEntry<String>>>(
+      <CalendarEntry<String>>[
+        for (final entry in entries)
+          if (entry.time.firstDay <= to &&
+              entry.time.firstDay + entry.time.dayCount - 1 >= from)
+            entry,
+      ],
+    );
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    return SynchronousFuture<CalendarEntry<String>>(entry);
+  }
+
+  @override
+  Future<void> delete(String id) {
+    return SynchronousFuture<void>(null);
+  }
+}
+
+/// A caching store over a [ReadSource] that counts its [isRead] calls.
+class CountingStore extends CachingCalendarStore<String> {
+  CountingStore(this.source) : super(dataSource: source);
+
+  final ReadSource source;
+
+  int isReadCalls = 0;
+
+  @override
+  bool isRead(DateTime day) {
+    isReadCalls++;
+    return super.isRead(day);
+  }
 }
 
 void main() {
@@ -331,5 +395,107 @@ void main() {
       find.descendant(of: bar, matching: find.text("second")),
       findsOneWidget,
     );
+  });
+
+  testWidgets("MB1 a month board whose grid the store does not show is "
+      "ready once every day of its grid is read, covers a failed read of "
+      "another range with the loading state, and reads no day in a "
+      "layout", (tester) async {
+    final source = ReadSource(<CalendarEntry<String>>[
+      CalendarEntry<String>(
+        id: "talk",
+        day: april(21),
+        startMinute: 10 * 60,
+        endMinute: 11 * 60,
+        title: "talk",
+        color: const Color(0xFF336699),
+        payload: "talk",
+      ),
+    ]);
+    final store = CountingStore(source);
+    addTearDown(store.dispose);
+    store.show(grid.firstDay, grid.lastDay);
+    expect(store.status, CalendarLoadStatus.ready);
+    final todayNotifier = ValueNotifier<DateTime>(april(21));
+    addTearDown(todayNotifier.dispose);
+    final workweek = MonthGrid(2026, 4, weekdays: WeekdaySet.workweek);
+    final june = MonthGrid(2026, 6);
+    // The board's grid is not the one the store shows.
+    expect(workweek.lastDay, isNot(grid.lastDay));
+
+    Widget board(MonthGrid shown, {double weekScale = 1.0}) {
+      return MaterialApp(
+        home: MonthBoard<String>(
+          store: store,
+          grid: shown,
+          weekScale: weekScale,
+          selectedDay: shownDayNear(
+            DateTime(shown.year, shown.month),
+            shown.weekdays,
+          ),
+          today: todayNotifier,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: null,
+          onOpenItem: (id) {},
+          loadingBuilder: (context, state) {
+            return const Text("loading");
+          },
+          failureBuilder: (context, state) {
+            return const Text("failed");
+          },
+        ),
+      );
+    }
+
+    final chip = find.byKey(monthChipKey(monthSegmentKey("talk", monday)));
+    void expectShows({required bool chips, String? cover}) {
+      expect(chip, chips ? findsOneWidget : findsNothing);
+      expect(
+        find.text("loading"),
+        cover == "loading" ? findsOneWidget : findsNothing,
+      );
+      expect(
+        find.text("failed"),
+        cover == "failed" ? findsOneWidget : findsNothing,
+      );
+    }
+
+    await tester.pumpWidget(board(workweek));
+    await tester.pumpAndSettle();
+    expectShows(chips: true);
+
+    source.fails = true;
+    final may = MonthGrid(2026, 5);
+    store.show(may.firstDay, may.lastDay);
+    await tester.pump();
+    expect(store.status, CalendarLoadStatus.failed);
+    await tester.pumpAndSettle();
+    expectShows(chips: true);
+
+    await tester.pumpWidget(board(june));
+    await tester.pumpAndSettle();
+    expectShows(chips: false, cover: "loading");
+
+    await tester.pumpWidget(board(workweek));
+    await tester.pumpAndSettle();
+    expectShows(chips: true);
+    final rows = tester
+        .widget<Board<String, MonthChip<String>>>(
+          find.byType(Board<String, MonthChip<String>>),
+        )
+        .controller
+        .rows;
+    store.isReadCalls = 0;
+    await tester.pumpWidget(board(workweek, weekScale: 1.5));
+    final scaled = tester
+        .widget<Board<String, MonthChip<String>>>(
+          find.byType(Board<String, MonthChip<String>>),
+        )
+        .controller
+        .rows;
+    // The new scale laid the weeks out again.
+    expect(identical(scaled.axis, rows.axis), isFalse);
+    expect(store.isReadCalls, 0);
   });
 }

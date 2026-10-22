@@ -64,6 +64,24 @@ List<String> directiveUris(String source) {
   ];
 }
 
+/// Each export directive of [source]: the path it exports, resolved from
+/// the package root against [barrelPath], and the names its `show` clause
+/// lists, null for a directive with none.
+List<({String path, List<String>? shown})> exportsOf(String source) {
+  return <({String path, List<String>? shown})>[
+    for (final match in RegExp(
+      r"""^\s*export\s+['"]([^'"]+)['"]\s*(?:show\s+([^;]+))?;""",
+      multiLine: true,
+    ).allMatches(source))
+      (
+        path: Uri.parse(barrelPath).resolve(match.group(1)!).path,
+        shown: match.group(2)?.split(",").map((name) {
+          return name.trim();
+        }).toList(),
+      ),
+  ];
+}
+
 /// The module's Dart files but the barrel, from the package root: those
 /// Git tracks and the new ones it does not ignore. Checks that Git ran and
 /// that the list holds a file of each layer from dates to views.
@@ -135,20 +153,83 @@ void main() {
       defaultCalendarLoadingBuilder,
       defaultCalendarFailureBuilder,
       CalendarActivityIndicator,
+      CalendarView,
+      CalendarController,
+      CalendarViewKind,
+      CalendarStepUnit,
+      CalendarHeaderBuilder,
+      CalendarHeaderDetails,
+      defaultCalendarHeaderBuilder,
+      CalendarEntryTapDetails,
+      CalendarThemeExtension,
+      CreateRange,
+      HourLabelFormat,
+      MonthLayout,
+      minDayWidthLow,
+      minDayWidthHigh,
+      minSlotHeightLow,
+      minSlotHeightHigh,
+      defaultMinSlotHeight,
+      maxMonthWeekScale,
     ];
   });
 
-  test("B2 the barrel exports no view, nor the history lock or the labels "
-      "file", () {
-    final exports = <String>[
-      for (final uri in directiveUris(File(barrelPath).readAsStringSync()))
-        Uri.parse(barrelPath).resolve(uri).path,
-    ];
-    expect(exports, contains("lib/calendar/dates/calendar_dates.dart"));
+  test("B2 the barrel shows by name, and of the views and the labels file "
+      "only the types and the range constants the calendar's signatures "
+      "use, no view and nothing of the history lock", () {
+    final source = File(barrelPath).readAsStringSync();
+    final exports = exportsOf(source);
+    // Every directive the barrel holds was read.
+    expect(exports, hasLength(directiveUris(source).length));
+    expect(<String>[
+      for (final export in exports) export.path,
+    ], contains("lib/calendar/dates/calendar_dates.dart"));
     for (final export in exports) {
-      expect(export, isNot(startsWith("lib/calendar/views/")));
-      expect(export, isNot("lib/calendar/policy/history_lock.dart"));
-      expect(export, isNot("lib/calendar/dates/calendar_labels.dart"));
+      expect(export.shown, isNotNull, reason: export.path);
+    }
+    final views = <String, Set<String>>{
+      for (final export in exports)
+        if (export.path.startsWith("lib/calendar/views/"))
+          export.path: export.shown!.toSet(),
+    };
+    expect(views, <String, Set<String>>{
+      "lib/calendar/views/month_board.dart": <String>{"MonthLayout"},
+      "lib/calendar/views/pinch_zoom.dart": <String>{
+        "defaultMinSlotHeight",
+        "maxMonthWeekScale",
+        "minDayWidthHigh",
+        "minDayWidthLow",
+        "minSlotHeightHigh",
+        "minSlotHeightLow",
+      },
+      "lib/calendar/views/timed_grid.dart": <String>{"CreateRange"},
+    });
+    expect(
+      <List<String>?>[
+        for (final export in exports)
+          if (export.path == "lib/calendar/dates/calendar_labels.dart")
+            export.shown,
+      ],
+      <List<String>>[
+        <String>["HourLabelFormat"],
+      ],
+    );
+    const viewWidgets = <String>{
+      "TimedGrid",
+      "MonthBoard",
+      "DayList",
+      "WeekStrip",
+      "MonthStrip",
+      "MonthPicker",
+      "DayCell",
+    };
+    for (final export in exports) {
+      expect(export.path, isNot("lib/calendar/policy/history_lock.dart"));
+      expect(
+        export.shown!.toSet().intersection(viewWidgets),
+        isEmpty,
+        reason: export.path,
+      );
     }
   });
 
@@ -193,6 +274,25 @@ void main() {
         }
         expect(allowed, contains(library), reason: "$path: $uri");
       }
+    }
+  });
+
+  test("LY4 no file under lib/calendar/views holds a literal colour", () {
+    final views = <String>[
+      for (final path in moduleFiles())
+        if (layerOf(path) == "views") path,
+    ];
+    expect(views, isNotEmpty);
+    for (final path in views) {
+      final lines = File(path).readAsLinesSync();
+      expect(
+        <String>[
+          for (var i = 0; i < lines.length; i++)
+            if (lines[i].contains("Color(0x")) "${i + 1}: ${lines[i].trim()}",
+        ],
+        isEmpty,
+        reason: path,
+      );
     }
   });
 

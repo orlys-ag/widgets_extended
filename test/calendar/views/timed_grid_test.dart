@@ -2,16 +2,24 @@
 /// and back from the span a drop reports, over some of the weekdays and
 /// part of the day, the create ranges its gestures pick, the weekdays,
 /// hours, hour format and least sizes it lays out from, the edit mode and
-/// lock choices its drags follow, what each of those defaults to, and a
-/// block drawn again for a new payload.
+/// lock choices its drags follow, what each of those defaults to, a
+/// block drawn again for a new payload, the theme's shadows, when its days
+/// are ready on the range its owner asks, and its selection as the store
+/// moves off that range.
 library;
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
+import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
@@ -71,6 +79,97 @@ DateTime nineOClock() {
 
 Finder blockFinder(String id) {
   return find.byKey(blockKey(id));
+}
+
+/// A data source that answers each read within the call, through a
+/// [SynchronousFuture], with the entries covering its days, and once
+/// [fails] is set fails each read sent.
+class ReadSource implements CalendarDataSource<String> {
+  ReadSource(this.entries);
+
+  final List<CalendarEntry<String>> entries;
+
+  bool fails = false;
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    if (fails) {
+      return Future<List<CalendarEntry<String>>>.error(
+        StateError("The read failed."),
+      );
+    }
+    final from = dayNumber(first);
+    final to = dayNumber(last);
+    return SynchronousFuture<List<CalendarEntry<String>>>(
+      <CalendarEntry<String>>[
+        for (final entry in entries)
+          if (entry.time.firstDay <= to &&
+              entry.time.firstDay + entry.time.dayCount - 1 >= from)
+            entry,
+      ],
+    );
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    return SynchronousFuture<CalendarEntry<String>>(entry);
+  }
+
+  @override
+  Future<void> delete(String id) {
+    return SynchronousFuture<void>(null);
+  }
+}
+
+/// A caching store over a [ReadSource] that counts its [isRead] calls.
+class CountingStore extends CachingCalendarStore<String> {
+  CountingStore(this.source) : super(dataSource: source);
+
+  final ReadSource source;
+
+  int isReadCalls = 0;
+
+  @override
+  bool isRead(DateTime day) {
+    isReadCalls++;
+    return super.isRead(day);
+  }
+}
+
+/// An entry with the id and title [id] on [day] from [start] to [end]
+/// minutes, over [dayCount] days.
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime day,
+  int start,
+  int end, {
+  int dayCount = 1,
+}) {
+  return CalendarEntry<String>(
+    id: id,
+    day: day,
+    startMinute: start,
+    endMinute: end,
+    dayCount: dayCount,
+    title: id,
+    color: const Color(0xFF336699),
+    payload: id,
+  );
+}
+
+/// Draws a cover's loading state as "loading".
+Widget loadingText(BuildContext context, CalendarLoadingState state) {
+  return const Text("loading");
+}
+
+/// Draws a cover's failure state as "failed".
+Widget failureText(BuildContext context, CalendarFailureState state) {
+  return const Text("failed");
 }
 
 void main() {
@@ -805,5 +904,225 @@ void main() {
     expect(() => grid(minDayWidth: double.infinity), throwsAssertionError);
     expect(() => grid(minSlotHeight: 0.0), throwsAssertionError);
     expect(() => grid(minSlotHeight: double.infinity), throwsAssertionError);
+  });
+
+  testWidgets("TG5 a timed grid draws its selected block's grips and its "
+      "lifted block over the theme's shadows", (tester) async {
+    const size = Size(400.0, 800.0);
+    const grip = <BoxShadow>[
+      BoxShadow(
+        color: Color(0x80102030),
+        blurRadius: 5.0,
+        offset: Offset(2.0, 3.0),
+      ),
+    ];
+    const lifted = <BoxShadow>[
+      BoxShadow(
+        color: Color(0x80203040),
+        offset: Offset(1.0, 7.0),
+        blurRadius: 12.0,
+        spreadRadius: 1.0,
+      ),
+    ];
+    const theme = CalendarThemeData(
+      gripShadows: grip,
+      liftedBlockShadows: lifted,
+    );
+    // The theme's shadows are not the built-in ones, so a grid that drew
+    // those would fail below.
+    expect(grip, isNot(const CalendarThemeData().gripShadows));
+    expect(lifted, isNot(const CalendarThemeData().liftedBlockShadows));
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entryOf("talk", tuesday, 10 * 60, 12 * 60),
+      ],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<DateTime>(nineOClock());
+    addTearDown(now.dispose);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = size;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      CalendarTheme(
+        data: theme,
+        child: boxed(
+          size,
+          TimedGrid<String>(
+            store: store,
+            firstDay: monday,
+            dayCount: 7,
+            selectedDay: tuesday,
+            today: tuesday,
+            now: now,
+            onSelectDay: (day) {},
+            onOpenItem: (id) {},
+            onCreate: (range) async {},
+            editable: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(blockFinder("talk")),
+    );
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    expect(find.byKey(liftedBlockKey), findsOneWidget);
+    // Past the lift's motion, the theme's 300 ms.
+    await tester.pump(const Duration(milliseconds: 400));
+    final liftedBox = tester.widget<DecoratedBox>(find.byKey(liftedBlockKey));
+    expect((liftedBox.decoration as BoxDecoration).boxShadow, lifted);
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final down = find.byKey(blockGripKey("talk", AxisDirection.down));
+    expect(down, findsOneWidget);
+    final gripBox = tester.widget<DecoratedBox>(
+      find.descendant(of: down, matching: find.byType(DecoratedBox)).first,
+    );
+    expect((gripBox.decoration as BoxDecoration).boxShadow, grip);
+  });
+
+  testWidgets("TG6 a timed grid given the range its owner asks is ready "
+      "where the store shows that range ready, or another once every day of "
+      "that range is read, covers a failed read of another range with the "
+      "loading state, and reads no day in a layout", (tester) async {
+    const size = Size(300.0, 400.0);
+    final source = ReadSource(<CalendarEntry<String>>[
+      entryOf("talk", tuesday, 10 * 60, 11 * 60),
+    ]);
+    final store = CountingStore(source);
+    addTearDown(store.dispose);
+    store.show(DateTime(2026, 4, 13), DateTime(2026, 4, 26));
+    store.show(monday, DateTime(2026, 4, 24));
+    expect(store.status, CalendarLoadStatus.ready);
+    final now = ValueNotifier<DateTime>(nineOClock());
+    addTearDown(now.dispose);
+
+    TimedGrid<String> grid(
+      ({DateTime first, DateTime last})? range, {
+      double minSlotHeight = defaultMinSlotHeight,
+    }) {
+      return TimedGrid<String>(
+        store: store,
+        firstDay: tuesday,
+        dayCount: 1,
+        selectedDay: tuesday,
+        today: tuesday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenItem: (id) {},
+        onCreate: (range) async {},
+        minSlotHeight: minSlotHeight,
+        storeRange: range,
+        loadingBuilder: loadingText,
+        failureBuilder: failureText,
+      );
+    }
+
+    void expectShows({required bool block, String? cover}) {
+      expect(blockFinder("talk"), block ? findsOneWidget : findsNothing);
+      expect(
+        find.text("loading"),
+        cover == "loading" ? findsOneWidget : findsNothing,
+      );
+      expect(
+        find.text("failed"),
+        cover == "failed" ? findsOneWidget : findsNothing,
+      );
+    }
+
+    final toMonday = (first: monday, last: DateTime(2026, 4, 27));
+    final toFriday = (first: monday, last: DateTime(2026, 4, 24));
+    final toSunday = (first: monday, last: DateTime(2026, 4, 26));
+
+    // The shown range, April 20 to 24, holds April 21 and is ready, but
+    // April 27 is not read.
+    await pumpBoxed(tester, size, grid(toMonday));
+    expectShows(block: false, cover: "loading");
+    await tester.pumpWidget(boxed(size, grid(toFriday)));
+    expectShows(block: true);
+    await tester.pumpWidget(boxed(size, grid(toSunday)));
+    expectShows(block: true);
+    await tester.pumpWidget(boxed(size, grid(null)));
+    expectShows(block: true);
+
+    source.fails = true;
+    store.show(DateTime(2026, 5, 4), DateTime(2026, 5, 10));
+    await tester.pump();
+    expect(store.status, CalendarLoadStatus.failed);
+    await tester.pumpWidget(boxed(size, grid(toSunday)));
+    expectShows(block: true);
+    await tester.pumpWidget(boxed(size, grid(toMonday)));
+    expectShows(block: false, cover: "loading");
+    // Given none, the grid keeps the store's shown range's status, where
+    // the read of its own day would draw the block.
+    await tester.pumpWidget(boxed(size, grid(null)));
+    expectShows(block: false, cover: "failed");
+
+    await tester.pumpWidget(boxed(size, grid(toSunday)));
+    expectShows(block: true);
+    final viewport = viewportOf(tester);
+    expect(viewport.rectOfCell(2, 1)!.height, defaultMinSlotHeight);
+    store.isReadCalls = 0;
+    await tester.pumpWidget(boxed(size, grid(toSunday, minSlotHeight: 24.0)));
+    expect(viewport.rectOfCell(2, 1)!.height, 24.0);
+    expect(store.isReadCalls, 0);
+  });
+
+  testWidgets("TG7 a store notify that moves the store off the grid's range "
+      "clears the selection, though the selected entry covers the days the "
+      "grid takes next", (tester) async {
+    const size = Size(400.0, 800.0);
+    final saturday = DateTime(2026, 4, 25);
+    final sunday = DateTime(2026, 4, 26);
+    final nextMonday = DateTime(2026, 4, 27);
+    final nextSunday = DateTime(2026, 5, 3);
+    final source = ReadSource(<CalendarEntry<String>>[
+      entryOf("trip", saturday, 10 * 60, 11 * 60, dayCount: 4),
+    ]);
+    final store = CountingStore(source);
+    addTearDown(store.dispose);
+    // Both weeks read, the next one first.
+    store.show(nextMonday, nextSunday);
+    store.show(monday, sunday);
+    final now = ValueNotifier<DateTime>(nineOClock());
+    addTearDown(now.dispose);
+
+    TimedGrid<String> grid(DateTime first) {
+      return TimedGrid<String>(
+        store: store,
+        firstDay: first,
+        dayCount: 7,
+        selectedDay: first,
+        today: tuesday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenItem: (id) {},
+        onCreate: (range) async {},
+        editable: true,
+        storeRange: (first: first, last: addDays(first, 6)),
+      );
+    }
+
+    await pumpBoxed(tester, size, grid(monday));
+    await tester.pumpAndSettle();
+    final gesture = await tester.startGesture(
+      tester.getCenter(blockFinder("trip")),
+    );
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.byKey(blockHandlesKey("trip")), findsOneWidget);
+
+    // A chevron's step: the owner asks the store for the next week, which
+    // notifies within the call, and builds the grid on it.
+    store.show(nextMonday, nextSunday);
+    await tester.pumpWidget(boxed(size, grid(nextMonday)));
+    await tester.pumpAndSettle();
+    expect(blockFinder("trip"), findsOneWidget);
+    expect(find.byKey(blockHandlesKey("trip")), findsNothing);
   });
 }
