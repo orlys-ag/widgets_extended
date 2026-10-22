@@ -97,8 +97,10 @@ class CalendarEntryTapDetails<T> {
 ///   [hours] shows only in a count on a notice banner. A line marks the
 ///   current time over the rows of the clock's day. In edit mode the list
 ///   marks each gap in [hours] with a dashed row whose button reports a
-///   create through [onCreateRange], and each card has a menu of Edit and
-///   Delete, reported through [onEditRequest] and [onDeleteRequest]. A
+///   create through [onCreateRange], and each card's builder receives the
+///   [CalendarCardDetails.onEdit] and [CalendarCardDetails.onDelete] the
+///   history lock allows, which report through [onEditRequest] and
+///   [onDeleteRequest]; the default card offers neither. A
 ///   drag of the list folds the month into the week of the selected day,
 ///   and the pull tab under the card folds or unfolds it as far as a drag
 ///   on it moves, a tap on it switching; a downward drag on the folded
@@ -220,7 +222,8 @@ class CalendarView<T> extends StatefulWidget {
 
   /// Whether the calendar is in edit mode: Week's and Day's blocks move
   /// and resize, a create gesture reports through [onCreateRange], and
-  /// Agenda's cards offer Edit and Delete.
+  /// Agenda's card builder receives the edit and delete requests the
+  /// history lock allows.
   final bool editable;
 
   /// Whether, in edit mode, the history lock holds the days before today.
@@ -246,7 +249,9 @@ class CalendarView<T> extends StatefulWidget {
   /// not hold.
   final MonthLayout monthLayout;
 
-  /// The most days a move in Week may give an entry; null for no limit.
+  /// The most days a resize of an entry's trailing edge in Week may give
+  /// it, past which the grid refuses the drop; null for no limit. A move
+  /// keeps the entry's day count.
   final int? maxDayCount;
 
   /// Reads the current time, which the calendar reads when first built and
@@ -294,11 +299,14 @@ class CalendarView<T> extends StatefulWidget {
   /// and the marked slots clear at once.
   final Future<void> Function(CreateRange range)? onCreateRange;
 
-  /// Agenda's Edit on a card, with the stored entry; null reports nothing.
+  /// An edit request from an Agenda card, with the stored entry: a
+  /// [cardBuilder] calling [CalendarCardDetails.onEdit] makes it; null
+  /// reports nothing.
   final ValueChanged<CalendarEntry<T>>? onEditRequest;
 
-  /// Agenda's Delete on a card, with the stored entry; null reports
-  /// nothing. The calendar deletes nothing itself.
+  /// A delete request from an Agenda card, with the stored entry: a
+  /// [cardBuilder] calling [CalendarCardDetails.onDelete] makes it; null
+  /// reports nothing. The calendar deletes nothing itself.
   final ValueChanged<CalendarEntry<T>>? onDeleteRequest;
 
   /// Month's long press, in edit mode, on a day the history lock leaves no

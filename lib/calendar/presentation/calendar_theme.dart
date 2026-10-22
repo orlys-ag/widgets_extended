@@ -702,10 +702,10 @@ class CalendarThemeData with Diagnosticable {
   /// Colours interpolate with [Color.lerp], text styles with
   /// [TextStyle.lerp], the shadows with [BoxShadow.lerpList], the duration
   /// with [lerpDuration] and the four doubles with [lerpDouble]; the icons
-  /// and the curve are [a]'s below 0.5 and [b]'s from it. A [t] outside 0 to 1, as an overshooting curve
-  /// gives, may take the duration, [todayRingWidth], [draggedBlockOpacity],
-  /// [entryTintOpacity] or [pendingEntryOpacity] out of its domain, so each
-  /// is clamped into it.
+  /// and the curve are [a]'s below 0.5 and [b]'s from it. A [t] outside 0
+  /// to 1, as an overshooting curve gives, may take the duration,
+  /// [todayRingWidth], [draggedBlockOpacity], [entryTintOpacity] or
+  /// [pendingEntryOpacity] out of its domain, so each is clamped into it.
   static CalendarThemeData lerp(
     CalendarThemeData a,
     CalendarThemeData b,
