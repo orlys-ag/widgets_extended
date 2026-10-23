@@ -1110,11 +1110,12 @@ class TimedGrid<T> extends StatefulWidget {
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
 
   /// The most days, counting each day it has any part of, that a create
-  /// drag across days, over the slots or across the all-day strip, and a
-  /// bar's day-edge resize may give a range: one dragged past them is held
-  /// at the latest range they admit, which a release writes or reports. A
-  /// move keeps the days an entry covers, except where it crosses a
-  /// midnight, and no limit applies to it. Null for no limit.
+  /// drag across days, over the slots or across the all-day strip, a bar's
+  /// day-edge resize and, on more than one day column, an end handle
+  /// dragged into a later day may give a range: one dragged past them is
+  /// held at the latest range they admit, which a release writes or
+  /// reports. A move keeps the days an entry covers, except where it
+  /// crosses a midnight, and no limit applies to it. Null for no limit.
   final int? maxDayCount;
 
   /// The range, both days inclusive, that the grid's owner asks [store] to
@@ -1417,15 +1418,25 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The cell a crossing drag's pointer is over, as the crossing reads it
   /// ([_crossTo]): a block's strip column, a bar's day column and slot
-  /// row; -1 for none.
+  /// row, an end handle's later day column and slot row; -1 for none.
   int _crossColumn = -1;
   int _crossRow = -1;
+
+  /// The day column of the piece whose end a crossing resize drags, read
+  /// once at the drag's start so no pointer move looks the piece up; -1
+  /// with no such drag.
+  int _resizedColumn = -1;
 
   /// What a release over [_crossColumn] gives the entry: a block's all-day
   /// day ([_stripLandingOf]), a bar's hour ([_barLandingOf]); null where the
   /// pointer is over no such cell or the landing is refused.
   ({DateTime start, DateTime end})? _stripLanding;
   ({DateTime start, DateTime end})? _barLanding;
+
+  /// The end a release of an end handle over [_crossColumn]'s later day
+  /// gives the entry ([_laterDayEndOf]); null where the pointer is over no
+  /// later day's slot or the end is refused.
+  DateTime? _laterDayEnd;
 
   /// The range a bar's day-edge resize past [TimedGrid.maxDayCount] is held
   /// at ([_heldToLimit]), which its release writes; set by [_canDropAt].
@@ -2886,8 +2897,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [_fitlessConfig] for a bar's drag, takes as [_dragPointer] the first
   /// press of the grid on the dragged key, and for a crossing drag
   /// ([_isCrossingDrag]) listens to the two scroll controllers until the
-  /// drag ends. The lift of a move of an entry with more than one piece
-  /// takes its other pieces off the board.
+  /// drag ends, noting for an end handle's the column it starts in
+  /// ([_resizedColumn]). The lift of a move of an entry with more than one
+  /// piece takes its other pieces off the board.
   void _handleDragStart(GridKey key, BoardDragKind kind) {
     if (!mounted) {
       return;
@@ -2907,6 +2919,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     if (_dragPointer != null && _isCrossingDrag(_drag)) {
       _listenCross();
+      if (kind == BoardDragKind.resizeRowEnd) {
+        _resizedColumn = _board.spanOf(key)?.colStart ?? -1;
+      }
     }
     final shape = _board.itemOf(key);
     if (kind != BoardDragKind.move || shape == null) {
@@ -2956,11 +2971,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
   }
 
-  /// Whether [drag] crosses between the strip and the slots, reading the
-  /// cell under its pointer as it moves: a block's move, into the strip,
-  /// and a bar's, into the slots.
+  /// Whether [drag] reads the cell under its pointer as it moves, to cross
+  /// where the board's own drag does not: a block's move, into the strip;
+  /// a bar's, into the slots; and on more than one day column a piece's
+  /// end-handle resize, into a later day.
   bool _isCrossingDrag(_GridDrag? drag) {
-    return drag != null && drag.kind == BoardDragKind.move;
+    if (drag == null) {
+      return false;
+    }
+    return drag.kind == BoardDragKind.move ||
+        (drag.kind == BoardDragKind.resizeRowEnd && _tracks.columnCount > 1);
   }
 
   /// Listens to the two scroll controllers for a crossing drag, so content
@@ -2992,8 +3012,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _dragAt = null;
     _crossColumn = -1;
     _crossRow = -1;
+    _resizedColumn = -1;
     _stripLanding = null;
     _barLanding = null;
+    _laterDayEnd = null;
     _heldBar = null;
     _updateStripMark();
   }
@@ -3014,8 +3036,26 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// block's move the strip column under it, and the all-day day a release
   /// there gives ([_stripLandingOf]); for a bar's the day column and slot
   /// row under it, the first slot's over the row above the slots, and the
-  /// hour a release there gives ([_barLandingOf]).
+  /// hour a release there gives ([_barLandingOf]); for an end handle's
+  /// resize the slot under it on a day later than the piece's, and the end
+  /// a release there gives ([_laterDayEndOf]).
   void _crossTo(_GridDrag drag, int row, int col) {
+    if (drag.kind == BoardDragKind.resizeRowEnd) {
+      final later = _isLaterDaySlot(row, col);
+      final column = later ? col : -1;
+      final slotRow = later ? row : -1;
+      if (column == _crossColumn && slotRow == _crossRow) {
+        return;
+      }
+      setState(() {
+        _crossColumn = column;
+        _crossRow = slotRow;
+        _laterDayEnd = column == -1
+            ? null
+            : _laterDayEndOf(drag.key, column, slotRow);
+      });
+      return;
+    }
     if (drag.kind != BoardDragKind.move) {
       return;
     }
@@ -3052,6 +3092,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           ? null
           : _barLandingOf(drag.key, column, slotRow);
     });
+  }
+
+  /// Whether [row] and [col] name a slot in a day column later than the
+  /// one of the piece whose end a crossing resize drags ([_resizedColumn]):
+  /// the columns show their days in order, so a later column is a later
+  /// day.
+  bool _isLaterDaySlot(int row, int col) {
+    return _resizedColumn >= 1 &&
+        col > _resizedColumn &&
+        row >= _tracks.firstSlotRow &&
+        row <= _tracks.lastSlotRow;
   }
 
   /// The all-day day the block [key]'s entry takes when released over the
@@ -3099,6 +3150,55 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     return (start: start, end: end);
+  }
+
+  /// The end the piece [key]'s entry takes when its end handle is let go
+  /// over the slot [row] of [column], a later day than the piece's: that
+  /// slot's end on that column's day, the earlier instant of a time the
+  /// clock repeats, held at [TimedGrid.maxDayCount]'s days
+  /// ([_heldToLimit]); null where that end is a time the clock skips, or
+  /// where the history lock or the hours ([DayHours.holdsTimes]) refuse the
+  /// range from the entry's start to it, or that range shares time with
+  /// another timed entry the store shows.
+  DateTime? _laterDayEndOf(GridKey key, int column, int row) {
+    final shape = _board.itemOf(key);
+    var end = timeAtWallMinute(
+      _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row + 1),
+    );
+    if (shape == null || end == null) {
+      return null;
+    }
+    final entry = shape.shown.entry;
+    final start = entry.start;
+    if (!_coversAtMost(start, end)) {
+      final held = _heldToLimit(start, end, atEnd: true);
+      if (held == null) {
+        return null;
+      }
+      end = held.end;
+    }
+    if (!_lock.value.admits(entry.start, entry.end, start, end) ||
+        !_tracks.hours.holdsTimes(start, end) ||
+        _sharesShownTime(key.id, start, end)) {
+      return null;
+    }
+    return end;
+  }
+
+  /// Whether the range from [start] to [end] shares time with a timed
+  /// entry other than [id] that the store shows on the days the range
+  /// covers, shown columns or not ([rangeSharesTime]).
+  bool _sharesShownTime(String id, DateTime start, DateTime end) {
+    final shown = widget.store.entriesBetween(
+      dateOfDayNumber(dayNumber(start)),
+      dateOfDayNumber(lastDayNumberOf(start, end)),
+    );
+    for (final other in shown) {
+      if (other.id != id && rangeSharesTime(start, end, other.entry)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Reads the crossing's cell again once the board has laid out the rows
@@ -3303,6 +3403,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     if (_crosses) {
+      if (drag.kind == BoardDragKind.resizeRowEnd) {
+        final end = _laterDayEnd;
+        final shape = _board.itemOf(drag.key);
+        if (end == null || shape == null) {
+          return null;
+        }
+        return (start: shape.shown.entry.start, end: end);
+      }
       return drag.key.isBar ? _barLanding : _stripLanding;
     }
     final held = _heldBar;
@@ -3367,6 +3475,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     if (drag.key.isBar != _crosses) {
+      return null;
+    }
+    return wallSpanOf(times.start, times.end);
+  }
+
+  /// The wall minutes the background marks for [times], what
+  /// [_landingTimes] gives, while an end handle's resize names a later
+  /// day's slot: the range from the entry's start to the end a release
+  /// there gives, as a create range's slots are marked; null otherwise.
+  ({int start, int end})? _laterDayRangeOf(
+    ({DateTime start, DateTime end})? times,
+  ) {
+    final drag = _drag;
+    if (drag == null ||
+        times == null ||
+        drag.kind != BoardDragKind.resizeRowEnd ||
+        !_crosses) {
       return null;
     }
     return wallSpanOf(times.start, times.end);
@@ -3612,14 +3737,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// space, before the board's drag hears it. A crossing drag writes from
   /// the cell under [local], so the pointer, not the proxy's centre,
   /// decides where the entry lands: a block over a strip cell becomes
-  /// all-day on its day ([_stripLandingOf]), and a bar over a slot or the
-  /// row above the slots an hour from that slot ([_barLandingOf]), each
+  /// all-day on its day ([_stripLandingOf]), a bar over a slot or the row
+  /// above the slots an hour from that slot ([_barLandingOf]), and an end
+  /// handle over a later day's slot ends there ([_laterDayEndOf]), each
   /// through one write, or none where the landing is refused; either way
   /// [_crossSpent] then refuses the board's own report. A bar's day-edge
   /// resize held at [TimedGrid.maxDayCount] writes the range it is held
   /// at. Both stores notify within the write, so the sync that follows
   /// moves or drops the dragged key, which cancels the board's drag before
-  /// it hears the release.
+  /// it hears the release, or leaves the dragged piece's span as it was,
+  /// as for a piece ending at the day's end, whose drag the board then
+  /// ends without a report.
   void _releaseCross(Offset local) {
     final drag = _drag;
     if (drag == null) {
@@ -3629,7 +3757,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (_isCrossingDrag(drag)) {
       final row = _rowAt(local.dy);
       final col = _columnAt(local.dx);
-      if (!drag.key.isBar) {
+      if (drag.kind == BoardDragKind.resizeRowEnd) {
+        if (!_isLaterDaySlot(row, col)) {
+          return;
+        }
+        final end = _laterDayEndOf(drag.key, col, row);
+        final shape = _board.itemOf(drag.key);
+        write = end == null || shape == null
+            ? null
+            : (start: shape.shown.entry.start, end: end);
+      } else if (!drag.key.isBar) {
         if (col < 1 || !_isStripRow(row)) {
           return;
         }
@@ -4314,6 +4451,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final slotRange = range == null || range.strip ? null : range;
     final rangeAnchor = slotRange?.anchor ?? _creating?.anchor;
     final rangeFocus = slotRange?.focus ?? _creating?.focus;
+    final landing = _landingTimes();
     final listener = Listener(
       onPointerDown: _handlePointerDown,
       onPointerMove: _handlePointerMove,
@@ -4330,10 +4468,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             styles: styles,
             tracks: _tracks,
             today: widget.today,
-            range: rangeAnchor == null || rangeFocus == null
-                ? null
-                : _wallSpanOfCells(rangeAnchor, rangeFocus),
-            landing: _outlineOf(_landingTimes()),
+            range:
+                _laterDayRangeOf(landing) ??
+                (rangeAnchor == null || rangeFocus == null
+                    ? null
+                    : _wallSpanOfCells(rangeAnchor, rangeFocus)),
+            landing: _outlineOf(landing),
           ),
           foreground: _GridForegroundPainter(
             styles: styles,
@@ -5366,7 +5506,8 @@ class _TimedGridPainter extends BoardBackgroundPainter {
   final GridTracks tracks;
   final DateTime today;
 
-  /// The create range's wall minutes ([wallMinuteOf]), or null.
+  /// The wall minutes ([wallMinuteOf]) of the create range, or of the range
+  /// an end handle dragged into a later day gives, or null.
   final ({int start, int end})? range;
 
   /// The wall minutes a move would land on, or null.

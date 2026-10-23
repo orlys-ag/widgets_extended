@@ -276,10 +276,11 @@ class CalendarView<T> extends StatefulWidget {
 
   /// The most days, counting each day it has any part of, that a create
   /// drag across days in Week, over the slots or across the all-day strip,
-  /// and a strip bar's day-edge resize may give a range: one dragged past
-  /// them is held at the latest range they admit, which a release writes
-  /// or reports. A move keeps the days an entry covers, except where it
-  /// crosses a midnight, and no limit applies to it. Null for no limit.
+  /// a strip bar's day-edge resize, and Week's end handle dragged into a
+  /// later day may give a range: one dragged past them is held at the
+  /// latest range they admit, which a release writes or reports. A move
+  /// keeps the days an entry covers, except where it crosses a midnight,
+  /// and no limit applies to it. Null for no limit.
   final int? maxDayCount;
 
   /// Reads the current time, which the calendar reads when first built and

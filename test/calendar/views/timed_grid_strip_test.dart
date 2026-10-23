@@ -1,7 +1,7 @@
 /// The timed grid's all-day strip: its bars, rows, count and expansion, the
-/// gestures on bars within the strip, the crossings of a bar into the slots
-/// and of a block into the strip with their live marks, and the create
-/// ranges across the strip.
+/// gestures on bars within the strip, the crossings of a bar into the
+/// slots, of a block into the strip and of Week's end handle into a later
+/// day with their live marks, and the create ranges across the strip.
 library;
 
 import 'dart:async';
@@ -778,6 +778,88 @@ Future<RecordingStore> releaseBarEdge(
     side: side,
     over: over,
     others: others,
+  );
+  await gesture.up();
+  await tester.pumpAndSettle();
+  return store;
+}
+
+/// Monday 22:00 to Tuesday 02:00, whose end handle the LD tests drag.
+CalendarEntry<String> nightEntry() {
+  return entryOf("night", at(monday, 22), at(tuesday, 2));
+}
+
+/// The LD tests' gesture: in Week, under [limit], the entry [id] of
+/// [entries] selected and the end grip of its last piece, on [day],
+/// pressed 2 px above that block's bottom, on the grip's half inside the
+/// block, or with [outside] 2 px below it, on the half outside; then
+/// dragged so the pointer lies over the slot starting at [minute] in
+/// [over]'s column. Returns the gesture still held, the store and the
+/// harness.
+Future<(TestGesture, RecordingStore, Harness)> holdEndOver(
+  WidgetTester tester, {
+  required List<CalendarEntry<String>> entries,
+  required String id,
+  required DateTime day,
+  required DateTime over,
+  required int minute,
+  int? limit,
+  bool outside = false,
+}) async {
+  final shown = Shown.week(monday);
+  final store = storeOf(entries);
+  final harness = Harness(store, shown, maxDayCount: limit);
+  await harness.pump(tester);
+  final selecting = await lift(tester, tester.getCenter(blocksOf(id).first));
+  await selecting.up();
+  await tester.pumpAndSettle();
+  // Setup sanity: the entry is selected, and the block on [day] holds its
+  // end grip.
+  expect(
+    find.descendant(
+      of: blockFinder(id, day),
+      matching: find.byKey(blockGripKey(id, AxisDirection.down)),
+    ),
+    findsOneWidget,
+  );
+  final block = tester.getRect(blockFinder(id, day));
+  final from = Offset(block.center.dx, block.bottom + (outside ? 2.0 : -2.0));
+  final viewport = viewportOf(tester);
+  // Setup sanity: the press lies over the block, or with [outside] over
+  // no block, where only the grid's listener hands it to the handles.
+  expect(
+    viewport.itemAt(viewport.globalToLocal(from)),
+    outside ? isNull : isNotNull,
+  );
+  final to = slotRect(tester, shown, over, minute).center;
+  final gesture = await tester.startGesture(from);
+  await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+  await tester.pump();
+  await gesture.moveTo(to);
+  await tester.pump();
+  return (gesture, store, harness);
+}
+
+/// [holdEndOver], let go.
+Future<RecordingStore> releaseEndOver(
+  WidgetTester tester, {
+  required List<CalendarEntry<String>> entries,
+  required String id,
+  required DateTime day,
+  required DateTime over,
+  required int minute,
+  int? limit,
+  bool outside = false,
+}) async {
+  final (gesture, store, _) = await holdEndOver(
+    tester,
+    entries: entries,
+    id: id,
+    day: day,
+    over: over,
+    minute: minute,
+    limit: limit,
+    outside: outside,
   );
   await gesture.up();
   await tester.pumpAndSettle();
@@ -2400,6 +2482,111 @@ void main() {
         CreateRange(start: at(monday, 0, low), end: at(monday, 0, high + 15)),
       ]);
     });
+  });
+
+  group("LD1", () {
+    testWidgets("in Week the end handle of Monday 22:00 to Tuesday 02:00 "
+        "released on Wednesday's 12:00 slot writes an end of Wednesday "
+        "12:15, and the board reports no resize of its own", (tester) async {
+      final store = await releaseEndOver(
+        tester,
+        entries: <CalendarEntry<String>>[nightEntry()],
+        id: "night",
+        day: tuesday,
+        over: wednesday,
+        minute: 12 * 60,
+      );
+      expect(store.moves, <CalendarEntry<String>>[
+        entryOf("night", at(monday, 22), at(wednesday, 12, 15)),
+      ]);
+      expectTimes(store, "night", at(monday, 22), at(wednesday, 12, 15));
+    });
+
+    testWidgets("the end handle of a last piece ending at the day's end, "
+        "whose span the write leaves as it was, released on Wednesday's "
+        "12:00 slot, writes once too", (tester) async {
+      final store = await releaseEndOver(
+        tester,
+        entries: <CalendarEntry<String>>[
+          entryOf("late", at(monday, 22), wednesday),
+        ],
+        id: "late",
+        day: tuesday,
+        over: wednesday,
+        minute: 12 * 60,
+      );
+      expect(store.moves, <CalendarEntry<String>>[
+        entryOf("late", at(monday, 22), at(wednesday, 12, 15)),
+      ]);
+    });
+  });
+
+  testWidgets("LD2 with maxDayCount 3, released over Thursday's 12:00 slot "
+      "the end handle writes an end at Thursday's start, over Wednesday's "
+      "an end of Wednesday 12:15, and with no limit over Thursday's 12:00 "
+      "slot an end of Thursday 12:15", (tester) async {
+    for (final (limit, over, end) in <(int?, DateTime, DateTime)>[
+      (3, thursday, thursday),
+      (3, wednesday, at(wednesday, 12, 15)),
+      (null, thursday, at(thursday, 12, 15)),
+    ]) {
+      final store = await releaseEndOver(
+        tester,
+        entries: <CalendarEntry<String>>[nightEntry()],
+        id: "night",
+        day: tuesday,
+        over: over,
+        minute: 12 * 60,
+        limit: limit,
+      );
+      expect(store.moves, <CalendarEntry<String>>[
+        entryOf("night", at(monday, 22), end),
+      ], reason: "$limit over ${isoDate(over)}");
+    }
+  });
+
+  testWidgets("LD3 while the end handle's pointer is over Wednesday's 12:00 "
+      "slot the slots up to Wednesday 12:15 are marked and the landing "
+      "label names the range", (tester) async {
+    final (gesture, _, harness) = await holdEndOver(
+      tester,
+      entries: <CalendarEntry<String>>[nightEntry()],
+      id: "night",
+      day: tuesday,
+      over: wednesday,
+      minute: 12 * 60,
+    );
+    final shown = harness.shown;
+    expect(
+      landingText(tester),
+      landingLabel(at(monday, 22), at(wednesday, 12, 15), harness.today),
+    );
+    expect(strokedRects(tester), <Matcher>[
+      nearRect(slotsRect(tester, shown, monday, 22 * 60, 24 * 60).deflate(1.0)),
+      nearRect(slotsRect(tester, shown, tuesday, 0, 24 * 60).deflate(1.0)),
+      nearRect(
+        slotsRect(tester, shown, wednesday, 0, 12 * 60 + 15).deflate(1.0),
+      ),
+    ]);
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("LD4 the end handle dragged from a press on its grip's half "
+      "outside the block, released on Wednesday's 12:00 slot, writes an end "
+      "of Wednesday 12:15 once", (tester) async {
+    final store = await releaseEndOver(
+      tester,
+      entries: <CalendarEntry<String>>[nightEntry()],
+      id: "night",
+      day: tuesday,
+      over: wednesday,
+      minute: 12 * 60,
+      outside: true,
+    );
+    expect(store.moves, <CalendarEntry<String>>[
+      entryOf("night", at(monday, 22), at(wednesday, 12, 15)),
+    ]);
   });
 }
 
