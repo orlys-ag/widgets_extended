@@ -1988,8 +1988,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.byKey(monthStripKey(tuesday)));
     await tester.pumpAndSettle();
-    // The lock leaves 11:30 free, the first 30-minute start after 11:07,
-    // and the standup takes 11:30 to 12:00.
+    // The lock's earliest 30-minute start is 11:30, which the standup's
+    // 11:15 to 11:45 overlaps, so the first free slot starts at 12:00.
     expect(creates, <CreateRange>[
       CreateRange(start: at(tuesday, 12), end: at(tuesday, 12, 30)),
     ]);
