@@ -210,7 +210,7 @@ Future<void> pumpGrid(
             today: today,
             now: now,
             onSelectDay: (day) {},
-            onOpenItem: (id) {},
+            onOpenEntry: (id) {},
             onCreate: (range) async {},
             editable: settings.editing,
             lockPast: settings.lockPast,

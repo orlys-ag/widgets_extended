@@ -52,7 +52,7 @@ List<Object> rowsOf(
       editable: editable,
     ))
       switch (row) {
-        DayListItem(:final entry) => entry.id,
+        DayListEntry(:final entry) => entry.id,
         DayListGap(:final start, :final end) => (start, end),
         DayListHidden(:final count, :final above) => (
           above ? "before" : "after",
@@ -210,7 +210,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final card = find.byKey(itemCardKey("note-1"));
+    final card = find.byKey(entryCardKey("note-1"));
     expect(
       find.descendant(of: card, matching: find.text("first")),
       findsOneWidget,

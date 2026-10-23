@@ -74,7 +74,7 @@ Future<void> showCreateFlow(
 }
 
 /// Opens the form for the stored item [id], whose Save the history [lock]
-/// that holds then checks; of an item the lock has [ItemHold.started] the
+/// that holds then checks; of an item the lock has [EntryHold.started] the
 /// day and the start take no input, and it has no Delete. Does nothing
 /// when the store does not hold it.
 Future<void> showEditForm(
@@ -145,7 +145,7 @@ Map<String, String> lockErrorsOf(
       (from != null && lock.admits(from.start, from.end, to.start, to.end))) {
     return const <String, String>{};
   }
-  if (from == null || lock.holdOf(from.start, from.end) == ItemHold.free) {
+  if (from == null || lock.holdOf(from.start, from.end) == EntryHold.free) {
     if (!to.start.isBefore(boundary)) {
       return const <String, String>{};
     }
@@ -156,7 +156,7 @@ Map<String, String> lockErrorsOf(
       "startMinute": "The start can't be in the past.",
     };
   }
-  if (lock.holdOf(from.start, from.end) == ItemHold.locked) {
+  if (lock.holdOf(from.start, from.end) == EntryHold.locked) {
     return const <String, String>{"day": "Past items are locked."};
   }
   return <String, String>{
@@ -241,8 +241,8 @@ class _ItemFormState extends State<_ItemForm> {
 
   /// How the history lock held the stored item when the form opened, free
   /// for a draft. Of a started one the day and the start take no input.
-  late final ItemHold _hold = widget.item.id == null
-      ? ItemHold.free
+  late final EntryHold _hold = widget.item.id == null
+      ? EntryHold.free
       : widget.lock().holdOf(widget.item.start, widget.item.end);
 
   /// The text controllers of the schema's text, URL, long-text and text
@@ -550,7 +550,7 @@ class _ItemFormState extends State<_ItemForm> {
     final style = harborTypeStyleOf(type);
     final message = _message;
     final hours = widget.store.hours;
-    final started = _hold == ItemHold.started;
+    final started = _hold == EntryHold.started;
     final fields = <Widget>[
       Row(
         children: <Widget>[
@@ -681,7 +681,9 @@ class _ItemFormState extends State<_ItemForm> {
                         },
                         child: const Text("Close"),
                       ),
-                    if (!_isDraft && !widget.readOnly && _hold == ItemHold.free)
+                    if (!_isDraft &&
+                        !widget.readOnly &&
+                        _hold == EntryHold.free)
                       TextButton(
                         onPressed: _saving ? null : _delete,
                         child: const Text("Delete"),

@@ -22,7 +22,7 @@ import 'calendar_harness.dart';
 const Duration oneFrame = Duration(milliseconds: 16);
 
 Finder cardFinder(String id) {
-  return find.byKey(itemCardKey(id));
+  return find.byKey(entryCardKey(id));
 }
 
 /// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
@@ -158,7 +158,7 @@ void main() {
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
     expect(
-      tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasItems,
+      tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasEntries,
       isTrue,
     );
     await cardAction(tester, designCritiqueId, "Delete");
@@ -169,7 +169,7 @@ void main() {
     await tester.pump(latency);
     await tester.pumpAndSettle();
     expect(
-      tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasItems,
+      tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasEntries,
       isFalse,
     );
     expect(
@@ -415,7 +415,7 @@ void main() {
     }
     final yesterday = DateTime(2026, 4, 20);
     bool yesterdayRead() {
-      return tester.widget<DayCell>(dayFinder(yesterday)).hasItems;
+      return tester.widget<DayCell>(dayFinder(yesterday)).hasEntries;
     }
 
     expect(headerTop(tester, today), 0.0);

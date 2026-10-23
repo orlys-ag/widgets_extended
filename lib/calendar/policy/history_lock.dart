@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../dates/calendar_dates.dart';
 
 /// How the history lock holds an entry.
-enum ItemHold {
+enum EntryHold {
   /// The entry starts at the boundary or after it: it changes freely, but
   /// never to start before the boundary.
   free,
@@ -70,12 +70,12 @@ class HistoryLock {
   /// How the lock holds an entry from [start] to [end]: free where it
   /// starts at the boundary or after it, started where it ends after it,
   /// and locked otherwise.
-  ItemHold holdOf(DateTime start, DateTime end) {
+  EntryHold holdOf(DateTime start, DateTime end) {
     final boundary = this.boundary;
     if (boundary == null || !start.isBefore(boundary)) {
-      return ItemHold.free;
+      return EntryHold.free;
     }
-    return end.isAfter(boundary) ? ItemHold.started : ItemHold.locked;
+    return end.isAfter(boundary) ? EntryHold.started : EntryHold.locked;
   }
 
   /// Whether the entry from [fromStart] to [fromEnd] may become one from
@@ -93,11 +93,11 @@ class HistoryLock {
       return true;
     }
     switch (holdOf(fromStart, fromEnd)) {
-      case ItemHold.free:
+      case EntryHold.free:
         return !toStart.isBefore(boundary);
-      case ItemHold.started:
+      case EntryHold.started:
         return toStart == fromStart && toEnd.isAfter(boundary);
-      case ItemHold.locked:
+      case EntryHold.locked:
         return toStart == fromStart && toEnd == fromEnd;
     }
   }

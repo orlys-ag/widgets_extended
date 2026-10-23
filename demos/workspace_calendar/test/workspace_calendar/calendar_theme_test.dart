@@ -1919,7 +1919,7 @@ void main() {
       return tester
           .widget<Text>(
             find.descendant(
-              of: find.byKey(itemCardKey("item-1")),
+              of: find.byKey(entryCardKey("item-1")),
               matching: find.text("Planning"),
             ),
           )
@@ -2475,7 +2475,7 @@ void main() {
       return tester
           .widget<Text>(
             find.descendant(
-              of: find.byKey(itemCardKey(id)),
+              of: find.byKey(entryCardKey(id)),
               matching: find.text(title),
             ),
           )
@@ -2525,17 +2525,17 @@ void main() {
       }).toSet(),
       <Type>{CustomPaint, SizedBox},
     );
-    final card = tester.element(find.byKey(itemCardKey("item-2")));
+    final card = tester.element(find.byKey(entryCardKey("item-2")));
     final cardWidget = card.widget;
     storeOf(tester).requestDelete("item-13");
     await tester.pump();
     expect(
-      identical(tester.element(find.byKey(itemCardKey("item-2"))), card),
+      identical(tester.element(find.byKey(entryCardKey("item-2"))), card),
       isTrue,
     );
     expect(
       identical(
-        tester.element(find.byKey(itemCardKey("item-2"))).widget,
+        tester.element(find.byKey(entryCardKey("item-2"))).widget,
         cardWidget,
       ),
       isFalse,
@@ -2720,14 +2720,14 @@ void main() {
     );
     expectText(
       tester,
-      textIn(find.byKey(itemCardKey("item-1")), "Planning"),
+      textIn(find.byKey(entryCardKey("item-1")), "Planning"),
       theme,
       "entryCardTitleStyle",
       theme.text,
     );
     expectText(
       tester,
-      textIn(find.byKey(itemCardKey("item-1")), "Room 2"),
+      textIn(find.byKey(entryCardKey("item-1")), "Room 2"),
       theme,
       "entryCardSummaryStyle",
       theme.textSecondary,
@@ -3062,7 +3062,7 @@ void main() {
     final now = find.byKey(dayListNowKey);
     expectColour(decorationOf(tester, now).color!, theme.error, "time pill");
     expectColour(lineColourOf(tester, now), theme.error, "time line");
-    final card = find.byKey(itemCardKey("item-1"));
+    final card = find.byKey(entryCardKey("item-1"));
     expectColour(
       iconColourOf(tester, card, theme.entryMenuIcon),
       theme.textMuted,
@@ -3573,7 +3573,7 @@ void main() {
       if (mode == "Agenda") {
         expectText(
           tester,
-          textIn(find.byKey(itemCardKey("item-1")), "Planning"),
+          textIn(find.byKey(entryCardKey("item-1")), "Planning"),
           b,
           "entryCardTitleStyle",
           b.text,

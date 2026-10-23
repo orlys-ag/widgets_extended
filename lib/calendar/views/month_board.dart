@@ -289,9 +289,9 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
   }
   final placements = <BoardPlacement<MonthChip<T>>>[];
   for (final entry in shown) {
-    final item = entry.entry;
-    final first = dayNumber(item.start);
-    final last = lastDayNumberOf(item.start, item.end);
+    final calendarEntry = entry.entry;
+    final first = dayNumber(calendarEntry.start);
+    final last = lastDayNumberOf(calendarEntry.start, calendarEntry.end);
     for (var row = 0; row < weeks; row++) {
       final weekFirst = grid.weekdays.weekStartOfDay(days[row * columns]);
       final weekLast = weekFirst + DateTime.daysPerWeek - 1;
@@ -353,14 +353,14 @@ splitMonthHours<T>(
         dayNumber(grid.dateAt(row, col)): row * columns + col,
   };
   for (final entry in shown) {
-    final item = entry.entry;
-    if (item.isAllDay) {
+    final calendarEntry = entry.entry;
+    if (calendarEntry.isAllDay) {
       inside.add(entry);
       continue;
     }
-    final span = wallSpanOf(item.start, item.end);
-    final first = dayNumber(item.start);
-    final last = lastDayNumberOf(item.start, item.end);
+    final span = wallSpanOf(calendarEntry.start, calendarEntry.end);
+    final first = dayNumber(calendarEntry.start);
+    final last = lastDayNumberOf(calendarEntry.start, calendarEntry.end);
     var holds = false;
     for (var day = first; day <= last && !holds; day++) {
       final piece = pieceOn(span, day);
@@ -617,7 +617,7 @@ enum MonthLayout {
 /// weeks and the days, and each day of another month lies on the
 /// background colour.
 ///
-/// A tap on a chip reports [onOpenItem], a tap anywhere else on a day
+/// A tap on a chip reports [onOpenEntry], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
 /// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
 /// last two give the board the keyboard, whose arrow
@@ -664,7 +664,7 @@ class MonthBoard<T> extends StatefulWidget {
     required this.onSelectDay,
     required this.onOpenDay,
     required this.onCreateOnDay,
-    required this.onOpenItem,
+    required this.onOpenEntry,
     this.onZoom,
     this.chipBuilder,
     this.loadingBuilder,
@@ -713,7 +713,7 @@ class MonthBoard<T> extends StatefulWidget {
   final ValueChanged<DateTime>? onCreateOnDay;
 
   /// The chip of this item, which is not pending, was tapped.
-  final ValueChanged<String> onOpenItem;
+  final ValueChanged<String> onOpenEntry;
 
   /// Reports the week scale and the least day width a pinch zooms to,
   /// which the board shows once [weekScale] and [minDayWidth] bring them;
@@ -1206,9 +1206,9 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     create(day);
   }
 
-  void _openItem(String id) {
+  void _openEntry(String id) {
     if (!_pinch.pinched.value) {
-      widget.onOpenItem(id);
+      widget.onOpenEntry(id);
     }
   }
 
@@ -1309,7 +1309,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// ready and the last sync's were. Any other sync runs under
   /// [BoardAnimationStyle.disabled], which [_scheduleStyleRestore] lifts,
   /// and settles in its batch every enter and exit in flight
-  /// ([_setItemsSettled]). A refit alone leaves the style as it is, so the
+  /// ([_placeSettled]). A refit alone leaves the style as it is, so the
   /// motion in flight runs on: the replaced axis lands its own track
   /// resizes, and a new row axis takes each week's first measurement
   /// without animating it.
@@ -1404,7 +1404,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         return;
       }
       if (settles) {
-        _setItemsSettled(placements, next);
+        _placeSettled(placements, next);
       } else {
         _board.setItems(placements);
       }
@@ -1574,7 +1574,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// retiring an entering one; the second retires the carried keys and
   /// adds the left-out ones whole, under new ids. Inside the sync's batch
   /// the two calls make one notification.
-  void _setItemsSettled(
+  void _placeSettled(
     List<BoardPlacement<MonthChip<T>>> placements,
     Map<String, BoardPlacement<MonthChip<T>>> next,
   ) {
@@ -1604,7 +1604,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// after the batch of the sync that disabled it, so it runs at the next
   /// frame's start, before that frame's layout and after the sync's own
   /// layout has measured the weeks under the disabled style. That sync
-  /// left nothing in flight ([_setItemsSettled]), so a sync the next frame
+  /// left nothing in flight ([_placeSettled]), so a sync the next frame
   /// lays out animates.
   void _scheduleStyleRestore() {
     if (_restoreScheduled) {
@@ -1703,7 +1703,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         card: card,
         builder: _barBuilder,
         kindOf: widget.entryKindOf,
-        onOpen: _openItem,
+        onOpen: _openEntry,
       ),
     );
     _chips[chip.key] = (chip: chip, widget: built);
@@ -1880,13 +1880,15 @@ String _dayLabel(DateTime day) {
 /// 09:50", and for a timed entry over days "Title, Monday, April 20, 22:00
 /// to Tuesday, April 21, 02:00".
 String _chipLabel<T>(CalendarShownEntry<T> entry, String? kind) {
-  final item = entry.entry;
-  final first = dateOfDayNumber(dayNumber(item.start));
-  final last = dateOfDayNumber(lastDayNumberOf(item.start, item.end));
-  final start = clockLabel(minuteOfDay(item.start));
-  final end = clockLabel(endMinuteOfDay(item.end));
+  final calendarEntry = entry.entry;
+  final first = dateOfDayNumber(dayNumber(calendarEntry.start));
+  final last = dateOfDayNumber(
+    lastDayNumberOf(calendarEntry.start, calendarEntry.end),
+  );
+  final start = clockLabel(minuteOfDay(calendarEntry.start));
+  final end = clockLabel(endMinuteOfDay(calendarEntry.end));
   final String when;
-  if (item.isAllDay) {
+  if (calendarEntry.isAllDay) {
     when = first == last
         ? "${_dayLabel(first)}, all day"
         : "${_dayLabel(first)} to ${_dayLabel(last)}, all day";
@@ -1896,8 +1898,8 @@ String _chipLabel<T>(CalendarShownEntry<T> entry, String? kind) {
     when = "${_dayLabel(first)}, $start to ${_dayLabel(last)}, $end";
   }
   final label = kind == null
-      ? "${item.title}, $when"
-      : "${item.title}, $kind, $when";
+      ? "${calendarEntry.title}, $when"
+      : "${calendarEntry.title}, $kind, $when";
   return entry.pending ? "$label, pending" : label;
 }
 
@@ -1973,11 +1975,11 @@ class _MonthDayCell extends StatelessWidget {
             label,
             if (isToday) "today",
             if (hides.earlier > 0)
-              "${moreItemsLabel(hides.earlier)} before "
+              "${moreEntriesLabel(hides.earlier)} before "
                   "${hourLabel(hours.hours.start, hours.format)}",
             if (hides.count > 0) _hiddenLabel(hides.count),
             if (hides.later > 0)
-              "${moreItemsLabel(hides.later)} after "
+              "${moreEntriesLabel(hides.later)} after "
                   "${hourLabel(hours.hours.end, hours.format)}",
           ].join(", "),
           hint: "Opens the day",

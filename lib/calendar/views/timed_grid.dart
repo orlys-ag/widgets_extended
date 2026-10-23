@@ -278,7 +278,7 @@ const ValueKey<String> hiddenCountKey = ValueKey<String>("grid-hidden-count");
 
 /// What a screen reader hears for the pill counting [count] items on no
 /// day the grid has a column for, before the pill's own "+N".
-String hiddenItemsLabel(int count) {
+String hiddenEntriesLabel(int count) {
   if (count == 1) {
     return "1 item is on a day not shown";
   }
@@ -741,7 +741,7 @@ CreateRange? _createRangeOf(int startWall, int endWall) {
 /// from Monday 22:00 to Tuesday 02:00 shows one block at the end of
 /// Monday and one at the start of Tuesday. Rows follow the wall clock: on
 /// a day of 23 or 25 hours every column still has the same rows. A tap on
-/// a block that is not pending reports [onOpenItem] with its entry's id; a
+/// a block that is not pending reports [onOpenEntry] with its entry's id; a
 /// tap on a day header reports [onSelectDay]. Each block's content is what
 /// [blockBuilder] draws, told on a grid of one day column that the block
 /// is detailed, and which of its ends the hours cut or continue on
@@ -836,7 +836,7 @@ class TimedGrid<T> extends StatefulWidget {
     required this.today,
     required this.now,
     required this.onSelectDay,
-    required this.onOpenItem,
+    required this.onOpenEntry,
     required this.onCreate,
     this.editable = false,
     this.lockPast = false,
@@ -891,7 +891,7 @@ class TimedGrid<T> extends StatefulWidget {
   final ValueChanged<DateTime> onSelectDay;
 
   /// Reports a tap on a block that is not pending, with its entry's id.
-  final ValueChanged<String> onOpenItem;
+  final ValueChanged<String> onOpenEntry;
 
   /// Opens the create flow for the range a create gesture on empty cells
   /// picked, and completes when it closes.
@@ -1036,7 +1036,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// the previous one. [didUpdateWidget] gives the board a new item
   /// builder for a new [TimedGrid.blockBuilder], so every block finds it.
   late final BoardCellBuilder<GridKey, GridShape<T>> _cellBuilder = _buildCell;
-  late BoardItemBuilder<GridKey, GridShape<T>> _itemBuilder = _buildItem;
+  late BoardItemBuilder<GridKey, GridShape<T>> _placementBuilder =
+      _buildPlacement;
 
   /// [TimedGrid.blockBuilder], or the module's default where it is null.
   late CalendarBlockBuilder<T> _blockBuilder = _blockBuilderOf(widget);
@@ -1308,8 +1309,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     super.didUpdateWidget(oldWidget);
     if (widget.blockBuilder != oldWidget.blockBuilder) {
       _blockBuilder = _blockBuilderOf(widget);
-      _itemBuilder = (context, view) {
-        return _buildItem(context, view);
+      _placementBuilder = (context, view) {
+        return _buildPlacement(context, view);
       };
     }
     final storeChanged = widget.store != oldWidget.store;
@@ -2408,7 +2409,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _pinch.handleEvent(event);
     final selected = _selectedBlock.value;
     if (selected != null) {
-      final under = _itemAt(event.position);
+      final under = _keyAt(event.position);
       if (under == null && _startBeside(event)) {
         return;
       }
@@ -2463,7 +2464,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     var cursor = MouseCursor.defer;
     if (!_handles.isEmpty &&
         _selectedBlock.value != null &&
-        _itemAt(event.position) == null &&
+        _keyAt(event.position) == null &&
         _bodyCellAt(event.position) != null) {
       cursor = _handles.cursorOutside(event.position);
     }
@@ -2471,7 +2472,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The key of the block that lies under [global], or null.
-  GridKey? _itemAt(Offset global) {
+  GridKey? _keyAt(Offset global) {
     final viewport = _findViewport();
     if (viewport == null) {
       return null;
@@ -2784,7 +2785,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return labels.isEmpty ? null : labels.join(", ");
   }
 
-  Widget _buildItem(
+  Widget _buildPlacement(
     BuildContext context,
     BoardItemView<GridKey, GridShape<T>> view,
   ) {
@@ -2825,7 +2826,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       onOpen: entry.pending
           ? null
           : () {
-              widget.onOpenItem(entry.id);
+              widget.onOpenEntry(entry.id);
             },
     );
   }
@@ -2944,7 +2945,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           key: _boardKey,
           controller: _board,
           cellBuilder: _cellBuilder,
-          itemBuilder: _itemBuilder,
+          itemBuilder: _placementBuilder,
           background: _TimedGridPainter(
             styles: styles,
             tracks: _tracks,
@@ -3160,8 +3161,8 @@ class _DayHeaderCell extends StatelessWidget {
 /// which [_BlockContent] fills with what [builder] draws for [entry] and
 /// [details]; the block draws nothing of the entry itself. A long press on
 /// it moves its entry while the history [lock] holds the entry
-/// [ItemHold.free], and reports [onSelect] while it holds it
-/// [ItemHold.started], and while [selection] names its entry, an outline
+/// [EntryHold.free], and reports [onSelect] while it holds it
+/// [EntryHold.started], and while [selection] names its entry, an outline
 /// lies over it, with the top resize handle where [startHandle] holds and
 /// the entry is free, and the bottom one where [endHandle] holds
 /// ([_BlockHandles]). Its tap, long press and move take a press anywhere in
@@ -3230,7 +3231,7 @@ class _Block<T> extends StatelessWidget {
           fit: StackFit.passthrough,
           children: <Widget>[
             BoardDelayedDragHandle(
-              enabled: hold == ItemHold.free,
+              enabled: hold == EntryHold.free,
               child: Padding(
                 padding: const EdgeInsets.all(1.0),
                 child: GestureDetector(
@@ -3239,7 +3240,7 @@ class _Block<T> extends StatelessWidget {
                   // does too.
                   behavior: HitTestBehavior.opaque,
                   onTap: onOpen,
-                  onLongPress: hold == ItemHold.started ? onSelect : null,
+                  onLongPress: hold == EntryHold.started ? onSelect : null,
                   child: child,
                 ),
               ),
@@ -3250,7 +3251,7 @@ class _Block<T> extends StatelessWidget {
                   key: blockHandlesKey(entry.id),
                   id: entry.id,
                   slot: handles,
-                  resizesStart: startHandle && hold == ItemHold.free,
+                  resizesStart: startHandle && hold == EntryHold.free,
                   resizesEnd: endHandle,
                 ),
               ),
@@ -3338,7 +3339,7 @@ class _GutterCell extends StatelessWidget {
 
 /// The day header's corner over the gutter, on the surface colour: nothing,
 /// or a pill counting the shown entries on no day the grid has a column
-/// for, which a screen reader hears with [hiddenItemsLabel] before the
+/// for, which a screen reader hears with [hiddenEntriesLabel] before the
 /// count.
 class _HiddenCount extends StatelessWidget {
   const _HiddenCount({required this.count});
@@ -3359,7 +3360,7 @@ class _HiddenCount extends StatelessWidget {
               return const SizedBox.shrink();
             }
             return Semantics(
-              label: hiddenItemsLabel(value),
+              label: hiddenEntriesLabel(value),
               child: DecoratedBox(
                 key: hiddenCountKey,
                 decoration: styles.hiddenPill,

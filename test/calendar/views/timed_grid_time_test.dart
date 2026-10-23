@@ -206,7 +206,7 @@ class Harness {
       today: DateTime(2026, 1, 5),
       now: now,
       onSelectDay: (day) {},
-      onOpenItem: (id) {},
+      onOpenEntry: (id) {},
       onCreate: (range) async {
         creates.add(range);
       },

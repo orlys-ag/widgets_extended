@@ -984,8 +984,11 @@ void main() {
     await pumpCalendar(tester, api: api, clock: nineOClock);
     await pickMode(tester, "Week");
     await toggleWeekends(tester);
-    expect(find.bySemanticsLabel("${hiddenItemsLabel(1)}\n+1"), findsOneWidget);
-    expect(find.byTooltip(hiddenItemsLabel(1)), findsNothing);
+    expect(
+      find.bySemanticsLabel("${hiddenEntriesLabel(1)}\n+1"),
+      findsOneWidget,
+    );
+    expect(find.byTooltip(hiddenEntriesLabel(1)), findsNothing);
     expect(
       find.descendant(of: grid, matching: find.byType(Tooltip)),
       findsNothing,
@@ -1736,7 +1739,7 @@ void main() {
     expect(marks.lastCard(brainstormId).entry.pending, isTrue);
     await tester.pump(second);
     await tester.pumpAndSettle();
-    expect(find.byKey(itemCardKey(brainstormId)), findsNothing);
+    expect(find.byKey(entryCardKey(brainstormId)), findsNothing);
 
     // A card whose item the hours cut at both ends, on Saturday, which
     // holds no other item, in a calendar of its own.
@@ -1765,7 +1768,7 @@ void main() {
     final details = cut.lastCard(longDay).details;
     expect(details.startsAt, isNotNull);
     expect(details.endsAt, isNotNull);
-    final slot = find.byKey(itemCardKey(longDay));
+    final slot = find.byKey(entryCardKey(longDay));
     expect(slot, findsOneWidget);
     for (final strip in <Finder>[
       find.byKey(itemCardStartsAtKey(longDay)),
@@ -1897,7 +1900,7 @@ void main() {
     final decorations = tester
         .widgetList<DecoratedBox>(
           find.descendant(
-            of: find.byKey(itemCardKey(brainstormId)),
+            of: find.byKey(entryCardKey(brainstormId)),
             matching: find.byType(DecoratedBox),
           ),
         )
@@ -2054,7 +2057,7 @@ void main() {
     expect(add, findsOneWidget);
     expect(tester.getSemantics(add), isSemantics(hasTapAction: true));
     final menu = find.descendant(
-      of: find.byKey(itemCardKey(laterId)),
+      of: find.byKey(entryCardKey(laterId)),
       matching: find.bySemanticsLabel(itemActionsLabel),
     );
     expect(menu, findsOneWidget);
@@ -2079,7 +2082,7 @@ void main() {
     for (final id in <String>[runningId, laterId]) {
       expect(
         find.descendant(
-          of: find.byKey(itemCardKey(id)),
+          of: find.byKey(entryCardKey(id)),
           matching: find.byType(Tooltip),
         ),
         findsOneWidget,
@@ -2172,7 +2175,7 @@ void main() {
       expect(a.marked(tester, card.value, "card", id), isFalse, reason: id);
     }
 
-    final slot = find.byKey(itemCardKey(brainstormId));
+    final slot = find.byKey(entryCardKey(brainstormId));
     final row = find.ancestor(of: slot, matching: find.byType(SizeTransition));
     final height = tester.getSize(row.first).height;
     b.lastCard(brainstormId).details.onDelete!();

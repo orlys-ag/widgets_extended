@@ -61,7 +61,7 @@ CalendarViewKind calendarOpeningView(
 
 /// A tap on an entry: the [entry] as the store holds it, and whether it is
 /// [editable], in edit mode with the history lock not holding it
-/// [ItemHold.locked].
+/// [EntryHold.locked].
 @immutable
 class CalendarEntryTapDetails<T> {
   const CalendarEntryTapDetails({required this.entry, required this.editable});
@@ -71,7 +71,7 @@ class CalendarEntryTapDetails<T> {
 
   /// Whether a host's form may change the entry: the calendar is
   /// [CalendarView.editable] and the history lock does not hold the entry
-  /// [ItemHold.locked].
+  /// [EntryHold.locked].
   final bool editable;
 }
 
@@ -1089,7 +1089,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         entry: entry,
         editable:
             widget.editable &&
-            _lock.holdOf(entry.start, entry.end) != ItemHold.locked,
+            _lock.holdOf(entry.start, entry.end) != EntryHold.locked,
       ),
     );
   }
@@ -1328,7 +1328,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   today: _today.value,
                   now: _now,
                   onSelectDay: _select,
-                  onOpenItem: _openEntry,
+                  onOpenEntry: _openEntry,
                   onCreate: _createRange,
                   onZoom: (minSlotHeight, minDayWidth) {
                     controller.setZoom(
@@ -1390,7 +1390,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   onSelectDay: _select,
                   onOpenDay: _openDay,
                   onCreateOnDay: widget.editable ? _createOn : null,
-                  onOpenItem: _openEntry,
+                  onOpenEntry: _openEntry,
                   onZoom: (weekScale, minDayWidth) {
                     controller.setZoom(
                       monthWeekScale: weekScale,

@@ -64,7 +64,7 @@ Widget defaultCalendarBlockBuilder<T>(
   CalendarBlockDetails details,
 ) {
   final theme = CalendarTheme.of(context);
-  final item = entry.entry;
+  final calendarEntry = entry.entry;
   final Widget lines;
   if (details.detailed) {
     lines = Padding(
@@ -73,13 +73,13 @@ Widget defaultCalendarBlockBuilder<T>(
         spacing: 8.0,
         children: <Widget>[
           Text(
-            item.title,
+            calendarEntry.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.detailedBlockTitleStyle.copyWith(color: theme.text),
           ),
           Text(
-            entryTimesLabel(item.start, item.end),
+            entryTimesLabel(calendarEntry.start, calendarEntry.end),
             maxLines: 1,
             style: theme.detailedBlockDetailStyle.copyWith(
               color: theme.textSecondary,
@@ -92,7 +92,7 @@ Widget defaultCalendarBlockBuilder<T>(
     lines = Padding(
       padding: const EdgeInsets.fromLTRB(4.0, 2.0, 4.0, 2.0),
       child: Text(
-        item.title,
+        calendarEntry.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.blockTitleStyle.copyWith(color: theme.text),
@@ -101,8 +101,8 @@ Widget defaultCalendarBlockBuilder<T>(
   }
   Widget block = DecoratedBox(
     decoration: BoxDecoration(
-      color: _tintOf(item.color, theme),
-      border: Border(left: BorderSide(color: item.color, width: 4.0)),
+      color: _tintOf(calendarEntry.color, theme),
+      border: Border(left: BorderSide(color: calendarEntry.color, width: 4.0)),
     ),
     child: ClipRect(
       child: OverflowBox(
@@ -167,7 +167,7 @@ Widget defaultCalendarChipBuilder<T>(
   CalendarChipDetails details,
 ) {
   final theme = CalendarTheme.of(context);
-  final item = entry.entry;
+  final calendarEntry = entry.entry;
   const radius = Radius.circular(4.0);
   final Widget content;
   if (details.card) {
@@ -176,14 +176,14 @@ Widget defaultCalendarChipBuilder<T>(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          item.title,
+          calendarEntry.title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           softWrap: false,
           style: theme.monthCardTitleStyle.copyWith(color: theme.text),
         ),
         Text(
-          entryTimesLabel(item.start, item.end),
+          entryTimesLabel(calendarEntry.start, calendarEntry.end),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           softWrap: false,
@@ -195,7 +195,7 @@ Widget defaultCalendarChipBuilder<T>(
     content = Align(
       alignment: Alignment.centerLeft,
       child: Text(
-        item.title,
+        calendarEntry.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         softWrap: false,
@@ -209,11 +209,11 @@ Widget defaultCalendarChipBuilder<T>(
       right: details.continuesAfter ? Radius.zero : radius,
     ),
     child: ColoredBox(
-      color: _tintOf(item.color, theme),
+      color: _tintOf(calendarEntry.color, theme),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          SizedBox(width: 4.0, child: ColoredBox(color: item.color)),
+          SizedBox(width: 4.0, child: ColoredBox(color: calendarEntry.color)),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4.0),
@@ -247,7 +247,7 @@ Widget defaultCalendarCardBuilder<T>(
   CalendarCardDetails details,
 ) {
   final theme = CalendarTheme.of(context);
-  final item = entry.entry;
+  final calendarEntry = entry.entry;
   final titleStyle = theme.entryCardTitleStyle;
   final startsAt = details.startsAt;
   final endsAt = details.endsAt;
@@ -255,8 +255,10 @@ Widget defaultCalendarCardBuilder<T>(
     borderRadius: BorderRadius.circular(16.0),
     child: DecoratedBox(
       decoration: BoxDecoration(
-        color: _tintOf(item.color, theme),
-        border: Border(left: BorderSide(color: item.color, width: 4.0)),
+        color: _tintOf(calendarEntry.color, theme),
+        border: Border(
+          left: BorderSide(color: calendarEntry.color, width: 4.0),
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -271,7 +273,7 @@ Widget defaultCalendarCardBuilder<T>(
                 MediaQuery.maybeTextScalerOf(context) ?? TextScaler.noScaling,
               ),
               child: Text(
-                item.title,
+                calendarEntry.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,

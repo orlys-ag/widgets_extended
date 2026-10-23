@@ -1005,7 +1005,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: find.byKey(itemCardKey(designCritiqueId)),
+        of: find.byKey(entryCardKey(designCritiqueId)),
         matching: find.text("Design review"),
       ),
       findsOneWidget,
@@ -1072,7 +1072,7 @@ void main() {
     for (var i = 0; i < 25; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    final card = find.byKey(itemCardKey(uxFlowId));
+    final card = find.byKey(entryCardKey(uxFlowId));
     // Whether the card lies in [day]'s block: below its header and above
     // the next day's.
     bool cardIn(DateTime day) {

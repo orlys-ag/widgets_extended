@@ -321,13 +321,13 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
       child: DayMarkerListener<T>(
         store: widget.store,
         day: day,
-        builder: (context, hasItems) {
+        builder: (context, hasEntries) {
           return DayCell(
             day: day,
             inMonth: true,
             isSelected: day == widget.selectedDay,
             isToday: day == widget.today,
-            hasItems: hasItems,
+            hasEntries: hasEntries,
             collapse: kAlwaysCompleteAnimation,
           );
         },

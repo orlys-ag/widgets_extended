@@ -83,22 +83,25 @@ void main() {
         today: today,
         now: midMorning,
       );
-      expect(lock.holdOf(at(today, 11 * 60 + 7), at(today, 12 * 60)), ItemHold.free);
+      expect(
+        lock.holdOf(at(today, 11 * 60 + 7), at(today, 12 * 60)),
+        EntryHold.free,
+      );
       expect(
         lock.holdOf(at(today, 10 * 60), at(today, 11 * 60 + 8)),
-        ItemHold.started,
+        EntryHold.started,
       );
       expect(
         lock.holdOf(at(today, 10 * 60), at(today, 11 * 60 + 7)),
-        ItemHold.locked,
+        EntryHold.locked,
       );
       expect(
         lock.holdOf(at(monday, 9 * 60), at(wednesday, 10 * 60)),
-        ItemHold.started,
+        EntryHold.started,
       );
       expect(
         HistoryLock.none.holdOf(monday, at(monday, 60)),
-        ItemHold.free,
+        EntryHold.free,
       );
     });
 
@@ -194,7 +197,7 @@ void main() {
       );
       final start = at(monday, 22 * 60);
       final end = at(today, 2 * 60);
-      expect(lock.holdOf(start, end), ItemHold.started);
+      expect(lock.holdOf(start, end), EntryHold.started);
       expect(lock.admits(start, end, start, at(today, 3 * 60)), isTrue);
       expect(lock.admits(start, end, start, today), isFalse);
       expect(lock.admits(start, end, start, at(monday, 23 * 60)), isFalse);
@@ -216,7 +219,7 @@ void main() {
         today: today,
         now: at(today, 10 * 60),
       );
-      expect(lock.holdOf(today, wednesday), ItemHold.started);
+      expect(lock.holdOf(today, wednesday), EntryHold.started);
       // Its end may move to a later day start, and its start not at all.
       expect(lock.admits(today, wednesday, today, addDays(today, 2)), isTrue);
       expect(lock.admits(today, wednesday, wednesday, addDays(today, 2)), isFalse);
@@ -228,7 +231,7 @@ void main() {
           today: today,
           now: at(today, 10 * 60),
         ).holdOf(today, wednesday),
-        ItemHold.free,
+        EntryHold.free,
       );
     });
 

@@ -268,8 +268,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The form of the tapped item: editable where the calendar reports it
   /// so, in edit mode with the history lock not holding the item
-  /// [ItemHold.locked], and read-only otherwise.
-  void _openItem(CalendarEntryTapDetails<ItemPayload> details) {
+  /// [EntryHold.locked], and read-only otherwise.
+  void _openEntry(CalendarEntryTapDetails<ItemPayload> details) {
     final id = details.entry.id!;
     if (details.editable) {
       showEditForm(context, store: _store, id: id, lock: _currentLock);
@@ -383,7 +383,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               failureBuilder: widget.builders.failure,
               // Whatever the builders, a chip names its item's type.
               entryKindOf: harborEntryKind,
-              onEntryTap: _openItem,
+              onEntryTap: _openEntry,
               onCreateRange: _openCreateFlow,
               onEditRequest: _openEditForm,
               onDeleteRequest: _deleteFromCard,

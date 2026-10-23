@@ -21,12 +21,12 @@ void main() {
       expect(clockLabel(1440), "24:00");
     });
 
-    test("moreItemsLabel and itemCountLabel count in words", () {
-      expect(moreItemsLabel(1), "1 more item");
-      expect(moreItemsLabel(3), "3 more items");
-      expect(itemCountLabel(0), "No items");
-      expect(itemCountLabel(1), "1 item");
-      expect(itemCountLabel(2), "2 items");
+    test("LB2 moreEntriesLabel and entryCountLabel count in words", () {
+      expect(moreEntriesLabel(1), "1 more item");
+      expect(moreEntriesLabel(3), "3 more items");
+      expect(entryCountLabel(0), "No items");
+      expect(entryCountLabel(1), "1 item");
+      expect(entryCountLabel(2), "2 items");
     });
 
     test("dayTitle names today, tomorrow, yesterday and other weekdays, "

@@ -121,7 +121,7 @@ void main() {
           onSelectDay: (day) {},
           onOpenDay: (day) {},
           onCreateOnDay: null,
-          onOpenItem: (id) {},
+          onOpenEntry: (id) {},
         ),
       ),
     );

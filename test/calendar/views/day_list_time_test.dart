@@ -56,7 +56,7 @@ List<Object> rowsOf(
       editable: editable,
     ))
       switch (row) {
-        DayListItem(:final entry, :final start, :final end, :final allDay) => (
+        DayListEntry(:final entry, :final start, :final end, :final allDay) => (
           entry.id,
           start,
           end,

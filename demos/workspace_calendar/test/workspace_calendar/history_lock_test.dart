@@ -152,7 +152,7 @@ Future<void> mouseDrag(
 /// The menu button of [id]'s card in Agenda.
 Finder menuOf(String id) {
   return find.descendant(
-    of: find.byKey(itemCardKey(id)),
+    of: find.byKey(entryCardKey(id)),
     matching: find.bySemanticsLabel("Item actions"),
   );
 }

@@ -131,7 +131,7 @@ void main() {
       ),
       HarborColors.primary,
     );
-    final card = find.byKey(itemCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(designCritiqueId));
     final cardFill = decorationIn(tester, card);
     expect(cardFill.color, const Color(0xFFE0ECEB));
     expect(cardFill.borderRadius, BorderRadius.circular(16.0));
@@ -209,7 +209,7 @@ void main() {
     await pumpUnderHostTheme(tester);
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
-    final card = find.byKey(itemCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(designCritiqueId));
     await tester.tap(
       find.descendant(
         of: card,
@@ -229,7 +229,7 @@ void main() {
     expect(decorationIn(tester, dayFinder(today)).color, HarborColors.primary);
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
-    final card = find.byKey(itemCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(designCritiqueId));
     expect(
       textColorOf(
         tester,

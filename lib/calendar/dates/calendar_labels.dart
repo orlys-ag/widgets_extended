@@ -144,7 +144,7 @@ String hiddenRowLabel(
       "${weekdayNames[weekdayColumn(day)]}, "
       "${monthNames[day.month - 1]} ${day.day}";
   final side = above ? "before" : "after";
-  return "$date, ${moreItemsLabel(count)} $side ${hourLabel(minute, format)}";
+  return "$date, ${moreEntriesLabel(count)} $side ${hourLabel(minute, format)}";
 }
 
 /// The sentence the default failure builder shows for a read that failed.
@@ -203,12 +203,12 @@ String dayTitle(DateTime day, DateTime today) {
 }
 
 /// "1 more item" or "N more items".
-String moreItemsLabel(int count) {
+String moreEntriesLabel(int count) {
   return count == 1 ? "1 more item" : "$count more items";
 }
 
 /// "No items", "1 item" or "N items".
-String itemCountLabel(int count) {
+String entryCountLabel(int count) {
   if (count == 0) {
     return "No items";
   }

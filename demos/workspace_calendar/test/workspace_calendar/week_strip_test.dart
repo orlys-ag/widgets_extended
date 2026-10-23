@@ -139,9 +139,9 @@ void main() {
     expect(stripCell(tester, april(22)).isSelected, isFalse);
     expect(stripCell(tester, april(21)).isToday, isTrue);
     expect(stripCell(tester, april(23)).isToday, isFalse);
-    expect(stripCell(tester, april(21)).hasItems, isTrue);
-    expect(stripCell(tester, april(23)).hasItems, isTrue);
-    expect(stripCell(tester, april(22)).hasItems, isFalse);
+    expect(stripCell(tester, april(21)).hasEntries, isTrue);
+    expect(stripCell(tester, april(23)).hasEntries, isTrue);
+    expect(stripCell(tester, april(22)).hasEntries, isFalse);
 
     final node = tester.getSemantics(stripDay(april(23)));
     expect(node.label, "Thursday, April 23, has items");
@@ -182,7 +182,7 @@ void main() {
     expect(stripCell(tester, april(28)).isSelected, isFalse);
     // April's grid, which the first read covered, runs to May 3, so the
     // marker shows with no read.
-    expect(stripCell(tester, april(28)).hasItems, isTrue);
+    expect(stripCell(tester, april(28)).hasEntries, isTrue);
     expect(listCalls(api), lists);
 
     // April 30 to May 6: the week of May 4 is not read yet, and is read
@@ -193,8 +193,8 @@ void main() {
     final read = api.requests.last;
     expect((read.first, read.last), (may(4), may(10)));
     await tester.pump(harnessLatency);
-    expect(stripCell(tester, may(5)).hasItems, isTrue);
-    expect(stripCell(tester, may(6)).hasItems, isFalse);
+    expect(stripCell(tester, may(5)).hasEntries, isTrue);
+    expect(stripCell(tester, may(6)).hasEntries, isFalse);
 
     // Day reads May 5's whole week, which the strip has read, so a tap on
     // May 5 shows it at once, and the strip stays where it is.

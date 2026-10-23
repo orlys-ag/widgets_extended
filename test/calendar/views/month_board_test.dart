@@ -367,7 +367,7 @@ void main() {
           onSelectDay: (day) {},
           onOpenDay: (day) {},
           onCreateOnDay: null,
-          onOpenItem: (id) {},
+          onOpenEntry: (id) {},
           chipBuilder: (context, entry, details) {
             calls.add(entry);
             return Text(entry.entry.payload);
@@ -433,7 +433,7 @@ void main() {
           onSelectDay: (day) {},
           onOpenDay: (day) {},
           onCreateOnDay: null,
-          onOpenItem: (id) {},
+          onOpenEntry: (id) {},
           loadingBuilder: (context, state) {
             return const Text("loading");
           },
