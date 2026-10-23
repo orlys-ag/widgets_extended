@@ -28,12 +28,12 @@ Map<String, String> hoursErrorsOf(
   }
   return <String, String>{
     if (!hours.holdsStart(minuteOfDay(start)))
-      "startMinute":
+      "start":
           "The start is ${clockLabel(hours.start)} to "
           "${clockLabel(hours.end - minutesPerSlot)}, inside the calendar's "
           "hours.",
     if (!hours.holdsEnd(endMinuteOfDay(end)))
-      "endMinute":
+      "end":
           "The end is ${clockLabel(hours.start + minutesPerSlot)} to "
           "${clockLabel(hours.end)}, inside the calendar's hours.",
   };

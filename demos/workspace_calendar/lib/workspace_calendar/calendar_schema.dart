@@ -2,15 +2,13 @@
 /// type's payload, and the one validator of an item's JSON. The mock API
 /// and the form both read these.
 ///
-/// An item is a JSON envelope: `id`, `type`, `title`, `day` (an ISO
-/// date, the start's day), `startMinute` (the start's minutes after that
-/// day's midnight), `dayCount` (the days the item's range covers, from
-/// `day` on), `endMinute` (the end's minutes after the midnight of the
-/// last of them) and `fields`, the type's payload.
+/// An item is a JSON envelope: `id`, `type`, `title`, `start` and `end`,
+/// local date-times with no offset in the form [isoDateTime] writes
+/// (`YYYY-MM-DDTHH:MM`), the end exclusive, and `fields`, the type's
+/// payload.
 library;
 
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
 enum CalendarItemType {
   task("task", "Task"),
@@ -229,8 +227,9 @@ TypeSchema schemaOf(CalendarItemType type) {
 /// The most days one item may cover.
 const int maxDayCount = 366;
 
-/// Whether an item may cover [dayCount] days: 1 to [maxDayCount]. The one
-/// test of that range, which [validateItemJson] reads; the example passes
+/// Whether an item may cover [dayCount] days, counting each day it has
+/// any part of: 1 to [maxDayCount]. The one test of that range, which
+/// [validateItemJson] reads; the example passes
 /// [maxDayCount] to `CalendarView.maxDayCount`, which holds to it the
 /// gestures its own doc names.
 bool isAllowedDayCount(int dayCount) {
@@ -242,14 +241,49 @@ String fieldErrorKey(String key) {
   return "fields.$key";
 }
 
+/// [time]'s wall clock as the envelope writes it, "2026-04-21T09:10": its
+/// year, month, day, hour and minute, with no seconds and no offset. Both
+/// instants of a time a day's clock repeats write the same text.
+String isoDateTime(DateTime time) {
+  final hour = time.hour.toString().padLeft(2, "0");
+  final minute = time.minute.toString().padLeft(2, "0");
+  return "${isoDate(time)}T$hour:$minute";
+}
+
+final RegExp _isoDateTimePattern = RegExp(
+  r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$",
+);
+
+/// The local time [text] names in the form [isoDateTime] writes, or null
+/// when it is not in that form or names no time the clock reads: a day
+/// that does not exist, or a time in an hour the clock skips, whose fields
+/// a `DateTime` reads back moved. A time the clock repeats reads as its
+/// earlier instant, the one `DateTime` gives.
+DateTime? parseIsoDateTime(String text) {
+  final match = _isoDateTimePattern.firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  final fields = <int>[
+    for (var group = 1; group <= 5; group++) int.parse(match.group(group)!),
+  ];
+  final time = DateTime(fields[0], fields[1], fields[2], fields[3], fields[4]);
+  if (time.year != fields[0] ||
+      time.month != fields[1] ||
+      time.day != fields[2] ||
+      time.hour != fields[3] ||
+      time.minute != fields[4]) {
+    return null;
+  }
+  return time;
+}
+
 const Set<String> _envelopeKeys = <String>{
   "id",
   "type",
   "title",
-  "day",
-  "startMinute",
-  "endMinute",
-  "dayCount",
+  "start",
+  "end",
   "fields",
 };
 
@@ -272,32 +306,23 @@ Map<String, String> validateItemJson(Map<String, Object?> json) {
   if (type == null) {
     errors["type"] = "Unknown type.";
   }
-  final day = json["day"];
-  if (day is! String || parseIsoDate(day) == null) {
-    errors["day"] = "Enter a date as YYYY-MM-DD.";
+  final startText = json["start"];
+  final start = startText is String ? parseIsoDateTime(startText) : null;
+  if (start == null) {
+    errors["start"] = _timeError;
   }
-  final start = json["startMinute"];
-  final startValid =
-      start is int &&
-      start % minutesPerSlot == 0 &&
-      start >= 0 &&
-      start <= minutesPerDay - minutesPerSlot;
-  if (!startValid) {
-    errors["startMinute"] =
-        "The start is a multiple of $minutesPerSlot minutes, 00:00 to "
-        "${clockLabel(minutesPerDay - minutesPerSlot)}.";
-  }
-  final end = json["endMinute"];
-  if (end is! int || end % minutesPerSlot != 0 || end > minutesPerDay) {
-    errors["endMinute"] =
-        "The end is a multiple of $minutesPerSlot minutes, at most "
-        "${clockLabel(minutesPerDay)}.";
-  } else if (start is int && end <= start) {
-    errors["endMinute"] = "The end must be after the start.";
-  }
-  final dayCount = json["dayCount"];
-  if (dayCount is! int || !isAllowedDayCount(dayCount)) {
-    errors["dayCount"] = "The item covers 1 to $maxDayCount days.";
+  final endText = json["end"];
+  final end = endText is String ? parseIsoDateTime(endText) : null;
+  if (end == null) {
+    errors["end"] = _timeError;
+  } else if (start != null) {
+    if (!end.isAfter(start)) {
+      errors["end"] = "The end must be after the start.";
+    } else if (!isAllowedDayCount(
+      lastDayNumberOf(start, end) - dayNumber(start) + 1,
+    )) {
+      errors["end"] = "The item covers 1 to $maxDayCount days.";
+    }
   }
   final fields = json["fields"];
   if (fields is! Map<String, Object?>) {
@@ -307,6 +332,11 @@ Map<String, String> validateItemJson(Map<String, Object?> json) {
   }
   return errors;
 }
+
+/// What [validateItemJson] reports for a start or an end that
+/// [parseIsoDateTime] does not read.
+const String _timeError =
+    "Enter a date and time as YYYY-MM-DDTHH:MM, at a time the clock reads.";
 
 void _validateFields(
   TypeSchema schema,

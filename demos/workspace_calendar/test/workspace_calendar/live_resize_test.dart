@@ -7,6 +7,7 @@ library;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 
 import 'calendar_harness.dart';
@@ -93,7 +94,7 @@ void main() {
     );
     // Setup sanity: the drop was written, two slots later.
     final item = await storedJson(tester, api, brainstormId);
-    expect(item["endMinute"], 15 * 60 + 30);
+    expect(minuteOfDay(endOfJson(item)), 15 * 60 + 30);
   });
 
   testWidgets("L3 the day grid's bottom strip sets the end as it drags", (
@@ -117,6 +118,6 @@ void main() {
     );
     // Setup sanity: the drop was written, two slots later.
     final item = await storedJson(tester, api, brainstormId);
-    expect(item["endMinute"], 15 * 60 + 30);
+    expect(minuteOfDay(endOfJson(item)), 15 * 60 + 30);
   });
 }

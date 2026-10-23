@@ -82,7 +82,8 @@ String fieldText(WidgetTester tester, String label) {
 }
 
 /// Expects the create flow's picker, picks [type], and expects its form
-/// prefilled with [day], [start] to [end] and one day; then cancels it.
+/// prefilled with [day], [start] to [end], ending on [day]; then cancels
+/// it.
 Future<void> expectCreateForm(
   WidgetTester tester, {
   required String type,
@@ -93,16 +94,18 @@ Future<void> expectCreateForm(
   expect(find.text("New item"), findsOneWidget);
   await tester.tap(find.text(type).last);
   await tester.pumpAndSettle();
-  expect(find.text(day), findsOneWidget);
+  expectFormDays(day, 1);
   expect(
-    find.descendant(of: dropdownFinder("Start"), matching: find.text(start)),
+    find.descendant(
+      of: dropdownFinder("Start time"),
+      matching: find.text(start),
+    ),
     findsOneWidget,
   );
   expect(
-    find.descendant(of: dropdownFinder("End"), matching: find.text(end)),
+    find.descendant(of: dropdownFinder("End time"), matching: find.text(end)),
     findsOneWidget,
   );
-  expect(fieldText(tester, "Days"), "1");
   await tester.tap(find.widgetWithText(TextButton, "Cancel"));
   await tester.pumpAndSettle();
 }
@@ -1093,9 +1096,8 @@ void main() {
       id: "item-1",
       type: CalendarItemType.task,
       title: "Write",
-      day: today,
-      startMinute: 10 * 60,
-      endMinute: 11 * 60,
+      start: atMinute(today, 10 * 60),
+      end: atMinute(today, 11 * 60),
       fields: const <String, Object?>{"status": "toDo"},
     );
     final changes = <(CalendarItem?, CalendarItem?)>[];

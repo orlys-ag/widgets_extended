@@ -185,10 +185,8 @@ void main() {
     await createBeforePump(tester, api, <String, Object?>{
       "type": "meeting",
       "title": "Pairing",
-      "day": "2026-04-22",
-      "startMinute": 8 * 60 + 15,
-      "endMinute": 9 * 60,
-      "dayCount": 1,
+      "start": "2026-04-22T08:15",
+      "end": "2026-04-22T09:00",
       "fields": <String, Object?>{"location": "Lab"},
     });
     final week = await listAll(tester, api, monday, addDays(monday, 6));
@@ -207,10 +205,8 @@ void main() {
     final viewport = gridViewport(tester);
     var checked = 0;
     for (final item in week) {
-      final start = item["startMinute"]! as int;
-      final end = item["endMinute"]! as int;
-      final first = rowOf(start);
-      final last = rowOf(end) - 1;
+      final first = rowOf(minuteOfDay(startOfJson(item)));
+      final last = rowOf(endMinuteOfDay(endOfJson(item))) - 1;
       if (last < viewport.firstVisibleRow || first > viewport.lastVisibleRow) {
         continue;
       }
@@ -272,10 +268,14 @@ void main() {
         continue;
       }
       placed++;
-      final day = parseIsoDate(item["day"]! as String)!;
-      final col = colOf(daysBetween(monday, day));
-      final first = cellRect(tester, rowOf(item["startMinute"]! as int), col);
-      final last = cellRect(tester, rowOf(item["endMinute"]! as int) - 1, col);
+      final start = startOfJson(item);
+      final col = colOf(daysBetween(monday, dateOnly(start)));
+      final first = cellRect(tester, rowOf(minuteOfDay(start)), col);
+      final last = cellRect(
+        tester,
+        rowOf(endMinuteOfDay(endOfJson(item))) - 1,
+        col,
+      );
       final rect = tester.getRect(blockFinder(id));
       expect(rect.topLeft, nearOffset(first.topLeft), reason: id);
       expect(rect.bottomRight, nearOffset(last.bottomRight), reason: id);
@@ -363,19 +363,21 @@ void main() {
 
     await createAt(tester, rowOf(14 * 60), colOf(2), "Meeting");
     expect(find.text("New Meeting"), findsOneWidget);
-    expect(find.text("2026-04-22"), findsOneWidget);
+    expectFormDays("2026-04-22", 1);
     expect(
       find.descendant(
-        of: dropdownFinder("Start"),
+        of: dropdownFinder("Start time"),
         matching: find.text("14:00"),
       ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dropdownFinder("End"), matching: find.text("14:15")),
+      find.descendant(
+        of: dropdownFinder("End time"),
+        matching: find.text("14:15"),
+      ),
       findsOneWidget,
     );
-    expect(fieldText(tester, "Days"), "1");
     expect(formButton("Delete"), findsNothing);
 
     await tester.enterText(fieldFinder("Title"), "Design sync");
@@ -439,13 +441,16 @@ void main() {
     await createAt(tester, rowOf(23 * 60 + 45), colOf(2), "Task");
     expect(
       find.descendant(
-        of: dropdownFinder("Start"),
+        of: dropdownFinder("Start time"),
         matching: find.text("23:45"),
       ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dropdownFinder("End"), matching: find.text("24:00")),
+      find.descendant(
+        of: dropdownFinder("End time"),
+        matching: find.text("24:00"),
+      ),
       findsOneWidget,
     );
     await tester.tap(formButton("Cancel"));
@@ -471,19 +476,21 @@ void main() {
       expect(find.text("New item"), findsOneWidget);
       await tester.tap(find.text("Task").last);
       await tester.pumpAndSettle();
-      expect(find.text(day), findsOneWidget);
+      expectFormDays(day, int.parse(days));
       expect(
         find.descendant(
-          of: dropdownFinder("Start"),
+          of: dropdownFinder("Start time"),
           matching: find.text(start),
         ),
         findsOneWidget,
       );
       expect(
-        find.descendant(of: dropdownFinder("End"), matching: find.text(end)),
+        find.descendant(
+          of: dropdownFinder("End time"),
+          matching: find.text(end),
+        ),
         findsOneWidget,
       );
-      expect(fieldText(tester, "Days"), days);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     }
@@ -706,8 +713,7 @@ void main() {
     expect(find.text("New item"), findsOneWidget);
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(find.text("2026-04-25"), findsOneWidget);
-    expect(fieldText(tester, "Days"), "2");
+    expectFormDays("2026-04-25", 2);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
@@ -758,13 +764,13 @@ void main() {
 
     await createAt(tester, rowOf(14 * 60), colOf(5), "Meeting");
     await tester.enterText(fieldFinder("Title"), "Review");
-    await tester.enterText(fieldFinder("Days"), "x");
+    await chooseOption(tester, "End time", "13:00");
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: fieldFinder("Days"),
-        matching: find.text("The item covers 1 to 366 days."),
+        of: dropdownFinder("End time"),
+        matching: find.text("The end must be after the start."),
       ),
       findsOneWidget,
     );
@@ -1333,8 +1339,8 @@ void main() {
 
     await createAt(tester, rowOf(18 * 60), colOf(0), "Task");
     await tester.enterText(fieldFinder("Title"), "Dentist");
-    await chooseOption(tester, "Start", "10:00");
-    await chooseOption(tester, "End", "11:00");
+    await chooseOption(tester, "Start time", "10:00");
+    await chooseOption(tester, "End time", "11:00");
     await tester.tap(saveFinder());
     await tester.pump();
     await tester.pump(api.latency);
@@ -1346,8 +1352,8 @@ void main() {
     expect(find.text("New Task"), findsOneWidget);
     expect(fieldText(tester, "Title"), "Dentist");
 
-    await chooseOption(tester, "Start", "18:00", delta: 100.0);
-    await chooseOption(tester, "End", "19:00", delta: 100.0);
+    await chooseOption(tester, "Start time", "18:00", delta: 100.0);
+    await chooseOption(tester, "End time", "19:00", delta: 100.0);
     api.failurePolicy = (request) {
       return "The server is down.";
     };
@@ -2437,16 +2443,16 @@ void main() {
     expect(find.text("Edit Task"), findsNothing);
     // The title, and the type beside its icon.
     expect(inDialog(find.text("Task")), findsNWidgets(2));
-    // Title, Days, Assignee and Notes.
+    // Title, Assignee and Notes.
     expect(
       tester.widgetList<TextField>(inDialog(find.byType(TextField))).map((
         field,
       ) {
         return field.enabled;
       }),
-      <bool>[false, false, false, false],
+      <bool>[false, false, false],
     );
-    // Start, End, Status and Priority.
+    // Start time, End time, Status and Priority.
     expect(
       tester
           .widgetList<DropdownButtonFormField<Object>>(
@@ -2461,9 +2467,17 @@ void main() {
           }),
       <bool>[true, true, true, true],
     );
-    await tester.tap(inDialog(find.widgetWithText(InputDecorator, "Day")));
-    await tester.pumpAndSettle();
-    expect(find.byType(DatePickerDialog), findsNothing);
+    for (final label in <String>["Start date", "End date"]) {
+      await tester.tap(inDialog(find.widgetWithText(InputDecorator, label)));
+      await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog), findsNothing, reason: label);
+    }
+    expect(
+      tester
+          .widget<SwitchListTile>(inDialog(find.byType(SwitchListTile)))
+          .onChanged,
+      isNull,
+    );
     expect(saveFinder(), findsNothing);
     expect(formButton("Cancel"), findsNothing);
     expect(formButton("Delete"), findsNothing);
@@ -2732,19 +2746,21 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text("Task").last);
       await tester.pumpAndSettle();
-      expect(find.text(day), findsOneWidget);
+      expectFormDays(day, int.parse(days));
       expect(
         find.descendant(
-          of: dropdownFinder("Start"),
+          of: dropdownFinder("Start time"),
           matching: find.text(start),
         ),
         findsOneWidget,
       );
       expect(
-        find.descendant(of: dropdownFinder("End"), matching: find.text(end)),
+        find.descendant(
+          of: dropdownFinder("End time"),
+          matching: find.text(end),
+        ),
         findsOneWidget,
       );
-      expect(fieldText(tester, "Days"), days);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     }

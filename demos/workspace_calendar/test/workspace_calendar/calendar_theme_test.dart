@@ -372,10 +372,8 @@ Map<String, Object?> itemJson(
   return <String, Object?>{
     "type": type.id,
     "title": title,
-    "day": isoDate(day),
-    "startMinute": start,
-    "endMinute": end,
-    "dayCount": 1,
+    "start": isoDateTime(atMinute(day, start)),
+    "end": isoDateTime(atMinute(day, end)),
     "fields": fields,
   };
 }
@@ -2181,7 +2179,7 @@ void main() {
       april(24),
       april(24),
     )).firstWhere((item) => item["title"] == "Slot 1");
-    expect(stored["startMinute"], 12 * 60);
+    expect(startOfJson(stored), atMinute(april(24), 12 * 60));
     expect(
       tester.getRect(block).top,
       moreOrLessEquals(target.top, epsilon: 1.0),
@@ -3771,7 +3769,7 @@ void main() {
       april(24),
       april(24),
     )).firstWhere((item) => item["title"] == "Slot 1");
-    expect(stored["startMinute"], 12 * 60);
+    expect(startOfJson(stored), atMinute(april(24), 12 * 60));
 
     // An exit runs on through the frames of a theme moving back to A.
     storeOf(tester).requestDelete("item-7");

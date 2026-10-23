@@ -39,22 +39,22 @@ void main() {
     test("names a start or an end outside the hours", () {
       expect(
         hoursErrorsOf(onTuesday(7 * 60 + 45), onTuesday(9 * 60), office),
-        <String, String>{"startMinute": startError},
+        <String, String>{"start": startError},
       );
       expect(
         hoursErrorsOf(onTuesday(17 * 60), onTuesday(18 * 60 + 15), office),
-        <String, String>{"endMinute": endError},
+        <String, String>{"end": endError},
       );
     });
 
     test("names both for minutes wholly past either end", () {
       expect(
         hoursErrorsOf(onTuesday(18 * 60), onTuesday(18 * 60 + 15), office),
-        <String, String>{"startMinute": startError, "endMinute": endError},
+        <String, String>{"start": startError, "end": endError},
       );
       expect(
         hoursErrorsOf(onTuesday(7 * 60), onTuesday(8 * 60), office),
-        <String, String>{"startMinute": startError, "endMinute": endError},
+        <String, String>{"start": startError, "end": endError},
       );
     });
   });

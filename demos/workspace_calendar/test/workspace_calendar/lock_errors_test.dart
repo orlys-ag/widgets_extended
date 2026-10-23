@@ -18,7 +18,8 @@ final DateTime tuesday = DateTime(2026, 4, 21);
 
 void main() {
   test("LE1 lockErrorsOf answers each refusal with the form's message, "
-      "keyed as the form's fields, and nothing the lock admits", () {
+      "keyed start and end as the form's fields and the envelope are, and "
+      "nothing the lock admits", () {
     // 11:07 on Tuesday: after 08:00 to 09:00 ends, while 10:00 to 12:00
     // runs.
     final lock = HistoryLock.of(
@@ -30,11 +31,11 @@ void main() {
     final running = shape(tuesday, 10 * 60, 12 * 60);
     expect(
       lockErrorsOf(lock, null, shape(monday, 9 * 60, 10 * 60)),
-      <String, String>{"day": "Past days are locked."},
+      <String, String>{"start": "Past days are locked."},
     );
     expect(
       lockErrorsOf(lock, null, shape(tuesday, 9 * 60, 10 * 60)),
-      <String, String>{"startMinute": "The start can't be in the past."},
+      <String, String>{"start": "The start can't be in the past."},
     );
     expect(
       lockErrorsOf(
@@ -42,13 +43,13 @@ void main() {
         shape(tuesday, 8 * 60, 9 * 60),
         shape(tuesday, 8 * 60, 9 * 60 + 15),
       ),
-      <String, String>{"day": "Past items are locked."},
+      <String, String>{"start": "Past items are locked."},
     );
     expect(
       lockErrorsOf(lock, running, shape(tuesday, 10 * 60 + 15, 11 * 60)),
       <String, String>{
-        "startMinute": "An item in progress keeps its start.",
-        "endMinute": "The end can't be in the past.",
+        "start": "An item in progress keeps its start.",
+        "end": "The end can't be in the past.",
       },
     );
     expect(

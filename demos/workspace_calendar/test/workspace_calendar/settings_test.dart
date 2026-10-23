@@ -102,6 +102,19 @@ List<int?> offeredMinutes(WidgetTester tester, String label) {
   return <int?>[for (final item in button.items!) item.value];
 }
 
+/// Picks [minute] in the form's [label] time field through the field's own
+/// callback, as a pick in its menu does.
+Future<void> chooseMinute(WidgetTester tester, String label, int minute) async {
+  final button = tester.widget<DropdownButton<int>>(
+    find.descendant(
+      of: dropdownFinder(label),
+      matching: find.byType(DropdownButton<int>),
+    ),
+  );
+  button.onChanged!(minute);
+  await tester.pumpAndSettle();
+}
+
 Finder arrowIn(String id, IconData icon) {
   return find.descendant(of: blockFinder(id), matching: find.byIcon(icon));
 }
@@ -356,19 +369,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: dropdownFinder("Start"),
+        of: dropdownFinder("Start time"),
         matching: find.text("17:45"),
       ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dropdownFinder("End"), matching: find.text("18:00")),
+      find.descendant(
+        of: dropdownFinder("End time"),
+        matching: find.text("18:00"),
+      ),
       findsOneWidget,
     );
   });
 
   testWidgets("H6 the form offers the hours' times and holds a change of "
-      "days or times to them", (tester) async {
+      "its times to them", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
     final early = await store(
       tester,
@@ -382,16 +398,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("Edit Task"), findsOneWidget);
 
-    expect(offeredMinutes(tester, "Start"), <int>[
+    expect(offeredMinutes(tester, "Start time"), <int>[
       7 * 60,
       for (var minute = 8 * 60; minute < 18 * 60; minute += 15) minute,
     ]);
-    expect(offeredMinutes(tester, "End"), <int>[
+    expect(offeredMinutes(tester, "End time"), <int>[
       for (var minute = 8 * 60 + 15; minute <= 18 * 60; minute += 15) minute,
     ]);
 
     final updates = updateCount(api);
-    await tester.enterText(find.widgetWithText(TextField, "Days"), "2");
+    await chooseMinute(tester, "End time", 10 * 60);
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
     expect(
@@ -400,8 +416,8 @@ void main() {
     );
     expect(updateCount(api), updates);
 
-    // Keeping the stored days and times, a new title saves.
-    await tester.enterText(find.widgetWithText(TextField, "Days"), "1");
+    // Keeping the stored times, a new title saves.
+    await chooseMinute(tester, "End time", 9 * 60);
     await tester.enterText(find.widgetWithText(TextField, "Title"), "Earlier");
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pump(api.latency);

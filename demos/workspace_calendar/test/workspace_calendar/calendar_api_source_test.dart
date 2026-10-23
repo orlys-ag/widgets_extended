@@ -20,9 +20,8 @@ void main() {
     final draft = calendarItem(
       type: CalendarItemType.task,
       title: "Write",
-      day: day,
-      startMinute: 600,
-      endMinute: 660,
+      start: DateTime(2026, 4, 21, 10),
+      end: DateTime(2026, 4, 21, 11),
       fields: const <String, Object?>{"status": "toDo"},
     );
 
@@ -65,9 +64,7 @@ void main() {
       start: DateTime(2026, 4, 21, 7, 30),
       end: DateTime(2026, 4, 21, 8, 30),
     );
-    expect(writeFieldErrors(early), <String, String>{
-      "startMinute": startError,
-    });
+    expect(writeFieldErrors(early), <String, String>{"start": startError});
     expect(writeFailureMessage(early), "The item is not valid: $startError");
 
     final late = CalendarHoursException(
@@ -75,7 +72,7 @@ void main() {
       start: DateTime(2026, 4, 21, 17, 30),
       end: DateTime(2026, 4, 21, 18, 30),
     );
-    expect(writeFieldErrors(late), <String, String>{"endMinute": endError});
+    expect(writeFieldErrors(late), <String, String>{"end": endError});
 
     final past = CalendarHoursException(
       hours: hours,
@@ -83,8 +80,8 @@ void main() {
       end: DateTime(2026, 4, 21, 18, 15),
     );
     expect(writeFieldErrors(past), <String, String>{
-      "startMinute": startError,
-      "endMinute": endError,
+      "start": startError,
+      "end": endError,
     });
   });
 

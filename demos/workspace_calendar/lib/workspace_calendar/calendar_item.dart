@@ -5,7 +5,6 @@ library;
 
 import 'package:flutter/foundation.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 import 'calendar_schema.dart';
 import 'harbor_theme.dart';
@@ -65,45 +64,34 @@ extension CalendarItemFields on CalendarEntry<ItemPayload> {
   }
 
   /// The envelope, a new map each call. A draft carries no `id` key. Its
-  /// `day` is the start's day and `startMinute` the start's minute of it;
-  /// `dayCount` counts the days the range has a part in, and `endMinute` is
-  /// the end's minute on the last of them, 1440 for an end at the start of
-  /// the day after it.
+  /// `start` and `end` are the item's times as [isoDateTime] writes them.
   Map<String, Object?> toJson() {
-    final firstDay = dayNumber(start);
     return <String, Object?>{
       if (id != null) "id": id,
       "type": type.id,
       "title": title,
-      "day": isoDate(dateOfDayNumber(firstDay)),
-      "startMinute": minuteOfDay(start),
-      "endMinute": endMinuteOfDay(end),
-      "dayCount": lastDayNumberOf(start, end) - firstDay + 1,
+      "start": isoDateTime(start),
+      "end": isoDateTime(end),
       "fields": _modifiableCopy(fields),
     };
   }
 }
 
 /// An item of [type] with [fields], coloured by its type's Harbor edge;
-/// [id] null for a draft the API has not stored. It runs from
-/// [startMinute] minutes after [day]'s midnight to [endMinute] minutes
-/// after the midnight of the day [dayCount] - 1 days on, so a [dayCount]
-/// of 2 from 22:00 to 02:00 is one overnight item.
+/// [id] null for a draft the API has not stored. It runs from [start] to
+/// [end], an exclusive end.
 CalendarItem calendarItem({
   String? id,
   required CalendarItemType type,
   required String title,
-  required DateTime day,
-  required int startMinute,
-  required int endMinute,
-  int dayCount = 1,
+  required DateTime start,
+  required DateTime end,
   Map<String, Object?> fields = const <String, Object?>{},
 }) {
-  final last = addDays(day, dayCount - 1);
   return CalendarItem(
     id: id,
-    start: DateTime(day.year, day.month, day.day, 0, startMinute),
-    end: DateTime(last.year, last.month, last.day, 0, endMinute),
+    start: start,
+    end: end,
     title: title,
     color: harborTypeStyleOf(type).edge,
     payload: ItemPayload(type, fields),
@@ -111,24 +99,22 @@ CalendarItem calendarItem({
 }
 
 /// Reads a valid envelope. Throws a [FormatException] when a key is
-/// missing or of the wrong kind.
+/// missing or of the wrong kind, or the end is not after the start.
 CalendarItem itemFromJson(Map<String, Object?> json) {
   final typeId = json["type"];
   final type = typeId is String ? CalendarItemType.fromId(typeId) : null;
-  final dayText = json["day"];
-  final day = dayText is String ? parseIsoDate(dayText) : null;
   final title = json["title"];
-  final start = json["startMinute"];
-  final end = json["endMinute"];
-  final dayCount = json["dayCount"];
+  final startText = json["start"];
+  final start = startText is String ? parseIsoDateTime(startText) : null;
+  final endText = json["end"];
+  final end = endText is String ? parseIsoDateTime(endText) : null;
   final fields = json["fields"];
   final id = json["id"];
   if (type == null ||
-      day == null ||
       title is! String ||
-      start is! int ||
-      end is! int ||
-      dayCount is! int ||
+      start == null ||
+      end == null ||
+      !end.isAfter(start) ||
       fields is! Map<String, Object?> ||
       (id != null && id is! String)) {
     throw FormatException("Not a calendar item envelope: $json");
@@ -137,10 +123,8 @@ CalendarItem itemFromJson(Map<String, Object?> json) {
     id: id as String?,
     type: type,
     title: title,
-    day: day,
-    startMinute: start,
-    endMinute: end,
-    dayCount: dayCount,
+    start: start,
+    end: end,
     fields: fields,
   );
 }

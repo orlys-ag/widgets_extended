@@ -9,6 +9,7 @@ import 'dart:ui' as ui;
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
@@ -124,6 +125,31 @@ Rect cellRect(WidgetTester tester, int row, int col) {
   return viewport.localToGlobal(rect.topLeft) & rect.size;
 }
 
+/// The item form's date field labelled [label], "Start date" or "End
+/// date".
+Finder formDateFinder(String label) {
+  return find.ancestor(
+    of: find.text(label),
+    matching: find.byType(InputDecorator),
+  );
+}
+
+/// The item form's date field labelled [label] showing [date], as
+/// [isoDate] writes it.
+Finder formDateShows(String label, String date) {
+  return find.descendant(of: formDateFinder(label), matching: find.text(date));
+}
+
+/// Expects the item form's Start date to name [day] and its End date the
+/// day [days] - 1 days after it, both as [isoDate] writes them.
+void expectFormDays(String day, int days) {
+  expect(formDateShows("Start date", day), findsOneWidget);
+  expect(
+    formDateShows("End date", isoDate(addDays(parseIsoDate(day)!, days - 1))),
+    findsOneWidget,
+  );
+}
+
 /// Opens the calendar's mode menu and picks [mode], "Agenda", "Day", "Week"
 /// or "Month".
 Future<void> pickMode(WidgetTester tester, String mode) async {
@@ -144,7 +170,9 @@ Future<void> createBeforePump(
   await tester.pump(api.latency);
 }
 
-/// A Task envelope with status to do.
+/// A Task envelope with status to do, from [start] minutes after [day]'s
+/// midnight to [end] minutes after the midnight of the day [dayCount] - 1
+/// days on.
 Map<String, Object?> taskJson(
   String title,
   DateTime day,
@@ -155,12 +183,21 @@ Map<String, Object?> taskJson(
   return <String, Object?>{
     "type": "task",
     "title": title,
-    "day": isoDate(day),
-    "startMinute": start,
-    "endMinute": end,
-    "dayCount": dayCount,
+    "start": isoDateTime(atMinute(day, start)),
+    "end": isoDateTime(atMinute(addDays(day, dayCount - 1), end)),
     "fields": <String, Object?>{"status": "toDo"},
   };
+}
+
+/// The start of the stored envelope [item], read as the envelope writes
+/// it.
+DateTime startOfJson(Map<String, Object?> item) {
+  return parseIsoDateTime(item["start"]! as String)!;
+}
+
+/// The end of the stored envelope [item], read as the envelope writes it.
+DateTime endOfJson(Map<String, Object?> item) {
+  return parseIsoDateTime(item["end"]! as String)!;
 }
 
 /// The app [pumpCalendar] pumps: the calendar over [api], given [today]

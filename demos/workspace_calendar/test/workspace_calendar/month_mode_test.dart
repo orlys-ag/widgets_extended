@@ -561,8 +561,8 @@ void main() {
       );
       await longPressDay(tester, april(21));
       await pickTask(tester);
-      await chooseOption(tester, "Start", "08:00");
-      await chooseOption(tester, "End", "09:00");
+      await chooseOption(tester, "Start time", "08:00");
+      await chooseOption(tester, "End time", "09:00");
       await tester.enterText(fieldFinder("Title"), "Early");
       await tester.tap(saveFinder());
       await tester.pump(harnessLatency);
@@ -624,7 +624,7 @@ void main() {
       await tester.longPressAt(below);
       await tester.pumpAndSettle();
       await pickTask(tester);
-      expect(find.text("2026-04-22"), findsOneWidget);
+      expectFormDays("2026-04-22", 1);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },
@@ -756,9 +756,9 @@ void main() {
       );
       await longPressDay(tester, april(22));
       await pickTask(tester);
-      expect(find.text("2026-04-22"), findsOneWidget);
-      expect(dropdownShows("Start", "01:00"), findsOneWidget);
-      expect(dropdownShows("End", "01:15"), findsOneWidget);
+      expectFormDays("2026-04-22", 1);
+      expect(dropdownShows("Start time", "01:00"), findsOneWidget);
+      expect(dropdownShows("End time", "01:15"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(22)]);
@@ -777,8 +777,8 @@ void main() {
       );
       await longPressDay(tester, april(22));
       await pickTask(tester);
-      expect(dropdownShows("Start", "23:45"), findsOneWidget);
-      expect(dropdownShows("End", "24:00"), findsOneWidget);
+      expect(dropdownShows("Start time", "23:45"), findsOneWidget);
+      expect(dropdownShows("End time", "24:00"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },
@@ -794,8 +794,8 @@ void main() {
       );
       await longPressDay(tester, april(22));
       await pickTask(tester);
-      expect(dropdownShows("Start", "00:00"), findsOneWidget);
-      expect(dropdownShows("End", "00:15"), findsOneWidget);
+      expect(dropdownShows("Start time", "00:00"), findsOneWidget);
+      expect(dropdownShows("End time", "00:15"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },
@@ -808,7 +808,7 @@ void main() {
       await pumpMonth(tester, editing: true);
       await longPressDay(tester, DateTime(2026, 3, 31));
       await pickTask(tester);
-      expect(find.text("2026-03-31"), findsOneWidget);
+      expectFormDays("2026-03-31", 1);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
       expect(find.text("Apr 2026"), findsOneWidget);
@@ -959,8 +959,8 @@ void main() {
       await tester.tap(chipFinder("item-2", monday));
       await tester.pumpAndSettle();
       expect(find.text("Edit Task"), findsOneWidget);
-      await chooseOption(tester, "Start", "08:00", delta: -100.0);
-      await chooseOption(tester, "End", "09:00", delta: -100.0);
+      await chooseOption(tester, "Start time", "08:00", delta: -100.0);
+      await chooseOption(tester, "End time", "09:00", delta: -100.0);
 
       final reported = <String>{};
       addTearDown(() {
@@ -1261,8 +1261,8 @@ void main() {
       await tester.longPress(stripFinder(april(28)));
       await tester.pumpAndSettle();
       await pickTask(tester);
-      await chooseOption(tester, "Start", "16:00");
-      await chooseOption(tester, "End", "17:00");
+      await chooseOption(tester, "Start time", "16:00");
+      await chooseOption(tester, "End time", "17:00");
       await tester.enterText(fieldFinder("Title"), "Late");
       await tester.tap(saveFinder());
       await tester.pump(latency);
@@ -1705,7 +1705,7 @@ void main() {
       tester.semantics.longPress(find.semantics.byLabel("Wednesday, April 22"));
       await tester.pumpAndSettle();
       await pickTask(tester);
-      expect(find.text("2026-04-22"), findsOneWidget);
+      expectFormDays("2026-04-22", 1);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
 

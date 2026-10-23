@@ -283,13 +283,10 @@ Iterable<int> _coveredDaysOf(Map<String, Object?> stored) sync* {
   }
 }
 
-/// By day, then start minute, then creation order.
+/// By start, then creation order. The envelope's start text sorts as its
+/// time does: its fields are written in order, each zero-padded.
 int _compareStored(Map<String, Object?> a, Map<String, Object?> b) {
-  final byDay = (a["day"] as String).compareTo(b["day"] as String);
-  if (byDay != 0) {
-    return byDay;
-  }
-  final byStart = (a["startMinute"] as int).compareTo(b["startMinute"] as int);
+  final byStart = (a["start"] as String).compareTo(b["start"] as String);
   if (byStart != 0) {
     return byStart;
   }

@@ -192,15 +192,15 @@ void main() {
       final running = shape(today, 10 * 60, 12 * 60);
       expect(
         lockErrorsOf(lock, null, shape(monday, 9 * 60, 10 * 60)).keys,
-        <String>["day"],
+        <String>["start"],
       );
       expect(
         lockErrorsOf(lock, null, shape(today, 9 * 60, 10 * 60)).keys,
-        <String>["startMinute"],
+        <String>["start"],
       );
       expect(
         lockErrorsOf(lock, running, shape(today, 10 * 60 + 15, 11 * 60)).keys,
-        <String>["startMinute", "endMinute"],
+        <String>["start", "end"],
       );
       expect(
         lockErrorsOf(lock, running, shape(today, 10 * 60, 13 * 60)),
@@ -212,7 +212,7 @@ void main() {
           shape(today, 8 * 60, 9 * 60),
           shape(today, 8 * 60, 9 * 60 + 15),
         ).keys,
-        <String>["day"],
+        <String>["start"],
       );
     });
 
@@ -385,7 +385,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(dropdownShows("Start", "12:45"), findsOneWidget);
+    expect(dropdownShows("Start time", "12:45"), findsOneWidget);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -397,7 +397,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(dropdownShows("Start", "12:45"), findsOneWidget);
+    expect(dropdownShows("Start time", "12:45"), findsOneWidget);
   });
 
   testWidgets("K11 a past item's form is read-only; a running one's keeps "
@@ -415,14 +415,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(formButton("Delete"), findsNothing);
     final start = tester.widget<DropdownButtonFormField<int>>(
-      dropdownFinder("Start"),
+      dropdownFinder("Start time"),
     );
     expect(start.onChanged, isNull);
     final day = tester.widget<InkWell>(
-      find.ancestor(of: find.text("Day"), matching: find.byType(InkWell)),
+      find.ancestor(
+        of: find.text("Start date"),
+        matching: find.byType(InkWell),
+      ),
     );
     expect(day.onTap, isNull);
-    await chooseOption(tester, "End", "11:00", -100.0);
+    await chooseOption(tester, "End time", "11:00", -100.0);
     await tester.tap(find.byType(FilledButton));
     await tester.pumpAndSettle();
     expect(find.text("The end can't be in the past."), findsOneWidget);
@@ -432,7 +435,7 @@ void main() {
     await tester.tap(blockFinder(laterId));
     await tester.pumpAndSettle();
     expect(formButton("Delete"), findsOneWidget);
-    await chooseOption(tester, "Start", "10:00", -100.0);
+    await chooseOption(tester, "Start time", "10:00", -100.0);
     await tester.tap(find.byType(FilledButton));
     await tester.pumpAndSettle();
     expect(find.text("The start can't be in the past."), findsOneWidget);
@@ -468,7 +471,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(dropdownShows("Start", "09:45"), findsOneWidget);
+    expect(dropdownShows("Start time", "09:45"), findsOneWidget);
   });
 
   testWidgets("K14 as now passes an item's start, its Agenda card loses "
