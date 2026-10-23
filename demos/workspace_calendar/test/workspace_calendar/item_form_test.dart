@@ -1,10 +1,11 @@
-/// The item form's times: its start and end dates and times, and its All
-/// day switch.
+/// The item form's times: its start and end dates and times, the slot
+/// length they step by, and its All day switch.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/policy/history_lock.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
@@ -25,11 +26,12 @@ CalendarItem task(DateTime start, DateTime end) {
 }
 
 /// Pumps a host over [store] whose one button opens the form of the item
-/// "item-1", and opens it.
+/// "item-1", its times stepping by [slotMinutes], and opens it.
 Future<void> openForm(
   WidgetTester tester,
-  CalendarStore<ItemPayload> store,
-) async {
+  CalendarStore<ItemPayload> store, {
+  int slotMinutes = defaultSlotMinutes,
+}) async {
   await tester.pumpWidget(
     MaterialApp(
       theme: ThemeData(splashFactory: NoSplash.splashFactory),
@@ -45,6 +47,7 @@ Future<void> openForm(
                   lock: () {
                     return HistoryLock.none;
                   },
+                  slotMinutes: slotMinutes,
                 );
               },
               child: const Text("Open"),
@@ -64,6 +67,17 @@ Finder timeField(String label) {
     of: find.text(label),
     matching: find.byType(DropdownButtonFormField<int>),
   );
+}
+
+/// The labels of the times the form's time field labelled [label] offers.
+List<String> timeChoices(WidgetTester tester, String label) {
+  final dropdown = tester.widget<DropdownButton<int>>(
+    find.descendant(
+      of: timeField(label),
+      matching: find.byType(DropdownButton<int>),
+    ),
+  );
+  return <String>[for (final item in dropdown.items!) clockLabel(item.value!)];
 }
 
 void main() {
@@ -108,6 +122,31 @@ void main() {
     expect(saved.end, DateTime(2026, 4, 24));
     expect(saved.isAllDay, isTrue);
     store.dispose();
+  });
+
+  testWidgets("IF2 the form's times step by the slot length it is given", (
+    tester,
+  ) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[
+        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openForm(tester, store, slotMinutes: 30);
+    final starts = timeChoices(tester, "Start time");
+    expect(starts, containsAll(<String>["09:00", "09:30", "10:00"]));
+    expect(starts, isNot(contains("09:15")));
+    expect(starts, hasLength(48));
+    final ends = timeChoices(tester, "End time");
+    expect(ends.first, "00:30");
+    expect(ends, isNot(contains("09:45")));
+
+    // At the default 15 minutes the form offers the quarter hours.
+    await tester.pumpWidget(const SizedBox());
+    await openForm(tester, store);
+    expect(timeChoices(tester, "Start time"), contains("09:15"));
+    expect(timeChoices(tester, "Start time"), hasLength(96));
   });
 
   testWidgets("IF3 an entry at 09:10 shows 09:10, and a save that changes "

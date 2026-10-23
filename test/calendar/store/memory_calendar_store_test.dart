@@ -339,7 +339,10 @@ void main() {
         task("item-2", day, 75, 120),
       ],
     );
-    expect(first.firstFreeRange(day), (start: at(day, 60), end: at(day, 75)));
+    expect(first.firstFreeRange(day, slotMinutes: 15), (
+      start: at(day, 60),
+      end: at(day, 75),
+    ));
 
     final store = MemoryCalendarStore<String>(
       entries: <CalendarEntry<String>>[
@@ -348,23 +351,23 @@ void main() {
       ],
       hours: const DayHours(480, 1200),
     );
-    expect(store.firstFreeRange(day, from: 840), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: 840), (
       start: at(day, 840),
       end: at(day, 855),
     ));
-    expect(store.firstFreeRange(day, from: 850), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: 850), (
       start: at(day, 855),
       end: at(day, 870),
     ));
-    expect(store.firstFreeRange(day, from: 900), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: 900), (
       start: at(day, 960),
       end: at(day, 975),
     ));
-    expect(store.firstFreeRange(day, from: 300), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: 300), (
       start: at(day, 540),
       end: at(day, 555),
     ));
-    expect(store.firstFreeRange(day, from: 1200), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: 1200), (
       start: at(day, 540),
       end: at(day, 555),
     ));

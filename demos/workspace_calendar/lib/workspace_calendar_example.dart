@@ -20,7 +20,8 @@
 /// given it, and with the bar closed. Out of edit mode the calendar is
 /// read-only, so nothing is moved, resized or created, and a tap on an
 /// item opens its form read-only. The settings sheet, which opens from the
-/// app bar's More menu, chooses how Month fits its weeks, and on the
+/// app bar's More menu, chooses how Month fits its weeks, the length of the
+/// calendar's slots, which the item form's times step by too, and on the
 /// calendar's [CalendarController] the least width of a day in Week, Day
 /// and Month and the least height of the timed grids' slots, which a pinch
 /// on a grid sets too.
@@ -272,7 +273,13 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   void _openEntry(CalendarEntryTapDetails<ItemPayload> details) {
     final id = details.entry.id!;
     if (details.editable) {
-      showEditForm(context, store: _store, id: id, lock: _currentLock);
+      showEditForm(
+        context,
+        store: _store,
+        id: id,
+        lock: _currentLock,
+        slotMinutes: _settings.slotMinutes,
+      );
     } else {
       showItemDetails(context, store: _store, id: id);
     }
@@ -284,11 +291,18 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       store: _store,
       range: range,
       lock: _currentLock,
+      slotMinutes: _settings.slotMinutes,
     );
   }
 
   void _openEditForm(CalendarItem item) {
-    showEditForm(context, store: _store, id: item.id!, lock: _currentLock);
+    showEditForm(
+      context,
+      store: _store,
+      id: item.id!,
+      lock: _currentLock,
+      slotMinutes: _settings.slotMinutes,
+    );
   }
 
   Future<void> _deleteFromCard(CalendarItem item) async {
@@ -369,6 +383,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               lockEarlierToday: _settings.lockEarlierToday,
               weekdays: _settings.weekdays,
               hours: _settings.hours,
+              slotMinutes: _settings.slotMinutes,
               hourLabelFormat: _settings.hourLabelFormat,
               monthLayout: _settings.monthLayout,
               maxDayCount: maxDayCount,

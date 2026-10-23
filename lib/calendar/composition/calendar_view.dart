@@ -175,6 +175,16 @@ class CalendarEntryTapDetails<T> {
 /// [views] lists the views the header's menu offers, in its order; a list
 /// that is empty or names a view twice throws an [ArgumentError] from the
 /// build, in a release build as in a debug one.
+///
+/// [slotMinutes] is the slot of Week's and Day's grids, one row each, the
+/// step their gestures snap to, the length of the slot Agenda's add button
+/// and Month's long press create, and the grid those round the history
+/// lock's first free time up to. A value [slotMinuteChoices] does not hold
+/// throws an [ArgumentError] from the build, in a release build as in a
+/// debug one, and [hours] off its grid ([DayHours.isOnSlotsOf]) fail an
+/// assertion in a debug build; the views show and schedule in [hours]
+/// rounded out to it ([DayHours.roundedOutTo]), which are [hours]
+/// themselves on the grid.
 class CalendarView<T> extends StatefulWidget {
   const CalendarView({
     super.key,
@@ -186,6 +196,7 @@ class CalendarView<T> extends StatefulWidget {
     this.lockEarlierToday = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
+    this.slotMinutes = defaultSlotMinutes,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.monthLayout = MonthLayout.fitScreen,
     this.maxDayCount,
@@ -243,8 +254,13 @@ class CalendarView<T> extends StatefulWidget {
   final WeekdaySet weekdays;
 
   /// The hours the calendar shows and schedules in; the store's hours must
-  /// be these.
+  /// be these, and they start and end on the grid of [slotMinutes], both of
+  /// which a debug build asserts.
   final DayHours hours;
+
+  /// The length of one slot, in minutes: one of [slotMinuteChoices], or the
+  /// build throws an [ArgumentError].
+  final int slotMinutes;
 
   /// The format Week's and Day's grids and Agenda's times label the hours
   /// in.
@@ -349,6 +365,26 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// What [calendarViewsError] answers for [CalendarView.views], which the
   /// build throws.
   ArgumentError? _viewsError;
+
+  /// The error the build throws for a [CalendarView.slotMinutes] that
+  /// [slotMinuteChoices] does not hold, or null.
+  ArgumentError? get _slotMinutesError {
+    final slotMinutes = widget.slotMinutes;
+    if (slotMinuteChoices.contains(slotMinutes)) {
+      return null;
+    }
+    return ArgumentError.value(
+      slotMinutes,
+      "slotMinutes",
+      "is not one of $slotMinuteChoices",
+    );
+  }
+
+  /// The hours the views show and schedule in: [CalendarView.hours]
+  /// rounded out to the grid of [CalendarView.slotMinutes].
+  DayHours get _hours {
+    return widget.hours.roundedOutTo(widget.slotMinutes);
+  }
 
   /// The clock's time, read again at the start of each minute.
   late final ValueNotifier<DateTime> _now;
@@ -1145,21 +1181,23 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// none after it is free; where the lock leaves no slot in the hours,
   /// reports [CalendarView.onCreateRefused] instead.
   void _openCreateFlow(DateTime day) {
-    final hours = widget.hours;
-    final earliest = _lock.earliestStartOn(day);
-    if (earliest > hours.end - minutesPerSlot) {
+    final hours = _hours;
+    final slot = widget.slotMinutes;
+    final earliest = _lock.earliestStartOn(day, slotMinutes: slot);
+    if (earliest > hours.end - slot) {
       widget.onCreateRefused?.call(day);
       return;
     }
     final free = widget.store.firstFreeRange(
       day,
+      slotMinutes: slot,
       from: earliest == 0 ? null : earliest,
     );
     if (wallMinuteOf(free.start) - dayNumber(day) * minutesPerDay >= earliest) {
       _createRange(CreateRange(start: free.start, end: free.end));
       return;
     }
-    _createIn(day, earliest, earliest + minutesPerSlot);
+    _createIn(day, earliest, earliest + slot);
   }
 
   CalendarHeaderDetails _headerDetails() {
@@ -1262,7 +1300,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
               store: widget.store,
               weekdays: widget.weekdays,
               format: widget.hourLabelFormat,
-              hours: widget.hours,
+              hours: _hours,
+              slotMinutes: widget.slotMinutes,
               editable: widget.editable,
               lock: _lock,
               selectedDay: _day,
@@ -1340,7 +1379,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   lockPast: widget.lockPast,
                   lockEarlierToday: widget.lockEarlierToday,
                   weekdays: widget.weekdays,
-                  hours: widget.hours,
+                  hours: _hours,
+                  slotMinutes: widget.slotMinutes,
                   hourLabelFormat: widget.hourLabelFormat,
                   minDayWidth: controller.minDayWidth,
                   minSlotHeight: controller.minSlotHeight,
@@ -1383,7 +1423,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   layout: widget.monthLayout,
                   minDayWidth: controller.minDayWidth,
                   weekScale: controller.monthWeekScale,
-                  hours: widget.hours,
+                  hours: _hours,
                   hourLabelFormat: widget.hourLabelFormat,
                   selectedDay: _day,
                   today: _today,
@@ -1416,10 +1456,19 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (error != null) {
       throw error;
     }
+    final slotError = _slotMinutesError;
+    if (slotError != null) {
+      throw slotError;
+    }
     assert(
       widget.store.hours == widget.hours,
       "A CalendarView's hours, ${widget.hours}, must be its store's, "
       "${widget.store.hours}: set the store's hours with them.",
+    );
+    assert(
+      widget.hours.isOnSlotsOf(widget.slotMinutes),
+      "A CalendarView's hours, ${widget.hours}, must start and end on the "
+      "grid of its ${widget.slotMinutes}-minute slots.",
     );
     final header = _buildHeader();
     final Widget view;

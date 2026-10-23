@@ -1,7 +1,8 @@
 /// Agenda's day list on start and end: a timed entry listed under each day
 /// it covers with that day's part of it, all-day entries above the timed
 /// ones, the local zone's DST days listed once, the history lock read on
-/// start and end, and a gap shorter than a slot offering no add button.
+/// start and end, a gap shorter than a slot offering no add button, and the
+/// slot an add button creates.
 library;
 
 import 'package:flutter/material.dart';
@@ -79,16 +80,19 @@ MemoryCalendarStore<String> storeOf(List<CalendarEntry<String>> entries) {
   return store;
 }
 
-/// Pumps the day list over [store] on [day], with [lock], in edit mode
-/// unless not [editable]; [cards] records the details each card is built
-/// with, and an add button reads "add" and its minute.
+/// Pumps the day list over [store] on [day], with [lock] and slots of
+/// [slotMinutes], in edit mode unless not [editable]; [cards] records the
+/// details each card is built with, [creates] each create an add button
+/// reports, and an add button reads "add" and its minute.
 Future<void> pumpList(
   WidgetTester tester,
   CalendarStore<String> store,
   DateTime day, {
   HistoryLock lock = HistoryLock.none,
   bool editable = true,
+  int slotMinutes = 15,
   Map<String, List<CalendarCardDetails>>? cards,
+  List<(DateTime, int, int)>? creates,
 }) async {
   final now = ValueNotifier<DateTime>(at(day, 9));
   addTearDown(now.dispose);
@@ -103,13 +107,16 @@ Future<void> pumpList(
         weekdays: WeekdaySet.all,
         format: HourLabelFormat.twentyFourHour,
         hours: DayHours.allDay,
+        slotMinutes: slotMinutes,
         editable: editable,
         lock: lock,
         selectedDay: day,
         today: day,
         now: now,
         onTopDay: (day) {},
-        onCreateIn: (day, startMinute, endMinute) {},
+        onCreateIn: (day, startMinute, endMinute) {
+          creates?.add((day, startMinute, endMinute));
+        },
         onEdit: (id) {},
         onDelete: (id) {},
         cardBuilder: (context, entry, details) {
@@ -119,7 +126,10 @@ Future<void> pumpList(
           return Text("card ${entry.id}");
         },
         addButtonBuilder: (context, details) {
-          return Text("add ${details.startMinute}");
+          return GestureDetector(
+            onTap: details.onPressed,
+            child: Text("add ${details.startMinute}"),
+          );
         },
       ),
     ),
@@ -222,6 +232,22 @@ void main() {
     expect(find.byKey(dayListGapKey(tuesday, 590)), findsOneWidget);
     expect(find.text("add 590"), findsNothing);
     expect(find.text("add 660"), findsOneWidget);
+  });
+
+  testWidgets("AG4 at slot 30 Agenda's add button reports 30 minutes, and "
+      "a gap shorter than 30 minutes offers none", (tester) async {
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("first", at(tuesday, 9), at(tuesday, 9, 40)),
+      entryOf("second", at(tuesday, 10), at(tuesday, 11)),
+    ]);
+    final creates = <(DateTime, int, int)>[];
+    await pumpList(tester, store, tuesday, slotMinutes: 30, creates: creates);
+    // The 20 minutes from 09:40 hold no 30-minute slot.
+    expect(find.byKey(dayListGapKey(tuesday, 580)), findsOneWidget);
+    expect(find.text("add 580"), findsNothing);
+    await tester.tap(find.text("add 660"));
+    await tester.pumpAndSettle();
+    expect(creates, <(DateTime, int, int)>[(tuesday, 660, 690)]);
   });
 
   group("on the 23-hour day", skip: shortDaySkip, () {

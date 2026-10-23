@@ -211,8 +211,8 @@ void main() {
   group("C2 DayHours", () {
     test("counts its slots and holds the minutes inside it", () {
       const office = DayHours(8 * 60, 18 * 60);
-      expect(DayHours.allDay.slotCount, 96);
-      expect(office.slotCount, 40);
+      expect(DayHours.allDay.slotCountOf(15), 96);
+      expect(office.slotCountOf(15), 40);
       expect(office.contains(8 * 60, 18 * 60), isTrue);
       expect(office.contains(7 * 60 + 45, 9 * 60), isFalse);
       expect(office.contains(17 * 60, 18 * 60 + 15), isFalse);

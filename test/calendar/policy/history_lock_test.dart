@@ -170,9 +170,9 @@ void main() {
         today: today,
         now: midMorning,
       );
-      expect(lock.earliestStartOn(today), 11 * 60 + 15);
-      expect(lock.earliestStartOn(wednesday), 0);
-      expect(lock.earliestStartOn(monday), minutesPerDay);
+      expect(lock.earliestStartOn(today, slotMinutes: 15), 11 * 60 + 15);
+      expect(lock.earliestStartOn(wednesday, slotMinutes: 15), 0);
+      expect(lock.earliestStartOn(monday, slotMinutes: 15), minutesPerDay);
       expect(lock.admitsStart(at(today, 11 * 60 + 7)), isTrue);
       expect(lock.admitsStart(at(today, 11 * 60)), isFalse);
       expect(
@@ -181,7 +181,7 @@ void main() {
           lockEarlierToday: false,
           today: today,
           now: midMorning,
-        ).earliestStartOn(today),
+        ).earliestStartOn(today, slotMinutes: 15),
         0,
       );
     });
@@ -244,10 +244,13 @@ void main() {
         today: today,
         now: midMorning,
       );
-      expect(lock.earliestStartOn(wednesday), 0);
-      expect(lock.earliestStartOn(addDays(today, 10)), 0);
-      expect(lock.earliestStartOn(monday), minutesPerDay);
-      expect(lock.earliestStartOn(addDays(today, -10)), minutesPerDay);
+      expect(lock.earliestStartOn(wednesday, slotMinutes: 15), 0);
+      expect(lock.earliestStartOn(addDays(today, 10), slotMinutes: 15), 0);
+      expect(lock.earliestStartOn(monday, slotMinutes: 15), minutesPerDay);
+      expect(
+        lock.earliestStartOn(addDays(today, -10), slotMinutes: 15),
+        minutesPerDay,
+      );
 
       // The host pins today to Wednesday while the clock reads Tuesday.
       final pinned = HistoryLock.of(
@@ -257,8 +260,8 @@ void main() {
         now: DateTime(2026, 4, 21, 11, 7, 30),
       );
       expect(pinned.boundary, DateTime(2026, 4, 22, 11, 8));
-      expect(pinned.earliestStartOn(wednesday), 11 * 60 + 15);
-      expect(pinned.earliestStartOn(today), minutesPerDay);
+      expect(pinned.earliestStartOn(wednesday, slotMinutes: 15), 11 * 60 + 15);
+      expect(pinned.earliestStartOn(today, slotMinutes: 15), minutesPerDay);
     });
   });
 }

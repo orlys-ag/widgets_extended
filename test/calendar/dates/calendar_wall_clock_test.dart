@@ -1,7 +1,8 @@
 /// The wall-clock coordinate of the dates layer: a time's wall minute and
 /// back, the last day a range has a part in, a range's piece on a day, the
-/// hours rule on starts, ends and ranges, and the skipped and repeated
-/// times of the local zone's DST days.
+/// hours rule on starts, ends and ranges, the hours on the grid of a slot
+/// length, and the skipped and repeated times of the local zone's DST
+/// days.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -88,6 +89,29 @@ void main() {
     expect(DayHours.allDay.holdsTimes(at(monday, 17), tuesday), isTrue);
     expect(office.holdsTimes(monday, tuesday), isTrue);
     expect(office.holdsTimes(monday, addDays(monday, 3)), isTrue);
+  });
+
+  test("DT6 roundedOutTo(30) of 08:10-17:50 is 08:00-18:00, and "
+      "isOnSlotsOf(30) holds of 08:00-18:00 and not of 08:10-17:50", () {
+    const off = DayHours(8 * 60 + 10, 17 * 60 + 50);
+    const office = DayHours(8 * 60, 18 * 60);
+    expect(off.roundedOutTo(30), office);
+    expect(office.roundedOutTo(30), office);
+    expect(off.isOnSlotsOf(30), isFalse);
+    expect(const DayHours(8 * 60, 17 * 60 + 50).isOnSlotsOf(30), isFalse);
+    expect(office.isOnSlotsOf(30), isTrue);
+    expect(off.isOnSlotsOf(10), isTrue);
+    // Rounded out, the end stays inside the day.
+    expect(
+      const DayHours(0, minutesPerDay - 5).roundedOutTo(60),
+      DayHours.allDay,
+    );
+  });
+
+  test("DT7 slotCountOf(30) of the whole day is 48", () {
+    expect(DayHours.allDay.slotCountOf(30), 48);
+    expect(DayHours.allDay.slotCountOf(defaultSlotMinutes), 96);
+    expect(const DayHours(8 * 60, 18 * 60).slotCountOf(30), 20);
   });
 
   test("DST1 dstSkipReason answers null for a day found with the expected "

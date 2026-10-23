@@ -757,7 +757,10 @@ void main() {
         task("item-1", day, 0, 60),
         task("item-2", day, 75, 120),
       ]);
-      expect(store.firstFreeRange(day), (start: at(day, 60), end: at(day, 75)));
+      expect(store.firstFreeRange(day, slotMinutes: 15), (
+        start: at(day, 60),
+        end: at(day, 75),
+      ));
     });
 
     test(
@@ -767,7 +770,7 @@ void main() {
           task("item-1", day, 540, 705),
         ]);
         store.hours = const DayHours(540, 720);
-        expect(store.firstFreeRange(day), (
+        expect(store.firstFreeRange(day, slotMinutes: 15), (
           start: at(day, 705),
           end: at(day, 720),
         ));
@@ -778,7 +781,10 @@ void main() {
       final store = await readDay(Harness(), <CalendarEntry<String>>[
         task("item-1", day, 0, 1439),
       ]);
-      expect(store.firstFreeRange(day), (start: at(day, 0), end: at(day, 15)));
+      expect(store.firstFreeRange(day, slotMinutes: 15), (
+        start: at(day, 0),
+        end: at(day, 15),
+      ));
     });
 
     test("FF4 a pending move counts where it shows", () async {
@@ -786,13 +792,19 @@ void main() {
       final item = task("item-1", day, 60, 120);
       final store = await readDay(harness, <CalendarEntry<String>>[item]);
       // Sanity: the stored entry leaves the first slot free.
-      expect(store.firstFreeRange(day), (start: at(day, 0), end: at(day, 15)));
+      expect(store.firstFreeRange(day, slotMinutes: 15), (
+        start: at(day, 0),
+        end: at(day, 15),
+      ));
 
       final calls = harness.source.calls.length;
       store.requestMove(retimed(item, 0, 60));
       expect(harness.source.calls, hasLength(calls + 1));
       expect(store.isPending("item-1"), isTrue);
-      expect(store.firstFreeRange(day), (start: at(day, 60), end: at(day, 75)));
+      expect(store.firstFreeRange(day, slotMinutes: 15), (
+        start: at(day, 60),
+        end: at(day, 75),
+      ));
     });
 
     test("FF5 a search from a minute starts there, rounded up to the slots "
@@ -803,25 +815,25 @@ void main() {
         task("item-2", day, 900, 960),
       ]);
       store.hours = const DayHours(480, 1200);
-      expect(store.firstFreeRange(day, from: 840), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: 840), (
         start: at(day, 840),
         end: at(day, 855),
       ));
       // 14:10 rounds up to 14:15.
-      expect(store.firstFreeRange(day, from: 850), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: 850), (
         start: at(day, 855),
         end: at(day, 870),
       ));
       // Each slot from 15:00 meets item-2 until it ends.
-      expect(store.firstFreeRange(day, from: 900), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: 900), (
         start: at(day, 960),
         end: at(day, 975),
       ));
-      expect(store.firstFreeRange(day, from: 300), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: 300), (
         start: at(day, 540),
         end: at(day, 555),
       ));
-      expect(store.firstFreeRange(day, from: 1200), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: 1200), (
         start: at(day, 540),
         end: at(day, 555),
       ));

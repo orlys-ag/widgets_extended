@@ -247,31 +247,41 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// flight, reaches [onWriteFailed].
   void requestDelete(String id);
 
-  /// The first free slot of [day] inside [hours]: for each start from the
-  /// hours' start on the [minutesPerSlot] grid, the slot from it, the
-  /// first one whose start and end are times [day]'s clock reads
-  /// ([timeAtWallMinute]) and that shares no time ([rangeSharesTime]) with
-  /// an entry [entriesOn] lists for [day], pending ones where they show.
-  /// With [from], minutes after midnight, the starts begin at the later of
-  /// it, rounded up to the grid, and the hours' start, and only with none
-  /// free from there at the hours' start. With none free, the hours' first
-  /// slot.
-  ({DateTime start, DateTime end}) firstFreeRange(DateTime day, {int? from}) {
+  /// The first free slot of [slotMinutes] of [day] inside [hours]: for
+  /// each start from the hours' start, a step of [slotMinutes] apart, the
+  /// slot from it, the first one whose start and end are times [day]'s
+  /// clock reads ([timeAtWallMinute]) and that shares no time
+  /// ([rangeSharesTime]) with an entry [entriesOn] lists for [day], pending
+  /// ones where they show. With [from], minutes after midnight, the starts
+  /// begin at the later of it, rounded up to the grid of [slotMinutes] from
+  /// midnight, and the hours' start, and only with none free from there at
+  /// the hours' start. With none free, the hours' first slot.
+  ({DateTime start, DateTime end}) firstFreeRange(
+    DateTime day, {
+    required int slotMinutes,
+    int? from,
+  }) {
     final shown = entriesOn(day);
     final base = dayNumber(day) * minutesPerDay;
     if (from != null) {
-      final slot = (from + minutesPerSlot - 1) ~/ minutesPerSlot;
+      final slot = (from + slotMinutes - 1) ~/ slotMinutes;
       final later = _firstSlotFrom(
         base,
-        math.max(hours.start, slot * minutesPerSlot),
+        math.max(hours.start, slot * slotMinutes),
+        slotMinutes,
         shown,
       );
       if (later != null) {
         return later;
       }
     }
-    return _firstSlotFrom(base, hours.start, shown) ??
-        _firstSlotFrom(base, hours.start, <CalendarShownEntry<T>>[]) ??
+    return _firstSlotFrom(base, hours.start, slotMinutes, shown) ??
+        _firstSlotFrom(
+          base,
+          hours.start,
+          slotMinutes,
+          <CalendarShownEntry<T>>[],
+        ) ??
         (
           start: DateTime(day.year, day.month, day.day, 0, hours.start),
           end: DateTime(
@@ -279,26 +289,28 @@ abstract class CalendarStore<T> extends ChangeNotifier {
             day.month,
             day.day,
             0,
-            hours.start + minutesPerSlot,
+            hours.start + slotMinutes,
           ),
         );
   }
 
-  /// The first slot from the minute [first] of the day whose minute 0 is
-  /// the wall minute [base] whose start and end its clock reads and that
-  /// shares no time with any of [shown], or null where none does.
+  /// The first slot of [slotMinutes] from the minute [first] of the day
+  /// whose minute 0 is the wall minute [base] whose start and end its clock
+  /// reads and that shares no time with any of [shown], or null where none
+  /// does.
   ({DateTime start, DateTime end})? _firstSlotFrom(
     int base,
     int first,
+    int slotMinutes,
     List<CalendarShownEntry<T>> shown,
   ) {
     for (
       var minute = first;
-      minute <= hours.end - minutesPerSlot;
-      minute += minutesPerSlot
+      minute <= hours.end - slotMinutes;
+      minute += slotMinutes
     ) {
       final start = timeAtWallMinute(base + minute);
-      final end = timeAtWallMinute(base + minute + minutesPerSlot);
+      final end = timeAtWallMinute(base + minute + slotMinutes);
       if (start == null || end == null) {
         continue;
       }

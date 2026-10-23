@@ -1,7 +1,8 @@
 /// Both stores on start and end: an overnight entry answered on each day
 /// it covers, the hours rule on an entry's start and its last day's end,
 /// the overlap rule on instants with all-day entries exempt, minutes off
-/// the slot grid kept, and the local zone's DST days answered once.
+/// the slot grid kept, the first free slot of a slot length, and the
+/// local zone's DST days answered once.
 library;
 
 import 'dart:ui' show Color;
@@ -134,23 +135,18 @@ void main() {
       expect(idsOf(store.entriesOn(monday)), <String>["night"], reason: name);
       expect(idsOf(store.entriesOn(tuesday)), <String>["night"], reason: name);
       expect(store.entriesOn(wednesday), isEmpty, reason: name);
-      expect(
-        idsOf(store.entriesOn(sunday)),
-        <String>["to-midnight"],
-        reason: name,
-      );
+      expect(idsOf(store.entriesOn(sunday)), <String>[
+        "to-midnight",
+      ], reason: name);
       expect(store.dayHasShownEntries(tuesday), isTrue, reason: name);
       expect(store.dayHasShownEntries(wednesday), isFalse, reason: name);
-      expect(
-        idsOf(store.entriesBetween(sunday, wednesday)),
-        <String>["to-midnight", "night"],
-        reason: name,
-      );
-      expect(
-        idsOf(store.entriesBetween(tuesday, wednesday)),
-        <String>["night"],
-        reason: name,
-      );
+      expect(idsOf(store.entriesBetween(sunday, wednesday)), <String>[
+        "to-midnight",
+        "night",
+      ], reason: name);
+      expect(idsOf(store.entriesBetween(tuesday, wednesday)), <String>[
+        "night",
+      ], reason: name);
     }
 
     for (final day in <DateTime>[monday, tuesday]) {
@@ -180,11 +176,15 @@ void main() {
       failures: failures,
     )) {
       failures.clear();
-      store.requestMove(task.copyWith(start: at(monday, 17), end: at(tuesday, 9)));
+      store.requestMove(
+        task.copyWith(start: at(monday, 17), end: at(tuesday, 9)),
+      );
       expect(failures, isEmpty, reason: name);
       expect(store.storedEntry("task")!.end, at(tuesday, 9), reason: name);
 
-      store.requestMove(task.copyWith(start: at(monday, 17), end: at(monday, 19)));
+      store.requestMove(
+        task.copyWith(start: at(monday, 17), end: at(monday, 19)),
+      );
       expect(failures, hasLength(1), reason: name);
       final refusal = failures.single.error;
       expect(refusal, isA<CalendarHoursException>(), reason: name);
@@ -224,7 +224,9 @@ void main() {
       failures: failures,
     )) {
       failures.clear();
-      store.requestMove(task.copyWith(start: at(monday, 23), end: at(tuesday, 1)));
+      store.requestMove(
+        task.copyWith(start: at(monday, 23), end: at(tuesday, 1)),
+      );
       expect(failures, hasLength(1), reason: name);
       final refusal = failures.single.error;
       expect(refusal, isA<CalendarEntryOverlapException>(), reason: name);
@@ -257,6 +259,31 @@ void main() {
     }
   });
 
+  test("SM5 firstFreeRange with slotMinutes 30 steps by 30 minutes", () {
+    final task = entryOf("task", at(tuesday, 0, 10), at(tuesday, 0, 40));
+    for (final (name, store) in storesOf(
+      <CalendarEntry<String>>[task],
+      first: monday,
+      last: wednesday,
+    )) {
+      // 00:00 to 00:30 and 00:30 to 01:00 meet the task; at slot 15,
+      // 00:45 would be free.
+      expect(store.firstFreeRange(tuesday, slotMinutes: 30), (
+        start: at(tuesday, 1),
+        end: at(tuesday, 1, 30),
+      ), reason: name);
+      expect(store.firstFreeRange(tuesday, slotMinutes: 15), (
+        start: at(tuesday, 0, 45),
+        end: at(tuesday, 1),
+      ), reason: name);
+      // A start from 10:05 rounds up to 10:30.
+      expect(store.firstFreeRange(tuesday, slotMinutes: 30, from: 605), (
+        start: at(tuesday, 10, 30),
+        end: at(tuesday, 11),
+      ), reason: name);
+    }
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("SM6 the day's entries are answered for that day once", () {
       final day = shortDayStart;
@@ -268,18 +295,16 @@ void main() {
         first: addDays(day, -1),
         last: next,
       )) {
-        expect(
-          idsOf(store.entriesOn(day)),
-          <String>["all-day", "early"],
-          reason: name,
-        );
+        expect(idsOf(store.entriesOn(day)), <String>[
+          "all-day",
+          "early",
+        ], reason: name);
         expect(store.entriesOn(next), isEmpty, reason: name);
         expect(store.entriesOn(addDays(day, -1)), isEmpty, reason: name);
-        expect(
-          idsOf(store.entriesBetween(addDays(day, -1), next)),
-          <String>["all-day", "early"],
-          reason: name,
-        );
+        expect(idsOf(store.entriesBetween(addDays(day, -1), next)), <String>[
+          "all-day",
+          "early",
+        ], reason: name);
       }
     });
   });
@@ -299,17 +324,15 @@ void main() {
         first: addDays(day, -1),
         last: next,
       )) {
-        expect(
-          idsOf(store.entriesOn(day)),
-          <String>["all-day", "repeated"],
-          reason: name,
-        );
+        expect(idsOf(store.entriesOn(day)), <String>[
+          "all-day",
+          "repeated",
+        ], reason: name);
         expect(store.entriesOn(next), isEmpty, reason: name);
-        expect(
-          idsOf(store.entriesBetween(addDays(day, -1), next)),
-          <String>["all-day", "repeated"],
-          reason: name,
-        );
+        expect(idsOf(store.entriesBetween(addDays(day, -1), next)), <String>[
+          "all-day",
+          "repeated",
+        ], reason: name);
       }
     });
   });

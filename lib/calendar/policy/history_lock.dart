@@ -108,11 +108,11 @@ class HistoryLock {
     return boundary == null || !start.isBefore(boundary);
   }
 
-  /// The first minute of [day] on the [minutesPerSlot] grid a new entry may
-  /// start at: 0 on a day after the boundary's, [minutesPerDay] on one
-  /// before it, where none may, and on the boundary's day its
-  /// [minuteOfDay] rounded up to the grid.
-  int earliestStartOn(DateTime day) {
+  /// The first minute of [day] on the grid of [slotMinutes]-minute slots
+  /// from midnight a new entry may start at: 0 on a day after the
+  /// boundary's, [minutesPerDay] on one before it, where none may, and on
+  /// the boundary's day its [minuteOfDay] rounded up to the grid.
+  int earliestStartOn(DateTime day, {required int slotMinutes}) {
     final boundary = this.boundary;
     if (boundary == null) {
       return 0;
@@ -126,7 +126,7 @@ class HistoryLock {
       return minutesPerDay;
     }
     final into = isDayStart(boundary) ? 0 : minuteOfDay(boundary);
-    return (into + minutesPerSlot - 1) ~/ minutesPerSlot * minutesPerSlot;
+    return (into + slotMinutes - 1) ~/ slotMinutes * slotMinutes;
   }
 
   @override

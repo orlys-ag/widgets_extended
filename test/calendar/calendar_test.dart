@@ -115,6 +115,8 @@ void main() {
       WeekdaySet,
       dayNumber,
       dateOfDayNumber,
+      defaultSlotMinutes,
+      slotMinuteChoices,
       CalendarEntry,
       CalendarDataSource,
       CalendarStore,

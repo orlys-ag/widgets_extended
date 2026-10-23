@@ -11,9 +11,13 @@ import 'package:flutter/foundation.dart';
 
 import 'calendar_labels.dart';
 
-/// The length of one slot of the timed grid, the step its rows and
-/// gestures snap to.
-const int minutesPerSlot = 15;
+/// The slot length, in minutes, of a calendar given none: the step the
+/// timed grid's rows and gestures snap to.
+const int defaultSlotMinutes = 15;
+
+/// The slot lengths, in minutes, a calendar takes, each a whole number of
+/// them to an hour and so to a day.
+const List<int> slotMinuteChoices = <int>[5, 10, 15, 20, 30, 60];
 
 const int minutesPerDay = 1440;
 
@@ -509,14 +513,14 @@ class MonthGrid {
 }
 
 /// The part of each day a calendar shows and schedules in: from [start]
-/// to [end] minutes after midnight, in whole slots.
+/// to [end] minutes after midnight.
 @immutable
 class DayHours {
-  /// The hours from [start] to [end] minutes after midnight, each a whole
-  /// number of slots, with [start] before [end], inside one day.
+  /// The hours from [start] to [end] minutes after midnight, with [start]
+  /// before [end], inside one day.
   const DayHours(this.start, this.end)
-    : assert(start >= 0 && start % minutesPerSlot == 0),
-      assert(end <= minutesPerDay && end % minutesPerSlot == 0),
+    : assert(start >= 0),
+      assert(end <= minutesPerDay),
       assert(start < end);
 
   /// The whole day, 00:00 to 24:00.
@@ -528,9 +532,35 @@ class DayHours {
   /// Minutes after midnight.
   final int end;
 
-  /// The slots from [start] to [end].
-  int get slotCount {
-    return (end - start) ~/ minutesPerSlot;
+  /// The slots of [slotMinutes] from [start] to [end], which must both lie
+  /// on that slot grid ([isOnSlotsOf]).
+  int slotCountOf(int slotMinutes) {
+    assert(
+      isOnSlotsOf(slotMinutes),
+      "$this does not start and end on the grid of $slotMinutes-minute "
+      "slots.",
+    );
+    return (end - start) ~/ slotMinutes;
+  }
+
+  /// Whether [start] and [end] both lie on the grid of [slotMinutes]-minute
+  /// slots from midnight.
+  bool isOnSlotsOf(int slotMinutes) {
+    return start % slotMinutes == 0 && end % slotMinutes == 0;
+  }
+
+  /// These hours widened to the grid of [slotMinutes]-minute slots from
+  /// midnight: [start] rounded down and [end] up to it, so the hours
+  /// themselves where they lie on it. [slotMinutes] divides a day, as each
+  /// of [slotMinuteChoices] does, so the end stays inside the day.
+  DayHours roundedOutTo(int slotMinutes) {
+    if (isOnSlotsOf(slotMinutes)) {
+      return this;
+    }
+    return DayHours(
+      start - start % slotMinutes,
+      (end + slotMinutes - 1) ~/ slotMinutes * slotMinutes,
+    );
   }
 
   /// Whether the minutes [from] to [to] lie inside these hours.

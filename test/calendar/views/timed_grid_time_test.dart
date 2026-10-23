@@ -2,11 +2,13 @@
 /// day at its exact minutes, the gestures on pieces (a move keeping the
 /// entry's elapsed duration, resizes, the handles of the first and the
 /// last piece, a lift of a pieced entry), the create ranges across days and
-/// their day limit, and the wall-clock rows of the local zone's DST days.
+/// their day limit, the wall-clock rows of the local zone's DST days, the
+/// slot length, and a slot length or hours change during a gesture.
 library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -49,15 +51,22 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 /// day header, or Day over [first] alone, with none; its slots of
 /// [slotMinutes] over [hours].
 class Shown {
-  const Shown.week(this.first, {this.hours = DayHours.allDay}) : week = true;
+  const Shown.week(
+    this.first, {
+    this.hours = DayHours.allDay,
+    this.slotMinutes = 15,
+  }) : week = true;
 
-  const Shown.day(this.first, {this.hours = DayHours.allDay}) : week = false;
+  const Shown.day(
+    this.first, {
+    this.hours = DayHours.allDay,
+    this.slotMinutes = 15,
+  }) : week = false;
 
   final DateTime first;
   final bool week;
   final DayHours hours;
-
-  static const int slotMinutes = 15;
+  final int slotMinutes;
 
   /// The row of the first slot: under the day header and the room above
   /// the slots in Week, under the room alone in Day.
@@ -97,6 +106,58 @@ Rect cellRect(WidgetTester tester, int row, int col) {
 /// The global rect of the slot starting at [minute] in [day]'s column.
 Rect slotRect(WidgetTester tester, Shown shown, DateTime day, int minute) {
   return cellRect(tester, shown.rowOf(minute), shown.colOf(day));
+}
+
+/// The number of rows of the grid's board.
+int rowCount(WidgetTester tester) {
+  return tester
+      .widget<Board<GridKey, GridShape<String>>>(
+        find.byType(Board<GridKey, GridShape<String>>),
+      )
+      .controller
+      .rows
+      .axis
+      .trackCount;
+}
+
+/// A canvas that records the rects drawn on it with their paints. Every
+/// other call is ignored.
+class RecordingCanvas implements Canvas {
+  final List<({Rect rect, Paint paint})> rects = <({Rect rect, Paint paint})>[];
+
+  @override
+  void drawRect(Rect rect, Paint paint) {
+    rects.add((rect: rect, paint: paint));
+  }
+
+  @override
+  void save() {}
+
+  @override
+  void restore() {}
+
+  @override
+  void clipRect(
+    Rect rect, {
+    ui.ClipOp clipOp = ui.ClipOp.intersect,
+    bool doAntiAlias = true,
+  }) {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    return null;
+  }
+}
+
+/// Whether the grid's background marks a range of slots or a landing,
+/// each of which it edges with a stroke.
+bool marksSlots(WidgetTester tester) {
+  final viewport = viewportOf(tester);
+  final canvas = RecordingCanvas();
+  viewport.background!.paint(canvas, viewport);
+  return canvas.rects.any((record) {
+    return record.paint.style == PaintingStyle.stroke;
+  });
 }
 
 /// The block of [id]'s piece on [day].
@@ -182,14 +243,20 @@ class HeldSource implements CalendarDataSource<String> {
 
 /// What a test pumps: the grid of [shown] over [store], in a view 800 wide
 /// and 2000 tall, where every slot of the day shows; [creates] records each
-/// create range it reports.
+/// create range it reports. [hours] and [slotMinutes] start as [shown]'s,
+/// and [rebuild] builds the grid again with them.
 class Harness {
-  Harness(this.store, this.shown, {this.maxDayCount, this.editable = true});
+  Harness(this.store, this.shown, {this.maxDayCount, this.editable = true})
+    : hours = shown.hours,
+      slotMinutes = shown.slotMinutes;
 
   final CalendarStore<String> store;
   final Shown shown;
   final int? maxDayCount;
   final bool editable;
+
+  DayHours hours;
+  int slotMinutes;
 
   final List<CreateRange> creates = <CreateRange>[];
   final ValueNotifier<DateTime> now = ValueNotifier<DateTime>(
@@ -211,7 +278,8 @@ class Harness {
         creates.add(range);
       },
       editable: editable,
-      hours: shown.hours,
+      hours: hours,
+      slotMinutes: slotMinutes,
       maxDayCount: maxDayCount,
       showsDayHeader: shown.week,
     );
@@ -224,6 +292,12 @@ class Harness {
     addTearDown(now.dispose);
     await tester.pumpWidget(MaterialApp(home: grid()));
     await tester.pumpAndSettle();
+  }
+
+  /// Builds the grid again, the same grid with [hours] and [slotMinutes] as
+  /// they are now, and pumps one frame.
+  Future<void> rebuild(WidgetTester tester) async {
+    await tester.pumpWidget(MaterialApp(home: grid()));
   }
 }
 
@@ -951,6 +1025,200 @@ void main() {
       CreateRange(start: at(tuesday, 10), end: at(tuesday, 12, 45)),
     ]);
     expect(store.betweenCalls - calls, 1);
+  });
+
+  testWidgets("TC1 at slot 30 over 00:00-24:00 the grid has 48 slot rows and "
+      "a tap reports 30 minutes", (tester) async {
+    for (final shown in <Shown>[
+      Shown.week(monday, slotMinutes: 30),
+      Shown.day(tuesday, slotMinutes: 30),
+    ]) {
+      final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
+      await harness.pump(tester);
+      // The slots, and the room below them.
+      expect(rowCount(tester), shown.firstSlotRow + 48 + 1, reason: shown.name);
+      await tester.tapAt(slotRect(tester, shown, tuesday, 10 * 60).center);
+      await tester.pumpAndSettle();
+      expect(harness.creates, <CreateRange>[
+        CreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 30)),
+      ], reason: shown.name);
+    }
+  });
+
+  testWidgets("TP7b at slot 30 a move of 09:10-09:50 dropped lower writes a "
+      "start on the slot grid and keeps its 40 minutes", (tester) async {
+    final shown = Shown.week(monday, slotMinutes: 30);
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("task", at(tuesday, 9, 10), at(tuesday, 9, 50)),
+    ]);
+    await Harness(store, shown).pump(tester);
+    final slot = slotRect(tester, shown, tuesday, 9 * 60).height;
+    await moveBlock(
+      tester,
+      blockFinder("task", tuesday),
+      Offset(0.0, slot * 3 + 2.0),
+    );
+    final moved = store.storedEntry("task")!;
+    // The lifted top, 10:40, lands on the nearest 30-minute slot.
+    expect(moved.start, at(tuesday, 10, 30));
+    expect(moved.end.difference(moved.start), const Duration(minutes: 40));
+  });
+
+  testWidgets("TP8b at slot 30 a lift let go in place writes nothing", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday, slotMinutes: 30);
+    final task = entryOf("task", at(tuesday, 9, 10), at(tuesday, 9, 50));
+    final store = storeOf(<CalendarEntry<String>>[task]);
+    await Harness(store, shown).pump(tester);
+    final changes = store.changes;
+    await selectBlock(tester, blockFinder("task", tuesday));
+    // The lift selected the block, so it did lift.
+    expect(find.byKey(blockHandlesKey("task")), findsOneWidget);
+    expect(store.changes, changes);
+    expect(store.storedEntry("task"), task);
+  });
+
+  testWidgets("TP9b at slot 30 an end resize writes an end on the slot "
+      "grid", (tester) async {
+    final shown = Shown.week(monday, slotMinutes: 30);
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("task", at(tuesday, 9, 10), at(tuesday, 9, 50)),
+    ]);
+    await Harness(store, shown).pump(tester);
+    final slot = slotRect(tester, shown, tuesday, 9 * 60).height;
+    final block = blockFinder("task", tuesday);
+    await selectBlock(tester, block);
+    await resizeEnd(tester, block, Offset(0.0, slot + 2.0));
+    final resized = store.storedEntry("task")!;
+    expect(resized.start, at(tuesday, 9, 10));
+    // The dragged edge, at 10:20, lands on the nearest 30-minute edge.
+    expect(resized.end, at(tuesday, 10, 30));
+  });
+
+  /// The two changes TC2 to TC4 make during a gesture: the slot length
+  /// from 15 to 30, and the hours' end from 24:00 to 23:00, which leaves
+  /// every row of a block at 10:00 where it was.
+  final changes = <String, void Function(Harness harness)>{
+    "slotMinutes": (harness) {
+      harness.slotMinutes = 30;
+    },
+    "hours": (harness) {
+      harness.hours = const DayHours(0, 23 * 60);
+    },
+  };
+
+  testWidgets("TC2 a slotMinutes change, and an hours change, during a move "
+      "write nothing, leave the entry, and clear the marks", (tester) async {
+    for (final MapEntry(key: name, value: change) in changes.entries) {
+      final shown = Shown.week(monday);
+      final task = entryOf("task", at(tuesday, 10), at(tuesday, 11));
+      final store = storeOf(<CalendarEntry<String>>[task]);
+      final harness = Harness(store, shown);
+      await harness.pump(tester);
+      final writes = store.changes;
+      final slot = slotRect(tester, shown, tuesday, 10 * 60).height;
+      final gesture = await lift(
+        tester,
+        tester.getCenter(blockFinder("task", tuesday)),
+      );
+      await gesture.moveBy(Offset(0.0, slot * 2 + 2.0));
+      await tester.pump();
+      // The move shows where it lands.
+      expect(find.byKey(landingLabelKey), findsOneWidget, reason: name);
+      expect(marksSlots(tester), isTrue, reason: name);
+
+      change(harness);
+      await harness.rebuild(tester);
+      await tester.pump();
+      expect(find.byKey(landingLabelKey), findsNothing, reason: name);
+      expect(marksSlots(tester), isFalse, reason: name);
+      await gesture.moveBy(Offset(0.0, slot));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.changes, writes, reason: name);
+      expect(store.storedEntry("task"), task, reason: name);
+      expect(blockFinder("task", tuesday), findsOneWidget, reason: name);
+    }
+  });
+
+  testWidgets("TC3 a slotMinutes change, and an hours change, during a "
+      "resize write nothing, leave the entry, and clear the marks, an hours "
+      "change leaving the entry wholly outside them throwing nothing", (
+    tester,
+  ) async {
+    final cases = <String, (CalendarEntry<String>, void Function(Harness))>{
+      for (final MapEntry(key: name, value: change) in changes.entries)
+        name: (entryOf("task", at(tuesday, 10), at(tuesday, 11)), change),
+      "hours that leave it outside": (
+        entryOf("task", at(tuesday, 20), at(tuesday, 21)),
+        (harness) {
+          harness.hours = const DayHours(8 * 60, 18 * 60);
+        },
+      ),
+    };
+    for (final MapEntry(key: name, value: (task, change)) in cases.entries) {
+      final shown = Shown.week(monday);
+      final store = storeOf(<CalendarEntry<String>>[task]);
+      final harness = Harness(store, shown);
+      await harness.pump(tester);
+      final writes = store.changes;
+      final slot = slotRect(tester, shown, tuesday, 10 * 60).height;
+      final block = blockFinder("task", tuesday);
+      await selectBlock(tester, block);
+      final rect = tester.getRect(block);
+      final gesture = await tester.startGesture(
+        Offset(rect.center.dx, rect.bottom - 3.0),
+      );
+      await gesture.moveBy(Offset(0.0, slot * 2 + 2.0));
+      await tester.pump();
+      // The resize shows the times it would write.
+      expect(find.byKey(landingLabelKey), findsOneWidget, reason: name);
+
+      change(harness);
+      await harness.rebuild(tester);
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: name);
+      expect(find.byKey(landingLabelKey), findsNothing, reason: name);
+      await gesture.moveBy(Offset(0.0, slot));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: name);
+      expect(store.changes, writes, reason: name);
+      expect(store.storedEntry("task"), task, reason: name);
+    }
+  });
+
+  testWidgets("TC4 a slotMinutes change, and an hours change, during a "
+      "create drag report nothing and clear the marks", (tester) async {
+    for (final MapEntry(key: name, value: change) in changes.entries) {
+      final shown = Shown.week(monday);
+      final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
+      await harness.pump(tester);
+      final from = slotRect(tester, shown, tuesday, 10 * 60).center;
+      final slot = slotRect(tester, shown, tuesday, 10 * 60).height;
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(from + Offset(0.0, slot * 4));
+      await tester.pump();
+      // The range is marked while it is dragged.
+      expect(marksSlots(tester), isTrue, reason: name);
+
+      change(harness);
+      await harness.rebuild(tester);
+      await tester.pump();
+      expect(marksSlots(tester), isFalse, reason: name);
+      await gesture.moveTo(from + Offset(0.0, slot * 5));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(harness.creates, isEmpty, reason: name);
+      expect(marksSlots(tester), isFalse, reason: name);
+    }
   });
 
   group("on the 23-hour day", skip: shortDaySkip, () {

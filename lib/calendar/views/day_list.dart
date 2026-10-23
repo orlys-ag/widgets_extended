@@ -555,9 +555,9 @@ List<DayListRow> dayListRowsOf<T>(
 /// builder no Edit or Delete, so a day without items shows its header
 /// alone. Under the history [lock] a card is handed Edit only while its
 /// item is not [EntryHold.locked], and Delete only while it is
-/// [EntryHold.free], and a dashed row's button adds from the first time the
-/// lock leaves free in its gap, and is gone where the lock leaves none. A
-/// row that comes or
+/// [EntryHold.free], and a dashed row's button adds one slot of
+/// [slotMinutes] from the first time the lock leaves free in its gap, and
+/// is gone where that slot does not fit in the gap. A row that comes or
 /// goes in a block grows in and fades in, or fades out and shrinks away,
 /// so the block grows or shrinks smoothly; a block above the list's top
 /// that changes height moves nothing the list shows.
@@ -600,6 +600,7 @@ class DayList<T> extends StatefulWidget {
     required this.weekdays,
     required this.format,
     required this.hours,
+    this.slotMinutes = defaultSlotMinutes,
     required this.editable,
     required this.lock,
     required this.selectedDay,
@@ -629,6 +630,11 @@ class DayList<T> extends StatefulWidget {
   /// outside them shows only in a banner's count.
   final DayHours hours;
 
+  /// The length of the slot a gap row's add button creates, in minutes,
+  /// one of [slotMinuteChoices], which the list's state asserts; the lock
+  /// rounds its first free time up to the grid of it from midnight.
+  final int slotMinutes;
+
   /// Whether the calendar is in edit mode, where the list has its dashed
   /// rows and hands each card its Edit and Delete.
   final bool editable;
@@ -648,8 +654,8 @@ class DayList<T> extends StatefulWidget {
   /// A drag or a fling brought a new day under the list's top.
   final ValueChanged<DateTime> onTopDay;
 
-  /// The add button of a gap was pressed: an item in the gap's first slot
-  /// the history lock leaves free.
+  /// The add button of a gap was pressed: an item of one slot of
+  /// [slotMinutes] from the gap's first time the history lock leaves free.
   final void Function(DateTime day, int startMinute, int endMinute) onCreateIn;
 
   final void Function(String id) onEdit;
@@ -741,6 +747,11 @@ class _DayListState<T> extends State<DayList<T>> {
   @override
   void initState() {
     super.initState();
+    assert(
+      slotMinuteChoices.contains(widget.slotMinutes),
+      "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
+      "$slotMinuteChoices.",
+    );
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
     widget.store.addListener(_handleStore);
@@ -764,6 +775,11 @@ class _DayListState<T> extends State<DayList<T>> {
   @override
   void didUpdateWidget(DayList<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    assert(
+      slotMinuteChoices.contains(widget.slotMinutes),
+      "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
+      "$slotMinuteChoices.",
+    );
     if (widget.store != oldWidget.store) {
       oldWidget.store.removeListener(_handleStore);
       widget.store.addListener(_handleStore);
@@ -1294,7 +1310,11 @@ class _DayListState<T> extends State<DayList<T>> {
       case DayListEntry():
         throw ArgumentError.value(row, "row", "an item of another payload");
       case DayListGap(:final day, :final start, :final end):
-        final from = math.max(start, widget.lock.earliestStartOn(day));
+        final slot = widget.slotMinutes;
+        final from = math.max(
+          start,
+          widget.lock.earliestStartOn(day, slotMinutes: slot),
+        );
         // One slot from the gap's first free minute must fit it, so a gap
         // shorter than a slot, as entries off the slot grid can leave,
         // offers no add.
@@ -1305,9 +1325,9 @@ class _DayListState<T> extends State<DayList<T>> {
             day: day,
             addMinute: from,
             addLabel: "Add an item at ${hourLabel(from, widget.format)}",
-            onAdd: from + minutesPerSlot <= end
+            onAdd: from + slot <= end
                 ? () {
-                    widget.onCreateIn(day, from, from + minutesPerSlot);
+                    widget.onCreateIn(day, from, from + slot);
                   }
                 : null,
           ),

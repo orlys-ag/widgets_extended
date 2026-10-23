@@ -30,7 +30,7 @@ Future<void> showCreateFlow(
   required CalendarStore<ItemPayload> store,
   required CreateRange range,
   required ValueGetter<HistoryLock> lock,
-  int slotMinutes = minutesPerSlot,
+  int slotMinutes = defaultSlotMinutes,
 }) async {
   final type = await showDialog<CalendarItemType>(
     context: context,
@@ -87,7 +87,7 @@ Future<void> showEditForm(
   required CalendarStore<ItemPayload> store,
   required String id,
   required ValueGetter<HistoryLock> lock,
-  int slotMinutes = minutesPerSlot,
+  int slotMinutes = defaultSlotMinutes,
 }) async {
   final item = store.storedEntry(id);
   if (item == null) {
@@ -181,7 +181,7 @@ Future<void> _showForm(
   required CalendarItem item,
   bool readOnly = false,
   ValueGetter<HistoryLock>? lock,
-  int slotMinutes = minutesPerSlot,
+  int slotMinutes = defaultSlotMinutes,
 }) {
   return showDialog<void>(
     context: context,

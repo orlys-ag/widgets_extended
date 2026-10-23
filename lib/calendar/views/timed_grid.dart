@@ -1,6 +1,6 @@
 /// The calendar's timed grid: consecutive days on the board, with a frozen
 /// hour gutter and, where it shows one, a frozen day header, one row per
-/// 15-minute slot, and the days' entries as blocks, one per piece, the part
+/// slot, and the days' entries as blocks, one per piece, the part
 /// of an entry on one day, that in edit mode move, and once selected
 /// resize.
 library;
@@ -44,7 +44,7 @@ int _openingMinuteOf(GridTracks tracks, DateTime now) {
       ? _openingMinute
       : math.max(0, (now.hour - 1) * 60);
   final hours = tracks.hours;
-  return minute.clamp(hours.start, hours.end - minutesPerSlot);
+  return minute.clamp(hours.start, hours.end - tracks.slotMinutes);
 }
 
 /// The style the grid animates its blocks with under [theme]: every
@@ -534,7 +534,7 @@ final class GridPiece<T> extends GridShape<T> {
 /// its rows starts at.
 ///
 /// Column 0 is the hour gutter, and the rows from [firstSlotRow] are the
-/// slots of [hours], one per [minutesPerSlot]; the rows before it are
+/// slots of [hours], one per [slotMinutes]; the rows before it are
 /// whatever the grid lays out above its slots, such as a day header or a
 /// row counting the entries before the hours. The
 /// columns right of the gutter are the days of the [dayCount] days from
@@ -548,8 +548,10 @@ class GridTracks {
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
     this.firstSlotRow = 1,
+    this.slotMinutes = defaultSlotMinutes,
   }) : assert(dayCount >= 1),
        assert(firstSlotRow >= 0),
+       assert(slotMinutes > 0),
        _days = List<int>.unmodifiable(<int>[
          for (var day = firstDay; day < firstDay + dayCount; day++)
            if (weekdays.containsDay(day)) day,
@@ -567,6 +569,10 @@ class GridTracks {
   /// The row of the first slot.
   final int firstSlotRow;
 
+  /// The length of one slot, one row, in minutes; [hours] start and end on
+  /// its grid ([DayHours.isOnSlotsOf]).
+  final int slotMinutes;
+
   /// The [dayNumber]s of the shown days, ascending: column `c` shows
   /// `_days[c - 1]`.
   final List<int> _days;
@@ -583,7 +589,7 @@ class GridTracks {
 
   /// The slot rows, the header not counted.
   int get rowCount {
-    return hours.slotCount;
+    return hours.slotCountOf(slotMinutes);
   }
 
   /// The row of the last slot.
@@ -641,13 +647,13 @@ class GridTracks {
   /// The minute the slot [row] starts at, for a row from [firstSlotRow] to
   /// [lastSlotRow]; the row after the last gives the end of [hours].
   int minuteAt(int row) {
-    return hours.start + (row - firstSlotRow) * minutesPerSlot;
+    return hours.start + (row - firstSlotRow) * slotMinutes;
   }
 
   /// The row of the slot starting at [minute], a slot boundary in
   /// [hours].
   int rowOf(int minute) {
-    return firstSlotRow + (minute - hours.start) ~/ minutesPerSlot;
+    return firstSlotRow + (minute - hours.start) ~/ slotMinutes;
   }
 
   @override
@@ -657,12 +663,20 @@ class GridTracks {
         other.dayCount == dayCount &&
         other.weekdays == weekdays &&
         other.hours == hours &&
-        other.firstSlotRow == firstSlotRow;
+        other.firstSlotRow == firstSlotRow &&
+        other.slotMinutes == slotMinutes;
   }
 
   @override
   int get hashCode {
-    return Object.hash(firstDay, dayCount, weekdays, hours, firstSlotRow);
+    return Object.hash(
+      firstDay,
+      dayCount,
+      weekdays,
+      hours,
+      firstSlotRow,
+      slotMinutes,
+    );
   }
 }
 
@@ -679,7 +693,7 @@ BoardSpan? pieceSpanOf(GridTracks tracks, int column, int start, int end) {
   if (to <= from) {
     return null;
   }
-  const slot = minutesPerSlot;
+  final slot = tracks.slotMinutes;
   final into = from - hours.start;
   final length = to - from;
   return BoardSpan(
@@ -702,7 +716,7 @@ int slotWallMinuteOf(GridTracks tracks, ({int row, int col}) cell) {
 /// repeats a stretch, each end is the earlier instant of its time.
 CreateRange? createRangeAt(GridTracks tracks, ({int row, int col}) cell) {
   final start = slotWallMinuteOf(tracks, cell);
-  return _createRangeOf(start, start + minutesPerSlot);
+  return _createRangeOf(start, start + tracks.slotMinutes);
 }
 
 /// What a drag from the body cell [anchor] to [focus] creates: one
@@ -721,7 +735,7 @@ CreateRange? createRangeOver(
   final to = slotWallMinuteOf(tracks, focus);
   return _createRangeOf(
     math.min(from, to),
-    math.max(from, to) + minutesPerSlot,
+    math.max(from, to) + tracks.slotMinutes,
   );
 }
 
@@ -735,8 +749,9 @@ CreateRange? _createRangeOf(int startWall, int endWall) {
 }
 
 /// The days of the [dayCount] from [firstDay] whose weekday [weekdays]
-/// holds, on the board, over its [hours], showing what [store] shows for
-/// them once they are ready. An entry shows as one block per piece, its
+/// holds, on the board, over its [hours], one row per slot of
+/// [slotMinutes], showing what [store] shows for them once they are
+/// ready. An entry shows as one block per piece, its
 /// part on each shown day it covers, at its exact minutes, so an entry
 /// from Monday 22:00 to Tuesday 02:00 shows one block at the end of
 /// Monday and one at the start of Tuesday. Rows follow the wall clock: on
@@ -809,7 +824,9 @@ CreateRange? _createRangeOf(int startWall, int endWall) {
 /// selected block. No pinch starts while a block moves or resizes or a
 /// create range runs. New days, which a new [firstDay], [dayCount] or
 /// [weekdays] gives, end a create range in flight, which then creates
-/// nothing.
+/// nothing. A new [slotMinutes] or [hours] cancels a move or a resize in
+/// flight, which then writes nothing, and ends a create range in flight
+/// and clears the range a create flow marks.
 ///
 /// With no [storeRange], the days are ready while the store's shown range
 /// holds every one of them and its status is ready. With one, they are
@@ -843,6 +860,7 @@ class TimedGrid<T> extends StatefulWidget {
     this.lockEarlierToday = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
+    this.slotMinutes = defaultSlotMinutes,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
@@ -920,8 +938,14 @@ class TimedGrid<T> extends StatefulWidget {
   final WeekdaySet weekdays;
 
   /// The hours the grid shows and its gestures schedule in, one row per
-  /// slot.
+  /// slot; they start and end on the grid of [slotMinutes]
+  /// ([DayHours.isOnSlotsOf]).
   final DayHours hours;
+
+  /// The length of one slot, one row, in minutes: the step the rows, a
+  /// move's landing, a resize's edge and a create range snap to. One of
+  /// [slotMinuteChoices], which the grid's state asserts.
+  final int slotMinutes;
 
   /// The format the hour gutter labels the times in.
   final HourLabelFormat hourLabelFormat;
@@ -1177,6 +1201,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late double _slotHeight = widget.minSlotHeight;
   late int _columnCount = _tracks.columnCount;
   late DayHours _rowHours = _tracks.hours;
+  late int _rowSlotMinutes = _tracks.slotMinutes;
   double _rowRoom = _initialLabelRoom;
   late _Notices _rowNotices = _notices;
   late HourLabelFormat _rowFormat = widget.hourLabelFormat;
@@ -1250,6 +1275,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   @override
   void initState() {
     super.initState();
+    assert(
+      slotMinuteChoices.contains(widget.slotMinutes),
+      "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
+      "$slotMinuteChoices.",
+    );
     _pinch.holding.addListener(_handleHolding);
     _tap = TapGestureRecognizer(debugOwner: this)..onTapUp = _handleTapUp;
     // Each pointer kind goes to one range recognizer. A precise pointer
@@ -1307,6 +1337,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   @override
   void didUpdateWidget(TimedGrid<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    assert(
+      slotMinuteChoices.contains(widget.slotMinutes),
+      "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
+      "$slotMinuteChoices.",
+    );
+    if (widget.slotMinutes != oldWidget.slotMinutes ||
+        widget.hours != oldWidget.hours) {
+      _cancelForNewSlots();
+    }
     if (widget.blockBuilder != oldWidget.blockBuilder) {
       _blockBuilder = _blockBuilderOf(widget);
       _placementBuilder = (context, view) {
@@ -1384,6 +1423,28 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
   }
 
+  /// Ends the gestures that new slots or hours leave on rows they no
+  /// longer have, writing nothing: cancels the board's drag, by a span
+  /// write of its key to the span it holds, whose mutation cancel runs
+  /// before the write and queues [_handleDragEnd]; forgets [_lifted], so
+  /// the sync on the new tracks puts a lifted entry's pieces back; and
+  /// detaches a create range and clears the range a create flow marks.
+  /// Runs before [_tracks] is replaced and so before any placement on the
+  /// new tracks, which may drop the dragged key.
+  void _cancelForNewSlots() {
+    final dragged = _drag?.key;
+    if (dragged != null && _board.isDragging(dragged)) {
+      final span = _board.spanOf(dragged);
+      if (span != null) {
+        _board.moveItem(dragged, span);
+      }
+    }
+    _lifted = null;
+    _range?.detach();
+    _range = null;
+    _creating = null;
+  }
+
   static GridTracks _tracksOf<T>(TimedGrid<T> widget) {
     final tracks = GridTracks(
       firstDay: dayNumber(widget.firstDay),
@@ -1393,6 +1454,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // The day header, then the room above the first slot or the row
       // counting the items before the hours.
       firstSlotRow: (widget.showsDayHeader ? 1 : 0) + 1,
+      slotMinutes: widget.slotMinutes,
     );
     assert(
       tracks.columnCount > 0,
@@ -1502,6 +1564,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// were made for.
   void _replaceRows() {
     _rowHours = _tracks.hours;
+    _rowSlotMinutes = _tracks.slotMinutes;
     _rowRoom = _labelRoom;
     _rowNotices = _notices;
     _rowFormat = widget.hourLabelFormat;
@@ -1555,9 +1618,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// the build that places items on them.
   ///
   /// An axis is replaced only when its extent or its tracks change. The
-  /// rows are replaced for new hours even at the same count, for new
-  /// [_notices], and for a new [_labelRoom] or hour format, which also
-  /// rebuilds the gutter cells and so what they tell a screen reader.
+  /// rows are replaced for new hours or a new slot length even at the same
+  /// count, for new [_notices], and for a new [_labelRoom] or hour format,
+  /// which also rebuilds the gutter cells and so what they tell a screen
+  /// reader.
   void _fitAxes(Size size) {
     _size = size;
     final oldRows = _board.rows;
@@ -1580,6 +1644,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     if (slotHeight != _slotHeight ||
         _tracks.hours != _rowHours ||
+        _tracks.slotMinutes != _rowSlotMinutes ||
         _labelRoom != _rowRoom ||
         _notices != _rowNotices ||
         widget.hourLabelFormat != _rowFormat) {
@@ -2055,7 +2120,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     int wallAt(int column, double track) {
       return _tracks.dayAt(column) * minutesPerDay +
           hours.start +
-          ((track - _tracks.firstSlotRow) * minutesPerSlot).round();
+          ((track - _tracks.firstSlotRow) * _tracks.slotMinutes).round();
     }
 
     if (move) {
@@ -2556,11 +2621,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final focusWall = slotWallMinuteOf(_tracks, focus);
     if (focusWall >= anchorWall) {
       final limit = range.nextStart;
-      if (limit != null && focusWall + minutesPerSlot > limit) {
+      if (limit != null && focusWall + _tracks.slotMinutes > limit) {
         focus = _lastCellEndingBy(limit, anchor);
       }
       final end = timeAtWallMinute(
-        slotWallMinuteOf(_tracks, focus) + minutesPerSlot,
+        slotWallMinuteOf(_tracks, focus) + _tracks.slotMinutes,
       );
       final start = timeAtWallMinute(anchorWall);
       if (start != null && end != null && !_coversAtMost(start, end)) {
@@ -2581,7 +2646,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       focus = _firstCellStartingFrom(earliest, anchor);
     }
     final start = timeAtWallMinute(slotWallMinuteOf(_tracks, focus));
-    final end = timeAtWallMinute(anchorWall + minutesPerSlot);
+    final end = timeAtWallMinute(anchorWall + _tracks.slotMinutes);
     if (start != null && end != null && !_coversAtMost(start, end)) {
       final held = _heldToLimit(start, end, atEnd: false);
       if (held != null) {
@@ -2606,7 +2671,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     ({int row, int col})? cell;
     if (column >= 1) {
       if (tracks.dayAt(column) == day && into < hours.end) {
-        final slots = (into - hours.start) ~/ minutesPerSlot;
+        final slots = (into - hours.start) ~/ tracks.slotMinutes;
         if (into >= hours.start && slots >= 1) {
           cell = (row: tracks.firstSlotRow + slots - 1, col: column);
         } else {
@@ -2640,7 +2705,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (column <= tracks.columnCount) {
       if (tracks.dayAt(column) == day && into > hours.start) {
         final slots =
-            (into - hours.start + minutesPerSlot - 1) ~/ minutesPerSlot;
+            (into - hours.start + tracks.slotMinutes - 1) ~/ tracks.slotMinutes;
         if (slots < tracks.rowCount) {
           cell = (row: tracks.firstSlotRow + slots, col: column);
         } else {
@@ -2841,7 +2906,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final to = slotWallMinuteOf(_tracks, focus);
     return (
       start: math.min(from, to),
-      end: math.max(from, to) + minutesPerSlot,
+      end: math.max(from, to) + _tracks.slotMinutes,
     );
   }
 
@@ -2853,7 +2918,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   ({int? next, int? previous}) _conflictsAround(({int row, int col}) anchor) {
     final wall = slotWallMinuteOf(_tracks, anchor);
     final start = timeAtWallMinute(wall);
-    final end = timeAtWallMinute(wall + minutesPerSlot);
+    final end = timeAtWallMinute(wall + _tracks.slotMinutes);
     int? next;
     int? previous;
     if (start == null || end == null) {
@@ -3647,8 +3712,8 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     final to = tracks.minuteAt(slotLast + 1);
     double yOf(int minute, int col) {
       final into = minute - hours.start;
-      var row = tracks.firstSlotRow + into ~/ minutesPerSlot;
-      var fraction = (into % minutesPerSlot) / minutesPerSlot;
+      var row = tracks.firstSlotRow + into ~/ tracks.slotMinutes;
+      var fraction = (into % tracks.slotMinutes) / tracks.slotMinutes;
       if (row > slotLast) {
         row = slotLast;
         fraction = 1.0;
@@ -3837,8 +3902,8 @@ class _GridForegroundPainter extends BoardForegroundPainter {
       return;
     }
     final intoHours = now.minute - tracks.hours.start;
-    var row = tracks.firstSlotRow + intoHours ~/ minutesPerSlot;
-    var fraction = (intoHours % minutesPerSlot) / minutesPerSlot;
+    var row = tracks.firstSlotRow + intoHours ~/ tracks.slotMinutes;
+    var fraction = (intoHours % tracks.slotMinutes) / tracks.slotMinutes;
     if (row > tracks.lastSlotRow) {
       row = tracks.lastSlotRow;
       fraction = 1.0;
