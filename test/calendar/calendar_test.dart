@@ -116,7 +116,6 @@ void main() {
       dayNumber,
       dateOfDayNumber,
       CalendarEntry,
-      CalendarEntryTime,
       CalendarDataSource,
       CalendarStore,
       CachingCalendarStore,

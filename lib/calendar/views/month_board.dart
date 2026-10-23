@@ -266,11 +266,14 @@ class MonthChip<T> {
 }
 
 /// Where each of [shown] sits on the month board of [grid]: one placement
-/// per week of the grid whose shown days the item covers, on that week's
-/// row and on the columns from the first shown day on or after the item's
-/// first day to the last shown day on or before its last. A week whose
-/// shown days the item misses has none, which is the clipping
-/// `gridSpanOf` applies to the timed grid's columns.
+/// per week of the grid whose shown days the entry covers, from the day of
+/// its start to the last day it has a part in ([lastDayNumberOf]), on that
+/// week's row and on the columns from the first shown day on or after its
+/// first day to the last shown day on or before its last. So an entry
+/// covering more than one day, timed or all-day, is a bar across them, and
+/// a one-day timed entry a chip. A week whose shown days the entry misses
+/// has none, as the timed grid shows no piece on a day it has no column
+/// for.
 List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
   Iterable<CalendarShownEntry<T>> shown,
   MonthGrid grid,
@@ -287,8 +290,8 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
   final placements = <BoardPlacement<MonthChip<T>>>[];
   for (final entry in shown) {
     final item = entry.entry;
-    final first = dayNumber(item.day);
-    final last = first + item.dayCount - 1;
+    final first = dayNumber(item.start);
+    final last = lastDayNumberOf(item.start, item.end);
     for (var row = 0; row < weeks; row++) {
       final weekFirst = grid.weekdays.weekStartOfDay(days[row * columns]);
       final weekLast = weekFirst + DateTime.daysPerWeek - 1;
@@ -327,68 +330,88 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
 
 /// Which of [shown] a month board of [grid] shows as chips under [hours],
 /// and how many of the others each cell counts, at
-/// `row * columnCount + col`. An item with no minute inside the hours has
-/// no chip, and counts on each shown day of the grid it covers, in
-/// `earlier` when it starts before the hours and in `later` otherwise,
-/// as Agenda's `dayListRowsOf` counts it; every other item is `inside`.
+/// `row * columnCount + col`. An all-day entry is inside the hours, and so
+/// is a timed one any piece of which ([pieceOn]) on a day of the grid has a
+/// minute inside them; every other entry has no chip, and each of its
+/// pieces counts on its own day where the grid shows that day, in
+/// `earlier` where it ends at or before the hours' start and in `later`
+/// otherwise, as Agenda's `dayListRowsOf` counts it.
 ({List<CalendarShownEntry<T>> inside, Int32List earlier, Int32List later})
 splitMonthHours<T>(
   Iterable<CalendarShownEntry<T>> shown,
   MonthGrid grid,
   DayHours hours,
 ) {
+  final columns = grid.columnCount;
   final inside = <CalendarShownEntry<T>>[];
-  final before = <CalendarShownEntry<T>>[];
-  final after = <CalendarShownEntry<T>>[];
+  final earlier = Int32List(grid.weekCount * columns);
+  final later = Int32List(grid.weekCount * columns);
+  // The cell of each day the grid shows, by dayNumber, made once per call.
+  final cells = <int, int>{
+    for (var row = 0; row < grid.weekCount; row++)
+      for (var col = 0; col < columns; col++)
+        dayNumber(grid.dateAt(row, col)): row * columns + col,
+  };
   for (final entry in shown) {
     final item = entry.entry;
-    if (math.min(item.endMinute, hours.end) >
-        math.max(item.startMinute, hours.start)) {
+    if (item.isAllDay) {
       inside.add(entry);
-    } else if (item.startMinute < hours.start) {
-      before.add(entry);
-    } else {
-      after.add(entry);
+      continue;
     }
-  }
-  final columns = grid.columnCount;
-  Int32List countsOf(List<CalendarShownEntry<T>> outside) {
-    final counts = Int32List(grid.weekCount * columns);
-    // A placement covers the shown days of its week the item covers.
-    for (final placement in monthPlacementsOf(outside, grid)) {
-      final span = placement.span;
-      final first = span.rowStart * columns + span.colStart;
-      for (var cell = first; cell < first + span.colSpan; cell++) {
-        counts[cell]++;
+    final span = wallSpanOf(item.start, item.end);
+    final first = dayNumber(item.start);
+    final last = lastDayNumberOf(item.start, item.end);
+    var holds = false;
+    for (var day = first; day <= last && !holds; day++) {
+      final piece = pieceOn(span, day);
+      holds =
+          cells.containsKey(day) &&
+          piece != null &&
+          math.min(piece.end, hours.end) > math.max(piece.start, hours.start);
+    }
+    if (holds) {
+      inside.add(entry);
+      continue;
+    }
+    for (var day = first; day <= last; day++) {
+      final cell = cells[day];
+      final piece = pieceOn(span, day);
+      if (cell == null || piece == null) {
+        continue;
       }
+      (piece.end <= hours.start ? earlier : later)[cell]++;
     }
-    return counts;
   }
-
-  return (inside: inside, earlier: countsOf(before), later: countsOf(after));
+  return (inside: inside, earlier: earlier, later: later);
 }
 
 /// The month board's lane order among bars whose columns in a week are
-/// the same: the item that starts on an earlier day first, then the one
-/// covering more days, then the earlier start time, the title and the id.
-/// The board orders bars by their first and their last column before it,
-/// so a week's chips stack by the day each starts in the week, the longer
-/// first, and a bar continuing from the week before stacks above a chip
-/// starting on its first shown day.
+/// the same: the entry that starts on an earlier day first, then the one
+/// covering more days, then an all-day entry before a timed one, then the
+/// earlier start, the title and the id. The board orders bars by their
+/// first and their last column before it, so a week's chips stack by the
+/// day each starts in the week, the longer first, and a bar continuing
+/// from the week before stacks above a chip starting on its first shown
+/// day.
 int compareMonthChips<T>(MonthChip<T> a, MonthChip<T> b) {
   final x = a.entry.entry;
   final y = b.entry.entry;
-  // `day` is the first day at local midnight, so this compares days and
-  // allocates nothing.
-  final byDay = x.day.compareTo(y.day);
+  final xFirst = dayNumber(x.start);
+  final yFirst = dayNumber(y.start);
+  final byDay = xFirst.compareTo(yFirst);
   if (byDay != 0) {
     return byDay;
   }
-  final byLength = y.dayCount.compareTo(x.dayCount);
+  final xDays = lastDayNumberOf(x.start, x.end) - xFirst;
+  final yDays = lastDayNumberOf(y.start, y.end) - yFirst;
+  final byLength = yDays.compareTo(xDays);
   if (byLength != 0) {
     return byLength;
   }
-  final byStart = x.startMinute.compareTo(y.startMinute);
+  if (x.isAllDay != y.isAllDay) {
+    return x.isAllDay ? -1 : 1;
+  }
+  final byStart = x.start.compareTo(y.start);
   if (byStart != 0) {
     return byStart;
   }
@@ -1852,17 +1875,25 @@ String _dayLabel(DateTime day) {
 
 /// What a screen reader says for [entry]'s chip: its title, the [kind]
 /// where there is one, its days and times, and that it is pending while it
-/// is.
+/// is: "Title, Monday, April 20, all day", "Title, Monday, April 20 to
+/// Wednesday, April 22, all day", "Title, Monday, April 20, 09:10 to
+/// 09:50", and for a timed entry over days "Title, Monday, April 20, 22:00
+/// to Tuesday, April 21, 02:00".
 String _chipLabel<T>(CalendarShownEntry<T> entry, String? kind) {
   final item = entry.entry;
-  final times =
-      "${clockLabel(item.startMinute)} to ${clockLabel(item.endMinute)}";
+  final first = dateOfDayNumber(dayNumber(item.start));
+  final last = dateOfDayNumber(lastDayNumberOf(item.start, item.end));
+  final start = clockLabel(minuteOfDay(item.start));
+  final end = clockLabel(endMinuteOfDay(item.end));
   final String when;
-  if (item.dayCount == 1) {
-    when = "${_dayLabel(item.day)}, $times";
+  if (item.isAllDay) {
+    when = first == last
+        ? "${_dayLabel(first)}, all day"
+        : "${_dayLabel(first)} to ${_dayLabel(last)}, all day";
+  } else if (first == last) {
+    when = "${_dayLabel(first)}, $start to $end";
   } else {
-    final last = addDays(item.day, item.dayCount - 1);
-    when = "${_dayLabel(item.day)} to ${_dayLabel(last)}, $times each day";
+    when = "${_dayLabel(first)}, $start to ${_dayLabel(last)}, $end";
   }
   final label = kind == null
       ? "${item.title}, $when"

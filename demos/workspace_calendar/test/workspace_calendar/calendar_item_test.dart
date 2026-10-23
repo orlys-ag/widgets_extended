@@ -30,8 +30,9 @@ void main() {
     final item = itemFromJson(envelope());
     expect(item.toJson(), envelope());
     expect(item.type, CalendarItemType.meeting);
-    expect(item.day, DateTime(2026, 4, 21));
-    expect(item.dayCount, 2);
+    // From 10:00 on its day to 11:00 on the next, its second.
+    expect(item.start, DateTime(2026, 4, 21, 10));
+    expect(item.end, DateTime(2026, 4, 22, 11));
 
     final again = itemFromJson(envelope());
     expect(again == item, isTrue);

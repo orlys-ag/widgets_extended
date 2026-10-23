@@ -49,7 +49,7 @@ const String lockedMessage = "This item has a change in progress.";
 String writeFailureMessage(Object error) {
   if (error is CalendarHoursException) {
     return CalendarValidationException(
-      hoursErrorsOf(error.startMinute, error.endMinute, error.hours),
+      hoursErrorsOf(error.start, error.end, error.hours),
     ).message;
   }
   if (error is CalendarEntryOverlapException) {
@@ -86,7 +86,7 @@ String readFailureMessage(Object? error) {
 /// validation errors; null for any other error.
 Map<String, String>? writeFieldErrors(Object error) {
   if (error is CalendarHoursException) {
-    return hoursErrorsOf(error.startMinute, error.endMinute, error.hours);
+    return hoursErrorsOf(error.start, error.end, error.hours);
   }
   if (error is CalendarValidationException) {
     return error.fieldErrors;

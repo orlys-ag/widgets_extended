@@ -217,7 +217,12 @@ void main() {
       final key = element.widget.key! as ValueKey<String>;
       widths[key.value] = tester.getSize(find.byKey(key)).width;
     }
-    expect(widths, contains("block-$teamOffsiteId"));
+    expect(
+      widths.keys.where((key) {
+        return key.startsWith("block-$teamOffsiteId@");
+      }),
+      hasLength(1),
+    );
     await tester.pump(
       gridAnimationStyle(tester).effectiveItemEnterExit.duration,
     );

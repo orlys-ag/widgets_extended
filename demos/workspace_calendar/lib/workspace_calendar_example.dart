@@ -36,7 +36,7 @@
 ///
 /// A tap on an item opens its form, which edits it in edit mode unless the
 /// history lock holds it locked, and otherwise shows it read-only; a create
-/// the calendar's gestures pick opens the create flow over the slots
+/// the calendar's gestures pick opens the create flow over the range
 /// picked; Agenda's Edit opens the form, and its Delete asks before it
 /// deletes. A write that fails says why.
 library;

@@ -99,15 +99,18 @@ typedef CalendarFailureBuilder =
     Widget Function(BuildContext context, CalendarFailureState state);
 
 /// What the timed grid decides about one block's appearance, which a
-/// [CalendarBlockBuilder] draws from.
+/// [CalendarBlockBuilder] draws from. A block shows one piece of its
+/// entry: the part of it on the block's day.
 @immutable
 final class CalendarBlockDetails {
-  /// The block's form, its room and its cut ends.
+  /// The block's form, its room, its cut ends and its continued ends.
   const CalendarBlockDetails({
     required this.detailed,
     required this.tall,
     required this.cutAtStart,
     required this.cutAtEnd,
+    this.continuesBefore = false,
+    this.continuesAfter = false,
   });
 
   /// Whether the grid shows one day column, with room for the times and
@@ -120,11 +123,23 @@ final class CalendarBlockDetails {
   /// does not rebuild for it.
   final bool tall;
 
-  /// Whether the entry starts before the grid's hours.
+  /// Whether the block's piece starts before the grid's hours on its day,
+  /// which the grid then cuts off. A piece that starts at its day's start
+  /// because its entry began on an earlier day is cut only where the hours
+  /// start after midnight; [continuesBefore] tells that it continues.
   final bool cutAtStart;
 
-  /// Whether the entry ends after the grid's hours.
+  /// Whether the block's piece ends after the grid's hours on its day,
+  /// which the grid then cuts off, as [cutAtStart] does at its start.
   final bool cutAtEnd;
+
+  /// Whether the block's entry has a part on an earlier day than the
+  /// block's.
+  final bool continuesBefore;
+
+  /// Whether the block's entry has a part on a later day than the
+  /// block's.
+  final bool continuesAfter;
 
   @override
   bool operator ==(Object other) {
@@ -132,18 +147,28 @@ final class CalendarBlockDetails {
         other.detailed == detailed &&
         other.tall == tall &&
         other.cutAtStart == cutAtStart &&
-        other.cutAtEnd == cutAtEnd;
+        other.cutAtEnd == cutAtEnd &&
+        other.continuesBefore == continuesBefore &&
+        other.continuesAfter == continuesAfter;
   }
 
   @override
   int get hashCode {
-    return Object.hash(detailed, tall, cutAtStart, cutAtEnd);
+    return Object.hash(
+      detailed,
+      tall,
+      cutAtStart,
+      cutAtEnd,
+      continuesBefore,
+      continuesAfter,
+    );
   }
 
   @override
   String toString() {
     return "CalendarBlockDetails(detailed: $detailed, tall: $tall, "
-        "cutAtStart: $cutAtStart, cutAtEnd: $cutAtEnd)";
+        "cutAtStart: $cutAtStart, cutAtEnd: $cutAtEnd, continuesBefore: "
+        "$continuesBefore, continuesAfter: $continuesAfter)";
   }
 }
 
@@ -202,12 +227,14 @@ final class CalendarCardDetails {
     this.onDelete,
   });
 
-  /// The time the entry starts at as the list writes it, for one that
-  /// starts before the list's hours; null for one that starts inside them.
+  /// The time the row's piece of the entry, its part on the row's day,
+  /// starts at as the list writes it, for a piece that starts before the
+  /// list's hours on that day; null for one that starts inside them.
   final String? startsAt;
 
-  /// The time the entry ends at as the list writes it, for one that ends
-  /// after the list's hours; null for one that ends inside them.
+  /// The time the row's piece of the entry ends at as the list writes it,
+  /// for a piece that ends after the list's hours on the row's day; null
+  /// for one that ends inside them.
   final String? endsAt;
 
   /// Requests an edit of the entry; null where the list offers none.

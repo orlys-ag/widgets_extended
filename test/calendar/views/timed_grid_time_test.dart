@@ -49,8 +49,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 /// day header, or Day over [first] alone, with none; its slots of
 /// [slotMinutes] over [hours].
 class Shown {
-  const Shown.week(this.first, {this.hours = DayHours.allDay})
-    : week = true;
+  const Shown.week(this.first, {this.hours = DayHours.allDay}) : week = true;
 
   const Shown.day(this.first, {this.hours = DayHours.allDay}) : week = false;
 
@@ -475,8 +474,9 @@ void main() {
     }
   });
 
-  testWidgets("TP6 two entries sharing a minute sit side by side",
-      (tester) async {
+  testWidgets("TP6 two entries sharing a minute sit side by side", (
+    tester,
+  ) async {
     final shown = Shown.week(monday);
     final harness = Harness(
       storeOf(<CalendarEntry<String>>[
@@ -526,8 +526,9 @@ void main() {
     expect(store.storedEntry("task"), task);
   });
 
-  testWidgets("TP9 an end resize writes an end on the slot grid",
-      (tester) async {
+  testWidgets("TP9 an end resize writes an end on the slot grid", (
+    tester,
+  ) async {
     final shown = Shown.week(monday);
     final store = storeOf(<CalendarEntry<String>>[
       entryOf("task", at(tuesday, 9, 10), at(tuesday, 9, 50)),
@@ -615,9 +616,7 @@ void main() {
   });
 
   testWidgets("TP21 in Week a one-day entry dropped on another day's column "
-      "stays selected, and glides from the proxy's last rect", (
-    tester,
-  ) async {
+      "stays selected, and glides from the proxy's last rect", (tester) async {
     final shown = Shown.week(monday);
     final store = storeOf(<CalendarEntry<String>>[
       entryOf("task", at(tuesday, 10), at(tuesday, 11)),
@@ -658,15 +657,21 @@ void main() {
     final shown = Shown.week(monday);
     await Harness(store, shown).pump(tester);
     store.requestMove(night.copyWith(title: "renamed"));
-    await tester.pumpAndSettle();
+    // A pending block's activity indicator runs until the write ends, so
+    // the test pumps fixed frames rather than settling.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(store.isPending("night"), isTrue);
     expect(source.replaces, hasLength(1));
     for (final day in <DateTime>[monday, tuesday]) {
-      final gesture = await lift(tester, tester.getCenter(blockFinder("night", day)));
+      final gesture = await lift(
+        tester,
+        tester.getCenter(blockFinder("night", day)),
+      );
       await tester.pump();
       expect(find.byKey(liftedBlockKey), findsNothing, reason: "$day");
       await gesture.up();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
     }
   });
 
@@ -845,11 +850,9 @@ void main() {
         slotRect(tester, shown, monday, 10 * 60).center,
         slotRect(tester, shown, day, 12 * 60).center,
       );
-      expect(
-        harness.creates,
-        <CreateRange>[CreateRange(start: at(monday, 10), end: end)],
-        reason: "$limit over $day",
-      );
+      expect(harness.creates, <CreateRange>[
+        CreateRange(start: at(monday, 10), end: end),
+      ], reason: "$limit over $day");
     }
   });
 
@@ -960,12 +963,16 @@ void main() {
         Shown.week(addDays(day, -6)),
         Shown.day(day),
       ]) {
-        await Harness(storeOf(<CalendarEntry<String>>[early]), shown).pump(
-          tester,
-        );
+        await Harness(
+          storeOf(<CalendarEntry<String>>[early]),
+          shown,
+        ).pump(tester);
         final col = shown.colOf(day);
         final viewport = viewportOf(tester);
-        expect(viewport.rectOfCell(shown.rowOf(minutesPerDay - 15), col), isNotNull);
+        expect(
+          viewport.rectOfCell(shown.rowOf(minutesPerDay - 15), col),
+          isNotNull,
+        );
         expect(
           tester
               .widget<Board<GridKey, GridShape<String>>>(
@@ -1016,7 +1023,8 @@ void main() {
       await moveBlock(
         tester,
         blockFinder("late", day),
-        slotRect(tester, shown, day, 2 * 60).topLeft - from +
+        slotRect(tester, shown, day, 2 * 60).topLeft -
+            from +
             const Offset(0.0, 2.0),
       );
       expect(store.storedEntry("late"), late);
@@ -1053,7 +1061,8 @@ void main() {
       await moveBlock(
         tester,
         blockFinder("task", day),
-        slotRect(tester, shown, day, 90).topLeft - from +
+        slotRect(tester, shown, day, 90).topLeft -
+            from +
             const Offset(0.0, 2.0),
       );
       final moved = store.storedEntry("task")!;
@@ -1078,9 +1087,10 @@ void main() {
         Shown.week(addDays(day, -6)),
         Shown.day(day),
       ]) {
-        await Harness(storeOf(<CalendarEntry<String>>[second]), shown).pump(
-          tester,
-        );
+        await Harness(
+          storeOf(<CalendarEntry<String>>[second]),
+          shown,
+        ).pump(tester);
         final col = shown.colOf(day);
         expect(
           tester
@@ -1119,7 +1129,9 @@ void main() {
       await moveBlock(
         tester,
         blockFinder("task", day),
-        slotRect(tester, shown, day, 30).topLeft - from + const Offset(0.0, 2.0),
+        slotRect(tester, shown, day, 30).topLeft -
+            from +
+            const Offset(0.0, 2.0),
       );
       final moved = store.storedEntry("task")!;
       expect(moved.start, at(day, 0, 30));

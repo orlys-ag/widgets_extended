@@ -3,9 +3,10 @@
 /// and the form both read these.
 ///
 /// An item is a JSON envelope: `id`, `type`, `title`, `day` (an ISO
-/// date), `startMinute` and `endMinute` (minutes after midnight),
-/// `dayCount` (consecutive days carrying the same hours) and `fields`,
-/// the type's payload.
+/// date, the start's day), `startMinute` (the start's minutes after that
+/// day's midnight), `dayCount` (the days the item's range covers, from
+/// `day` on), `endMinute` (the end's minutes after the midnight of the
+/// last of them) and `fields`, the type's payload.
 library;
 
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
@@ -229,9 +230,9 @@ TypeSchema schemaOf(CalendarItemType type) {
 const int maxDayCount = 366;
 
 /// Whether an item may cover [dayCount] days: 1 to [maxDayCount]. The one
-/// test of that range, which [validateItemJson] reads; the composition
-/// passes [maxDayCount] to the timed grid, whose drop check holds a drop
-/// to it.
+/// test of that range, which [validateItemJson] reads; the example passes
+/// [maxDayCount] to `CalendarView.maxDayCount`, which holds to it the
+/// gestures its own doc names.
 bool isAllowedDayCount(int dayCount) {
   return dayCount >= 1 && dayCount <= maxDayCount;
 }

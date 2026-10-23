@@ -60,13 +60,14 @@ Future<void> showCreateFlow(
   if (type == null || !context.mounted) {
     return;
   }
+  final firstDay = dayNumber(range.start);
   final draft = calendarItem(
     type: type,
     title: "",
-    day: range.day,
-    startMinute: range.startMinute,
-    endMinute: range.endMinute,
-    dayCount: range.dayCount,
+    day: dateOfDayNumber(firstDay),
+    startMinute: minuteOfDay(range.start),
+    endMinute: endMinuteOfDay(range.end),
+    dayCount: lastDayNumberOf(range.start, range.end) - firstDay + 1,
     fields: withFieldDefaults(type, const <String, Object?>{}),
   );
   await _showForm(context, store: store, item: draft, lock: lock);
@@ -136,32 +137,32 @@ Future<bool> confirmDelete(BuildContext context) async {
 /// `validateItemJson` keys them; empty where [lock] admits it.
 Map<String, String> lockErrorsOf(
   HistoryLock lock,
-  CalendarEntryTime? from,
-  CalendarEntryTime to,
+  ({DateTime start, DateTime end})? from,
+  ({DateTime start, DateTime end}) to,
 ) {
   final boundary = lock.boundary;
-  if (boundary == null || (from != null && lock.admits(from, to))) {
+  if (boundary == null ||
+      (from != null && lock.admits(from.start, from.end, to.start, to.end))) {
     return const <String, String>{};
   }
-  if (from == null || lock.holdOf(from) == ItemHold.free) {
-    if (HistoryLock.startOf(to) >= boundary) {
+  if (from == null || lock.holdOf(from.start, from.end) == ItemHold.free) {
+    if (!to.start.isBefore(boundary)) {
       return const <String, String>{};
     }
-    if (to.firstDay < boundary ~/ minutesPerDay) {
+    if (dayNumber(to.start) < dayNumber(boundary)) {
       return const <String, String>{"day": "Past days are locked."};
     }
     return const <String, String>{
       "startMinute": "The start can't be in the past.",
     };
   }
-  if (lock.holdOf(from) == ItemHold.locked) {
+  if (lock.holdOf(from.start, from.end) == ItemHold.locked) {
     return const <String, String>{"day": "Past items are locked."};
   }
   return <String, String>{
-    if (HistoryLock.startOf(to) != HistoryLock.startOf(from))
+    if (to.start != from.start)
       "startMinute": "An item in progress keeps its start.",
-    if (HistoryLock.endOf(to) <= boundary)
-      "endMinute": "The end can't be in the past.",
+    if (!to.end.isAfter(boundary)) "endMinute": "The end can't be in the past.",
   };
 }
 
@@ -221,18 +222,28 @@ class _ItemFormState extends State<_ItemForm> {
   late final TextEditingController _title = TextEditingController(
     text: widget.item.title,
   );
+
+  /// The days the item's range has a part in, from its start's day.
   late final TextEditingController _days = TextEditingController(
-    text: "${widget.item.dayCount}",
+    text:
+        "${lastDayNumberOf(widget.item.start, widget.item.end) - dayNumber(widget.item.start) + 1}",
   );
-  late DateTime _day = widget.item.day;
-  late int _start = widget.item.startMinute;
-  late int _end = widget.item.endMinute;
+
+  /// The day of the item's start.
+  late DateTime _day = dateOfDayNumber(dayNumber(widget.item.start));
+
+  /// The start's minute of [_day].
+  late int _start = minuteOfDay(widget.item.start);
+
+  /// The end's minute on the last of the [_days], 1440 for an end at the
+  /// start of the day after it.
+  late int _end = endMinuteOfDay(widget.item.end);
 
   /// How the history lock held the stored item when the form opened, free
   /// for a draft. Of a started one the day and the start take no input.
   late final ItemHold _hold = widget.item.id == null
       ? ItemHold.free
-      : widget.lock().holdOf(widget.item.time);
+      : widget.lock().holdOf(widget.item.start, widget.item.end);
 
   /// The text controllers of the schema's text, URL, long-text and text
   /// list fields, by key.
@@ -298,9 +309,10 @@ class _ItemFormState extends State<_ItemForm> {
     super.dispose();
   }
 
-  /// The item the form holds, as an envelope. The Days text goes in as an
-  /// int when it reads as one and as the text otherwise, so the validator
-  /// reports it.
+  /// The item the form holds, as an envelope: from [_start] on [_day] to
+  /// [_end] on the last of the Days. The Days text goes in as an int when
+  /// it reads as one and as the text otherwise, so the validator reports
+  /// it.
   Map<String, Object?> _envelope() {
     final daysText = _days.text.trim();
     final fields = <String, Object?>{};
@@ -351,10 +363,11 @@ class _ItemFormState extends State<_ItemForm> {
     final json = _envelope();
     var errors = validateItemJson(json);
     if (errors.isEmpty) {
+      final to = itemFromJson(json);
       errors = lockErrorsOf(
         widget.lock(),
-        _isDraft ? null : widget.item.time,
-        itemFromJson(json).time,
+        _isDraft ? null : (start: widget.item.start, end: widget.item.end),
+        (start: to.start, end: to.end),
       );
     }
     if (errors.isNotEmpty) {

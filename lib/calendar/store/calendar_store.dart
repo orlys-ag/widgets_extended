@@ -87,40 +87,40 @@ sealed class CalendarStoreException implements Exception {
   const CalendarStoreException();
 }
 
-/// The write changes an entry's days or minutes, or creates one, outside
-/// the store's [CalendarStore.hours].
+/// The write changes an entry's start or end, or creates one, outside the
+/// store's [CalendarStore.hours] ([DayHours.holdsTimes]).
 final class CalendarHoursException extends CalendarStoreException {
-  /// The refusal of an entry from [startMinute] to [endMinute] under
-  /// [hours].
+  /// The refusal of an entry from [start] to [end] under [hours].
   const CalendarHoursException({
     required this.hours,
-    required this.startMinute,
-    required this.endMinute,
+    required this.start,
+    required this.end,
   });
 
   /// The store's hours when it refused the write.
   final DayHours hours;
 
-  /// The refused entry's start, in minutes after midnight.
-  final int startMinute;
+  /// The refused entry's start.
+  final DateTime start;
 
-  /// The refused entry's end, in minutes after midnight.
-  final int endMinute;
+  /// The refused entry's end.
+  final DateTime end;
 
-  /// Whether [startMinute] does not begin a slot inside [hours].
+  /// Whether [hours] do not hold [start]'s minute of its day as a start
+  /// ([DayHours.holdsStart]).
   bool get startOutside {
-    return !hours.holdsStart(startMinute);
+    return !hours.holdsStart(minuteOfDay(start));
   }
 
-  /// Whether [endMinute] does not end a slot inside [hours].
+  /// Whether [hours] do not hold [end]'s minute of its last day as an end
+  /// ([DayHours.holdsEnd], [endMinuteOfDay]).
   bool get endOutside {
-    return !hours.holdsEnd(endMinute);
+    return !hours.holdsEnd(endMinuteOfDay(end));
   }
 
   @override
   String toString() {
-    return "CalendarHoursException($startMinute to $endMinute outside "
-        "$hours)";
+    return "CalendarHoursException($start to $end outside $hours)";
   }
 }
 
@@ -166,10 +166,11 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// delete to [onWriteFailed].
   CalendarStore({this.hours = DayHours.allDay, this.onWriteFailed});
 
-  /// The hours a new entry, and a write that changes an entry's days or
-  /// minutes, must lie in. A write that keeps the stored days and minutes
-  /// is not held to them, so an entry that lay outside them when they
-  /// changed can still be edited. Setting it notifies nothing: what shows
+  /// The hours a new entry, and a write that changes an entry's start or
+  /// end, must lie in ([DayHours.holdsTimes]), which hold every all-day
+  /// entry. A write that keeps the stored start and end is not held to
+  /// them, so an entry that lay outside them when they changed can still
+  /// be edited. Setting it notifies nothing: what shows
   /// does not depend on it.
   DayHours hours;
 
@@ -248,51 +249,62 @@ abstract class CalendarStore<T> extends ChangeNotifier {
 
   /// The first free slot of [day] inside [hours]: for each start from the
   /// hours' start on the [minutesPerSlot] grid, the slot from it, the
-  /// first one that shares no time with an entry [entriesOn] lists for
-  /// [day], pending ones where they show. With [from], the starts begin at
-  /// the later of it, rounded up to the grid, and the hours' start, and
-  /// only with none free from there at the hours' start. With none free,
-  /// the hours' first slot.
-  ({int start, int end}) firstFreeRange(DateTime day, {int? from}) {
+  /// first one whose start and end are times [day]'s clock reads
+  /// ([timeAtWallMinute]) and that shares no time ([rangeSharesTime]) with
+  /// an entry [entriesOn] lists for [day], pending ones where they show.
+  /// With [from], minutes after midnight, the starts begin at the later of
+  /// it, rounded up to the grid, and the hours' start, and only with none
+  /// free from there at the hours' start. With none free, the hours' first
+  /// slot.
+  ({DateTime start, DateTime end}) firstFreeRange(DateTime day, {int? from}) {
     final shown = entriesOn(day);
-    final number = dayNumber(day);
+    final base = dayNumber(day) * minutesPerDay;
     if (from != null) {
       final slot = (from + minutesPerSlot - 1) ~/ minutesPerSlot;
-      final later = _firstFreeFrom(
+      final later = _firstSlotFrom(
+        base,
         math.max(hours.start, slot * minutesPerSlot),
-        number,
         shown,
       );
       if (later != null) {
         return later;
       }
     }
-    return _firstFreeFrom(hours.start, number, shown) ??
-        (start: hours.start, end: hours.start + minutesPerSlot);
+    return _firstSlotFrom(base, hours.start, shown) ??
+        _firstSlotFrom(base, hours.start, <CalendarShownEntry<T>>[]) ??
+        (
+          start: DateTime(day.year, day.month, day.day, 0, hours.start),
+          end: DateTime(
+            day.year,
+            day.month,
+            day.day,
+            0,
+            hours.start + minutesPerSlot,
+          ),
+        );
   }
 
-  /// The first free range of [firstFreeRange]'s search on the [dayNumber]
-  /// [day], starting at [first], or null when none from there is free.
-  ({int start, int end})? _firstFreeFrom(
+  /// The first slot from the minute [first] of the day whose minute 0 is
+  /// the wall minute [base] whose start and end its clock reads and that
+  /// shares no time with any of [shown], or null where none does.
+  ({DateTime start, DateTime end})? _firstSlotFrom(
+    int base,
     int first,
-    int day,
     List<CalendarShownEntry<T>> shown,
   ) {
     for (
-      var start = first;
-      start <= hours.end - minutesPerSlot;
-      start += minutesPerSlot
+      var minute = first;
+      minute <= hours.end - minutesPerSlot;
+      minute += minutesPerSlot
     ) {
-      final end = start + minutesPerSlot;
-      final CalendarEntryTime time = (
-        firstDay: day,
-        dayCount: 1,
-        start: start,
-        end: end,
-      );
+      final start = timeAtWallMinute(base + minute);
+      final end = timeAtWallMinute(base + minute + minutesPerSlot);
+      if (start == null || end == null) {
+        continue;
+      }
       var free = true;
       for (final other in shown) {
-        if (timesOverlap(time, other.entry.time)) {
+        if (rangeSharesTime(start, end, other.entry)) {
           free = false;
           break;
         }
@@ -305,39 +317,43 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   }
 
   /// The refusal of [entry] for [hours], or null when the hours hold its
-  /// start and its end, or when it keeps the days and minutes of the
-  /// stored entry its id names.
+  /// start and its end ([DayHours.holdsTimes]), or when it keeps the start
+  /// and end of the stored entry its id names.
   @protected
   CalendarHoursException? hoursRefusalOf(CalendarEntry<T> entry) {
     final id = entry.id;
     final stored = id == null ? null : storedEntry(id);
     if (stored != null &&
-        stored.day == entry.day &&
-        stored.dayCount == entry.dayCount &&
-        stored.startMinute == entry.startMinute &&
-        stored.endMinute == entry.endMinute) {
+        stored.start == entry.start &&
+        stored.end == entry.end) {
       return null;
     }
-    if (hours.holdsStart(entry.startMinute) &&
-        hours.holdsEnd(entry.endMinute)) {
+    if (hours.holdsTimes(entry.start, entry.end)) {
       return null;
     }
     return CalendarHoursException(
       hours: hours,
-      startMinute: entry.startMinute,
-      endMinute: entry.endMinute,
+      start: entry.start,
+      end: entry.end,
     );
   }
 
   /// The ids of the shown entries on [requested]'s days, other than
-  /// [requested] itself, whose times overlap its time.
+  /// [requested] itself, that share time with it ([entriesShareTime]);
+  /// none for an all-day [requested], which shares time with nothing.
   @protected
   List<String> overlapsOf(CalendarEntry<T> requested) {
-    final time = requested.time;
     final overlaps = <String>[];
-    final last = addDays(requested.day, requested.dayCount - 1);
-    for (final other in entriesBetween(requested.day, last)) {
-      if (other.id != requested.id && timesOverlap(time, other.entry.time)) {
+    if (requested.isAllDay) {
+      return overlaps;
+    }
+    final first = dateOfDayNumber(dayNumber(requested.start));
+    final last = dateOfDayNumber(
+      lastDayNumberOf(requested.start, requested.end),
+    );
+    for (final other in entriesBetween(first, last)) {
+      if (other.id != requested.id &&
+          entriesShareTime(requested, other.entry)) {
         overlaps.add(other.id);
       }
     }
@@ -429,7 +445,7 @@ class CalendarEntryIndex<T> {
     final opened = <int, List<CalendarEntry<T>>>{};
     if (days == null) {
       for (final entry in _stored.values) {
-        for (final day in entry.dayNumbers) {
+        for (var day = _firstDayOf(entry); day <= _lastDayOf(entry); day++) {
           if (_byDay.containsKey(day)) {
             continue;
           }
@@ -450,9 +466,8 @@ class CalendarEntryIndex<T> {
         return;
       }
       for (final entry in _stored.values) {
-        final entryFirst = dayNumber(entry.day);
-        final from = math.max(entryFirst, first);
-        final to = math.min(entryFirst + entry.dayCount - 1, last);
+        final from = math.max(_firstDayOf(entry), first);
+        final to = math.min(_lastDayOf(entry), last);
         for (var day = from; day <= to; day++) {
           opened[day]?.add(entry);
         }
@@ -470,7 +485,7 @@ class CalendarEntryIndex<T> {
   void put(CalendarEntry<T> entry) {
     forget(entry.id!);
     _stored[entry.id!] = entry;
-    for (final day in entry.dayNumbers) {
+    for (var day = _firstDayOf(entry); day <= _lastDayOf(entry); day++) {
       var list = _byDay[day];
       if (list == null) {
         if (!opensEveryDay) {
@@ -489,7 +504,7 @@ class CalendarEntryIndex<T> {
     if (old == null) {
       return null;
     }
-    for (final day in old.dayNumbers) {
+    for (var day = _firstDayOf(old); day <= _lastDayOf(old); day++) {
       final list = _byDay[day];
       if (list == null) {
         continue;
@@ -555,7 +570,7 @@ class CalendarEntryIndex<T> {
           _pending.containsKey(stored[i].id)) {
         i++;
       }
-      while (j < _pendingList.length && !_pendingList[j].coversDay(day)) {
+      while (j < _pendingList.length && !_covers(_pendingList[j], day)) {
         j++;
       }
       if (i == stored.length && j == _pendingList.length) {
@@ -594,8 +609,7 @@ class CalendarEntryIndex<T> {
       }
     }
     for (final entry in _pendingList) {
-      final entryFirst = dayNumber(entry.day);
-      if (entryFirst <= last && entryFirst + entry.dayCount - 1 >= first) {
+      if (_firstDayOf(entry) <= last && _lastDayOf(entry) >= first) {
         runs.add(CalendarShownEntry<T>(entry, pending: true));
       }
     }
@@ -633,11 +647,27 @@ class CalendarEntryIndex<T> {
       }
     }
     for (final entry in _pendingList) {
-      if (entry.coversDay(day)) {
+      if (_covers(entry, day)) {
         return true;
       }
     }
     return false;
+  }
+
+  /// The [dayNumber] of the first day [entry] has a part in.
+  static int _firstDayOf<T>(CalendarEntry<T> entry) {
+    return dayNumber(entry.start);
+  }
+
+  /// The [dayNumber] of the last day [entry] has a part in
+  /// ([lastDayNumberOf]), never a day its end is the start of.
+  static int _lastDayOf<T>(CalendarEntry<T> entry) {
+    return lastDayNumberOf(entry.start, entry.end);
+  }
+
+  /// Whether [entry] has a part in the [dayNumber] [day].
+  static bool _covers<T>(CalendarEntry<T> entry, int day) {
+    return day >= _firstDayOf(entry) && day <= _lastDayOf(entry);
   }
 
   /// The end of the strictly ascending run of [shown] that starts at
@@ -719,13 +749,13 @@ class CalendarEntryIndex<T> {
   }
 }
 
-/// By start, end, title and id.
+/// By start, end, title and id: a total order, as ids are distinct.
 int _compare<T>(CalendarEntry<T> a, CalendarEntry<T> b) {
-  final byStart = a.startMinute.compareTo(b.startMinute);
+  final byStart = a.start.compareTo(b.start);
   if (byStart != 0) {
     return byStart;
   }
-  final byEnd = a.endMinute.compareTo(b.endMinute);
+  final byEnd = a.end.compareTo(b.end);
   if (byEnd != 0) {
     return byEnd;
   }

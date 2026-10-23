@@ -60,27 +60,27 @@ void main() {
     const startError =
         "The start is 08:00 to 17:45, inside the calendar's hours.";
     const endError = "The end is 08:15 to 18:00, inside the calendar's hours.";
-    const early = CalendarHoursException(
+    final early = CalendarHoursException(
       hours: hours,
-      startMinute: 450,
-      endMinute: 510,
+      start: DateTime(2026, 4, 21, 7, 30),
+      end: DateTime(2026, 4, 21, 8, 30),
     );
     expect(writeFieldErrors(early), <String, String>{
       "startMinute": startError,
     });
     expect(writeFailureMessage(early), "The item is not valid: $startError");
 
-    const late = CalendarHoursException(
+    final late = CalendarHoursException(
       hours: hours,
-      startMinute: 1050,
-      endMinute: 1110,
+      start: DateTime(2026, 4, 21, 17, 30),
+      end: DateTime(2026, 4, 21, 18, 30),
     );
     expect(writeFieldErrors(late), <String, String>{"endMinute": endError});
 
-    const past = CalendarHoursException(
+    final past = CalendarHoursException(
       hours: hours,
-      startMinute: 1080,
-      endMinute: 1095,
+      start: DateTime(2026, 4, 21, 18),
+      end: DateTime(2026, 4, 21, 18, 15),
     );
     expect(writeFieldErrors(past), <String, String>{
       "startMinute": startError,

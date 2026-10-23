@@ -9,6 +9,8 @@ import 'package:widgets_extended/calendar/calendar.dart';
 
 const Color taskColor = Color(0xFF3060C0);
 
+/// An entry from [start] minutes after [day]'s midnight to [end] minutes
+/// after the midnight of its [dayCount]th day.
 CalendarEntry<String> task(
   String? id,
   DateTime day,
@@ -19,14 +21,17 @@ CalendarEntry<String> task(
 }) {
   return CalendarEntry<String>(
     id: id,
-    day: day,
-    startMinute: start,
-    endMinute: end,
-    dayCount: dayCount,
+    start: at(day, start),
+    end: at(DateTime(day.year, day.month, day.day + dayCount - 1), end),
     title: title,
     color: taskColor,
     payload: "task",
   );
+}
+
+/// [minute] minutes after [day]'s midnight.
+DateTime at(DateTime day, int minute) {
+  return DateTime(day.year, day.month, day.day, 0, minute);
 }
 
 /// What a store reported: each notification and each `onChanged` call, in
@@ -138,9 +143,9 @@ void main() {
     expect(idsOf(range.entriesOn(DateTime(2026, 5, 4))), isEmpty);
     expect(idsOf(range.entriesOn(DateTime(2026, 5, 8))), <String>["late"]);
     expect(idsOf(range.entriesBetween(first, DateTime(2026, 5, 8))), <String>[
-      "nine",
       "ten",
       "three",
+      "nine",
       "late",
     ]);
     expect(range.dayHasShownEntries(DateTime(2026, 5, 6)), isTrue);
@@ -173,7 +178,7 @@ void main() {
     final recorder = Recorder();
     final item = task("item-1", day, 600, 660);
     final store = recorder.store(entries: <CalendarEntry<String>>[item]);
-    final moved = item.copyWith(startMinute: 720, endMinute: 780);
+    final moved = item.copyWith(start: at(day, 720), end: at(day, 780));
     final pendingSeen = <bool>[];
     final storedSeen = <CalendarEntry<String>?>[];
     store.addListener(() {
@@ -202,8 +207,8 @@ void main() {
       hours: const DayHours(480, 1080),
     );
 
-    store.requestMove(item.copyWith(startMinute: 450, endMinute: 510));
-    store.requestMove(item.copyWith(startMinute: 750, endMinute: 810));
+    store.requestMove(item.copyWith(start: at(day, 450), end: at(day, 510)));
+    store.requestMove(item.copyWith(start: at(day, 750), end: at(day, 810)));
     expect(recorder.failures, hasLength(2));
     expect(recorder.failures[0].id, "item-1");
     expect(
@@ -334,7 +339,7 @@ void main() {
         task("item-2", day, 75, 120),
       ],
     );
-    expect(first.firstFreeRange(day), (start: 60, end: 75));
+    expect(first.firstFreeRange(day), (start: at(day, 60), end: at(day, 75)));
 
     final store = MemoryCalendarStore<String>(
       entries: <CalendarEntry<String>>[
@@ -343,11 +348,26 @@ void main() {
       ],
       hours: const DayHours(480, 1200),
     );
-    expect(store.firstFreeRange(day, from: 840), (start: 840, end: 855));
-    expect(store.firstFreeRange(day, from: 850), (start: 855, end: 870));
-    expect(store.firstFreeRange(day, from: 900), (start: 960, end: 975));
-    expect(store.firstFreeRange(day, from: 300), (start: 540, end: 555));
-    expect(store.firstFreeRange(day, from: 1200), (start: 540, end: 555));
+    expect(store.firstFreeRange(day, from: 840), (
+      start: at(day, 840),
+      end: at(day, 855),
+    ));
+    expect(store.firstFreeRange(day, from: 850), (
+      start: at(day, 855),
+      end: at(day, 870),
+    ));
+    expect(store.firstFreeRange(day, from: 900), (
+      start: at(day, 960),
+      end: at(day, 975),
+    ));
+    expect(store.firstFreeRange(day, from: 300), (
+      start: at(day, 540),
+      end: at(day, 555),
+    ));
+    expect(store.firstFreeRange(day, from: 1200), (
+      start: at(day, 540),
+      end: at(day, 555),
+    ));
   });
 
   test("MS9 a shown entry is a value of the entry and its flag", () {

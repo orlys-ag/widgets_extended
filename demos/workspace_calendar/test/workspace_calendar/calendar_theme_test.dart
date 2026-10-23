@@ -823,10 +823,7 @@ Future<Set<String>> labelsOf(
 /// Fails every read [api] answers from here on, and selects in Agenda the
 /// day a month on ([selectNextMonth]) until a read fails, at most three
 /// times.
-Future<void> failNextMonthRead(
-  WidgetTester tester,
-  MockCalendarApi api,
-) async {
+Future<void> failNextMonthRead(WidgetTester tester, MockCalendarApi api) async {
   api.failurePolicy = (request) {
     return request.method == CalendarMethod.list ? "Reading failed." : null;
   };
@@ -1045,7 +1042,7 @@ Future<void> revealDay(WidgetTester tester, DateTime day) async {
 /// Expects every family of [board]'s animation style to run [duration]
 /// on [curve].
 void expectBoardMotion(
-  BoardController<String, Object?> board,
+  BoardController<Object, Object?> board,
   Duration duration,
   Curve curve,
 ) {
@@ -1069,9 +1066,9 @@ BoardController<String, MonthChip<ItemPayload>> monthController(
 }
 
 /// The timed grid's board.
-Board<String, ShownItem> gridBoard(WidgetTester tester) {
-  return tester.widget<Board<String, ShownItem>>(
-    find.byType(Board<String, ShownItem>),
+Board<GridKey, GridShape<ItemPayload>> gridBoard(WidgetTester tester) {
+  return tester.widget<Board<GridKey, GridShape<ItemPayload>>>(
+    find.byType(Board<GridKey, GridShape<ItemPayload>>),
   );
 }
 

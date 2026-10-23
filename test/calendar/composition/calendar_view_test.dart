@@ -76,16 +76,21 @@ void useTallView(WidgetTester tester) {
   addTearDown(tester.view.reset);
 }
 
+/// An entry from [start] to [end] minutes after [day]'s midnight.
 CalendarEntry<String> entryOf(String id, DateTime day, int start, int end) {
   return CalendarEntry<String>(
     id: id,
-    day: day,
-    startMinute: start,
-    endMinute: end,
+    start: DateTime(day.year, day.month, day.day, 0, start),
+    end: DateTime(day.year, day.month, day.day, 0, end),
     title: id,
     color: const Color(0xFF336699),
     payload: id,
   );
+}
+
+/// [hour]:[minute] on [day].
+DateTime at(DateTime day, int hour, [int minute = 0]) {
+  return DateTime(day.year, day.month, day.day, hour, minute);
 }
 
 /// The month grid's days of [day]'s month under [weekdays].
@@ -129,8 +134,8 @@ class HeldSource implements CalendarDataSource<String> {
     final to = dayNumber(last);
     final answer = <CalendarEntry<String>>[
       for (final entry in entries)
-        if (entry.time.firstDay <= to &&
-            entry.time.firstDay + entry.time.dayCount - 1 >= from)
+        if (dayNumber(entry.start) <= to &&
+            lastDayNumberOf(entry.start, entry.end) >= from)
           entry,
     ];
     if (!holds) {
@@ -202,14 +207,22 @@ class RecordingCanvas implements Canvas {
   }
 }
 
-Finder blockFinder(String id) {
-  return find.byKey(blockKey(id));
+/// The block of [id]'s piece on [day], or with no [day] the one block of
+/// [id].
+Finder blockFinder(String id, [DateTime? day]) {
+  if (day != null) {
+    return find.byKey(blockKey(id, day));
+  }
+  return find.byWidgetPredicate((widget) {
+    final key = widget.key;
+    return key is ValueKey<String> && key.value.startsWith("block-$id@");
+  });
 }
 
 /// The one timed grid's viewport.
-RenderBoardViewport<String> gridViewport(WidgetTester tester) {
+RenderBoardViewport<GridKey> gridViewport(WidgetTester tester) {
   return tester.allRenderObjects
-      .whereType<RenderBoardViewport<String>>()
+      .whereType<RenderBoardViewport<GridKey>>()
       .single;
 }
 
@@ -1012,12 +1025,7 @@ void main() {
     await tester.pump();
     expect(
       creates.last,
-      CreateRange(
-        day: thursday,
-        startMinute: 14 * 60,
-        endMinute: 14 * 60 + 15,
-        dayCount: 1,
-      ),
+      CreateRange(start: at(thursday, 14), end: at(thursday, 14, 15)),
     );
     // The slot stays marked while the host's future runs.
     expect(marksRange(tester), isTrue);
@@ -1036,12 +1044,7 @@ void main() {
     await tester.pump();
     expect(
       creates.last,
-      CreateRange(
-        day: wednesday,
-        startMinute: 14 * 60,
-        endMinute: 14 * 60 + 15,
-        dayCount: 1,
-      ),
+      CreateRange(start: at(wednesday, 14), end: at(wednesday, 14, 15)),
     );
     pending.last.complete();
     await tester.pumpAndSettle();
@@ -1066,7 +1069,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       creates.last,
-      CreateRange(day: thursday, startMinute: 0, endMinute: 15, dayCount: 1),
+      CreateRange(start: at(thursday, 0), end: at(thursday, 0, 15)),
     );
     pending.last.complete();
 
@@ -1078,7 +1081,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       creates.last,
-      CreateRange(day: wednesday, startMinute: 0, endMinute: 15, dayCount: 1),
+      CreateRange(start: at(wednesday, 0), end: at(wednesday, 0, 15)),
     );
     pending.last.complete();
     await tester.tap(find.text("edit later"));
@@ -1150,7 +1153,7 @@ void main() {
     await tester.longPress(find.byKey(monthStripKey(tuesday)));
     await tester.pumpAndSettle();
     expect(creates, <CreateRange>[
-      CreateRange(day: tuesday, startMinute: 705, endMinute: 720, dayCount: 1),
+      CreateRange(start: at(tuesday, 11, 45), end: at(tuesday, 12)),
     ]);
     expect(refused, isEmpty);
     await tester.longPress(find.byKey(monthStripKey(monday)));

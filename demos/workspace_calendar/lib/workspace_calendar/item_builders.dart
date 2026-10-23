@@ -414,7 +414,7 @@ class HarborBlock extends StatelessWidget {
                 style: styles.detailedTitle,
               ),
               Text(
-                clockRangeLabel(item.startMinute, item.endMinute),
+                entryTimesLabel(item.start, item.end),
                 maxLines: 1,
                 style: styles.detail,
               ),
@@ -528,7 +528,7 @@ class HarborChip extends StatelessWidget {
   }
 
   /// A card's [title] over its type's icon and [item]'s times, as
-  /// [clockRangeLabel] writes them, each line cut short where the day is
+  /// [entryTimesLabel] writes them, each line cut short where the day is
   /// too narrow for it.
   Widget _buildCardLines(
     Text title,
@@ -547,7 +547,7 @@ class HarborChip extends StatelessWidget {
             const SizedBox(width: 3.0),
             Flexible(
               child: Text(
-                clockRangeLabel(item.startMinute, item.endMinute),
+                entryTimesLabel(item.start, item.end),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,

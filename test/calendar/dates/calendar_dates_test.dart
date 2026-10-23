@@ -233,8 +233,8 @@ void main() {
   });
 
   group("DH1 DayHours' starts and ends", () {
-    test("holds a start from its start to its last slot's start, and an end "
-        "from its first slot's end to its end", () {
+    test("holds a start from its start to before its end, and an end from "
+        "after its start to its end", () {
       const office = DayHours(480, 1080);
       expect(office.holdsStart(480), isTrue);
       expect(office.holdsStart(1065), isTrue);

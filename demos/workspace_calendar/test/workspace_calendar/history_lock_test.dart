@@ -44,8 +44,18 @@ final List<Map<String, Object?>> seed = <Map<String, Object?>>[
   taskJson("Later", today, 14 * 60, 15 * 60),
 ];
 
-CalendarEntryTime shape(DateTime day, int start, int end, {int dayCount = 1}) {
-  return (firstDay: dayNumber(day), dayCount: dayCount, start: start, end: end);
+/// From [start] minutes after [day]'s midnight to [end] minutes after the
+/// midnight of its [dayCount]th day.
+({DateTime start, DateTime end}) shape(
+  DateTime day,
+  int start,
+  int end, {
+  int dayCount = 1,
+}) {
+  return (
+    start: DateTime(day.year, day.month, day.day, 0, start),
+    end: DateTime(day.year, day.month, day.day + dayCount - 1, 0, end),
+  );
 }
 
 /// The calendar over [seed] in edit mode, its clock reading [clock], or

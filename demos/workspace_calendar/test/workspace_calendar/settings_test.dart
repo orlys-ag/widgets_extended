@@ -276,12 +276,9 @@ void main() {
       taskJson("Late", today, 19 * 60, 20 * 60),
     );
     await store(tester, api, taskJson("Run", thursday, 6 * 60, 7 * 60));
-    // 05:00 to 06:00 on Wednesday and Thursday.
-    await store(
-      tester,
-      api,
-      taskJson("Trip", wednesday, 5 * 60, 6 * 60, dayCount: 2),
-    );
+    // 05:00 to 06:00 on Wednesday and on Thursday.
+    await store(tester, api, taskJson("Trip", wednesday, 5 * 60, 6 * 60));
+    await store(tester, api, taskJson("Trip", thursday, 5 * 60, 6 * 60));
     await pumpCalendar(tester, api: api);
     await pickMode(tester, "Week");
     expect(blockFinder(lateId), findsOneWidget);

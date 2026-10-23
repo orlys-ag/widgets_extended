@@ -13,17 +13,26 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
-/// The field errors of an item from [start] to [end] minutes that does not
-/// lie in [hours], keyed as `validateItemJson` keys them: the start when it
-/// does not begin a slot inside them, the end when it does not end one.
-Map<String, String> hoursErrorsOf(int start, int end, DayHours hours) {
+/// The field errors of an item from [start] to [end] that [hours] do not
+/// hold ([DayHours.holdsTimes]), keyed as `validateItemJson` keys them: the
+/// start when the hours do not hold its time of day as a start, the end
+/// when they do not hold its minute on its last day as an end. An all-day
+/// item has none.
+Map<String, String> hoursErrorsOf(
+  DateTime start,
+  DateTime end,
+  DayHours hours,
+) {
+  if (hours.holdsTimes(start, end)) {
+    return const <String, String>{};
+  }
   return <String, String>{
-    if (!hours.holdsStart(start))
+    if (!hours.holdsStart(minuteOfDay(start)))
       "startMinute":
           "The start is ${clockLabel(hours.start)} to "
           "${clockLabel(hours.end - minutesPerSlot)}, inside the calendar's "
           "hours.",
-    if (!hours.holdsEnd(end))
+    if (!hours.holdsEnd(endMinuteOfDay(end)))
       "endMinute":
           "The end is ${clockLabel(hours.start + minutesPerSlot)} to "
           "${clockLabel(hours.end)}, inside the calendar's hours.",

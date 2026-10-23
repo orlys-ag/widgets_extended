@@ -1,7 +1,8 @@
 /// The calendar's timed grid: consecutive days on the board, with a frozen
 /// hour gutter and, where it shows one, a frozen day header, one row per
-/// 15-minute slot, and the days' items as blocks that, in edit mode, move,
-/// and once selected resize.
+/// 15-minute slot, and the days' entries as blocks, one per piece, the part
+/// of an entry on one day, that in edit mode move, and once selected
+/// resize.
 library;
 
 import 'dart:async';
@@ -253,9 +254,9 @@ ValueKey<String> dayHeaderKey(DateTime day) {
   return ValueKey<String>("grid-day-${isoDate(day)}");
 }
 
-/// The key of the block showing the item [id].
-ValueKey<String> blockKey(String id) {
-  return ValueKey<String>("block-$id");
+/// The key of the block showing the piece of the entry [id] on [day].
+ValueKey<String> blockKey(String id, DateTime day) {
+  return ValueKey<String>("block-$id@${isoDate(day)}");
 }
 
 /// The key of the outline and the resize handles over the block of the
@@ -367,55 +368,165 @@ const ValueKey<String> landingLabelKey = ValueKey<String>("grid-landing-label");
 /// What the landing label says while a move has nowhere to land.
 const String noLandingLabel = "No free time near here";
 
-/// What the landing label says for a drag that would give an item
-/// [shape]: its first day, as [dayTitle] names it against [today], its
-/// times, and its day count when it covers more than one day.
-String landingLabel(CalendarEntryTime shape, DateTime today) {
-  final day = dayTitle(dateOfDayNumber(shape.firstDay), today);
-  final times = "${clockLabel(shape.start)}-${clockLabel(shape.end)}";
-  if (shape.dayCount == 1) {
-    return "$day, $times";
+/// What the landing label says for a drag that would give an entry the
+/// times [start] to [end]: its first day, as [dayTitle] names it against
+/// [today], and its times ([entryTimesLabel]), as "Today, April 21,
+/// 14:00-15:00"; for a range over more than one day its last day too, as
+/// "Monday, April 20, 22:00 to Tuesday, April 21, 02:00"; and for an
+/// all-day range its days and "all day".
+String landingLabel(DateTime start, DateTime end, DateTime today) {
+  final first = dayNumber(start);
+  final last = lastDayNumberOf(start, end);
+  final from = dayTitle(dateOfDayNumber(first), today);
+  final to = dayTitle(dateOfDayNumber(last), today);
+  if (isDayStart(start) && isDayStart(end)) {
+    return first == last ? "$from, all day" : "$from to $to, all day";
   }
-  return "$day, $times, ${shape.dayCount} days";
+  if (first == last) {
+    return "$from, ${entryTimesLabel(start, end)}";
+  }
+  return "$from, ${clockLabel(minuteOfDay(start))} to $to, "
+      "${clockLabel(endMinuteOfDay(end))}";
 }
 
 /// The key of the shadow under the block a move carries.
 const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
 
-/// The slots a create gesture picked: [dayCount] days from [day], each
-/// from [startMinute] to [endMinute].
+/// The time a create gesture picked: one continuous range from [start] to
+/// [end], an exclusive end, both local times.
 @immutable
 class CreateRange {
-  const CreateRange({
-    required this.day,
-    required this.startMinute,
-    required this.endMinute,
-    required this.dayCount,
-  });
+  const CreateRange({required this.start, required this.end});
 
-  final DateTime day;
-  final int startMinute;
-  final int endMinute;
-  final int dayCount;
+  /// Where the range starts.
+  final DateTime start;
+
+  /// Where the range ends, after [start].
+  final DateTime end;
+
+  /// Whether the range runs from a day start to a day start
+  /// ([isDayStart]), covering whole days.
+  bool get isAllDay {
+    return isDayStart(start) && isDayStart(end);
+  }
 
   @override
   bool operator ==(Object other) {
-    return other is CreateRange &&
-        other.day == day &&
-        other.startMinute == startMinute &&
-        other.endMinute == endMinute &&
-        other.dayCount == dayCount;
+    return other is CreateRange && other.start == start && other.end == end;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, startMinute, endMinute, dayCount);
+    return Object.hash(start, end);
   }
 
   @override
   String toString() {
-    return "CreateRange(${isoDate(day)}, ${clockLabel(startMinute)}-"
-        "${clockLabel(endMinute)}, $dayCount days)";
+    return "CreateRange(${isoDate(start)} ${clockLabel(minuteOfDay(start))} "
+        "to ${isoDate(end)} ${clockLabel(minuteOfDay(end))})";
+  }
+}
+
+/// The key of a timed grid's board item: the entry [id] it shows, and for
+/// a piece its day's offset from the entry's first day, so a one-day
+/// entry's piece keeps its key on whatever day it moves to. Compared and
+/// hashed by all three fields.
+@immutable
+class GridKey {
+  /// The piece of the entry [id] [dayOffset] days after its first day.
+  const GridKey.piece(this.id, this.dayOffset) : isBar = false;
+
+  /// The bar of the all-day entry [id].
+  const GridKey.bar(this.id) : isBar = true, dayOffset = 0;
+
+  /// The entry the item shows.
+  final String id;
+
+  /// Whether the item is a bar rather than a piece.
+  final bool isBar;
+
+  /// The days from the entry's first day to the piece's; 0 for a bar.
+  final int dayOffset;
+
+  @override
+  bool operator ==(Object other) {
+    return other is GridKey &&
+        other.id == id &&
+        other.isBar == isBar &&
+        other.dayOffset == dayOffset;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(id, isBar, dayOffset);
+  }
+
+  @override
+  String toString() {
+    return isBar ? "GridKey.bar($id)" : "GridKey.piece($id, $dayOffset)";
+  }
+}
+
+/// What a timed grid's board item shows of one shown entry.
+@immutable
+sealed class GridShape<T> {
+  const GridShape();
+
+  /// The entry the item shows.
+  CalendarShownEntry<T> get shown;
+}
+
+/// The piece of [shown]'s entry on the [dayNumber] [day]: from [start] to
+/// [end] minutes after that day's midnight ([pieceOn]), and whether it
+/// holds the entry's start, [first], or its end, [last].
+final class GridPiece<T> extends GridShape<T> {
+  const GridPiece({
+    required this.shown,
+    required this.day,
+    required this.start,
+    required this.end,
+    required this.first,
+    required this.last,
+  });
+
+  @override
+  final CalendarShownEntry<T> shown;
+
+  /// The [dayNumber] of the piece's day.
+  final int day;
+
+  /// Minutes after the day's midnight, on the wall clock.
+  final int start;
+
+  /// Minutes after the day's midnight, on the wall clock, after [start].
+  final int end;
+
+  /// Whether the piece holds the entry's start.
+  final bool first;
+
+  /// Whether the piece holds the entry's end.
+  final bool last;
+
+  @override
+  bool operator ==(Object other) {
+    return other is GridPiece<T> &&
+        other.shown == shown &&
+        other.day == day &&
+        other.start == start &&
+        other.end == end &&
+        other.first == first &&
+        other.last == last;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(shown, day, start, end, first, last);
+  }
+
+  @override
+  String toString() {
+    return "GridPiece(${shown.id}, ${isoDate(dateOfDayNumber(day))} "
+        "${clockRangeLabel(start, end)})";
   }
 }
 
@@ -425,7 +536,7 @@ class CreateRange {
 /// Column 0 is the hour gutter, and the rows from [firstSlotRow] are the
 /// slots of [hours], one per [minutesPerSlot]; the rows before it are
 /// whatever the grid lays out above its slots, such as a day header or a
-/// row counting the items before the hours. The
+/// row counting the entries before the hours. The
 /// columns right of the gutter are the days of the [dayCount] days from
 /// [firstDay] whose weekday [weekdays] holds, in order, so a day it does
 /// not hold has no column and the days either side of it are adjacent.
@@ -555,164 +666,136 @@ class GridTracks {
   }
 }
 
-/// Where [shape] sits on the grid [tracks] lays out, in track space. The
-/// days of it the grid has no column for and its minutes outside the
-/// grid's hours are clipped off; null when no shown day or no minute of it
-/// is left.
-BoardSpan? gridSpanOf(CalendarEntryTime shape, GridTracks tracks) {
-  final firstColumn = tracks.firstColumnFrom(shape.firstDay);
-  final lastColumn = tracks.lastColumnUpTo(shape.firstDay + shape.dayCount - 1);
+/// Where the piece from [start] to [end] minutes of the day [column] shows
+/// sits on the grid [tracks] lays out, in track space: its minutes clipped
+/// to the grid's hours, one row per slot, a minute off the slot grid lying
+/// as far into its slot's row as it lies into the slot, so 09:10 to 09:50
+/// at 15-minute slots runs from 10/15 into the 09:00 row to 50/15 past its
+/// top. Null where no minute of it is left.
+BoardSpan? pieceSpanOf(GridTracks tracks, int column, int start, int end) {
   final hours = tracks.hours;
-  final start = math.max(shape.start, hours.start);
-  final end = math.min(shape.end, hours.end);
-  if (lastColumn < firstColumn || end <= start) {
+  final from = math.max(start, hours.start);
+  final to = math.min(end, hours.end);
+  if (to <= from) {
     return null;
   }
+  const slot = minutesPerSlot;
+  final into = from - hours.start;
+  final length = to - from;
   return BoardSpan(
-    rowStart: tracks.rowOf(start),
-    rowSpan: (end - start) ~/ minutesPerSlot,
-    colStart: firstColumn,
-    colSpan: lastColumn - firstColumn + 1,
+    rowStart: tracks.firstSlotRow + into ~/ slot,
+    rowFraction: (into % slot) / slot,
+    rowSpan: length ~/ slot,
+    rowSpanFraction: (length % slot) / slot,
+    colStart: column,
   );
 }
 
-/// [shape] after a drag took its block from [from] to [to], both track
-/// space, on the grid [tracks] lays out. Its times are read from [to]'s
-/// rows, so a shape whose minutes the grid clips has no business here.
-///
-/// A drop that keeps the column count moves the first day by the days
-/// between the two spans' first columns and keeps the day count, so the
-/// days a clipped item has outside the grid keep their distance. A drop
-/// that changes the column count is a resize of the trailing column edge,
-/// the only column edge the grid resizes, which keeps the start: the item
-/// keeps its first day and ends on the day of [to]'s last column, whatever
-/// the grid clipped of it.
-CalendarEntryTime shapeFromSpan(
-  CalendarEntryTime shape,
-  BoardSpan from,
-  BoardSpan to,
-  GridTracks tracks,
-) {
-  final start = tracks.minuteAt(to.rowStart);
-  final end = start + to.rowSpan * minutesPerSlot;
-  if (to.colSpan == from.colSpan) {
-    final shift = tracks.dayAt(to.colStart) - tracks.dayAt(from.colStart);
-    return (
-      firstDay: shape.firstDay + shift,
-      dayCount: shape.dayCount,
-      start: start,
-      end: end,
-    );
-  }
-  final lastDay = tracks.dayAt(to.colStart + to.colSpan - 1);
-  return (
-    firstDay: shape.firstDay,
-    dayCount: lastDay - shape.firstDay + 1,
-    start: start,
-    end: end,
-  );
+/// The wall minute ([wallMinuteOf]) the slot of the body [cell] starts at
+/// on the grid [tracks] lays out.
+int slotWallMinuteOf(GridTracks tracks, ({int row, int col}) cell) {
+  return tracks.dayAt(cell.col) * minutesPerDay + tracks.minuteAt(cell.row);
 }
 
-/// [item] with the day, minutes and day count [shapeFromSpan] gives for
-/// its shape.
-CalendarEntry<T> itemFromSpan<T>(
-  CalendarEntry<T> item,
-  BoardSpan from,
-  BoardSpan to,
-  GridTracks tracks,
-) {
-  final shape = shapeFromSpan(item.time, from, to, tracks);
-  return item.copyWith(
-    day: dateOfDayNumber(shape.firstDay),
-    dayCount: shape.dayCount,
-    startMinute: shape.start,
-    endMinute: shape.end,
-  );
+/// What a tap on the body [cell] creates: its one slot, or null where its
+/// start or its end is a time the clock skips. On a day whose clock
+/// repeats a stretch, each end is the earlier instant of its time.
+CreateRange? createRangeAt(GridTracks tracks, ({int row, int col}) cell) {
+  final start = slotWallMinuteOf(tracks, cell);
+  return _createRangeOf(start, start + minutesPerSlot);
 }
 
-/// What a tap on the body [cell] creates: its one slot.
-CreateRange createRangeAt(GridTracks tracks, ({int row, int col}) cell) {
-  final start = tracks.minuteAt(cell.row);
-  return CreateRange(
-    day: tracks.dateAt(cell.col),
-    startMinute: start,
-    endMinute: start + minutesPerSlot,
-    dayCount: 1,
-  );
-}
-
-/// What a drag from the body cell [anchor] to [focus] creates: the slots of
-/// the rectangle between them, on every day from its left column's to its
-/// right column's, shown or not.
-CreateRange createRangeOver(
+/// What a drag from the body cell [anchor] to [focus] creates: one
+/// continuous range from the start of the earlier cell's slot, in
+/// wall-minute order, to the end of the later one's, so Monday 10:00 to
+/// Wednesday 12:00 gives Monday 10:00 to Wednesday 12:15, over every day
+/// between, shown or not. Null where an end is a time the clock skips; on
+/// a day whose clock repeats a stretch, each end is the earlier instant of
+/// its time.
+CreateRange? createRangeOver(
   GridTracks tracks,
   ({int row, int col}) anchor,
   ({int row, int col}) focus,
 ) {
-  final top = math.min(anchor.row, focus.row);
-  final bottom = math.max(anchor.row, focus.row);
-  final left = math.min(anchor.col, focus.col);
-  final right = math.max(anchor.col, focus.col);
-  return CreateRange(
-    day: tracks.dateAt(left),
-    startMinute: tracks.minuteAt(top),
-    endMinute: tracks.minuteAt(bottom + 1),
-    dayCount: tracks.dayAt(right) - tracks.dayAt(left) + 1,
+  final from = slotWallMinuteOf(tracks, anchor);
+  final to = slotWallMinuteOf(tracks, focus);
+  return _createRangeOf(
+    math.min(from, to),
+    math.max(from, to) + minutesPerSlot,
   );
+}
+
+CreateRange? _createRangeOf(int startWall, int endWall) {
+  final start = timeAtWallMinute(startWall);
+  final end = timeAtWallMinute(endWall);
+  if (start == null || end == null || !end.isAfter(start)) {
+    return null;
+  }
+  return CreateRange(start: start, end: end);
 }
 
 /// The days of the [dayCount] from [firstDay] whose weekday [weekdays]
 /// holds, on the board, over its [hours], showing what [store] shows for
-/// them once they are ready. A
-/// tap on a block that is not pending reports [onOpenItem]; a tap on a
-/// day header reports [onSelectDay]. Each block's content is what
+/// them once they are ready. An entry shows as one block per piece, its
+/// part on each shown day it covers, at its exact minutes, so an entry
+/// from Monday 22:00 to Tuesday 02:00 shows one block at the end of
+/// Monday and one at the start of Tuesday. Rows follow the wall clock: on
+/// a day of 23 or 25 hours every column still has the same rows. A tap on
+/// a block that is not pending reports [onOpenItem] with its entry's id; a
+/// tap on a day header reports [onSelectDay]. Each block's content is what
 /// [blockBuilder] draws, told on a grid of one day column that the block
-/// is detailed.
+/// is detailed, and which of its ends the hours cut or continue on
+/// another day.
 ///
-/// In edit mode, which [editable] turns on, a long press on an item lifts it
-/// to move and selects its block; a tap anywhere but on the selected
-/// block, its item leaving the grid, or edit mode ending clears the
-/// selection. Only the selected block has resize handles, over an outline:
-/// its top drags its start time, its bottom its end time, and, on more
-/// than one day, its right edge its day count, each from a press on either
-/// side of the edge, where a pill lies across it. A touch drag from
-/// another block's edge scrolls the grid as one anywhere else does. Out of
-/// edit mode the grid is read-only: no block moves or resizes, and an
-/// empty slot creates nothing. In it the history lock [lockPast] and
-/// [lockEarlierToday] choose holds too ([HistoryLock]): a block whose item
-/// ended before the lock's boundary takes no drag, one in progress neither
-/// moves nor has a top
-/// handle, a long press selecting it, no move or resize lands an item, and
-/// no create gesture starts or reaches, before the boundary.
-/// A move dropped onto another item's time lands at the nearest free time
+/// In edit mode, which [editable] turns on, a long press on any block of
+/// an entry lifts the entry to move and selects its blocks; a tap anywhere
+/// but on a selected block, its entry leaving the grid, or edit mode
+/// ending clears the selection. A move lands the lifted block's top on the
+/// slot it is dropped on and moves the whole entry by the same elapsed
+/// time, so it keeps its length; while it is lifted the entry's other
+/// blocks leave the grid. Only the selected entry's blocks have resize
+/// handles, over an outline: the top of the block holding its start drags
+/// its start time, and the bottom of the block holding its end its end
+/// time, each from a press on either side of the edge, where a pill lies
+/// across it. A touch drag from another block's edge scrolls the grid as
+/// one anywhere else does. A move, a resize or a create that lands on a
+/// time the clock skips writes and reports nothing; one on a time it
+/// repeats keeps the occurrence the gesture began in. Out of edit mode the
+/// grid is read-only: no block moves or resizes, and an empty slot creates
+/// nothing. In it the history lock [lockPast] and [lockEarlierToday]
+/// choose holds too ([HistoryLock]): a block whose entry ended before the
+/// lock's boundary takes no drag, one in progress neither moves nor has a
+/// top handle, a long press selecting it, no move or resize lands an
+/// entry, and no create gesture starts or reaches, before the boundary.
+/// A move dropped onto another entry's time lands at the nearest free time
 /// that shows, on that day or the day before or after it, and goes back
-/// where there is none; a resize dragged onto one stops at its
-/// edge, and so does a create's range, its times first, in the day it was
-/// pressed on, then its days, as far as each is free over those times. While a drag runs, a label over the grid names the day and times a
-/// release would give, or that a move has nowhere to land, and a move outlines
-/// the slots it would land on. A line over the blocks marks the time [now]
-/// holds in its day's column, and the grid opens scrolled to the hour before it
-/// when it shows that day, at 08:00 otherwise, with that hour's label whole
-/// below the top edge. Each whole hour, and the start and the end of the hours,
-/// has a label centred on its line in the hour gutter, in [hourLabelFormat],
-/// which a room above the first slot and below the last, or the gutter
-/// beside a row counting items outside the hours, keeps whole. An
-/// item reaching past the hours shows the part inside them, its block's details
-/// telling its builder which ends the hours cut, and takes no move or resize:
-/// only an edit outside the grid changes it. An item wholly
-/// outside them has no block. While some are before the hours, a yellow row
-/// frozen against the first slot, in place of the room above it, says "+N
-/// more" in the column of each day with N of them, and while some are after
-/// them, a row frozen against the last slot does; the hour gutter runs on
-/// beside both. An item on no shown day has no block either,
-/// and a pill in the day header's corner counts it. In edit mode empty
-/// body cells take a create gesture, reported through [onCreate]: a drag
-/// picks the rectangle of slots it covers, at once with a mouse or a
-/// stylus and after a press and hold on touch, so a touch drag without one
-/// scrolls the grid, and a tap, or a hold let go where it began, picks its
-/// one slot. The slots picked
-/// stay marked, as a range being dragged is, until the create flow
-/// [onCreate] opens closes.
+/// where there is none; a resize dragged onto one stops at its edge, and
+/// so does a create's range. While a drag runs, a label over the grid
+/// names the days and times a release would give, or that a move has
+/// nowhere to land, and a move outlines the times it would land on. A line
+/// over the blocks marks the time [now] holds in its day's column, and the
+/// grid opens scrolled to the hour before it when it shows that day, at
+/// 08:00 otherwise, with that hour's label whole below the top edge. Each
+/// whole hour, and the start and the end of the hours, has a label centred
+/// on its line in the hour gutter, in [hourLabelFormat], which a room above
+/// the first slot and below the last, or the gutter beside a row counting
+/// entries outside the hours, keeps whole. A piece reaching past the hours
+/// shows its part inside them, and an entry whose start or end the hours
+/// do not hold ([DayHours.holdsTimes]) takes no move or resize: only an
+/// edit outside the grid changes it. A piece wholly outside them has no
+/// block. While some are before the hours, a yellow row frozen against the
+/// first slot, in place of the room above it, says "+N more" in the column
+/// of each day with N of them, and while some are after them, a row frozen
+/// against the last slot does; the hour gutter runs on beside both. An
+/// entry on no shown day has no block either, and a pill in the day
+/// header's corner counts it. In edit mode empty body cells take a create
+/// gesture, reported through [onCreate]: a drag picks one continuous range
+/// from the earlier of its two slots to the later, across days too, at
+/// once with a mouse or a stylus and after a press and hold on touch, so a
+/// touch drag without one scrolls the grid, and a tap, or a hold let go
+/// where it began, picks its one slot. A slot that shares time with an
+/// entry takes no create gesture. The range picked stays marked, as a
+/// range being dragged is, until the create flow [onCreate] opens closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
@@ -806,9 +889,11 @@ class TimedGrid<T> extends StatefulWidget {
   final ValueListenable<DateTime> now;
 
   final ValueChanged<DateTime> onSelectDay;
+
+  /// Reports a tap on a block that is not pending, with its entry's id.
   final ValueChanged<String> onOpenItem;
 
-  /// Opens the create flow for the slots a create gesture on empty cells
+  /// Opens the create flow for the range a create gesture on empty cells
   /// picked, and completes when it closes.
   final Future<void> Function(CreateRange range) onCreate;
 
@@ -860,8 +945,11 @@ class TimedGrid<T> extends StatefulWidget {
   /// and [minDayWidth]; null for a grid no pinch zooms.
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
 
-  /// The most days a drop may give an item, which it refuses past them;
-  /// null for no limit.
+  /// The most days, counting each day it has any part of, that a create
+  /// drag across days may give a range: one dragged past them is held at
+  /// the latest range they admit. A move keeps the days an entry covers,
+  /// except where it crosses a midnight, and no limit applies to it. Null
+  /// for no limit.
   final int? maxDayCount;
 
   /// The range, both days inclusive, that the grid's owner asks [store] to
@@ -900,11 +988,16 @@ typedef _HeaderState = ({
 /// edge, whether the board has reported a target yet, and the placement a
 /// release would report, null where none is admitted.
 typedef _GridDrag = ({
-  String id,
+  GridKey key,
   BoardDragKind kind,
   bool resolved,
   BoardSpan? target,
 });
+
+/// The pieces of the shown entries a sync split, in the store's order,
+/// and the shown entries with no block, counted: the split [_TimedGridState]
+/// keeps and places.
+typedef _GridLayout<T> = ({List<GridPiece<T>> pieces, _Hidden hidden});
 
 /// Where the line marking the current time sits: the column of its day
 /// and its minute after midnight.
@@ -912,7 +1005,7 @@ typedef _NowMark = ({int column, int minute});
 
 class _TimedGridState<T> extends State<TimedGrid<T>>
     with TickerProviderStateMixin {
-  late final BoardController<String, CalendarShownEntry<T>> _board;
+  late final BoardController<GridKey, GridShape<T>> _board;
 
   late final PinchTracker _pinch = PinchTracker(
     onStart: _startPinch,
@@ -931,8 +1024,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   final ScrollHolder _scrollHold = ScrollHolder();
 
-  /// The rows counting the items outside the hours that the grid lays out
-  /// above and below its slots.
+  /// The rows counting the entries outside the hours that the grid lays
+  /// out above and below its slots.
   _Notices _notices = (above: false, below: false);
 
   /// Where the widget's days and minutes sit on the board.
@@ -942,10 +1035,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// every cell and item, whenever a builder it gets is not identical to
   /// the previous one. [didUpdateWidget] gives the board a new item
   /// builder for a new [TimedGrid.blockBuilder], so every block finds it.
-  late final BoardCellBuilder<String, CalendarShownEntry<T>> _cellBuilder =
-      _buildCell;
-  late BoardItemBuilder<String, CalendarShownEntry<T>> _itemBuilder =
-      _buildItem;
+  late final BoardCellBuilder<GridKey, GridShape<T>> _cellBuilder = _buildCell;
+  late BoardItemBuilder<GridKey, GridShape<T>> _itemBuilder = _buildItem;
 
   /// [TimedGrid.blockBuilder], or the module's default where it is null.
   late CalendarBlockBuilder<T> _blockBuilder = _blockBuilderOf(widget);
@@ -960,24 +1051,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// cancels a drag that runs. The board builds no handles of its own:
   /// each block carries the handle that moves it after a long press, and
   /// the selected block the resize handles the config's edges admit
-  /// ([_Block]). A single day column has no right strip: there is no
-  /// column to drag its edge onto. Whether the grid has more than one
-  /// column is fixed for its life, which [didUpdateWidget] asserts.
+  /// ([_Block]). No block resizes its column edges: a piece's days are its
+  /// entry's. Whether the grid has more than one column is fixed for its
+  /// life, which [didUpdateWidget] asserts.
   ///
-  /// A move [_canDropAt] refuses for meeting another item slides to the
+  /// A move [_canDropAt] refuses for meeting another entry slides to the
   /// placement nearest on screen that holds it clear, at any time that
   /// shows of the day it was dropped on or of the day before or after it,
   /// however busy the time around it is. A resize it refuses for meeting
-  /// another item stops its dragged edge at that item. The drag reports
+  /// another entry stops its dragged edge at that entry. The drag reports
   /// keep [_drag], which the landing label and outline show. A drag's
   /// start plays a haptic, and the block a move carries casts a shadow.
   /// [_applyTheme] makes both again for a theme with another dragged-block
   /// opacity, which the board hands its live drag.
-  late BoardDragConfig<String> _editConfig;
-  late BoardDragConfig<String> _viewConfig;
+  late BoardDragConfig<GridKey> _editConfig;
+  late BoardDragConfig<GridKey> _viewConfig;
 
-  BoardDragConfig<String> _dragConfigOf({required bool enabled}) {
-    return BoardDragConfig<String>(
+  BoardDragConfig<GridKey> _dragConfigOf({required bool enabled}) {
+    return BoardDragConfig<GridKey>(
       enabled: enabled,
       canDrag: _canDrag,
       canDropAt: _canDropAt,
@@ -987,11 +1078,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         colRadius: 1.0,
         clampResizes: true,
       ),
-      onItemMoved: _commit,
-      onItemResized: _commit,
-      resizeEdges: _tracks.columnCount > 1
-          ? BoardResizeEdges.trailing
-          : BoardResizeEdges.none,
+      onItemMoved: _commitMove,
+      onItemResized: _commitResize,
+      resizeEdges: BoardResizeEdges.none,
       primaryResizeEdges: BoardResizeEdges.both,
       buildDefaultDragHandles: false,
       draggedItemOpacity: _styles.theme.draggedBlockOpacity,
@@ -1003,13 +1092,27 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The id of the item whose block a long press last lifted, which shows
-  /// its resize handles, or null. The blocks listen to it, as the item
-  /// builder runs only when the board rebuilds an item.
+  /// The id of the entry whose block a long press last lifted, whose
+  /// blocks all show selected and whose first and last blocks show its
+  /// resize handles, or null. The blocks listen to it, as the item builder
+  /// runs only when the board rebuilds an item.
   final ValueNotifier<String?> _selectedBlock = ValueNotifier<String?>(null);
 
-  /// The selected block's handles, while it is built.
+  /// The selected entry's handles, while they are built.
   final _HandlesSlot _handles = _HandlesSlot();
+
+  /// The entry a running move lifted, with the start and end it was
+  /// lifted with, while it shows more than one piece: the placement step
+  /// leaves out its pieces other than the dragged one while the shown
+  /// entry keeps those times. Set by [_handleDragStart], cleared by
+  /// [_handleDragEnd].
+  ({String id, DateTime start, DateTime end})? _lifted;
+
+  /// The last split [_layOutEntries] made, which [_placeLayout] places.
+  late _GridLayout<T> _layout = (
+    pieces: <GridPiece<T>>[],
+    hidden: _Hidden.none(_tracks),
+  );
 
   /// The history lock in edit mode, at the minute [TimedGrid.now] holds
   /// when the grid last built, and none out of it, where nothing changes.
@@ -1037,10 +1140,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     MouseCursor.defer,
   );
 
-  /// The presses that went down off the selected block, by pointer: where
-  /// each went down, and the block selected then. One let go within its
-  /// slop of there, with that block still selected, is a tap elsewhere,
-  /// which clears the selection.
+  /// The presses that went down off the selected entry's blocks, by
+  /// pointer: where each went down, and the entry selected then. One let
+  /// go within its slop of there, with that entry still selected, is a tap
+  /// elsewhere, which clears the selection.
   final Map<int, ({Offset at, String id})> _pressesOff =
       <int, ({Offset at, String id})>{};
 
@@ -1090,8 +1193,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// layout.
   Size? _size;
 
-  /// The shown items with no block, as the last [_sync] counted them. The
-  /// pill counting those on no shown day and the cells of the rows
+  /// The shown entries with no block, as the last [_sync] counted them.
+  /// The pill counting those on no shown day and the cells of the rows
   /// counting those outside the hours listen to it, as the cell builder
   /// runs only when the board rebuilds a cell.
   late final ValueNotifier<_Hidden> _hiddenCount = ValueNotifier<_Hidden>(
@@ -1106,11 +1209,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The board's viewport, found under [_boardKey] and kept while it is
   /// attached.
-  RenderBoardViewport<String>? _viewport;
+  RenderBoardViewport<GridKey>? _viewport;
 
   /// The create gestures. They live here rather than in the board, and are
-  /// armed only for a press on an empty body cell, so a press on an item
-  /// leaves the arena to the item's own move and resize gestures.
+  /// armed only for a press on an empty body cell, so a press on a block
+  /// leaves the arena to the block's own move and resize gestures.
   late final TapGestureRecognizer _tap;
   late final ImmediateMultiDragGestureRecognizer _immediateRange;
   late final DelayedMultiDragGestureRecognizer _delayedRange;
@@ -1169,13 +1272,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         PointerDeviceKind.unknown,
       },
     )..onStart = _beginRange;
-    _board = BoardController<String, CalendarShownEntry<T>>(
+    _board = BoardController<GridKey, GridShape<T>>(
       vsync: this,
       rows: _rowsConfig(),
       columns: _columnsConfig(),
-      keyOf: (entry) {
-        return entry.id;
-      },
+      keyOf: _keyOf,
       // The first sync disables it and schedules the theme's.
       animationStyle: BoardAnimationStyle.disabled,
     );
@@ -1359,9 +1460,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     super.dispose();
   }
 
+  /// The board key of [shape]: a piece's is its entry's id and its day's
+  /// offset from the entry's first day.
+  static GridKey _keyOf<T>(GridShape<T> shape) {
+    switch (shape) {
+      case GridPiece<T>(:final shown, :final day):
+        return GridKey.piece(shown.id, day - dayNumber(shown.entry.start));
+    }
+  }
+
   /// The slots of the hours, [_slotHeight] each, under the frozen day
   /// header where the grid shows one. Above the slots a row of
-  /// [_labelRoom], or the frozen row counting the items before the hours
+  /// [_labelRoom], or the frozen row counting the entries before the hours
   /// where [_notices] has one, and below them a row of [_labelRoom] or the
   /// frozen row counting those after.
   BoardAxisConfig _rowsConfig() {
@@ -1407,23 +1517,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _headerExtent + (_notices.above ? _noticeHeight : 0.0);
   }
 
-  /// The row counting the items before the hours, or null where [_notices]
-  /// has none.
+  /// The row counting the entries before the hours, or null where
+  /// [_notices] has none.
   int? get _rowAbove {
     return _notices.above ? _tracks.firstSlotRow - 1 : null;
   }
 
-  /// The row counting the items after the hours, or null where [_notices]
-  /// has none.
+  /// The row counting the entries after the hours, or null where
+  /// [_notices] has none.
   int? get _rowBelow {
     return _notices.below ? _tracks.lastSlotRow + 1 : null;
   }
 
   /// Column 0 is the frozen hour gutter; columns 1 onward are the days
   /// [_tracks] shows. The `laneExtent` makes the day axis the
-  /// lane axis, so items sharing a day's time sit side by side. No two
-  /// stored items do, but a failed move can return an item under another
-  /// item's pending move until the store refuses that one.
+  /// lane axis, so pieces sharing a day's time sit side by side. No two
+  /// stored entries do, but a failed move can return an entry under
+  /// another entry's pending move until the store refuses that one.
   BoardAxisConfig _columnsConfig() {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
@@ -1583,7 +1693,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Follows the store. A notify that moves it off the range it showed
   /// for this grid clears the selection: the grid's owner, which moved it,
-  /// builds the grid on the days of its new range next.
+  /// builds the grid on the days of its new range next. A create range in
+  /// flight reads the entries it is held by again.
   void _handleStore() {
     final showedRange = _showsRange;
     _noteRange();
@@ -1591,6 +1702,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _selectedBlock.value = null;
     }
     _sync();
+    _range?.readConflicts();
     setState(() {});
   }
 
@@ -1648,12 +1760,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _rangeRead;
   }
 
-  /// Sets the board's items to the days' shown items when the days are
-  /// ready, and to none otherwise, counts the shown items with no block,
-  /// and lays out the rows counting those outside the hours, before the
-  /// items, so they fit the lattice they land on. A sync animates
-  /// only when [animate] holds, its days are ready, the last sync found its
-  /// own days ready and the rows stay as they were; any other runs under
+  /// Splits the days' shown entries when the days are ready, and none
+  /// otherwise ([_layOutEntries]), lays out the rows counting those
+  /// outside the hours before the pieces, so they fit the lattice they land
+  /// on, and places the split ([_placeLayout]). A sync animates only when
+  /// [animate] holds, its days are ready, the last sync found its own days
+  /// ready and the rows stay as they were; any other runs under
   /// [BoardAnimationStyle.disabled], and so does every sync until a frame
   /// callback restores the styles' animation. New days reach this grid
   /// through [didUpdateWidget], whose sync does not animate, and a sync
@@ -1664,30 +1776,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final shown = ready
         ? widget.store.entriesBetween(widget.firstDay, _lastDay)
         : <CalendarShownEntry<T>>[];
-    final hidden = _hiddenOf(shown);
+    final layout = _layOutEntries(shown);
+    _layout = layout;
+    final hidden = layout.hidden;
     final relaid = _layOutNotices((
       above: hidden.rowAbove,
       below: hidden.rowBelow,
     ));
-    final placements = <BoardPlacement<CalendarShownEntry<T>>>[];
-    for (final entry in shown) {
-      final span = gridSpanOf(entry.entry.time, _tracks);
-      if (span != null) {
-        placements.add(BoardPlacement<CalendarShownEntry<T>>(entry, span));
-      }
-    }
-    final animated = animate && ready && _syncedReady && !relaid;
-    if (!animated) {
-      _board.animationStyle = BoardAnimationStyle.disabled;
-    }
-    _board.setItems(placements);
-    if (!animated) {
-      _scheduleStyleRestore();
-    }
+    _placeLayout(disable: !(animate && ready && _syncedReady && !relaid));
     final selected = _selectedBlock.value;
     if (selected != null &&
-        !placements.any((placement) {
-          return placement.item.id == selected;
+        !layout.pieces.any((piece) {
+          return piece.shown.id == selected;
         })) {
       _selectedBlock.value = null;
     }
@@ -1695,31 +1795,104 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _hiddenCount.value = hidden;
   }
 
-  /// The items of [shown] that [_tracks] has no block for, counted.
-  _Hidden _hiddenOf(List<CalendarShownEntry<T>> shown) {
-    final above = List<int>.filled(_tracks.columnCount, 0);
-    final below = List<int>.filled(_tracks.columnCount, 0);
+  /// The split of [shown] on [_tracks]: for each timed entry, and in this
+  /// grid each all-day one too, its piece on each shown day it covers
+  /// ([pieceOn]) that has a minute inside the hours, walking only the
+  /// columns from its first day's to its last day's, so it yields at most
+  /// one piece per shown day; and the entries with no block, counted: on
+  /// each day column the pieces wholly before its hours and those wholly
+  /// after them, and the entries on no day it has a column for.
+  _GridLayout<T> _layOutEntries(List<CalendarShownEntry<T>> shown) {
+    final tracks = _tracks;
+    final hours = tracks.hours;
+    final pieces = <GridPiece<T>>[];
+    final above = List<int>.filled(tracks.columnCount, 0);
+    final below = List<int>.filled(tracks.columnCount, 0);
     var offDays = 0;
     for (final entry in shown) {
-      final shape = entry.entry.time;
-      if (gridSpanOf(shape, _tracks) != null) {
-        continue;
-      }
-      final first = _tracks.firstColumnFrom(shape.firstDay);
-      final last = _tracks.lastColumnUpTo(shape.firstDay + shape.dayCount - 1);
+      final start = entry.entry.start;
+      final end = entry.entry.end;
+      final firstDay = dayNumber(start);
+      final lastDay = lastDayNumberOf(start, end);
+      final first = tracks.firstColumnFrom(firstDay);
+      final last = tracks.lastColumnUpTo(lastDay);
       if (last < first) {
         offDays++;
         continue;
       }
-      // On a shown day, so wholly outside the hours, on each of its days
-      // alike: an item's minutes are the same on each, as timesOverlap
-      // reads them.
-      final counts = shape.start < _tracks.hours.start ? above : below;
+      final span = wallSpanOf(start, end);
       for (var column = first; column <= last; column++) {
-        counts[column - 1]++;
+        final day = tracks.dayAt(column);
+        final piece = pieceOn(span, day);
+        if (piece == null) {
+          continue;
+        }
+        if (piece.end <= hours.start) {
+          above[column - 1]++;
+        } else if (piece.start >= hours.end) {
+          below[column - 1]++;
+        } else {
+          pieces.add(
+            GridPiece<T>(
+              shown: entry,
+              day: day,
+              start: piece.start,
+              end: piece.end,
+              first: day == firstDay,
+              last: day == lastDay,
+            ),
+          );
+        }
       }
     }
-    return _Hidden(_tracks, above, below, offDays);
+    return (pieces: pieces, hidden: _Hidden(tracks, above, below, offDays));
+  }
+
+  /// Turns the kept split into the board's items on the current tracks,
+  /// leaving out, while [_lifted] names an entry the split still shows
+  /// with the times it was lifted with, that entry's pieces other than the
+  /// dragged one. Under [BoardAnimationStyle.disabled] where [disable]
+  /// holds and where the placements drop the key a drag holds, so that key
+  /// leaves with no exit and what replaces it shows at once, until a frame
+  /// callback restores the styles' animation; otherwise under the board's
+  /// style as it stands, so a drop's glide runs on.
+  void _placeLayout({required bool disable}) {
+    final lifted = _lifted;
+    final dragged = _drag?.key;
+    final placements = <BoardPlacement<GridShape<T>>>[];
+    var keepsDragged = false;
+    for (final piece in _layout.pieces) {
+      final column = _tracks.columnOf(piece.day);
+      if (column == null) {
+        continue;
+      }
+      final span = pieceSpanOf(_tracks, column, piece.start, piece.end);
+      if (span == null) {
+        continue;
+      }
+      final entry = piece.shown.entry;
+      if (lifted != null &&
+          piece.shown.id == lifted.id &&
+          entry.start == lifted.start &&
+          entry.end == lifted.end &&
+          _keyOf(piece) != dragged) {
+        continue;
+      }
+      if (dragged != null && !keepsDragged && _keyOf(piece) == dragged) {
+        keepsDragged = true;
+      }
+      placements.add(BoardPlacement<GridShape<T>>(piece, span));
+    }
+    final dropsDragged =
+        dragged != null && !keepsDragged && _board.contains(dragged);
+    final disabled = disable || dropsDragged;
+    if (disabled) {
+      _board.animationStyle = BoardAnimationStyle.disabled;
+    }
+    _board.setItems(placements);
+    if (disabled) {
+      _scheduleStyleRestore();
+    }
   }
 
   /// Lays out the rows [notices] asks for, above and below the slots, in
@@ -1763,122 +1936,266 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     });
   }
 
-  /// Whether the board may lift [id]: not while a write on it runs, and
-  /// not when it reaches past the hours, whose cut-off minutes a drop
-  /// would lose.
-  bool _canDrag(String id) {
-    if (widget.store.isPending(id)) {
+  /// Whether the board may lift [key]: not while a write on its entry
+  /// runs, and not when the hours do not hold the entry's start or end
+  /// ([DayHours.holdsTimes]), as for an entry an hours change left outside
+  /// them, whose cut-off minutes a drop would lose.
+  bool _canDrag(GridKey key) {
+    if (widget.store.isPending(key.id)) {
       return false;
     }
-    final entry = _board.itemOf(id);
-    return entry != null && !_reachesPastHours(entry.entry);
+    final shape = _board.itemOf(key);
+    if (shape == null) {
+      return false;
+    }
+    final entry = shape.shown.entry;
+    return _tracks.hours.holdsTimes(entry.start, entry.end);
   }
 
-  /// Whether [item] starts before the grid's hours or ends after them.
-  bool _reachesPastHours(CalendarEntry<T> item) {
-    final hours = _tracks.hours;
-    return item.startMinute < hours.start || item.endMinute > hours.end;
-  }
-
-  bool _canDropAt(String id, BoardSpan span) {
+  bool _canDropAt(GridKey key, BoardSpan span) {
+    // A piece stays inside its day's rows.
     if (span.rowStart < _tracks.firstSlotRow ||
-        span.rowStart + span.rowSpan > _tracks.lastSlotRow + 1 ||
+        span.endTrackOn(Axis.vertical) >
+            _tracks.lastSlotRow + 1 + precisionErrorTolerance ||
         span.colStart < 1) {
       return false;
     }
-    final from = _board.spanOf(id);
-    final entry = _board.itemOf(id);
-    if (from == null || entry == null) {
+    final from = _board.spanOf(key);
+    final shape = _board.itemOf(key);
+    if (from == null || shape is! GridPiece<T>) {
       return false;
     }
     // The span the drag started from: an unchanged drop is admitted even
-    // where the item already shares its time.
+    // where the entry already shares its time.
     if (from == span) {
       return true;
     }
-    final time = entry.entry.time;
-    final converted = shapeFromSpan(time, from, span, _tracks);
-    final maxDays = widget.maxDayCount;
-    if (converted.dayCount < 1 ||
-        (maxDays != null && converted.dayCount > maxDays) ||
-        !_lock.value.admits(time, converted)) {
+    final entry = shape.shown.entry;
+    final times = _timesOf(shape, entry, from, span, move: _isMove(key));
+    if (times == null ||
+        !_lock.value.admits(entry.start, entry.end, times.start, times.end) ||
+        !_tracks.hours.holdsTimes(times.start, times.end)) {
       return false;
     }
-    // The converted shape's own span, not the candidate's: an item clipped
-    // at the grid's first day shows more days once moved right.
-    final shownSpan = gridSpanOf(converted, _tracks);
-    if (shownSpan == null) {
-      return false;
-    }
-    final others = _board.itemsIn(
-      shownSpan.rowStart,
-      shownSpan.rowStart + shownSpan.rowSpan,
-      shownSpan.colStart,
-      shownSpan.colStart + shownSpan.colSpan,
-    );
-    for (final other in others) {
-      if (other == id) {
-        continue;
-      }
-      final occupant = _board.itemOf(other);
-      if (occupant != null && timesOverlap(converted, occupant.entry.time)) {
-        return false;
-      }
-    }
-    return true;
+    return !_meetsOtherEntry(key.id, times.start, times.end);
   }
 
-  /// A drop the board reports, a move or a resize. Sends nothing for a
-  /// locked item, which the board's semantics move action can report when
-  /// the item locked after its host last built, for one reaching past the
-  /// hours, and when the item would not change.
-  void _commit(String id, BoardSpan to) {
-    if (widget.store.isPending(id)) {
+  /// Whether the running drag of [key], or with none a semantics action's
+  /// report, moves it rather than resizing it.
+  bool _isMove(GridKey key) {
+    final drag = _drag;
+    if (drag == null || drag.key != key) {
+      return true;
+    }
+    return drag.kind == BoardDragKind.move;
+  }
+
+  /// Whether a range from [start] to [end] shares time with a board piece
+  /// of an entry other than [id] in the shown columns it covers. An
+  /// all-day range shares time with none ([entriesShareTime]).
+  bool _meetsOtherEntry(String id, DateTime start, DateTime end) {
+    if (isDayStart(start) && isDayStart(end)) {
+      return false;
+    }
+    final first = _tracks.firstColumnFrom(dayNumber(start));
+    final last = _tracks.lastColumnUpTo(lastDayNumberOf(start, end));
+    final span = wallSpanOf(start, end);
+    for (var column = first; column <= last; column++) {
+      final piece = pieceOn(span, _tracks.dayAt(column));
+      if (piece == null) {
+        continue;
+      }
+      final shown = pieceSpanOf(_tracks, column, piece.start, piece.end);
+      if (shown == null) {
+        continue;
+      }
+      final others = _board.itemsIn(
+        shown.rowStart,
+        (shown.endTrackOn(Axis.vertical) - precisionErrorTolerance).ceil(),
+        column,
+        column + 1,
+      );
+      for (final other in others) {
+        if (other.id == id) {
+          continue;
+        }
+        final occupant = _board.itemOf(other);
+        if (occupant != null &&
+            rangeSharesTime(start, end, occupant.shown.entry)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// The start and end a drag of [piece] of [entry] from [from] to [to],
+  /// both track space, gives the entry, or null where the drag lands on a
+  /// time the clock skips or leaves the end not after the start.
+  ///
+  /// A [move] lands the piece's shown top, its anchor, on the slot [to]
+  /// starts on: the anchor is the entry's start for a piece holding it and
+  /// not cut by the hours, and otherwise the time the piece's top shows,
+  /// its day's start or the hours' start. The landing is the time of
+  /// [to]'s start on its column's day, the occurrence of the anchor's kept
+  /// on a day whose clock repeats a stretch ([timeAtWallMinute]), and the
+  /// entry's start and end each move by the elapsed time from the anchor
+  /// to the landing, so the entry keeps its length. A resize sets the end
+  /// whose edge [to] moved off [from]'s to the time of that edge on the
+  /// piece's day, the occurrence of the old end's kept likewise.
+  ({DateTime start, DateTime end})? _timesOf(
+    GridPiece<T> piece,
+    CalendarEntry<T> entry,
+    BoardSpan from,
+    BoardSpan to, {
+    required bool move,
+  }) {
+    final hours = _tracks.hours;
+    int wallAt(int column, double track) {
+      return _tracks.dayAt(column) * minutesPerDay +
+          hours.start +
+          ((track - _tracks.firstSlotRow) * minutesPerSlot).round();
+    }
+
+    if (move) {
+      final cut = piece.start < hours.start;
+      final anchor = piece.first && !cut
+          ? entry.start
+          : timeAtWallMinute(
+              piece.day * minutesPerDay + math.max(piece.start, hours.start),
+            );
+      if (anchor == null) {
+        return null;
+      }
+      final landing = timeAtWallMinute(
+        wallAt(to.colStart, to.startTrackOn(Axis.vertical)),
+        from: anchor,
+      );
+      if (landing == null) {
+        return null;
+      }
+      final shift = landing.difference(anchor);
+      return (start: entry.start.add(shift), end: entry.end.add(shift));
+    }
+    var start = entry.start;
+    var end = entry.end;
+    final column = from.colStart;
+    final top = to.startTrackOn(Axis.vertical);
+    if ((top - from.startTrackOn(Axis.vertical)).abs() >
+        precisionErrorTolerance) {
+      final edge = timeAtWallMinute(wallAt(column, top), from: entry.start);
+      if (edge == null) {
+        return null;
+      }
+      start = edge;
+    }
+    final bottom = to.endTrackOn(Axis.vertical);
+    if ((bottom - from.endTrackOn(Axis.vertical)).abs() >
+        precisionErrorTolerance) {
+      final edge = timeAtWallMinute(wallAt(column, bottom), from: entry.end);
+      if (edge == null) {
+        return null;
+      }
+      end = edge;
+    }
+    if (!end.isAfter(start)) {
+      return null;
+    }
+    return (start: start, end: end);
+  }
+
+  /// A move the board reports, from a drag or a semantics action.
+  void _commitMove(GridKey key, BoardSpan to) {
+    _commit(key, to, move: true);
+  }
+
+  /// A resize the board reports.
+  void _commitResize(GridKey key, BoardSpan to) {
+    _commit(key, to, move: false);
+  }
+
+  /// Writes the drop of [key] at [to]. Sends nothing for a pending entry,
+  /// for one whose start or end the hours do not hold, for a drop
+  /// [_timesOf] has no times for, and when the entry would not change; a
+  /// locked entry the board's semantics move action can report, when it
+  /// locked after its host last built, the store's own lock refuses.
+  void _commit(GridKey key, BoardSpan to, {required bool move}) {
+    if (widget.store.isPending(key.id)) {
       return;
     }
-    final from = _board.spanOf(id);
-    final stored = widget.store.storedEntry(id);
-    if (from == null || stored == null || _reachesPastHours(stored)) {
+    final from = _board.spanOf(key);
+    final shape = _board.itemOf(key);
+    final stored = widget.store.storedEntry(key.id);
+    if (from == null ||
+        shape is! GridPiece<T> ||
+        stored == null ||
+        !_tracks.hours.holdsTimes(stored.start, stored.end)) {
       return;
     }
-    final requested = itemFromSpan(stored, from, to, _tracks);
+    final times = _timesOf(shape, stored, from, to, move: move);
+    if (times == null) {
+      return;
+    }
+    final requested = stored.copyWith(start: times.start, end: times.end);
     if (requested == stored) {
       return;
     }
     widget.store.requestMove(requested);
   }
 
-  void _handleDragStart(String id, BoardDragKind kind) {
+  void _handleDragStart(GridKey key, BoardDragKind kind) {
     if (!mounted) {
       return;
     }
     if (kind == BoardDragKind.move) {
-      _selectedBlock.value = id;
+      _selectedBlock.value = key.id;
     }
     setState(() {
-      _drag = (id: id, kind: kind, resolved: false, target: null);
+      _drag = (key: key, kind: kind, resolved: false, target: null);
     });
+    final shape = _board.itemOf(key);
+    if (kind != BoardDragKind.move || shape == null) {
+      return;
+    }
+    final id = key.id;
+    final pieced = _layout.pieces.any((piece) {
+      return piece.shown.id == id && _keyOf(piece) != key;
+    });
+    if (!pieced) {
+      return;
+    }
+    // Off the board, the entry's other pieces are no occupant the
+    // make-room preview or the drop fit reads, and they leave at once.
+    final entry = shape.shown.entry;
+    _lifted = (id: id, start: entry.start, end: entry.end);
+    _placeLayout(disable: true);
   }
 
-  void _handleDragTarget(String id, BoardDropTarget? target) {
+  void _handleDragTarget(GridKey key, BoardDropTarget? target) {
     final drag = _drag;
-    if (!mounted || drag == null || drag.id != id) {
+    if (!mounted || drag == null || drag.key != key) {
       return;
     }
     setState(() {
-      _drag = (id: id, kind: drag.kind, resolved: true, target: target?.span);
+      _drag = (key: key, kind: drag.kind, resolved: true, target: target?.span);
     });
   }
 
   /// Delivered after the drop's report, and possibly after the board has
-  /// left the tree.
-  void _handleDragEnd(String id, bool committed) {
+  /// left the tree. Puts back a lifted entry's pieces the drop's write
+  /// did not, under the board's style as it stands, so a drop's glide runs
+  /// on and they enter as added blocks do.
+  void _handleDragEnd(GridKey key, bool committed) {
     if (!mounted || _drag == null) {
       return;
     }
     setState(() {
       _drag = null;
     });
+    if (_lifted != null) {
+      _lifted = null;
+      _placeLayout(disable: false);
+    }
   }
 
   /// The block a move carries, [proxy], over the theme's
@@ -1886,7 +2203,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// the theme's motion. The board calls this on every pointer move with a
   /// tree of the same shape, so the lift runs once a drag, from the frame
   /// the block lifts.
-  Widget _buildLiftedBlock(BuildContext context, String id, Widget proxy) {
+  Widget _buildLiftedBlock(BuildContext context, GridKey key, Widget proxy) {
     final theme = _styles.theme;
     final shadows = theme.liftedBlockShadows;
     return TweenAnimationBuilder<double>(
@@ -1911,34 +2228,50 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// What the landing label says for [_drag]: the day and times a release
+  /// The times a release of [_drag] would give its entry: null with no
+  /// drag, before its first target, and with no target.
+  ({DateTime start, DateTime end})? _landingTimes() {
+    final drag = _drag;
+    final target = drag?.target;
+    if (drag == null || !drag.resolved || target == null) {
+      return null;
+    }
+    final from = _board.spanOf(drag.key);
+    final shape = _board.itemOf(drag.key);
+    if (from == null || shape is! GridPiece<T>) {
+      return null;
+    }
+    return _timesOf(
+      shape,
+      shape.shown.entry,
+      from,
+      target,
+      move: drag.kind == BoardDragKind.move,
+    );
+  }
+
+  /// What the landing label says for [_drag]: the days and times a release
   /// would give, or [noLandingLabel] for a move with no target. Null with
   /// no drag, before its first target, and for a resize with no target.
-  String? _landingText() {
+  String? _landingText(({DateTime start, DateTime end})? times) {
     final drag = _drag;
     if (drag == null || !drag.resolved) {
       return null;
     }
-    final target = drag.target;
-    if (target == null) {
+    if (drag.target == null) {
       return drag.kind == BoardDragKind.move ? noLandingLabel : null;
     }
-    final from = _board.spanOf(drag.id);
-    final entry = _board.itemOf(drag.id);
-    if (from == null || entry == null) {
+    if (times == null) {
       return null;
     }
-    return landingLabel(
-      shapeFromSpan(entry.entry.time, from, target, _tracks),
-      widget.today,
-    );
+    return landingLabel(times.start, times.end, widget.today);
   }
 
   /// Where the line marking [now] sits: null when no column shows its day
   /// or the hours do not hold its minute.
   _NowMark? _nowMarkOf(DateTime now) {
     final column = _tracks.columnOf(dayNumber(now));
-    final minute = now.hour * 60 + now.minute;
+    final minute = minuteOfDay(now);
     final hours = _tracks.hours;
     if (column == null || minute < hours.start || minute > hours.end) {
       return null;
@@ -1961,7 +2294,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     widget.onSelectDay(day);
   }
 
-  RenderBoardViewport<String>? _findViewport() {
+  RenderBoardViewport<GridKey>? _findViewport() {
     final cached = _viewport;
     if (cached != null && cached.attached) {
       return cached;
@@ -1971,12 +2304,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (root == null) {
       return null;
     }
-    RenderBoardViewport<String>? found;
+    RenderBoardViewport<GridKey>? found;
     void visit(RenderObject node) {
       if (found != null) {
         return;
       }
-      if (node is RenderBoardViewport<String>) {
+      if (node is RenderBoardViewport<GridKey>) {
         found = node;
         return;
       }
@@ -1991,7 +2324,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The body cell painting under [local], a point in the viewport's paint
   /// space, or null over the header, the gutter or past the lattice.
   ({int row, int col})? _bodyCellAtLocal(
-    RenderBoardViewport<String> viewport,
+    RenderBoardViewport<GridKey> viewport,
     Offset local,
   ) {
     final cell = viewport.cellAt(local);
@@ -2014,9 +2347,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Whether a press at [global] may create: no range runs, it lies over a
-  /// body cell whose slot the history lock leaves free, no item paints
-  /// under it, and the grid is neither scrolling nor just stopped by this
-  /// press.
+  /// body cell whose slot is a time the clock reads and the history lock
+  /// leaves free, no block paints under it, no shown entry shares time
+  /// with its slot, as one from 09:10 does with the 09:00 slot whose free
+  /// part the press lies in, and the grid is neither scrolling nor just
+  /// stopped by this press.
   bool _admits(Offset global) {
     final viewport = _findViewport();
     if (viewport == null || _scrollJustStopped || _range != null) {
@@ -2034,8 +2369,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return false;
     }
     final slot = createRangeAt(_tracks, cell);
-    return _lock.value.admitsStart(slot.day, slot.startMinute) &&
-        viewport.itemAt(local) == null;
+    return slot != null &&
+        _lock.value.admitsStart(slot.start) &&
+        viewport.itemAt(local) == null &&
+        !_slotMeetsEntry(cell, slot);
+  }
+
+  /// Whether a board piece in [cell]'s row and column shares time with
+  /// [slot], the cell's slot.
+  bool _slotMeetsEntry(({int row, int col}) cell, CreateRange slot) {
+    final keys = _board.itemsIn(cell.row, cell.row + 1, cell.col, cell.col + 1);
+    for (final key in keys) {
+      final shape = _board.itemOf(key);
+      if (shape != null &&
+          rangeSharesTime(slot.start, slot.end, shape.shown.entry)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   bool _handleScrollNotification(ScrollNotification notification) {
@@ -2061,7 +2412,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       if (under == null && _startBeside(event)) {
         return;
       }
-      if (under != selected) {
+      if (under?.id != selected) {
         _pressesOff[event.pointer] = (at: event.position, id: selected);
       }
     }
@@ -2073,8 +2424,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _delayedRange.addPointer(event);
   }
 
-  /// Clears the selection for a tap off the selected block, which a press
-  /// lifting another block, and so selecting it, is not.
+  /// Clears the selection for a tap off the selected entry's blocks, which
+  /// a press lifting another block, and so selecting it, is not.
   void _handlePointerUp(PointerUpEvent event) {
     _pinch.handleEvent(event);
     final press = _pressesOff.remove(event.pointer);
@@ -2097,32 +2448,30 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _pressesOff.remove(event.pointer);
   }
 
-  /// Starts a resize of the selected block for a press over a body cell,
-  /// and over no block, on a strip outside the selected block beside one
-  /// of its edges, which the board, hit-testing a block only within its
-  /// bounds, gives no handle; reports whether it did.
+  /// Starts a resize of a selected block for a press over a body cell,
+  /// and over no block, on a strip outside a selected block holding a
+  /// handle beside one of its edges, which the board, hit-testing a block
+  /// only within its bounds, gives no handle; reports whether it did.
   bool _startBeside(PointerDownEvent event) {
-    final handles = _handles.current;
-    return handles != null &&
+    return !_handles.isEmpty &&
         _bodyCellAt(event.position) != null &&
-        handles.startOutside(event);
+        _handles.startOutside(event);
   }
 
   /// Shows the resize cursor over the strips [_startBeside] starts from.
   void _handleHover(PointerHoverEvent event) {
-    final handles = _handles.current;
     var cursor = MouseCursor.defer;
-    if (handles != null &&
+    if (!_handles.isEmpty &&
         _selectedBlock.value != null &&
         _itemAt(event.position) == null &&
         _bodyCellAt(event.position) != null) {
-      cursor = handles.cursorOutside(event.position);
+      cursor = _handles.cursorOutside(event.position);
     }
     _besideCursor.value = cursor;
   }
 
-  /// The id of the item whose block lies under [global], or null.
-  String? _itemAt(Offset global) {
+  /// The key of the block that lies under [global], or null.
+  GridKey? _itemAt(Offset global) {
     final viewport = _findViewport();
     if (viewport == null) {
       return null;
@@ -2135,24 +2484,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (cell == null) {
       return;
     }
-    _create(cell, null, createRangeAt(_tracks, cell));
+    final range = createRangeAt(_tracks, cell);
+    if (range == null) {
+      return;
+    }
+    _create(cell, cell, range);
   }
 
-  /// Reports [range] through [TimedGrid.onCreate], marking the slots from
-  /// [anchor] to [focus], or to the end of [range] in [anchor]'s column
-  /// where [focus] is null, until the create flow closes.
+  /// Reports [range] through [TimedGrid.onCreate], marking the range from
+  /// the slot of [anchor] to that of [focus] until the create flow
+  /// closes.
   void _create(
     ({int row, int col}) anchor,
-    ({int row, int col})? focus,
+    ({int row, int col}) focus,
     CreateRange range,
   ) {
     final create = ++_creates;
     setState(() {
-      _creating = (
-        anchor: anchor,
-        focus:
-            focus ?? (row: _tracks.rowOf(range.endMinute) - 1, col: anchor.col),
-      );
+      _creating = (anchor: anchor, focus: focus);
     });
     widget.onCreate(range).whenComplete(() {
       if (mounted && create == _creates) {
@@ -2185,7 +2534,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (!mounted || !identical(_range, range)) {
       return;
     }
-    final reached = _reach(range.anchor, focus);
+    final reached = _reach(range, focus);
     if (reached == range.focus) {
       return;
     }
@@ -2194,60 +2543,164 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     });
   }
 
-  /// The focus a range from [anchor] reaches toward [focus]: the rows of
-  /// [anchor]'s column toward [focus]'s row, then the columns toward
-  /// [focus]'s column over those rows, each up to the last before one
-  /// [_admitsRange] refuses, so the range stops at an item's edge, or at
-  /// the history lock's boundary, however far past it [focus] lies.
-  ({int row, int col}) _reach(
-    ({int row, int col}) anchor,
-    ({int row, int col}) focus,
-  ) {
-    final items = widget.store.entriesBetween(
-      _tracks.dateAt(math.min(anchor.col, focus.col)),
-      _tracks.dateAt(math.max(anchor.col, focus.col)),
-    );
-    var row = anchor.row;
-    final rowStep = (focus.row - anchor.row).sign;
-    while (row != focus.row &&
-        _admitsRange(anchor, (row: row + rowStep, col: anchor.col), items)) {
-      row += rowStep;
+  /// The focus [range] reaches toward [focus], in wall-minute order of the
+  /// cells' slots: held at the last slot that does not pass the nearest
+  /// entry [range] read on either side of its anchor, at the history
+  /// lock's boundary for its start, and at [TimedGrid.maxDayCount]'s days
+  /// ([_heldToLimit]), however far past them [focus] lies. Constant work
+  /// per call: the entries were read when the range began.
+  ({int row, int col}) _reach(_RangeDrag<T> range, ({int row, int col}) focus) {
+    final anchor = range.anchor;
+    final anchorWall = slotWallMinuteOf(_tracks, anchor);
+    final focusWall = slotWallMinuteOf(_tracks, focus);
+    if (focusWall >= anchorWall) {
+      final limit = range.nextStart;
+      if (limit != null && focusWall + minutesPerSlot > limit) {
+        focus = _lastCellEndingBy(limit, anchor);
+      }
+      final end = timeAtWallMinute(
+        slotWallMinuteOf(_tracks, focus) + minutesPerSlot,
+      );
+      final start = timeAtWallMinute(anchorWall);
+      if (start != null && end != null && !_coversAtMost(start, end)) {
+        final held = _heldToLimit(start, end, atEnd: true);
+        if (held != null) {
+          focus = _lastCellEndingBy(wallMinuteOf(held.end), anchor);
+        }
+      }
+      return focus;
     }
-    var col = anchor.col;
-    final colStep = (focus.col - anchor.col).sign;
-    while (col != focus.col &&
-        _admitsRange(anchor, (row: row, col: col + colStep), items)) {
-      col += colStep;
+    var earliest = range.previousEnd;
+    final boundary = _lock.value.boundary;
+    if (boundary != null) {
+      final wall = wallMinuteOf(boundary);
+      earliest = earliest == null ? wall : math.max(earliest, wall);
     }
-    return (row: row, col: col);
-  }
-
-  /// Whether the range from [anchor] to [focus] starts where the history
-  /// lock admits a start and shares no time, under [timesOverlap], with
-  /// any of [items].
-  bool _admitsRange(
-    ({int row, int col}) anchor,
-    ({int row, int col}) focus,
-    List<CalendarShownEntry<T>> items,
-  ) {
-    final range = createRangeOver(_tracks, anchor, focus);
-    if (!_lock.value.admitsStart(range.day, range.startMinute)) {
-      return false;
+    if (earliest != null && focusWall < earliest) {
+      focus = _firstCellStartingFrom(earliest, anchor);
     }
-    final CalendarEntryTime time = (
-      firstDay: dayNumber(range.day),
-      dayCount: range.dayCount,
-      start: range.startMinute,
-      end: range.endMinute,
-    );
-    for (final item in items) {
-      if (timesOverlap(time, item.entry.time)) {
-        return false;
+    final start = timeAtWallMinute(slotWallMinuteOf(_tracks, focus));
+    final end = timeAtWallMinute(anchorWall + minutesPerSlot);
+    if (start != null && end != null && !_coversAtMost(start, end)) {
+      final held = _heldToLimit(start, end, atEnd: false);
+      if (held != null) {
+        focus = _firstCellStartingFrom(wallMinuteOf(held.start), anchor);
       }
     }
-    return true;
+    return focus;
   }
 
+  /// The latest body cell, in wall-minute order, whose slot ends at the
+  /// wall minute [wall] or before it, and [anchor] where that is not after
+  /// [anchor].
+  ({int row, int col}) _lastCellEndingBy(
+    int wall,
+    ({int row, int col}) anchor,
+  ) {
+    final tracks = _tracks;
+    final hours = tracks.hours;
+    final into = wall % minutesPerDay;
+    final day = (wall - into) ~/ minutesPerDay;
+    var column = tracks.lastColumnUpTo(day);
+    ({int row, int col})? cell;
+    if (column >= 1) {
+      if (tracks.dayAt(column) == day && into < hours.end) {
+        final slots = (into - hours.start) ~/ minutesPerSlot;
+        if (into >= hours.start && slots >= 1) {
+          cell = (row: tracks.firstSlotRow + slots - 1, col: column);
+        } else {
+          column--;
+        }
+      }
+      if (cell == null && column >= 1) {
+        cell = (row: tracks.lastSlotRow, col: column);
+      }
+    }
+    if (cell == null ||
+        slotWallMinuteOf(tracks, cell) <= slotWallMinuteOf(tracks, anchor)) {
+      return anchor;
+    }
+    return cell;
+  }
+
+  /// The earliest body cell, in wall-minute order, whose slot starts at the
+  /// wall minute [wall] or after it, and [anchor] where that is not before
+  /// [anchor].
+  ({int row, int col}) _firstCellStartingFrom(
+    int wall,
+    ({int row, int col}) anchor,
+  ) {
+    final tracks = _tracks;
+    final hours = tracks.hours;
+    final into = wall % minutesPerDay;
+    final day = (wall - into) ~/ minutesPerDay;
+    var column = tracks.firstColumnFrom(day);
+    ({int row, int col})? cell;
+    if (column <= tracks.columnCount) {
+      if (tracks.dayAt(column) == day && into > hours.start) {
+        final slots =
+            (into - hours.start + minutesPerSlot - 1) ~/ minutesPerSlot;
+        if (slots < tracks.rowCount) {
+          cell = (row: tracks.firstSlotRow + slots, col: column);
+        } else {
+          column++;
+        }
+      }
+      if (cell == null && column <= tracks.columnCount) {
+        cell = (row: tracks.firstSlotRow, col: column);
+      }
+    }
+    if (cell == null ||
+        slotWallMinuteOf(tracks, cell) >= slotWallMinuteOf(tracks, anchor)) {
+      return anchor;
+    }
+    return cell;
+  }
+
+  /// Whether the range from [start] to [end] covers at most
+  /// [TimedGrid.maxDayCount] days, counting each day it has any part of;
+  /// every range does with no limit.
+  bool _coversAtMost(DateTime start, DateTime end) {
+    final limit = widget.maxDayCount;
+    return limit == null ||
+        lastDayNumberOf(start, end) - dayNumber(start) + 1 <= limit;
+  }
+
+  /// The range from [start] to [end] held at [TimedGrid.maxDayCount]'s
+  /// days: with [atEnd] its end moved, and otherwise its start. An all-day
+  /// range ends at the start of the day after the limit's last day, or
+  /// starts at the start of its first; any other ends at the hours' end on
+  /// the limit's last day, or starts at the hours' start on its first, so
+  /// a held slot range ends or starts on a slot the hours hold. Null where
+  /// that is a time the clock skips; the range itself with no limit.
+  ({DateTime start, DateTime end})? _heldToLimit(
+    DateTime start,
+    DateTime end, {
+    required bool atEnd,
+  }) {
+    final limit = widget.maxDayCount;
+    if (limit == null) {
+      return (start: start, end: end);
+    }
+    final hours = _tracks.hours;
+    final allDay = isDayStart(start) && isDayStart(end);
+    if (atEnd) {
+      final lastDay = dayNumber(start) + limit - 1;
+      final held = allDay
+          ? dateOfDayNumber(lastDay + 1)
+          : timeAtWallMinute(lastDay * minutesPerDay + hours.end);
+      return held == null ? null : (start: start, end: held);
+    }
+    final firstDay = lastDayNumberOf(start, end) - limit + 1;
+    final held = allDay
+        ? dateOfDayNumber(firstDay)
+        : timeAtWallMinute(firstDay * minutesPerDay + hours.start);
+    return held == null ? null : (start: held, end: end);
+  }
+
+  /// Reports the range [range] was let go at: its anchor's slot where its
+  /// focus never left it, and otherwise the range to its focus; nothing
+  /// where that range has an end the clock skips.
   void _endRange(_RangeDrag<T> range) {
     if (!mounted || !identical(_range, range)) {
       return;
@@ -2257,7 +2710,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         ? createRangeAt(_tracks, range.anchor)
         : createRangeOver(_tracks, range.anchor, range.focus);
     _clearRange(range);
-    _create(range.anchor, hold ? null : range.focus, created);
+    if (created == null) {
+      return;
+    }
+    _create(range.anchor, range.focus, created);
   }
 
   void _clearRange(_RangeDrag<T> range) {
@@ -2271,7 +2727,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   Widget? _buildCell(
     BuildContext context,
-    BoardCellView<String, CalendarShownEntry<T>> cell,
+    BoardCellView<GridKey, GridShape<T>> cell,
   ) {
     if (widget.showsDayHeader && cell.row == 0) {
       if (cell.col == 0) {
@@ -2330,18 +2786,32 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   Widget _buildItem(
     BuildContext context,
-    BoardItemView<String, CalendarShownEntry<T>> view,
+    BoardItemView<GridKey, GridShape<T>> view,
   ) {
-    final entry = view.item;
+    final shape = view.item;
+    switch (shape) {
+      case GridPiece<T>():
+        return _buildPiece(shape, view.span);
+    }
+  }
+
+  Widget _buildPiece(GridPiece<T> piece, BoardSpan span) {
+    final entry = piece.shown;
     final hours = _tracks.hours;
+    final cutAtStart = piece.start < hours.start;
+    final cutAtEnd = piece.end > hours.end;
     return _Block<T>(
-      key: blockKey(entry.id),
+      key: blockKey(entry.id, dateOfDayNumber(piece.day)),
       entry: entry,
       details: CalendarBlockDetails(
         detailed: _tracks.columnCount == 1,
-        tall: view.span.rowSpan >= 3,
-        cutAtStart: entry.entry.startMinute < hours.start,
-        cutAtEnd: entry.entry.endMinute > hours.end,
+        tall:
+            span.endTrackOn(Axis.vertical) - span.startTrackOn(Axis.vertical) >=
+            3.0 - precisionErrorTolerance,
+        cutAtStart: cutAtStart,
+        cutAtEnd: cutAtEnd,
+        continuesBefore: !piece.first,
+        continuesAfter: !piece.last,
       ),
       builder: _blockBuilder,
       selection: _selectedBlock,
@@ -2350,13 +2820,62 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _selectedBlock.value = entry.id;
       },
       handles: _handles,
-      resizesDays: _tracks.columnCount > 1,
+      startHandle: piece.first && !cutAtStart,
+      endHandle: piece.last && !cutAtEnd,
       onOpen: entry.pending
           ? null
           : () {
               widget.onOpenItem(entry.id);
             },
     );
+  }
+
+  /// The wall minutes from the start of the earlier of [anchor] and
+  /// [focus]'s slots to the end of the later one's.
+  ({int start, int end}) _wallSpanOfCells(
+    ({int row, int col}) anchor,
+    ({int row, int col}) focus,
+  ) {
+    final from = slotWallMinuteOf(_tracks, anchor);
+    final to = slotWallMinuteOf(_tracks, focus);
+    return (
+      start: math.min(from, to),
+      end: math.max(from, to) + minutesPerSlot,
+    );
+  }
+
+  /// The wall minutes ([wallMinuteOf]) next to [anchor]'s slot that a
+  /// create range from it may not pass: the earliest start after the
+  /// slot's start, and the latest end before its end, among the timed
+  /// entries the store shows on the grid's days; each null where there is
+  /// none.
+  ({int? next, int? previous}) _conflictsAround(({int row, int col}) anchor) {
+    final wall = slotWallMinuteOf(_tracks, anchor);
+    final start = timeAtWallMinute(wall);
+    final end = timeAtWallMinute(wall + minutesPerSlot);
+    int? next;
+    int? previous;
+    if (start == null || end == null) {
+      return (next: next, previous: previous);
+    }
+    for (final shown in widget.store.entriesBetween(
+      widget.firstDay,
+      _lastDay,
+    )) {
+      final entry = shown.entry;
+      if (entry.isAllDay) {
+        continue;
+      }
+      if (entry.start.isAfter(start)) {
+        final at = wallMinuteOf(entry.start);
+        next = next == null ? at : math.min(next, at);
+      }
+      if (entry.end.isBefore(end)) {
+        final at = wallMinuteOf(entry.end);
+        previous = previous == null ? at : math.max(previous, at);
+      }
+    }
+    return (next: next, previous: previous);
   }
 
   /// The cover's content: what the failure builder draws for the grid's
@@ -2410,7 +2929,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       widget.hourLabelFormat,
     );
     _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
-    final landingText = _landingText();
+    final landingTimes = _landingTimes();
+    final landingText = _landingText(landingTimes);
+    final rangeAnchor = range?.anchor ?? _creating?.anchor;
+    final rangeFocus = range?.focus ?? _creating?.focus;
     final listener = Listener(
       onPointerDown: _handlePointerDown,
       onPointerMove: _pinch.handleEvent,
@@ -2418,7 +2940,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       onPointerCancel: _handlePointerCancel,
       child: NotificationListener<ScrollNotification>(
         onNotification: _handleScrollNotification,
-        child: Board<String, CalendarShownEntry<T>>(
+        child: Board<GridKey, GridShape<T>>(
           key: _boardKey,
           controller: _board,
           cellBuilder: _cellBuilder,
@@ -2427,10 +2949,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             styles: styles,
             tracks: _tracks,
             today: widget.today,
-            rangeAnchor: range?.anchor ?? _creating?.anchor,
-            rangeFocus: range?.focus ?? _creating?.focus,
-            landing: drag != null && drag.kind == BoardDragKind.move
-                ? drag.target
+            range: rangeAnchor == null || rangeFocus == null
+                ? null
+                : _wallSpanOfCells(rangeAnchor, rangeFocus),
+            landing:
+                drag != null &&
+                    drag.kind == BoardDragKind.move &&
+                    landingTimes != null
+                ? wallSpanOf(landingTimes.start, landingTimes.end)
                 : null,
           ),
           foreground: _GridForegroundPainter(
@@ -2494,7 +3020,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 /// reports the move that accepted it as a delta from the press, with the
 /// press's own position. The range listens to both scroll positions for
 /// its length, so the focus stays the cell under the pointer while content
-/// scrolls beneath it.
+/// scrolls beneath it. It reads the entries that hold it once, when it
+/// begins, and again on a store notify ([readConflicts]).
 class _RangeDrag<T> extends Drag {
   _RangeDrag(this._grid, this._viewport, this.anchor, this._point)
     : focus = anchor,
@@ -2502,19 +3029,36 @@ class _RangeDrag<T> extends Drag {
       _horizontal = _viewport.horizontalPosition {
     _vertical?.addListener(_refocus);
     _horizontal?.addListener(_refocus);
+    readConflicts();
   }
 
   final _TimedGridState<T> _grid;
-  final RenderBoardViewport<String> _viewport;
+  final RenderBoardViewport<GridKey> _viewport;
   final ScrollPosition? _vertical;
   final ScrollPosition? _horizontal;
   final ({int row, int col}) anchor;
 
-  /// The body cell last under the pointer: unchanged while the pointer is
-  /// over the header, the gutter or past the lattice.
+  /// The body cell last under the pointer, as far as the range reaches:
+  /// unchanged while the pointer is over the header, the gutter or past
+  /// the lattice.
   ({int row, int col}) focus;
 
+  /// The wall minute of the earliest start after [anchor]'s slot, which a
+  /// range reaching later may not pass, or null.
+  int? nextStart;
+
+  /// The wall minute of the latest end before [anchor]'s slot, which a
+  /// range reaching earlier may not pass, or null.
+  int? previousEnd;
+
   Offset _point;
+
+  /// Reads the entries next to [anchor]'s slot that hold the range.
+  void readConflicts() {
+    final conflicts = _grid._conflictsAround(anchor);
+    nextStart = conflicts.next;
+    previousEnd = conflicts.previous;
+  }
 
   @override
   void update(DragUpdateDetails details) {
@@ -2612,15 +3156,16 @@ class _DayHeaderCell extends StatelessWidget {
   }
 }
 
-/// One item on the grid: the box the board places it in, inset 1 px, which
-/// [_BlockContent] fills with what [builder] draws for [entry] and
+/// One piece on the grid: the box the board places it in, inset 1 px,
+/// which [_BlockContent] fills with what [builder] draws for [entry] and
 /// [details]; the block draws nothing of the entry itself. A long press on
-/// it moves it while the history [lock] holds it [ItemHold.free], and
-/// reports [onSelect] while it holds it [ItemHold.started], and while
-/// [selection] names its item, an outline and the resize handles lie over
-/// it ([_BlockHandles]), the top one only while it is free. Its tap, long
-/// press and move take a press anywhere in the box, whatever the builder
-/// paints there.
+/// it moves its entry while the history [lock] holds the entry
+/// [ItemHold.free], and reports [onSelect] while it holds it
+/// [ItemHold.started], and while [selection] names its entry, an outline
+/// lies over it, with the top resize handle where [startHandle] holds and
+/// the entry is free, and the bottom one where [endHandle] holds
+/// ([_BlockHandles]). Its tap, long press and move take a press anywhere in
+/// the box, whatever the builder paints there.
 class _Block<T> extends StatelessWidget {
   const _Block({
     super.key,
@@ -2631,7 +3176,8 @@ class _Block<T> extends StatelessWidget {
     required this.lock,
     required this.onSelect,
     required this.handles,
-    required this.resizesDays,
+    required this.startHandle,
+    required this.endHandle,
     required this.onOpen,
   });
 
@@ -2643,22 +3189,27 @@ class _Block<T> extends StatelessWidget {
 
   final CalendarBlockBuilder<T> builder;
 
-  /// The id of the item whose block is selected, or null.
+  /// The id of the entry whose blocks are selected, or null.
   final ValueListenable<String?> selection;
 
   final ValueListenable<HistoryLock> lock;
 
-  /// A long press on a block of a started item asks to select it.
+  /// A long press on a block of a started entry asks to select it.
   final VoidCallback onSelect;
 
   /// Where the handles register while this block is selected.
   final _HandlesSlot handles;
 
-  /// Whether the selected block has a handle on its right edge, which
-  /// drags its day count: on a grid of more than one day column.
-  final bool resizesDays;
+  /// Whether the block, selected, has a handle on its top edge while its
+  /// entry is free: the piece holds the entry's start, and the hours do
+  /// not cut it.
+  final bool startHandle;
 
-  /// Null while the item is pending, so a tap opens nothing.
+  /// Whether the block, selected, has a handle on its bottom edge: the
+  /// piece holds the entry's end, and the hours do not cut it.
+  final bool endHandle;
+
+  /// Null while the entry is pending, so a tap opens nothing.
   final VoidCallback? onOpen;
 
   @override
@@ -2674,7 +3225,7 @@ class _Block<T> extends StatelessWidget {
       listenable: Listenable.merge(<Listenable>[selection, lock]),
       child: content,
       builder: (context, child) {
-        final hold = lock.value.holdOf(entry.entry.time);
+        final hold = lock.value.holdOf(entry.entry.start, entry.entry.end);
         return Stack(
           fit: StackFit.passthrough,
           children: <Widget>[
@@ -2699,8 +3250,8 @@ class _Block<T> extends StatelessWidget {
                   key: blockHandlesKey(entry.id),
                   id: entry.id,
                   slot: handles,
-                  resizesStart: hold == ItemHold.free,
-                  resizesDays: resizesDays,
+                  resizesStart: startHandle && hold == ItemHold.free,
+                  resizesEnd: endHandle,
                 ),
               ),
           ],
@@ -2786,8 +3337,9 @@ class _GutterCell extends StatelessWidget {
 }
 
 /// The day header's corner over the gutter, on the surface colour: nothing,
-/// or a pill counting the shown items on no day the grid has a column for,
-/// which a screen reader hears with [hiddenItemsLabel] before the count.
+/// or a pill counting the shown entries on no day the grid has a column
+/// for, which a screen reader hears with [hiddenItemsLabel] before the
+/// count.
 class _HiddenCount extends StatelessWidget {
   const _HiddenCount({required this.count});
 
@@ -2827,7 +3379,7 @@ class _HiddenCount extends StatelessWidget {
   }
 }
 
-/// A day column's cell in a row counting the shown items with no block:
+/// A day column's cell in a row counting the shown pieces with no block:
 /// those before the hours in the row above the slots, or those after them
 /// in the row below when [above] is false. A soft yellow, with a rule on
 /// the side facing the slots and one between days, and while the day has
@@ -2992,31 +3544,32 @@ class _LoadOverlay extends StatelessWidget {
 }
 
 /// The grid behind the cells, drawn for the visible body tracks alone: the
-/// body, and across the slots the weekend and today's columns; the create range
-/// being dragged, or whose create flow is open, and the slots a move would
-/// land on, each filled like today's
-/// column and edged in the primary colour so it shows over that column too; and
-/// a line at the top of each slot row, under the last one and at the left of
-/// each day column, across the slots. The room above and below the slots shows
-/// the body alone. Every paint it draws with is [styles]', made once per theme.
+/// body, and across the slots the weekend and today's columns; the create
+/// range being dragged, or whose create flow is open, and the times a move
+/// would land on, each filled like today's column and edged in the primary
+/// colour so it shows over that column too, one rect per day column it
+/// covers; and a line at the top of each slot row, under the last one and
+/// at the left of each day column, across the slots. The room above and
+/// below the slots shows the body alone. Every paint it draws with is
+/// [styles]', made once per theme.
 class _TimedGridPainter extends BoardBackgroundPainter {
   const _TimedGridPainter({
     required this.styles,
     required this.tracks,
     required this.today,
-    required this.rangeAnchor,
-    required this.rangeFocus,
+    required this.range,
     required this.landing,
   });
 
   final _GridStyles styles;
   final GridTracks tracks;
   final DateTime today;
-  final ({int row, int col})? rangeAnchor;
-  final ({int row, int col})? rangeFocus;
 
-  /// The span a move would land on, or null.
-  final BoardSpan? landing;
+  /// The create range's wall minutes ([wallMinuteOf]), or null.
+  final ({int start, int end})? range;
+
+  /// The wall minutes a move would land on, or null.
+  final ({int start, int end})? landing;
 
   @override
   void paint(Canvas canvas, BoardGeometryView geometry) {
@@ -3055,28 +3608,13 @@ class _TimedGridPainter extends BoardBackgroundPainter {
         fill,
       );
     }
-    final anchor = rangeAnchor;
-    final focus = rangeFocus;
-    if (anchor != null && focus != null) {
-      _paintMarked(
-        canvas,
-        geometry,
-        top: math.min(anchor.row, focus.row),
-        bottom: math.max(anchor.row, focus.row),
-        left: math.min(anchor.col, focus.col),
-        right: math.max(anchor.col, focus.col),
-      );
+    final range = this.range;
+    if (range != null) {
+      _paintMarked(canvas, geometry, range, slotFirst, slotLast);
     }
     final landing = this.landing;
     if (landing != null) {
-      _paintMarked(
-        canvas,
-        geometry,
-        top: landing.rowStart,
-        bottom: landing.rowStart + landing.rowSpan - 1,
-        left: landing.colStart,
-        right: landing.colStart + landing.colSpan - 1,
-      );
+      _paintMarked(canvas, geometry, landing, slotFirst, slotLast);
     }
     // The top line of each slot that shows, and the bottom line of the
     // last slot where the room below it shows.
@@ -3092,28 +3630,56 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     canvas.restore();
   }
 
-  /// Fills the cells that show of the body rows [top] to [bottom] and
-  /// columns [left] to [right], and edges them.
+  /// Fills, in each visible day column, the part of [marked], wall
+  /// minutes, on that column's day that shows in the visible slot rows
+  /// [slotFirst] to [slotLast], each minute as far into its slot's row as
+  /// it lies into the slot, and edges it.
   void _paintMarked(
     Canvas canvas,
-    BoardGeometryView geometry, {
-    required int top,
-    required int bottom,
-    required int left,
-    required int right,
-  }) {
-    final firstRow = math.max(top, geometry.firstVisibleRow);
-    final lastRow = math.min(bottom, geometry.lastVisibleRow);
-    final firstCol = math.max(left, geometry.firstVisibleCol);
-    final lastCol = math.min(right, geometry.lastVisibleCol);
-    if (firstRow > lastRow || firstCol > lastCol) {
-      return;
+    BoardGeometryView geometry,
+    ({int start, int end}) marked,
+    int slotFirst,
+    int slotLast,
+  ) {
+    final hours = tracks.hours;
+    final from = tracks.minuteAt(slotFirst);
+    final to = tracks.minuteAt(slotLast + 1);
+    double yOf(int minute, int col) {
+      final into = minute - hours.start;
+      var row = tracks.firstSlotRow + into ~/ minutesPerSlot;
+      var fraction = (into % minutesPerSlot) / minutesPerSlot;
+      if (row > slotLast) {
+        row = slotLast;
+        fraction = 1.0;
+      }
+      final rect = geometry.visibleCellRect(row, col);
+      return rect.top + fraction * rect.height;
     }
-    final rect = geometry
-        .visibleCellRect(firstRow, firstCol)
-        .expandToInclude(geometry.visibleCellRect(lastRow, lastCol));
-    canvas.drawRect(rect, styles.tintPaint);
-    canvas.drawRect(rect.deflate(1.0), styles.markEdgePaint);
+
+    for (
+      var col = math.max(1, geometry.firstVisibleCol);
+      col <= geometry.lastVisibleCol;
+      col++
+    ) {
+      final piece = pieceOn(marked, tracks.dayAt(col));
+      if (piece == null) {
+        continue;
+      }
+      final start = math.max(piece.start, from);
+      final end = math.min(piece.end, to);
+      if (end <= start) {
+        continue;
+      }
+      final cell = geometry.visibleCellRect(slotFirst, col);
+      final rect = Rect.fromLTRB(
+        cell.left,
+        yOf(start, col),
+        cell.right,
+        yOf(end, col),
+      );
+      canvas.drawRect(rect, styles.tintPaint);
+      canvas.drawRect(rect.deflate(1.0), styles.markEdgePaint);
+    }
   }
 
   @override
@@ -3121,8 +3687,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     return !identical(old.styles, styles) ||
         old.tracks != tracks ||
         old.today != today ||
-        old.rangeAnchor != rangeAnchor ||
-        old.rangeFocus != rangeFocus ||
+        old.range != range ||
         old.landing != landing;
   }
 }
@@ -3359,11 +3924,46 @@ class _HourLabels {
   }
 }
 
-/// Where the selected block's [_BlockHandles] register while they are
-/// built, so a press outside the block reaches them from [TimedGrid]'s
-/// listener.
+/// Where the selected entry's [_BlockHandles] register while they are
+/// built, up to two: its first block's and its last block's, so a press
+/// outside a block reaches them from [TimedGrid]'s listener.
 class _HandlesSlot {
-  _BlockHandlesState? current;
+  final List<_BlockHandlesState> _states = <_BlockHandlesState>[];
+
+  bool get isEmpty {
+    return _states.isEmpty;
+  }
+
+  void add(_BlockHandlesState state) {
+    _states.add(state);
+  }
+
+  void remove(_BlockHandlesState state) {
+    _states.remove(state);
+  }
+
+  /// Starts a resize for [event] on the first registered handles whose
+  /// strip outside its block holds it, and reports whether one did.
+  bool startOutside(PointerDownEvent event) {
+    for (final state in _states) {
+      if (state.startOutside(event)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// The resize cursor of the strip outside a registered block that holds
+  /// [global], or [MouseCursor.defer] off them.
+  MouseCursor cursorOutside(Offset global) {
+    for (final state in _states) {
+      final cursor = state.cursorOutside(global);
+      if (cursor != MouseCursor.defer) {
+        return cursor;
+      }
+    }
+    return MouseCursor.defer;
+  }
 }
 
 /// The cursor of a resize on [axis].
@@ -3373,11 +3973,11 @@ MouseCursor _resizeCursorOf(Axis axis) {
       : SystemMouseCursors.resizeLeftRight;
 }
 
-/// The selected block's outline and resize handles, over the block. Each
-/// edge that resizes, the top where [resizesStart], the bottom and, where
-/// [resizesDays], the right, has a pill-shaped grip lying across its middle
-/// on the outline,
-/// half outside the block, and takes a press on either side of it: inside
+/// A selected block's outline and resize handles, over the block. Each
+/// edge that resizes, the top where [resizesStart] and the bottom where
+/// [resizesEnd], has a pill-shaped grip lying across its middle on the
+/// outline, half outside the block, and takes a press on either side of
+/// it: inside
 /// the block, a strip [depth] deep and never more than a third of the
 /// block, so a short block keeps room to move by, takes the press
 /// outright, the top and the bottom taking a corner, as the board's own
@@ -3390,7 +3990,7 @@ class _BlockHandles extends StatefulWidget {
     required this.id,
     required this.slot,
     required this.resizesStart,
-    required this.resizesDays,
+    required this.resizesEnd,
   });
 
   /// How far a resize press reaches from an edge into the block at most,
@@ -3405,12 +4005,12 @@ class _BlockHandles extends StatefulWidget {
 
   static const double gripThickness = 8.0;
 
-  /// The block's item, which names the grips' keys.
+  /// The block's entry, which names the grips' keys.
   final String id;
 
   final _HandlesSlot slot;
   final bool resizesStart;
-  final bool resizesDays;
+  final bool resizesEnd;
 
   @override
   State<_BlockHandles> createState() {
@@ -3422,15 +4022,12 @@ class _BlockHandlesState extends State<_BlockHandles> {
   @override
   void initState() {
     super.initState();
-    widget.slot.current = this;
+    widget.slot.add(this);
   }
 
   @override
   void dispose() {
-    // The block selected next may have registered first.
-    if (identical(widget.slot.current, this)) {
-      widget.slot.current = null;
-    }
+    widget.slot.remove(this);
     super.dispose();
   }
 
@@ -3448,16 +4045,11 @@ class _BlockHandlesState extends State<_BlockHandles> {
       if (widget.resizesStart && local.dy < 0.0 && local.dy >= -depth) {
         return (edge: BoardResizeEdges.leading, axis: Axis.vertical);
       }
-      if (local.dy >= size.height && local.dy <= size.height + depth) {
+      if (widget.resizesEnd &&
+          local.dy >= size.height &&
+          local.dy <= size.height + depth) {
         return (edge: BoardResizeEdges.trailing, axis: Axis.vertical);
       }
-    }
-    if (widget.resizesDays &&
-        local.dy >= 0.0 &&
-        local.dy <= size.height &&
-        local.dx >= size.width &&
-        local.dx <= size.width + depth) {
-      return (edge: BoardResizeEdges.trailing, axis: Axis.horizontal);
     }
     return null;
   }
@@ -3495,9 +4087,7 @@ class _BlockHandlesState extends State<_BlockHandles> {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
         final rows = math.min(_BlockHandles.depth, height / 3);
-        final columns = math.min(_BlockHandles.depth, width / 3);
         final across = math.min(_BlockHandles.gripLength, width * 0.6);
-        final down = math.min(_BlockHandles.gripLength, height * 0.6);
         // From the block's edge to a grip's near side, which centres the
         // grip on the outline's middle.
         const lead =
@@ -3507,17 +4097,6 @@ class _BlockHandlesState extends State<_BlockHandles> {
           clipBehavior: Clip.none,
           children: <Widget>[
             styles.selectionOutline,
-            if (widget.resizesDays)
-              Positioned(
-                top: 0.0,
-                right: 0.0,
-                bottom: 0.0,
-                width: columns,
-                child: const _ResizeHandle(
-                  edge: BoardResizeEdges.trailing,
-                  axis: Axis.horizontal,
-                ),
-              ),
             if (widget.resizesStart)
               Positioned(
                 top: 0.0,
@@ -3529,16 +4108,17 @@ class _BlockHandlesState extends State<_BlockHandles> {
                   axis: Axis.vertical,
                 ),
               ),
-            Positioned(
-              left: 0.0,
-              right: 0.0,
-              bottom: 0.0,
-              height: rows,
-              child: const _ResizeHandle(
-                edge: BoardResizeEdges.trailing,
-                axis: Axis.vertical,
+            if (widget.resizesEnd)
+              Positioned(
+                left: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+                height: rows,
+                child: const _ResizeHandle(
+                  edge: BoardResizeEdges.trailing,
+                  axis: Axis.vertical,
+                ),
               ),
-            ),
             if (widget.resizesStart)
               Positioned(
                 top: lead,
@@ -3547,20 +4127,13 @@ class _BlockHandlesState extends State<_BlockHandles> {
                 height: _BlockHandles.gripThickness,
                 child: _Grip(key: blockGripKey(id, AxisDirection.up)),
               ),
-            Positioned(
-              bottom: lead,
-              left: (width - across) / 2,
-              width: across,
-              height: _BlockHandles.gripThickness,
-              child: _Grip(key: blockGripKey(id, AxisDirection.down)),
-            ),
-            if (widget.resizesDays)
+            if (widget.resizesEnd)
               Positioned(
-                top: (height - down) / 2,
-                right: lead,
-                width: _BlockHandles.gripThickness,
-                height: down,
-                child: _Grip(key: blockGripKey(id, AxisDirection.right)),
+                bottom: lead,
+                left: (width - across) / 2,
+                width: across,
+                height: _BlockHandles.gripThickness,
+                child: _Grip(key: blockGripKey(id, AxisDirection.down)),
               ),
           ],
         );

@@ -1,5 +1,5 @@
-/// One calendar entry: its id, its time, its title, its colour and the
-/// host's payload.
+/// One calendar entry: its id, its start and end, its title, its colour
+/// and the host's payload.
 library;
 
 import 'dart:ui' show Color;
@@ -9,59 +9,50 @@ import 'package:flutter/foundation.dart';
 import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
 
-/// The time of an entry as the overlap rule reads it: [firstDay] is a
-/// [dayNumber], [dayCount] the consecutive days from it, and [start] and
-/// [end] minutes after midnight on each of those days.
-typedef CalendarEntryTime = ({int firstDay, int dayCount, int start, int end});
-
 /// One entry of a calendar, carrying a payload of the host's type [T].
 ///
-/// An entry covers [dayCount] consecutive days from [day], from
-/// [startMinute] to [endMinute] on each of them. It is immutable, and two
-/// entries are equal when every field is, the payload compared by its own
-/// `==`.
+/// An entry runs from [start] to [end], an exclusive end, both local
+/// times on whole minutes. One from a day start to a day start covers
+/// whole days and is all-day ([isAllDay]); any other is timed. It is
+/// immutable, and two entries are equal when every field is, the payload
+/// compared by its own `==`.
 @immutable
 class CalendarEntry<T> {
-  /// An entry from [startMinute] to [endMinute] on each of the [dayCount]
-  /// days from [day], whose time of day is dropped.
+  /// An entry from [start] to [end].
   ///
-  /// [dayCount] is at least 1, and `0 <= startMinute < endMinute <= 1440`.
+  /// In a debug build each of these is asserted on its own: [start] and
+  /// [end] are local times with no second, millisecond or microsecond, and
+  /// [end] is after [start]. A release build stores what it is given.
   CalendarEntry({
     this.id,
-    required DateTime day,
-    required this.startMinute,
-    required this.endMinute,
-    this.dayCount = 1,
+    required this.start,
+    required this.end,
     required this.title,
     required this.color,
     required this.payload,
-  }) : assert(dayCount >= 1, "An entry covers a day at least, not $dayCount."),
+  }) : assert(!start.isUtc, "An entry starts at a local time, not $start."),
+       assert(!end.isUtc, "An entry ends at a local time, not $end."),
+       assert(start.second == 0, "An entry starts on a whole minute."),
+       assert(start.millisecond == 0, "An entry starts on a whole minute."),
+       assert(start.microsecond == 0, "An entry starts on a whole minute."),
+       assert(end.second == 0, "An entry ends on a whole minute."),
+       assert(end.millisecond == 0, "An entry ends on a whole minute."),
+       assert(end.microsecond == 0, "An entry ends on a whole minute."),
        assert(
-         0 <= startMinute && startMinute < endMinute,
-         "An entry starts at 0 or later and ends after its start, not "
-         "$startMinute to $endMinute.",
-       ),
-       assert(
-         endMinute <= minutesPerDay,
-         "An entry ends at $minutesPerDay at the latest, not $endMinute.",
-       ),
-       day = dateOnly(day);
+         end.isAfter(start),
+         "An entry ends after its start, not $start to $end.",
+       );
 
   /// The id naming this entry in a store, or null for a draft no store
   /// holds yet. Every entry a store answers has one.
   final String? id;
 
-  /// The first day, at local midnight.
-  final DateTime day;
+  /// When the entry starts, a local time.
+  final DateTime start;
 
-  /// Minutes after midnight, on each day the entry covers.
-  final int startMinute;
-
-  /// Minutes after midnight, on each day the entry covers.
-  final int endMinute;
-
-  /// The consecutive days, from [day], that carry the same minutes.
-  final int dayCount;
+  /// When the entry ends, a local time after [start]; the entry holds the
+  /// time up to it, not the minute it names.
+  final DateTime end;
 
   final String title;
 
@@ -70,48 +61,27 @@ class CalendarEntry<T> {
   /// The host's value, compared by its own `==`.
   final T payload;
 
-  /// The entry's days and minutes.
-  CalendarEntryTime get time {
-    return (
-      firstDay: dayNumber(day),
-      dayCount: dayCount,
-      start: startMinute,
-      end: endMinute,
-    );
-  }
-
-  /// Whether the [dayNumber] [day] is one this entry covers.
-  bool coversDay(int day) {
-    final first = dayNumber(this.day);
-    return day >= first && day < first + dayCount;
-  }
-
-  /// The [dayNumber]s of the days this entry covers, in order.
-  Iterable<int> get dayNumbers {
-    final first = dayNumber(day);
-    return Iterable<int>.generate(dayCount, (index) {
-      return first + index;
-    });
+  /// Whether the entry covers whole days: [start] and [end] are each the
+  /// start of a day ([isDayStart]), so a day of 23 or 25 hours is one
+  /// whole day.
+  bool get isAllDay {
+    return isDayStart(start) && isDayStart(end);
   }
 
   /// This entry with each field given replaced. A null argument keeps the
   /// field, so a nullable [T] payload cannot be cleared through it.
   CalendarEntry<T> copyWith({
     String? id,
-    DateTime? day,
-    int? startMinute,
-    int? endMinute,
-    int? dayCount,
+    DateTime? start,
+    DateTime? end,
     String? title,
     Color? color,
     T? payload,
   }) {
     return CalendarEntry<T>(
       id: id ?? this.id,
-      day: day ?? this.day,
-      startMinute: startMinute ?? this.startMinute,
-      endMinute: endMinute ?? this.endMinute,
-      dayCount: dayCount ?? this.dayCount,
+      start: start ?? this.start,
+      end: end ?? this.end,
       title: title ?? this.title,
       color: color ?? this.color,
       payload: payload ?? this.payload,
@@ -122,10 +92,8 @@ class CalendarEntry<T> {
   bool operator ==(Object other) {
     return other is CalendarEntry<T> &&
         other.id == id &&
-        other.day == day &&
-        other.startMinute == startMinute &&
-        other.endMinute == endMinute &&
-        other.dayCount == dayCount &&
+        other.start == start &&
+        other.end == end &&
         other.title == title &&
         other.color == color &&
         other.payload == payload;
@@ -133,23 +101,13 @@ class CalendarEntry<T> {
 
   @override
   int get hashCode {
-    return Object.hash(
-      id,
-      day,
-      startMinute,
-      endMinute,
-      dayCount,
-      title,
-      color,
-      payload,
-    );
+    return Object.hash(id, start, end, title, color, payload);
   }
 
   @override
   String toString() {
-    final days = dayCount == 1 ? "" : " x$dayCount";
-    return "CalendarEntry(${id ?? "draft"}, ${isoDate(day)}$days "
-        "${clockLabel(startMinute)}-${clockLabel(endMinute)}, \"$title\", "
-        "$payload)";
+    return "CalendarEntry(${id ?? "draft"}, ${isoDate(start)} "
+        "${clockLabel(minuteOfDay(start))} to ${isoDate(end)} "
+        "${clockLabel(minuteOfDay(end))}, \"$title\", $payload)";
   }
 }

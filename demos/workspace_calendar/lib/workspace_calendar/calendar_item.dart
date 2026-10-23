@@ -64,23 +64,31 @@ extension CalendarItemFields on CalendarEntry<ItemPayload> {
     return payload.fields;
   }
 
-  /// The envelope, a new map each call. A draft carries no `id` key.
+  /// The envelope, a new map each call. A draft carries no `id` key. Its
+  /// `day` is the start's day and `startMinute` the start's minute of it;
+  /// `dayCount` counts the days the range has a part in, and `endMinute` is
+  /// the end's minute on the last of them, 1440 for an end at the start of
+  /// the day after it.
   Map<String, Object?> toJson() {
+    final firstDay = dayNumber(start);
     return <String, Object?>{
       if (id != null) "id": id,
       "type": type.id,
       "title": title,
-      "day": isoDate(day),
-      "startMinute": startMinute,
-      "endMinute": endMinute,
-      "dayCount": dayCount,
+      "day": isoDate(dateOfDayNumber(firstDay)),
+      "startMinute": minuteOfDay(start),
+      "endMinute": endMinuteOfDay(end),
+      "dayCount": lastDayNumberOf(start, end) - firstDay + 1,
       "fields": _modifiableCopy(fields),
     };
   }
 }
 
 /// An item of [type] with [fields], coloured by its type's Harbor edge;
-/// [id] null for a draft the API has not stored.
+/// [id] null for a draft the API has not stored. It runs from
+/// [startMinute] minutes after [day]'s midnight to [endMinute] minutes
+/// after the midnight of the day [dayCount] - 1 days on, so a [dayCount]
+/// of 2 from 22:00 to 02:00 is one overnight item.
 CalendarItem calendarItem({
   String? id,
   required CalendarItemType type,
@@ -91,12 +99,11 @@ CalendarItem calendarItem({
   int dayCount = 1,
   Map<String, Object?> fields = const <String, Object?>{},
 }) {
+  final last = addDays(day, dayCount - 1);
   return CalendarItem(
     id: id,
-    day: day,
-    startMinute: startMinute,
-    endMinute: endMinute,
-    dayCount: dayCount,
+    start: DateTime(day.year, day.month, day.day, 0, startMinute),
+    end: DateTime(last.year, last.month, last.day, 0, endMinute),
     title: title,
     color: harborTypeStyleOf(type).edge,
     payload: ItemPayload(type, fields),

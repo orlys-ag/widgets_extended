@@ -1045,7 +1045,9 @@ void main() {
     final kept = <String, Element>{
       for (final element in find.byWidgetPredicate((widget) {
         final key = widget.key;
-        return key is ValueKey<String> && key.value.startsWith("block-");
+        return key is ValueKey<String> &&
+            key.value.startsWith("block-") &&
+            key.value.contains("@");
       }).evaluate())
         (element.widget.key! as ValueKey<String>).value: element,
     };
@@ -1060,8 +1062,8 @@ void main() {
     expect(counts.adds, 0);
     var stayed = 0;
     for (final entry in kept.entries) {
-      final id = entry.key.substring("block-".length);
-      final now = find.byKey(blockKey(id));
+      final id = entry.key.substring("block-".length, entry.key.indexOf("@"));
+      final now = find.byKey(ValueKey<String>(entry.key));
       if (now.evaluate().length == 1 &&
           identical(now.evaluate().single, entry.value)) {
         stayed++;

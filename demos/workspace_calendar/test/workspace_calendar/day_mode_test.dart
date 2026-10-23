@@ -318,83 +318,52 @@ void main() {
     );
   });
 
-  testWidgets("D3 a move and the bottom strip change the hours, not the days", (
-    tester,
-  ) async {
-    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
-    await createBeforePump(
-      tester,
-      api,
-      taskJson("Retreat", DateTime(2026, 4, 20), 19 * 60, 20 * 60, dayCount: 3),
+  testWidgets("D3 a move in Day moves a multi-day entry's start and end "
+      "alike", (tester) async {
+    // Monday 19:00 to Tuesday 20:00: on Tuesday from the day's start.
+    final api = MockCalendarApi(
+      seed: <Map<String, Object?>>[
+        taskJson(
+          "Retreat",
+          DateTime(2026, 4, 20),
+          19 * 60,
+          20 * 60,
+          dayCount: 2,
+        ),
+      ],
+      latency: harnessLatency,
     );
     final retreat =
-        (await listAll(
-              tester,
-              api,
-              today,
-              today,
-            )).singleWhere((item) => item["title"] == "Retreat")["id"]!
-            as String;
+        (await listAll(tester, api, today, today)).single["id"]! as String;
     await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Day");
 
-    // The three-day item shows its one day here.
-    final column = cellRect(tester, dayRowOf(19 * 60), dayColumn);
-    final block = tester.getRect(blockFinder(retreat));
+    // The item shows its Tuesday piece across the day's column, from the
+    // day's start.
+    final column = cellRect(tester, dayRowOf(0), dayColumn);
+    final block = tester.getRect(blockFinder(retreat, today));
     expect(block.left, near(column.left));
     expect(block.right, near(column.right));
+    expect(block.top, near(column.top));
 
-    final board = tester.widget<Board<String, ShownItem>>(
-      find.byType(Board<String, ShownItem>),
+    final board = tester.widget<Board<GridKey, GridShape<ItemPayload>>>(
+      find.byType(Board<GridKey, GridShape<ItemPayload>>),
     );
     expect(board.drag!.resizeEdges, BoardResizeEdges.none);
     expect(board.drag!.primaryResizeEdges, BoardResizeEdges.both);
 
-    // A long press moves the block four rows down.
+    // The piece's top, the day's start, lands an hour down, and the start
+    // and the end move by that hour alike.
     await moveBlock(
       tester,
-      blockFinder(brainstormId),
-      cellRect(tester, dayRowOf(15 * 60), dayColumn).topLeft,
-    );
-    await tester.pump(api.latency);
-    await tester.pumpAndSettle();
-    var item = await stored(tester, api, brainstormId);
-    expect(item.day, today);
-    expect(item.dayCount, 1);
-    expect(item.startMinute, 15 * 60);
-    expect(item.endMinute, 16 * 60);
-
-    // The bottom strip drags the end, with a mouse.
-    final rect = tester.getRect(blockFinder(brainstormId));
-    final slot = cellRect(tester, dayRowOf(9 * 60), dayColumn).height;
-    final gesture = await tester.startGesture(
-      Offset(rect.center.dx, rect.bottom - 3.0),
-      kind: PointerDeviceKind.mouse,
-    );
-    await gesture.moveBy(Offset(0.0, 2 * slot));
-    await tester.pump();
-    await gesture.up();
-    await tester.pumpAndSettle();
-    await tester.pump(api.latency);
-    await tester.pumpAndSettle();
-    item = await stored(tester, api, brainstormId);
-    expect(item.day, today);
-    expect(item.startMinute, 15 * 60);
-    expect(item.endMinute, 16 * 60 + 30);
-
-    // A multi-day item keeps its first day and its day count.
-    await moveBlock(
-      tester,
-      blockFinder(retreat),
-      cellRect(tester, dayRowOf(20 * 60), dayColumn).topLeft,
+      blockFinder(retreat, today),
+      cellRect(tester, dayRowOf(60), dayColumn).topLeft,
     );
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
     final moved = await stored(tester, api, retreat);
-    expect(moved.day, DateTime(2026, 4, 20));
-    expect(moved.dayCount, 3);
-    expect(moved.startMinute, 20 * 60);
-    expect(moved.endMinute, 21 * 60);
+    expect(moved.start, DateTime(2026, 4, 20, 20));
+    expect(moved.end, DateTime(2026, 4, 21, 21));
   });
 
   testWidgets("D4 a drop onto another item's time lands at the nearest "
@@ -413,7 +382,7 @@ void main() {
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
     final landed = await stored(tester, api, brainstormId);
-    expect((landed.startMinute, landed.endMinute), (13 * 60, 14 * 60));
+    expect(minutesOf(landed), (13 * 60, 14 * 60));
   });
 
   testWidgets("D5 Day mode reads the selected day's week, so a step within "
@@ -587,7 +556,7 @@ void main() {
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
     final moved = await stored(tester, api, uxFlowId);
-    expect((moved.startMinute, moved.endMinute), (8 * 60, 11 * 60));
+    expect(minutesOf(moved), (8 * 60, 11 * 60));
   });
 
   testWidgets("D11 the time line shows over the block it crosses and moves "
@@ -968,7 +937,9 @@ void main() {
         taskJson("Cut", today, 7 * 60 + 30, 9 * 60),
         taskJson("Late", today, 15 * 60, 16 * 60),
         // 05:00 to 06:00 on each of April 20 to 22.
-        taskJson("Trip", DateTime(2026, 4, 20), 5 * 60, 6 * 60, dayCount: 3),
+        taskJson("Trip", DateTime(2026, 4, 20), 5 * 60, 6 * 60),
+        taskJson("Trip", today, 5 * 60, 6 * 60),
+        taskJson("Trip", DateTime(2026, 4, 22), 5 * 60, 6 * 60),
       ],
       latency: harnessLatency,
     );
@@ -1147,7 +1118,10 @@ void main() {
 
     final noon = cellRect(tester, dayRowOf(12 * 60), dayColumn);
     await moveBlock(tester, blockFinder("item-1"), noon.topLeft);
-    final moved = item.copyWith(startMinute: 12 * 60, endMinute: 13 * 60);
+    final moved = item.copyWith(
+      start: atMinute(today, 12 * 60),
+      end: atMinute(today, 13 * 60),
+    );
     expect(heard, <(CalendarItem?, bool)>[(moved, false)]);
     expect(changes, <(CalendarItem?, CalendarItem?)>[(item, moved)]);
     await tester.pumpAndSettle();

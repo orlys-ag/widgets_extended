@@ -96,46 +96,6 @@ void main() {
     expect(item["endMinute"], 15 * 60 + 30);
   });
 
-  testWidgets("L2 the week grid's right strip sets the days as it drags", (
-    tester,
-  ) async {
-    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
-    await createBeforePump(
-      tester,
-      api,
-      taskJson("Focus", DateTime(2026, 4, 22), 19 * 60, 20 * 60),
-    );
-    final focus =
-        (await listAll(
-              tester,
-              api,
-              DateTime(2026, 4, 22),
-              DateTime(2026, 4, 22),
-            )).singleWhere((item) => item["title"] == "Focus")["id"]!
-            as String;
-    await pumpCalendar(tester, editing: true, api: api, size: tall);
-    await pickMode(tester, "Week");
-    final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
-    final before = tester.getRect(blockFinder(focus));
-    // Setup sanity: the block fills its one day.
-    expect(before.width, moreOrLessEquals(dayWidth, epsilon: 0.5));
-    await expectLiveResize(
-      tester,
-      focus,
-      Offset(before.right - 3.0, before.center.dy),
-      Offset(dayWidth, 0.0),
-      Rect.fromLTRB(
-        before.left,
-        before.top,
-        before.right + dayWidth,
-        before.bottom,
-      ),
-    );
-    // Setup sanity: the drop was written, a day longer.
-    final item = await storedJson(tester, api, focus);
-    expect(item["dayCount"], 2);
-  });
-
   testWidgets("L3 the day grid's bottom strip sets the end as it drags", (
     tester,
   ) async {

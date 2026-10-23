@@ -78,14 +78,43 @@ DateTime gridDay(WidgetTester tester) {
       .firstDay;
 }
 
+/// [minute] minutes after [day]'s midnight.
+DateTime atMinute(DateTime day, int minute) {
+  return DateTime(day.year, day.month, day.day, 0, minute);
+}
+
+/// The minutes after midnight of [item]'s start, and of its end on the
+/// last day it has a part in, 1440 for an end at a day's start.
+(int, int) minutesOf(CalendarItem item) {
+  return (minuteOfDay(item.start), endMinuteOfDay(item.end));
+}
+
+/// The day of [item]'s start.
+DateTime firstDayOf(CalendarItem item) {
+  return dateOfDayNumber(dayNumber(item.start));
+}
+
+/// The days [item] has a part in, from its start's day to its last.
+int daysOf(CalendarItem item) {
+  return lastDayNumberOf(item.start, item.end) - dayNumber(item.start) + 1;
+}
+
 /// The week grid's column of the day [weekday] days after [monday]:
 /// column 0 is the hour gutter.
 int colOf(int weekday) {
   return 1 + weekday;
 }
 
-Finder blockFinder(String id) {
-  return find.byKey(blockKey(id));
+/// The block of the item [id]'s piece on [day], or with no [day] the one
+/// block of [id].
+Finder blockFinder(String id, [DateTime? day]) {
+  if (day != null) {
+    return find.byKey(blockKey(id, day));
+  }
+  return find.byWidgetPredicate((widget) {
+    final key = widget.key;
+    return key is ValueKey<String> && key.value.startsWith("block-$id@");
+  });
 }
 
 /// The global rect of the timed grid's cell at [row] and [col].
@@ -253,12 +282,11 @@ Future<void> selectNextMonth(WidgetTester tester) async {
   final motion = CalendarTheme.of(
     tester.element(find.byType(MonthStrip<ItemPayload>)),
   ).motionDuration;
-  final selected = tester
-      .widgetList<DayCell>(find.byType(DayCell))
-      .singleWhere((cell) {
-        return cell.isSelected;
-      })
-      .day;
+  final selected = tester.widgetList<DayCell>(find.byType(DayCell)).singleWhere(
+    (cell) {
+      return cell.isSelected;
+    },
+  ).day;
   await tester.tap(find.byTooltip("Next month"));
   // The frame that starts the slide after the build, the frame its
   // motion's clock starts on, its motion, and a frame past it: the slide
@@ -271,10 +299,11 @@ Future<void> selectNextMonth(WidgetTester tester) async {
   await tester.tap(find.byKey(dayCellKey(addMonths(selected, 1))));
 }
 
-/// The timed grid's viewport: the one board keyed by item id strings.
-RenderBoardViewport<String> gridViewport(WidgetTester tester) {
+/// The one board's viewport: in Week and Day the timed grid's, keyed by
+/// [GridKey]s, and in Month the month board's, keyed by strings.
+RenderBoardViewport<Object> gridViewport(WidgetTester tester) {
   return tester.allRenderObjects
-      .whereType<RenderBoardViewport<String>>()
+      .whereType<RenderBoardViewport<Object>>()
       .single;
 }
 

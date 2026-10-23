@@ -81,7 +81,9 @@ Finder stripFinder(DateTime day) {
 /// The month board's viewport: in Month mode the one board keyed by
 /// strings.
 RenderBoardViewport<String> monthViewport(WidgetTester tester) {
-  return gridViewport(tester);
+  return tester.allRenderObjects
+      .whereType<RenderBoardViewport<String>>()
+      .single;
 }
 
 /// Pumps the calendar over a mock holding [seed] at [latency], in edit
@@ -421,11 +423,12 @@ void main() {
       expect(listed.length, greaterThan(10));
       for (final json in listed) {
         final item = itemFromJson(json);
-        final itemLast = addDays(item.day, item.dayCount - 1);
+        final itemFirst = firstDayOf(item);
+        final itemLast = addDays(itemFirst, daysOf(item) - 1);
         for (var row = 0; row < grid.weekCount; row++) {
           final monday = grid.dateAt(row, 0);
           final sunday = addDays(monday, 6);
-          final first = item.day.isAfter(monday) ? item.day : monday;
+          final first = itemFirst.isAfter(monday) ? itemFirst : monday;
           final last = itemLast.isBefore(sunday) ? itemLast : sunday;
           if (first.isAfter(last)) {
             continue;
@@ -502,7 +505,8 @@ void main() {
       await pumpMonth(
         tester,
         seed: <Map<String, Object?>>[
-          taskJson("X", april(24), 10 * 60, 11 * 60, dayCount: 5),
+          // All day from April 24 to 28, sharing no time with W.
+          taskJson("X", april(24), 0, 24 * 60, dayCount: 5),
           taskJson("W", april(25), 11 * 60, 12 * 60, dayCount: 2),
         ],
       );
@@ -579,7 +583,8 @@ void main() {
     await pumpMonth(
       tester,
       seed: <Map<String, Object?>>[
-        taskJson("P", april(19), 18 * 60, 19 * 60, dayCount: 2),
+        // All day on April 19 and 20, sharing no time with Q.
+        taskJson("P", april(19), 0, 24 * 60, dayCount: 2),
         taskAt("Q", april(20), 9, 10),
       ],
     );
@@ -599,7 +604,8 @@ void main() {
         tester,
         editing: true,
         seed: <Map<String, Object?>>[
-          taskJson("A", april(20), 9 * 60, 10 * 60, dayCount: 3),
+          // All day from April 20 to 22, sharing no time with B to D.
+          taskJson("A", april(20), 0, 24 * 60, dayCount: 3),
           taskAt("B", april(20), 10, 11),
           taskAt("C", april(20), 11, 12),
           taskAt("D", april(22), 12, 13),
@@ -1024,7 +1030,12 @@ void main() {
         }
       };
       final b = store.storedEntry("item-2")!;
-      store.requestMove(b.copyWith(startMinute: 8 * 60, endMinute: 9 * 60));
+      store.requestMove(
+        b.copyWith(
+          start: atMinute(firstDayOf(b), 8 * 60),
+          end: atMinute(firstDayOf(b), 9 * 60),
+        ),
+      );
       await tester.pump();
       // A's exit still runs at the sync of B's pending move and at the sync
       // of its answer.
@@ -1647,8 +1658,8 @@ void main() {
         review,
       );
       const offsite =
-          "Offsite, Task, Saturday, April 18 to Monday, April 20, 09:00 to "
-          "17:00 each day";
+          "Offsite, Task, Saturday, April 18, 09:00 to Monday, April 20, "
+          "17:00";
       for (final monday in <DateTime>[april(13), april(20)]) {
         expect(
           tester.getSemantics(chipFinder("item-2", monday)).label,
@@ -2121,8 +2132,9 @@ void main() {
         tester,
         seed: <Map<String, Object?>>[
           taskJson("Run", april(23), 6 * 60, 7 * 60),
-          // 05:00 to 06:00 on Wednesday and Thursday.
-          taskJson("Trip", april(22), 5 * 60, 6 * 60, dayCount: 2),
+          // 05:00 to 06:00 on Wednesday and on Thursday.
+          taskJson("Trip", april(22), 5 * 60, 6 * 60),
+          taskJson("Trip", april(23), 5 * 60, 6 * 60),
           taskJson("Late", april(21), 19 * 60, 20 * 60),
           // Partly inside the hours, so it keeps its chip.
           taskJson("Early start", april(24), 7 * 60, 9 * 60),
@@ -2131,10 +2143,11 @@ void main() {
       );
       const run = "item-1";
       const trip = "item-2";
-      const late = "item-3";
-      const early = "item-4";
-      const mid = "item-5";
-      for (final id in <String>[run, trip, late, early, mid]) {
+      const tripOn = "item-3";
+      const late = "item-4";
+      const early = "item-5";
+      const mid = "item-6";
+      for (final id in <String>[run, trip, tripOn, late, early, mid]) {
         expect(chipFinder(id, april(20)), findsOneWidget);
       }
       expect(find.byKey(monthEarlierKey(april(23))), findsNothing);
@@ -2143,6 +2156,7 @@ void main() {
       await pickHours(tester, 8, 18);
       expect(chipFinder(run, april(20)), findsNothing);
       expect(chipFinder(trip, april(20)), findsNothing);
+      expect(chipFinder(tripOn, april(20)), findsNothing);
       expect(chipFinder(late, april(20)), findsNothing);
       expect(chipFinder(early, april(20)), findsOneWidget);
       expect(chipFinder(mid, april(20)), findsOneWidget);
@@ -2186,7 +2200,7 @@ void main() {
       await pickHours(tester, 0, 24);
       expect(find.byKey(monthEarlierKey(april(23))), findsNothing);
       expect(find.byKey(monthLaterKey(april(21))), findsNothing);
-      for (final id in <String>[run, trip, late, early, mid]) {
+      for (final id in <String>[run, trip, tripOn, late, early, mid]) {
         expect(chipFinder(id, april(20)), findsOneWidget);
       }
       final friday = tester.getRect(dayFinder(april(24)));

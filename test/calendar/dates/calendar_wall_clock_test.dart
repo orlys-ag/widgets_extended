@@ -90,7 +90,33 @@ void main() {
     expect(office.holdsTimes(monday, addDays(monday, 3)), isTrue);
   });
 
+  test("DST1 dstSkipReason answers null for a day found with the expected "
+      "hour, and a reason naming the zone the tests are written for "
+      "otherwise", () {
+    expect(dstSkipReason("23-hour day", tuesday, 2, 2), isNull);
+    expect(
+      dstSkipReason("23-hour day", null, null, 2),
+      allOf(contains("23-hour day"), contains("TZ=America/New_York")),
+    );
+    expect(
+      dstSkipReason("25-hour day", tuesday, 3, 1),
+      allOf(
+        contains("2026-04-21"),
+        contains("from 3, not 1"),
+        contains("TZ=America/New_York"),
+      ),
+    );
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
+    test("DST2 the 23-hour day lasts 23 hours and skips 02:00", () {
+      final day = shortDayStart;
+      expect(addDays(day, 1).difference(day), const Duration(hours: 23));
+      expect(shortDay!.hour, 2);
+      expect(DateTime(day.year, day.month, day.day, 2, 30).hour, isNot(2));
+      expect(DateTime(day.year, day.month, day.day, 1, 30).hour, 1);
+    });
+
     test("DT2 timeAtWallMinute of 02:30 is null, the clock skipping it", () {
       final day = dayNumber(shortDayStart) * minutesPerDay;
       expect(timeAtWallMinute(day + 2 * 60 + 30), isNull);
@@ -101,6 +127,16 @@ void main() {
   });
 
   group("on the 25-hour day", skip: longDaySkip, () {
+    test("DST2 the 25-hour day lasts 25 hours and repeats 01:00", () {
+      final day = longDayStart;
+      expect(addDays(day, 1).difference(day), const Duration(hours: 25));
+      expect(longDay!.hour, 1);
+      // The day start plus two hours reads 01:00 again.
+      expect(day.add(const Duration(hours: 1)).hour, 1);
+      expect(day.add(const Duration(hours: 2)).hour, 1);
+      expect(day.add(const Duration(hours: 3)).hour, 2);
+    });
+
     test("DT8 timeAtWallMinute of 01:30 is the first 01:30, the second "
         "with from: in the day's later stretch, and isLaterOccurrence tells "
         "the two apart", () {

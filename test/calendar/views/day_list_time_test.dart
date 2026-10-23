@@ -113,7 +113,9 @@ Future<void> pumpList(
         onEdit: (id) {},
         onDelete: (id) {},
         cardBuilder: (context, entry, details) {
-          (cards?[entry.id] ??= <CalendarCardDetails>[]).add(details);
+          if (cards != null) {
+            (cards[entry.id] ??= <CalendarCardDetails>[]).add(details);
+          }
           return Text("card ${entry.id}");
         },
         addButtonBuilder: (context, details) {

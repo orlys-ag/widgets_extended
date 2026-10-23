@@ -132,6 +132,13 @@ final DateTime weekLast = DateTime(2026, 4, 26);
 
 const Color taskColor = Color(0xFF3060C0);
 
+/// [minute] minutes after [day]'s midnight.
+DateTime at(DateTime day, int minute) {
+  return DateTime(day.year, day.month, day.day, 0, minute);
+}
+
+/// An entry from [start] minutes after [day]'s midnight to [end] minutes
+/// after the midnight of its [dayCount]th day.
 CalendarEntry<String> task(
   String id,
   DateTime day,
@@ -142,17 +149,16 @@ CalendarEntry<String> task(
 }) {
   return CalendarEntry<String>(
     id: id,
-    day: day,
-    startMinute: start,
-    endMinute: end,
-    dayCount: dayCount,
+    start: at(day, start),
+    end: at(DateTime(day.year, day.month, day.day + dayCount - 1), end),
     title: title,
     color: taskColor,
     payload: "task",
   );
 }
 
-/// An entry no store holds yet.
+/// An entry no store holds yet, from [start] minutes after [day]'s
+/// midnight to [end] minutes after the midnight of its [dayCount]th day.
 CalendarEntry<String> draft(
   DateTime day,
   int start,
@@ -161,14 +167,38 @@ CalendarEntry<String> draft(
   String title = "Created",
 }) {
   return CalendarEntry<String>(
-    day: day,
-    startMinute: start,
-    endMinute: end,
-    dayCount: dayCount,
+    start: at(day, start),
+    end: at(DateTime(day.year, day.month, day.day + dayCount - 1), end),
     title: title,
     color: taskColor,
     payload: "task",
   );
+}
+
+/// [entry] from [start] to [end] minutes after the midnight of the day it
+/// starts on.
+CalendarEntry<String> retimed(CalendarEntry<String> entry, int start, int end) {
+  return entry.copyWith(
+    start: at(entry.start, start),
+    end: at(entry.start, end),
+  );
+}
+
+/// [entry] moved to start on [day], keeping its times of day and the days
+/// it covers.
+CalendarEntry<String> onDay(CalendarEntry<String> entry, DateTime day) {
+  final shift = dayNumber(day) - dayNumber(entry.start);
+  DateTime shifted(DateTime time) {
+    return DateTime(
+      time.year,
+      time.month,
+      time.day + shift,
+      time.hour,
+      time.minute,
+    );
+  }
+
+  return entry.copyWith(start: shifted(entry.start), end: shifted(entry.end));
 }
 
 /// Lets the futures the fake data source's completions resolve run.
@@ -299,14 +329,17 @@ void main() {
 
     // Three writes the data source confirms before April's read answers.
     final moved = moving.copyWith(
-      day: DateTime(2026, 4, 22),
-      startMinute: 840,
-      endMinute: 900,
+      start: DateTime(2026, 4, 22, 14),
+      end: DateTime(2026, 4, 22, 15),
     );
     store.requestMove(moved);
     harness.lastCall.succeed(moved);
     await settle();
-    final multiMoved = multi.copyWith(day: DateTime(2026, 4, 21));
+    // Monday 19:00 to Wednesday 12:00, clear of the moved entry.
+    final multiMoved = multi.copyWith(
+      start: DateTime(2026, 4, 20, 19),
+      end: DateTime(2026, 4, 22, 12),
+    );
     store.requestMove(multiMoved);
     harness.lastCall.succeed(multiMoved);
     await settle();
@@ -370,7 +403,7 @@ void main() {
     await settle();
 
     // A move that fails.
-    final requested = item.copyWith(day: DateTime(2026, 4, 23));
+    final requested = onDay(item, DateTime(2026, 4, 23));
     store.requestMove(requested);
     final failing = harness.lastCall;
     expect(failing.method, SourceMethod.replace);
@@ -382,7 +415,7 @@ void main() {
 
     // Every write on the locked id is refused without a call or a throw.
     final calls = harness.source.calls.length;
-    store.requestMove(item.copyWith(day: DateTime(2026, 4, 24)));
+    store.requestMove(onDay(item, DateTime(2026, 4, 24)));
     expect(harness.failures, <Matcher>[
       failureOf("item-1", pendingRefusal("item-1")),
     ]);
@@ -439,13 +472,8 @@ void main() {
   test("M4 a move that meets an entry on a read day sends nothing", () async {
     final harness = Harness();
     final store = harness.store;
-    final multi = task(
-      "item-1",
-      DateTime(2026, 4, 25),
-      1140,
-      1200,
-      dayCount: 3,
-    );
+    // From Saturday 19:00 to Sunday 01:00.
+    final multi = task("item-1", DateTime(2026, 4, 25), 1140, 1500);
     final single = task("item-2", DateTime(2026, 4, 27), 1020, 1080);
     final morning = task("item-3", DateTime(2026, 4, 26), 600, 660);
     store.show(DateTime(2026, 4, 25), DateTime(2026, 4, 27));
@@ -453,27 +481,35 @@ void main() {
     await settle();
     final calls = harness.source.calls.length;
 
-    store.requestMove(multi.copyWith(startMinute: 1020, endMinute: 1080));
+    // Monday 13:00 to 19:00 meets Monday's entry from 17:00.
+    store.requestMove(
+      multi.copyWith(
+        start: DateTime(2026, 4, 27, 13),
+        end: DateTime(2026, 4, 27, 19),
+      ),
+    );
     expect(harness.source.calls, hasLength(calls));
     expect(store.isPending("item-1"), isFalse);
     expect(harness.failures, <Matcher>[
       failureOf("item-1", overlapRefusal(<String>["item-2"])),
     ]);
 
-    store.requestMove(multi.copyWith(startMinute: 1110, endMinute: 1170));
-    expect(harness.source.calls, hasLength(calls + 1));
-    harness.lastCall.succeed(
-      multi.copyWith(startMinute: 1110, endMinute: 1170),
+    // Sunday 19:00 to Monday 01:00 meets neither.
+    final clear = multi.copyWith(
+      start: DateTime(2026, 4, 26, 19),
+      end: DateTime(2026, 4, 27, 1),
     );
+    store.requestMove(clear);
+    expect(harness.source.calls, hasLength(calls + 1));
+    harness.lastCall.succeed(clear);
     await settle();
 
     // Two single-day entries are kept apart as well.
     final reported = harness.failures.length;
     store.requestMove(
       single.copyWith(
-        day: DateTime(2026, 4, 26),
-        startMinute: 630,
-        endMinute: 690,
+        start: DateTime(2026, 4, 26, 10, 30),
+        end: DateTime(2026, 4, 26, 11, 30),
       ),
     );
     expect(harness.source.calls, hasLength(calls + 1));
@@ -555,7 +591,7 @@ void main() {
         await settle();
         store.show(aprilFirst, aprilLast);
         final read = harness.lastCall;
-        store.requestMove(item.copyWith(day: DateTime(2026, 4, 22)));
+        store.requestMove(onDay(item, DateTime(2026, 4, 22)));
         final write = harness.lastCall;
 
         store.dispose();
@@ -587,13 +623,17 @@ void main() {
     final created = errorOf(
       store.create(draft(DateTime(2026, 4, 22), 1050, 1110, title: "Late")),
     );
-    final moved = errorOf(store.update(early.copyWith(day: weekLast)));
+    final moved = errorOf(
+      store.update(
+        early.copyWith(start: at(weekLast, 420), end: at(weekLast, 540)),
+      ),
+    );
     await settle();
     expect(created(), hoursRefusal(startOutside: false));
     expect(moved(), hoursRefusal(startOutside: true));
     expect(store.isPending("item-1"), isFalse);
 
-    store.requestMove(early.copyWith(startMinute: 450, endMinute: 510));
+    store.requestMove(retimed(early, 450, 510));
     expect(harness.failures, <Matcher>[
       failureOf("item-1", hoursRefusal(startOutside: true)),
     ]);
@@ -605,9 +645,9 @@ void main() {
     expect(harness.source.calls, hasLength(calls + 1));
     harness.lastCall.succeed(early.copyWith(title: "Renamed"));
     await renamed;
-    store.requestMove(early.copyWith(startMinute: 480, endMinute: 600));
+    store.requestMove(retimed(early, 480, 600));
     expect(harness.source.calls, hasLength(calls + 2));
-    expect(harness.lastCall.entry!.startMinute, 480);
+    expect(harness.lastCall.entry!.start, DateTime(2026, 4, 21, 8));
   });
 
   test("M9 isWithinShown holds for the days inside the shown range", () {
@@ -717,7 +757,7 @@ void main() {
         task("item-1", day, 0, 60),
         task("item-2", day, 75, 120),
       ]);
-      expect(store.firstFreeRange(day), (start: 60, end: 75));
+      expect(store.firstFreeRange(day), (start: at(day, 60), end: at(day, 75)));
     });
 
     test(
@@ -727,15 +767,18 @@ void main() {
           task("item-1", day, 540, 705),
         ]);
         store.hours = const DayHours(540, 720);
-        expect(store.firstFreeRange(day), (start: 705, end: 720));
+        expect(store.firstFreeRange(day), (
+          start: at(day, 705),
+          end: at(day, 720),
+        ));
       },
     );
 
     test("FF3 with no free start the range is the hours' first slot", () async {
       final store = await readDay(Harness(), <CalendarEntry<String>>[
-        task("item-1", day, 0, 1440),
+        task("item-1", day, 0, 1439),
       ]);
-      expect(store.firstFreeRange(day), (start: 0, end: 15));
+      expect(store.firstFreeRange(day), (start: at(day, 0), end: at(day, 15)));
     });
 
     test("FF4 a pending move counts where it shows", () async {
@@ -743,13 +786,13 @@ void main() {
       final item = task("item-1", day, 60, 120);
       final store = await readDay(harness, <CalendarEntry<String>>[item]);
       // Sanity: the stored entry leaves the first slot free.
-      expect(store.firstFreeRange(day), (start: 0, end: 15));
+      expect(store.firstFreeRange(day), (start: at(day, 0), end: at(day, 15)));
 
       final calls = harness.source.calls.length;
-      store.requestMove(item.copyWith(startMinute: 0, endMinute: 60));
+      store.requestMove(retimed(item, 0, 60));
       expect(harness.source.calls, hasLength(calls + 1));
       expect(store.isPending("item-1"), isTrue);
-      expect(store.firstFreeRange(day), (start: 60, end: 75));
+      expect(store.firstFreeRange(day), (start: at(day, 60), end: at(day, 75)));
     });
 
     test("FF5 a search from a minute starts there, rounded up to the slots "
@@ -760,13 +803,28 @@ void main() {
         task("item-2", day, 900, 960),
       ]);
       store.hours = const DayHours(480, 1200);
-      expect(store.firstFreeRange(day, from: 840), (start: 840, end: 855));
+      expect(store.firstFreeRange(day, from: 840), (
+        start: at(day, 840),
+        end: at(day, 855),
+      ));
       // 14:10 rounds up to 14:15.
-      expect(store.firstFreeRange(day, from: 850), (start: 855, end: 870));
+      expect(store.firstFreeRange(day, from: 850), (
+        start: at(day, 855),
+        end: at(day, 870),
+      ));
       // Each slot from 15:00 meets item-2 until it ends.
-      expect(store.firstFreeRange(day, from: 900), (start: 960, end: 975));
-      expect(store.firstFreeRange(day, from: 300), (start: 540, end: 555));
-      expect(store.firstFreeRange(day, from: 1200), (start: 540, end: 555));
+      expect(store.firstFreeRange(day, from: 900), (
+        start: at(day, 960),
+        end: at(day, 975),
+      ));
+      expect(store.firstFreeRange(day, from: 300), (
+        start: at(day, 540),
+        end: at(day, 555),
+      ));
+      expect(store.firstFreeRange(day, from: 1200), (
+        start: at(day, 540),
+        end: at(day, 555),
+      ));
     });
   });
 
@@ -833,10 +891,8 @@ void main() {
       store.show(weekFirst, weekLast);
       harness.lastCall.succeed(<CalendarEntry<String>>[item]);
       await settle();
-      store.requestMove(item.copyWith(startMinute: 720, endMinute: 780));
-      harness.lastCall.succeed(
-        item.copyWith(id: "item-9", startMinute: 720, endMinute: 780),
-      );
+      store.requestMove(retimed(item, 720, 780));
+      harness.lastCall.succeed(retimed(item, 720, 780).copyWith(id: "item-9"));
       await settle();
       expect(harness.failures, <Matcher>[
         failureOf("item-1", isA<StateError>()),
@@ -878,7 +934,7 @@ void main() {
       final stored = created.copyWith(id: "item-5");
       read.succeed(<CalendarEntry<String>>[stored]);
       await settle();
-      final requested = stored.copyWith(startMinute: 720, endMinute: 780);
+      final requested = retimed(stored, 720, 780);
       store.requestMove(requested);
       expect(store.isPending("item-5"), isTrue);
 
@@ -888,7 +944,7 @@ void main() {
       expect(store.entriesOn(day), <CalendarShownEntry<String>>[
         CalendarShownEntry<String>(requested, pending: true),
       ]);
-      store.requestMove(stored.copyWith(startMinute: 900, endMinute: 960));
+      store.requestMove(retimed(stored, 900, 960));
       expect(harness.failures, <Matcher>[
         failureOf("item-5", pendingRefusal("item-5")),
       ]);
@@ -923,7 +979,7 @@ void main() {
       const thrown = SourceFailure("Thrown.");
       harness.source.thrown = thrown;
       expect(() => store.show(aprilFirst, aprilLast), returnsNormally);
-      store.requestMove(item.copyWith(startMinute: 720, endMinute: 780));
+      store.requestMove(retimed(item, 720, 780));
       store.requestDelete("item-2");
       await settle();
       expect(store.status, CalendarLoadStatus.failed);
@@ -944,12 +1000,13 @@ void main() {
       "each once, in order", () async {
     final harness = Harness();
     final store = harness.store;
+    // All-day from May 5 to May 7, sharing time with no entry.
     final three = task(
       "three",
       DateTime(2026, 5, 5),
-      840,
-      900,
-      dayCount: 3,
+      0,
+      0,
+      dayCount: 4,
       title: "Three",
     );
     final ten = task("ten", DateTime(2026, 5, 6), 600, 660, title: "Ten");
@@ -964,34 +1021,33 @@ void main() {
     }
 
     expect(range(), <CalendarShownEntry<String>>[
-      CalendarShownEntry<String>(nine, pending: false),
-      CalendarShownEntry<String>(ten, pending: false),
       CalendarShownEntry<String>(three, pending: false),
+      CalendarShownEntry<String>(ten, pending: false),
+      CalendarShownEntry<String>(nine, pending: false),
     ]);
 
     final moved = ten.copyWith(
-      day: DateTime(2026, 5, 7),
-      startMinute: 480,
-      endMinute: 540,
+      start: DateTime(2026, 5, 7, 8),
+      end: DateTime(2026, 5, 7, 9),
     );
     store.requestMove(moved);
     expect(store.isPending("ten"), isTrue);
     expect(range(), <CalendarShownEntry<String>>[
+      CalendarShownEntry<String>(three, pending: false),
       CalendarShownEntry<String>(moved, pending: true),
       CalendarShownEntry<String>(nine, pending: false),
-      CalendarShownEntry<String>(three, pending: false),
     ]);
     expect(store.entriesOn(DateTime(2026, 5, 7)), <CalendarShownEntry<String>>[
+      CalendarShownEntry<String>(three, pending: false),
       CalendarShownEntry<String>(moved, pending: true),
       CalendarShownEntry<String>(nine, pending: false),
-      CalendarShownEntry<String>(three, pending: false),
     ]);
 
     store.update(nine.copyWith(title: "Nine o'clock"));
     expect(range(), <CalendarShownEntry<String>>[
+      CalendarShownEntry<String>(three, pending: false),
       CalendarShownEntry<String>(moved, pending: true),
       CalendarShownEntry<String>(nine, pending: true),
-      CalendarShownEntry<String>(three, pending: false),
     ]);
   });
 
@@ -1017,7 +1073,7 @@ void main() {
     store.prefetch(DateTime(2026, 5, 4), DateTime(2026, 5, 10));
     expect(store.isRead(DateTime(2026, 5, 4)), isTrue);
 
-    final moved = item.copyWith(startMinute: 720, endMinute: 780);
+    final moved = retimed(item, 720, 780);
     store.requestMove(moved);
     expect(store.isPending("item-1"), isFalse);
     expect(store.storedEntry("item-1"), moved);

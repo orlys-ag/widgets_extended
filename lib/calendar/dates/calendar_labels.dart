@@ -85,6 +85,22 @@ String clockRangeLabel(int start, int end) {
   return "${clockLabel(start)}-${clockLabel(end)}";
 }
 
+/// What an all-day entry's times read: "All day".
+const String allDayLabel = "All day";
+
+/// "09:10-09:50": the [clockLabel]s of the times of day of [start] and
+/// [end], the end reading "24:00" where it is the start of the day after
+/// [start]'s; [allDayLabel] for a range from a day start to a day start.
+String entryTimesLabel(DateTime start, DateTime end) {
+  if (isDayStart(start) && isDayStart(end)) {
+    return allDayLabel;
+  }
+  final last = isDayStart(end) && dayNumber(end) == dayNumber(start) + 1
+      ? minutesPerDay
+      : minuteOfDay(end);
+  return clockRangeLabel(minuteOfDay(start), last);
+}
+
 /// How the timed grid's hour gutter names the times it labels.
 enum HourLabelFormat {
   /// "13:00", as [clockLabel] writes it.

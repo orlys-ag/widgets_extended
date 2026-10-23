@@ -79,7 +79,7 @@ Widget defaultCalendarBlockBuilder<T>(
             style: theme.detailedBlockTitleStyle.copyWith(color: theme.text),
           ),
           Text(
-            clockRangeLabel(item.startMinute, item.endMinute),
+            entryTimesLabel(item.start, item.end),
             maxLines: 1,
             style: theme.detailedBlockDetailStyle.copyWith(
               color: theme.textSecondary,
@@ -183,7 +183,7 @@ Widget defaultCalendarChipBuilder<T>(
           style: theme.monthCardTitleStyle.copyWith(color: theme.text),
         ),
         Text(
-          clockRangeLabel(item.startMinute, item.endMinute),
+          entryTimesLabel(item.start, item.end),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           softWrap: false,

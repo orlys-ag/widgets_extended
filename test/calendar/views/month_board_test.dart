@@ -31,16 +31,14 @@ DateTime april(int day) {
   return DateTime(2026, 4, day);
 }
 
-/// An entry with the id and title [id] from [day] for [dayCount] days, an
-/// hour from [start] o'clock, as the calendar shows it.
+/// An entry with the id and title [id] from [start] o'clock on [day] to
+/// an hour later on its [dayCount]th day, as the calendar shows it.
 ShownItem task(String id, DateTime day, int start, {int dayCount = 1}) {
   return ShownItem(
     CalendarEntry<String>(
       id: id,
-      day: day,
-      startMinute: start * 60,
-      endMinute: (start + 1) * 60,
-      dayCount: dayCount,
+      start: DateTime(day.year, day.month, day.day, start),
+      end: DateTime(day.year, day.month, day.day + dayCount - 1, start + 1),
       title: id,
       color: const Color(0xFF336699),
       payload: id,
@@ -124,8 +122,8 @@ class ReadSource implements CalendarDataSource<String> {
     return SynchronousFuture<List<CalendarEntry<String>>>(
       <CalendarEntry<String>>[
         for (final entry in entries)
-          if (entry.time.firstDay <= to &&
-              entry.time.firstDay + entry.time.dayCount - 1 >= from)
+          if (dayNumber(entry.start) <= to &&
+              lastDayNumberOf(entry.start, entry.end) >= from)
             entry,
       ],
     );
@@ -344,9 +342,8 @@ void main() {
     final day = DateTime(2026, 4, 21);
     final note = CalendarEntry<String>(
       id: "note-1",
-      day: day,
-      startMinute: 10 * 60,
-      endMinute: 11 * 60,
+      start: DateTime(2026, 4, 21, 10),
+      end: DateTime(2026, 4, 21, 11),
       title: "Note",
       color: const Color(0xFF336699),
       payload: "first",
@@ -404,9 +401,8 @@ void main() {
     final source = ReadSource(<CalendarEntry<String>>[
       CalendarEntry<String>(
         id: "talk",
-        day: april(21),
-        startMinute: 10 * 60,
-        endMinute: 11 * 60,
+        start: DateTime(2026, 4, 21, 10),
+        end: DateTime(2026, 4, 21, 11),
         title: "talk",
         color: const Color(0xFF336699),
         payload: "talk",

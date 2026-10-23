@@ -11,7 +11,8 @@ import 'package:flutter/foundation.dart';
 
 import 'calendar_labels.dart';
 
-/// The length of one slot, and the step every entry time is a multiple of.
+/// The length of one slot of the timed grid, the step its rows and
+/// gestures snap to.
 const int minutesPerSlot = 15;
 
 const int minutesPerDay = 1440;
@@ -241,6 +242,127 @@ DateTime dateOfDayNumber(int day) {
   return DateTime(utc.year, utc.month, utc.day);
 }
 
+/// Whether [time] is the start of its day: the instant
+/// `DateTime(year, month, day)` gives, so a day of 23 or 25 hours, and one
+/// whose midnight the clock skips, has one.
+bool isDayStart(DateTime time) {
+  return time == DateTime(time.year, time.month, time.day);
+}
+
+/// The minutes after midnight [time]'s wall clock reads.
+int minuteOfDay(DateTime time) {
+  return time.hour * 60 + time.minute;
+}
+
+/// The minute of its last day an end at [end] lies at: [minutesPerDay] for
+/// a day start, which ends the day before, and [minuteOfDay] otherwise.
+int endMinuteOfDay(DateTime end) {
+  return isDayStart(end) ? minutesPerDay : minuteOfDay(end);
+}
+
+/// [time] on the wall-clock coordinate: its [dayNumber] times
+/// [minutesPerDay], plus 0 for a day start and its [minuteOfDay]
+/// otherwise. A day's 24:00 is the next day's minute 0.
+int wallMinuteOf(DateTime time) {
+  return dayNumber(time) * minutesPerDay +
+      (isDayStart(time) ? 0 : minuteOfDay(time));
+}
+
+/// The instant the wall minute [wall] names: for minute 0 of a day its
+/// start, and otherwise the time its day's clock reads at that hour and
+/// minute; null for a time the clock skips.
+///
+/// On a day whose clock repeats a stretch, a time in it has two instants:
+/// the earlier, or the later where [from] lies on the same day and is
+/// itself a later occurrence ([isLaterOccurrence]), so a gesture that
+/// began in the repeated stretch stays in the occurrence it began in.
+DateTime? timeAtWallMinute(int wall, {DateTime? from}) {
+  // Floored, so a wall minute before the epoch's day keeps its minute.
+  final minute = wall % minutesPerDay;
+  final day = (wall - minute) ~/ minutesPerDay;
+  final date = dateOfDayNumber(day);
+  if (minute == 0) {
+    return date;
+  }
+  final hour = minute ~/ 60;
+  final ofHour = minute % 60;
+  bool reads(DateTime time) {
+    return time.year == date.year &&
+        time.month == date.month &&
+        time.day == date.day &&
+        time.hour == hour &&
+        time.minute == ofHour;
+  }
+
+  final time = DateTime(date.year, date.month, date.day, hour, ofHour);
+  // A time the clock skips rolls over to another hour.
+  if (!reads(time)) {
+    return null;
+  }
+  final change = date.timeZoneOffset - addDays(date, 1).timeZoneOffset;
+  if (change <= Duration.zero) {
+    return time;
+  }
+  // The clock repeats a stretch of [change] on this day, so the time may
+  // have a second instant [change] away, whichever one the constructor
+  // picked.
+  DateTime? earliest;
+  DateTime? latest;
+  for (final candidate in <DateTime>[
+    time.subtract(change),
+    time,
+    time.add(change),
+  ]) {
+    if (reads(candidate)) {
+      earliest ??= candidate;
+      latest = candidate;
+    }
+  }
+  if (from != null && dayNumber(from) == day && isLaterOccurrence(from)) {
+    return latest;
+  }
+  return earliest;
+}
+
+/// Whether [time] is the later instant of a wall time its day's clock
+/// reads twice.
+bool isLaterOccurrence(DateTime time) {
+  return time != timeAtWallMinute(wallMinuteOf(time));
+}
+
+/// The [dayNumber] of the last day a range from [start] to [end], end
+/// exclusive, has a part in: the day before an end at a day start, and the
+/// end's own day otherwise.
+int lastDayNumberOf(DateTime start, DateTime end) {
+  return isDayStart(end) ? dayNumber(end) - 1 : dayNumber(end);
+}
+
+/// The range from [start] to [end] in wall minutes ([wallMinuteOf]). An
+/// end whose wall minute is not after the start's, which only a stretch
+/// the clock repeats gives, is the start plus the range's length in
+/// minutes.
+({int start, int end}) wallSpanOf(DateTime start, DateTime end) {
+  final from = wallMinuteOf(start);
+  var to = wallMinuteOf(end);
+  if (to <= from) {
+    to = from + end.difference(start).inMinutes;
+  }
+  return (start: from, end: to);
+}
+
+/// The part of [span], in wall minutes, on the [dayNumber] [day], as
+/// minutes of that day with `0 <= start < end <= minutesPerDay`; null
+/// where it has none, as on a day an end at its start leaves.
+({int start, int end})? pieceOn(({int start, int end}) span, int day) {
+  final base = day * minutesPerDay;
+  final start = math.max(span.start, base) - base;
+  final end = math.min(span.end, base + minutesPerDay) - base;
+  if (end <= start) {
+    return null;
+  }
+  return (start: start, end: end);
+}
+
 /// "2026-04-21".
 String isoDate(DateTime date) {
   final year = date.year.toString().padLeft(4, "0");
@@ -416,16 +538,28 @@ class DayHours {
     return from >= start && to <= end;
   }
 
-  /// Whether [minute] begins a slot inside these hours: from [start] to
-  /// the start of the last slot.
+  /// Whether a range may start at [minute] after midnight inside these
+  /// hours: from [start] to before [end].
   bool holdsStart(int minute) {
-    return start <= minute && minute <= end - minutesPerSlot;
+    return start <= minute && minute < end;
   }
 
-  /// Whether [minute] ends a slot inside these hours: from the end of the
-  /// first slot to [end].
+  /// Whether a range may end at [minute] after midnight inside these
+  /// hours: from after [start] to [end].
   bool holdsEnd(int minute) {
-    return start + minutesPerSlot <= minute && minute <= end;
+    return start < minute && minute <= end;
+  }
+
+  /// Whether these hours hold the range from [from] to [to]: every range
+  /// from a day start to a day start, an all-day range, which no hours
+  /// limit; and any other whose start's [minuteOfDay] they hold as a start
+  /// and whose end's minute on its last day ([endMinuteOfDay]) they hold
+  /// as an end, so an overnight range may cross the hours' end and start.
+  bool holdsTimes(DateTime from, DateTime to) {
+    if (isDayStart(from) && isDayStart(to)) {
+      return true;
+    }
+    return holdsStart(minuteOfDay(from)) && holdsEnd(endMinuteOfDay(to));
   }
 
   @override

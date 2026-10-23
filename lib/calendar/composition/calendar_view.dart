@@ -115,7 +115,8 @@ class CalendarEntryTapDetails<T> {
 /// - Week: a timed grid of the selected day's week under the header's
 ///   card, its days in columns under a day header whose tap selects a day.
 /// - Month: the month's weeks under the header's card, each entry a chip
-///   on the days it covers, the weeks laid out as [monthLayout] says. A
+///   on the days it covers, from its start's day to the last day it has a
+///   part in, the weeks laid out as [monthLayout] says. A
 ///   tap on a chip reports the entry, and a tap anywhere else on a day
 ///   opens that day in Day where [views] lists Day, and otherwise selects
 ///   it. In edit mode a long press on a day reports a create through
@@ -123,11 +124,15 @@ class CalendarEntryTapDetails<T> {
 ///   free, selecting the day when it is in the month, or, where the lock
 ///   leaves no slot of [hours] that day, [onCreateRefused].
 ///
+/// An entry runs from its start to its end ([CalendarEntry]): Week and Day
+/// draw it as one block per shown day it covers, at its exact minutes, and
+/// Agenda lists it under each day it covers with that day's part of it.
 /// In Week and Day a tap on a block, and in Month on a chip, reports the
 /// stored entry through [onEntryTap]. In edit mode, which [editable] turns
-/// on, Week's and Day's blocks move and resize, and a drag over empty slots
-/// reports a create through [onCreateRange], whose slots stay marked until
-/// its future completes. Out of edit mode the calendar is read-only. In
+/// on, Week's and Day's blocks move, keeping the entry's length, and
+/// resize, and a drag over empty slots reports one continuous range
+/// through [onCreateRange], across days too, which stays marked until its
+/// future completes. Out of edit mode the calendar is read-only. In
 /// edit mode the history lock, which [lockPast] and [lockEarlierToday]
 /// choose ([HistoryLock.of]), keeps the past as it is. A pinch of two
 /// fingers on Week's, Day's or Month's grid sets the controller's zoom
@@ -249,9 +254,11 @@ class CalendarView<T> extends StatefulWidget {
   /// not hold.
   final MonthLayout monthLayout;
 
-  /// The most days a resize of an entry's trailing edge in Week may give
-  /// it, past which the grid refuses the drop; null for no limit. A move
-  /// keeps the entry's day count.
+  /// The most days, counting each day it has any part of, that a create
+  /// drag across days in Week may give a range: one dragged past them is
+  /// held at the latest range they admit. A move keeps the days an entry
+  /// covers, except where it crosses a midnight, and no limit applies to
+  /// it. Null for no limit.
   final int? maxDayCount;
 
   /// Reads the current time, which the calendar reads when first built and
@@ -292,11 +299,11 @@ class CalendarView<T> extends StatefulWidget {
   /// that is not pending and that the store holds; null reports nothing.
   final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
-  /// A create the calendar's gestures picked, in edit mode: the slots a
-  /// gesture picked in Week or Day, which stay marked until the future
+  /// A create the calendar's gestures picked, in edit mode: the range a
+  /// gesture picked in Week or Day, which stays marked until the future
   /// completes; a gap's first free slot in Agenda, the add button's; and a
   /// day's first free slot in Month, a long press's. Null reports nothing,
-  /// and the marked slots clear at once.
+  /// and the marked range clears at once.
   final Future<void> Function(CreateRange range)? onCreateRange;
 
   /// An edit request from an Agenda card, with the stored entry: a
@@ -1081,7 +1088,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       CalendarEntryTapDetails<T>(
         entry: entry,
         editable:
-            widget.editable && _lock.holdOf(entry.time) != ItemHold.locked,
+            widget.editable &&
+            _lock.holdOf(entry.start, entry.end) != ItemHold.locked,
       ),
     );
   }
@@ -1094,15 +1102,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return onCreateRange(range);
   }
 
+  /// Reports a create on [day] from [startMinute] to [endMinute] after its
+  /// midnight, or nothing where either is a time the clock skips.
   void _createIn(DateTime day, int startMinute, int endMinute) {
-    _createRange(
-      CreateRange(
-        day: day,
-        startMinute: startMinute,
-        endMinute: endMinute,
-        dayCount: 1,
-      ),
-    );
+    final base = dayNumber(day) * minutesPerDay;
+    final start = timeAtWallMinute(base + startMinute);
+    final end = timeAtWallMinute(base + endMinute);
+    if (start == null || end == null) {
+      return;
+    }
+    _createRange(CreateRange(start: start, end: end));
   }
 
   void _requestEdit(String id) {
@@ -1146,15 +1155,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       day,
       from: earliest == 0 ? null : earliest,
     );
-    final start = math.max(free.start, earliest);
-    _createRange(
-      CreateRange(
-        day: day,
-        startMinute: start,
-        endMinute: start + minutesPerSlot,
-        dayCount: 1,
-      ),
-    );
+    if (wallMinuteOf(free.start) - dayNumber(day) * minutesPerDay >= earliest) {
+      _createRange(CreateRange(start: free.start, end: free.end));
+      return;
+    }
+    _createIn(day, earliest, earliest + minutesPerSlot);
   }
 
   CalendarHeaderDetails _headerDetails() {
