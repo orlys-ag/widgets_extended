@@ -22,6 +22,7 @@ import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
@@ -399,8 +400,9 @@ class HeldSource implements CalendarDataSource<String> {
 
 /// What a test pumps: the grid of [shown] over [store], in a view of
 /// [size], 800 wide and 2000 tall by default, where every slot of the day
-/// shows; [creates] records each create range it reports and [opened]
-/// each entry it opens. [editable], [first], [hours] and [slotMinutes]
+/// shows at the default [minSlotHeight] and every day column at the
+/// default [minDayWidth]; [creates] records each create range it reports
+/// and [opened] each entry it opens. [editable], [first], [hours] and [slotMinutes]
 /// start as given, and [rebuild] builds the grid again with them.
 class Harness {
   Harness(
@@ -411,6 +413,7 @@ class Harness {
     this.lockPast = false,
     this.lockEarlierToday = false,
     this.minSlotHeight = defaultMinSlotHeight,
+    this.minDayWidth = minDayWidthLow,
     this.size = const Size(800.0, 2000.0),
     DateTime? today,
     int nowHour = 9,
@@ -426,6 +429,7 @@ class Harness {
   final bool lockPast;
   final bool lockEarlierToday;
   final double minSlotHeight;
+  final double minDayWidth;
   final Size size;
   final DateTime today;
 
@@ -461,6 +465,7 @@ class Harness {
       hours: hours,
       slotMinutes: slotMinutes,
       minSlotHeight: minSlotHeight,
+      minDayWidth: minDayWidth,
       maxDayCount: maxDayCount,
       showsDayHeader: shown.week,
     );
@@ -1845,6 +1850,367 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle();
     }
+  });
+
+  group("TX15", () {
+    setUp(() {
+      debugDropGateCount = 0;
+      debugCellReadCount = 0;
+    });
+
+    /// Pumps the grid of [shown], Week from Monday by default, over
+    /// [entries] in a view of [size], with slots at least 40 px tall and the
+    /// hours scrolled to their start, and returns the harness.
+    Future<Harness> pumpGrid(
+      WidgetTester tester,
+      List<CalendarEntry<String>> entries, {
+      Shown? shown,
+      int? maxDayCount,
+      double minDayWidth = minDayWidthLow,
+      Size size = const Size(800.0, 2000.0),
+    }) async {
+      final harness = Harness(
+        storeOf(entries),
+        shown ?? Shown.week(monday),
+        minSlotHeight: 40.0,
+        minDayWidth: minDayWidth,
+        maxDayCount: maxDayCount,
+        size: size,
+      );
+      await harness.pump(tester);
+      viewportOf(tester).verticalPosition!.jumpTo(0.0);
+      await tester.pump();
+      return harness;
+    }
+
+    /// Moves [gesture] by [step] ten times, a frame after each.
+    Future<void> moveTenTimes(
+      WidgetTester tester,
+      TestGesture gesture,
+      Offset step,
+    ) async {
+      for (var i = 0; i < 10; i++) {
+        await gesture.moveBy(step);
+        await tester.pump();
+      }
+    }
+
+    testWidgets("with 20 blocks mounted, a block's move asks at most two "
+        "gates on the move that enters the strip and on the one that "
+        "leaves it", (tester) async {
+      final shown = Shown.week(monday);
+      await pumpGrid(tester, <CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 3), at(tuesday, 4)),
+        for (var i = 0; i < 20; i++)
+          entryOf(
+            "b$i",
+            at(addDays(monday, i % 7), 5 + (i ~/ 7) * 2),
+            at(addDays(monday, i % 7), 6 + (i ~/ 7) * 2),
+          ),
+      ]);
+      // Setup sanity: the 20 blocks are mounted.
+      for (var i = 0; i < 20; i++) {
+        expect(blockFinder("b$i", addDays(monday, i % 7)), findsOneWidget);
+      }
+      final over = slotRect(tester, shown, tuesday, 2 * 60).center;
+      final gesture = await liftTo(
+        tester,
+        tester.getCenter(blockFinder("meet", tuesday)),
+        over,
+      );
+      debugDropGateCount = 0;
+      await gesture.moveTo(stripRect(tester, shown, tuesday).center);
+      await tester.pump();
+      // Setup sanity: the crossing reads the strip cell.
+      expect(markedOf(tester, <DateTime>[tuesday]), <DateTime>[tuesday]);
+      expect(debugDropGateCount, lessThanOrEqualTo(2), reason: "entering");
+      debugDropGateCount = 0;
+      await gesture.moveTo(over);
+      await tester.pump();
+      expect(markedOf(tester, <DateTime>[tuesday]), isEmpty);
+      expect(debugDropGateCount, lessThanOrEqualTo(2), reason: "leaving");
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets("a one-slot block's proxy over Tuesday's strip cell asks at "
+        "most 10 * 3 * (B + 4) gates over ten moves of 1 px, on a strip of "
+        "one row and on an expanded one", (tester) async {
+      final shown = Shown.week(monday);
+      for (final perDay in const <int>[1, 5]) {
+        await pumpGrid(tester, <CalendarEntry<String>>[
+          entryOf("q", at(tuesday, 2), at(tuesday, 2, 15)),
+          for (final day in <DateTime>[monday, tuesday, wednesday])
+            for (var i = 0; i < perDay; i++) allDayOf("a${day.day}-$i", day),
+        ]);
+        if (perDay > 1) {
+          await tester.tap(find.byKey(allDayMoreKey(tuesday)));
+          await tester.pumpAndSettle();
+          viewportOf(tester).verticalPosition!.jumpTo(0.0);
+          await tester.pump();
+        }
+        final band = boardOf(tester).controller.rows.frozenStart;
+        // Setup sanity: the band holds the header and every strip row.
+        expect(band, 1 + perDay, reason: "$perDay a day");
+        final gesture = await liftTo(
+          tester,
+          tester.getCenter(blockFinder("q", tuesday)),
+          stripRect(tester, shown, tuesday).center,
+        );
+        debugDropGateCount = 0;
+        await moveTenTimes(tester, gesture, const Offset(0.0, 1.0));
+        // Setup sanity: the pointer stayed over Tuesday's strip cell.
+        expect(markedOf(tester, <DateTime>[tuesday]), <DateTime>[tuesday]);
+        expect(
+          debugDropGateCount,
+          lessThanOrEqualTo(10 * 3 * (band + 4)),
+          reason: "$perDay a day",
+        );
+        await gesture.up();
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets("ten moves of 1 px of a block's move read the cell ten "
+        "times, and ten of a start-handle resize, of a bar's day-edge resize "
+        "and, in Day, of an end-handle resize read none", (tester) async {
+      final week = Shown.week(monday);
+      await pumpGrid(tester, <CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 5), at(tuesday, 6)),
+        allDayOf("off", monday),
+      ]);
+      final block = blockFinder("meet", tuesday);
+      final move = await liftTo(
+        tester,
+        tester.getCenter(block),
+        tester.getCenter(block) + const Offset(0.0, 8.0),
+      );
+      debugCellReadCount = 0;
+      await moveTenTimes(tester, move, const Offset(0.0, 1.0));
+      expect(debugCellReadCount, 10, reason: "a block's move");
+      await move.up();
+      await tester.pumpAndSettle();
+
+      // The drop left the entry selected, its start grip on the block.
+      final top = tester.getRect(block);
+      final start = await tester.startGesture(
+        Offset(top.center.dx, top.top + 2.0),
+      );
+      await start.moveBy(const Offset(0.0, -30.0));
+      await tester.pump();
+      // Setup sanity: the resize runs.
+      expect(landingText(tester), isNotNull, reason: "a start-handle resize");
+      debugCellReadCount = 0;
+      await moveTenTimes(tester, start, const Offset(0.0, -1.0));
+      expect(debugCellReadCount, 0, reason: "a start-handle resize");
+      await start.up();
+      await tester.pumpAndSettle();
+
+      await selectBar(tester, "off");
+      final edge = await holdEdge(
+        tester,
+        "off",
+        AxisDirection.right,
+        Offset(
+          stripRect(tester, week, wednesday).right - 20.0,
+          tester.getCenter(barFinder("off")).dy,
+        ),
+      );
+      expect(landingText(tester), isNotNull, reason: "a bar's day-edge resize");
+      debugCellReadCount = 0;
+      await moveTenTimes(tester, edge, const Offset(1.0, 0.0));
+      expect(debugCellReadCount, 0, reason: "a bar's day-edge resize");
+      await edge.up();
+      await tester.pumpAndSettle();
+
+      await pumpGrid(tester, <CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 5), at(tuesday, 6)),
+      ], shown: Shown.day(tuesday));
+      final dayBlock = blockFinder("meet", tuesday);
+      final selecting = await lift(tester, tester.getCenter(dayBlock));
+      await selecting.up();
+      await tester.pumpAndSettle();
+      final bottom = tester.getRect(dayBlock);
+      final end = await tester.startGesture(
+        Offset(bottom.center.dx, bottom.bottom - 2.0),
+      );
+      await end.moveBy(const Offset(0.0, 30.0));
+      await tester.pump();
+      expect(landingText(tester), isNotNull, reason: "Day's end-handle resize");
+      debugCellReadCount = 0;
+      await moveTenTimes(tester, end, const Offset(0.0, 1.0));
+      expect(debugCellReadCount, 0, reason: "Day's end-handle resize");
+      await end.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets("with a block's move, and then a bar's, held still in the "
+        "middle of the slots, ten jumps of 1 px of the vertical position "
+        "read the cell ten times, and so do ten of the horizontal one", (
+      tester,
+    ) async {
+      final shown = Shown.week(monday);
+      await pumpGrid(tester, <CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 5), at(tuesday, 6)),
+        allDayOf("off", monday),
+      ], minDayWidth: 200.0);
+      final viewport = viewportOf(tester);
+      final middle = viewport
+          .localToGlobal(Offset(0.0, viewport.size.height / 2))
+          .dy;
+      for (final (name, from, column) in <(String, Finder, DateTime)>[
+        ("a block's move", blockFinder("meet", tuesday), tuesday),
+        ("a bar's move", barFinder("off"), monday),
+      ]) {
+        final gesture = await liftTo(
+          tester,
+          tester.getCenter(from),
+          Offset(slotRect(tester, shown, column, 0).center.dx, middle),
+        );
+        // Setup sanity: the drag runs.
+        expect(find.byKey(liftedBlockKey), findsOneWidget, reason: name);
+        final vertical = viewportOf(tester).verticalPosition!;
+        debugCellReadCount = 0;
+        for (var i = 0; i < 10; i++) {
+          vertical.jumpTo(vertical.pixels + 1.0);
+          await tester.pump();
+        }
+        expect(debugCellReadCount, 10, reason: "$name, vertical");
+        final horizontal = viewportOf(tester).horizontalPosition!;
+        // Setup sanity: the days scroll across.
+        expect(horizontal.maxScrollExtent, greaterThan(10.0), reason: name);
+        debugCellReadCount = 0;
+        for (var i = 0; i < 10; i++) {
+          horizontal.jumpTo(horizontal.pixels + 1.0);
+          await tester.pump();
+        }
+        expect(debugCellReadCount, 10, reason: "$name, horizontal");
+        await gesture.up();
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets("once a block's move has been released, and once a "
+        "slotMinutes change has cancelled another's, ten frames of a "
+        "vertical scroll and ten jumps of either position read no cell", (
+      tester,
+    ) async {
+      final harness = await pumpGrid(
+        tester,
+        <CalendarEntry<String>>[
+          entryOf("meet", at(tuesday, 5), at(tuesday, 6)),
+          entryOf("talk", at(thursday, 5), at(thursday, 6)),
+        ],
+        minDayWidth: 200.0,
+        size: const Size(800.0, 1000.0),
+      );
+
+      Future<void> expectNoReads(String name) async {
+        debugCellReadCount = 0;
+        final vertical = viewportOf(tester).verticalPosition!;
+        final from = vertical.pixels;
+        unawaited(
+          vertical.animateTo(
+            from + 200.0,
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.linear,
+          ),
+        );
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        // Setup sanity: the hours scrolled.
+        expect(vertical.pixels, greaterThan(from), reason: name);
+        for (final position in <ScrollPosition>[
+          viewportOf(tester).verticalPosition!,
+          viewportOf(tester).horizontalPosition!,
+        ]) {
+          for (var i = 0; i < 10; i++) {
+            position.jumpTo(position.pixels + 1.0);
+            await tester.pump();
+          }
+        }
+        expect(debugCellReadCount, 0, reason: name);
+        viewportOf(tester).verticalPosition!.jumpTo(0.0);
+        viewportOf(tester).horizontalPosition!.jumpTo(0.0);
+        await tester.pump();
+      }
+
+      final block = blockFinder("meet", tuesday);
+      final released = await liftTo(
+        tester,
+        tester.getCenter(block),
+        tester.getCenter(block) + const Offset(0.0, 80.0),
+      );
+      await released.up();
+      await tester.pump();
+      await expectNoReads("after a release");
+      await tester.pumpAndSettle();
+
+      final talk = blockFinder("talk", thursday);
+      final cancelled = await liftTo(
+        tester,
+        tester.getCenter(talk),
+        tester.getCenter(talk) + const Offset(0.0, 80.0),
+      );
+      harness.slotMinutes = 30;
+      await harness.rebuild(tester);
+      await tester.pump();
+      // Setup sanity: the change ended the drag.
+      expect(find.byKey(liftedBlockKey), findsNothing);
+      await expectNoReads("after a slotMinutes change");
+      await cancelled.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets("ten moves of 1 px of a bar's move over one slot ask no "
+        "gate, and with maxDayCount 3 neither do ten of a bar's trailing "
+        "edge within one column past the limit", (tester) async {
+      final shown = Shown.week(monday);
+      await pumpGrid(tester, <CalendarEntry<String>>[allDayOf("off", monday)]);
+      final move = await liftTo(
+        tester,
+        tester.getCenter(barFinder("off")),
+        slotRect(tester, shown, monday, 5 * 60).center,
+      );
+      // Setup sanity: the crossing names the slot's hour.
+      expect(
+        landingText(tester),
+        landingLabel(at(monday, 5), at(monday, 6), DateTime(2026, 1, 5)),
+      );
+      debugDropGateCount = 0;
+      await moveTenTimes(tester, move, const Offset(1.0, 0.0));
+      expect(debugDropGateCount, 0, reason: "a bar over one slot");
+      await move.up();
+      await tester.pumpAndSettle();
+
+      await pumpGrid(tester, <CalendarEntry<String>>[
+        allDayOf("m", monday),
+      ], maxDayCount: 3);
+      await selectBar(tester, "m");
+      final edge = await holdEdge(
+        tester,
+        "m",
+        AxisDirection.right,
+        Offset(
+          stripRect(tester, shown, thursday).right - 20.0,
+          tester.getCenter(barFinder("m")).dy,
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the edge is held at Wednesday.
+      expect(
+        markedOf(tester, <DateTime>[
+          for (var i = 0; i < 7; i++) addDays(monday, i),
+        ]),
+        <DateTime>[monday, tuesday, wednesday],
+      );
+      debugDropGateCount = 0;
+      await moveTenTimes(tester, edge, const Offset(-1.0, 0.0));
+      expect(debugDropGateCount, 0, reason: "a bar's edge past the limit");
+      await edge.up();
+      await tester.pumpAndSettle();
+    });
   });
 
   testWidgets("TX16 in Day a selected bar has no day-edge grip and the "

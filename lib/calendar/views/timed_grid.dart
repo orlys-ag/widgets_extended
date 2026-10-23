@@ -23,6 +23,7 @@ import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
+import 'entry_split.dart';
 import 'pinch_zoom.dart';
 
 const double _headerHeight = 40.0;
@@ -1337,6 +1338,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [_handleDragEnd].
   ({String id, DateTime start, DateTime end})? _lifted;
 
+  /// The entry list the last split read, with the days, weekdays and
+  /// hours it split them for, never the strip rows, which the split does
+  /// not read; null before the first split. A split of the identical
+  /// entries for the same of those is the last one ([_layOutEntries]).
+  ({
+    List<CalendarShownEntry<T>> shown,
+    int firstDay,
+    int dayCount,
+    WeekdaySet weekdays,
+    DayHours hours,
+  })?
+  _layoutRead;
+
   /// The last split [_layOutEntries] made, which [_placeLayout] places.
   late _GridLayout<T> _layout = (
     pieces: <GridPiece<T>>[],
@@ -2292,8 +2306,32 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([_stackBars]); and the entries with no block or bar, counted: on
   /// each day column the pieces wholly before its hours and those wholly
   /// after them, and the entries on no day it has a column for.
+  ///
+  /// Where [shown] holds the entries the last split read, the identical
+  /// instances with the same pending flags in the same order, on the same
+  /// days, weekdays and hours ([_layoutRead]), the split is that one, kept
+  /// in [_layout], and runs nothing: a store notify that changes nothing
+  /// the grid shows splits nothing, and a sync on new tracks followed by a
+  /// store notify that answers the same entries splits once.
   _GridLayout<T> _layOutEntries(List<CalendarShownEntry<T>> shown) {
     final tracks = _tracks;
+    final read = _layoutRead;
+    if (read != null &&
+        read.firstDay == tracks.firstDay &&
+        read.dayCount == tracks.dayCount &&
+        read.weekdays == tracks.weekdays &&
+        read.hours == tracks.hours &&
+        _sameShown(read.shown, shown)) {
+      return _layout;
+    }
+    noteEntrySplit();
+    _layoutRead = (
+      shown: shown,
+      firstDay: tracks.firstDay,
+      dayCount: tracks.dayCount,
+      weekdays: tracks.weekdays,
+      hours: tracks.hours,
+    );
     final hours = tracks.hours;
     final pieces = <GridPiece<T>>[];
     final allDay = <({CalendarShownEntry<T> shown, int first, int last})>[];
@@ -2348,6 +2386,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       below: stacked.below,
       hidden: _Hidden(tracks, above, below, offDays),
     );
+  }
+
+  /// Whether [a] and [b] hold the identical entries with the same pending
+  /// flags, in the same order.
+  static bool _sameShown<T>(
+    List<CalendarShownEntry<T>> a,
+    List<CalendarShownEntry<T>> b,
+  ) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i].entry, b[i].entry) || a[i].pending != b[i].pending) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// The bars of [allDay], each an all-day entry over the shown columns
@@ -2430,6 +2485,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// callback restores the styles' animation; otherwise under the board's
   /// style as it stands, so a drop's glide runs on.
   void _placeLayout({required bool disable}) {
+    noteEntryPlace();
     final lifted = _lifted;
     final dragged = _drag?.key;
     final placements = <BoardPlacement<GridShape<T>>>[];
@@ -2555,6 +2611,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// itself at its pointer's release ([_handlePointerUp]), after which
   /// every target is refused ([_crossSpent]).
   bool _canDropAt(GridKey key, BoardSpan span) {
+    noteDropGate();
     if (_crossSpent) {
       return false;
     }
@@ -3021,8 +3078,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Reads the crossing's cell under [_dragAt], doing nothing before the
-  /// drag pointer's first move.
+  /// drag pointer's first move. Counted as it begins ([noteCellRead]), so
+  /// a listener left on a scroll controller after its drag counts too.
   void _readCross() {
+    noteCellRead();
     final at = _dragAt;
     final drag = _drag;
     if (at == null || drag == null || !mounted) {
@@ -3109,6 +3168,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// strip cell of [column]: from that day's start to the next day's, or
   /// null where the history lock does not admit the move to it.
   ({DateTime start, DateTime end})? _stripLandingOf(GridKey key, int column) {
+    noteDropGate();
     final shape = _board.itemOf(key);
     if (shape == null) {
       return null;
@@ -3134,6 +3194,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     int column,
     int row,
   ) {
+    noteDropGate();
     final shape = _board.itemOf(key);
     final start = timeAtWallMinute(
       _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row),
@@ -3161,6 +3222,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// range from the entry's start to it, or that range shares time with
   /// another timed entry the store shows.
   DateTime? _laterDayEndOf(GridKey key, int column, int row) {
+    noteDropGate();
     final shape = _board.itemOf(key);
     var end = timeAtWallMinute(
       _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row + 1),
@@ -3755,6 +3817,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     ({DateTime start, DateTime end})? write;
     if (_isCrossingDrag(drag)) {
+      noteCellRead();
       final row = _rowAt(local.dy);
       final col = _columnAt(local.dx);
       if (drag.kind == BoardDragKind.resizeRowEnd) {

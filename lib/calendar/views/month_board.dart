@@ -18,6 +18,7 @@ import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'day_cell.dart';
+import 'entry_split.dart';
 import 'pinch_zoom.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
@@ -782,6 +783,20 @@ const _Hidden _noneHidden = (
 /// The hours the days' banners name to a screen reader, and their format.
 typedef _BannerHours = ({DayHours hours, HourLabelFormat format});
 
+/// A split of the entries the store shows on a month's days: the entries
+/// it [read], for [grid] and [hours]; those [inside] the hours, and on each
+/// day the counts wholly before them, [earlier], and after them, [later]
+/// ([splitMonthHours]); and the bars of those inside ([monthPlacementsOf]).
+typedef _MonthSplit<T> = ({
+  List<CalendarShownEntry<T>> read,
+  MonthGrid grid,
+  DayHours hours,
+  List<CalendarShownEntry<T>> inside,
+  Int32List earlier,
+  Int32List later,
+  List<BoardPlacement<MonthChip<T>>> placements,
+});
+
 class _MonthBoardState<T> extends State<MonthBoard<T>>
     with TickerProviderStateMixin {
   /// The columns' width before the first layout, which replaces it.
@@ -948,6 +963,14 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// The board's background for [MonthBoard.grid], made once per grid and
   /// styles, so a build that keeps both hands the board the same painter.
   late _MonthGridPainter _background;
+
+  /// The last split of the entries the store shows on the grid's days
+  /// ([_splitOf]), with the bars [monthPlacementsOf] made of it, the entry
+  /// list it read, and the grid and hours it split for; null before the
+  /// first layout. A new grid, new hours and the store's notify set
+  /// [_syncPending], so while none is pending it is the split of what the
+  /// board shows, which a change of the lanes or of the cards fits again.
+  _MonthSplit<T>? _split;
 
   /// The latest sync's placements, by chip key.
   Map<String, BoardPlacement<MonthChip<T>>> _placed =
@@ -1302,8 +1325,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// and so one structural notification; the sync also tells each day what
   /// it hides ([_writeHidden]). A sync the store, the grid or the hours owe
   /// reads the store before the axes, since the banners it counts decide
-  /// the room above and below the lanes. Called from the layout callback,
-  /// so the first frame lays the board out at its size.
+  /// the room above and below the lanes, and splits only what the store
+  /// answers anew ([_splitOf]); one the lanes or the cards alone owe fits
+  /// the kept split's bars again ([_split]). Called from the layout
+  /// callback, so the first frame lays the board out at its size.
   ///
   /// A sync animates only when it follows the store alone, its days are
   /// ready and the last sync's were. Any other sync runs under
@@ -1332,11 +1357,13 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     final cards = monthShowsCards(width, fitted);
     final laneExtent = cards ? monthCardExtent : monthLaneExtent;
     final ready = _daysReady;
-    var split = _syncPending ? _splitShown(grid, hours, ready) : null;
-    if (split != null) {
+    if (_syncPending) {
+      final split = _splitOf(grid, hours, ready);
+      _split = split;
       _earlierBand = split.earlier.any(_isCounted);
       _laterBand = split.later.any(_isCounted);
     }
+    final split = _split!;
     final padding =
         monthStripHeight + (_earlierBand ? monthHoursBannerExtent : 0.0);
     final lanes = layout == MonthLayout.fitScreen
@@ -1365,13 +1392,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     }
     List<BoardPlacement<MonthChip<T>>>? placements;
     Int32List? hidden;
-    if (sync) {
-      split ??= _splitShown(grid, hours, ready);
-    }
     if (sync && !ready) {
       placements = <BoardPlacement<MonthChip<T>>>[];
     } else if (sync) {
-      final all = monthPlacementsOf(split!.inside, grid);
+      final all = split.placements;
       if (lanes == null) {
         placements = all;
       } else {
@@ -1455,7 +1479,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       lanes,
       laneExtent,
       padding,
-      split!,
+      split,
       _laterBand ? monthDayLanesOf(placements, grid) : null,
     );
     if (remeasure) {
@@ -1472,23 +1496,62 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   }
 
   /// The items the store shows on [grid]'s days split by [hours]
-  /// ([splitMonthHours]); none, and no day counting any, while they are not
-  /// [ready].
-  ({List<CalendarShownEntry<T>> inside, Int32List earlier, Int32List later})
-  _splitShown(MonthGrid grid, DayHours hours, bool ready) {
+  /// ([splitMonthHours]), with their bars ([monthPlacementsOf]); none, and
+  /// no day counting any, while they are not [ready]. Where the store
+  /// answers the entries the last split read, the identical instances with
+  /// the same pending flags in the same order, for the same grid and hours,
+  /// the split is that one, [_split], and runs nothing.
+  _MonthSplit<T> _splitOf(MonthGrid grid, DayHours hours, bool ready) {
+    final read = ready
+        ? widget.store.entriesBetween(grid.firstDay, grid.lastDay)
+        : <CalendarShownEntry<T>>[];
+    final kept = _split;
+    if (kept != null &&
+        _sameGrid(kept.grid, grid) &&
+        kept.hours == hours &&
+        _sameShown(kept.read, read)) {
+      return kept;
+    }
+    noteEntrySplit();
     if (!ready) {
       final cells = grid.weekCount * grid.columnCount;
       return (
+        read: read,
+        grid: grid,
+        hours: hours,
         inside: <CalendarShownEntry<T>>[],
         earlier: Int32List(cells),
         later: Int32List(cells),
+        placements: <BoardPlacement<MonthChip<T>>>[],
       );
     }
-    return splitMonthHours(
-      widget.store.entriesBetween(grid.firstDay, grid.lastDay),
-      grid,
-      hours,
+    final split = splitMonthHours(read, grid, hours);
+    return (
+      read: read,
+      grid: grid,
+      hours: hours,
+      inside: split.inside,
+      earlier: split.earlier,
+      later: split.later,
+      placements: monthPlacementsOf(split.inside, grid),
     );
+  }
+
+  /// Whether [a] and [b] hold the identical entries with the same pending
+  /// flags, in the same order.
+  static bool _sameShown<T>(
+    List<CalendarShownEntry<T>> a,
+    List<CalendarShownEntry<T>> b,
+  ) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i].entry, b[i].entry) || a[i].pending != b[i].pending) {
+        return false;
+      }
+    }
+    return true;
   }
 
   static bool _isCounted(int count) {
@@ -1509,8 +1572,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     int? lanes,
     double laneExtent,
     double padding,
-    ({List<CalendarShownEntry<T>> inside, Int32List earlier, Int32List later})
-    split,
+    _MonthSplit<T> split,
     Int32List? dayLanes,
   ) {
     final cells = grid.weekCount * grid.columnCount;
