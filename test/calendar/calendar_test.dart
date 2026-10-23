@@ -233,6 +233,25 @@ void main() {
     }
   });
 
+  test("B3 the barrel's show clauses name no CalendarEntryTime", () {
+    final exports = exportsOf(File(barrelPath).readAsStringSync());
+    final entries = <List<String>?>[
+      for (final export in exports)
+        if (export.path == "lib/calendar/entries/calendar_entry.dart")
+          export.shown,
+    ];
+    // The barrel shows the entry's file, by name.
+    expect(entries, hasLength(1));
+    expect(entries.single, contains("CalendarEntry"));
+    for (final export in exports) {
+      expect(
+        export.shown,
+        isNot(contains("CalendarEntryTime")),
+        reason: export.path,
+      );
+    }
+  });
+
   test("LY1 each file imports the package's files by relative paths, up "
       "the layer table, and the board and sliver_tree modules only "
       "through their barrels", () {

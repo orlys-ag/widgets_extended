@@ -54,6 +54,31 @@ void main() {
     expect(clockRangeLabel(540, 600), "09:00-10:00");
   });
 
+  test("LB1 entryTimesLabel writes a range's clock times, 24:00 for an end "
+      "at the next day's start, and All day from a day start to one", () {
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 21, 9, 10), DateTime(2026, 4, 21, 9, 50)),
+      "09:10-09:50",
+    );
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 20, 22), DateTime(2026, 4, 21, 2)),
+      "22:00-02:00",
+    );
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 20, 22), DateTime(2026, 4, 21)),
+      "22:00-24:00",
+    );
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 20), DateTime(2026, 4, 21)),
+      "All day",
+    );
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 20), DateTime(2026, 4, 23)),
+      "All day",
+    );
+    expect(allDayLabel, "All day");
+  });
+
   group("C7 hourLabel", () {
     test("names a minute as clockLabel does in 24-hour", () {
       const format = HourLabelFormat.twentyFourHour;
